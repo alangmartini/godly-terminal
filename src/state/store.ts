@@ -1,0 +1,158 @@
+export interface Terminal {
+  id: string;
+  workspaceId: string;
+  name: string;
+  processName: string;
+  order: number;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  folderPath: string;
+  tabOrder: string[];
+}
+
+export interface AppState {
+  workspaces: Workspace[];
+  terminals: Terminal[];
+  activeWorkspaceId: string | null;
+  activeTerminalId: string | null;
+}
+
+type Listener = () => void;
+
+class Store {
+  private state: AppState = {
+    workspaces: [],
+    terminals: [],
+    activeWorkspaceId: null,
+    activeTerminalId: null,
+  };
+
+  private listeners: Set<Listener> = new Set();
+
+  getState(): AppState {
+    return this.state;
+  }
+
+  setState(partial: Partial<AppState>) {
+    this.state = { ...this.state, ...partial };
+    this.notify();
+  }
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify() {
+    this.listeners.forEach(listener => listener());
+  }
+
+  // Workspace operations
+  addWorkspace(workspace: Workspace) {
+    this.setState({
+      workspaces: [...this.state.workspaces, workspace],
+    });
+  }
+
+  updateWorkspace(id: string, updates: Partial<Workspace>) {
+    this.setState({
+      workspaces: this.state.workspaces.map(w =>
+        w.id === id ? { ...w, ...updates } : w
+      ),
+    });
+  }
+
+  removeWorkspace(id: string) {
+    this.setState({
+      workspaces: this.state.workspaces.filter(w => w.id !== id),
+      terminals: this.state.terminals.filter(t => t.workspaceId !== id),
+      activeWorkspaceId: this.state.activeWorkspaceId === id
+        ? (this.state.workspaces[0]?.id ?? null)
+        : this.state.activeWorkspaceId,
+    });
+  }
+
+  setActiveWorkspace(id: string | null) {
+    const workspaceTerminals = this.state.terminals.filter(t => t.workspaceId === id);
+    this.setState({
+      activeWorkspaceId: id,
+      activeTerminalId: workspaceTerminals[0]?.id ?? null,
+    });
+  }
+
+  // Terminal operations
+  addTerminal(terminal: Terminal) {
+    const workspaceTerminals = this.state.terminals.filter(
+      t => t.workspaceId === terminal.workspaceId
+    );
+    const order = workspaceTerminals.length;
+
+    this.setState({
+      terminals: [...this.state.terminals, { ...terminal, order }],
+      activeTerminalId: terminal.id,
+    });
+  }
+
+  updateTerminal(id: string, updates: Partial<Terminal>) {
+    this.setState({
+      terminals: this.state.terminals.map(t =>
+        t.id === id ? { ...t, ...updates } : t
+      ),
+    });
+  }
+
+  removeTerminal(id: string) {
+    const terminal = this.state.terminals.find(t => t.id === id);
+    const remainingTerminals = this.state.terminals.filter(t => t.id !== id);
+
+    let newActiveId = this.state.activeTerminalId;
+    if (this.state.activeTerminalId === id && terminal) {
+      const sameWorkspace = remainingTerminals.filter(
+        t => t.workspaceId === terminal.workspaceId
+      );
+      newActiveId = sameWorkspace[0]?.id ?? null;
+    }
+
+    this.setState({
+      terminals: remainingTerminals,
+      activeTerminalId: newActiveId,
+    });
+  }
+
+  setActiveTerminal(id: string | null) {
+    this.setState({ activeTerminalId: id });
+  }
+
+  moveTerminalToWorkspace(terminalId: string, workspaceId: string) {
+    this.setState({
+      terminals: this.state.terminals.map(t =>
+        t.id === terminalId ? { ...t, workspaceId } : t
+      ),
+    });
+  }
+
+  reorderTerminals(workspaceId: string, tabOrder: string[]) {
+    this.setState({
+      terminals: this.state.terminals.map(t => {
+        if (t.workspaceId !== workspaceId) return t;
+        const order = tabOrder.indexOf(t.id);
+        return { ...t, order: order >= 0 ? order : t.order };
+      }),
+    });
+  }
+
+  getWorkspaceTerminals(workspaceId: string): Terminal[] {
+    return this.state.terminals
+      .filter(t => t.workspaceId === workspaceId)
+      .sort((a, b) => a.order - b.order);
+  }
+
+  getTerminalCount(workspaceId: string): number {
+    return this.state.terminals.filter(t => t.workspaceId === workspaceId).length;
+  }
+}
+
+export const store = new Store();
