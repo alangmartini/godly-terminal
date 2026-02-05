@@ -1,0 +1,31 @@
+[package]
+name = "godly-terminal"
+version = "0.1.0"
+description = "A Windows terminal application with workspaces"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "godly_terminal_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-store = "2.0"
+tauri-plugin-dialog = "2.0"
+portable-pty = "0.8"
+uuid = { version = "1.0", features = ["v4"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+parking_lot = "0.12"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi", "handleapi", "psapi", "tlhelp32"] }
+
+[profile.release]
+strip = true
+lto = true
