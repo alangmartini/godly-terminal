@@ -29,6 +29,8 @@ export class App {
   private terminalContainer: HTMLElement;
   private terminalPanes: Map<string, TerminalPane> = new Map();
   private restoredTerminalIds: Set<string> = new Set();
+  /** Terminal IDs that were reattached to live daemon sessions (no scrollback load needed) */
+  private reattachedTerminalIds: Set<string> = new Set();
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -259,27 +261,53 @@ export class App {
         console.log('[App] Setting active workspace:', activeWsId);
         store.setActiveWorkspace(activeWsId);
 
-        // Recreate terminals with saved CWD, shell type, and original ID
+        // Check daemon for live sessions that can be reattached
+        const liveSessions = await terminalService.reconnectSessions();
+        const liveSessionIds = new Set(liveSessions.map((s) => s.id));
+        console.log('[App] Live daemon sessions:', liveSessionIds.size);
+
+        // Restore terminals: reattach if alive, or create fresh with scrollback
         console.log('[App] Restoring terminals...');
         for (const t of layout.terminals) {
-          console.log('[App] Creating terminal:', t.id, 'in workspace:', t.workspace_id);
           const shellType = convertShellType(t.shell_type);
-          const terminalId = await terminalService.createTerminal(t.workspace_id, {
-            cwdOverride: t.cwd ?? undefined,
-            shellTypeOverride: shellType,
-            idOverride: t.id, // Preserve original ID for scrollback lookup
-          });
-
-          console.log('[App] Terminal created with ID:', terminalId, '(requested:', t.id, ')');
-
-          // Mark this terminal for scrollback restoration
-          this.restoredTerminalIds.add(terminalId);
-
-          // Determine process name from shell type
           const processName =
             shellType.type === 'wsl'
               ? shellType.distribution ?? 'wsl'
               : 'powershell';
+
+          if (liveSessionIds.has(t.id)) {
+            // Session is still alive in daemon - reattach
+            console.log('[App] Reattaching to live session:', t.id);
+            try {
+              await terminalService.attachSession(t.id, t.workspace_id, t.name);
+              this.reattachedTerminalIds.add(t.id);
+
+              store.addTerminal({
+                id: t.id,
+                workspaceId: t.workspace_id,
+                name: t.name,
+                processName,
+                order: 0,
+              });
+              continue;
+            } catch (error) {
+              console.warn('[App] Failed to reattach session:', t.id, error);
+              // Fall through to create fresh terminal
+            }
+          }
+
+          // Session is dead or reattach failed - create fresh terminal with saved CWD
+          console.log('[App] Creating fresh terminal:', t.id, 'in workspace:', t.workspace_id);
+          const terminalId = await terminalService.createTerminal(t.workspace_id, {
+            cwdOverride: t.cwd ?? undefined,
+            shellTypeOverride: shellType,
+            idOverride: t.id,
+          });
+
+          console.log('[App] Terminal created with ID:', terminalId, '(requested:', t.id, ')');
+
+          // Mark for scrollback restoration (only for fresh terminals, not reattached ones)
+          this.restoredTerminalIds.add(terminalId);
 
           store.addTerminal({
             id: terminalId,
@@ -292,11 +320,9 @@ export class App {
         console.log('[App] Restore complete!');
       } else {
         console.log('[App] No workspaces in layout, creating default...');
-        // Create default workspace
         await this.createDefaultWorkspace();
       }
     } catch (error) {
-      // If no saved layout, create default workspace
       console.error('[App] Error loading layout:', error);
       await this.createDefaultWorkspace();
     }
