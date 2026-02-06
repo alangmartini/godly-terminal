@@ -1,4 +1,5 @@
 mod commands;
+mod daemon_client;
 mod persistence;
 mod pty;
 mod state;
@@ -9,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 
+use crate::daemon_client::{DaemonBridge, DaemonClient};
 use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
@@ -25,20 +27,32 @@ fn scrollback_save_complete() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = Arc::new(AppState::new());
-    let process_monitor = ProcessMonitor::new();
     let auto_save = Arc::new(AutoSaveManager::new());
+    let process_monitor = ProcessMonitor::new();
+
+    // Connect to daemon (or launch one)
+    let daemon_client = Arc::new(
+        DaemonClient::connect_or_launch().expect("Failed to connect to daemon"),
+    );
+    eprintln!("[lib] Connected to daemon");
+
+    let bridge = DaemonBridge::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state.clone())
         .manage(auto_save.clone())
+        .manage(daemon_client.clone())
         .invoke_handler(tauri::generate_handler![
             commands::create_terminal,
             commands::close_terminal,
             commands::write_to_terminal,
             commands::resize_terminal,
             commands::rename_terminal,
+            commands::reconnect_sessions,
+            commands::attach_session,
+            commands::detach_all_sessions,
             commands::create_workspace,
             commands::delete_workspace,
             commands::get_workspaces,
@@ -57,17 +71,22 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let state_clone = app_state.clone();
 
-            // Start process monitor
-            process_monitor.start(app_handle.clone(), state_clone.clone());
+            // Start the daemon event bridge (forwards daemon events -> Tauri events)
+            let reader = daemon_client.clone_reader();
+            bridge.start(reader, app_handle.clone());
+
+            // Start process monitor (queries daemon for PIDs, resolves process names locally)
+            process_monitor.start(app_handle.clone(), state_clone.clone(), daemon_client.clone());
 
             // Start auto-save manager
             auto_save.start(app_handle.clone(), state_clone.clone());
 
-            // Save layout on window close
+            // Handle window close: detach sessions (don't kill them) and save layout
             let main_window = app.get_webview_window("main").unwrap();
             let state_for_close = state_clone.clone();
             let handle_for_close = app_handle.clone();
             let window_for_close = main_window.clone();
+            let daemon_for_close = daemon_client.clone();
 
             main_window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -91,7 +110,18 @@ pub fn run() {
                         std::thread::sleep(Duration::from_millis(50));
                     }
 
-                    // Now save layout and close
+                    // Detach all sessions (they keep running in the daemon)
+                    eprintln!("[lib] Detaching all sessions...");
+                    let terminals = state_for_close.terminals.read();
+                    for terminal_id in terminals.keys() {
+                        let request = godly_protocol::Request::Detach {
+                            session_id: terminal_id.clone(),
+                        };
+                        let _ = daemon_for_close.send_request(&request);
+                    }
+                    drop(terminals);
+
+                    // Save layout and close
                     save_on_exit(&handle_for_close, &state_for_close);
                     eprintln!("[lib] Destroying window...");
                     let _ = window_for_close.destroy();

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
 use crate::state::{AppState, ShellType, Workspace};
 
@@ -33,14 +34,17 @@ pub fn create_workspace(
 pub fn delete_workspace(
     workspace_id: String,
     state: State<Arc<AppState>>,
+    daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
 ) -> Result<(), String> {
-    // Close all terminals in the workspace
+    // Close all terminals in the workspace via daemon
     let terminals = state.get_workspace_terminals(&workspace_id);
     for terminal in terminals {
-        if let Some(session) = state.remove_pty_session(&terminal.id) {
-            session.close();
-        }
+        let request = godly_protocol::Request::CloseSession {
+            session_id: terminal.id.clone(),
+        };
+        let _ = daemon.send_request(&request);
+        state.remove_session_metadata(&terminal.id);
         state.remove_terminal(&terminal.id);
     }
 
