@@ -2,11 +2,12 @@ mod commands;
 mod persistence;
 mod pty;
 mod state;
+mod utils;
 
 use std::sync::Arc;
 use tauri::Manager;
 
-use crate::persistence::save_on_exit;
+use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
 
@@ -14,11 +15,13 @@ use crate::state::AppState;
 pub fn run() {
     let app_state = Arc::new(AppState::new());
     let process_monitor = ProcessMonitor::new();
+    let auto_save = Arc::new(AutoSaveManager::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state.clone())
+        .manage(auto_save.clone())
         .invoke_handler(tauri::generate_handler![
             commands::create_terminal,
             commands::close_terminal,
@@ -30,8 +33,13 @@ pub fn run() {
             commands::get_workspaces,
             commands::move_tab_to_workspace,
             commands::reorder_tabs,
+            commands::get_wsl_distributions,
+            commands::is_wsl_available,
             persistence::save_layout,
             persistence::load_layout,
+            persistence::save_scrollback,
+            persistence::load_scrollback,
+            persistence::delete_scrollback,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -39,6 +47,9 @@ pub fn run() {
 
             // Start process monitor
             process_monitor.start(app_handle.clone(), state_clone.clone());
+
+            // Start auto-save manager
+            auto_save.start(app_handle.clone(), state_clone.clone());
 
             // Save layout on window close
             let main_window = app.get_webview_window("main").unwrap();

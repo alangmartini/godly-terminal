@@ -5,12 +5,16 @@ use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
+use crate::state::ShellType;
+use crate::utils::windows_to_wsl_path;
+
 pub struct PtySession {
     master: Arc<parking_lot::Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<parking_lot::Mutex<Box<dyn Write + Send>>>,
     running: Arc<AtomicBool>,
     #[cfg(windows)]
     pid: u32,
+    shell_type: ShellType,
 }
 
 impl Clone for PtySession {
@@ -21,6 +25,7 @@ impl Clone for PtySession {
             running: self.running.clone(),
             #[cfg(windows)]
             pid: self.pid,
+            shell_type: self.shell_type.clone(),
         }
     }
 }
@@ -29,6 +34,7 @@ impl PtySession {
     pub fn new(
         terminal_id: String,
         working_dir: Option<String>,
+        shell_type: ShellType,
         app_handle: AppHandle,
     ) -> Result<Self, String> {
         let pty_system = native_pty_system();
@@ -44,12 +50,27 @@ impl PtySession {
             .openpty(size)
             .map_err(|e| format!("Failed to open pty: {}", e))?;
 
-        let mut cmd = CommandBuilder::new("powershell.exe");
-        cmd.arg("-NoLogo");
-
-        if let Some(dir) = working_dir {
-            cmd.cwd(dir);
-        }
+        let cmd = match &shell_type {
+            ShellType::Windows => {
+                let mut cmd = CommandBuilder::new("powershell.exe");
+                cmd.arg("-NoLogo");
+                if let Some(dir) = &working_dir {
+                    cmd.cwd(dir);
+                }
+                cmd
+            }
+            ShellType::Wsl { distribution } => {
+                let mut cmd = CommandBuilder::new("wsl.exe");
+                if let Some(distro) = distribution {
+                    cmd.args(["-d", distro]);
+                }
+                if let Some(dir) = &working_dir {
+                    let wsl_path = windows_to_wsl_path(dir);
+                    cmd.args(["--cd", &wsl_path]);
+                }
+                cmd
+            }
+        };
 
         let child = pair
             .slave
@@ -122,6 +143,7 @@ impl PtySession {
             running,
             #[cfg(windows)]
             pid,
+            shell_type,
         })
     }
 
@@ -155,5 +177,15 @@ impl PtySession {
     #[cfg(windows)]
     pub fn get_pid(&self) -> u32 {
         self.pid
+    }
+
+    pub fn get_shell_type(&self) -> &ShellType {
+        &self.shell_type
+    }
+
+    #[cfg(windows)]
+    pub fn get_cwd(&self) -> Option<String> {
+        use crate::utils::get_process_cwd;
+        get_process_cwd(self.pid)
     }
 }
