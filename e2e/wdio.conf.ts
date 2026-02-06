@@ -1,7 +1,7 @@
 import path from 'path';
 
 export const config: WebdriverIO.Config = {
-  specs: ['./e2e/specs/**/*.e2e.ts'],
+  specs: ['./specs/**/*.e2e.ts'],
   maxInstances: 1,
   capabilities: [
     {
