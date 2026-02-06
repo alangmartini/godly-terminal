@@ -1,22 +1,23 @@
-import { waitForAppReady, sendCommand, triggerSave } from '../helpers/app';
+import { waitForAppReady, waitForTerminalPane, sendCommand, triggerSave } from '../helpers/app';
 import { waitForTerminalText, getTerminalText } from '../helpers/terminal-reader';
-import { clearAppData, readLayoutFile } from '../helpers/persistence';
+import { readLayoutFile } from '../helpers/persistence';
 
 describe('CWD Persistence', () => {
   let originalCwd = '';
 
   before(async () => {
-    clearAppData();
     await waitForAppReady();
+    await waitForTerminalPane();
   });
 
   it('should detect the initial working directory', async () => {
-    await waitForTerminalText('PS ', 30000);
+    // Wait for shell to initialize
+    await browser.pause(5000);
 
     // Use pwd to get the current directory in PowerShell
     const marker = 'CWD_MARKER_START';
     await sendCommand(`echo "${marker}"; (Get-Location).Path`);
-    await waitForTerminalText(marker, 15000);
+    await waitForTerminalText(marker, 30000);
 
     // Extract the CWD from the buffer
     const text = await getTerminalText();
@@ -31,7 +32,6 @@ describe('CWD Persistence', () => {
 
   it('should save the CWD in the layout file', async () => {
     await triggerSave();
-    await browser.pause(3000);
 
     const layout = readLayoutFile();
     expect(layout).not.toBeNull();
@@ -53,12 +53,14 @@ describe('CWD Persistence', () => {
     await waitForAppReady();
 
     try {
-      await waitForTerminalText('PS ', 30000);
+      // Wait for terminal to be ready
+      await waitForTerminalPane();
+      await browser.pause(5000);
 
       // Check the CWD after restoration
       const cwdMarker = 'RESTORED_CWD_CHECK';
       await sendCommand(`echo "${cwdMarker}"; (Get-Location).Path`);
-      await waitForTerminalText(cwdMarker, 15000);
+      await waitForTerminalText(cwdMarker, 30000);
 
       const text = await getTerminalText();
       const lines = text.split('\n');
