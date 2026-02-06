@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import { ChildProcess, spawn } from 'child_process';
+import { clearAppData } from './helpers/persistence';
 
 // Skip WDIO 9.x's built-in browser driver management — we manage tauri-driver ourselves.
 // This also hardcodes the connection to localhost:4321.
@@ -50,6 +51,9 @@ export const config: WebdriverIO.Config = {
   // Spawn tauri-driver before each worker session.
   // Uses the cargo-installed binary which properly bridges WebDriver to WebView2.
   async beforeSession() {
+    // Clear persisted app data so the app starts with a fresh default workspace
+    clearAppData();
+
     // Ensure edgedriver is downloaded and find its path
     const edgedriver = await import('edgedriver');
     const edgedriverProcess = await edgedriver.start({ port: 9516 });
