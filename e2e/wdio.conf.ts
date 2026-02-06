@@ -6,8 +6,7 @@ process.env.WDIO_SKIP_DRIVER_SETUP = '1';
 export const config: WebdriverIO.Config = {
   specs: ['./specs/**/*.e2e.ts'],
   maxInstances: 1,
-  hostname: 'localhost',
-  port: 4444,
+  // hostname/port are overridden by WDIO_SKIP_DRIVER_SETUP to localhost:4321
   capabilities: [
     {
       'browserName': 'wry',
@@ -55,7 +54,7 @@ export const config: WebdriverIO.Config = {
     // Start tauri-driver using the NAPI programmatic API (runs in background)
     const { run, waitTauriDriverReady } = await import('@crabnebula/tauri-driver');
     run(
-      ['--port', '4444', '--native-driver', nativeDriverPath, '--native-port', '9516'],
+      ['--port', '4321', '--native-driver', nativeDriverPath, '--native-port', '9516'],
       'tauri-driver'
     ).catch((err: Error) => {
       // run() resolves when the driver exits; errors during normal shutdown are expected
@@ -65,7 +64,7 @@ export const config: WebdriverIO.Config = {
     });
 
     // Wait for tauri-driver to be listening
-    await waitTauriDriverReady('127.0.0.1', 4444, 200);
-    console.log('tauri-driver is ready on port 4444');
+    await waitTauriDriverReady('127.0.0.1', 4321, 200);
+    console.log('tauri-driver is ready on port 4321');
   },
 };
