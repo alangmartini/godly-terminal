@@ -32,7 +32,8 @@ pub fn run() {
 
     // Connect to daemon (or launch one)
     let daemon_client = Arc::new(
-        DaemonClient::connect_or_launch().expect("Failed to connect to daemon"),
+        DaemonClient::connect_or_launch()
+            .expect("Failed to connect to daemon. Run 'npm run build:daemon' first."),
     );
     eprintln!("[lib] Connected to daemon");
 

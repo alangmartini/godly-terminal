@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run build:daemon && vite",
     "build": "tsc && vite build",
     "build:daemon": "cd src-tauri && cargo build -p godly-daemon",
     "build:daemon:release": "cd src-tauri && cargo build -p godly-daemon --release",
