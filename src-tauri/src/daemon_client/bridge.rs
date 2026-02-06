@@ -1,16 +1,18 @@
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter};
 
-use godly_protocol::{DaemonMessage, Event};
+use godly_protocol::{DaemonMessage, Event, Response};
 
-/// Bridge that reads async events from the daemon and emits matching Tauri events.
-/// This makes the frontend see identical events as before (terminal-output,
-/// terminal-closed, process-changed), so the frontend code is unchanged.
+/// Bridge that reads all messages from the daemon pipe and routes them:
+/// - Response messages → sent to DaemonClient via mpsc channel
+/// - Event messages → emitted as Tauri events to the frontend
+///
+/// The bridge is the **sole reader** of the pipe, eliminating lock contention.
 pub struct DaemonBridge {
     running: Arc<AtomicBool>,
 }
@@ -22,12 +24,12 @@ impl DaemonBridge {
         }
     }
 
-    /// Start the bridge event reader thread.
-    /// The reader is shared with DaemonClient (locked during request/response).
-    /// Between requests, the bridge reads events and emits Tauri events.
+    /// Start the bridge reader thread.
+    /// Takes ownership of the pipe reader and the response sender channel.
     pub fn start(
         &self,
-        reader: Arc<Mutex<Box<dyn Read + Send>>>,
+        mut reader: Box<dyn Read + Send>,
+        response_tx: mpsc::Sender<Response>,
         app_handle: AppHandle,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
@@ -40,21 +42,19 @@ impl DaemonBridge {
             eprintln!("[bridge] Event bridge started");
 
             while running.load(Ordering::Relaxed) {
-                // Try to acquire the reader - the client may hold it during
-                // request/response cycles.
-                let msg_result = {
-                    let mut reader_guard = reader.lock();
-                    godly_protocol::read_message::<_, DaemonMessage>(&mut *reader_guard)
-                };
+                let msg_result =
+                    godly_protocol::read_message::<_, DaemonMessage>(&mut reader);
 
                 match msg_result {
                     Ok(Some(DaemonMessage::Event(event))) => {
                         emit_event(&app_handle, event);
                     }
-                    Ok(Some(DaemonMessage::Response(_))) => {
-                        // Responses should be consumed by DaemonClient.send_request()
-                        // If we see one here, the client wasn't waiting for it.
-                        eprintln!("[bridge] Unexpected response in event loop (dropped)");
+                    Ok(Some(DaemonMessage::Response(response))) => {
+                        // Route response back to the DaemonClient
+                        if response_tx.send(response).is_err() {
+                            eprintln!("[bridge] Response channel closed, stopping");
+                            break;
+                        }
                     }
                     Ok(None) => {
                         eprintln!("[bridge] Daemon connection closed");

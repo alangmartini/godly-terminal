@@ -73,8 +73,10 @@ pub fn run() {
             let state_clone = app_state.clone();
 
             // Start the daemon event bridge (forwards daemon events -> Tauri events)
-            let reader = daemon_client.clone_reader();
-            bridge.start(reader, app_handle.clone());
+            let reader = daemon_client.take_reader()
+                .expect("Daemon reader already taken");
+            let response_tx = daemon_client.response_sender();
+            bridge.start(reader, response_tx, app_handle.clone());
 
             // Start process monitor (queries daemon for PIDs, resolves process names locally)
             process_monitor.start(app_handle.clone(), state_clone.clone(), daemon_client.clone());
