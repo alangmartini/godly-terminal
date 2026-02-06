@@ -1,0 +1,31 @@
+[package]
+name = "godly-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "godly-daemon"
+path = "src/main.rs"
+
+[dependencies]
+godly-protocol = { path = "../protocol" }
+portable-pty = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+parking_lot = "0.12"
+tokio = { version = "1.0", features = ["full"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "processthreadsapi",
+    "handleapi",
+    "psapi",
+    "tlhelp32",
+    "winbase",
+    "wincon",
+    "namedpipeapi",
+    "fileapi",
+    "errhandlingapi",
+    "synchapi",
+] }
