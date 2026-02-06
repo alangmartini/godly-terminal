@@ -109,3 +109,139 @@ impl Default for AppState {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::models::ShellType;
+
+    #[test]
+    fn test_workspace_add_and_get() {
+        let state = AppState::new();
+
+        let workspace = Workspace {
+            id: "ws-123".to_string(),
+            name: "Test Workspace".to_string(),
+            folder_path: "C:\\Test".to_string(),
+            tab_order: vec![],
+            shell_type: ShellType::Windows,
+        };
+
+        state.add_workspace(workspace.clone());
+
+        let retrieved = state.get_workspace("ws-123");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().id, "ws-123");
+    }
+
+    #[test]
+    fn test_workspace_restore_preserves_id() {
+        // This simulates what happens when load_layout restores workspaces
+        let state = AppState::new();
+
+        let original_id = "original-workspace-id-abc123";
+        let workspace = Workspace {
+            id: original_id.to_string(),
+            name: "Restored Workspace".to_string(),
+            folder_path: "C:\\Projects".to_string(),
+            tab_order: vec!["term-1".to_string()],
+            shell_type: ShellType::Windows,
+        };
+
+        state.add_workspace(workspace);
+
+        // The workspace should be retrievable by its original ID
+        let retrieved = state.get_workspace(original_id);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().id, original_id);
+    }
+
+    #[test]
+    fn test_terminal_workspace_relationship() {
+        let state = AppState::new();
+
+        // Add workspace
+        state.add_workspace(Workspace {
+            id: "ws-1".to_string(),
+            name: "Workspace".to_string(),
+            folder_path: "C:\\".to_string(),
+            tab_order: vec![],
+            shell_type: ShellType::Windows,
+        });
+
+        // Add terminal to workspace
+        state.add_terminal(Terminal {
+            id: "term-1".to_string(),
+            workspace_id: "ws-1".to_string(),
+            name: "Terminal".to_string(),
+            process_name: "powershell".to_string(),
+        });
+
+        // Verify terminal is associated with workspace
+        let terminals = state.get_workspace_terminals("ws-1");
+        assert_eq!(terminals.len(), 1);
+        assert_eq!(terminals[0].id, "term-1");
+    }
+
+    #[test]
+    fn test_restore_multiple_workspaces() {
+        let state = AppState::new();
+
+        // Simulate restoring multiple workspaces from saved layout
+        let workspaces = vec![
+            Workspace {
+                id: "ws-1".to_string(),
+                name: "Project A".to_string(),
+                folder_path: "C:\\ProjectA".to_string(),
+                tab_order: vec![],
+                shell_type: ShellType::Windows,
+            },
+            Workspace {
+                id: "ws-2".to_string(),
+                name: "Project B".to_string(),
+                folder_path: "/home/user/projectb".to_string(),
+                tab_order: vec![],
+                shell_type: ShellType::Wsl {
+                    distribution: Some("Ubuntu".to_string()),
+                },
+            },
+        ];
+
+        for ws in workspaces {
+            state.add_workspace(ws);
+        }
+
+        assert_eq!(state.get_all_workspaces().len(), 2);
+        assert!(state.get_workspace("ws-1").is_some());
+        assert!(state.get_workspace("ws-2").is_some());
+    }
+
+    #[test]
+    fn test_active_workspace_id_restore() {
+        let state = AppState::new();
+
+        // Simulate setting active workspace during restore
+        *state.active_workspace_id.write() = Some("ws-active".to_string());
+
+        let active = state.active_workspace_id.read().clone();
+        assert_eq!(active, Some("ws-active".to_string()));
+    }
+
+    #[test]
+    fn test_terminal_with_preserved_id() {
+        let state = AppState::new();
+
+        // This simulates create_terminal with id_override
+        let preserved_id = "preserved-terminal-id-xyz";
+        state.add_terminal(Terminal {
+            id: preserved_id.to_string(),
+            workspace_id: "ws-1".to_string(),
+            name: "Restored Terminal".to_string(),
+            process_name: "powershell".to_string(),
+        });
+
+        let terminal = state.get_terminal(preserved_id);
+        assert!(terminal.is_some());
+        assert_eq!(terminal.unwrap().id, preserved_id);
+    }
+}

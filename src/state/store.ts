@@ -6,11 +6,16 @@ export interface Terminal {
   order: number;
 }
 
+export type ShellType =
+  | { type: 'windows' }
+  | { type: 'wsl'; distribution?: string };
+
 export interface Workspace {
   id: string;
   name: string;
   folderPath: string;
   tabOrder: string[];
+  shellType: ShellType;
 }
 
 export interface AppState {

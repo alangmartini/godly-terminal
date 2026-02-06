@@ -24,7 +24,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
-use crate::state::AppState;
+use crate::state::{AppState, ShellType};
 
 pub struct ProcessMonitor {
     running: Arc<AtomicBool>,
@@ -54,21 +54,33 @@ impl ProcessMonitor {
                 for (terminal_id, session) in sessions.iter() {
                     #[cfg(windows)]
                     {
-                        let pid = session.get_pid();
-                        if let Some(process_name) = get_foreground_process(pid) {
-                            let last = last_processes.get(terminal_id);
-                            if last.map(|s| s.as_str()) != Some(&process_name) {
-                                last_processes
-                                    .insert(terminal_id.clone(), process_name.clone());
-                                state.update_terminal_process(terminal_id, process_name.clone());
-                                let _ = app_handle.emit(
-                                    "process-changed",
-                                    serde_json::json!({
-                                        "terminal_id": terminal_id,
-                                        "process_name": process_name,
-                                    }),
-                                );
+                        // For WSL terminals, we can't query Linux process names from Windows
+                        // Instead, display the distribution name or "wsl"
+                        let process_name = match session.get_shell_type() {
+                            ShellType::Wsl { distribution } => {
+                                distribution.clone().unwrap_or_else(|| String::from("wsl"))
                             }
+                            ShellType::Windows => {
+                                // For Windows terminals, query the actual foreground process
+                                let pid = session.get_pid();
+                                match get_foreground_process(pid) {
+                                    Some(name) => name,
+                                    None => continue,
+                                }
+                            }
+                        };
+
+                        let last = last_processes.get(terminal_id);
+                        if last.map(|s| s.as_str()) != Some(&process_name) {
+                            last_processes.insert(terminal_id.clone(), process_name.clone());
+                            state.update_terminal_process(terminal_id, process_name.clone());
+                            let _ = app_handle.emit(
+                                "process-changed",
+                                serde_json::json!({
+                                    "terminal_id": terminal_id,
+                                    "process_name": process_name,
+                                }),
+                            );
                         }
                     }
 

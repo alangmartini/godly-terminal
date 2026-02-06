@@ -1,9 +1,26 @@
-import { store } from '../state/store';
+import { store, ShellType } from '../state/store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar } from './TabBar';
 import { TerminalPane } from './TerminalPane';
+
+type BackendShellType =
+  | 'windows'
+  | { wsl: { distribution: string | null } };
+
+function convertShellType(backendType?: BackendShellType): ShellType {
+  if (!backendType || backendType === 'windows') {
+    return { type: 'windows' };
+  }
+  if (typeof backendType === 'object' && 'wsl' in backendType) {
+    return {
+      type: 'wsl',
+      distribution: backendType.wsl.distribution ?? undefined,
+    };
+  }
+  return { type: 'windows' };
+}
 
 export class App {
   private container: HTMLElement;
@@ -11,6 +28,7 @@ export class App {
   private tabBar: TabBar;
   private terminalContainer: HTMLElement;
   private terminalPanes: Map<string, TerminalPane> = new Map();
+  private restoredTerminalIds: Set<string> = new Set();
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -54,6 +72,13 @@ export class App {
         const pane = new TerminalPane(terminal.id);
         pane.mount(this.terminalContainer);
         this.terminalPanes.set(terminal.id, pane);
+
+        // Load scrollback for restored terminals
+        if (this.restoredTerminalIds.has(terminal.id)) {
+          // Small delay to ensure terminal is mounted
+          setTimeout(() => pane.loadScrollback(), 100);
+          this.restoredTerminalIds.delete(terminal.id);
+        }
       }
     });
 
@@ -109,6 +134,34 @@ export class App {
     document.addEventListener('keydown', async (e) => {
       const state = store.getState();
 
+      // Ctrl+Shift+S: Manual save (for debugging)
+      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        console.log('[App] Manual save triggered...');
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('save_layout');
+          console.log('[App] Manual save complete!');
+        } catch (error) {
+          console.error('[App] Manual save failed:', error);
+        }
+        return;
+      }
+
+      // Ctrl+Shift+L: Manual load (for debugging)
+      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
+        e.preventDefault();
+        console.log('[App] Manual load triggered...');
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const layout = await invoke('load_layout');
+          console.log('[App] Manual load result:', JSON.stringify(layout, null, 2));
+        } catch (error) {
+          console.error('[App] Manual load failed:', error);
+        }
+        return;
+      }
+
       // Ctrl+T: New terminal
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
@@ -158,57 +211,93 @@ export class App {
     // Initialize terminal service
     await terminalService.init();
 
+    // Listen for scrollback save requests from backend (on window close)
+    await this.setupScrollbackSaveListener();
+
     // Load persisted state
     try {
       const { invoke } = await import('@tauri-apps/api/core');
+      console.log('[App] Loading layout...');
       const layout = await invoke<{
         workspaces: Array<{
           id: string;
           name: string;
           folder_path: string;
           tab_order: string[];
+          shell_type?: BackendShellType;
         }>;
         terminals: Array<{
           id: string;
           workspace_id: string;
           name: string;
+          shell_type?: BackendShellType;
+          cwd?: string | null;
         }>;
         active_workspace_id: string | null;
       }>('load_layout');
 
+      console.log('[App] Layout loaded:', JSON.stringify(layout, null, 2));
+      console.log('[App] Workspaces count:', layout.workspaces.length);
+      console.log('[App] Terminals count:', layout.terminals.length);
+
       if (layout.workspaces.length > 0) {
+        console.log('[App] Restoring workspaces...');
         // Restore workspaces
         layout.workspaces.forEach((w) => {
+          console.log('[App] Adding workspace:', w.id, w.name);
           store.addWorkspace({
             id: w.id,
             name: w.name,
             folderPath: w.folder_path,
             tabOrder: w.tab_order,
+            shellType: convertShellType(w.shell_type),
           });
         });
 
         // Set active workspace
-        store.setActiveWorkspace(
-          layout.active_workspace_id || layout.workspaces[0].id
-        );
+        const activeWsId = layout.active_workspace_id || layout.workspaces[0].id;
+        console.log('[App] Setting active workspace:', activeWsId);
+        store.setActiveWorkspace(activeWsId);
 
-        // Recreate terminals
+        // Recreate terminals with saved CWD, shell type, and original ID
+        console.log('[App] Restoring terminals...');
         for (const t of layout.terminals) {
-          const terminalId = await terminalService.createTerminal(t.workspace_id);
+          console.log('[App] Creating terminal:', t.id, 'in workspace:', t.workspace_id);
+          const shellType = convertShellType(t.shell_type);
+          const terminalId = await terminalService.createTerminal(t.workspace_id, {
+            cwdOverride: t.cwd ?? undefined,
+            shellTypeOverride: shellType,
+            idOverride: t.id, // Preserve original ID for scrollback lookup
+          });
+
+          console.log('[App] Terminal created with ID:', terminalId, '(requested:', t.id, ')');
+
+          // Mark this terminal for scrollback restoration
+          this.restoredTerminalIds.add(terminalId);
+
+          // Determine process name from shell type
+          const processName =
+            shellType.type === 'wsl'
+              ? shellType.distribution ?? 'wsl'
+              : 'powershell';
+
           store.addTerminal({
             id: terminalId,
             workspaceId: t.workspace_id,
             name: t.name,
-            processName: 'powershell',
+            processName,
             order: 0,
           });
         }
+        console.log('[App] Restore complete!');
       } else {
+        console.log('[App] No workspaces in layout, creating default...');
         // Create default workspace
         await this.createDefaultWorkspace();
       }
-    } catch {
+    } catch (error) {
       // If no saved layout, create default workspace
+      console.error('[App] Error loading layout:', error);
       await this.createDefaultWorkspace();
     }
   }
@@ -232,6 +321,22 @@ export class App {
       name: 'Terminal',
       processName: 'powershell',
       order: 0,
+    });
+  }
+
+  private async setupScrollbackSaveListener() {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen('request-scrollback-save', async () => {
+      console.log('[App] Saving all scrollbacks before exit...');
+      const saves = Array.from(this.terminalPanes.values()).map((pane) =>
+        pane.saveScrollback()
+      );
+      await Promise.all(saves);
+      console.log('[App] All scrollbacks saved, signaling completion...');
+
+      // Signal completion to backend
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('scrollback_save_complete');
     });
   }
 }

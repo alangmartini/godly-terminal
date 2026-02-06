@@ -1,18 +1,30 @@
 import { invoke } from '@tauri-apps/api/core';
-import { store, Workspace } from '../state/store';
+import { store, Workspace, ShellType } from '../state/store';
 
 export interface WorkspaceData {
   id: string;
   name: string;
   folder_path: string;
   tab_order: string[];
+  shell_type?: 'windows' | { wsl: { distribution: string | null } };
 }
 
 class WorkspaceService {
-  async createWorkspace(name: string, folderPath: string): Promise<string> {
+  async createWorkspace(
+    name: string,
+    folderPath: string,
+    shellType: ShellType = { type: 'windows' }
+  ): Promise<string> {
+    // Convert frontend ShellType to backend format
+    const backendShellType =
+      shellType.type === 'windows'
+        ? 'windows'
+        : { wsl: { distribution: shellType.distribution ?? null } };
+
     const workspaceId = await invoke<string>('create_workspace', {
       name,
       folderPath,
+      shellType: backendShellType,
     });
 
     const workspace: Workspace = {
@@ -20,10 +32,19 @@ class WorkspaceService {
       name,
       folderPath,
       tabOrder: [],
+      shellType,
     };
     store.addWorkspace(workspace);
 
     return workspaceId;
+  }
+
+  async getWslDistributions(): Promise<string[]> {
+    return invoke<string[]>('get_wsl_distributions');
+  }
+
+  async isWslAvailable(): Promise<boolean> {
+    return invoke<boolean>('is_wsl_available');
   }
 
   async deleteWorkspace(workspaceId: string): Promise<void> {
@@ -57,7 +78,23 @@ class WorkspaceService {
       name: w.name,
       folderPath: w.folder_path,
       tabOrder: w.tab_order,
+      shellType: this.convertShellType(w.shell_type),
     }));
+  }
+
+  private convertShellType(
+    backendType?: 'windows' | { wsl: { distribution: string | null } }
+  ): ShellType {
+    if (!backendType || backendType === 'windows') {
+      return { type: 'windows' };
+    }
+    if (typeof backendType === 'object' && 'wsl' in backendType) {
+      return {
+        type: 'wsl',
+        distribution: backendType.wsl.distribution ?? undefined,
+      };
+    }
+    return { type: 'windows' };
   }
 }
 
