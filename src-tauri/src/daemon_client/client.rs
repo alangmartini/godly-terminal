@@ -135,8 +135,7 @@ impl DaemonClient {
         // Launch as a detached process that survives our exit
         Command::new(&daemon_path)
             .creation_flags(
-                0x00000008 | // CREATE_NO_WINDOW
-                0x00000010 | // CREATE_NEW_CONSOLE (so it doesn't share our console)
+                0x00000008 | // DETACHED_PROCESS (no console)
                 0x00000200,  // CREATE_NEW_PROCESS_GROUP
             )
             .spawn()
