@@ -1,4 +1,4 @@
-import { store, Workspace } from '../state/store';
+import { store, Workspace, ShellType } from '../state/store';
 import { workspaceService } from '../services/workspace-service';
 import { open } from '@tauri-apps/plugin-dialog';
 
@@ -34,6 +34,15 @@ export class WorkspaceSidebar {
   }
 
   private async handleAddWorkspace() {
+    // Check if WSL is available
+    const wslAvailable = await workspaceService.isWslAvailable().catch(() => false);
+
+    // Show shell type selection dialog
+    const shellType = await this.showShellTypeDialog(wslAvailable);
+    if (!shellType) {
+      return; // User cancelled
+    }
+
     const selected = await open({
       directory: true,
       multiple: false,
@@ -42,7 +51,7 @@ export class WorkspaceSidebar {
 
     if (selected && typeof selected === 'string') {
       const folderName = selected.split(/[/\\]/).pop() || 'New Workspace';
-      await workspaceService.createWorkspace(folderName, selected);
+      await workspaceService.createWorkspace(folderName, selected, shellType);
 
       const state = store.getState();
       const newWorkspace = state.workspaces[state.workspaces.length - 1];
@@ -50,6 +59,92 @@ export class WorkspaceSidebar {
         store.setActiveWorkspace(newWorkspace.id);
       }
     }
+  }
+
+  private async showShellTypeDialog(wslAvailable: boolean): Promise<ShellType | null> {
+    return new Promise(async resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'dialog-overlay';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog';
+
+      let wslDistributions: string[] = [];
+      if (wslAvailable) {
+        wslDistributions = await workspaceService.getWslDistributions().catch(() => []);
+      }
+
+      const showWslOption = wslAvailable && wslDistributions.length > 0;
+
+      dialog.innerHTML = `
+        <div class="dialog-title">New Workspace</div>
+        <div class="shell-type-options">
+          <label class="shell-type-option">
+            <input type="radio" name="shellType" value="windows" checked />
+            <span>Windows (PowerShell)</span>
+          </label>
+          ${
+            showWslOption
+              ? `
+          <label class="shell-type-option">
+            <input type="radio" name="shellType" value="wsl" />
+            <span>WSL (Linux)</span>
+          </label>
+          <div class="wsl-distro-container" style="display: none;">
+            <label class="wsl-distro-label">Distribution:</label>
+            <select class="wsl-distro-select dialog-input">
+              ${wslDistributions.map(d => `<option value="${d}">${d}</option>`).join('')}
+            </select>
+          </div>
+          `
+              : ''
+          }
+        </div>
+        <div class="dialog-buttons">
+          <button class="dialog-btn dialog-btn-secondary">Cancel</button>
+          <button class="dialog-btn dialog-btn-primary">Continue</button>
+        </div>
+      `;
+
+      const close = () => overlay.remove();
+
+      const [cancelBtn, continueBtn] = dialog.querySelectorAll('button');
+      const radioInputs = dialog.querySelectorAll<HTMLInputElement>('input[name="shellType"]');
+      const distroContainer = dialog.querySelector<HTMLElement>('.wsl-distro-container');
+      const distroSelect = dialog.querySelector<HTMLSelectElement>('.wsl-distro-select');
+
+      // Toggle distro dropdown visibility
+      radioInputs.forEach(radio => {
+        radio.addEventListener('change', () => {
+          if (distroContainer) {
+            distroContainer.style.display = radio.value === 'wsl' ? 'block' : 'none';
+          }
+        });
+      });
+
+      cancelBtn.onclick = () => {
+        close();
+        resolve(null);
+      };
+
+      continueBtn.onclick = () => {
+        const selectedType = dialog.querySelector<HTMLInputElement>(
+          'input[name="shellType"]:checked'
+        )?.value;
+
+        if (selectedType === 'wsl') {
+          const distribution = distroSelect?.value;
+          close();
+          resolve({ type: 'wsl', distribution });
+        } else {
+          close();
+          resolve({ type: 'windows' });
+        }
+      };
+
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+    });
   }
 
   private render() {
@@ -67,16 +162,29 @@ export class WorkspaceSidebar {
     const state = store.getState();
     const isActive = state.activeWorkspaceId === workspace.id;
     const terminalCount = store.getTerminalCount(workspace.id);
+    const isWsl = workspace.shellType?.type === 'wsl';
 
     const item = document.createElement('div');
     item.className = `workspace-item${isActive ? ' active' : ''}`;
     item.dataset.workspaceId = workspace.id;
 
+    const nameContainer = document.createElement('span');
+    nameContainer.className = 'workspace-name-container';
+
     const name = document.createElement('span');
     name.className = 'workspace-name';
     name.textContent = workspace.name;
     name.title = workspace.folderPath;
-    item.appendChild(name);
+    nameContainer.appendChild(name);
+
+    if (isWsl) {
+      const wslBadge = document.createElement('span');
+      wslBadge.className = 'wsl-badge';
+      wslBadge.textContent = 'WSL';
+      nameContainer.appendChild(wslBadge);
+    }
+
+    item.appendChild(nameContainer);
 
     const badge = document.createElement('span');
     badge.className = 'workspace-badge';
