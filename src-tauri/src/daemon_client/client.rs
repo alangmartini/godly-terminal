@@ -1,23 +1,33 @@
 use std::io::{Read, Write};
-use std::sync::Arc;
 use std::sync::mpsc;
 
 use parking_lot::Mutex;
+use tauri::AppHandle;
 
 use godly_protocol::{Request, Response};
 
+use super::bridge::{BridgeRequest, DaemonBridge};
+
 /// Client that communicates with the godly-daemon process via named pipes.
 ///
-/// The reader is handed off to `DaemonBridge` which becomes the sole reader.
-/// Responses are routed back via an mpsc channel.
+/// Both the reader and writer are handed off to `DaemonBridge`, which performs
+/// all pipe I/O from a single thread using PeekNamedPipe for non-blocking reads.
+/// The client sends requests to the bridge via a channel, and receives responses
+/// via a per-request one-shot channel.
+///
+/// If the pipe connection breaks, the client automatically reconnects on the
+/// next `send_request` call.
 pub struct DaemonClient {
-    /// Pipe reader — taken by bridge via `take_reader()`
+    /// Pipe reader — taken by bridge via `setup_bridge()`
     reader: Mutex<Option<Box<dyn Read + Send>>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    /// Receives responses routed by the bridge
-    response_rx: Mutex<mpsc::Receiver<Response>>,
-    /// Sender given to bridge so it can route responses back
-    response_tx: mpsc::Sender<Response>,
+    /// Pipe writer — taken by bridge via `setup_bridge()`
+    writer: Mutex<Option<Box<dyn Write + Send>>>,
+    /// Sender for submitting requests to the bridge thread
+    request_tx: Mutex<Option<mpsc::Sender<BridgeRequest>>>,
+    /// App handle for bridge setup (stored after first `setup_bridge` call)
+    app_handle: Mutex<Option<AppHandle>>,
+    /// Prevents concurrent reconnection attempts
+    reconnect_lock: Mutex<()>,
 }
 
 impl DaemonClient {
@@ -120,13 +130,12 @@ impl DaemonClient {
         let writer: Box<dyn Write + Send> =
             Box::new(unsafe { std::fs::File::from_raw_handle(writer_handle as _) });
 
-        let (response_tx, response_rx) = mpsc::channel();
-
         Ok(Self {
             reader: Mutex::new(Some(reader)),
-            writer: Arc::new(Mutex::new(writer)),
-            response_rx: Mutex::new(response_rx),
-            response_tx,
+            writer: Mutex::new(Some(writer)),
+            request_tx: Mutex::new(None),
+            app_handle: Mutex::new(None),
+            reconnect_lock: Mutex::new(()),
         })
     }
 
@@ -193,30 +202,138 @@ impl DaemonClient {
         ))
     }
 
-    /// Take the pipe reader (for handing to the bridge). Can only be called once.
-    pub fn take_reader(&self) -> Option<Box<dyn Read + Send>> {
-        self.reader.lock().take()
+    /// Set up the bridge: creates channels, starts the bridge I/O thread, and
+    /// stores the request sender. Also stores the app_handle for future reconnections.
+    pub fn setup_bridge(&self, app_handle: AppHandle) -> Result<(), String> {
+        let reader = self
+            .reader
+            .lock()
+            .take()
+            .ok_or("Daemon reader not available")?;
+        let writer = self
+            .writer
+            .lock()
+            .take()
+            .ok_or("Daemon writer not available")?;
+
+        let (request_tx, request_rx) = mpsc::channel();
+        *self.request_tx.lock() = Some(request_tx);
+
+        let bridge = DaemonBridge::new();
+        bridge.start(reader, writer, request_rx, app_handle.clone());
+
+        *self.app_handle.lock() = Some(app_handle);
+
+        Ok(())
     }
 
-    /// Get the response sender (for the bridge to route responses back).
-    pub fn response_sender(&self) -> mpsc::Sender<Response> {
-        self.response_tx.clone()
+    /// Reconnect to the daemon, establishing a new pipe and bridge.
+    /// Called automatically when `send_request` detects a broken connection.
+    fn reconnect(&self) -> Result<(), String> {
+        let _guard = self.reconnect_lock.lock();
+
+        // Check if another thread already reconnected while we waited for the lock
+        if self.request_tx.lock().is_some() {
+            // Try a quick ping to verify the connection is alive
+            if self.try_send_request(&Request::Ping).is_ok() {
+                return Ok(());
+            }
+        }
+
+        eprintln!("[daemon_client] Reconnecting to daemon...");
+
+        // Clear stale request sender so no new requests go to the dead bridge
+        *self.request_tx.lock() = None;
+
+        // Try connecting to existing daemon first, then launch if needed
+        let new_client = match Self::try_connect() {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("[daemon_client] Daemon not reachable, launching new one...");
+                Self::launch_daemon()?;
+
+                let mut retries = 0;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    match Self::try_connect() {
+                        Ok(c) => break c,
+                        Err(e) => {
+                            retries += 1;
+                            if retries > 15 {
+                                return Err(format!(
+                                    "Failed to reconnect to daemon after launch: {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        // Move the new connection's reader/writer into self
+        *self.reader.lock() = new_client.reader.lock().take();
+        *self.writer.lock() = new_client.writer.lock().take();
+
+        // Set up the bridge with the stored app_handle
+        let app_handle = self
+            .app_handle
+            .lock()
+            .clone()
+            .ok_or("No app_handle stored — setup_bridge was never called")?;
+
+        self.setup_bridge(app_handle)?;
+
+        eprintln!("[daemon_client] Reconnected to daemon");
+        Ok(())
+    }
+
+    /// Low-level send: attempts to send a request through the current bridge.
+    /// Returns Err if the bridge channel is broken or the response channel is dropped.
+    fn try_send_request(&self, request: &Request) -> Result<Response, String> {
+        let tx = self
+            .request_tx
+            .lock()
+            .as_ref()
+            .ok_or("Bridge not started yet")?
+            .clone();
+
+        // Create a one-shot channel for this request's response
+        let (response_tx, response_rx) = mpsc::channel();
+
+        tx.send(BridgeRequest {
+            request: request.clone(),
+            response_tx,
+        })
+        .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
+
+        response_rx
+            .recv()
+            .map_err(|e| format!("Failed to receive response: {}", e))
+    }
+
+    /// Check if an error indicates a broken connection (bridge channel dead).
+    fn is_connection_error(err: &str) -> bool {
+        err.contains("Failed to send request to bridge")
+            || err.contains("Failed to receive response")
+            || err.contains("Bridge not started yet")
     }
 
     /// Send a request and wait for the response.
-    /// The bridge thread routes responses back via the mpsc channel.
+    /// If the connection is broken, automatically reconnects and retries once.
     pub fn send_request(&self, request: &Request) -> Result<Response, String> {
-        // Write request
-        {
-            let mut writer = self.writer.lock();
-            godly_protocol::write_message(&mut *writer, request)
-                .map_err(|e| format!("Failed to send request: {}", e))?;
+        match self.try_send_request(request) {
+            Ok(response) => Ok(response),
+            Err(e) if Self::is_connection_error(&e) => {
+                eprintln!(
+                    "[daemon_client] Connection error: {}, attempting reconnect...",
+                    e
+                );
+                self.reconnect()?;
+                self.try_send_request(request)
+            }
+            Err(e) => Err(e),
         }
-
-        // Wait for response from the bridge (which is the sole reader)
-        let rx = self.response_rx.lock();
-        rx.recv()
-            .map_err(|e| format!("Failed to receive response: {}", e))
     }
 
     /// Verify the connection is alive
