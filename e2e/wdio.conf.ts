@@ -1,8 +1,13 @@
 import path from 'path';
 
+// Skip WDIO's built-in browser driver management — we manage tauri-driver ourselves
+process.env.WDIO_SKIP_DRIVER_SETUP = '1';
+
 export const config: WebdriverIO.Config = {
   specs: ['./specs/**/*.e2e.ts'],
   maxInstances: 1,
+  hostname: 'localhost',
+  port: 4444,
   capabilities: [
     {
       'browserName': 'wry',
