@@ -201,9 +201,16 @@ fn get_raw_handle(_file: &std::fs::File) -> isize {
     0
 }
 
+/// Result of a non-blocking pipe peek: data available, empty, or error (pipe closed/broken).
+enum PeekResult {
+    Data,
+    Empty,
+    Error,
+}
+
 /// Non-blocking check: how many bytes are available to read from the pipe?
 #[cfg(windows)]
-fn peek_pipe(handle: isize) -> u32 {
+fn peek_pipe(handle: isize) -> PeekResult {
     use winapi::um::namedpipeapi::PeekNamedPipe;
 
     let mut bytes_available: u32 = 0;
@@ -218,14 +225,18 @@ fn peek_pipe(handle: isize) -> u32 {
         )
     };
     if result == 0 {
-        return 0; // Error (pipe might be closed)
+        return PeekResult::Error; // Pipe closed or broken
     }
-    bytes_available
+    if bytes_available > 0 {
+        PeekResult::Data
+    } else {
+        PeekResult::Empty
+    }
 }
 
 #[cfg(not(windows))]
-fn peek_pipe(_handle: isize) -> u32 {
-    0
+fn peek_pipe(_handle: isize) -> PeekResult {
+    PeekResult::Empty
 }
 
 /// Handle a single client connection using a single I/O thread.
@@ -325,29 +336,36 @@ fn io_thread(
 
     while io_running.load(Ordering::Relaxed) && server_running.load(Ordering::Relaxed) {
         // Step 1: Check if there are bytes available to read (non-blocking)
-        let bytes_available = peek_pipe(raw_handle);
-
-        if bytes_available > 0 {
-            // Read the request from the pipe
-            match godly_protocol::read_message::<_, Request>(&mut pipe) {
-                Ok(Some(request)) => {
-                    if req_tx.send(request).is_err() {
-                        eprintln!("[daemon-io] Request channel closed, stopping");
+        match peek_pipe(raw_handle) {
+            PeekResult::Data => {
+                // Read the request from the pipe
+                match godly_protocol::read_message::<_, Request>(&mut pipe) {
+                    Ok(Some(request)) => {
+                        if req_tx.send(request).is_err() {
+                            eprintln!("[daemon-io] Request channel closed, stopping");
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        eprintln!("[daemon-io] Client disconnected (EOF)");
+                        break;
+                    }
+                    Err(e) => {
+                        if io_running.load(Ordering::Relaxed) {
+                            eprintln!("[daemon-io] Read error: {}", e);
+                        }
                         break;
                     }
                 }
-                Ok(None) => {
-                    eprintln!("[daemon-io] Client disconnected (EOF)");
-                    break;
-                }
-                Err(e) => {
-                    if io_running.load(Ordering::Relaxed) {
-                        eprintln!("[daemon-io] Read error: {}", e);
-                    }
-                    break;
-                }
+                continue; // Check for more data immediately
             }
-            continue; // Check for more data immediately
+            PeekResult::Error => {
+                eprintln!("[daemon-io] Pipe closed or broken, stopping");
+                break;
+            }
+            PeekResult::Empty => {
+                // Fall through to check for outgoing messages
+            }
         }
 
         // Step 2: Check if there are outgoing messages to write

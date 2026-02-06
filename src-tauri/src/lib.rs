@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 
-use crate::daemon_client::{DaemonBridge, DaemonClient};
+use crate::daemon_client::DaemonClient;
 use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
@@ -36,8 +36,6 @@ pub fn run() {
             .expect("Failed to connect to daemon. Run 'npm run build:daemon' first."),
     );
     eprintln!("[lib] Connected to daemon");
-
-    let bridge = DaemonBridge::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -73,10 +71,11 @@ pub fn run() {
             let state_clone = app_state.clone();
 
             // Start the daemon event bridge (forwards daemon events -> Tauri events)
-            let reader = daemon_client.take_reader()
-                .expect("Daemon reader already taken");
-            let response_tx = daemon_client.response_sender();
-            bridge.start(reader, response_tx, app_handle.clone());
+            // The bridge owns both reader AND writer, doing all pipe I/O from a
+            // single thread to avoid Windows named pipe file-object serialization.
+            daemon_client
+                .setup_bridge(app_handle.clone())
+                .expect("Failed to setup daemon bridge");
 
             // Start process monitor (queries daemon for PIDs, resolves process names locally)
             process_monitor.start(app_handle.clone(), state_clone.clone(), daemon_client.clone());
