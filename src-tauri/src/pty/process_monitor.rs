@@ -24,6 +24,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+use crate::daemon_client::DaemonClient;
 use crate::state::{AppState, ShellType};
 
 pub struct ProcessMonitor {
@@ -37,7 +38,7 @@ impl ProcessMonitor {
         }
     }
 
-    pub fn start(&self, app_handle: AppHandle, state: Arc<AppState>) {
+    pub fn start(&self, app_handle: AppHandle, state: Arc<AppState>, daemon: Arc<DaemonClient>) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
         }
@@ -50,19 +51,30 @@ impl ProcessMonitor {
             while running.load(Ordering::Relaxed) {
                 thread::sleep(Duration::from_secs(1));
 
-                let sessions = state.pty_sessions.read();
-                for (terminal_id, session) in sessions.iter() {
+                // Get session list from daemon to get PIDs
+                let sessions = match daemon.send_request(&godly_protocol::Request::ListSessions) {
+                    Ok(godly_protocol::Response::SessionList { sessions }) => sessions,
+                    _ => continue,
+                };
+
+                let session_map: HashMap<String, &godly_protocol::SessionInfo> =
+                    sessions.iter().map(|s| (s.id.clone(), s)).collect();
+
+                let meta = state.session_metadata.read();
+                for (terminal_id, session_meta) in meta.iter() {
+                    let session_info = match session_map.get(terminal_id) {
+                        Some(info) => info,
+                        None => continue,
+                    };
+
                     #[cfg(windows)]
                     {
-                        // For WSL terminals, we can't query Linux process names from Windows
-                        // Instead, display the distribution name or "wsl"
-                        let process_name = match session.get_shell_type() {
+                        let process_name = match &session_meta.shell_type {
                             ShellType::Wsl { distribution } => {
                                 distribution.clone().unwrap_or_else(|| String::from("wsl"))
                             }
                             ShellType::Windows => {
-                                // For Windows terminals, query the actual foreground process
-                                let pid = session.get_pid();
+                                let pid = session_info.pid;
                                 match get_foreground_process(pid) {
                                     Some(name) => name,
                                     None => continue,
@@ -86,7 +98,7 @@ impl ProcessMonitor {
 
                     #[cfg(not(windows))]
                     {
-                        let _ = session;
+                        let _ = session_info;
                     }
                 }
             }
@@ -101,7 +113,6 @@ impl ProcessMonitor {
 
 #[cfg(windows)]
 fn get_foreground_process(parent_pid: u32) -> Option<String> {
-    // Find the deepest child process
     let child_pid = find_deepest_child(parent_pid)?;
     get_process_name(child_pid)
 }
@@ -135,7 +146,6 @@ fn find_deepest_child(parent_pid: u32) -> Option<u32> {
         if children.is_empty() {
             Some(parent_pid)
         } else {
-            // Recursively find the deepest child
             children
                 .into_iter()
                 .filter_map(|pid| find_deepest_child(pid))

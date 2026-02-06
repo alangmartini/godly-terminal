@@ -1,13 +1,13 @@
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
-use super::models::{Terminal, Workspace};
-use crate::pty::manager::PtySession;
+use super::models::{SessionMetadata, Terminal, Workspace};
 
 pub struct AppState {
     pub workspaces: RwLock<HashMap<String, Workspace>>,
     pub terminals: RwLock<HashMap<String, Terminal>>,
-    pub pty_sessions: RwLock<HashMap<String, PtySession>>,
+    /// Session metadata for persistence (shell_type, cwd) - replaces direct PTY session access
+    pub session_metadata: RwLock<HashMap<String, SessionMetadata>>,
     pub active_workspace_id: RwLock<Option<String>>,
 }
 
@@ -16,7 +16,7 @@ impl AppState {
         Self {
             workspaces: RwLock::new(HashMap::new()),
             terminals: RwLock::new(HashMap::new()),
-            pty_sessions: RwLock::new(HashMap::new()),
+            session_metadata: RwLock::new(HashMap::new()),
             active_workspace_id: RwLock::new(None),
         }
     }
@@ -87,20 +87,14 @@ impl AppState {
             .collect()
     }
 
-    pub fn add_pty_session(&self, id: String, session: PtySession) {
-        let mut sessions = self.pty_sessions.write();
-        sessions.insert(id, session);
+    pub fn add_session_metadata(&self, id: String, metadata: SessionMetadata) {
+        let mut meta = self.session_metadata.write();
+        meta.insert(id, metadata);
     }
 
-    pub fn remove_pty_session(&self, id: &str) -> Option<PtySession> {
-        let mut sessions = self.pty_sessions.write();
-        sessions.remove(id)
-    }
-
-    #[allow(dead_code)]
-    pub fn get_pty_session(&self, id: &str) -> Option<PtySession> {
-        let sessions = self.pty_sessions.read();
-        sessions.get(id).cloned()
+    pub fn remove_session_metadata(&self, id: &str) {
+        let mut meta = self.session_metadata.write();
+        meta.remove(id);
     }
 }
 
@@ -136,7 +130,6 @@ mod tests {
 
     #[test]
     fn test_workspace_restore_preserves_id() {
-        // This simulates what happens when load_layout restores workspaces
         let state = AppState::new();
 
         let original_id = "original-workspace-id-abc123";
@@ -150,7 +143,6 @@ mod tests {
 
         state.add_workspace(workspace);
 
-        // The workspace should be retrievable by its original ID
         let retrieved = state.get_workspace(original_id);
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().id, original_id);
@@ -160,7 +152,6 @@ mod tests {
     fn test_terminal_workspace_relationship() {
         let state = AppState::new();
 
-        // Add workspace
         state.add_workspace(Workspace {
             id: "ws-1".to_string(),
             name: "Workspace".to_string(),
@@ -169,7 +160,6 @@ mod tests {
             shell_type: ShellType::Windows,
         });
 
-        // Add terminal to workspace
         state.add_terminal(Terminal {
             id: "term-1".to_string(),
             workspace_id: "ws-1".to_string(),
@@ -177,7 +167,6 @@ mod tests {
             process_name: "powershell".to_string(),
         });
 
-        // Verify terminal is associated with workspace
         let terminals = state.get_workspace_terminals("ws-1");
         assert_eq!(terminals.len(), 1);
         assert_eq!(terminals[0].id, "term-1");
@@ -187,7 +176,6 @@ mod tests {
     fn test_restore_multiple_workspaces() {
         let state = AppState::new();
 
-        // Simulate restoring multiple workspaces from saved layout
         let workspaces = vec![
             Workspace {
                 id: "ws-1".to_string(),
@@ -220,7 +208,6 @@ mod tests {
     fn test_active_workspace_id_restore() {
         let state = AppState::new();
 
-        // Simulate setting active workspace during restore
         *state.active_workspace_id.write() = Some("ws-active".to_string());
 
         let active = state.active_workspace_id.read().clone();
@@ -231,7 +218,6 @@ mod tests {
     fn test_terminal_with_preserved_id() {
         let state = AppState::new();
 
-        // This simulates create_terminal with id_override
         let preserved_id = "preserved-terminal-id-xyz";
         state.add_terminal(Terminal {
             id: preserved_id.to_string(),
@@ -243,5 +229,23 @@ mod tests {
         let terminal = state.get_terminal(preserved_id);
         assert!(terminal.is_some());
         assert_eq!(terminal.unwrap().id, preserved_id);
+    }
+
+    #[test]
+    fn test_session_metadata() {
+        let state = AppState::new();
+
+        state.add_session_metadata(
+            "term-1".to_string(),
+            SessionMetadata {
+                shell_type: ShellType::Windows,
+                cwd: Some("C:\\Users\\test".to_string()),
+            },
+        );
+
+        let meta = state.session_metadata.read();
+        let m = meta.get("term-1").unwrap();
+        assert_eq!(m.shell_type, ShellType::Windows);
+        assert_eq!(m.cwd, Some("C:\\Users\\test".to_string()));
     }
 }
