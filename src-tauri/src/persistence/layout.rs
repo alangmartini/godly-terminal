@@ -7,21 +7,51 @@ use crate::state::{AppState, Layout, TerminalInfo};
 const STORE_PATH: &str = "layout.json";
 const LAYOUT_KEY: &str = "layout";
 
+fn log_info(msg: &str) {
+    eprintln!("[persistence] {}", msg);
+}
+
+fn log_error(msg: &str) {
+    eprintln!("[persistence] ERROR: {}", msg);
+}
+
 #[tauri::command]
 pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<(), String> {
+    log_info("Saving layout...");
+
     let store = app_handle
         .store(STORE_PATH)
-        .map_err(|e| format!("Failed to open store: {}", e))?;
+        .map_err(|e| {
+            let msg = format!("Failed to open store: {}", e);
+            log_error(&msg);
+            msg
+        })?;
 
     let workspaces = state.get_all_workspaces();
     let terminals: Vec<TerminalInfo> = {
         let terminals = state.terminals.read();
+        let pty_sessions = state.pty_sessions.read();
         terminals
             .values()
-            .map(|t| TerminalInfo {
-                id: t.id.clone(),
-                workspace_id: t.workspace_id.clone(),
-                name: t.name.clone(),
+            .map(|t| {
+                // Get shell type from PTY session if available
+                let shell_type = pty_sessions
+                    .get(&t.id)
+                    .map(|s| s.get_shell_type().clone())
+                    .unwrap_or_default();
+
+                // Get initial CWD from PTY session if available
+                let cwd = pty_sessions
+                    .get(&t.id)
+                    .and_then(|s| s.get_initial_cwd());
+
+                TerminalInfo {
+                    id: t.id.clone(),
+                    workspace_id: t.workspace_id.clone(),
+                    name: t.name.clone(),
+                    shell_type,
+                    cwd,
+                }
             })
             .collect()
     };
@@ -33,40 +63,116 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
         active_workspace_id,
     };
 
-    store.set(LAYOUT_KEY, serde_json::to_value(&layout).unwrap());
-    store.save().map_err(|e| format!("Failed to save store: {}", e))?;
+    let json_value = serde_json::to_value(&layout)
+        .map_err(|e| {
+            let msg = format!("Failed to serialize layout: {}", e);
+            log_error(&msg);
+            msg
+        })?;
+
+    store.set(LAYOUT_KEY, json_value);
+    store.save().map_err(|e| {
+        let msg = format!("Failed to save store: {}", e);
+        log_error(&msg);
+        msg
+    })?;
+
+    log_info(&format!(
+        "Layout saved: {} workspaces, {} terminals",
+        layout.workspaces.len(),
+        layout.terminals.len()
+    ));
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn load_layout(app_handle: AppHandle) -> Result<Layout, String> {
+pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<Layout, String> {
+    log_info("Loading layout...");
+
     let store = app_handle
         .store(STORE_PATH)
-        .map_err(|e| format!("Failed to open store: {}", e))?;
+        .map_err(|e| {
+            let msg = format!("Failed to open store: {}", e);
+            log_error(&msg);
+            msg
+        })?;
 
     match store.get(LAYOUT_KEY) {
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|e| format!("Failed to parse layout: {}", e)),
-        None => Ok(Layout::default()),
+        Some(value) => {
+            let layout: Layout = serde_json::from_value(value.clone())
+                .map_err(|e| {
+                    let msg = format!("Failed to parse layout: {}", e);
+                    log_error(&msg);
+                    msg
+                })?;
+
+            log_info(&format!(
+                "Layout loaded: {} workspaces, {} terminals",
+                layout.workspaces.len(),
+                layout.terminals.len()
+            ));
+
+            // Restore workspaces to backend state so create_terminal can find them
+            for ws in &layout.workspaces {
+                log_info(&format!("Restoring workspace to backend state: {} ({})", ws.name, ws.id));
+                state.add_workspace(crate::state::Workspace {
+                    id: ws.id.clone(),
+                    name: ws.name.clone(),
+                    folder_path: ws.folder_path.clone(),
+                    tab_order: ws.tab_order.clone(),
+                    shell_type: ws.shell_type.clone(),
+                });
+            }
+
+            // Set active workspace ID
+            if let Some(active_id) = &layout.active_workspace_id {
+                *state.active_workspace_id.write() = Some(active_id.clone());
+            }
+
+            Ok(layout)
+        }
+        None => {
+            log_info("No saved layout found, using default");
+            Ok(Layout::default())
+        }
     }
 }
 
 pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
+    log_info("Saving layout on exit...");
+
     let store = match app_handle.store(STORE_PATH) {
         Ok(s) => s,
-        Err(_) => return,
+        Err(e) => {
+            log_error(&format!("Failed to open store on exit: {}", e));
+            return;
+        }
     };
 
     let workspaces = state.get_all_workspaces();
     let terminals: Vec<TerminalInfo> = {
         let terminals = state.terminals.read();
+        let pty_sessions = state.pty_sessions.read();
         terminals
             .values()
-            .map(|t| TerminalInfo {
-                id: t.id.clone(),
-                workspace_id: t.workspace_id.clone(),
-                name: t.name.clone(),
+            .map(|t| {
+                let shell_type = pty_sessions
+                    .get(&t.id)
+                    .map(|s| s.get_shell_type().clone())
+                    .unwrap_or_default();
+
+                let cwd = pty_sessions
+                    .get(&t.id)
+                    .and_then(|s| s.get_initial_cwd());
+
+                TerminalInfo {
+                    id: t.id.clone(),
+                    workspace_id: t.workspace_id.clone(),
+                    name: t.name.clone(),
+                    shell_type,
+                    cwd,
+                }
             })
             .collect()
     };
@@ -78,6 +184,70 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
         active_workspace_id,
     };
 
-    store.set(LAYOUT_KEY, serde_json::to_value(&layout).unwrap());
-    let _ = store.save();
+    match serde_json::to_value(&layout) {
+        Ok(json_value) => {
+            store.set(LAYOUT_KEY, json_value);
+            if let Err(e) = store.save() {
+                log_error(&format!("Failed to save store on exit: {}", e));
+            } else {
+                log_info(&format!(
+                    "Layout saved on exit: {} workspaces, {} terminals",
+                    layout.workspaces.len(),
+                    layout.terminals.len()
+                ));
+            }
+        }
+        Err(e) => {
+            log_error(&format!("Failed to serialize layout on exit: {}", e));
+        }
+    }
+}
+
+/// Save layout from a background thread context (not a command)
+pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
+    let store = app_handle
+        .store(STORE_PATH)
+        .map_err(|e| format!("Failed to open store: {}", e))?;
+
+    let workspaces = state.get_all_workspaces();
+    let terminals: Vec<TerminalInfo> = {
+        let terminals = state.terminals.read();
+        let pty_sessions = state.pty_sessions.read();
+        terminals
+            .values()
+            .map(|t| {
+                let shell_type = pty_sessions
+                    .get(&t.id)
+                    .map(|s| s.get_shell_type().clone())
+                    .unwrap_or_default();
+
+                let cwd = pty_sessions
+                    .get(&t.id)
+                    .and_then(|s| s.get_initial_cwd());
+
+                TerminalInfo {
+                    id: t.id.clone(),
+                    workspace_id: t.workspace_id.clone(),
+                    name: t.name.clone(),
+                    shell_type,
+                    cwd,
+                }
+            })
+            .collect()
+    };
+    let active_workspace_id = state.active_workspace_id.read().clone();
+
+    let layout = Layout {
+        workspaces,
+        terminals,
+        active_workspace_id,
+    };
+
+    let json_value = serde_json::to_value(&layout)
+        .map_err(|e| format!("Failed to serialize layout: {}", e))?;
+
+    store.set(LAYOUT_KEY, json_value);
+    store.save().map_err(|e| format!("Failed to save store: {}", e))?;
+
+    Ok(())
 }

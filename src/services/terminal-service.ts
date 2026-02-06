@@ -1,6 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { store } from '../state/store';
+import { store, ShellType } from '../state/store';
+
+// Backend shell type format - matches Rust serde externally tagged enum
+export type BackendShellType =
+  | 'windows'
+  | { wsl: { distribution: string | null } };
+
+// Convert frontend ShellType to backend format
+function toBackendShellType(shellType: ShellType): BackendShellType {
+  if (shellType.type === 'windows') {
+    return 'windows';
+  }
+  return { wsl: { distribution: shellType.distribution ?? null } };
+}
 
 export interface TerminalOutputPayload {
   terminal_id: string;
@@ -52,9 +65,21 @@ class TerminalService {
     this.unlistenFns.push(unlistenOutput, unlistenProcess, unlistenClosed);
   }
 
-  async createTerminal(workspaceId: string): Promise<string> {
+  async createTerminal(
+    workspaceId: string,
+    options?: {
+      cwdOverride?: string;
+      shellTypeOverride?: ShellType;
+      idOverride?: string;
+    }
+  ): Promise<string> {
     const terminalId = await invoke<string>('create_terminal', {
       workspaceId,
+      cwdOverride: options?.cwdOverride ?? null,
+      shellTypeOverride: options?.shellTypeOverride
+        ? toBackendShellType(options.shellTypeOverride)
+        : null,
+      idOverride: options?.idOverride ?? null,
     });
     return terminalId;
   }
@@ -62,6 +87,12 @@ class TerminalService {
   async closeTerminal(terminalId: string): Promise<void> {
     await invoke('close_terminal', { terminalId });
     this.outputListeners.delete(terminalId);
+    // Also delete scrollback data
+    try {
+      await invoke('delete_scrollback', { terminalId });
+    } catch {
+      // Ignore scrollback deletion errors
+    }
   }
 
   async writeToTerminal(terminalId: string, data: string): Promise<void> {
