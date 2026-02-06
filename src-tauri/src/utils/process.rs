@@ -1,5 +1,8 @@
-/// Get the current working directory of a process by PID
+/// Get the current working directory of a process by PID.
+/// NOTE: This function is currently broken - it returns the executable path, not CWD.
+/// Kept for potential future use if we implement proper CWD tracking.
 #[cfg(windows)]
+#[allow(dead_code)]
 pub fn get_process_cwd(pid: u32) -> Option<String> {
     // For getting CWD, we use PowerShell to query the process
     // This is simpler than using the Windows API directly
@@ -7,6 +10,7 @@ pub fn get_process_cwd(pid: u32) -> Option<String> {
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 fn get_cwd_via_powershell(pid: u32) -> Option<String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;

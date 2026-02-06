@@ -15,6 +15,7 @@ pub struct PtySession {
     #[cfg(windows)]
     pid: u32,
     shell_type: ShellType,
+    initial_cwd: Option<String>,
 }
 
 impl Clone for PtySession {
@@ -26,6 +27,7 @@ impl Clone for PtySession {
             #[cfg(windows)]
             pid: self.pid,
             shell_type: self.shell_type.clone(),
+            initial_cwd: self.initial_cwd.clone(),
         }
     }
 }
@@ -144,6 +146,7 @@ impl PtySession {
             #[cfg(windows)]
             pid,
             shell_type,
+            initial_cwd: working_dir,
         })
     }
 
@@ -183,9 +186,9 @@ impl PtySession {
         &self.shell_type
     }
 
-    #[cfg(windows)]
-    pub fn get_cwd(&self) -> Option<String> {
-        use crate::utils::get_process_cwd;
-        get_process_cwd(self.pid)
+    /// Get the initial working directory that was passed when creating the terminal.
+    /// This is more reliable than get_cwd() which tries to detect the live CWD.
+    pub fn get_initial_cwd(&self) -> Option<String> {
+        self.initial_cwd.clone()
     }
 }

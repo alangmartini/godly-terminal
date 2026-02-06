@@ -211,6 +211,9 @@ export class App {
     // Initialize terminal service
     await terminalService.init();
 
+    // Listen for scrollback save requests from backend (on window close)
+    await this.setupScrollbackSaveListener();
+
     // Load persisted state
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -318,6 +321,22 @@ export class App {
       name: 'Terminal',
       processName: 'powershell',
       order: 0,
+    });
+  }
+
+  private async setupScrollbackSaveListener() {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen('request-scrollback-save', async () => {
+      console.log('[App] Saving all scrollbacks before exit...');
+      const saves = Array.from(this.terminalPanes.values()).map((pane) =>
+        pane.saveScrollback()
+      );
+      await Promise.all(saves);
+      console.log('[App] All scrollbacks saved, signaling completion...');
+
+      // Signal completion to backend
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('scrollback_save_complete');
     });
   }
 }

@@ -40,13 +40,10 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                     .map(|s| s.get_shell_type().clone())
                     .unwrap_or_default();
 
-                // Get CWD from PTY session if available
-                #[cfg(windows)]
+                // Get initial CWD from PTY session if available
                 let cwd = pty_sessions
                     .get(&t.id)
-                    .and_then(|s| s.get_cwd());
-                #[cfg(not(windows))]
-                let cwd = None;
+                    .and_then(|s| s.get_initial_cwd());
 
                 TerminalInfo {
                     id: t.id.clone(),
@@ -165,12 +162,9 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
                     .map(|s| s.get_shell_type().clone())
                     .unwrap_or_default();
 
-                #[cfg(windows)]
                 let cwd = pty_sessions
                     .get(&t.id)
-                    .and_then(|s| s.get_cwd());
-                #[cfg(not(windows))]
-                let cwd = None;
+                    .and_then(|s| s.get_initial_cwd());
 
                 TerminalInfo {
                     id: t.id.clone(),
@@ -227,12 +221,9 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
                     .map(|s| s.get_shell_type().clone())
                     .unwrap_or_default();
 
-                #[cfg(windows)]
                 let cwd = pty_sessions
                     .get(&t.id)
-                    .and_then(|s| s.get_cwd());
-                #[cfg(not(windows))]
-                let cwd = None;
+                    .and_then(|s| s.get_initial_cwd());
 
                 TerminalInfo {
                     id: t.id.clone(),
