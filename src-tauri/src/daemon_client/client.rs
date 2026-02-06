@@ -1,14 +1,23 @@
 use std::io::{Read, Write};
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use parking_lot::Mutex;
 
-use godly_protocol::{DaemonMessage, Request, Response};
+use godly_protocol::{Request, Response};
 
 /// Client that communicates with the godly-daemon process via named pipes.
+///
+/// The reader is handed off to `DaemonBridge` which becomes the sole reader.
+/// Responses are routed back via an mpsc channel.
 pub struct DaemonClient {
-    reader: Arc<Mutex<Box<dyn Read + Send>>>,
+    /// Pipe reader — taken by bridge via `take_reader()`
+    reader: Mutex<Option<Box<dyn Read + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Receives responses routed by the bridge
+    response_rx: Mutex<mpsc::Receiver<Response>>,
+    /// Sender given to bridge so it can route responses back
+    response_tx: mpsc::Sender<Response>,
 }
 
 impl DaemonClient {
@@ -111,9 +120,13 @@ impl DaemonClient {
         let writer: Box<dyn Write + Send> =
             Box::new(unsafe { std::fs::File::from_raw_handle(writer_handle as _) });
 
+        let (response_tx, response_rx) = mpsc::channel();
+
         Ok(Self {
-            reader: Arc::new(Mutex::new(reader)),
+            reader: Mutex::new(Some(reader)),
             writer: Arc::new(Mutex::new(writer)),
+            response_rx: Mutex::new(response_rx),
+            response_tx,
         })
     }
 
@@ -180,8 +193,18 @@ impl DaemonClient {
         ))
     }
 
+    /// Take the pipe reader (for handing to the bridge). Can only be called once.
+    pub fn take_reader(&self) -> Option<Box<dyn Read + Send>> {
+        self.reader.lock().take()
+    }
+
+    /// Get the response sender (for the bridge to route responses back).
+    pub fn response_sender(&self) -> mpsc::Sender<Response> {
+        self.response_tx.clone()
+    }
+
     /// Send a request and wait for the response.
-    /// NOTE: This does not handle interleaved events - those are handled by the bridge.
+    /// The bridge thread routes responses back via the mpsc channel.
     pub fn send_request(&self, request: &Request) -> Result<Response, String> {
         // Write request
         {
@@ -190,28 +213,10 @@ impl DaemonClient {
                 .map_err(|e| format!("Failed to send request: {}", e))?;
         }
 
-        // Read response (may receive events first, skip them)
-        loop {
-            let mut reader = self.reader.lock();
-            let msg: DaemonMessage = godly_protocol::read_message(&mut *reader)
-                .map_err(|e| format!("Failed to read response: {}", e))?
-                .ok_or_else(|| "Daemon connection closed".to_string())?;
-
-            match msg {
-                DaemonMessage::Response(response) => return Ok(response),
-                DaemonMessage::Event(_) => {
-                    // Events during request/response should be rare since we
-                    // hold the reader lock. The bridge handles events in its
-                    // own thread.
-                    continue;
-                }
-            }
-        }
-    }
-
-    /// Get a clone of the reader for the bridge event loop
-    pub fn clone_reader(&self) -> Arc<Mutex<Box<dyn Read + Send>>> {
-        self.reader.clone()
+        // Wait for response from the bridge (which is the sole reader)
+        let rx = self.response_rx.lock();
+        rx.recv()
+            .map_err(|e| format!("Failed to receive response: {}", e))
     }
 
     /// Verify the connection is alive
