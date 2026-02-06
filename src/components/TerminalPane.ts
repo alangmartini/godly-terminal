@@ -67,6 +67,8 @@ export class TerminalPane {
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
     this.terminal.open(this.container);
+    (this.container as any).__xterm = this.terminal;
+    (this.container as any).__serializeAddon = this.serializeAddon;
     this.resizeObserver.observe(this.container);
 
     // Handle input
