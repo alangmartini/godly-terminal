@@ -15,6 +15,29 @@ fn log_error(msg: &str) {
     eprintln!("[persistence] ERROR: {}", msg);
 }
 
+fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
+    let terminals = state.terminals.read();
+    let session_meta = state.session_metadata.read();
+    terminals
+        .values()
+        .map(|t| {
+            let meta = session_meta.get(&t.id);
+            let shell_type = meta
+                .map(|m| m.shell_type.clone())
+                .unwrap_or_default();
+            let cwd = meta.and_then(|m| m.cwd.clone());
+
+            TerminalInfo {
+                id: t.id.clone(),
+                workspace_id: t.workspace_id.clone(),
+                name: t.name.clone(),
+                shell_type,
+                cwd,
+            }
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<(), String> {
     log_info("Saving layout...");
@@ -28,33 +51,7 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
         })?;
 
     let workspaces = state.get_all_workspaces();
-    let terminals: Vec<TerminalInfo> = {
-        let terminals = state.terminals.read();
-        let pty_sessions = state.pty_sessions.read();
-        terminals
-            .values()
-            .map(|t| {
-                // Get shell type from PTY session if available
-                let shell_type = pty_sessions
-                    .get(&t.id)
-                    .map(|s| s.get_shell_type().clone())
-                    .unwrap_or_default();
-
-                // Get initial CWD from PTY session if available
-                let cwd = pty_sessions
-                    .get(&t.id)
-                    .and_then(|s| s.get_initial_cwd());
-
-                TerminalInfo {
-                    id: t.id.clone(),
-                    workspace_id: t.workspace_id.clone(),
-                    name: t.name.clone(),
-                    shell_type,
-                    cwd,
-                }
-            })
-            .collect()
-    };
+    let terminals = build_terminal_infos(&state);
     let active_workspace_id = state.active_workspace_id.read().clone();
 
     let layout = Layout {
@@ -151,31 +148,7 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     };
 
     let workspaces = state.get_all_workspaces();
-    let terminals: Vec<TerminalInfo> = {
-        let terminals = state.terminals.read();
-        let pty_sessions = state.pty_sessions.read();
-        terminals
-            .values()
-            .map(|t| {
-                let shell_type = pty_sessions
-                    .get(&t.id)
-                    .map(|s| s.get_shell_type().clone())
-                    .unwrap_or_default();
-
-                let cwd = pty_sessions
-                    .get(&t.id)
-                    .and_then(|s| s.get_initial_cwd());
-
-                TerminalInfo {
-                    id: t.id.clone(),
-                    workspace_id: t.workspace_id.clone(),
-                    name: t.name.clone(),
-                    shell_type,
-                    cwd,
-                }
-            })
-            .collect()
-    };
+    let terminals = build_terminal_infos(state);
     let active_workspace_id = state.active_workspace_id.read().clone();
 
     let layout = Layout {
@@ -210,31 +183,7 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
         .map_err(|e| format!("Failed to open store: {}", e))?;
 
     let workspaces = state.get_all_workspaces();
-    let terminals: Vec<TerminalInfo> = {
-        let terminals = state.terminals.read();
-        let pty_sessions = state.pty_sessions.read();
-        terminals
-            .values()
-            .map(|t| {
-                let shell_type = pty_sessions
-                    .get(&t.id)
-                    .map(|s| s.get_shell_type().clone())
-                    .unwrap_or_default();
-
-                let cwd = pty_sessions
-                    .get(&t.id)
-                    .and_then(|s| s.get_initial_cwd());
-
-                TerminalInfo {
-                    id: t.id.clone(),
-                    workspace_id: t.workspace_id.clone(),
-                    name: t.name.clone(),
-                    shell_type,
-                    cwd,
-                }
-            })
-            .collect()
-    };
+    let terminals = build_terminal_infos(state);
     let active_workspace_id = state.active_workspace_id.read().clone();
 
     let layout = Layout {

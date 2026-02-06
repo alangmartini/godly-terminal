@@ -1,10 +1,32 @@
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::State;
 use uuid::Uuid;
 
+use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
-use crate::pty::PtySession;
-use crate::state::{AppState, ShellType, Terminal};
+use crate::state::{AppState, SessionMetadata, ShellType, Terminal};
+
+use godly_protocol::{Request, Response, SessionInfo};
+
+/// Convert app ShellType to protocol ShellType
+fn to_protocol_shell_type(st: &ShellType) -> godly_protocol::ShellType {
+    match st {
+        ShellType::Windows => godly_protocol::ShellType::Windows,
+        ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
+            distribution: distribution.clone(),
+        },
+    }
+}
+
+/// Convert protocol ShellType to app ShellType
+fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> ShellType {
+    match st {
+        godly_protocol::ShellType::Windows => ShellType::Windows,
+        godly_protocol::ShellType::Wsl { distribution } => ShellType::Wsl {
+            distribution: distribution.clone(),
+        },
+    }
+}
 
 #[tauri::command]
 pub fn create_terminal(
@@ -13,10 +35,9 @@ pub fn create_terminal(
     shell_type_override: Option<ShellType>,
     id_override: Option<String>,
     state: State<Arc<AppState>>,
+    daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
-    app_handle: AppHandle,
 ) -> Result<String, String> {
-    // Use provided ID (for restoring terminals) or generate a new one
     let terminal_id = id_override.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // Get workspace info
@@ -38,11 +59,41 @@ pub fn create_terminal(
         }
     };
 
-    // Create PTY session
-    let session = PtySession::new(terminal_id.clone(), working_dir, shell_type, app_handle)?;
+    // Create session via daemon
+    let request = Request::CreateSession {
+        id: terminal_id.clone(),
+        shell_type: to_protocol_shell_type(&shell_type),
+        cwd: working_dir.clone(),
+        rows: 24,
+        cols: 80,
+    };
 
-    // Store session
-    state.add_pty_session(terminal_id.clone(), session);
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::SessionCreated { .. } => {}
+        Response::Error { message } => return Err(message),
+        other => return Err(format!("Unexpected response: {:?}", other)),
+    }
+
+    // Attach to the session to start receiving output
+    let attach_request = Request::Attach {
+        session_id: terminal_id.clone(),
+    };
+    let attach_response = daemon.send_request(&attach_request)?;
+    match attach_response {
+        Response::Ok | Response::Buffer { .. } => {}
+        Response::Error { message } => return Err(format!("Failed to attach: {}", message)),
+        other => return Err(format!("Unexpected attach response: {:?}", other)),
+    }
+
+    // Store session metadata for persistence
+    state.add_session_metadata(
+        terminal_id.clone(),
+        SessionMetadata {
+            shell_type: shell_type.clone(),
+            cwd: working_dir,
+        },
+    );
 
     // Create terminal record
     let terminal = Terminal {
@@ -53,7 +104,6 @@ pub fn create_terminal(
     };
     state.add_terminal(terminal);
 
-    // Mark state as dirty for auto-save
     auto_save.mark_dirty();
 
     Ok(terminal_id)
@@ -63,17 +113,26 @@ pub fn create_terminal(
 pub fn close_terminal(
     terminal_id: String,
     state: State<Arc<AppState>>,
+    daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
 ) -> Result<(), String> {
-    // Close PTY session
-    if let Some(session) = state.remove_pty_session(&terminal_id) {
-        session.close();
+    // Close session via daemon
+    let request = Request::CloseSession {
+        session_id: terminal_id.clone(),
+    };
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::Ok => {}
+        Response::Error { message } => {
+            eprintln!("[terminal] Warning: close session error: {}", message);
+        }
+        _ => {}
     }
 
-    // Remove terminal record
+    // Remove metadata and terminal record
+    state.remove_session_metadata(&terminal_id);
     state.remove_terminal(&terminal_id);
 
-    // Mark state as dirty for auto-save
     auto_save.mark_dirty();
 
     Ok(())
@@ -83,14 +142,18 @@ pub fn close_terminal(
 pub fn write_to_terminal(
     terminal_id: String,
     data: String,
-    state: State<Arc<AppState>>,
+    daemon: State<Arc<DaemonClient>>,
 ) -> Result<(), String> {
-    let sessions = state.pty_sessions.read();
-    let session = sessions
-        .get(&terminal_id)
-        .ok_or_else(|| format!("Terminal {} not found", terminal_id))?;
-
-    session.write(data.as_bytes())
+    let request = Request::Write {
+        session_id: terminal_id,
+        data: data.into_bytes(),
+    };
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::Ok => Ok(()),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
 }
 
 #[tauri::command]
@@ -98,14 +161,19 @@ pub fn resize_terminal(
     terminal_id: String,
     rows: u16,
     cols: u16,
-    state: State<Arc<AppState>>,
+    daemon: State<Arc<DaemonClient>>,
 ) -> Result<(), String> {
-    let sessions = state.pty_sessions.read();
-    let session = sessions
-        .get(&terminal_id)
-        .ok_or_else(|| format!("Terminal {} not found", terminal_id))?;
-
-    session.resize(rows, cols)
+    let request = Request::Resize {
+        session_id: terminal_id,
+        rows,
+        cols,
+    };
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::Ok => Ok(()),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
 }
 
 #[tauri::command]
@@ -117,5 +185,90 @@ pub fn rename_terminal(
 ) -> Result<(), String> {
     state.update_terminal_name(&terminal_id, name);
     auto_save.mark_dirty();
+    Ok(())
+}
+
+/// List live sessions from the daemon (for reconnection on app restart)
+#[tauri::command]
+pub fn reconnect_sessions(
+    daemon: State<Arc<DaemonClient>>,
+) -> Result<Vec<SessionInfo>, String> {
+    let request = Request::ListSessions;
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::SessionList { sessions } => Ok(sessions),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
+}
+
+/// Attach to an existing daemon session (for reconnection)
+#[tauri::command]
+pub fn attach_session(
+    session_id: String,
+    workspace_id: String,
+    name: String,
+    state: State<Arc<AppState>>,
+    daemon: State<Arc<DaemonClient>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    let request = Request::Attach {
+        session_id: session_id.clone(),
+    };
+    let response = daemon.send_request(&request)?;
+
+    match response {
+        Response::Ok | Response::Buffer { .. } => {}
+        Response::Error { message } => return Err(message),
+        other => return Err(format!("Unexpected response: {:?}", other)),
+    }
+
+    // Get session info to populate metadata
+    let sessions_response = daemon.send_request(&Request::ListSessions)?;
+    if let Response::SessionList { sessions } = sessions_response {
+        if let Some(info) = sessions.iter().find(|s| s.id == session_id) {
+            let shell_type = from_protocol_shell_type(&info.shell_type);
+            let process_name = match &shell_type {
+                ShellType::Windows => String::from("powershell"),
+                ShellType::Wsl { distribution } => {
+                    distribution.clone().unwrap_or_else(|| String::from("wsl"))
+                }
+            };
+
+            state.add_session_metadata(
+                session_id.clone(),
+                SessionMetadata {
+                    shell_type,
+                    cwd: info.cwd.clone(),
+                },
+            );
+
+            state.add_terminal(Terminal {
+                id: session_id,
+                workspace_id,
+                name,
+                process_name,
+            });
+
+            auto_save.mark_dirty();
+        }
+    }
+
+    Ok(())
+}
+
+/// Detach all sessions (called on window close instead of killing them)
+#[tauri::command]
+pub fn detach_all_sessions(
+    daemon: State<Arc<DaemonClient>>,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    let terminals = state.terminals.read();
+    for terminal_id in terminals.keys() {
+        let request = Request::Detach {
+            session_id: terminal_id.clone(),
+        };
+        let _ = daemon.send_request(&request);
+    }
     Ok(())
 }

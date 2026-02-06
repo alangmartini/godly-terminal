@@ -49,6 +49,14 @@ pub struct TerminalInfo {
     pub cwd: Option<String>,
 }
 
+/// Metadata about a daemon session tracked by the Tauri app (for persistence).
+/// Replaces the need to query PTY sessions directly for shell_type and cwd.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetadata {
+    pub shell_type: ShellType,
+    pub cwd: Option<String>,
+}
+
 impl Default for Layout {
     fn default() -> Self {
         Self {
