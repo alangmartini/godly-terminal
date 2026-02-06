@@ -29,6 +29,18 @@ export interface TerminalClosedPayload {
   terminal_id: string;
 }
 
+/** Info about a live daemon session (from reconnect_sessions) */
+export interface SessionInfo {
+  id: string;
+  shell_type: BackendShellType;
+  pid: number;
+  rows: number;
+  cols: number;
+  cwd: string | null;
+  created_at: number;
+  attached: boolean;
+}
+
 class TerminalService {
   private outputListeners: Map<string, (data: Uint8Array) => void> = new Map();
   private unlistenFns: UnlistenFn[] = [];
@@ -117,6 +129,24 @@ class TerminalService {
   async renameTerminal(terminalId: string, name: string): Promise<void> {
     await invoke('rename_terminal', { terminalId, name });
     store.updateTerminal(terminalId, { name });
+  }
+
+  /** List live daemon sessions (for reconnection on app restart) */
+  async reconnectSessions(): Promise<SessionInfo[]> {
+    try {
+      return await invoke<SessionInfo[]>('reconnect_sessions');
+    } catch {
+      return [];
+    }
+  }
+
+  /** Attach to an existing daemon session */
+  async attachSession(
+    sessionId: string,
+    workspaceId: string,
+    name: string
+  ): Promise<void> {
+    await invoke('attach_session', { sessionId, workspaceId, name });
   }
 
   onTerminalOutput(terminalId: string, callback: (data: Uint8Array) => void) {

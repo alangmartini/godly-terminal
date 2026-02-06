@@ -1,4 +1,5 @@
 /// Convert Windows path to WSL format: C:\foo\bar -> /mnt/c/foo/bar
+#[allow(dead_code)]
 pub fn windows_to_wsl_path(windows_path: &str) -> String {
     // Handle empty path
     if windows_path.is_empty() {
