@@ -4,6 +4,7 @@ mod persistence;
 mod pty;
 mod state;
 mod utils;
+mod worktree;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -66,6 +67,11 @@ pub fn run() {
             commands::reorder_tabs,
             commands::get_wsl_distributions,
             commands::is_wsl_available,
+            commands::toggle_worktree_mode,
+            commands::is_git_repo,
+            commands::list_worktrees,
+            commands::remove_worktree,
+            commands::cleanup_all_worktrees,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,
