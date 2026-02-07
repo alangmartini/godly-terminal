@@ -186,15 +186,33 @@ impl DaemonClient {
         let daemon_path = Self::find_daemon_binary()?;
         eprintln!("[daemon_client] Launching daemon: {:?}", daemon_path);
 
-        // Launch as a detached process that survives our exit
-        Command::new(&daemon_path)
-            .creation_flags(
-                0x00000008 | // DETACHED_PROCESS (no console)
-                0x00000200 | // CREATE_NEW_PROCESS_GROUP
-                0x01000000,  // CREATE_BREAKAWAY_FROM_JOB
-            )
-            .spawn()
-            .map_err(|e| format!("Failed to launch daemon: {}", e))?;
+        // Launch as a detached process that survives our exit.
+        // Try with CREATE_BREAKAWAY_FROM_JOB first so the daemon escapes any
+        // Job Object the parent tree may be in (e.g. cargo tauri dev). If the
+        // job doesn't allow breakaway, this fails with ERROR_ACCESS_DENIED — in
+        // that case, fall back without the flag.
+        let base_flags = 0x00000008 | // DETACHED_PROCESS (no console)
+                         0x00000200;  // CREATE_NEW_PROCESS_GROUP
+        let breakaway_flag = 0x01000000; // CREATE_BREAKAWAY_FROM_JOB
+
+        let spawn_result = Command::new(&daemon_path)
+            .creation_flags(base_flags | breakaway_flag)
+            .spawn();
+
+        match spawn_result {
+            Ok(_) => {}
+            Err(ref e) if e.raw_os_error() == Some(5) => {
+                // ERROR_ACCESS_DENIED — job doesn't allow breakaway, retry without
+                eprintln!("[daemon_client] CREATE_BREAKAWAY_FROM_JOB denied, retrying without");
+                Command::new(&daemon_path)
+                    .creation_flags(base_flags)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch daemon: {}", e))?;
+            }
+            Err(e) => {
+                return Err(format!("Failed to launch daemon: {}", e));
+            }
+        }
 
         Ok(())
     }
