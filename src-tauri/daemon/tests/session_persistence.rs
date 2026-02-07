@@ -564,3 +564,244 @@ fn test_04_wmi_launch_escapes_job_object() {
         killed_count, iterations
     );
 }
+
+/// Simulates the actual `cargo tauri dev` restart workflow:
+///   1. Daemon A is running with sessions
+///   2. Client disconnects (app window closed)
+///   3. A SECOND daemon binary is launched (simulating `connect_or_launch`)
+///   4. Does daemon B detect daemon A and exit? Or does it start and take over?
+///
+/// Verification is by SESSION EXISTENCE, not PID file (which is unreliable
+/// because `taskkill /F` skips cleanup, leaving stale PID files).
+///
+/// Also checks whether the daemon binary can be overwritten, which tells us
+/// if the daemon process is truly alive (on Windows, running .exe files are locked).
+#[test]
+fn test_03_second_daemon_detects_first() {
+    let iterations = 5;
+    let mut session_lost_count = 0;
+
+    eprintln!(
+        "\n=== test_03: second daemon detects running first ({} iterations) ===",
+        iterations
+    );
+
+    for i in 0..iterations {
+        eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
+        kill_existing_daemon();
+        // Clean up stale PID file from previous taskkill
+        if let Some(appdata) = std::env::var("APPDATA").ok() {
+            let pid_path = std::path::PathBuf::from(&appdata)
+                .join("com.godly.terminal")
+                .join("godly-daemon.pid");
+            let _ = std::fs::remove_file(&pid_path);
+        }
+
+        // Start daemon A
+        let _child_a = launch_daemon_like_tauri_app();
+        let mut pipe = wait_for_daemon(Duration::from_secs(5));
+        eprintln!("  Daemon A running (PID file: {:?})", read_pid_file());
+
+        // Create a uniquely-named session (our "marker" for daemon A)
+        let session_id = format!("marker-session-iter{}-{}", i, std::process::id());
+        let resp = send_request(
+            &mut pipe,
+            &Request::CreateSession {
+                id: session_id.clone(),
+                shell_type: ShellType::Windows,
+                cwd: None,
+                rows: 24,
+                cols: 80,
+            },
+        );
+        assert!(
+            matches!(resp, Response::SessionCreated { .. }),
+            "CreateSession failed: {:?}",
+            resp
+        );
+
+        // Disconnect (simulates app window close)
+        // Do NOT call try_connect_pipe() for diagnostics — it consumes a pipe
+        // instance and creates a race window.
+        drop(pipe);
+        thread::sleep(Duration::from_secs(2));
+
+        // Check if daemon binary is locked (proves the process is alive)
+        let daemon_path = daemon_binary_path();
+        let binary_locked = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&daemon_path)
+            .is_err();
+        eprintln!("  Daemon binary locked (process alive): {}", binary_locked);
+
+        // Start daemon B (exactly as the Tauri app would via launch_daemon)
+        eprintln!("  Starting daemon B...");
+        let _child_b = launch_daemon_like_tauri_app();
+        thread::sleep(Duration::from_secs(3));
+
+        // Connect to whatever daemon is available and check for our marker session
+        let mut pipe2 = wait_for_daemon(Duration::from_secs(5));
+        let resp = send_request(&mut pipe2, &Request::ListSessions);
+        match &resp {
+            Response::SessionList { sessions } => {
+                let found = sessions.iter().any(|s| s.id == session_id);
+                let session_names: Vec<&str> =
+                    sessions.iter().map(|s| s.id.as_str()).collect();
+                if found {
+                    eprintln!(
+                        "  OK: Marker session '{}' found — daemon A is still serving",
+                        session_id
+                    );
+                } else {
+                    eprintln!(
+                        "  LOST: Marker session '{}' missing! Sessions: {:?}",
+                        session_id, session_names
+                    );
+                    eprintln!(
+                        "  PID file now: {:?} (daemon B took over, sessions lost)",
+                        read_pid_file()
+                    );
+                    session_lost_count += 1;
+                }
+            }
+            other => panic!("Expected SessionList, got {:?}", other),
+        }
+
+        // Clean up session
+        let _ = send_request(
+            &mut pipe2,
+            &Request::CloseSession {
+                session_id: session_id.clone(),
+            },
+        );
+        drop(pipe2);
+        kill_existing_daemon();
+    }
+
+    assert_eq!(
+        session_lost_count, 0,
+        "\n\nBUG: Sessions were lost in {}/{} iterations.\n\
+         A second daemon launched and took over while the first was still running.\n\
+         This causes session loss when `cargo tauri dev` is restarted.\n",
+        session_lost_count, iterations
+    );
+}
+
+/// FIX VERIFICATION: Daemon launched via WMI survives Job Object closure.
+///
+/// This tests the fix for test_02: instead of spawning the daemon directly
+/// (which inherits the Job Object), we use WMI's Win32_Process.Create(),
+/// which runs from the WMI service (wmiprvse.exe) — outside any Job Object.
+///
+/// Steps:
+///   1. Create a KILL_ON_JOB_CLOSE Job Object
+///   2. Launch the daemon via WMI (NOT as a child of this process)
+///   3. Create a session to prove the daemon is working
+///   4. Close the Job Object handle (this would kill job members)
+///   5. Verify the daemon and session survived
+///
+/// This should PASS — proving WMI launch is the correct escape mechanism.
+#[test]
+fn test_04_wmi_launch_escapes_job_object() {
+    let iterations = 3;
+    let mut killed_count = 0;
+
+    eprintln!(
+        "\n=== test_04: WMI-launched daemon vs Job Object ({} iterations) ===",
+        iterations
+    );
+
+    for i in 0..iterations {
+        eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
+        kill_existing_daemon();
+
+        // Create a Job Object with KILL_ON_JOB_CLOSE — same as cargo/tauri-cli
+        let job = create_job_object(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE);
+
+        // Launch daemon via WMI — this is the FIX being tested.
+        // The daemon is created by wmiprvse.exe, not by us, so it's NOT in our job.
+        eprintln!("  Launching daemon via WMI...");
+        launch_daemon_via_wmi();
+
+        // Wait for daemon to start and create a session
+        let mut pipe = wait_for_daemon(Duration::from_secs(10));
+        let pid = read_pid_file().expect("PID file should exist");
+        eprintln!("  Daemon started with PID {}", pid);
+
+        let session_id = format!("wmi-test-session-{}", i);
+        let resp = send_request(
+            &mut pipe,
+            &Request::CreateSession {
+                id: session_id.clone(),
+                shell_type: ShellType::Windows,
+                cwd: None,
+                rows: 24,
+                cols: 80,
+            },
+        );
+        assert!(
+            matches!(resp, Response::SessionCreated { .. }),
+            "CreateSession failed: {:?}",
+            resp
+        );
+
+        // Disconnect client
+        drop(pipe);
+        thread::sleep(Duration::from_millis(500));
+
+        // Close the Job Object handle — this kills all processes IN the job.
+        // The WMI-launched daemon should NOT be in the job.
+        eprintln!("  Closing Job Object handle...");
+        unsafe {
+            CloseHandle(job);
+        }
+        thread::sleep(Duration::from_secs(2));
+
+        // Try to reconnect and verify the session is still alive
+        match try_connect_pipe() {
+            Some(mut pipe2) => {
+                let resp = send_request(&mut pipe2, &Request::ListSessions);
+                match &resp {
+                    Response::SessionList { sessions } => {
+                        let found = sessions.iter().any(|s| s.id == session_id);
+                        if found {
+                            eprintln!(
+                                "  OK: Daemon survived, session '{}' intact (PID {})",
+                                session_id, pid
+                            );
+                        } else {
+                            eprintln!(
+                                "  PARTIAL: Daemon alive but session '{}' missing!",
+                                session_id
+                            );
+                            killed_count += 1;
+                        }
+                    }
+                    other => {
+                        eprintln!("  ERROR: Unexpected response: {:?}", other);
+                        killed_count += 1;
+                    }
+                }
+                let _ = send_request(
+                    &mut pipe2,
+                    &Request::CloseSession {
+                        session_id: session_id.clone(),
+                    },
+                );
+            }
+            None => {
+                eprintln!("  KILLED: Daemon did not survive Job Object closure (PID {})", pid);
+                killed_count += 1;
+            }
+        }
+
+        kill_existing_daemon();
+    }
+
+    assert_eq!(
+        killed_count, 0,
+        "\n\nFIX FAILED: WMI-launched daemon was killed/broken in {}/{} iterations.\n\
+         The WMI escape mechanism did not work as expected.\n",
+        killed_count, iterations
+    );
+}
