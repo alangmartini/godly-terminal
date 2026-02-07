@@ -16,6 +16,7 @@ export interface Workspace {
   folderPath: string;
   tabOrder: string[];
   shellType: ShellType;
+  worktreeMode: boolean;
 }
 
 export interface AppState {

@@ -171,13 +171,24 @@ export class App {
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
         if (state.activeWorkspaceId) {
-          const terminalId = await terminalService.createTerminal(
-            state.activeWorkspaceId
+          const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+          let worktreeName: string | undefined;
+
+          if (workspace?.worktreeMode) {
+            const { showWorktreeNamePrompt } = await import('./dialogs');
+            const name = await showWorktreeNamePrompt();
+            if (name === null) return; // user cancelled
+            worktreeName = name || undefined;
+          }
+
+          const result = await terminalService.createTerminal(
+            state.activeWorkspaceId,
+            { worktreeName }
           );
           store.addTerminal({
-            id: terminalId,
+            id: result.id,
             workspaceId: state.activeWorkspaceId,
-            name: 'Terminal',
+            name: result.worktree_branch ?? 'Terminal',
             processName: 'powershell',
             order: 0,
           });
@@ -230,6 +241,7 @@ export class App {
           folder_path: string;
           tab_order: string[];
           shell_type?: BackendShellType;
+          worktree_mode?: boolean;
         }>;
         terminals: Array<{
           id: string;
@@ -237,6 +249,8 @@ export class App {
           name: string;
           shell_type?: BackendShellType;
           cwd?: string | null;
+          worktree_path?: string | null;
+          worktree_branch?: string | null;
         }>;
         active_workspace_id: string | null;
       }>('load_layout');
@@ -256,6 +270,7 @@ export class App {
             folderPath: w.folder_path,
             tabOrder: w.tab_order,
             shellType: convertShellType(w.shell_type),
+            worktreeMode: w.worktree_mode ?? false,
           });
         });
 
@@ -278,17 +293,19 @@ export class App {
               ? shellType.distribution ?? 'wsl'
               : 'powershell';
 
+          const tabName = t.worktree_branch || t.name;
+
           if (liveSessionIds.has(t.id)) {
             // Session is still alive in daemon - reattach
             console.log('[App] Reattaching to live session:', t.id);
             try {
-              await terminalService.attachSession(t.id, t.workspace_id, t.name);
+              await terminalService.attachSession(t.id, t.workspace_id, tabName);
               this.reattachedTerminalIds.add(t.id);
 
               store.addTerminal({
                 id: t.id,
                 workspaceId: t.workspace_id,
-                name: t.name,
+                name: tabName,
                 processName,
                 order: 0,
               });
@@ -301,21 +318,21 @@ export class App {
 
           // Session is dead or reattach failed - create fresh terminal with saved CWD
           console.log('[App] Creating fresh terminal:', t.id, 'in workspace:', t.workspace_id);
-          const terminalId = await terminalService.createTerminal(t.workspace_id, {
+          const result = await terminalService.createTerminal(t.workspace_id, {
             cwdOverride: t.cwd ?? undefined,
             shellTypeOverride: shellType,
             idOverride: t.id,
           });
 
-          console.log('[App] Terminal created with ID:', terminalId, '(requested:', t.id, ')');
+          console.log('[App] Terminal created with ID:', result.id, '(requested:', t.id, ')');
 
           // Mark for scrollback restoration (only for fresh terminals, not reattached ones)
-          this.restoredTerminalIds.add(terminalId);
+          this.restoredTerminalIds.add(result.id);
 
           store.addTerminal({
-            id: terminalId,
+            id: result.id,
             workspaceId: t.workspace_id,
-            name: t.name,
+            name: tabName,
             processName,
             order: 0,
           });
@@ -352,12 +369,12 @@ export class App {
 
     // Create initial terminal
     console.log('[App] Creating terminal in workspace:', workspaceId);
-    const terminalId = await terminalService.createTerminal(workspaceId);
-    console.log('[App] Terminal created:', terminalId);
+    const result = await terminalService.createTerminal(workspaceId);
+    console.log('[App] Terminal created:', result.id);
     store.addTerminal({
-      id: terminalId,
+      id: result.id,
       workspaceId,
-      name: 'Terminal',
+      name: result.worktree_branch ?? 'Terminal',
       processName: 'powershell',
       order: 0,
     });

@@ -78,6 +78,13 @@ impl AppState {
         }
     }
 
+    pub fn update_workspace_worktree_mode(&self, id: &str, worktree_mode: bool) {
+        let mut workspaces = self.workspaces.write();
+        if let Some(workspace) = workspaces.get_mut(id) {
+            workspace.worktree_mode = worktree_mode;
+        }
+    }
+
     pub fn get_workspace_terminals(&self, workspace_id: &str) -> Vec<Terminal> {
         let terminals = self.terminals.read();
         terminals
@@ -119,6 +126,7 @@ mod tests {
             folder_path: "C:\\Test".to_string(),
             tab_order: vec![],
             shell_type: ShellType::Windows,
+            worktree_mode: false,
         };
 
         state.add_workspace(workspace.clone());
@@ -139,6 +147,7 @@ mod tests {
             folder_path: "C:\\Projects".to_string(),
             tab_order: vec!["term-1".to_string()],
             shell_type: ShellType::Windows,
+            worktree_mode: false,
         };
 
         state.add_workspace(workspace);
@@ -158,6 +167,7 @@ mod tests {
             folder_path: "C:\\".to_string(),
             tab_order: vec![],
             shell_type: ShellType::Windows,
+            worktree_mode: false,
         });
 
         state.add_terminal(Terminal {
@@ -183,6 +193,7 @@ mod tests {
                 folder_path: "C:\\ProjectA".to_string(),
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
+                worktree_mode: false,
             },
             Workspace {
                 id: "ws-2".to_string(),
@@ -192,6 +203,7 @@ mod tests {
                 shell_type: ShellType::Wsl {
                     distribution: Some("Ubuntu".to_string()),
                 },
+                worktree_mode: false,
             },
         ];
 
@@ -240,6 +252,8 @@ mod tests {
             SessionMetadata {
                 shell_type: ShellType::Windows,
                 cwd: Some("C:\\Users\\test".to_string()),
+                worktree_path: None,
+                worktree_branch: None,
             },
         );
 
