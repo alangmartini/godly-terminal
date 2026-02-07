@@ -39,7 +39,8 @@ pub fn is_daemon_running() -> bool {
 
         const ERROR_PIPE_BUSY: u32 = 231;
 
-        let pipe_name: Vec<u16> = OsStr::new(godly_protocol::PIPE_NAME)
+        let pipe_name_str = godly_protocol::pipe_name();
+        let pipe_name: Vec<u16> = OsStr::new(&pipe_name_str)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();

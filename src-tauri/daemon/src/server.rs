@@ -29,7 +29,8 @@ impl DaemonServer {
     /// Run the server, listening for connections on the named pipe.
     /// Returns when the server should shut down (idle timeout or explicit stop).
     pub async fn run(&self) {
-        eprintln!("[daemon] Server starting on {}", godly_protocol::PIPE_NAME);
+        let pipe_name = godly_protocol::pipe_name();
+        eprintln!("[daemon] Server starting on {}", pipe_name);
 
         // Start process monitor
         self.start_process_monitor();
@@ -108,7 +109,8 @@ impl DaemonServer {
             PIPE_WAIT,
         };
 
-        let pipe_name: Vec<u16> = OsStr::new(godly_protocol::PIPE_NAME)
+        let pipe_name_str = godly_protocol::pipe_name();
+        let pipe_name: Vec<u16> = OsStr::new(&pipe_name_str)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
