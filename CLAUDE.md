@@ -104,6 +104,16 @@ Rules to keep context windows clean during long agent sessions:
 - **Avoid verbose flags**: Don't use `--verbose`, `--nocapture`, or similar flags unless actively debugging a specific test.
 - **Incremental verification**: Check compilation (`cargo check`) before running tests. Check one crate before all crates.
 
+### Clean Test Output
+
+Tests should produce minimal, parseable output — not walls of text that pollute the context window.
+
+- **Minimal on success**: A passing test suite should print a summary line (e.g., `45 passed, 0 failed`), not per-test details. Use the default output level; avoid `--show-output` or `--nocapture` for routine runs.
+- **Structured on failure**: Failed tests should print a single-line error identifier (e.g., `FAIL: test_ring_buffer_overflow — expected 1024 bytes, got 0`) followed by the relevant assertion, not the entire backtrace.
+- **Log to files, not stdout**: When debugging requires verbose output, redirect to a file (`cargo test 2> test-debug.log`) and read the file selectively rather than flooding the terminal.
+- **Grep-friendly format**: Error messages should be self-contained on one line so they can be found with `grep FAIL` or `grep ERROR`. Avoid multi-line error formatting in test harnesses.
+- **Pre-compute summaries**: When running large test suites, use summary flags (`--format terse` for Rust, `--reporter=dot` for JS) to get aggregate pass/fail counts without per-test noise.
+
 ## Verification Requirements
 
 **IMPORTANT**: After making any code changes, always verify the project builds and tests pass before considering work complete. Loop until all checks pass:
