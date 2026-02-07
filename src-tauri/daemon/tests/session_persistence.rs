@@ -14,7 +14,7 @@
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle};
+use std::os::windows::io::FromRawHandle;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::ptr;
@@ -28,7 +28,7 @@ use godly_protocol::{DaemonMessage, Request, Response, PIPE_NAME};
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
 use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
-use winapi::um::jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject};
+use winapi::um::jobapi2::{CreateJobObjectW, SetInformationJobObject};
 use winapi::um::winnt::{
     JobObjectExtendedLimitInformation, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ,
     GENERIC_WRITE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -85,12 +85,27 @@ fn try_connect_pipe() -> Option<std::fs::File> {
     }
 }
 
-/// Wait for the daemon pipe to become available, with timeout.
+/// Wait for the daemon pipe to become available and verify it's responsive.
+/// Sends a Ping request to confirm the daemon is fully initialized.
 fn wait_for_daemon(timeout: Duration) -> std::fs::File {
     let start = Instant::now();
     loop {
-        if let Some(file) = try_connect_pipe() {
-            return file;
+        if let Some(mut file) = try_connect_pipe() {
+            // Verify the daemon is responsive with a Ping
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                send_request(&mut file, &Request::Ping)
+            })) {
+                Ok(Response::Pong) => return file,
+                Ok(other) => {
+                    eprintln!("  [test] Unexpected ping response: {:?}, retrying...", other);
+                }
+                Err(_) => {
+                    eprintln!("  [test] Ping failed (daemon not ready), retrying...");
+                }
+            }
+            drop(file);
+            thread::sleep(Duration::from_millis(200));
+            continue;
         }
         if start.elapsed() > timeout {
             panic!(
@@ -117,7 +132,7 @@ fn send_request(pipe: &mut std::fs::File, req: &Request) -> Response {
     }
 }
 
-/// Kill any running godly-daemon process.
+/// Kill any running godly-daemon process and wait for full cleanup.
 fn kill_existing_daemon() {
     let _ = Command::new("taskkill")
         .args(["/F", "/IM", "godly-daemon.exe"])
@@ -126,8 +141,10 @@ fn kill_existing_daemon() {
         .status();
     // Wait for pipe to disappear
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(3) {
+    while start.elapsed() < Duration::from_secs(5) {
         if try_connect_pipe().is_none() {
+            // Pipe is gone — wait a bit more for OS to fully reclaim pipe resources
+            thread::sleep(Duration::from_millis(500));
             break;
         }
         thread::sleep(Duration::from_millis(200));
@@ -154,6 +171,41 @@ fn launch_daemon_like_tauri_app() -> std::process::Child {
         )
         .spawn()
         .expect("Failed to spawn daemon")
+}
+
+/// Launch the daemon via WMI (Win32_Process.Create) using PowerShell CIM.
+/// The process is created by the WMI provider host (wmiprvse.exe), NOT as a
+/// child of the calling process, so it does not inherit any Job Object membership.
+fn launch_daemon_via_wmi() {
+    let daemon_path = daemon_binary_path();
+    let daemon_str = daemon_path.to_string_lossy();
+
+    let ps_command = format!(
+        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create \
+         -Arguments @{{CommandLine='{}'}}; \
+         if ($r.ReturnValue -ne 0) {{ throw \"WMI Create failed: $($r.ReturnValue)\" }}; \
+         Write-Output \"PID=$($r.ProcessId)\"",
+        daemon_str
+    );
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_command])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+        .expect("Failed to run PowerShell");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    eprintln!("  [wmi] stdout: {}", stdout.trim());
+    if !stderr.is_empty() {
+        eprintln!("  [wmi] stderr: {}", stderr.trim());
+    }
+    assert!(
+        output.status.success(),
+        "WMI launch failed (exit: {}, stderr: {})",
+        output.status,
+        stderr
+    );
 }
 
 /// Create a Windows Job Object with the given limit flags.
@@ -272,64 +324,45 @@ fn test_01_sessions_persist_across_client_reconnect() {
     kill_existing_daemon();
 }
 
-/// BUG REPRODUCTION: The daemon is killed when a Windows Job Object with
-/// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE is closed.
+/// Simulates the actual `cargo tauri dev` restart workflow:
+///   1. Daemon A is running with sessions
+///   2. Client disconnects (app window closed)
+///   3. A SECOND daemon binary is launched (simulating `connect_or_launch`)
+///   4. Does daemon B detect daemon A and exit? Or does it start and take over?
 ///
-/// This reproduces what happens with `cargo tauri dev`:
-///   1. cargo/tauri-cli create a Job Object for their process tree
-///   2. The Tauri app spawns the daemon (which inherits the job)
-///   3. User closes the Tauri window -> app exits
-///   4. cargo/tauri-cli exit -> Job Object is closed -> daemon is KILLED
-///   5. Next `cargo tauri dev` -> no daemon found -> new daemon starts
-///   6. Old sessions are lost
+/// Verification is by SESSION EXISTENCE, not PID file (which is unreliable
+/// because `taskkill /F` skips cleanup, leaving stale PID files).
 ///
-/// The test assigns the daemon to a KILL_ON_JOB_CLOSE Job Object (simulating
-/// job inheritance from the cargo process tree), then closes the job handle
-/// (simulating cargo/tauri-cli exiting). The daemon should survive, but
-/// currently it doesn't.
-///
-/// This test should FAIL until the daemon can escape Job Objects.
+/// Also checks whether the daemon binary can be overwritten, which tells us
+/// if the daemon process is truly alive (on Windows, running .exe files are locked).
 #[test]
-fn test_02_daemon_survives_job_object_closure() {
-    let iterations = 3;
-    let mut killed_count = 0;
+fn test_03_second_daemon_detects_first() {
+    let iterations = 5;
+    let mut session_lost_count = 0;
 
     eprintln!(
-        "\n=== test_02: daemon vs Job Object ({} iterations) ===",
+        "\n=== test_03: second daemon detects running first ({} iterations) ===",
         iterations
     );
 
     for i in 0..iterations {
         eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
         kill_existing_daemon();
-
-        // Create a Job Object with KILL_ON_JOB_CLOSE (simulates cargo/tauri-cli)
-        let job = create_job_object(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE);
-
-        // Launch daemon with the same flags the Tauri app uses
-        let child = launch_daemon_like_tauri_app();
-
-        // Assign daemon to the Job Object (simulates job inheritance from parent).
-        // In the real scenario, the daemon inherits the job automatically because
-        // it's spawned by a process that's already in the job. Here we assign
-        // explicitly after spawn to achieve the same effect without putting the
-        // test process itself in the job.
-        unsafe {
-            let result = AssignProcessToJobObject(job, child.as_raw_handle() as _);
-            assert!(
-                result != 0,
-                "AssignProcessToJobObject failed: {}",
-                GetLastError()
-            );
+        // Clean up stale PID file from previous taskkill
+        if let Some(appdata) = std::env::var("APPDATA").ok() {
+            let pid_path = std::path::PathBuf::from(&appdata)
+                .join("com.godly.terminal")
+                .join("godly-daemon.pid");
+            let _ = std::fs::remove_file(&pid_path);
         }
 
-        // Wait for daemon to start
+        // Start daemon A
+        let _child_a = launch_daemon_like_tauri_app();
         let mut pipe = wait_for_daemon(Duration::from_secs(5));
-        let pid = read_pid_file().expect("PID file should exist");
-        eprintln!("  Daemon started with PID {}", pid);
+        eprintln!("  Daemon A running (PID file: {:?})", read_pid_file());
 
-        // Create a session with a running process
-        let session_id = format!("job-test-session-{}", i);
+        // Create a uniquely-named session (our "marker" for daemon A)
+        let session_id = format!("marker-session-iter{}-{}", i, std::process::id());
         let resp = send_request(
             &mut pipe,
             &Request::CreateSession {
@@ -346,46 +379,188 @@ fn test_02_daemon_survives_job_object_closure() {
             resp
         );
 
-        // Disconnect client (simulates user closing the app window)
+        // Disconnect (simulates app window close)
+        // Do NOT call try_connect_pipe() for diagnostics — it consumes a pipe
+        // instance and creates a race window.
+        drop(pipe);
+        thread::sleep(Duration::from_secs(2));
+
+        // Check if daemon binary is locked (proves the process is alive)
+        let daemon_path = daemon_binary_path();
+        let binary_locked = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&daemon_path)
+            .is_err();
+        eprintln!("  Daemon binary locked (process alive): {}", binary_locked);
+
+        // Start daemon B (exactly as the Tauri app would via launch_daemon)
+        eprintln!("  Starting daemon B...");
+        let _child_b = launch_daemon_like_tauri_app();
+        thread::sleep(Duration::from_secs(3));
+
+        // Connect to whatever daemon is available and check for our marker session
+        let mut pipe2 = wait_for_daemon(Duration::from_secs(5));
+        let resp = send_request(&mut pipe2, &Request::ListSessions);
+        match &resp {
+            Response::SessionList { sessions } => {
+                let found = sessions.iter().any(|s| s.id == session_id);
+                let session_names: Vec<&str> =
+                    sessions.iter().map(|s| s.id.as_str()).collect();
+                if found {
+                    eprintln!(
+                        "  OK: Marker session '{}' found — daemon A is still serving",
+                        session_id
+                    );
+                } else {
+                    eprintln!(
+                        "  LOST: Marker session '{}' missing! Sessions: {:?}",
+                        session_id, session_names
+                    );
+                    eprintln!(
+                        "  PID file now: {:?} (daemon B took over, sessions lost)",
+                        read_pid_file()
+                    );
+                    session_lost_count += 1;
+                }
+            }
+            other => panic!("Expected SessionList, got {:?}", other),
+        }
+
+        // Clean up session
+        let _ = send_request(
+            &mut pipe2,
+            &Request::CloseSession {
+                session_id: session_id.clone(),
+            },
+        );
+        drop(pipe2);
+        kill_existing_daemon();
+    }
+
+    assert_eq!(
+        session_lost_count, 0,
+        "\n\nBUG: Sessions were lost in {}/{} iterations.\n\
+         A second daemon launched and took over while the first was still running.\n\
+         This causes session loss when `cargo tauri dev` is restarted.\n",
+        session_lost_count, iterations
+    );
+}
+
+/// FIX VERIFICATION: Daemon launched via WMI survives Job Object closure.
+///
+/// This tests the fix for test_02: instead of spawning the daemon directly
+/// (which inherits the Job Object), we use WMI's Win32_Process.Create(),
+/// which runs from the WMI service (wmiprvse.exe) — outside any Job Object.
+///
+/// Steps:
+///   1. Create a KILL_ON_JOB_CLOSE Job Object
+///   2. Launch the daemon via WMI (NOT as a child of this process)
+///   3. Create a session to prove the daemon is working
+///   4. Close the Job Object handle (this would kill job members)
+///   5. Verify the daemon and session survived
+///
+/// This should PASS — proving WMI launch is the correct escape mechanism.
+#[test]
+fn test_04_wmi_launch_escapes_job_object() {
+    let iterations = 3;
+    let mut killed_count = 0;
+
+    eprintln!(
+        "\n=== test_04: WMI-launched daemon vs Job Object ({} iterations) ===",
+        iterations
+    );
+
+    for i in 0..iterations {
+        eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
+        kill_existing_daemon();
+
+        // Create a Job Object with KILL_ON_JOB_CLOSE — same as cargo/tauri-cli
+        let job = create_job_object(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE);
+
+        // Launch daemon via WMI — this is the FIX being tested.
+        // The daemon is created by wmiprvse.exe, not by us, so it's NOT in our job.
+        eprintln!("  Launching daemon via WMI...");
+        launch_daemon_via_wmi();
+
+        // Wait for daemon to start and create a session
+        let mut pipe = wait_for_daemon(Duration::from_secs(10));
+        let pid = read_pid_file().expect("PID file should exist");
+        eprintln!("  Daemon started with PID {}", pid);
+
+        let session_id = format!("wmi-test-session-{}", i);
+        let resp = send_request(
+            &mut pipe,
+            &Request::CreateSession {
+                id: session_id.clone(),
+                shell_type: ShellType::Windows,
+                cwd: None,
+                rows: 24,
+                cols: 80,
+            },
+        );
+        assert!(
+            matches!(resp, Response::SessionCreated { .. }),
+            "CreateSession failed: {:?}",
+            resp
+        );
+
+        // Disconnect client
         drop(pipe);
         thread::sleep(Duration::from_millis(500));
 
-        // Close the Job Object handle — simulates cargo/tauri-cli exiting.
-        // With JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, this kills all processes
-        // in the job (including the daemon).
-        eprintln!("  Closing Job Object handle (simulating cargo exit)...");
+        // Close the Job Object handle — this kills all processes IN the job.
+        // The WMI-launched daemon should NOT be in the job.
+        eprintln!("  Closing Job Object handle...");
         unsafe {
             CloseHandle(job);
         }
         thread::sleep(Duration::from_secs(2));
 
-        // Try to reconnect to the daemon
-        let survived = try_connect_pipe().is_some();
-        if survived {
-            eprintln!("  Daemon SURVIVED Job Object closure (PID {})", pid);
-        } else {
-            eprintln!("  Daemon KILLED by Job Object closure (PID {})", pid);
-            killed_count += 1;
+        // Try to reconnect and verify the session is still alive
+        match try_connect_pipe() {
+            Some(mut pipe2) => {
+                let resp = send_request(&mut pipe2, &Request::ListSessions);
+                match &resp {
+                    Response::SessionList { sessions } => {
+                        let found = sessions.iter().any(|s| s.id == session_id);
+                        if found {
+                            eprintln!(
+                                "  OK: Daemon survived, session '{}' intact (PID {})",
+                                session_id, pid
+                            );
+                        } else {
+                            eprintln!(
+                                "  PARTIAL: Daemon alive but session '{}' missing!",
+                                session_id
+                            );
+                            killed_count += 1;
+                        }
+                    }
+                    other => {
+                        eprintln!("  ERROR: Unexpected response: {:?}", other);
+                        killed_count += 1;
+                    }
+                }
+                let _ = send_request(
+                    &mut pipe2,
+                    &Request::CloseSession {
+                        session_id: session_id.clone(),
+                    },
+                );
+            }
+            None => {
+                eprintln!("  KILLED: Daemon did not survive Job Object closure (PID {})", pid);
+                killed_count += 1;
+            }
         }
 
-        // Clean up for next iteration
         kill_existing_daemon();
     }
 
-    // The daemon SHOULD survive — if it doesn't, the bug is reproduced
     assert_eq!(
         killed_count, 0,
-        "\n\nBUG REPRODUCED: Daemon was killed by Job Object closure in {}/{} iterations.\n\
-         When `cargo tauri dev` exits, it closes its Job Object, killing the daemon.\n\
-         All sessions are lost because the daemon doesn't escape the Job Object.\n\
-         \n\
-         Root cause: the daemon is spawned with DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,\n\
-         but these flags do NOT remove the process from its parent's Job Object.\n\
-         CREATE_BREAKAWAY_FROM_JOB would fix this, but it requires the Job Object to\n\
-         have JOB_OBJECT_LIMIT_BREAKAWAY_OK set — cargo's job does not allow this.\n\
-         \n\
-         Fix: launch the daemon via an intermediate process that is NOT in the job,\n\
-         or use a Windows Service, or use a scheduled task to start the daemon.\n",
+        "\n\nFIX FAILED: WMI-launched daemon was killed/broken in {}/{} iterations.\n\
+         The WMI escape mechanism did not work as expected.\n",
         killed_count, iterations
     );
 }

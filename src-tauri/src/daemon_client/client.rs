@@ -203,12 +203,15 @@ impl DaemonClient {
         match spawn_result {
             Ok(_) => {}
             Err(ref e) if e.raw_os_error() == Some(5) => {
-                // ERROR_ACCESS_DENIED — job doesn't allow breakaway, retry without
-                eprintln!("[daemon_client] CREATE_BREAKAWAY_FROM_JOB denied, retrying without");
-                Command::new(&daemon_path)
-                    .creation_flags(base_flags)
-                    .spawn()
-                    .map_err(|e| format!("Failed to launch daemon: {}", e))?;
+                // ERROR_ACCESS_DENIED — job doesn't allow breakaway.
+                // The daemon would stay in the parent's Job Object and get killed
+                // when the job closes (e.g. when `cargo tauri dev` exits).
+                // Launch via WMI instead — Win32_Process.Create() runs from the
+                // WMI service (wmiprvse.exe), which is NOT in our Job Object.
+                eprintln!(
+                    "[daemon_client] CREATE_BREAKAWAY_FROM_JOB denied, launching via WMI to escape Job Object"
+                );
+                Self::launch_daemon_via_wmi(&daemon_path)?;
             }
             Err(e) => {
                 return Err(format!("Failed to launch daemon: {}", e));
@@ -221,6 +224,58 @@ impl DaemonClient {
     #[cfg(not(windows))]
     fn launch_daemon() -> Result<(), String> {
         Err("Daemon launch only supported on Windows".to_string())
+    }
+
+    /// Launch the daemon via WMI (Win32_Process.Create).
+    ///
+    /// When the calling process is inside a Windows Job Object that doesn't
+    /// allow breakaway (e.g. the process tree created by `cargo tauri dev`),
+    /// any child process we spawn inherits that Job Object. If the job has
+    /// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, closing the job handle kills all
+    /// member processes — including the daemon.
+    ///
+    /// WMI's Win32_Process.Create() runs from the WMI provider host
+    /// (wmiprvse.exe), which is NOT in our Job Object. The daemon process it
+    /// creates is therefore free from the job and survives when cargo exits.
+    #[cfg(windows)]
+    fn launch_daemon_via_wmi(daemon_path: &std::path::Path) -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+
+        let daemon_str = daemon_path.to_string_lossy();
+
+        // Use PowerShell's Invoke-CimMethod to call Win32_Process.Create().
+        // This creates the process from the WMI provider host (wmiprvse.exe),
+        // NOT as a child of the calling process, so it escapes any Job Object.
+        let ps_command = format!(
+            "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create \
+             -Arguments @{{CommandLine='{}'}}; \
+             if ($r.ReturnValue -ne 0) {{ throw \"WMI Create failed: $($r.ReturnValue)\" }}",
+            daemon_str
+        );
+
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_command])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|e| format!("Failed to run PowerShell for WMI launch: {}", e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[daemon_client] WMI launch stdout: {}", stdout.trim());
+        if !stderr.is_empty() {
+            eprintln!("[daemon_client] WMI launch stderr: {}", stderr.trim());
+        }
+
+        if !output.status.success() {
+            return Err(format!(
+                "WMI launch failed (exit: {}, stderr: {})",
+                output.status,
+                stderr.trim()
+            ));
+        }
+
+        Ok(())
     }
 
     /// Find the daemon binary location
