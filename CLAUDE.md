@@ -49,6 +49,12 @@ When the user pastes a bug report or describes a bug:
 
 Do NOT skip the reproduction step. The test must fail before you start fixing.
 
+### Test Quality Standards
+
+- Tests must be **specific** enough that passing them means the bug is actually fixed, not just that something changed.
+- Each test should assert the **exact expected behavior**, not just "no error."
+- Regression tests should include the original bug trigger as a comment (e.g., `// Bug: scrollback was truncated when buffer exceeded 5MB`).
+
 ## Feature Development Workflow
 
 When adding a new feature:
@@ -59,6 +65,44 @@ When adding a new feature:
 4. Continue with the standard verification requirements below (full build + all tests).
 
 Do NOT consider a feature complete without an accompanying E2E test suite.
+
+## Parallel Agent Workflow
+
+When multiple Claude instances work simultaneously in worktrees:
+
+### Task Claiming
+
+Before starting work, create a file `current_tasks/<branch-name>.md` describing the task scope and files likely to be modified. Check existing files in `current_tasks/` first to avoid overlap. Remove the file when the PR is merged.
+
+### Branch Naming
+
+Worktree branches should use descriptive names: `wt-<scope>` (e.g., `wt-fix-scrollback`, `wt-feat-search`). Avoid generic names like `wt-abc123`.
+
+### Staying in Sync
+
+Pull and rebase from master before opening a PR. If another agent's PR merges first, rebase on top of it before pushing.
+
+### Scope Boundaries
+
+Each agent should own a clearly scoped task. Avoid modifying the same files as another active agent. If overlap is unavoidable, coordinate via smaller, more frequent commits and PRs.
+
+### Agent Specialization
+
+When using multiple worktrees, consider role-based division:
+- **Feature agent**: implements new functionality
+- **Test agent**: writes and maintains test suites
+- **Quality agent**: refactoring, performance, code cleanup
+
+This is guidance, not enforcement — but helps avoid agents stepping on each other.
+
+## Output Hygiene
+
+Rules to keep context windows clean during long agent sessions:
+
+- **Run targeted tests first**: When working on a specific crate or module, run just that crate's tests (`cargo test -p godly-daemon`) before the full suite.
+- **Summarize failures**: When tests fail, identify the root cause and state it concisely rather than pasting full stack traces.
+- **Avoid verbose flags**: Don't use `--verbose`, `--nocapture`, or similar flags unless actively debugging a specific test.
+- **Incremental verification**: Check compilation (`cargo check`) before running tests. Check one crate before all crates.
 
 ## Verification Requirements
 
