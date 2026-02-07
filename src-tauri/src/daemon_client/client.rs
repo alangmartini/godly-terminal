@@ -71,16 +71,20 @@ impl DaemonClient {
     fn try_connect() -> Result<Self, String> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+        use winapi::um::errhandlingapi::GetLastError;
         use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
         use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+        use winapi::um::namedpipeapi::WaitNamedPipeW;
         use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
+
+        const ERROR_PIPE_BUSY: u32 = 231;
 
         let pipe_name: Vec<u16> = OsStr::new(godly_protocol::PIPE_NAME)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 
-        let handle = unsafe {
+        let mut handle = unsafe {
             CreateFileW(
                 pipe_name.as_ptr(),
                 GENERIC_READ | GENERIC_WRITE,
@@ -93,7 +97,36 @@ impl DaemonClient {
         };
 
         if handle == INVALID_HANDLE_VALUE {
-            return Err("Cannot connect to daemon pipe".to_string());
+            let err = unsafe { GetLastError() };
+            eprintln!("[daemon_client] CreateFileW failed with error: {}", err);
+
+            if err == ERROR_PIPE_BUSY {
+                // Daemon is running but all pipe instances are busy — wait for one
+                eprintln!("[daemon_client] Pipe busy, waiting for available instance...");
+                let wait_result = unsafe { WaitNamedPipeW(pipe_name.as_ptr(), 5000) };
+                if wait_result != 0 {
+                    // A pipe instance became available — retry
+                    handle = unsafe {
+                        CreateFileW(
+                            pipe_name.as_ptr(),
+                            GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            std::ptr::null_mut(),
+                            OPEN_EXISTING,
+                            0,
+                            std::ptr::null_mut(),
+                        )
+                    };
+                }
+            }
+
+            if handle == INVALID_HANDLE_VALUE {
+                let final_err = unsafe { GetLastError() };
+                return Err(format!(
+                    "Cannot connect to daemon pipe (error: {})",
+                    final_err
+                ));
+            }
         }
 
         // Create reader and writer from the handle
@@ -102,7 +135,6 @@ impl DaemonClient {
             Box::new(unsafe { std::fs::File::from_raw_handle(handle as _) });
 
         // Duplicate handle for writer
-        use winapi::um::errhandlingapi::GetLastError;
         use winapi::um::handleapi::DuplicateHandle;
         use winapi::um::processthreadsapi::GetCurrentProcess;
         use winapi::um::winnt::DUPLICATE_SAME_ACCESS;
@@ -158,7 +190,8 @@ impl DaemonClient {
         Command::new(&daemon_path)
             .creation_flags(
                 0x00000008 | // DETACHED_PROCESS (no console)
-                0x00000200,  // CREATE_NEW_PROCESS_GROUP
+                0x00000200 | // CREATE_NEW_PROCESS_GROUP
+                0x01000000,  // CREATE_BREAKAWAY_FROM_JOB
             )
             .spawn()
             .map_err(|e| format!("Failed to launch daemon: {}", e))?;
