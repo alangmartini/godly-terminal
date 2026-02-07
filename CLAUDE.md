@@ -35,6 +35,29 @@ npm test
 
 Always commit all staged and unstaged changes when making a commit. Do not leave uncommitted changes behind.
 
+## Bug Fix Workflow
+
+When the user pastes a bug report or describes a bug:
+
+1. **Write a test suite first** that reproduces the bug. The tests must fail, confirming the bug exists.
+2. **Run the test suite** to verify the tests actually fail as expected (red phase).
+3. **Fix the bug** by modifying the source code.
+4. **Run the test suite again** and loop until all tests pass (green phase).
+5. Continue with the standard verification requirements below (full build + all tests).
+
+Do NOT skip the reproduction step. The test must fail before you start fixing.
+
+## Feature Development Workflow
+
+When adding a new feature:
+
+1. **Implement the feature** in the source code.
+2. **Write an E2E test suite** covering the feature's key user-facing behaviors.
+3. **Run the E2E tests** (`npm run test:e2e`) and loop until all tests pass.
+4. Continue with the standard verification requirements below (full build + all tests).
+
+Do NOT consider a feature complete without an accompanying E2E test suite.
+
 ## Verification Requirements
 
 **IMPORTANT**: After making any code changes, always verify the project builds and tests pass before considering work complete. Loop until all checks pass:

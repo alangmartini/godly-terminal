@@ -29,3 +29,18 @@ winapi = { version = "0.3", features = [
     "errhandlingapi",
     "synchapi",
 ] }
+
+[target.'cfg(windows)'.dev-dependencies]
+winapi = { version = "0.3", features = [
+    "processthreadsapi",
+    "handleapi",
+    "namedpipeapi",
+    "fileapi",
+    "errhandlingapi",
+    "synchapi",
+    "winnt",
+    "jobapi2",
+] }
+
+[dev-dependencies]
+godly-protocol = { path = "../protocol" }

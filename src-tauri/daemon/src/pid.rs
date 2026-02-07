@@ -32,9 +32,12 @@ pub fn is_daemon_running() -> bool {
     {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+        use winapi::um::errhandlingapi::GetLastError;
         use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
         use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
         use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
+
+        const ERROR_PIPE_BUSY: u32 = 231;
 
         let pipe_name: Vec<u16> = OsStr::new(godly_protocol::PIPE_NAME)
             .encode_wide()
@@ -53,7 +56,10 @@ pub fn is_daemon_running() -> bool {
             );
 
             if handle == INVALID_HANDLE_VALUE {
-                false
+                // ERROR_PIPE_BUSY means the pipe exists but all instances are in use
+                // — the daemon IS running, just busy serving another client
+                let err = GetLastError();
+                err == ERROR_PIPE_BUSY
             } else {
                 CloseHandle(handle);
                 true

@@ -1,21 +1,26 @@
+import os from 'os';
 import path from 'path';
+import { ChildProcess, spawn } from 'child_process';
+import { clearAppData } from './helpers/persistence';
 
-// Skip WDIO's built-in browser driver management — we manage tauri-driver ourselves
+// Skip WDIO 9.x's built-in browser driver management — we manage tauri-driver ourselves.
+// This also hardcodes the connection to localhost:4321.
 process.env.WDIO_SKIP_DRIVER_SETUP = '1';
+
+let tauriDriver: ChildProcess;
 
 export const config: WebdriverIO.Config = {
   specs: ['./specs/**/*.e2e.ts'],
   maxInstances: 1,
-  // hostname/port are overridden by WDIO_SKIP_DRIVER_SETUP to localhost:4321
   capabilities: [
     {
-      'browserName': 'wry',
+      // No browserName — tauri-driver handles the app launch via tauri:options
       'tauri:options': {
         application: path.resolve(
           'src-tauri/target/debug/godly-terminal.exe'
         ),
       },
-    },
+    } as any,
   ],
   logLevel: 'warn',
   bail: 0,
@@ -30,8 +35,8 @@ export const config: WebdriverIO.Config = {
   },
   tsConfigPath: './tsconfig.e2e.json',
 
+  // Build the debug binary unless SKIP_BUILD is set
   async onPrepare() {
-    // Build the debug binary unless SKIP_BUILD is set
     if (!process.env.SKIP_BUILD) {
       const { execFileSync } = await import('child_process');
       console.log('Building Tauri debug binary...');
@@ -41,30 +46,35 @@ export const config: WebdriverIO.Config = {
         shell: true,
       });
     }
+  },
 
-    // Ensure edgedriver is downloaded, then stop it (we just need the binary)
+  // Spawn tauri-driver before each worker session.
+  // Uses the cargo-installed binary which properly bridges WebDriver to WebView2.
+  async beforeSession() {
+    // Clear persisted app data so the app starts with a fresh default workspace
+    clearAppData();
+
+    // Ensure edgedriver is downloaded and find its path
     const edgedriver = await import('edgedriver');
     const edgedriverProcess = await edgedriver.start({ port: 9516 });
     edgedriverProcess.kill();
-
-    // Find the edgedriver binary path
     const tempDir = process.env.TEMP || process.env.TMP || '/tmp';
     const nativeDriverPath = path.join(tempDir, 'msedgedriver.exe');
 
-    // Start tauri-driver using the NAPI programmatic API (runs in background)
-    const { run, waitTauriDriverReady } = await import('@crabnebula/tauri-driver');
-    run(
-      ['--port', '4321', '--native-driver', nativeDriverPath, '--native-port', '9516'],
-      'tauri-driver'
-    ).catch((err: Error) => {
-      // run() resolves when the driver exits; errors during normal shutdown are expected
-      if (!err.message?.includes('interrupted')) {
-        console.error('[tauri-driver]', err.message);
-      }
-    });
+    const driverPath = path.resolve(os.homedir(), '.cargo', 'bin', 'tauri-driver.exe');
+    tauriDriver = spawn(
+      driverPath,
+      ['--port', '4321', '--native-driver', nativeDriverPath],
+      { stdio: [null, process.stdout, process.stderr] }
+    );
 
-    // Wait for tauri-driver to be listening
-    await waitTauriDriverReady('127.0.0.1', 4321, 200);
-    console.log('tauri-driver is ready on port 4321');
+    // Wait for tauri-driver to start listening
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+  },
+
+  afterSession() {
+    if (tauriDriver) {
+      tauriDriver.kill();
+    }
   },
 };

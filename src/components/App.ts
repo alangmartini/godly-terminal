@@ -35,6 +35,9 @@ export class App {
   constructor(container: HTMLElement) {
     this.container = container;
 
+    // Expose store for E2E test access
+    (window as any).__store = store;
+
     // Create sidebar
     this.sidebar = new WorkspaceSidebar();
     this.sidebar.setOnTabDrop((workspaceId, terminalId) => {
@@ -324,7 +327,13 @@ export class App {
       }
     } catch (error) {
       console.error('[App] Error loading layout:', error);
-      await this.createDefaultWorkspace();
+      (window as any).__app_init_error = String(error);
+      try {
+        await this.createDefaultWorkspace();
+      } catch (e2) {
+        console.error('[App] Error creating default workspace:', e2);
+        (window as any).__app_init_error2 = String(e2);
+      }
     }
   }
 
@@ -332,15 +341,19 @@ export class App {
     // Get user home directory via Tauri
     const { homeDir } = await import('@tauri-apps/api/path');
     const homePath = await homeDir().catch(() => 'C:\\');
+    console.log('[App] Home path:', homePath);
 
     const workspaceId = await workspaceService.createWorkspace(
       'Default',
       homePath
     );
+    console.log('[App] Workspace created:', workspaceId);
     store.setActiveWorkspace(workspaceId);
 
     // Create initial terminal
+    console.log('[App] Creating terminal in workspace:', workspaceId);
     const terminalId = await terminalService.createTerminal(workspaceId);
+    console.log('[App] Terminal created:', terminalId);
     store.addTerminal({
       id: terminalId,
       workspaceId,
@@ -348,6 +361,7 @@ export class App {
       processName: 'powershell',
       order: 0,
     });
+    console.log('[App] Terminal added to store');
   }
 
   private async setupScrollbackSaveListener() {

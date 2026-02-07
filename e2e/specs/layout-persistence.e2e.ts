@@ -1,39 +1,38 @@
-import { waitForAppReady, triggerSave } from '../helpers/app';
-import { waitForTerminalText } from '../helpers/terminal-reader';
-import { clearAppData, readLayoutFile } from '../helpers/persistence';
+import {
+  waitForAppReady,
+  waitForTerminalPane,
+  triggerSave,
+  getElementCount,
+  createNewTerminalTab,
+} from '../helpers/app';
+import { readLayoutFile } from '../helpers/persistence';
 
 describe('Layout Persistence', () => {
   before(async () => {
-    clearAppData();
     await waitForAppReady();
+    await waitForTerminalPane();
   });
 
   it('should start with one workspace and one terminal', async () => {
-    await waitForTerminalText('PS ', 30000);
+    // Wait for shell to initialize
+    await browser.pause(5000);
 
-    const tabs = await browser.$$('.tab');
-    expect(tabs.length).toBe(1);
+    const tabCount = await getElementCount('.tab');
+    expect(tabCount).toBe(1);
 
-    const workspaces = await browser.$$('.workspace-item');
-    expect(workspaces.length).toBeGreaterThanOrEqual(1);
+    const workspaceCount = await getElementCount('.workspace-item');
+    expect(workspaceCount).toBeGreaterThanOrEqual(1);
   });
 
   it('should create a second terminal tab', async () => {
-    const addBtn = await browser.$('.add-tab-btn');
-    await addBtn.click();
+    await createNewTerminalTab();
 
-    await browser.waitUntil(
-      async () => {
-        const tabs = await browser.$$('.tab');
-        return tabs.length === 2;
-      },
-      { timeout: 15000, timeoutMsg: 'Second tab did not appear' }
-    );
+    const tabCount = await getElementCount('.tab');
+    expect(tabCount).toBe(2);
   });
 
   it('should save layout with correct counts', async () => {
     await triggerSave();
-    await browser.pause(3000);
 
     const layout = readLayoutFile();
     expect(layout).not.toBeNull();
@@ -53,14 +52,14 @@ describe('Layout Persistence', () => {
     try {
       await browser.waitUntil(
         async () => {
-          const tabs = await browser.$$('.tab');
-          return tabs.length === 2;
+          const count = await getElementCount('.tab');
+          return count === 2;
         },
         { timeout: 20000 }
       );
 
-      const tabs = await browser.$$('.tab');
-      expect(tabs.length).toBe(2);
+      const tabCount = await getElementCount('.tab');
+      expect(tabCount).toBe(2);
     } catch {
       // If reloadSession doesn't cleanly restart, verify layout file
       const layout = readLayoutFile();

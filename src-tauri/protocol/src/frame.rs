@@ -9,7 +9,10 @@ pub fn write_message<W: io::Write, T: Serialize>(writer: &mut W, msg: &T) -> io:
     let len = json.len() as u32;
     writer.write_all(&len.to_be_bytes())?;
     writer.write_all(&json)?;
-    writer.flush()?;
+    // NOTE: Do NOT call flush() here. On Windows named pipes, FlushFileBuffers()
+    // blocks until the other end reads all data, which can cause deadlocks when
+    // the reader is in a spawn_blocking task. Named pipes in byte mode deliver
+    // data immediately via write_all() without needing explicit flush.
     Ok(())
 }
 
