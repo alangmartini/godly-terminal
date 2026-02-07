@@ -5,8 +5,15 @@ mod session;
 use crate::pid::{is_daemon_running, remove_pid_file, write_pid_file};
 use crate::server::DaemonServer;
 
+#[cfg(feature = "leak-check")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[tokio::main]
 async fn main() {
+    #[cfg(feature = "leak-check")]
+    let _profiler = dhat::Profiler::new_heap();
+
     eprintln!("[daemon] Godly Terminal daemon starting (pid: {})", std::process::id());
 
     // Check if another instance is already running
@@ -16,11 +23,14 @@ async fn main() {
     }
 
     // Detach from console on Windows (so closing the launching terminal doesn't kill us)
+    // Skip when GODLY_NO_DETACH is set (used by tests to keep daemon as child process)
     #[cfg(windows)]
     {
-        use winapi::um::wincon::FreeConsole;
-        unsafe {
-            FreeConsole();
+        if std::env::var("GODLY_NO_DETACH").is_err() {
+            use winapi::um::wincon::FreeConsole;
+            unsafe {
+                FreeConsole();
+            }
         }
     }
 
