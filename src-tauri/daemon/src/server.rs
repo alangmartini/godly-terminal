@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -65,7 +64,7 @@ impl DaemonServer {
         // Accept connections loop
         while self.running.load(Ordering::Relaxed) {
             match self.accept_connection().await {
-                Ok((reader, writer)) => {
+                Ok(pipe) => {
                     *last_activity.write() = Instant::now();
                     self.has_clients.store(true, Ordering::Relaxed);
 
@@ -75,7 +74,7 @@ impl DaemonServer {
                     let activity = last_activity.clone();
 
                     tokio::spawn(async move {
-                        handle_client(reader, writer, sessions, running, activity).await;
+                        handle_client(pipe, sessions, running, activity).await;
                         // Client disconnected - we don't track individual clients count,
                         // just set has_clients to false. If another client exists it will
                         // set it back to true on its next interaction.
@@ -94,11 +93,10 @@ impl DaemonServer {
         eprintln!("[daemon] Server shutting down");
     }
 
-    /// Accept a single named pipe connection (Windows implementation)
+    /// Accept a single named pipe connection (Windows implementation).
+    /// Returns a single File handle used for both reading and writing.
     #[cfg(windows)]
-    async fn accept_connection(
-        &self,
-    ) -> Result<(Box<dyn Read + Send>, Box<dyn Write + Send>), String> {
+    async fn accept_connection(&self) -> Result<std::fs::File, String> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
         use winapi::shared::winerror::ERROR_PIPE_CONNECTED;
@@ -154,40 +152,11 @@ impl DaemonServer {
 
             eprintln!("[daemon] Client connected");
 
-            // Create reader/writer from the pipe handle
+            // Return a single File — used for both reading and writing in one thread
             use std::os::windows::io::FromRawHandle;
-            let reader: Box<dyn Read + Send> =
-                Box::new(unsafe { std::fs::File::from_raw_handle(handle as _) });
+            let pipe = unsafe { std::fs::File::from_raw_handle(handle as _) };
 
-            // We need to duplicate the handle for the writer since File takes ownership
-            use winapi::um::handleapi::DuplicateHandle;
-            use winapi::um::processthreadsapi::GetCurrentProcess;
-            use winapi::um::winnt::DUPLICATE_SAME_ACCESS;
-
-            let mut writer_handle = std::ptr::null_mut();
-            let dup_result = unsafe {
-                DuplicateHandle(
-                    GetCurrentProcess(),
-                    handle,
-                    GetCurrentProcess(),
-                    &mut writer_handle,
-                    0,
-                    0,
-                    DUPLICATE_SAME_ACCESS,
-                )
-            };
-
-            if dup_result == 0 {
-                return Err(format!(
-                    "DuplicateHandle failed: {}",
-                    unsafe { GetLastError() }
-                ));
-            }
-
-            let writer: Box<dyn Write + Send> =
-                Box::new(unsafe { std::fs::File::from_raw_handle(writer_handle as _) });
-
-            Ok((reader, writer))
+            Ok(pipe)
         })
         .await
         .map_err(|e| format!("Spawn blocking failed: {}", e))?;
@@ -196,9 +165,7 @@ impl DaemonServer {
     }
 
     #[cfg(not(windows))]
-    async fn accept_connection(
-        &self,
-    ) -> Result<(Box<dyn Read + Send>, Box<dyn Write + Send>), String> {
+    async fn accept_connection(&self) -> Result<std::fs::File, String> {
         Err("Named pipes are only supported on Windows".to_string())
     }
 
@@ -222,92 +189,129 @@ impl DaemonServer {
     }
 }
 
-/// Handle a single client connection
+/// Get the raw handle from a File for use with PeekNamedPipe
+#[cfg(windows)]
+fn get_raw_handle(file: &std::fs::File) -> isize {
+    use std::os::windows::io::AsRawHandle;
+    file.as_raw_handle() as isize
+}
+
+#[cfg(not(windows))]
+fn get_raw_handle(_file: &std::fs::File) -> isize {
+    0
+}
+
+/// Result of a non-blocking pipe peek: data available, empty, or error (pipe closed/broken).
+enum PeekResult {
+    Data,
+    Empty,
+    Error,
+}
+
+/// Non-blocking check: how many bytes are available to read from the pipe?
+#[cfg(windows)]
+fn peek_pipe(handle: isize) -> PeekResult {
+    use winapi::um::namedpipeapi::PeekNamedPipe;
+
+    let mut bytes_available: u32 = 0;
+    let result = unsafe {
+        PeekNamedPipe(
+            handle as *mut _,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut bytes_available,
+            std::ptr::null_mut(),
+        )
+    };
+    if result == 0 {
+        return PeekResult::Error; // Pipe closed or broken
+    }
+    if bytes_available > 0 {
+        PeekResult::Data
+    } else {
+        PeekResult::Empty
+    }
+}
+
+#[cfg(not(windows))]
+fn peek_pipe(_handle: isize) -> PeekResult {
+    PeekResult::Empty
+}
+
+/// Handle a single client connection using a single I/O thread.
+///
+/// On Windows, synchronous named pipe I/O is serialized per file object.
+/// Using separate threads for reading and writing the same pipe deadlocks.
+/// Instead, we do ALL pipe I/O from one blocking thread using PeekNamedPipe
+/// for non-blocking read checks (same pattern as the client-side DaemonBridge).
+///
+/// Architecture:
+/// ```text
+/// [Named Pipe] <--read/write--> [I/O Thread (spawn_blocking)]
+///                                     |            ^
+///                                     | req_tx     | msg_tx (responses + events)
+///                                     v            |
+///                               [Async Handler] --+
+///                                     |
+///                                     v
+///                               [Session forwarding tasks]
+/// ```
 async fn handle_client(
-    mut reader: Box<dyn Read + Send>,
-    writer: Box<dyn Write + Send>,
+    pipe: std::fs::File,
     sessions: Arc<RwLock<HashMap<String, DaemonSession>>>,
     running: Arc<AtomicBool>,
     last_activity: Arc<RwLock<Instant>>,
 ) {
     // Track which sessions this client has attached to
-    let mut attached_sessions: Vec<String> = Vec::new();
+    let attached_sessions: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
 
-    // Channel for sending daemon messages back to client
-    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+    // Channel: I/O thread -> async handler (incoming requests from client)
+    let (req_tx, mut req_rx) = mpsc::unbounded_channel::<Request>();
 
-    // Spawn a writer task that serializes messages to the pipe
-    let _writer_handle = {
-        let writer = Arc::new(parking_lot::Mutex::new(writer));
-        let writer_clone = writer.clone();
-        tokio::spawn(async move {
-            while let Some(msg) = msg_rx.recv().await {
-                let mut w = writer_clone.lock();
-                if godly_protocol::write_message(&mut *w, &msg).is_err() {
-                    break;
-                }
-            }
-        });
-        writer
-    };
+    // Channel: async handler -> I/O thread (outgoing messages to client)
+    let (msg_tx, msg_rx) = mpsc::unbounded_channel::<DaemonMessage>();
 
-    // Read requests from client
-    loop {
-        if !running.load(Ordering::Relaxed) {
-            break;
-        }
+    // Signal to stop the I/O thread when the async handler is done
+    let io_running = Arc::new(AtomicBool::new(true));
 
-        // Read request in blocking thread
-        let reader_result = tokio::task::spawn_blocking({
-            // We need to move reader into the closure, then get it back
-            let mut reader_opt = Some(reader);
-            move || {
-                let mut r = reader_opt.take().unwrap();
-                let result = godly_protocol::read_message::<_, Request>(&mut r);
-                (r, result)
-            }
-        })
+    // Spawn the single I/O thread that does ALL pipe reads and writes
+    let io_running_clone = io_running.clone();
+    let running_clone = running.clone();
+    let io_handle = tokio::task::spawn_blocking(move || {
+        io_thread(pipe, req_tx, msg_rx, io_running_clone, running_clone);
+    });
+
+    // Async handler loop: process requests from the I/O thread
+    eprintln!("[daemon] Entering request loop for client");
+    while let Some(request) = req_rx.recv().await {
+        *last_activity.write() = Instant::now();
+        eprintln!("[daemon] Received request: {:?}", request);
+
+        let response = handle_request(
+            &request,
+            &sessions,
+            &msg_tx,
+            &attached_sessions,
+        )
         .await;
 
-        match reader_result {
-            Ok((r, Ok(Some(request)))) => {
-                reader = r;
-                *last_activity.write() = Instant::now();
-
-                let response = handle_request(
-                    &request,
-                    &sessions,
-                    &msg_tx,
-                    &mut attached_sessions,
-                )
-                .await;
-
-                // Send response
-                let msg = DaemonMessage::Response(response);
-                if msg_tx.send(msg).is_err() {
-                    break;
-                }
-            }
-            Ok((_, Ok(None))) => {
-                // Client disconnected (EOF)
-                eprintln!("[daemon] Client disconnected (EOF)");
-                break;
-            }
-            Ok((_, Err(e))) => {
-                eprintln!("[daemon] Read error: {}", e);
-                break;
-            }
-            Err(e) => {
-                eprintln!("[daemon] Spawn blocking error: {}", e);
-                break;
-            }
+        // Send response back to I/O thread for writing to pipe
+        let msg = DaemonMessage::Response(response);
+        if msg_tx.send(msg).is_err() {
+            break;
         }
     }
+
+    // Signal I/O thread to stop and wait for it
+    io_running.store(false, Ordering::Relaxed);
+    let _ = io_handle.await;
 
     // Client disconnected - detach all sessions (they keep running)
     {
         let sessions_guard = sessions.read();
-        for session_id in &attached_sessions {
+        let attached = attached_sessions.read();
+        for session_id in attached.iter() {
             if let Some(session) = sessions_guard.get(session_id) {
                 session.detach();
                 eprintln!(
@@ -319,11 +323,79 @@ async fn handle_client(
     }
 }
 
+/// Single I/O thread: performs all pipe reads and writes.
+/// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
+fn io_thread(
+    mut pipe: std::fs::File,
+    req_tx: mpsc::UnboundedSender<Request>,
+    mut msg_rx: mpsc::UnboundedReceiver<DaemonMessage>,
+    io_running: Arc<AtomicBool>,
+    server_running: Arc<AtomicBool>,
+) {
+    let raw_handle = get_raw_handle(&pipe);
+
+    while io_running.load(Ordering::Relaxed) && server_running.load(Ordering::Relaxed) {
+        // Step 1: Check if there are bytes available to read (non-blocking)
+        match peek_pipe(raw_handle) {
+            PeekResult::Data => {
+                // Read the request from the pipe
+                match godly_protocol::read_message::<_, Request>(&mut pipe) {
+                    Ok(Some(request)) => {
+                        if req_tx.send(request).is_err() {
+                            eprintln!("[daemon-io] Request channel closed, stopping");
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        eprintln!("[daemon-io] Client disconnected (EOF)");
+                        break;
+                    }
+                    Err(e) => {
+                        if io_running.load(Ordering::Relaxed) {
+                            eprintln!("[daemon-io] Read error: {}", e);
+                        }
+                        break;
+                    }
+                }
+                continue; // Check for more data immediately
+            }
+            PeekResult::Error => {
+                eprintln!("[daemon-io] Pipe closed or broken, stopping");
+                break;
+            }
+            PeekResult::Empty => {
+                // Fall through to check for outgoing messages
+            }
+        }
+
+        // Step 2: Check if there are outgoing messages to write
+        match msg_rx.try_recv() {
+            Ok(msg) => {
+                if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                    eprintln!("[daemon-io] Write error, stopping");
+                    break;
+                }
+                continue; // Check for more messages immediately
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {
+                // Nothing to do - brief sleep to avoid busy-waiting
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                eprintln!("[daemon-io] Message channel disconnected, stopping");
+                break;
+            }
+        }
+    }
+
+    eprintln!("[daemon-io] I/O thread stopped");
+}
+
 async fn handle_request(
     request: &Request,
     sessions: &Arc<RwLock<HashMap<String, DaemonSession>>>,
     msg_tx: &mpsc::UnboundedSender<DaemonMessage>,
-    attached_sessions: &mut Vec<String>,
+    attached_sessions: &Arc<RwLock<Vec<String>>>,
 ) -> Response {
     match request {
         Request::Ping => Response::Pong,
@@ -360,7 +432,7 @@ async fn handle_request(
             match sessions_guard.get(session_id) {
                 Some(session) => {
                     let (buffer, mut rx) = session.attach();
-                    attached_sessions.push(session_id.clone());
+                    attached_sessions.write().push(session_id.clone());
 
                     // Spawn a task to forward live output as events
                     let tx = msg_tx.clone();
@@ -404,7 +476,7 @@ async fn handle_request(
             match sessions_guard.get(session_id) {
                 Some(session) => {
                     session.detach();
-                    attached_sessions.retain(|id| id != session_id);
+                    attached_sessions.write().retain(|id| id != session_id);
                     eprintln!("[daemon] Detached from session {}", session_id);
                     Response::Ok
                 }
@@ -449,7 +521,7 @@ async fn handle_request(
             match sessions_guard.remove(session_id) {
                 Some(session) => {
                     session.close();
-                    attached_sessions.retain(|id| id != session_id);
+                    attached_sessions.write().retain(|id| id != session_id);
                     eprintln!("[daemon] Closed session {}", session_id);
                     Response::Ok
                 }

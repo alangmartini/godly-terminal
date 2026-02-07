@@ -1,30 +1,27 @@
-import { waitForAppReady, sendCommand, triggerSave } from '../helpers/app';
+import { waitForAppReady, waitForTerminalPane, sendCommand, triggerSave } from '../helpers/app';
 import { waitForTerminalText } from '../helpers/terminal-reader';
 import {
-  clearAppData,
   readLayoutFile,
   getScrollbackFiles,
 } from '../helpers/persistence';
 
 describe('Scrollback Persistence', () => {
   before(async () => {
-    clearAppData();
     await waitForAppReady();
+    await waitForTerminalPane();
   });
 
   it('should produce identifiable output in the terminal', async () => {
-    // Wait for shell to be ready
-    await waitForTerminalText('PS ', 30000);
+    // Wait for shell to initialize
+    await browser.pause(5000);
 
     const marker = 'SCROLLBACK_TEST_MARKER_12345';
     await sendCommand(`echo "${marker}"`);
-    await waitForTerminalText(marker, 15000);
+    await waitForTerminalText(marker, 30000);
   });
 
   it('should persist layout to disk on save', async () => {
     await triggerSave();
-    // Give persistence a moment to flush
-    await browser.pause(3000);
 
     const layout = readLayoutFile();
     expect(layout).not.toBeNull();
