@@ -434,6 +434,145 @@ html, body {
   border-color: var(--accent);
 }
 
+/* Worktree toggle button */
+.worktree-toggle {
+  font-size: 9px;
+  background: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.worktree-toggle:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.worktree-toggle.active {
+  background: var(--success);
+  color: #1e1e1e;
+  border-color: var(--success);
+}
+
+.worktree-toggle.active:hover {
+  background: #3bb89a;
+  border-color: #3bb89a;
+}
+
+/* Worktree panel */
+.worktree-panel {
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.worktree-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.worktree-panel-toggle::before {
+  content: '\25BE ';
+}
+
+.worktree-panel-toggle.collapsed::before {
+  content: '\25B8 ';
+}
+
+.worktree-list {
+  padding: 0 8px 8px;
+}
+
+.worktree-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 4px;
+}
+
+.worktree-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+
+.worktree-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.worktree-item-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.worktree-item-branch {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-item-commit {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.worktree-item-delete {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+
+.worktree-item:hover .worktree-item-delete {
+  opacity: 1;
+}
+
+.worktree-item-delete:hover {
+  color: var(--danger);
+}
+
+.worktree-clean-all {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.worktree-clean-all:hover {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
 /* Empty state */
 .empty-state {
   display: flex;

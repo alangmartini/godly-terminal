@@ -27,12 +27,17 @@ fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
                 .unwrap_or_default();
             let cwd = meta.and_then(|m| m.cwd.clone());
 
+            let worktree_path = meta.and_then(|m| m.worktree_path.clone());
+            let worktree_branch = meta.and_then(|m| m.worktree_branch.clone());
+
             TerminalInfo {
                 id: t.id.clone(),
                 workspace_id: t.workspace_id.clone(),
                 name: t.name.clone(),
                 shell_type,
                 cwd,
+                worktree_path,
+                worktree_branch,
             }
         })
         .collect()
@@ -119,6 +124,7 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                     folder_path: ws.folder_path.clone(),
                     tab_order: ws.tab_order.clone(),
                     shell_type: ws.shell_type.clone(),
+                    worktree_mode: ws.worktree_mode,
                 });
             }
 

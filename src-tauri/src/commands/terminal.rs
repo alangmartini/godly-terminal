@@ -8,6 +8,12 @@ use crate::state::{AppState, SessionMetadata, ShellType, Terminal};
 
 use godly_protocol::{Request, Response, SessionInfo};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct CreateTerminalResult {
+    pub id: String,
+    pub worktree_branch: Option<String>,
+}
+
 /// Convert app ShellType to protocol ShellType
 fn to_protocol_shell_type(st: &ShellType) -> godly_protocol::ShellType {
     match st {
@@ -34,17 +40,52 @@ pub fn create_terminal(
     cwd_override: Option<String>,
     shell_type_override: Option<ShellType>,
     id_override: Option<String>,
+    worktree_name: Option<String>,
     state: State<Arc<AppState>>,
     daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
-) -> Result<String, String> {
+) -> Result<CreateTerminalResult, String> {
     let terminal_id = id_override.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // Get workspace info
     let workspace = state.get_workspace(&workspace_id);
 
-    // Determine working directory: cwd_override > workspace folder
-    let working_dir = cwd_override.or_else(|| workspace.as_ref().map(|w| w.folder_path.clone()));
+    // Determine working directory: cwd_override > worktree (if enabled) > workspace folder
+    let mut worktree_path_result: Option<String> = None;
+    let mut worktree_branch: Option<String> = None;
+    let working_dir = if let Some(cwd) = cwd_override {
+        // Explicit CWD override (e.g., restore) - skip worktree creation
+        Some(cwd)
+    } else if let Some(ref ws) = workspace {
+        if ws.worktree_mode && crate::worktree::is_git_repo(&ws.folder_path) {
+            // Worktree mode enabled and it's a git repo - create a worktree
+            match crate::worktree::get_repo_root(&ws.folder_path) {
+                Ok(repo_root) => {
+                    let custom_name = worktree_name.as_deref();
+                    match crate::worktree::create_worktree(&repo_root, &terminal_id, custom_name) {
+                        Ok(wt_result) => {
+                            eprintln!("[terminal] Created worktree at: {} (branch: {})", wt_result.path, wt_result.branch);
+                            worktree_path_result = Some(wt_result.path.clone());
+                            worktree_branch = Some(wt_result.branch);
+                            Some(wt_result.path)
+                        }
+                        Err(e) => {
+                            eprintln!("[terminal] Warning: worktree creation failed, falling back to workspace dir: {}", e);
+                            Some(ws.folder_path.clone())
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[terminal] Warning: could not get repo root, falling back to workspace dir: {}", e);
+                    Some(ws.folder_path.clone())
+                }
+            }
+        } else {
+            Some(ws.folder_path.clone())
+        }
+    } else {
+        None
+    };
 
     // Determine shell type: shell_type_override > workspace shell type > default
     let shell_type = shell_type_override
@@ -92,6 +133,8 @@ pub fn create_terminal(
         SessionMetadata {
             shell_type: shell_type.clone(),
             cwd: working_dir,
+            worktree_path: worktree_path_result,
+            worktree_branch: worktree_branch.clone(),
         },
     );
 
@@ -106,7 +149,7 @@ pub fn create_terminal(
 
     auto_save.mark_dirty();
 
-    Ok(terminal_id)
+    Ok(CreateTerminalResult { id: terminal_id, worktree_branch })
 }
 
 #[tauri::command]
@@ -240,6 +283,8 @@ pub fn attach_session(
                 SessionMetadata {
                     shell_type,
                     cwd: info.cwd.clone(),
+                    worktree_path: None,
+                    worktree_branch: None,
                 },
             );
 

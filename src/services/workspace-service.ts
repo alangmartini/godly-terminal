@@ -7,6 +7,14 @@ export interface WorkspaceData {
   folder_path: string;
   tab_order: string[];
   shell_type?: 'windows' | { wsl: { distribution: string | null } };
+  worktree_mode?: boolean;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+  commit: string;
+  is_main: boolean;
 }
 
 class WorkspaceService {
@@ -33,6 +41,7 @@ class WorkspaceService {
       folderPath,
       tabOrder: [],
       shellType,
+      worktreeMode: false,
     };
     store.addWorkspace(workspace);
 
@@ -79,7 +88,33 @@ class WorkspaceService {
       folderPath: w.folder_path,
       tabOrder: w.tab_order,
       shellType: this.convertShellType(w.shell_type),
+      worktreeMode: w.worktree_mode ?? false,
     }));
+  }
+
+  async toggleWorktreeMode(workspaceId: string, enabled: boolean): Promise<void> {
+    await invoke('toggle_worktree_mode', { workspaceId, enabled });
+    store.updateWorkspace(workspaceId, { worktreeMode: enabled });
+  }
+
+  async isGitRepo(folderPath: string): Promise<boolean> {
+    return invoke<boolean>('is_git_repo', { folderPath });
+  }
+
+  async listWorktrees(folderPath: string): Promise<WorktreeInfo[]> {
+    return invoke<WorktreeInfo[]>('list_worktrees', { folderPath });
+  }
+
+  async removeWorktree(
+    folderPath: string,
+    worktreePath: string,
+    force?: boolean
+  ): Promise<void> {
+    await invoke('remove_worktree', { folderPath, worktreePath, force: force ?? false });
+  }
+
+  async cleanupAllWorktrees(folderPath: string): Promise<number> {
+    return invoke<number>('cleanup_all_worktrees', { folderPath });
   }
 
   private convertShellType(

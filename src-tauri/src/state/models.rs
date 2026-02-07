@@ -29,6 +29,8 @@ pub struct Workspace {
     pub tab_order: Vec<String>,
     #[serde(default)]
     pub shell_type: ShellType,
+    #[serde(default)]
+    pub worktree_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,10 @@ pub struct TerminalInfo {
     pub shell_type: ShellType,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub worktree_path: Option<String>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 /// Metadata about a daemon session tracked by the Tauri app (for persistence).
@@ -55,6 +61,10 @@ pub struct TerminalInfo {
 pub struct SessionMetadata {
     pub shell_type: ShellType,
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub worktree_path: Option<String>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 impl Default for Layout {
@@ -121,6 +131,7 @@ mod tests {
             shell_type: ShellType::Wsl {
                 distribution: Some("Debian".to_string()),
             },
+            worktree_mode: false,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();
@@ -135,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_workspace_default_shell_type_on_missing_field() {
-        // Simulate JSON without shell_type field
+        // Simulate JSON without shell_type or worktree_mode fields
         let json = r#"{
             "id": "ws-1",
             "name": "Test",
@@ -145,6 +156,7 @@ mod tests {
 
         let workspace: Workspace = serde_json::from_str(json).unwrap();
         assert_eq!(workspace.shell_type, ShellType::Windows);
+        assert!(!workspace.worktree_mode);
     }
 
     #[test]
@@ -157,6 +169,8 @@ mod tests {
                 distribution: Some("Ubuntu-22.04".to_string()),
             },
             cwd: Some("/home/user/project".to_string()),
+            worktree_path: None,
+            worktree_branch: None,
         };
 
         let json = serde_json::to_string(&terminal).unwrap();
@@ -177,6 +191,7 @@ mod tests {
                     folder_path: "C:\\".to_string(),
                     tab_order: vec![],
                     shell_type: ShellType::Windows,
+                    worktree_mode: false,
                 },
                 Workspace {
                     id: "ws-2".to_string(),
@@ -186,6 +201,7 @@ mod tests {
                     shell_type: ShellType::Wsl {
                         distribution: Some("Alpine".to_string()),
                     },
+                    worktree_mode: false,
                 },
             ],
             terminals: vec![],
@@ -215,6 +231,7 @@ mod tests {
                 folder_path: "C:\\Projects\\myapp".to_string(),
                 tab_order: vec!["term-1".to_string(), "term-2".to_string()],
                 shell_type: ShellType::Windows,
+                worktree_mode: false,
             }],
             terminals: vec![
                 TerminalInfo {
@@ -223,6 +240,8 @@ mod tests {
                     name: "Terminal 1".to_string(),
                     shell_type: ShellType::Windows,
                     cwd: Some("C:\\Projects\\myapp\\src".to_string()),
+                    worktree_path: None,
+                    worktree_branch: None,
                 },
                 TerminalInfo {
                     id: "term-2".to_string(),
@@ -232,6 +251,8 @@ mod tests {
                         distribution: Some("Ubuntu".to_string()),
                     },
                     cwd: Some("/home/user/projects".to_string()),
+                    worktree_path: None,
+                    worktree_branch: None,
                 },
             ],
             active_workspace_id: Some("ws-abc123".to_string()),
@@ -274,6 +295,7 @@ mod tests {
                 folder_path: "/test".to_string(),
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
+                worktree_mode: false,
             }],
             terminals: vec![TerminalInfo {
                 id: original_id.to_string(),
@@ -281,6 +303,8 @@ mod tests {
                 name: "Test Terminal".to_string(),
                 shell_type: ShellType::Windows,
                 cwd: None,
+                worktree_path: None,
+                worktree_branch: None,
             }],
             active_workspace_id: Some("ws-1".to_string()),
         };
@@ -290,5 +314,59 @@ mod tests {
 
         // The terminal ID must be exactly preserved
         assert_eq!(restored.terminals[0].id, original_id);
+    }
+
+    #[test]
+    fn test_workspace_default_worktree_mode_on_missing_field() {
+        let json = r#"{
+            "id": "ws-1",
+            "name": "Test",
+            "folder_path": "/home/user",
+            "tab_order": [],
+            "shell_type": "windows"
+        }"#;
+
+        let workspace: Workspace = serde_json::from_str(json).unwrap();
+        assert!(!workspace.worktree_mode);
+    }
+
+    #[test]
+    fn test_workspace_roundtrip_with_worktree_mode() {
+        let workspace = Workspace {
+            id: "ws-1".to_string(),
+            name: "Worktree WS".to_string(),
+            folder_path: "C:\\repo".to_string(),
+            tab_order: vec![],
+            shell_type: ShellType::Windows,
+            worktree_mode: true,
+        };
+
+        let json = serde_json::to_string(&workspace).unwrap();
+        let deserialized: Workspace = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.worktree_mode);
+    }
+
+    #[test]
+    fn test_terminal_info_default_worktree_path_on_missing_field() {
+        let json = r#"{
+            "id": "term-1",
+            "workspace_id": "ws-1",
+            "name": "Shell",
+            "shell_type": "windows"
+        }"#;
+
+        let info: TerminalInfo = serde_json::from_str(json).unwrap();
+        assert!(info.worktree_path.is_none());
+    }
+
+    #[test]
+    fn test_session_metadata_default_worktree_path_on_missing_field() {
+        let json = r#"{
+            "shell_type": "windows",
+            "cwd": "C:\\test"
+        }"#;
+
+        let meta: SessionMetadata = serde_json::from_str(json).unwrap();
+        assert!(meta.worktree_path.is_none());
     }
 }

@@ -1,10 +1,12 @@
 import { store, Workspace, ShellType } from '../state/store';
 import { workspaceService } from '../services/workspace-service';
 import { open } from '@tauri-apps/plugin-dialog';
+import { WorktreePanel } from './WorktreePanel';
 
 export class WorkspaceSidebar {
   private container: HTMLElement;
   private listContainer: HTMLElement;
+  private worktreePanel: WorktreePanel;
   private onDrop: ((workspaceId: string, terminalId: string) => void) | null = null;
 
   constructor() {
@@ -19,6 +21,9 @@ export class WorkspaceSidebar {
     this.listContainer = document.createElement('div');
     this.listContainer.className = 'workspace-list';
     this.container.appendChild(this.listContainer);
+
+    this.worktreePanel = new WorktreePanel();
+    this.worktreePanel.mount(this.container);
 
     const addBtn = document.createElement('div');
     addBtn.className = 'add-workspace-btn';
@@ -184,6 +189,23 @@ export class WorkspaceSidebar {
       nameContainer.appendChild(wslBadge);
     }
 
+    const wtToggle = document.createElement('button');
+    wtToggle.className = `worktree-toggle${workspace.worktreeMode ? ' active' : ''}`;
+    wtToggle.textContent = 'WT';
+    wtToggle.title = workspace.worktreeMode ? 'Worktree mode: ON' : 'Worktree mode: OFF';
+    wtToggle.onclick = async (e) => {
+      e.stopPropagation();
+      if (!workspace.worktreeMode) {
+        const isGit = await workspaceService.isGitRepo(workspace.folderPath).catch(() => false);
+        if (!isGit) {
+          console.warn('Cannot enable worktree mode: not a git repository');
+          return;
+        }
+      }
+      await workspaceService.toggleWorktreeMode(workspace.id, !workspace.worktreeMode);
+    };
+    nameContainer.appendChild(wtToggle);
+
     item.appendChild(nameContainer);
 
     const badge = document.createElement('span');
@@ -242,6 +264,23 @@ export class WorkspaceSidebar {
       this.showRenameDialog(workspace);
     };
     menu.appendChild(renameItem);
+
+    // Worktree mode toggle (only for git repos)
+    const worktreeItem = document.createElement('div');
+    worktreeItem.className = 'context-menu-item';
+    worktreeItem.textContent = workspace.worktreeMode
+      ? 'Disable Worktree Mode'
+      : 'Enable Worktree Mode';
+    worktreeItem.onclick = async () => {
+      menu.remove();
+      const isGit = await workspaceService.isGitRepo(workspace.folderPath).catch(() => false);
+      if (!isGit && !workspace.worktreeMode) {
+        console.warn('Cannot enable worktree mode: not a git repository');
+        return;
+      }
+      await workspaceService.toggleWorktreeMode(workspace.id, !workspace.worktreeMode);
+    };
+    menu.appendChild(worktreeItem);
 
     const separator = document.createElement('div');
     separator.className = 'context-menu-separator';
