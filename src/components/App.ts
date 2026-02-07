@@ -230,6 +230,7 @@ export class App {
           folder_path: string;
           tab_order: string[];
           shell_type?: BackendShellType;
+          worktree_mode?: boolean;
         }>;
         terminals: Array<{
           id: string;
@@ -237,6 +238,7 @@ export class App {
           name: string;
           shell_type?: BackendShellType;
           cwd?: string | null;
+          worktree_path?: string | null;
         }>;
         active_workspace_id: string | null;
       }>('load_layout');
@@ -256,6 +258,7 @@ export class App {
             folderPath: w.folder_path,
             tabOrder: w.tab_order,
             shellType: convertShellType(w.shell_type),
+            worktreeMode: w.worktree_mode ?? false,
           });
         });
 
