@@ -86,14 +86,14 @@ Pull and rebase from master before opening a PR. If another agent's PR merges fi
 
 Each agent should own a clearly scoped task. Avoid modifying the same files as another active agent. If overlap is unavoidable, coordinate via smaller, more frequent commits and PRs.
 
-### Agent Specialization
+### Task Scoping
 
-When using multiple worktrees, consider role-based division:
-- **Feature agent**: implements new functionality
-- **Test agent**: writes and maintains test suites
-- **Quality agent**: refactoring, performance, code cleanup
+Each agent should receive a single, well-defined task when launched. Good tasks have clear boundaries:
+- "Implement search in the terminal pane" (one feature, known files)
+- "Write tests for the ring buffer module" (one module, test-only changes)
+- "Refactor daemon session cleanup logic" (one concern, contained scope)
 
-This is guidance, not enforcement — but helps avoid agents stepping on each other.
+Avoid giving one agent a broad task like "improve the codebase" — it will collide with other agents. The narrower the task, the fewer merge conflicts.
 
 ## Output Hygiene
 
