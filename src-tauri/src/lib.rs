@@ -15,6 +15,10 @@ use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
 
+#[cfg(feature = "leak-check")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 /// Flag to signal that scrollback save is complete
 static SCROLLBACK_SAVED: AtomicBool = AtomicBool::new(false);
 
@@ -26,6 +30,9 @@ fn scrollback_save_complete() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(feature = "leak-check")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let app_state = Arc::new(AppState::new());
     let auto_save = Arc::new(AutoSaveManager::new());
     let process_monitor = ProcessMonitor::new();
