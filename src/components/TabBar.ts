@@ -32,13 +32,24 @@ export class TabBar {
     const state = store.getState();
     if (!state.activeWorkspaceId) return;
 
-    const terminalId = await terminalService.createTerminal(
-      state.activeWorkspaceId
+    const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+    let worktreeName: string | undefined;
+
+    if (workspace?.worktreeMode) {
+      const { showWorktreeNamePrompt } = await import('./dialogs');
+      const name = await showWorktreeNamePrompt();
+      if (name === null) return; // user cancelled
+      worktreeName = name || undefined; // empty string = auto-generate
+    }
+
+    const result = await terminalService.createTerminal(
+      state.activeWorkspaceId,
+      { worktreeName }
     );
     store.addTerminal({
-      id: terminalId,
+      id: result.id,
       workspaceId: state.activeWorkspaceId,
-      name: 'Terminal',
+      name: result.worktree_branch ?? 'Terminal',
       processName: 'powershell',
       order: 0,
     });
