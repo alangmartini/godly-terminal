@@ -7,7 +7,11 @@ edition = "2021"
 name = "godly-daemon"
 path = "src/main.rs"
 
+[features]
+leak-check = ["dhat"]
+
 [dependencies]
+dhat = { version = "0.3", optional = true }
 godly-protocol = { path = "../protocol" }
 portable-pty = "0.8"
 serde = { version = "1.0", features = ["derive"] }

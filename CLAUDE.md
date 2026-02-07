@@ -35,6 +35,8 @@ npm test
 
 Always commit all staged and unstaged changes when making a commit. Do not leave uncommitted changes behind.
 
+Never add "Generated with Claude Code" or any similar attribution message to commits, PRs, or any other output.
+
 ## Bug Fix Workflow
 
 When the user pastes a bug report or describes a bug:
