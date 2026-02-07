@@ -21,6 +21,11 @@ Cargo.lock
 # OS files
 .DS_Store
 Thumbs.db
+NUL
+
+# Scratch / personal notes
+TODO.md
+commands.txt
 
 # Local settings
 .claude/
