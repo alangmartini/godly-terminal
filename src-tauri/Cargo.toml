@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "A Windows terminal application with workspaces"
 authors = ["you"]
 edition = "2021"
+license = "BUSL-1.1"
 
 [lib]
 name = "godly_terminal_lib"
