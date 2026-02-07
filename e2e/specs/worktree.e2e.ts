@@ -90,11 +90,11 @@ describe('Worktree Mode', () => {
     expect(workspaceId).toBeTruthy();
   });
 
-  it('should toggle worktree mode on via IPC and show WT badge', async () => {
+  it('should toggle worktree mode on via IPC and show WT toggle active', async () => {
     await toggleWorktreeMode(workspaceId, true);
 
-    const hasBadge = await elementExists('.worktree-badge');
-    expect(hasBadge).toBe(true);
+    const hasToggle = await elementExists('.worktree-toggle.active');
+    expect(hasToggle).toBe(true);
   });
 
   it('should check if workspace folder is a git repo via IPC', async () => {
@@ -154,11 +154,15 @@ describe('Worktree Mode', () => {
     expect(worktrees.some(wt => wt.is_main)).toBe(true);
   });
 
-  it('should toggle worktree mode off and hide WT badge', async () => {
+  it('should toggle worktree mode off and deactivate WT toggle', async () => {
     await toggleWorktreeMode(workspaceId, false);
 
-    const hasBadge = await elementExists('.worktree-badge');
-    expect(hasBadge).toBe(false);
+    const hasActiveToggle = await elementExists('.worktree-toggle.active');
+    expect(hasActiveToggle).toBe(false);
+
+    // Toggle button should still exist, just not active
+    const hasToggle = await elementExists('.worktree-toggle');
+    expect(hasToggle).toBe(true);
   });
 
   it('should create a normal terminal when worktree mode is off', async () => {

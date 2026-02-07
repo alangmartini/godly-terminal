@@ -28,6 +28,7 @@ fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
             let cwd = meta.and_then(|m| m.cwd.clone());
 
             let worktree_path = meta.and_then(|m| m.worktree_path.clone());
+            let worktree_branch = meta.and_then(|m| m.worktree_branch.clone());
 
             TerminalInfo {
                 id: t.id.clone(),
@@ -36,6 +37,7 @@ fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
                 shell_type,
                 cwd,
                 worktree_path,
+                worktree_branch,
             }
         })
         .collect()

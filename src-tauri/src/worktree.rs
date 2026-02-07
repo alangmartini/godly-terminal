@@ -14,6 +14,13 @@ const BRANCH_PREFIX: &str = "wt-";
 /// Subdirectory under TEMP for all godly worktrees.
 const WORKTREES_DIR: &str = "godly-worktrees";
 
+/// Result of creating a new worktree.
+#[derive(Debug, Clone)]
+pub struct WorktreeResult {
+    pub path: String,
+    pub branch: String,
+}
+
 /// Info about a single worktree returned by `list_worktrees`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WorktreeInfo {
@@ -65,19 +72,28 @@ fn short_hash(input: &str) -> String {
     format!("{:016x}", hasher.finish())[..8].to_string()
 }
 
-/// Build the worktree path: `%TEMP%/godly-worktrees/<repo-hash>/wt-<terminal-id-prefix>/`
-pub fn worktree_path(repo_root: &str, terminal_id: &str) -> PathBuf {
+/// Compute the worktree folder/branch name suffix from either a custom name or terminal id.
+fn wt_name_from(custom_name: Option<&str>, terminal_id: &str) -> String {
+    match custom_name {
+        Some(name) if !name.is_empty() => format!("{}{}", BRANCH_PREFIX, name),
+        _ => format!("{}{}", BRANCH_PREFIX, &terminal_id[..6.min(terminal_id.len())]),
+    }
+}
+
+/// Build the worktree path: `%TEMP%/godly-worktrees/<repo-hash>/wt-<name>/`
+pub fn worktree_path(repo_root: &str, terminal_id: &str, custom_name: Option<&str>) -> PathBuf {
     let temp = std::env::temp_dir();
     let repo_hash = short_hash(repo_root);
-    let wt_name = format!("{}{}", BRANCH_PREFIX, &terminal_id[..6.min(terminal_id.len())]);
+    let wt_name = wt_name_from(custom_name, terminal_id);
     temp.join(WORKTREES_DIR).join(&repo_hash).join(&wt_name)
 }
 
 /// Create a new worktree for the given terminal.
-/// Returns the absolute path to the created worktree directory.
-pub fn create_worktree(repo_root: &str, terminal_id: &str) -> Result<String, String> {
-    let wt_path = worktree_path(repo_root, terminal_id);
-    let branch_name = format!("{}{}", BRANCH_PREFIX, &terminal_id[..6.min(terminal_id.len())]);
+/// If `custom_name` is provided, it is used as the branch/folder suffix instead of the terminal id prefix.
+/// Returns a `WorktreeResult` with the path and branch name.
+pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&str>) -> Result<WorktreeResult, String> {
+    let wt_path = worktree_path(repo_root, terminal_id, custom_name);
+    let branch_name = wt_name_from(custom_name, terminal_id);
 
     // Ensure parent directory exists
     if let Some(parent) = wt_path.parent() {
@@ -98,7 +114,7 @@ pub fn create_worktree(repo_root: &str, terminal_id: &str) -> Result<String, Str
         return Err(format!("git worktree add failed: {}", stderr.trim()));
     }
 
-    Ok(wt_path_str)
+    Ok(WorktreeResult { path: wt_path_str, branch: branch_name })
 }
 
 /// List all worktrees for the repo at `repo_root`.
@@ -292,8 +308,9 @@ mod tests {
         let repo_root = repo.path().to_str().unwrap();
         let terminal_id = "abcdef-1234-5678";
 
-        let wt_path = create_worktree(repo_root, terminal_id).expect("create worktree");
-        assert!(Path::new(&wt_path).is_dir(), "worktree directory should exist");
+        let result = create_worktree(repo_root, terminal_id, None).expect("create worktree");
+        assert!(Path::new(&result.path).is_dir(), "worktree directory should exist");
+        assert_eq!(result.branch, "wt-abcdef");
 
         // Verify branch exists
         let output = StdCommand::new("git")
@@ -305,7 +322,30 @@ mod tests {
         assert!(branches.contains("wt-abcdef"), "branch should exist");
 
         // Cleanup
-        let _ = std::fs::remove_dir_all(&wt_path);
+        let _ = std::fs::remove_dir_all(&result.path);
+    }
+
+    #[test]
+    fn test_create_worktree_custom_name() {
+        let repo = create_test_repo();
+        let repo_root = repo.path().to_str().unwrap();
+        let terminal_id = "abcdef-1234-5678";
+
+        let result = create_worktree(repo_root, terminal_id, Some("my-feature")).expect("create worktree with custom name");
+        assert!(Path::new(&result.path).is_dir(), "worktree directory should exist");
+        assert_eq!(result.branch, "wt-my-feature");
+
+        // Verify branch exists
+        let output = StdCommand::new("git")
+            .args(["branch", "--list", "wt-my-feature"])
+            .current_dir(repo_root)
+            .output()
+            .expect("git branch list");
+        let branches = String::from_utf8_lossy(&output.stdout);
+        assert!(branches.contains("wt-my-feature"), "custom branch should exist");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&result.path);
     }
 
     #[test]
@@ -320,13 +360,13 @@ mod tests {
 
         // Create a worktree
         let terminal_id = "112233-aabb-ccdd";
-        let wt_path = create_worktree(repo_root, terminal_id).expect("create worktree");
+        let result = create_worktree(repo_root, terminal_id, None).expect("create worktree");
 
         let worktrees = list_worktrees(repo_root).expect("list worktrees after create");
         assert_eq!(worktrees.len(), 2, "should have 2 worktrees");
 
         // Cleanup
-        let _ = std::fs::remove_dir_all(&wt_path);
+        let _ = std::fs::remove_dir_all(&result.path);
     }
 
     #[test]
@@ -335,17 +375,17 @@ mod tests {
         let repo_root = repo.path().to_str().unwrap();
         let terminal_id = "aabbcc-1111-2222";
 
-        let wt_path = create_worktree(repo_root, terminal_id).expect("create worktree");
-        assert!(Path::new(&wt_path).is_dir());
+        let result = create_worktree(repo_root, terminal_id, None).expect("create worktree");
+        assert!(Path::new(&result.path).is_dir());
 
-        remove_worktree(repo_root, &wt_path, false).expect("remove worktree");
-        assert!(!Path::new(&wt_path).is_dir(), "worktree should be removed");
+        remove_worktree(repo_root, &result.path, false).expect("remove worktree");
+        assert!(!Path::new(&result.path).is_dir(), "worktree should be removed");
     }
 
     #[test]
     fn test_create_worktree_non_git_fails() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        let result = create_worktree(dir.path().to_str().unwrap(), "test-id");
+        let result = create_worktree(dir.path().to_str().unwrap(), "test-id", None);
         assert!(result.is_err(), "should fail on non-git dir");
     }
 
@@ -359,9 +399,17 @@ mod tests {
 
     #[test]
     fn test_worktree_path_formula() {
-        let path = worktree_path("C:\\repo", "abcdef-1234");
+        let path = worktree_path("C:\\repo", "abcdef-1234", None);
         let path_str = path.to_string_lossy().to_string();
         assert!(path_str.contains(WORKTREES_DIR));
         assert!(path_str.contains("wt-abcdef"));
+    }
+
+    #[test]
+    fn test_worktree_path_custom_name() {
+        let path = worktree_path("C:\\repo", "abcdef-1234", Some("my-feature"));
+        let path_str = path.to_string_lossy().to_string();
+        assert!(path_str.contains(WORKTREES_DIR));
+        assert!(path_str.contains("wt-my-feature"));
     }
 }

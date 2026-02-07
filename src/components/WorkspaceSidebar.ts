@@ -189,12 +189,22 @@ export class WorkspaceSidebar {
       nameContainer.appendChild(wslBadge);
     }
 
-    if (workspace.worktreeMode) {
-      const wtBadge = document.createElement('span');
-      wtBadge.className = 'worktree-badge';
-      wtBadge.textContent = 'WT';
-      nameContainer.appendChild(wtBadge);
-    }
+    const wtToggle = document.createElement('button');
+    wtToggle.className = `worktree-toggle${workspace.worktreeMode ? ' active' : ''}`;
+    wtToggle.textContent = 'WT';
+    wtToggle.title = workspace.worktreeMode ? 'Worktree mode: ON' : 'Worktree mode: OFF';
+    wtToggle.onclick = async (e) => {
+      e.stopPropagation();
+      if (!workspace.worktreeMode) {
+        const isGit = await workspaceService.isGitRepo(workspace.folderPath).catch(() => false);
+        if (!isGit) {
+          console.warn('Cannot enable worktree mode: not a git repository');
+          return;
+        }
+      }
+      await workspaceService.toggleWorktreeMode(workspace.id, !workspace.worktreeMode);
+    };
+    nameContainer.appendChild(wtToggle);
 
     item.appendChild(nameContainer);
 
