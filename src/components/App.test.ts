@@ -431,15 +431,16 @@ describe('App Persistence', () => {
       mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
         if (cmd === 'create_terminal') {
           capturedArgs = args;
-          return 'returned-id';
+          return { id: 'returned-id', worktree_branch: null };
         }
         return undefined;
       });
 
-      await terminalService.createTerminal('ws-1', {
+      const result = await terminalService.createTerminal('ws-1', {
         idOverride: 'my-custom-id',
       });
 
+      expect(result.id).toBe('returned-id');
       expect(capturedArgs).toMatchObject({
         workspaceId: 'ws-1',
         idOverride: 'my-custom-id',
@@ -452,16 +453,40 @@ describe('App Persistence', () => {
       mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
         if (cmd === 'create_terminal') {
           capturedArgs = args;
-          return 'new-id';
+          return { id: 'new-id', worktree_branch: null };
         }
         return undefined;
       });
 
-      await terminalService.createTerminal('ws-1');
+      const result = await terminalService.createTerminal('ws-1');
 
+      expect(result.id).toBe('new-id');
       expect(capturedArgs).toMatchObject({
         workspaceId: 'ws-1',
         idOverride: null,
+      });
+    });
+
+    it('should pass worktreeName to backend', async () => {
+      let capturedArgs: unknown = null;
+
+      mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === 'create_terminal') {
+          capturedArgs = args;
+          return { id: 'wt-id', worktree_branch: 'wt-my-feature' };
+        }
+        return undefined;
+      });
+
+      const result = await terminalService.createTerminal('ws-1', {
+        worktreeName: 'my-feature',
+      });
+
+      expect(result.id).toBe('wt-id');
+      expect(result.worktree_branch).toBe('wt-my-feature');
+      expect(capturedArgs).toMatchObject({
+        workspaceId: 'ws-1',
+        worktreeName: 'my-feature',
       });
     });
   });

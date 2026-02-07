@@ -253,6 +253,7 @@ mod tests {
                 shell_type: ShellType::Windows,
                 cwd: Some("C:\\Users\\test".to_string()),
                 worktree_path: None,
+                worktree_branch: None,
             },
         );
 

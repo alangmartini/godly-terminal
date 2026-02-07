@@ -434,14 +434,34 @@ html, body {
   border-color: var(--accent);
 }
 
-/* Worktree badge */
-.worktree-badge {
+/* Worktree toggle button */
+.worktree-toggle {
   font-size: 9px;
-  background: var(--success);
-  color: #1e1e1e;
+  background: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
   padding: 1px 4px;
   border-radius: 3px;
   flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.worktree-toggle:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.worktree-toggle.active {
+  background: var(--success);
+  color: #1e1e1e;
+  border-color: var(--success);
+}
+
+.worktree-toggle.active:hover {
+  background: #3bb89a;
+  border-color: #3bb89a;
 }
 
 /* Worktree panel */

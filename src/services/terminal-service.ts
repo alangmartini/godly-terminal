@@ -29,6 +29,12 @@ export interface TerminalClosedPayload {
   terminal_id: string;
 }
 
+/** Result of create_terminal IPC call */
+export interface CreateTerminalResult {
+  id: string;
+  worktree_branch: string | null;
+}
+
 /** Info about a live daemon session (from reconnect_sessions) */
 export interface SessionInfo {
   id: string;
@@ -83,17 +89,19 @@ class TerminalService {
       cwdOverride?: string;
       shellTypeOverride?: ShellType;
       idOverride?: string;
+      worktreeName?: string;
     }
-  ): Promise<string> {
-    const terminalId = await invoke<string>('create_terminal', {
+  ): Promise<CreateTerminalResult> {
+    const result = await invoke<CreateTerminalResult>('create_terminal', {
       workspaceId,
       cwdOverride: options?.cwdOverride ?? null,
       shellTypeOverride: options?.shellTypeOverride
         ? toBackendShellType(options.shellTypeOverride)
         : null,
       idOverride: options?.idOverride ?? null,
+      worktreeName: options?.worktreeName ?? null,
     });
-    return terminalId;
+    return result;
   }
 
   async closeTerminal(terminalId: string): Promise<void> {

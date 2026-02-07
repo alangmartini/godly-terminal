@@ -51,6 +51,8 @@ pub struct TerminalInfo {
     pub cwd: Option<String>,
     #[serde(default)]
     pub worktree_path: Option<String>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 /// Metadata about a daemon session tracked by the Tauri app (for persistence).
@@ -61,6 +63,8 @@ pub struct SessionMetadata {
     pub cwd: Option<String>,
     #[serde(default)]
     pub worktree_path: Option<String>,
+    #[serde(default)]
+    pub worktree_branch: Option<String>,
 }
 
 impl Default for Layout {
@@ -166,6 +170,7 @@ mod tests {
             },
             cwd: Some("/home/user/project".to_string()),
             worktree_path: None,
+            worktree_branch: None,
         };
 
         let json = serde_json::to_string(&terminal).unwrap();
@@ -236,6 +241,7 @@ mod tests {
                     shell_type: ShellType::Windows,
                     cwd: Some("C:\\Projects\\myapp\\src".to_string()),
                     worktree_path: None,
+                    worktree_branch: None,
                 },
                 TerminalInfo {
                     id: "term-2".to_string(),
@@ -246,6 +252,7 @@ mod tests {
                     },
                     cwd: Some("/home/user/projects".to_string()),
                     worktree_path: None,
+                    worktree_branch: None,
                 },
             ],
             active_workspace_id: Some("ws-abc123".to_string()),
@@ -297,6 +304,7 @@ mod tests {
                 shell_type: ShellType::Windows,
                 cwd: None,
                 worktree_path: None,
+                worktree_branch: None,
             }],
             active_workspace_id: Some("ws-1".to_string()),
         };
