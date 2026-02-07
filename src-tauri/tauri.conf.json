@@ -7,6 +7,7 @@
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
+    "beforeBundleCommand": "cargo build -p godly-daemon --release",
     "frontendDist": "../dist"
   },
   "app": {
@@ -30,7 +31,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico"],
+    "resources": {
+      "target/release/godly-daemon.exe": "godly-daemon.exe"
+    }
   },
   "plugins": {}
 }

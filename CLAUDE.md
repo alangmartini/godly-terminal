@@ -14,8 +14,7 @@ npm run build:daemon
 # Development mode (starts Vite + Tauri)
 npm run tauri dev
 
-# Production build (daemon must be built first)
-npm run build:daemon:release
+# Production build (daemon is built automatically via beforeBundleCommand)
 npm run tauri build
 
 # TypeScript check only
