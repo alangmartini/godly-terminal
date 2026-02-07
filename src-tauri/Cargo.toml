@@ -13,10 +13,14 @@ edition = "2021"
 name = "godly_terminal_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+leak-check = ["dhat"]
+
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
+dhat = { version = "0.3", optional = true }
 tauri = { version = "2.0", features = [] }
 tauri-plugin-store = "2.0"
 tauri-plugin-dialog = "2.0"
