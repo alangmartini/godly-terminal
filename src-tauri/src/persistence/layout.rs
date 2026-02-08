@@ -125,6 +125,7 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                     tab_order: ws.tab_order.clone(),
                     shell_type: ws.shell_type.clone(),
                     worktree_mode: ws.worktree_mode,
+                    claude_code_mode: ws.claude_code_mode,
                 });
             }
 
