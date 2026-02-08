@@ -9,6 +9,10 @@ pub struct AppState {
     /// Session metadata for persistence (shell_type, cwd) - replaces direct PTY session access
     pub session_metadata: RwLock<HashMap<String, SessionMetadata>>,
     pub active_workspace_id: RwLock<Option<String>>,
+    /// Per-terminal notification overrides (terminal_id → enabled)
+    pub notification_overrides_terminal: RwLock<HashMap<String, bool>>,
+    /// Per-workspace notification overrides (workspace_id → enabled)
+    pub notification_overrides_workspace: RwLock<HashMap<String, bool>>,
 }
 
 impl AppState {
@@ -18,6 +22,8 @@ impl AppState {
             terminals: RwLock::new(HashMap::new()),
             session_metadata: RwLock::new(HashMap::new()),
             active_workspace_id: RwLock::new(None),
+            notification_overrides_terminal: RwLock::new(HashMap::new()),
+            notification_overrides_workspace: RwLock::new(HashMap::new()),
         }
     }
 
@@ -109,6 +115,39 @@ impl AppState {
     pub fn remove_session_metadata(&self, id: &str) {
         let mut meta = self.session_metadata.write();
         meta.remove(id);
+    }
+
+    /// Check if notifications are enabled for a given terminal/workspace.
+    /// Priority: per-terminal override > per-workspace override > global default (true).
+    /// Returns (enabled, source_description).
+    pub fn is_notification_enabled(
+        &self,
+        terminal_id: Option<&str>,
+        workspace_id: Option<&str>,
+    ) -> (bool, &'static str) {
+        if let Some(tid) = terminal_id {
+            let overrides = self.notification_overrides_terminal.read();
+            if let Some(&enabled) = overrides.get(tid) {
+                return (enabled, "terminal");
+            }
+        }
+        if let Some(wid) = workspace_id {
+            let overrides = self.notification_overrides_workspace.read();
+            if let Some(&enabled) = overrides.get(wid) {
+                return (enabled, "workspace");
+            }
+        }
+        (true, "global")
+    }
+
+    pub fn set_notification_enabled_terminal(&self, terminal_id: &str, enabled: bool) {
+        let mut overrides = self.notification_overrides_terminal.write();
+        overrides.insert(terminal_id.to_string(), enabled);
+    }
+
+    pub fn set_notification_enabled_workspace(&self, workspace_id: &str, enabled: bool) {
+        let mut overrides = self.notification_overrides_workspace.write();
+        overrides.insert(workspace_id.to_string(), enabled);
     }
 }
 

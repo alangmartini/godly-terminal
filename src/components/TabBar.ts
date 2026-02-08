@@ -1,6 +1,7 @@
 import { store, Terminal } from '../state/store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
+import { notificationStore } from '../state/notification-store';
 
 export class TabBar {
   private container: HTMLElement;
@@ -26,6 +27,7 @@ export class TabBar {
     this.container.appendChild(addBtn);
 
     store.subscribe(() => this.render());
+    notificationStore.subscribe(() => this.render());
   }
 
   private async handleNewTab() {
@@ -91,6 +93,12 @@ export class TabBar {
     title.className = 'tab-title';
     title.textContent = displayName;
     tab.appendChild(title);
+
+    if (notificationStore.hasBadge(terminal.id) && !isActive) {
+      const badge = document.createElement('span');
+      badge.className = 'tab-notification-badge';
+      tab.appendChild(badge);
+    }
 
     const closeBtn = document.createElement('span');
     closeBtn.className = 'tab-close';
