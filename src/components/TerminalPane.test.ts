@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
+import { createTerminalKeyHandler } from './terminal-key-handler';
 
 function keydown(key: string, opts: { ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {}) {
   return {
@@ -171,5 +172,110 @@ describe('custom keybinding integration', () => {
 
   it('Ctrl+, is always an app shortcut regardless of bindings', () => {
     expect(isAppShortcut(keydown(',', { ctrlKey: true }))).toBe(true);
+  });
+});
+
+describe('Terminal key event handler', () => {
+  // Bug: Shift+Enter sends plain \r instead of \x1b[13;2u, so Claude Code
+  // cannot distinguish it from Enter and treats it as submit instead of newline.
+  describe('Shift+Enter handling', () => {
+    it('should send kitty keyboard escape sequence for Shift+Enter keydown', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => '');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keydown', key: 'Enter', shiftKey: true, ctrlKey: false } as KeyboardEvent;
+      const result = handler(event);
+
+      expect(result).toBe(false);
+      expect(writeData).toHaveBeenCalledWith('\x1b[13;2u');
+    });
+
+    it('should suppress Shift+Enter keyup without sending data', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => '');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keyup', key: 'Enter', shiftKey: true, ctrlKey: false } as KeyboardEvent;
+      const result = handler(event);
+
+      expect(result).toBe(false);
+      expect(writeData).not.toHaveBeenCalled();
+    });
+
+    it('should not intercept plain Enter', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => '');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keydown', key: 'Enter', shiftKey: false, ctrlKey: false } as KeyboardEvent;
+      const result = handler(event);
+
+      expect(result).toBe(true);
+      expect(writeData).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Ctrl+Shift+C copy handling', () => {
+    it('should copy selection and block event', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => 'selected text');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keydown', key: 'C', shiftKey: true, ctrlKey: true } as KeyboardEvent;
+      const result = handler(event);
+
+      expect(result).toBe(false);
+      expect(copyToClipboard).toHaveBeenCalledWith('selected text');
+    });
+
+    it('should not copy when there is no selection', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => '');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keydown', key: 'C', shiftKey: true, ctrlKey: true } as KeyboardEvent;
+      const result = handler(event);
+
+      expect(result).toBe(false);
+      expect(copyToClipboard).not.toHaveBeenCalled();
+      expect(writeData).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Ctrl+Shift+Enter handling', () => {
+    it('should not send Shift+Enter sequence when Ctrl is also held', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => '');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keydown', key: 'Enter', shiftKey: true, ctrlKey: true } as KeyboardEvent;
+      const result = handler(event);
+
+      // Ctrl+Shift+Enter should pass through to xterm.js, not trigger Shift+Enter handler
+      expect(result).toBe(true);
+      expect(writeData).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('passthrough', () => {
+    it('should let regular keys pass through', () => {
+      const writeData = vi.fn();
+      const getSelection = vi.fn(() => '');
+      const copyToClipboard = vi.fn();
+      const handler = createTerminalKeyHandler(writeData, getSelection, copyToClipboard);
+
+      const event = { type: 'keydown', key: 'a', shiftKey: false, ctrlKey: false } as KeyboardEvent;
+      const result = handler(event);
+
+      expect(result).toBe(true);
+      expect(writeData).not.toHaveBeenCalled();
+    });
   });
 });

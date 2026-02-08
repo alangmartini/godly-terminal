@@ -124,6 +124,14 @@ export class TerminalPane {
       })) {
         event.preventDefault();
       }
+      // Shift+Enter: send CSI 13;2u (kitty keyboard protocol) so CLI tools
+      // like Claude Code can distinguish it from plain Enter.
+      if (event.shiftKey && !event.ctrlKey && event.key === 'Enter') {
+        if (event.type === 'keydown') {
+          terminalService.writeToTerminal(this.terminalId, '\x1b[13;2u');
+        }
+        return false;
+      }
       return true;
     });
 
