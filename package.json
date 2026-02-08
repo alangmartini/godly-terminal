@@ -5,10 +5,12 @@
   "license": "BUSL-1.1",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:daemon && vite",
+    "dev": "npm run build:daemon && npm run build:mcp && vite",
     "build": "tsc && vite build",
     "build:daemon": "cd src-tauri && cargo build -p godly-daemon",
     "build:daemon:release": "cd src-tauri && cargo build -p godly-daemon --release",
+    "build:mcp": "cd src-tauri && cargo build -p godly-mcp",
+    "build:mcp:release": "cd src-tauri && cargo build -p godly-mcp --release",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
@@ -22,6 +24,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-store": "^2.0.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-serialize": "^0.13.0",

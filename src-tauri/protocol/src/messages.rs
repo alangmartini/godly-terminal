@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::types::{SessionInfo, ShellType};
@@ -12,6 +14,8 @@ pub enum Request {
         cwd: Option<String>,
         rows: u16,
         cols: u16,
+        #[serde(default)]
+        env: Option<HashMap<String, String>>,
     },
     ListSessions,
     Attach {

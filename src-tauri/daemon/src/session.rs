@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -37,6 +37,7 @@ impl DaemonSession {
         cwd: Option<String>,
         rows: u16,
         cols: u16,
+        env: Option<HashMap<String, String>>,
     ) -> Result<Self, String> {
         let pty_system = native_pty_system();
 
@@ -51,7 +52,7 @@ impl DaemonSession {
             .openpty(size)
             .map_err(|e| format!("Failed to open pty: {}", e))?;
 
-        let cmd = match &shell_type {
+        let mut cmd = match &shell_type {
             ShellType::Windows => {
                 let mut cmd = CommandBuilder::new("powershell.exe");
                 cmd.arg("-NoLogo");
@@ -72,6 +73,13 @@ impl DaemonSession {
                 cmd
             }
         };
+
+        // Inject environment variables into the PTY session
+        if let Some(env_vars) = &env {
+            for (key, value) in env_vars {
+                cmd.env(key, value);
+            }
+        }
 
         let child = pair
             .slave
