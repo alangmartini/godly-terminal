@@ -38,6 +38,7 @@ class Store {
   };
 
   private listeners: Set<Listener> = new Set();
+  private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
 
   getState(): AppState {
     return this.state;
@@ -45,6 +46,17 @@ class Store {
 
   setState(partial: Partial<AppState>) {
     this.state = { ...this.state, ...partial };
+    this.notify();
+  }
+
+  reset() {
+    this.state = {
+      workspaces: [],
+      terminals: [],
+      activeWorkspaceId: null,
+      activeTerminalId: null,
+    };
+    this.lastActiveTerminalByWorkspace.clear();
     this.notify();
   }
 
@@ -73,6 +85,7 @@ class Store {
   }
 
   removeWorkspace(id: string) {
+    this.lastActiveTerminalByWorkspace.delete(id);
     this.setState({
       workspaces: this.state.workspaces.filter(w => w.id !== id),
       terminals: this.state.terminals.filter(t => t.workspaceId !== id),
@@ -83,10 +96,21 @@ class Store {
   }
 
   setActiveWorkspace(id: string | null) {
+    // Remember current active terminal for the workspace we're leaving
+    if (this.state.activeWorkspaceId && this.state.activeTerminalId) {
+      this.lastActiveTerminalByWorkspace.set(
+        this.state.activeWorkspaceId,
+        this.state.activeTerminalId,
+      );
+    }
+
     const workspaceTerminals = this.state.terminals.filter(t => t.workspaceId === id);
+    const rememberedId = id ? this.lastActiveTerminalByWorkspace.get(id) : null;
+    const rememberedStillExists = rememberedId && workspaceTerminals.some(t => t.id === rememberedId);
+
     this.setState({
       activeWorkspaceId: id,
-      activeTerminalId: workspaceTerminals[0]?.id ?? null,
+      activeTerminalId: rememberedStillExists ? rememberedId : (workspaceTerminals[0]?.id ?? null),
     });
   }
 
@@ -97,6 +121,7 @@ class Store {
     );
     const order = workspaceTerminals.length;
 
+    this.lastActiveTerminalByWorkspace.set(terminal.workspaceId, terminal.id);
     this.setState({
       terminals: [...this.state.terminals, { ...terminal, order }],
       activeTerminalId: terminal.id,
@@ -130,6 +155,9 @@ class Store {
   }
 
   setActiveTerminal(id: string | null) {
+    if (id && this.state.activeWorkspaceId) {
+      this.lastActiveTerminalByWorkspace.set(this.state.activeWorkspaceId, id);
+    }
     this.setState({ activeTerminalId: id });
   }
 
