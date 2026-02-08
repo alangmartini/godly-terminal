@@ -1,8 +1,10 @@
 use std::io::{Read, Write};
 use std::sync::mpsc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::Mutex;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{Request, Response};
 
@@ -28,6 +30,8 @@ pub struct DaemonClient {
     app_handle: Mutex<Option<AppHandle>>,
     /// Prevents concurrent reconnection attempts
     reconnect_lock: Mutex<()>,
+    /// Session IDs currently attached by this client (for re-attach after reconnect)
+    attached_sessions: Mutex<Vec<String>>,
 }
 
 impl DaemonClient {
@@ -169,6 +173,7 @@ impl DaemonClient {
             request_tx: Mutex::new(None),
             app_handle: Mutex::new(None),
             reconnect_lock: Mutex::new(()),
+            attached_sessions: Mutex::new(Vec::new()),
         })
     }
 
@@ -389,7 +394,52 @@ impl DaemonClient {
             .clone()
             .ok_or("No app_handle stored — setup_bridge was never called")?;
 
-        self.setup_bridge(app_handle)?;
+        self.setup_bridge(app_handle.clone())?;
+
+        // Re-attach all previously attached sessions so output flows again.
+        // When the pipe broke, the daemon auto-detached all sessions for
+        // the old client. Without re-attaching, the terminal appears frozen
+        // because output events stop flowing.
+        let sessions: Vec<String> = self.attached_sessions.lock().clone();
+        for session_id in &sessions {
+            let req = Request::Attach {
+                session_id: session_id.clone(),
+            };
+            match self.try_send_request(&req) {
+                Ok(Response::Buffer { session_id, data }) => {
+                    // Emit buffered output so the user sees anything they missed
+                    let _ = app_handle.emit(
+                        "terminal-output",
+                        serde_json::json!({
+                            "terminal_id": session_id,
+                            "data": data,
+                        }),
+                    );
+                    eprintln!(
+                        "[daemon_client] Re-attached session {} (with buffer replay)",
+                        session_id
+                    );
+                }
+                Ok(Response::Ok) => {
+                    eprintln!("[daemon_client] Re-attached session {}", session_id);
+                }
+                Ok(Response::Error { message }) => {
+                    eprintln!(
+                        "[daemon_client] Session {} no longer exists: {}",
+                        session_id, message
+                    );
+                    // Session is gone (daemon restarted) — remove from tracking
+                    self.attached_sessions.lock().retain(|id| id != session_id);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[daemon_client] Failed to re-attach session {}: {}",
+                        session_id, e
+                    );
+                }
+                _ => {}
+            }
+        }
 
         eprintln!("[daemon_client] Reconnected to daemon");
         Ok(())
@@ -444,11 +494,39 @@ impl DaemonClient {
     }
 
     /// Verify the connection is alive
-    #[allow(dead_code)]
     pub fn ping(&self) -> Result<(), String> {
         match self.send_request(&Request::Ping)? {
             Response::Pong => Ok(()),
             other => Err(format!("Unexpected ping response: {:?}", other)),
         }
+    }
+
+    /// Track a session as attached (for re-attach after reconnect)
+    pub fn track_attach(&self, session_id: String) {
+        let mut sessions = self.attached_sessions.lock();
+        if !sessions.contains(&session_id) {
+            sessions.push(session_id);
+        }
+    }
+
+    /// Remove a session from the attached tracking list
+    pub fn track_detach(&self, session_id: &str) {
+        self.attached_sessions.lock().retain(|id| id != session_id);
+    }
+
+    /// Start a background keepalive thread that periodically pings the daemon.
+    /// Detects broken connections early and triggers reconnection proactively.
+    pub fn start_keepalive(client: Arc<Self>) {
+        std::thread::Builder::new()
+            .name("daemon-keepalive".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_secs(30));
+                    if let Err(e) = client.ping() {
+                        eprintln!("[daemon_client] Keepalive ping failed: {}", e);
+                    }
+                }
+            })
+            .expect("Failed to spawn keepalive thread");
     }
 }
