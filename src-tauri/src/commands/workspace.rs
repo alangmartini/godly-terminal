@@ -23,6 +23,7 @@ pub fn create_workspace(
         tab_order: Vec::new(),
         shell_type: shell_type.unwrap_or_default(),
         worktree_mode: false,
+        claude_code_mode: false,
     };
 
     state.add_workspace(workspace);

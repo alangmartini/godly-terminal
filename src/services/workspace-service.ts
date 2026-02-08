@@ -8,6 +8,7 @@ export interface WorkspaceData {
   tab_order: string[];
   shell_type?: 'windows' | { wsl: { distribution: string | null } };
   worktree_mode?: boolean;
+  claude_code_mode?: boolean;
 }
 
 export interface WorktreeInfo {
@@ -42,6 +43,7 @@ class WorkspaceService {
       tabOrder: [],
       shellType,
       worktreeMode: false,
+      claudeCodeMode: false,
     };
     store.addWorkspace(workspace);
 
@@ -89,12 +91,18 @@ class WorkspaceService {
       tabOrder: w.tab_order,
       shellType: this.convertShellType(w.shell_type),
       worktreeMode: w.worktree_mode ?? false,
+      claudeCodeMode: w.claude_code_mode ?? false,
     }));
   }
 
   async toggleWorktreeMode(workspaceId: string, enabled: boolean): Promise<void> {
     await invoke('toggle_worktree_mode', { workspaceId, enabled });
     store.updateWorkspace(workspaceId, { worktreeMode: enabled });
+  }
+
+  async toggleClaudeCodeMode(workspaceId: string, enabled: boolean): Promise<void> {
+    await invoke('toggle_claude_code_mode', { workspaceId, enabled });
+    store.updateWorkspace(workspaceId, { claudeCodeMode: enabled });
   }
 
   async isGitRepo(folderPath: string): Promise<boolean> {
