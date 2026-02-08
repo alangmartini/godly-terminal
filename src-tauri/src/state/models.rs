@@ -31,6 +31,8 @@ pub struct Workspace {
     pub shell_type: ShellType,
     #[serde(default)]
     pub worktree_mode: bool,
+    #[serde(default)]
+    pub claude_code_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +134,7 @@ mod tests {
                 distribution: Some("Debian".to_string()),
             },
             worktree_mode: false,
+            claude_code_mode: false,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();
@@ -157,6 +160,7 @@ mod tests {
         let workspace: Workspace = serde_json::from_str(json).unwrap();
         assert_eq!(workspace.shell_type, ShellType::Windows);
         assert!(!workspace.worktree_mode);
+        assert!(!workspace.claude_code_mode);
     }
 
     #[test]
@@ -192,6 +196,7 @@ mod tests {
                     tab_order: vec![],
                     shell_type: ShellType::Windows,
                     worktree_mode: false,
+                    claude_code_mode: false,
                 },
                 Workspace {
                     id: "ws-2".to_string(),
@@ -202,6 +207,7 @@ mod tests {
                         distribution: Some("Alpine".to_string()),
                     },
                     worktree_mode: false,
+                    claude_code_mode: false,
                 },
             ],
             terminals: vec![],
@@ -232,6 +238,7 @@ mod tests {
                 tab_order: vec!["term-1".to_string(), "term-2".to_string()],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
+                claude_code_mode: false,
             }],
             terminals: vec![
                 TerminalInfo {
@@ -296,6 +303,7 @@ mod tests {
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
+                claude_code_mode: false,
             }],
             terminals: vec![TerminalInfo {
                 id: original_id.to_string(),
@@ -339,6 +347,7 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: true,
+            claude_code_mode: false,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();
@@ -357,6 +366,37 @@ mod tests {
 
         let info: TerminalInfo = serde_json::from_str(json).unwrap();
         assert!(info.worktree_path.is_none());
+    }
+
+    #[test]
+    fn test_workspace_default_claude_code_mode_on_missing_field() {
+        let json = r#"{
+            "id": "ws-1",
+            "name": "Test",
+            "folder_path": "/home/user",
+            "tab_order": [],
+            "shell_type": "windows"
+        }"#;
+
+        let workspace: Workspace = serde_json::from_str(json).unwrap();
+        assert!(!workspace.claude_code_mode);
+    }
+
+    #[test]
+    fn test_workspace_roundtrip_with_claude_code_mode() {
+        let workspace = Workspace {
+            id: "ws-1".to_string(),
+            name: "Claude WS".to_string(),
+            folder_path: "C:\\repo".to_string(),
+            tab_order: vec![],
+            shell_type: ShellType::Windows,
+            worktree_mode: false,
+            claude_code_mode: true,
+        };
+
+        let json = serde_json::to_string(&workspace).unwrap();
+        let deserialized: Workspace = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.claude_code_mode);
     }
 
     #[test]

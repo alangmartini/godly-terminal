@@ -259,6 +259,92 @@ describe('WorkspaceService', () => {
     });
   });
 
+  describe('toggleClaudeCodeMode', () => {
+    it('should invoke toggle_claude_code_mode and update store', async () => {
+      mockedInvoke.mockResolvedValue(undefined);
+
+      store.addWorkspace({
+        id: 'ws-cc',
+        name: 'CC Test',
+        folderPath: 'C:\\test',
+        tabOrder: [],
+        shellType: { type: 'windows' },
+        worktreeMode: false,
+        claudeCodeMode: false,
+      });
+
+      await workspaceService.toggleClaudeCodeMode('ws-cc', true);
+
+      expect(mockedInvoke).toHaveBeenCalledWith('toggle_claude_code_mode', {
+        workspaceId: 'ws-cc',
+        enabled: true,
+      });
+      expect(store.getState().workspaces[0].claudeCodeMode).toBe(true);
+    });
+
+    it('should disable claude code mode', async () => {
+      mockedInvoke.mockResolvedValue(undefined);
+
+      store.addWorkspace({
+        id: 'ws-cc-off',
+        name: 'CC Disable',
+        folderPath: 'C:\\test',
+        tabOrder: [],
+        shellType: { type: 'windows' },
+        worktreeMode: false,
+        claudeCodeMode: true,
+      });
+
+      await workspaceService.toggleClaudeCodeMode('ws-cc-off', false);
+
+      expect(mockedInvoke).toHaveBeenCalledWith('toggle_claude_code_mode', {
+        workspaceId: 'ws-cc-off',
+        enabled: false,
+      });
+      expect(store.getState().workspaces[0].claudeCodeMode).toBe(false);
+    });
+  });
+
+  describe('loadWorkspaces claude_code_mode', () => {
+    it('should default claudeCodeMode to false when missing from backend', async () => {
+      const workspaceData: WorkspaceData[] = [
+        {
+          id: 'ws-old',
+          name: 'Old Workspace',
+          folder_path: 'C:\\old',
+          tab_order: [],
+          shell_type: 'windows',
+          // claude_code_mode not present (old layout)
+        },
+      ];
+
+      mockedInvoke.mockResolvedValue(workspaceData);
+
+      const workspaces = await workspaceService.loadWorkspaces();
+
+      expect(workspaces[0].claudeCodeMode).toBe(false);
+    });
+
+    it('should preserve claudeCodeMode=true from backend', async () => {
+      const workspaceData: WorkspaceData[] = [
+        {
+          id: 'ws-cc',
+          name: 'CC Workspace',
+          folder_path: 'C:\\cc',
+          tab_order: [],
+          shell_type: 'windows',
+          claude_code_mode: true,
+        },
+      ];
+
+      mockedInvoke.mockResolvedValue(workspaceData);
+
+      const workspaces = await workspaceService.loadWorkspaces();
+
+      expect(workspaces[0].claudeCodeMode).toBe(true);
+    });
+  });
+
   describe('deleteWorkspace', () => {
     it('should remove workspace from store after deletion', async () => {
       mockedInvoke.mockResolvedValue(undefined);

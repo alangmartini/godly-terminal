@@ -85,6 +85,13 @@ impl AppState {
         }
     }
 
+    pub fn update_workspace_claude_code_mode(&self, id: &str, claude_code_mode: bool) {
+        let mut workspaces = self.workspaces.write();
+        if let Some(workspace) = workspaces.get_mut(id) {
+            workspace.claude_code_mode = claude_code_mode;
+        }
+    }
+
     pub fn get_workspace_terminals(&self, workspace_id: &str) -> Vec<Terminal> {
         let terminals = self.terminals.read();
         terminals
@@ -127,6 +134,7 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: false,
+            claude_code_mode: false,
         };
 
         state.add_workspace(workspace.clone());
@@ -148,6 +156,7 @@ mod tests {
             tab_order: vec!["term-1".to_string()],
             shell_type: ShellType::Windows,
             worktree_mode: false,
+            claude_code_mode: false,
         };
 
         state.add_workspace(workspace);
@@ -168,6 +177,7 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: false,
+            claude_code_mode: false,
         });
 
         state.add_terminal(Terminal {
@@ -194,6 +204,7 @@ mod tests {
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
+                claude_code_mode: false,
             },
             Workspace {
                 id: "ws-2".to_string(),
@@ -204,6 +215,7 @@ mod tests {
                     distribution: Some("Ubuntu".to_string()),
                 },
                 worktree_mode: false,
+                claude_code_mode: false,
             },
         ];
 

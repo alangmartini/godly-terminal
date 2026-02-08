@@ -70,6 +70,7 @@ pub fn run() {
             commands::get_wsl_distributions,
             commands::is_wsl_available,
             commands::toggle_worktree_mode,
+            commands::toggle_claude_code_mode,
             commands::is_git_repo,
             commands::list_worktrees,
             commands::remove_worktree,

@@ -192,6 +192,12 @@ export class App {
             processName: 'powershell',
             order: 0,
           });
+
+          if (workspace?.claudeCodeMode) {
+            setTimeout(() => {
+              terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
+            }, 500);
+          }
         }
       }
 
@@ -245,6 +251,7 @@ export class App {
           tab_order: string[];
           shell_type?: BackendShellType;
           worktree_mode?: boolean;
+          claude_code_mode?: boolean;
         }>;
         terminals: Array<{
           id: string;
@@ -274,6 +281,7 @@ export class App {
             tabOrder: w.tab_order,
             shellType: convertShellType(w.shell_type),
             worktreeMode: w.worktree_mode ?? false,
+            claudeCodeMode: w.claude_code_mode ?? false,
           });
         });
 

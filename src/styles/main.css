@@ -464,6 +464,36 @@ html, body {
   border-color: #3bb89a;
 }
 
+/* Claude Code toggle button */
+.claude-code-toggle {
+  font-size: 9px;
+  background: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.claude-code-toggle:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.claude-code-toggle.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.claude-code-toggle.active:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 /* Worktree panel */
 .worktree-panel {
   border-top: 1px solid var(--border-color);
