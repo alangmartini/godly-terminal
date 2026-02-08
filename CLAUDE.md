@@ -49,6 +49,12 @@ When the user pastes a bug report or describes a bug:
 
 Do NOT skip the reproduction step. The test must fail before you start fixing.
 
+### Test Quality Standards
+
+- Tests must be **specific** enough that passing them means the bug is actually fixed, not just that something changed.
+- Each test should assert the **exact expected behavior**, not just "no error."
+- Regression tests should include the original bug trigger as a comment (e.g., `// Bug: scrollback was truncated when buffer exceeded 5MB`).
+
 ## Feature Development Workflow
 
 When adding a new feature:
@@ -59,6 +65,54 @@ When adding a new feature:
 4. Continue with the standard verification requirements below (full build + all tests).
 
 Do NOT consider a feature complete without an accompanying E2E test suite.
+
+## Parallel Agent Workflow
+
+When multiple Claude instances work simultaneously in worktrees:
+
+### Task Claiming
+
+Before starting work, create a file `current_tasks/<branch-name>.md` describing the task scope and files likely to be modified. Check existing files in `current_tasks/` first to avoid overlap. Remove the file when the PR is merged.
+
+### Branch Naming
+
+Worktree branches should use descriptive names: `wt-<scope>` (e.g., `wt-fix-scrollback`, `wt-feat-search`). Avoid generic names like `wt-abc123`.
+
+### Staying in Sync
+
+Pull and rebase from master before opening a PR. If another agent's PR merges first, rebase on top of it before pushing.
+
+### Scope Boundaries
+
+Each agent should own a clearly scoped task. Avoid modifying the same files as another active agent. If overlap is unavoidable, coordinate via smaller, more frequent commits and PRs.
+
+### Task Scoping
+
+Each agent should receive a single, well-defined task when launched. Good tasks have clear boundaries:
+- "Implement search in the terminal pane" (one feature, known files)
+- "Write tests for the ring buffer module" (one module, test-only changes)
+- "Refactor daemon session cleanup logic" (one concern, contained scope)
+
+Avoid giving one agent a broad task like "improve the codebase" — it will collide with other agents. The narrower the task, the fewer merge conflicts.
+
+## Output Hygiene
+
+Rules to keep context windows clean during long agent sessions:
+
+- **Run targeted tests first**: When working on a specific crate or module, run just that crate's tests (`cargo test -p godly-daemon`) before the full suite.
+- **Summarize failures**: When tests fail, identify the root cause and state it concisely rather than pasting full stack traces.
+- **Avoid verbose flags**: Don't use `--verbose`, `--nocapture`, or similar flags unless actively debugging a specific test.
+- **Incremental verification**: Check compilation (`cargo check`) before running tests. Check one crate before all crates.
+
+### Clean Test Output
+
+Tests should produce minimal, parseable output — not walls of text that pollute the context window.
+
+- **Minimal on success**: A passing test suite should print a summary line (e.g., `45 passed, 0 failed`), not per-test details. Use the default output level; avoid `--show-output` or `--nocapture` for routine runs.
+- **Structured on failure**: Failed tests should print a single-line error identifier (e.g., `FAIL: test_ring_buffer_overflow — expected 1024 bytes, got 0`) followed by the relevant assertion, not the entire backtrace.
+- **Log to files, not stdout**: When debugging requires verbose output, redirect to a file (`cargo test 2> test-debug.log`) and read the file selectively rather than flooding the terminal.
+- **Grep-friendly format**: Error messages should be self-contained on one line so they can be found with `grep FAIL` or `grep ERROR`. Avoid multi-line error formatting in test harnesses.
+- **Pre-compute summaries**: When running large test suites, use summary flags (`--format terse` for Rust, `--reporter=dot` for JS) to get aggregate pass/fail counts without per-test noise.
 
 ## Verification Requirements
 
