@@ -153,6 +153,9 @@ pub fn create_terminal(
         other => return Err(format!("Unexpected attach response: {:?}", other)),
     }
 
+    // Track this session so it gets re-attached after daemon reconnection
+    daemon.track_attach(terminal_id.clone());
+
     // Store session metadata for persistence
     state.add_session_metadata(
         terminal_id.clone(),
@@ -197,6 +200,9 @@ pub fn close_terminal(
         }
         _ => {}
     }
+
+    // Stop tracking this session for reconnection
+    daemon.track_detach(&terminal_id);
 
     // Remove metadata and terminal record
     state.remove_session_metadata(&terminal_id);
@@ -292,6 +298,9 @@ pub fn attach_session(
         other => return Err(format!("Unexpected response: {:?}", other)),
     }
 
+    // Track this session so it gets re-attached after daemon reconnection
+    daemon.track_attach(session_id.clone());
+
     // Get session info to populate metadata
     let sessions_response = daemon.send_request(&Request::ListSessions)?;
     if let Response::SessionList { sessions } = sessions_response {
@@ -340,6 +349,7 @@ pub fn detach_all_sessions(
             session_id: terminal_id.clone(),
         };
         let _ = daemon.send_request(&request);
+        daemon.track_detach(terminal_id);
     }
     Ok(())
 }
