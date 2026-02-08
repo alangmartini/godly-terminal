@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
@@ -100,6 +101,29 @@ pub fn create_terminal(
         }
     };
 
+    // Build environment variables for the PTY session
+    let mut env_vars = HashMap::new();
+    env_vars.insert("GODLY_SESSION_ID".to_string(), terminal_id.clone());
+    env_vars.insert("GODLY_WORKSPACE_ID".to_string(), workspace_id.clone());
+
+    // Provide path to godly-mcp binary so tools can discover it
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            let mcp_name = if cfg!(windows) {
+                "godly-mcp.exe"
+            } else {
+                "godly-mcp"
+            };
+            let mcp_path = exe_dir.join(mcp_name);
+            if mcp_path.exists() {
+                env_vars.insert(
+                    "GODLY_MCP_BINARY".to_string(),
+                    mcp_path.to_string_lossy().to_string(),
+                );
+            }
+        }
+    }
+
     // Create session via daemon
     let request = Request::CreateSession {
         id: terminal_id.clone(),
@@ -107,6 +131,7 @@ pub fn create_terminal(
         cwd: working_dir.clone(),
         rows: 24,
         cols: 80,
+        env: Some(env_vars),
     };
 
     let response = daemon.send_request(&request)?;
