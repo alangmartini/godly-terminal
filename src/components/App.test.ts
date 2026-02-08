@@ -491,6 +491,123 @@ describe('App Persistence', () => {
     });
   });
 
+  describe('tab name restoration', () => {
+    it('should pass saved tab name to backend when restoring dead sessions', async () => {
+      // Bug: create_terminal hardcodes name="Terminal" in the backend,
+      // so after autosave the custom tab name is lost.
+      const savedLayout = {
+        workspaces: [
+          {
+            id: 'ws-1',
+            name: 'Workspace',
+            folder_path: 'C:\\Test',
+            tab_order: ['term-1'],
+            shell_type: 'windows' as const,
+          },
+        ],
+        terminals: [
+          {
+            id: 'term-1',
+            workspace_id: 'ws-1',
+            name: 'My Custom Tab',
+            shell_type: 'windows' as const,
+            cwd: 'C:\\Test',
+          },
+        ],
+        active_workspace_id: 'ws-1',
+      };
+
+      let createTerminalArgs: Record<string, unknown> | null = null;
+
+      mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === 'load_layout') return savedLayout;
+        if (cmd === 'reconnect_sessions') return []; // no live sessions
+        if (cmd === 'create_terminal') {
+          createTerminalArgs = args as Record<string, unknown>;
+          return { id: 'term-1', worktree_branch: null };
+        }
+        return undefined;
+      });
+
+      // Simulate the restore flow from App.init()
+      const layout = await invoke<typeof savedLayout>('load_layout');
+      const liveSessions = await invoke<unknown[]>('reconnect_sessions');
+      const liveSessionIds = new Set((liveSessions as Array<{ id: string }>).map(s => s.id));
+
+      for (const t of layout.terminals) {
+        const tabName = t.worktree_branch || t.name;
+
+        if (!liveSessionIds.has(t.id)) {
+          await terminalService.createTerminal(t.workspace_id, {
+            cwdOverride: t.cwd ?? undefined,
+            idOverride: t.id,
+            nameOverride: tabName,
+          });
+        }
+      }
+
+      // Verify the saved tab name was passed to the backend
+      expect(createTerminalArgs).not.toBeNull();
+      expect(createTerminalArgs!['nameOverride']).toBe('My Custom Tab');
+    });
+
+    it('should pass worktree_branch as name when available', async () => {
+      const savedLayout = {
+        workspaces: [
+          {
+            id: 'ws-1',
+            name: 'Workspace',
+            folder_path: 'C:\\Test',
+            tab_order: ['term-1'],
+            shell_type: 'windows' as const,
+          },
+        ],
+        terminals: [
+          {
+            id: 'term-1',
+            workspace_id: 'ws-1',
+            name: 'Terminal',
+            shell_type: 'windows' as const,
+            cwd: 'C:\\Test',
+            worktree_branch: 'feat/my-branch',
+          },
+        ],
+        active_workspace_id: 'ws-1',
+      };
+
+      let createTerminalArgs: Record<string, unknown> | null = null;
+
+      mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === 'load_layout') return savedLayout;
+        if (cmd === 'reconnect_sessions') return [];
+        if (cmd === 'create_terminal') {
+          createTerminalArgs = args as Record<string, unknown>;
+          return { id: 'term-1', worktree_branch: 'feat/my-branch' };
+        }
+        return undefined;
+      });
+
+      const layout = await invoke<typeof savedLayout>('load_layout');
+      const liveSessions = await invoke<unknown[]>('reconnect_sessions');
+      const liveSessionIds = new Set((liveSessions as Array<{ id: string }>).map(s => s.id));
+
+      for (const t of layout.terminals) {
+        const tabName = t.worktree_branch || t.name;
+
+        if (!liveSessionIds.has(t.id)) {
+          await terminalService.createTerminal(t.workspace_id, {
+            cwdOverride: t.cwd ?? undefined,
+            idOverride: t.id,
+            nameOverride: tabName,
+          });
+        }
+      }
+
+      expect(createTerminalArgs).not.toBeNull();
+      expect(createTerminalArgs!['nameOverride']).toBe('feat/my-branch');
+    });
+  });
+
   describe('Terminal Persistence E2E - Full Cycle', () => {
     it('should preserve terminal path, scrollback size and bytes across restart', async () => {
       // === PHASE 1: CREATE ===
