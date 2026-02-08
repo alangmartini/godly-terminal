@@ -42,6 +42,7 @@ pub fn create_terminal(
     shell_type_override: Option<ShellType>,
     id_override: Option<String>,
     worktree_name: Option<String>,
+    name_override: Option<String>,
     state: State<Arc<AppState>>,
     daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
@@ -167,7 +168,7 @@ pub fn create_terminal(
     let terminal = Terminal {
         id: terminal_id.clone(),
         workspace_id,
-        name: String::from("Terminal"),
+        name: name_override.unwrap_or_else(|| String::from("Terminal")),
         process_name,
     };
     state.add_terminal(terminal);
