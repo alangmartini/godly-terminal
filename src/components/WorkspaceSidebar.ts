@@ -8,6 +8,7 @@ export class WorkspaceSidebar {
   private listContainer: HTMLElement;
   private worktreePanel: WorktreePanel;
   private onDrop: ((workspaceId: string, terminalId: string) => void) | null = null;
+  private draggedItem: HTMLElement | null = null;
 
   constructor() {
     this.container = document.createElement('div');
@@ -232,22 +233,50 @@ export class WorkspaceSidebar {
       this.showContextMenu(e, workspace);
     };
 
-    // Drop zone for tabs
+    // Drag source for workspace reordering
+    item.draggable = true;
+
+    item.ondragstart = (e) => {
+      this.draggedItem = item;
+      item.classList.add('dragging');
+      e.dataTransfer!.effectAllowed = 'move';
+      e.dataTransfer!.setData('application/x-workspace-id', workspace.id);
+    };
+
+    item.ondragend = () => {
+      item.classList.remove('dragging');
+      this.draggedItem = null;
+      document.querySelectorAll('.drag-over-workspace').forEach(el => {
+        el.classList.remove('drag-over-workspace');
+      });
+    };
+
+    // Drop zone for tabs and workspace reordering
     item.ondragover = (e) => {
       e.preventDefault();
-      const terminalId = e.dataTransfer?.types.includes('text/plain');
-      if (terminalId && !isActive) {
+      const isWorkspaceDrag = e.dataTransfer?.types.includes('application/x-workspace-id');
+      if (isWorkspaceDrag && this.draggedItem && this.draggedItem !== item) {
+        item.classList.add('drag-over-workspace');
+      } else if (!isWorkspaceDrag && e.dataTransfer?.types.includes('text/plain') && !isActive) {
         item.classList.add('drag-over');
       }
     };
 
     item.ondragleave = () => {
       item.classList.remove('drag-over');
+      item.classList.remove('drag-over-workspace');
     };
 
     item.ondrop = (e) => {
       e.preventDefault();
       item.classList.remove('drag-over');
+      item.classList.remove('drag-over-workspace');
+
+      const droppedWorkspaceId = e.dataTransfer?.getData('application/x-workspace-id');
+      if (droppedWorkspaceId && droppedWorkspaceId !== workspace.id) {
+        this.handleWorkspaceReorder(droppedWorkspaceId, workspace.id);
+        return;
+      }
 
       const terminalId = e.dataTransfer?.getData('text/plain');
       if (terminalId && this.onDrop) {
@@ -256,6 +285,20 @@ export class WorkspaceSidebar {
     };
 
     return item;
+  }
+
+  private handleWorkspaceReorder(draggedId: string, targetId: string) {
+    const state = store.getState();
+    const ids = state.workspaces.map(w => w.id);
+
+    const draggedIndex = ids.indexOf(draggedId);
+    const targetIndex = ids.indexOf(targetId);
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    ids.splice(draggedIndex, 1);
+    ids.splice(targetIndex, 0, draggedId);
+
+    store.reorderWorkspaces(ids);
   }
 
   private showContextMenu(e: MouseEvent, workspace: Workspace) {
