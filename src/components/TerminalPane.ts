@@ -4,6 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { terminalService } from '../services/terminal-service';
+import { isAppShortcut } from './keyboard';
 
 export class TerminalPane {
   private terminal: Terminal;
@@ -78,13 +79,18 @@ export class TerminalPane {
     (this.container as any).__serializeAddon = this.serializeAddon;
     this.resizeObserver.observe(this.container);
 
-    // Handle Ctrl+Shift+C to copy selection to clipboard
+    // Block app-level shortcuts from being consumed by xterm.js so they
+    // bubble to the document-level handler in App.ts. Also handle
+    // Ctrl+Shift+C copy inline since we need access to the terminal.
     this.terminal.attachCustomKeyEventHandler((event) => {
       if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
         const selection = this.terminal.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection);
         }
+        return false;
+      }
+      if (isAppShortcut(event)) {
         return false;
       }
       return true;
