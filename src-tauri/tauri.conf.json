@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build:daemon:release && npm run build",
+    "beforeBuildCommand": "npm run build:daemon:release && npm run build:mcp:release && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -32,7 +32,8 @@
     "targets": "all",
     "icon": ["icons/icon.ico"],
     "resources": {
-      "target/release/godly-daemon.exe": "./"
+      "target/release/godly-daemon.exe": "./",
+      "target/release/godly-mcp.exe": "./"
     }
   },
   "plugins": {}
