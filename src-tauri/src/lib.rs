@@ -93,6 +93,11 @@ pub fn run() {
                 .setup_bridge(app_handle.clone())
                 .expect("Failed to setup daemon bridge");
 
+            // Start keepalive thread — periodically pings the daemon to detect
+            // broken connections early (e.g. after system sleep/wake) and trigger
+            // reconnection + session re-attachment before the user notices.
+            DaemonClient::start_keepalive(daemon_client.clone());
+
             // Start process monitor (queries daemon for PIDs, resolves process names locally)
             process_monitor.start(app_handle.clone(), state_clone.clone(), daemon_client.clone());
 
