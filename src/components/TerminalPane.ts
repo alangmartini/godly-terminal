@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SerializeAddon } from '@xterm/addon-serialize';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { terminalService } from '../services/terminal-service';
 
 export class TerminalPane {
@@ -53,7 +54,13 @@ export class TerminalPane {
     this.serializeAddon = new SerializeAddon();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(this.serializeAddon);
-    this.terminal.loadAddon(new WebLinksAddon());
+    this.terminal.loadAddon(new WebLinksAddon((event: MouseEvent, uri: string) => {
+      if (event.ctrlKey) {
+        openUrl(uri).catch((err) => {
+          console.error('Failed to open URL:', err);
+        });
+      }
+    }));
 
     this.container = document.createElement('div');
     this.container.className = 'terminal-pane';
@@ -70,6 +77,18 @@ export class TerminalPane {
     (this.container as any).__xterm = this.terminal;
     (this.container as any).__serializeAddon = this.serializeAddon;
     this.resizeObserver.observe(this.container);
+
+    // Handle Ctrl+Shift+C to copy selection to clipboard
+    this.terminal.attachCustomKeyEventHandler((event) => {
+      if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
+        const selection = this.terminal.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection);
+        }
+        return false;
+      }
+      return true;
+    });
 
     // Handle input
     this.terminal.onData((data) => {

@@ -1,5 +1,6 @@
 mod commands;
 mod daemon_client;
+mod mcp_server;
 mod persistence;
 mod pty;
 mod state;
@@ -48,6 +49,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(app_state.clone())
         .manage(auto_save.clone())
         .manage(daemon_client.clone())
@@ -95,6 +97,14 @@ pub fn run() {
 
             // Start auto-save manager
             auto_save.start(app_handle.clone(), state_clone.clone());
+
+            // Start MCP pipe server for Claude Code integration
+            mcp_server::start_mcp_server(
+                app_handle.clone(),
+                state_clone.clone(),
+                daemon_client.clone(),
+                auto_save.clone(),
+            );
 
             // Handle window close: detach sessions (don't kill them) and save layout
             let main_window = app.get_webview_window("main").unwrap();
