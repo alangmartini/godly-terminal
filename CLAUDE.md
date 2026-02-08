@@ -254,6 +254,10 @@ App.ts           - Root: manages layout, keyboard shortcuts, reconnection logic
 3. Add client method in `src/daemon_client/client.rs`
 4. Add Tauri command wrapper in `src/commands/terminal.rs`
 
+### Modifying godly-mcp
+
+When changing any code in `src-tauri/mcp/`, bump the build number in `src-tauri/mcp/build.rs` so the log shows which binary is running. The log line `=== godly-mcp starting === build=N` makes it easy to confirm whether a rebuilt binary is actually in use.
+
 ### Adding auto-save triggers
 
 Inject `State<Arc<AutoSaveManager>>` and call `auto_save.mark_dirty()` after state mutations.
