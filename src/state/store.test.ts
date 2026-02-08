@@ -206,6 +206,74 @@ describe('Store', () => {
     });
   });
 
+  describe('claude code mode', () => {
+    it('should store claudeCodeMode on workspace', () => {
+      const workspace: Workspace = {
+        id: 'ws-cc',
+        name: 'Claude Code Workspace',
+        folderPath: 'C:\\Projects',
+        tabOrder: [],
+        shellType: { type: 'windows' },
+        worktreeMode: false,
+        claudeCodeMode: true,
+      };
+
+      store.addWorkspace(workspace);
+
+      const state = store.getState();
+      expect(state.workspaces[0].claudeCodeMode).toBe(true);
+    });
+
+    it('should toggle claudeCodeMode via updateWorkspace', () => {
+      store.addWorkspace({
+        id: 'ws-cc-toggle',
+        name: 'Toggle Test',
+        folderPath: 'C:\\test',
+        tabOrder: [],
+        shellType: { type: 'windows' },
+        worktreeMode: false,
+        claudeCodeMode: false,
+      });
+
+      expect(store.getState().workspaces[0].claudeCodeMode).toBe(false);
+
+      store.updateWorkspace('ws-cc-toggle', { claudeCodeMode: true });
+
+      expect(store.getState().workspaces[0].claudeCodeMode).toBe(true);
+
+      store.updateWorkspace('ws-cc-toggle', { claudeCodeMode: false });
+
+      expect(store.getState().workspaces[0].claudeCodeMode).toBe(false);
+    });
+
+    it('should not affect other workspaces when toggling claudeCodeMode', () => {
+      store.addWorkspace({
+        id: 'ws-a',
+        name: 'A',
+        folderPath: 'C:\\a',
+        tabOrder: [],
+        shellType: { type: 'windows' },
+        worktreeMode: false,
+        claudeCodeMode: false,
+      });
+      store.addWorkspace({
+        id: 'ws-b',
+        name: 'B',
+        folderPath: 'C:\\b',
+        tabOrder: [],
+        shellType: { type: 'windows' },
+        worktreeMode: false,
+        claudeCodeMode: false,
+      });
+
+      store.updateWorkspace('ws-a', { claudeCodeMode: true });
+
+      const state = store.getState();
+      expect(state.workspaces.find(w => w.id === 'ws-a')?.claudeCodeMode).toBe(true);
+      expect(state.workspaces.find(w => w.id === 'ws-b')?.claudeCodeMode).toBe(false);
+    });
+  });
+
   describe('subscription', () => {
     it('should notify listeners on state change', () => {
       let notified = false;

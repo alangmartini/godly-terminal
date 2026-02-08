@@ -223,6 +223,82 @@ describe('App Persistence', () => {
     });
   });
 
+  describe('claude code mode persistence', () => {
+    it('should restore claudeCodeMode from layout', async () => {
+      const savedLayout = {
+        workspaces: [
+          {
+            id: 'ws-cc',
+            name: 'CC Workspace',
+            folder_path: 'C:\\Projects',
+            tab_order: [],
+            shell_type: 'windows',
+            claude_code_mode: true,
+          },
+        ],
+        terminals: [],
+        active_workspace_id: 'ws-cc',
+      };
+
+      mockedInvoke.mockResolvedValue(savedLayout);
+
+      const layout = await invoke<typeof savedLayout>('load_layout');
+
+      // Simulate App.init() restore logic
+      layout.workspaces.forEach((w) => {
+        store.addWorkspace({
+          id: w.id,
+          name: w.name,
+          folderPath: w.folder_path,
+          tabOrder: w.tab_order,
+          shellType: convertShellType(w.shell_type),
+          worktreeMode: false,
+          claudeCodeMode: w.claude_code_mode ?? false,
+        });
+      });
+
+      const state = store.getState();
+      expect(state.workspaces[0].claudeCodeMode).toBe(true);
+    });
+
+    it('should default claudeCodeMode to false when missing from old layout', async () => {
+      // Simulate an old layout that doesn't have claude_code_mode field
+      const oldLayout = {
+        workspaces: [
+          {
+            id: 'ws-old',
+            name: 'Old Workspace',
+            folder_path: 'C:\\Old',
+            tab_order: [],
+            shell_type: 'windows',
+            // no claude_code_mode field
+          },
+        ],
+        terminals: [],
+        active_workspace_id: 'ws-old',
+      };
+
+      mockedInvoke.mockResolvedValue(oldLayout);
+
+      const layout = await invoke<typeof oldLayout>('load_layout');
+
+      layout.workspaces.forEach((w) => {
+        store.addWorkspace({
+          id: w.id,
+          name: w.name,
+          folderPath: w.folder_path,
+          tabOrder: w.tab_order,
+          shellType: convertShellType(w.shell_type),
+          worktreeMode: false,
+          claudeCodeMode: (w as any).claude_code_mode ?? false,
+        });
+      });
+
+      const state = store.getState();
+      expect(state.workspaces[0].claudeCodeMode).toBe(false);
+    });
+  });
+
   describe('scrollback persistence', () => {
     it('should load scrollback using the same terminal ID', async () => {
       const terminalId = 'term-with-scrollback-123';
