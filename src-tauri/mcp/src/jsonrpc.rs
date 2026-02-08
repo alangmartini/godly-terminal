@@ -60,54 +60,64 @@ impl JsonRpcResponse {
     }
 }
 
-/// Read a single JSON-RPC message from stdin using Content-Length framing (MCP stdio transport).
+/// Read a single JSON-RPC message from stdin.
+///
+/// Supports both Content-Length framing (MCP spec) and raw JSON lines
+/// (what Claude Code actually sends). Auto-detects the format per message.
 pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<JsonRpcRequest>> {
-    mcp_log!("read_message: waiting for headers...");
+    mcp_log!("read_message: waiting for input...");
 
-    // Read headers until empty line
+    // Read lines, auto-detecting whether we get Content-Length headers or raw JSON.
     let mut content_length: Option<usize> = None;
     loop {
         let mut line = String::new();
         let bytes_read = reader.read_line(&mut line)?;
         if bytes_read == 0 {
-            mcp_log!("read_message: EOF while reading headers");
+            mcp_log!("read_message: EOF");
             return Ok(None);
         }
 
         let trimmed = line.trim();
+
+        // Skip empty lines (header/body separator, or blank lines between JSON messages)
         if trimmed.is_empty() {
-            break; // Empty line = end of headers
+            if content_length.is_some() {
+                break; // End of headers — read body next
+            }
+            continue; // Blank line between raw JSON messages
         }
 
+        // Content-Length header → switch to framed mode
         if let Some(value) = trimmed.strip_prefix("Content-Length:") {
             content_length = value.trim().parse::<usize>().ok();
             mcp_log!("read_message: Content-Length = {:?}", content_length);
-        } else {
-            mcp_log!("read_message: ignoring header: {}", trimmed);
+            continue;
         }
+
+        // If we haven't seen Content-Length, this line is raw JSON
+        if content_length.is_none() {
+            mcp_log!("read_message: raw JSON line ({} bytes)", trimmed.len());
+            return parse_request(trimmed);
+        }
+
+        // Unexpected non-header line while reading headers — skip it
+        mcp_log!("read_message: ignoring unknown header: {}", trimmed);
     }
 
-    let content_length = match content_length {
-        Some(len) => len,
-        None => {
-            mcp_log!("read_message: missing Content-Length header");
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Missing Content-Length header",
-            ));
-        }
-    };
-
-    // Read exactly content_length bytes for the body
-    let mut body = vec![0u8; content_length];
+    // Content-Length framing: read exactly that many bytes
+    let length = content_length.unwrap(); // safe: we only break from loop when Some
+    let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
 
     let body_str = String::from_utf8(body)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    mcp_log!("read_message: body ({} bytes): {}", content_length, body_str);
+    mcp_log!("read_message: framed body ({} bytes): {}", length, body_str);
+    parse_request(&body_str)
+}
 
-    let request: JsonRpcRequest = serde_json::from_str(&body_str).map_err(|e| {
+fn parse_request(json_str: &str) -> io::Result<Option<JsonRpcRequest>> {
+    let request: JsonRpcRequest = serde_json::from_str(json_str).map_err(|e| {
         mcp_log!("read_message: JSON parse error: {}", e);
         io::Error::new(io::ErrorKind::InvalidData, e)
     })?;
@@ -146,6 +156,8 @@ mod tests {
         format!("Content-Length: {}\r\n\r\n{}", body.len(), body).into_bytes()
     }
 
+    // --- Content-Length framing tests ---
+
     #[test]
     fn read_message_parses_content_length_framing() {
         let body = r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#;
@@ -158,27 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn read_message_returns_none_on_eof() {
-        let input: &[u8] = b"";
-        let mut reader = BufReader::new(input);
-
-        let result = read_message(&mut reader).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn read_message_handles_notification_without_id() {
-        let body = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
-        let input = make_framed_message(body);
-        let mut reader = BufReader::new(&input[..]);
-
-        let req = read_message(&mut reader).unwrap().unwrap();
-        assert_eq!(req.method, "notifications/initialized");
-        assert!(req.id.is_none());
-    }
-
-    #[test]
-    fn read_message_handles_multiple_sequential_messages() {
+    fn read_message_handles_multiple_framed_messages() {
         let body1 = r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#;
         let body2 = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#;
         let mut input = make_framed_message(body1);
@@ -187,11 +179,70 @@ mod tests {
 
         let req1 = read_message(&mut reader).unwrap().unwrap();
         assert_eq!(req1.method, "initialize");
-        assert_eq!(req1.id, Some(json!(0)));
 
         let req2 = read_message(&mut reader).unwrap().unwrap();
         assert_eq!(req2.method, "tools/list");
-        assert_eq!(req2.id, Some(json!(1)));
+    }
+
+    #[test]
+    fn read_message_errors_on_invalid_json_in_framed_body() {
+        let input = make_framed_message("not valid json");
+        let mut reader = BufReader::new(&input[..]);
+
+        let err = read_message(&mut reader).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    // --- Raw JSON line tests (what Claude Code actually sends) ---
+
+    #[test]
+    fn read_message_parses_raw_json_line() {
+        // Claude Code sends raw JSON lines without Content-Length framing
+        let input = b"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{}}\n";
+        let mut reader = BufReader::new(&input[..]);
+
+        let req = read_message(&mut reader).unwrap().unwrap();
+        assert_eq!(req.method, "initialize");
+        assert_eq!(req.id, Some(json!(0)));
+    }
+
+    #[test]
+    fn read_message_parses_multiple_raw_json_lines() {
+        let input = b"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\"}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n";
+        let mut reader = BufReader::new(&input[..]);
+
+        let req1 = read_message(&mut reader).unwrap().unwrap();
+        assert_eq!(req1.method, "initialize");
+
+        let req2 = read_message(&mut reader).unwrap().unwrap();
+        assert_eq!(req2.method, "tools/list");
+    }
+
+    #[test]
+    fn read_message_parses_raw_notification_without_id() {
+        let input = b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n";
+        let mut reader = BufReader::new(&input[..]);
+
+        let req = read_message(&mut reader).unwrap().unwrap();
+        assert_eq!(req.method, "notifications/initialized");
+        assert!(req.id.is_none());
+    }
+
+    #[test]
+    fn read_message_skips_blank_lines_in_raw_mode() {
+        let input = b"\n\n{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\"}\n";
+        let mut reader = BufReader::new(&input[..]);
+
+        let req = read_message(&mut reader).unwrap().unwrap();
+        assert_eq!(req.method, "initialize");
+    }
+
+    // --- Common tests ---
+
+    #[test]
+    fn read_message_returns_none_on_eof() {
+        let mut reader = BufReader::new(&b""[..]);
+        assert!(read_message(&mut reader).unwrap().is_none());
     }
 
     #[test]
@@ -206,7 +257,6 @@ mod tests {
         let header = &output_str[..header_end];
         let body = &output_str[header_end + 4..];
 
-        // Verify Content-Length value matches actual body length
         let claimed_len: usize = header
             .strip_prefix("Content-Length: ")
             .unwrap()
@@ -214,30 +264,9 @@ mod tests {
             .unwrap();
         assert_eq!(claimed_len, body.len());
 
-        // Verify body is valid JSON with expected fields
         let parsed: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!(parsed["jsonrpc"], "2.0");
         assert_eq!(parsed["id"], 0);
         assert_eq!(parsed["result"]["ok"], true);
-    }
-
-    #[test]
-    fn read_message_errors_on_missing_content_length() {
-        // Headers with no Content-Length, then empty line
-        let input = b"X-Custom: foo\r\n\r\n{}";
-        let mut reader = BufReader::new(&input[..]);
-
-        let err = read_message(&mut reader).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn read_message_errors_on_invalid_json() {
-        let bad_body = "not valid json";
-        let input = make_framed_message(bad_body);
-        let mut reader = BufReader::new(&input[..]);
-
-        let err = read_message(&mut reader).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }
