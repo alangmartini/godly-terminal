@@ -256,7 +256,7 @@ App.ts           - Root: manages layout, keyboard shortcuts, reconnection logic
 
 ### Modifying godly-mcp
 
-When changing any code in `src-tauri/mcp/`, bump the build number in `src-tauri/mcp/build.rs` so the log shows which binary is running. The log line `=== godly-mcp starting === build=N` makes it easy to confirm whether a rebuilt binary is actually in use.
+When changing any code in `src-tauri/mcp/`, bump the `BUILD` constant in `src-tauri/mcp/src/main.rs` so the log shows which binary is running. The log line `=== godly-mcp starting === build=N` makes it easy to confirm a rebuilt binary is actually in use.
 
 ### Adding auto-save triggers
 
