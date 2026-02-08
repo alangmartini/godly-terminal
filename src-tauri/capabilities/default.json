@@ -7,6 +7,7 @@
     "core:default",
     "core:path:default",
     "store:default",
-    "dialog:default"
+    "dialog:default",
+    "opener:default"
   ]
 }
