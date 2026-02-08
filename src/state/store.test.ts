@@ -3,13 +3,7 @@ import { store, Workspace, Terminal } from './store';
 
 describe('Store', () => {
   beforeEach(() => {
-    // Reset store state before each test
-    store.setState({
-      workspaces: [],
-      terminals: [],
-      activeWorkspaceId: null,
-      activeTerminalId: null,
-    });
+    store.reset();
   });
 
   describe('workspace operations', () => {
@@ -327,6 +321,82 @@ describe('Store', () => {
       const state = store.getState();
       expect(state.workspaces.find(w => w.id === 'ws-a')?.claudeCodeMode).toBe(true);
       expect(state.workspaces.find(w => w.id === 'ws-b')?.claudeCodeMode).toBe(false);
+    });
+  });
+
+  describe('active tab memory across workspace switches', () => {
+    // Bug: switching to another workspace and back resets tab to the first one
+    // instead of restoring the previously active tab
+    const ws1: Workspace = {
+      id: 'ws-1', name: 'WS 1', folderPath: 'C:\\ws1', tabOrder: [],
+      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    };
+    const ws2: Workspace = {
+      id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
+      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    };
+
+    beforeEach(() => {
+      store.addWorkspace(ws1);
+      store.addWorkspace(ws2);
+      store.addTerminal({ id: 't1', workspaceId: 'ws-1', name: 'Tab 1', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't2', workspaceId: 'ws-1', name: 'Tab 2', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't3', workspaceId: 'ws-1', name: 'Tab 3', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't4', workspaceId: 'ws-2', name: 'Tab 4', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't5', workspaceId: 'ws-2', name: 'Tab 5', processName: 'cmd', order: 0 });
+    });
+
+    it('should restore last active tab when switching back to a workspace', () => {
+      store.setActiveWorkspace('ws-1');
+      store.setActiveTerminal('t2');
+
+      store.setActiveWorkspace('ws-2');
+      store.setActiveWorkspace('ws-1');
+
+      expect(store.getState().activeTerminalId).toBe('t2');
+    });
+
+    it('should restore last active tab in the second workspace too', () => {
+      store.setActiveWorkspace('ws-2');
+      store.setActiveTerminal('t5');
+
+      store.setActiveWorkspace('ws-1');
+      store.setActiveWorkspace('ws-2');
+
+      expect(store.getState().activeTerminalId).toBe('t5');
+    });
+
+    it('should track active tab changes within a workspace', () => {
+      store.setActiveWorkspace('ws-1');
+      store.setActiveTerminal('t2');
+      store.setActiveTerminal('t3');
+
+      store.setActiveWorkspace('ws-2');
+      store.setActiveWorkspace('ws-1');
+
+      expect(store.getState().activeTerminalId).toBe('t3');
+    });
+
+    it('should fall back to first tab if remembered tab was removed', () => {
+      store.setActiveWorkspace('ws-1');
+      store.setActiveTerminal('t2');
+
+      store.setActiveWorkspace('ws-2');
+      store.removeTerminal('t2');
+      store.setActiveWorkspace('ws-1');
+
+      expect(store.getState().activeTerminalId).toBe('t1');
+    });
+
+    it('should remember newly added terminal as active when switching back', () => {
+      store.setActiveWorkspace('ws-1');
+      store.addTerminal({ id: 't6', workspaceId: 'ws-1', name: 'Tab 6', processName: 'cmd', order: 0 });
+      // addTerminal sets the new terminal as active
+
+      store.setActiveWorkspace('ws-2');
+      store.setActiveWorkspace('ws-1');
+
+      expect(store.getState().activeTerminalId).toBe('t6');
     });
   });
 
