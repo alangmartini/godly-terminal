@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "protocol", "daemon"]
+members = [".", "protocol", "daemon", "mcp"]
 resolver = "2"
 
 [package]
@@ -33,7 +33,7 @@ tokio = { version = "1.0", features = ["full"] }
 parking_lot = "0.12"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["processthreadsapi", "handleapi", "psapi", "tlhelp32", "winbase", "namedpipeapi", "fileapi", "errhandlingapi"] }
+winapi = { version = "0.3", features = ["processthreadsapi", "handleapi", "psapi", "tlhelp32", "winbase", "namedpipeapi", "fileapi", "errhandlingapi", "winerror"] }
 
 [dev-dependencies]
 tempfile = "3"
