@@ -90,6 +90,7 @@ class TerminalService {
       shellTypeOverride?: ShellType;
       idOverride?: string;
       worktreeName?: string;
+      nameOverride?: string;
     }
   ): Promise<CreateTerminalResult> {
     const result = await invoke<CreateTerminalResult>('create_terminal', {
@@ -100,6 +101,7 @@ class TerminalService {
         : null,
       idOverride: options?.idOverride ?? null,
       worktreeName: options?.worktreeName ?? null,
+      nameOverride: options?.nameOverride ?? null,
     });
     return result;
   }
