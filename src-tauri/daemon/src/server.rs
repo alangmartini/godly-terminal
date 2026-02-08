@@ -408,8 +408,9 @@ async fn handle_request(
             cwd,
             rows,
             cols,
+            env,
         } => {
-            match DaemonSession::new(id.clone(), shell_type.clone(), cwd.clone(), *rows, *cols) {
+            match DaemonSession::new(id.clone(), shell_type.clone(), cwd.clone(), *rows, *cols, env.clone()) {
                 Ok(session) => {
                     let info = session.info();
                     sessions.write().insert(id.clone(), session);
