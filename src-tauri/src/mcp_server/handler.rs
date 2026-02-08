@@ -297,6 +297,72 @@ pub fn handle_mcp_request(
                 Err(e) => McpResponse::Error { message: e },
             }
         }
+
+        McpRequest::Notify {
+            terminal_id,
+            message,
+        } => {
+            #[derive(serde::Serialize, Clone)]
+            struct NotifyPayload {
+                terminal_id: String,
+                message: Option<String>,
+            }
+
+            let _ = app_handle.emit(
+                "mcp-notify",
+                NotifyPayload {
+                    terminal_id: terminal_id.clone(),
+                    message: message.clone(),
+                },
+            );
+
+            McpResponse::Ok
+        }
+
+        McpRequest::SetNotificationEnabled {
+            terminal_id,
+            workspace_id,
+            enabled,
+        } => {
+            if let Some(tid) = terminal_id {
+                app_state.set_notification_enabled_terminal(tid, *enabled);
+            }
+            if let Some(wid) = workspace_id {
+                app_state.set_notification_enabled_workspace(wid, *enabled);
+            }
+
+            #[derive(serde::Serialize, Clone)]
+            struct SettingsPayload {
+                terminal_id: Option<String>,
+                workspace_id: Option<String>,
+                enabled: bool,
+            }
+
+            let _ = app_handle.emit(
+                "notification-settings-changed",
+                SettingsPayload {
+                    terminal_id: terminal_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    enabled: *enabled,
+                },
+            );
+
+            McpResponse::Ok
+        }
+
+        McpRequest::GetNotificationStatus {
+            terminal_id,
+            workspace_id,
+        } => {
+            let (enabled, source) = app_state.is_notification_enabled(
+                terminal_id.as_deref(),
+                workspace_id.as_deref(),
+            );
+            McpResponse::NotificationStatus {
+                enabled,
+                source: source.to_string(),
+            }
+        }
     }
 }
 

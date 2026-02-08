@@ -6,6 +6,8 @@ import {
   type ActionId,
   type ShortcutCategory,
 } from '../state/keybinding-store';
+import { notificationStore } from '../state/notification-store';
+import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
 
 /**
  * Show the settings dialog for customising keyboard shortcuts.
@@ -25,8 +27,104 @@ export function showSettingsDialog(): Promise<void> {
 
     const title = document.createElement('div');
     title.className = 'dialog-title';
-    title.textContent = 'Keyboard Shortcuts';
+    title.textContent = 'Settings';
     header.appendChild(title);
+
+    dialog.appendChild(header);
+
+    // ── Notifications section ───────────────────────────────────
+    const notifSection = document.createElement('div');
+    notifSection.className = 'settings-section';
+
+    const notifTitle = document.createElement('div');
+    notifTitle.className = 'settings-section-title';
+    notifTitle.textContent = 'Notifications';
+    notifSection.appendChild(notifTitle);
+
+    // Enable/disable row
+    const enableRow = document.createElement('div');
+    enableRow.className = 'shortcut-row';
+    const enableLabel = document.createElement('span');
+    enableLabel.className = 'shortcut-label';
+    enableLabel.textContent = 'Sound notifications';
+    enableRow.appendChild(enableLabel);
+    const enableCheckbox = document.createElement('input');
+    enableCheckbox.type = 'checkbox';
+    enableCheckbox.className = 'notification-checkbox';
+    enableCheckbox.checked = notificationStore.getSettings().globalEnabled;
+    enableCheckbox.onchange = () => {
+      notificationStore.setGlobalEnabled(enableCheckbox.checked);
+    };
+    enableRow.appendChild(enableCheckbox);
+    notifSection.appendChild(enableRow);
+
+    // Volume row
+    const volumeRow = document.createElement('div');
+    volumeRow.className = 'shortcut-row';
+    const volumeLabel = document.createElement('span');
+    volumeLabel.className = 'shortcut-label';
+    volumeLabel.textContent = 'Volume';
+    volumeRow.appendChild(volumeLabel);
+    const volumeSlider = document.createElement('input');
+    volumeSlider.type = 'range';
+    volumeSlider.className = 'notification-volume';
+    volumeSlider.min = '0';
+    volumeSlider.max = '100';
+    volumeSlider.value = String(Math.round(notificationStore.getSettings().volume * 100));
+    volumeSlider.oninput = () => {
+      notificationStore.setVolume(parseInt(volumeSlider.value) / 100);
+    };
+    volumeRow.appendChild(volumeSlider);
+    notifSection.appendChild(volumeRow);
+
+    // Sound preset row
+    const presetRow = document.createElement('div');
+    presetRow.className = 'shortcut-row';
+    const presetLabel = document.createElement('span');
+    presetLabel.className = 'shortcut-label';
+    presetLabel.textContent = 'Sound';
+    presetRow.appendChild(presetLabel);
+    const presetSelect = document.createElement('select');
+    presetSelect.className = 'notification-preset';
+    const presets: { value: SoundPreset; label: string }[] = [
+      { value: 'chime', label: 'Chime' },
+      { value: 'bell', label: 'Bell' },
+      { value: 'ping', label: 'Ping' },
+    ];
+    presets.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.value;
+      opt.textContent = p.label;
+      if (p.value === notificationStore.getSettings().soundPreset) opt.selected = true;
+      presetSelect.appendChild(opt);
+    });
+    presetSelect.onchange = () => {
+      notificationStore.setSoundPreset(presetSelect.value as SoundPreset);
+    };
+    presetRow.appendChild(presetSelect);
+
+    const testBtn = document.createElement('button');
+    testBtn.className = 'dialog-btn dialog-btn-secondary';
+    testBtn.textContent = 'Test';
+    testBtn.style.marginLeft = '8px';
+    testBtn.onclick = () => {
+      const s = notificationStore.getSettings();
+      playNotificationSound(s.soundPreset, s.volume);
+    };
+    presetRow.appendChild(testBtn);
+    notifSection.appendChild(presetRow);
+
+    dialog.appendChild(notifSection);
+
+    // ── Keyboard Shortcuts header ────────────────────────────────
+    const kbHeader = document.createElement('div');
+    kbHeader.className = 'settings-header';
+    kbHeader.style.marginTop = '16px';
+
+    const kbTitle = document.createElement('div');
+    kbTitle.className = 'settings-section-title';
+    kbTitle.textContent = 'Keyboard Shortcuts';
+    kbHeader.appendChild(kbTitle);
 
     const resetAllBtn = document.createElement('button');
     resetAllBtn.className = 'dialog-btn dialog-btn-secondary';
@@ -35,9 +133,9 @@ export function showSettingsDialog(): Promise<void> {
       keybindingStore.resetAll();
       renderShortcuts();
     };
-    header.appendChild(resetAllBtn);
+    kbHeader.appendChild(resetAllBtn);
 
-    dialog.appendChild(header);
+    dialog.appendChild(kbHeader);
 
     // ── Shortcuts container ─────────────────────────────────────
     const shortcutsContainer = document.createElement('div');

@@ -1,5 +1,6 @@
 import { store, Workspace, ShellType } from '../state/store';
 import { workspaceService } from '../services/workspace-service';
+import { notificationStore } from '../state/notification-store';
 import { open } from '@tauri-apps/plugin-dialog';
 import { WorktreePanel } from './WorktreePanel';
 
@@ -52,6 +53,7 @@ export class WorkspaceSidebar {
     this.container.appendChild(addBtn);
 
     store.subscribe(() => this.render());
+    notificationStore.subscribe(() => this.render());
   }
 
   setOnTabDrop(handler: (workspaceId: string, terminalId: string) => void) {
@@ -237,6 +239,16 @@ export class WorkspaceSidebar {
     nameContainer.appendChild(ccToggle);
 
     item.appendChild(nameContainer);
+
+    const hasNotification = !isActive && notificationStore.workspaceHasBadge(
+      workspace.id,
+      (wsId) => store.getWorkspaceTerminals(wsId),
+    );
+    if (hasNotification) {
+      const notifBadge = document.createElement('span');
+      notifBadge.className = 'workspace-notification-badge';
+      item.appendChild(notifBadge);
+    }
 
     const badge = document.createElement('span');
     badge.className = 'workspace-badge';
