@@ -182,6 +182,67 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{SessionMetadata, ShellType, Terminal};
+
+    #[test]
+    fn test_custom_tab_name_survives_save_cycle() {
+        // Bug: create_terminal hardcoded name="Terminal", so after autosave
+        // the custom tab name was overwritten. This test verifies that when
+        // a terminal with a custom name exists in backend state,
+        // build_terminal_infos preserves that name for persistence.
+        let state = AppState::new();
+
+        state.add_terminal(Terminal {
+            id: "term-1".to_string(),
+            workspace_id: "ws-1".to_string(),
+            name: "My Custom Tab".to_string(),
+            process_name: "powershell".to_string(),
+        });
+
+        state.add_session_metadata(
+            "term-1".to_string(),
+            SessionMetadata {
+                shell_type: ShellType::Windows,
+                cwd: Some("C:\\Projects".to_string()),
+                worktree_path: None,
+                worktree_branch: None,
+            },
+        );
+
+        let infos = build_terminal_infos(&state);
+
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name, "My Custom Tab");
+
+        // Verify the name survives JSON round-trip (save → load cycle)
+        let json = serde_json::to_string(&infos[0]).unwrap();
+        let restored: TerminalInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.name, "My Custom Tab");
+    }
+
+    #[test]
+    fn test_default_terminal_name_when_no_override() {
+        // When no name_override is provided, create_terminal sets "Terminal".
+        // Verify this default also persists correctly.
+        let state = AppState::new();
+
+        state.add_terminal(Terminal {
+            id: "term-1".to_string(),
+            workspace_id: "ws-1".to_string(),
+            name: "Terminal".to_string(),
+            process_name: "powershell".to_string(),
+        });
+
+        let infos = build_terminal_infos(&state);
+
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name, "Terminal");
+    }
+}
+
 /// Save layout from a background thread context (not a command)
 pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
     let store = app_handle
