@@ -140,6 +140,14 @@ class Store {
     });
   }
 
+  reorderWorkspaces(workspaceIds: string[]) {
+    const workspaceMap = new Map(this.state.workspaces.map(w => [w.id, w]));
+    const reordered = workspaceIds
+      .map(id => workspaceMap.get(id))
+      .filter((w): w is Workspace => w !== undefined);
+    this.setState({ workspaces: reordered });
+  }
+
   reorderTerminals(workspaceId: string, tabOrder: string[]) {
     this.setState({
       terminals: this.state.terminals.map(t => {
