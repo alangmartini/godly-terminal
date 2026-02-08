@@ -110,6 +110,62 @@ describe('Store', () => {
       expect(updated?.shellType).toEqual({ type: 'windows' });
     });
 
+    it('should reorder workspaces by id list', () => {
+      store.addWorkspace({
+        id: 'ws-a', name: 'A', folderPath: 'C:\\a', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false,
+      });
+      store.addWorkspace({
+        id: 'ws-b', name: 'B', folderPath: 'C:\\b', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false,
+      });
+      store.addWorkspace({
+        id: 'ws-c', name: 'C', folderPath: 'C:\\c', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false,
+      });
+
+      store.reorderWorkspaces(['ws-c', 'ws-a', 'ws-b']);
+
+      const state = store.getState();
+      expect(state.workspaces.map(w => w.id)).toEqual(['ws-c', 'ws-a', 'ws-b']);
+    });
+
+    it('should ignore unknown ids in reorderWorkspaces', () => {
+      store.addWorkspace({
+        id: 'ws-a', name: 'A', folderPath: 'C:\\a', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false,
+      });
+      store.addWorkspace({
+        id: 'ws-b', name: 'B', folderPath: 'C:\\b', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false,
+      });
+
+      store.reorderWorkspaces(['ws-b', 'ws-nonexistent', 'ws-a']);
+
+      const state = store.getState();
+      expect(state.workspaces.map(w => w.id)).toEqual(['ws-b', 'ws-a']);
+    });
+
+    it('should preserve workspace data after reorder', () => {
+      store.addWorkspace({
+        id: 'ws-a', name: 'Alpha', folderPath: 'C:\\alpha', tabOrder: ['t1'],
+        shellType: { type: 'wsl', distribution: 'Ubuntu' }, worktreeMode: true,
+      });
+      store.addWorkspace({
+        id: 'ws-b', name: 'Beta', folderPath: 'C:\\beta', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false,
+      });
+
+      store.reorderWorkspaces(['ws-b', 'ws-a']);
+
+      const state = store.getState();
+      const alpha = state.workspaces.find(w => w.id === 'ws-a');
+      expect(alpha?.name).toBe('Alpha');
+      expect(alpha?.folderPath).toBe('C:\\alpha');
+      expect(alpha?.shellType).toEqual({ type: 'wsl', distribution: 'Ubuntu' });
+      expect(alpha?.worktreeMode).toBe(true);
+    });
+
     it('should remove workspace and its terminals', () => {
       const workspace: Workspace = {
         id: 'ws-6',
