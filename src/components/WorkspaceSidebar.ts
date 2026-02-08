@@ -26,9 +26,28 @@ export class WorkspaceSidebar {
     this.worktreePanel = new WorktreePanel();
     this.worktreePanel.mount(this.container);
 
+    const settingsBtn = document.createElement('div');
+    settingsBtn.className = 'settings-btn';
+    const settingsIcon = document.createElement('span');
+    settingsIcon.textContent = '\u2699';
+    const settingsLabel = document.createElement('span');
+    settingsLabel.textContent = 'Settings';
+    settingsBtn.appendChild(settingsIcon);
+    settingsBtn.appendChild(settingsLabel);
+    settingsBtn.onclick = async () => {
+      const { showSettingsDialog } = await import('./SettingsDialog');
+      await showSettingsDialog();
+    };
+    this.container.appendChild(settingsBtn);
+
     const addBtn = document.createElement('div');
     addBtn.className = 'add-workspace-btn';
-    addBtn.innerHTML = '<span>+</span><span>New Workspace</span>';
+    const addIcon = document.createElement('span');
+    addIcon.textContent = '+';
+    const addLabel = document.createElement('span');
+    addLabel.textContent = 'New Workspace';
+    addBtn.appendChild(addIcon);
+    addBtn.appendChild(addLabel);
     addBtn.onclick = () => this.handleAddWorkspace();
     this.container.appendChild(addBtn);
 
