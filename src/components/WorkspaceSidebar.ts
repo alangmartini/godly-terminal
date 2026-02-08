@@ -206,6 +206,16 @@ export class WorkspaceSidebar {
     };
     nameContainer.appendChild(wtToggle);
 
+    const ccToggle = document.createElement('button');
+    ccToggle.className = `claude-code-toggle${workspace.claudeCodeMode ? ' active' : ''}`;
+    ccToggle.textContent = 'CC';
+    ccToggle.title = workspace.claudeCodeMode ? 'Claude Code mode: ON' : 'Claude Code mode: OFF';
+    ccToggle.onclick = async (e) => {
+      e.stopPropagation();
+      await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
+    };
+    nameContainer.appendChild(ccToggle);
+
     item.appendChild(nameContainer);
 
     const badge = document.createElement('span');
@@ -281,6 +291,17 @@ export class WorkspaceSidebar {
       await workspaceService.toggleWorktreeMode(workspace.id, !workspace.worktreeMode);
     };
     menu.appendChild(worktreeItem);
+
+    const claudeCodeItem = document.createElement('div');
+    claudeCodeItem.className = 'context-menu-item';
+    claudeCodeItem.textContent = workspace.claudeCodeMode
+      ? 'Disable Claude Code Mode'
+      : 'Enable Claude Code Mode';
+    claudeCodeItem.onclick = async () => {
+      menu.remove();
+      await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
+    };
+    menu.appendChild(claudeCodeItem);
 
     const separator = document.createElement('div');
     separator.className = 'context-menu-separator';

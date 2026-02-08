@@ -17,6 +17,7 @@ export interface Workspace {
   tabOrder: string[];
   shellType: ShellType;
   worktreeMode: boolean;
+  claudeCodeMode: boolean;
 }
 
 export interface AppState {
