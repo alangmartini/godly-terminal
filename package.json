@@ -5,10 +5,12 @@
   "license": "BUSL-1.1",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:daemon && vite",
+    "dev": "npm run build:daemon && npm run build:mcp && vite",
     "build": "tsc && vite build",
     "build:daemon": "cd src-tauri && cargo build -p godly-daemon",
     "build:daemon:release": "cd src-tauri && cargo build -p godly-daemon --release",
+    "build:mcp": "cd src-tauri && cargo build -p godly-mcp",
+    "build:mcp:release": "cd src-tauri && cargo build -p godly-mcp --release",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",

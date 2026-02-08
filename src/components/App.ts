@@ -230,6 +230,9 @@ export class App {
     // Listen for scrollback save requests from backend (on window close)
     await this.setupScrollbackSaveListener();
 
+    // Listen for MCP-triggered UI events
+    await this.setupMcpEventListeners();
+
     // Load persisted state
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -394,6 +397,69 @@ export class App {
       // Signal completion to backend
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('scrollback_save_complete');
+    });
+  }
+
+  private async setupMcpEventListeners() {
+    const { listen } = await import('@tauri-apps/api/event');
+
+    // MCP: focus a terminal tab
+    await listen<string>('focus-terminal', (event) => {
+      const terminalId = event.payload;
+      console.log('[App] MCP focus-terminal:', terminalId);
+      const terminal = store.getState().terminals.find((t) => t.id === terminalId);
+      if (terminal) {
+        store.setActiveWorkspace(terminal.workspaceId);
+        store.setActiveTerminal(terminalId);
+      }
+    });
+
+    // MCP: switch workspace
+    await listen<string>('switch-workspace', (event) => {
+      const workspaceId = event.payload;
+      console.log('[App] MCP switch-workspace:', workspaceId);
+      store.setActiveWorkspace(workspaceId);
+    });
+
+    // MCP: terminal renamed
+    await listen<{ terminal_id: string; name: string }>('terminal-renamed', (event) => {
+      const { terminal_id, name } = event.payload;
+      console.log('[App] MCP terminal-renamed:', terminal_id, name);
+      store.updateTerminal(terminal_id, { name });
+    });
+
+    // MCP: terminal created by MCP handler
+    await listen<string>('mcp-terminal-created', async (event) => {
+      const terminalId = event.payload;
+      console.log('[App] MCP terminal created:', terminalId);
+      // The terminal was already added to backend state by the MCP handler.
+      // Add it to the frontend store with a default name.
+      // The process-changed event will update the process name later.
+      const state = store.getState();
+      const existing = state.terminals.find((t) => t.id === terminalId);
+      if (!existing) {
+        store.addTerminal({
+          id: terminalId,
+          workspaceId: state.activeWorkspaceId || '',
+          name: 'Terminal',
+          processName: 'powershell',
+          order: 0,
+        });
+      }
+    });
+
+    // MCP: terminal closed by MCP handler
+    await listen<string>('mcp-terminal-closed', (event) => {
+      const terminalId = event.payload;
+      console.log('[App] MCP terminal closed:', terminalId);
+      store.removeTerminal(terminalId);
+    });
+
+    // MCP: terminal moved to different workspace
+    await listen<{ terminal_id: string; workspace_id: string }>('mcp-terminal-moved', (event) => {
+      const { terminal_id, workspace_id } = event.payload;
+      console.log('[App] MCP terminal moved:', terminal_id, 'to', workspace_id);
+      store.moveTerminalToWorkspace(terminal_id, workspace_id);
     });
   }
 }
