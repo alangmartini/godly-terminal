@@ -693,3 +693,120 @@ html, body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
 }
+
+/* Settings button in sidebar */
+.settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-top: 1px solid var(--border-color);
+  margin-top: auto;
+}
+
+.settings-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Settings dialog */
+.settings-dialog {
+  max-width: 500px;
+  min-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.settings-header .dialog-title {
+  margin-bottom: 0;
+}
+
+.settings-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.shortcut-label {
+  flex: 1;
+  font-size: 13px;
+}
+
+.shortcut-binding {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  padding: 4px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.shortcut-binding:hover {
+  border-color: var(--accent);
+}
+
+.shortcut-binding.capturing {
+  border-color: var(--accent);
+  animation: pulse-border 1s ease-in-out infinite;
+  color: var(--text-secondary);
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--accent); }
+  50% { border-color: var(--border-color); }
+}
+
+.shortcut-binding.custom {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.shortcut-reset {
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.shortcut-row:hover .shortcut-reset {
+  opacity: 1;
+}
+
+.shortcut-reset:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
