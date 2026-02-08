@@ -23,23 +23,35 @@ pub fn is_git_repo(folder_path: String) -> bool {
 }
 
 #[tauri::command]
-pub fn list_worktrees(folder_path: String) -> Result<Vec<worktree::WorktreeInfo>, String> {
-    let repo_root = worktree::get_repo_root(&folder_path)?;
-    worktree::list_worktrees(&repo_root)
+pub async fn list_worktrees(folder_path: String) -> Result<Vec<worktree::WorktreeInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        let repo_root = worktree::get_repo_root(&folder_path)?;
+        worktree::list_worktrees(&repo_root)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-pub fn remove_worktree(
+pub async fn remove_worktree(
     folder_path: String,
     worktree_path: String,
     force: Option<bool>,
 ) -> Result<(), String> {
-    let repo_root = worktree::get_repo_root(&folder_path)?;
-    worktree::remove_worktree(&repo_root, &worktree_path, force.unwrap_or(false))
+    tokio::task::spawn_blocking(move || {
+        let repo_root = worktree::get_repo_root(&folder_path)?;
+        worktree::remove_worktree(&repo_root, &worktree_path, force.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-pub fn cleanup_all_worktrees(folder_path: String) -> Result<u32, String> {
-    let repo_root = worktree::get_repo_root(&folder_path)?;
-    worktree::cleanup_all_worktrees(&repo_root)
+pub async fn cleanup_all_worktrees(folder_path: String) -> Result<u32, String> {
+    tokio::task::spawn_blocking(move || {
+        let repo_root = worktree::get_repo_root(&folder_path)?;
+        worktree::cleanup_all_worktrees(&repo_root)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
