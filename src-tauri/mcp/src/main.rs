@@ -14,7 +14,7 @@ use pipe_client::McpPipeClient;
 fn main() {
     log::init();
 
-    mcp_log!("=== godly-mcp starting ===");
+    mcp_log!("=== godly-mcp starting === build={}", env!("GODLY_MCP_BUILD"));
     mcp_log!("PID: {}", std::process::id());
     if let Ok(exe) = std::env::current_exe() {
         mcp_log!("exe: {}", exe.display());
