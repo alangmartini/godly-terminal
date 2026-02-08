@@ -3,6 +3,8 @@ use std::io::{self, BufRead, Write};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::log::mcp_log;
+
 /// JSON-RPC request (MCP uses JSON-RPC 2.0 over stdio with Content-Length framing)
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
@@ -63,38 +65,54 @@ pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<JsonRpcReque
     // Read headers until empty line
     let mut content_length: Option<usize> = None;
 
+    mcp_log!("read_message: waiting for headers...");
+
     loop {
         let mut line = String::new();
         let bytes_read = reader.read_line(&mut line)?;
         if bytes_read == 0 {
+            mcp_log!("read_message: EOF while reading headers");
             return Ok(None); // EOF
         }
 
         let trimmed = line.trim();
+        mcp_log!("read_message: header line ({} bytes): {:?}", bytes_read, trimmed);
+
         if trimmed.is_empty() {
+            mcp_log!("read_message: end of headers");
             break; // End of headers
         }
 
         if let Some(value) = trimmed.strip_prefix("Content-Length:") {
+            let parsed = value.trim().parse::<usize>();
+            mcp_log!("read_message: Content-Length parsed: {:?}", parsed);
             content_length = Some(
-                value
-                    .trim()
-                    .parse()
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                parsed.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
             );
         }
     }
 
     let length = content_length.ok_or_else(|| {
+        mcp_log!("read_message: ERROR — missing Content-Length header");
         io::Error::new(io::ErrorKind::InvalidData, "Missing Content-Length header")
     })?;
+
+    mcp_log!("read_message: reading body ({} bytes)...", length);
 
     // Read body
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
 
+    let body_str = String::from_utf8_lossy(&body);
+    mcp_log!("read_message: raw body: {}", body_str);
+
     let request: JsonRpcRequest =
-        serde_json::from_slice(&body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        serde_json::from_slice(&body).map_err(|e| {
+            mcp_log!("read_message: JSON parse error: {}", e);
+            io::Error::new(io::ErrorKind::InvalidData, e)
+        })?;
+
+    mcp_log!("read_message: parsed OK — method={}, id={:?}", request.method, request.id);
 
     Ok(Some(request))
 }
@@ -104,8 +122,12 @@ pub fn write_message(writer: &mut impl Write, response: &JsonRpcResponse) -> io:
     let body = serde_json::to_string(response)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
+    mcp_log!("write_message: body length={}, content: {}", body.len(), body);
+
     write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
     writer.flush()?;
+
+    mcp_log!("write_message: flushed OK");
 
     Ok(())
 }
