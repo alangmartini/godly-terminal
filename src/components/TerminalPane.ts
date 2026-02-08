@@ -78,6 +78,18 @@ export class TerminalPane {
     (this.container as any).__serializeAddon = this.serializeAddon;
     this.resizeObserver.observe(this.container);
 
+    // Handle Ctrl+Shift+C to copy selection to clipboard
+    this.terminal.attachCustomKeyEventHandler((event) => {
+      if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
+        const selection = this.terminal.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection);
+        }
+        return false;
+      }
+      return true;
+    });
+
     // Handle input
     this.terminal.onData((data) => {
       terminalService.writeToTerminal(this.terminalId, data);
