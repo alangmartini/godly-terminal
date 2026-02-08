@@ -325,6 +325,7 @@ export class App {
             cwdOverride: t.cwd ?? undefined,
             shellTypeOverride: shellType,
             idOverride: t.id,
+            nameOverride: tabName,
           });
 
           console.log('[App] Terminal created with ID:', result.id, '(requested:', t.id, ')');
