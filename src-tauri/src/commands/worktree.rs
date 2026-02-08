@@ -18,6 +18,18 @@ pub fn toggle_worktree_mode(
 }
 
 #[tauri::command]
+pub fn toggle_claude_code_mode(
+    workspace_id: String,
+    enabled: bool,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    state.update_workspace_claude_code_mode(&workspace_id, enabled);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
 pub fn is_git_repo(folder_path: String) -> bool {
     worktree::is_git_repo(&folder_path)
 }
