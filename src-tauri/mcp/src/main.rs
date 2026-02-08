@@ -37,6 +37,11 @@ fn main() {
             }
         };
 
+        // JSON-RPC notifications have no id — servers MUST NOT respond to them.
+        if request.id.is_none() {
+            continue;
+        }
+
         let response = handle_request(&request, &mut client, &session_id);
 
         if let Err(e) = write_message(&mut stdout, &response) {
@@ -66,13 +71,6 @@ fn handle_request(
                     }
                 }),
             )
-        }
-
-        "notifications/initialized" => {
-            // No response needed for notifications, but since our loop always
-            // writes a response, return an empty success. MCP clients should
-            // ignore responses to notifications.
-            JsonRpcResponse::success(request.id.clone(), json!({}))
         }
 
         "tools/list" => {
