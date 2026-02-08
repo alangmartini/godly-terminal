@@ -166,6 +166,60 @@ pub fn list_tools() -> Value {
                     },
                     "required": ["terminal_id", "data"]
                 }
+            },
+            {
+                "name": "notify",
+                "description": "Send a sound notification to alert the user. Plays a chime and shows a badge on the terminal tab if the user isn't looking at it.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "Optional message to include with the notification"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "set_notification_enabled",
+                "description": "Enable or disable sound notifications for a specific terminal or workspace",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to configure (optional)"
+                        },
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to configure (optional)"
+                        },
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Whether notifications should be enabled"
+                        }
+                    },
+                    "required": ["enabled"]
+                }
+            },
+            {
+                "name": "get_notification_status",
+                "description": "Check whether notifications are currently enabled for a terminal or workspace",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to check (optional)"
+                        },
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to check (optional)"
+                        }
+                    },
+                    "required": []
+                }
             }
         ]
     })
@@ -292,6 +346,40 @@ pub fn call_tool(
             McpRequest::WriteToTerminal { terminal_id, data }
         }
 
+        "notify" => {
+            let sid = session_id
+                .as_ref()
+                .ok_or("GODLY_SESSION_ID not set. Is this running inside Godly Terminal?")?;
+            let message = args.get("message").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::Notify {
+                terminal_id: sid.clone(),
+                message,
+            }
+        }
+
+        "set_notification_enabled" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let enabled = args
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .ok_or("Missing enabled")?;
+            McpRequest::SetNotificationEnabled {
+                terminal_id,
+                workspace_id,
+                enabled,
+            }
+        }
+
+        "get_notification_status" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::GetNotificationStatus {
+                terminal_id,
+                workspace_id,
+            }
+        }
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -330,5 +418,9 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             })).collect::<Vec<_>>()
         })),
         McpResponse::Created { id } => Ok(json!({ "success": true, "id": id })),
+        McpResponse::NotificationStatus { enabled, source } => Ok(json!({
+            "enabled": enabled,
+            "source": source,
+        })),
     }
 }

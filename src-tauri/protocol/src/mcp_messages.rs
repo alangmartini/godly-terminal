@@ -36,6 +36,26 @@ pub enum McpRequest {
 
     // Terminal I/O
     WriteToTerminal { terminal_id: String, data: String },
+
+    // Notifications
+    Notify {
+        terminal_id: String,
+        #[serde(default)]
+        message: Option<String>,
+    },
+    SetNotificationEnabled {
+        #[serde(default)]
+        terminal_id: Option<String>,
+        #[serde(default)]
+        workspace_id: Option<String>,
+        enabled: bool,
+    },
+    GetNotificationStatus {
+        #[serde(default)]
+        terminal_id: Option<String>,
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
 }
 
 /// Terminal info returned by MCP queries
@@ -66,4 +86,5 @@ pub enum McpResponse {
     TerminalInfo { terminal: McpTerminalInfo },
     WorkspaceList { workspaces: Vec<McpWorkspaceInfo> },
     Created { id: String },
+    NotificationStatus { enabled: bool, source: String },
 }

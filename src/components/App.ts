@@ -2,6 +2,8 @@ import { store, ShellType } from '../state/store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { keybindingStore, formatChord } from '../state/keybinding-store';
+import { notificationStore } from '../state/notification-store';
+import { playNotificationSound } from '../services/notification-sound';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar } from './TabBar';
 import { TerminalPane } from './TerminalPane';
@@ -105,6 +107,11 @@ export class App {
         id === state.activeTerminalId;
       pane.setActive(isVisible);
     });
+
+    // Clear notification badge for the now-active terminal
+    if (state.activeTerminalId) {
+      notificationStore.clearBadge(state.activeTerminalId);
+    }
 
     // Show empty state if no terminals
     const workspaceTerminals = store.getWorkspaceTerminals(
@@ -504,6 +511,26 @@ export class App {
       const { terminal_id, workspace_id } = event.payload;
       console.log('[App] MCP terminal moved:', terminal_id, 'to', workspace_id);
       store.moveTerminalToWorkspace(terminal_id, workspace_id);
+    });
+
+    // MCP: notification triggered
+    await listen<{ terminal_id: string; message: string | null }>('mcp-notify', (event) => {
+      const { terminal_id } = event.payload;
+      const settings = notificationStore.getSettings();
+      if (!settings.globalEnabled) return;
+
+      const state = store.getState();
+      const isActive = state.activeTerminalId === terminal_id;
+
+      const played = notificationStore.recordNotify(terminal_id);
+      if (played) {
+        playNotificationSound(settings.soundPreset, settings.volume);
+      }
+
+      // If already the active terminal, clear badge immediately
+      if (isActive) {
+        notificationStore.clearBadge(terminal_id);
+      }
     });
   }
 }

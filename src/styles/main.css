@@ -810,3 +810,57 @@ html, body {
   color: var(--text-primary);
   border-color: var(--text-secondary);
 }
+
+/* Notification badges */
+.tab-notification-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 6px;
+  flex-shrink: 0;
+  animation: notification-pulse 1.5s ease-in-out infinite;
+}
+
+.workspace-notification-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: notification-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes notification-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Notification settings controls */
+.notification-checkbox {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.notification-volume {
+  width: 120px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.notification-preset {
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.notification-preset:focus {
+  outline: none;
+  border-color: var(--accent);
+}
