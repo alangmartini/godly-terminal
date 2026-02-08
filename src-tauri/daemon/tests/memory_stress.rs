@@ -236,6 +236,7 @@ mod windows_tests {
                     cwd: None,
                     rows: 24,
                     cols: 80,
+                    env: None,
                 },
             );
             assert!(
@@ -272,6 +273,7 @@ mod windows_tests {
                     cwd: None,
                     rows: 24,
                     cols: 80,
+                    env: None,
                 },
             );
             assert!(
@@ -391,6 +393,7 @@ mod windows_tests {
                     cwd: None,
                     rows: 24,
                     cols: 80,
+                    env: None,
                 },
             );
             assert!(matches!(resp, Response::SessionCreated { .. }));
@@ -513,6 +516,7 @@ mod windows_tests {
                 cwd: None,
                 rows: 24,
                 cols: 80,
+                env: None,
             },
         );
         assert!(matches!(resp, Response::SessionCreated { .. }));
