@@ -79,9 +79,17 @@ html, body {
   background: var(--bg-active);
 }
 
+.workspace-item.dragging {
+  opacity: 0.5;
+}
+
 .workspace-item.drag-over {
   background: var(--accent);
   color: white;
+}
+
+.workspace-item.drag-over-workspace {
+  border-top: 2px solid var(--accent);
 }
 
 .workspace-name-container {
