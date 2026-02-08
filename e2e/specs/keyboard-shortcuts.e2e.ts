@@ -183,4 +183,107 @@ describe('Keyboard Shortcuts', () => {
       expect(error).toBeNull();
     });
   });
+
+  // Bug: keyboard shortcuts stopped working when text was selected in the
+  // terminal because xterm.js consumed the keydown event as terminal input.
+  describe('Shortcuts with text selected in terminal', () => {
+    /**
+     * Select all text in the active terminal via xterm.js API.
+     * Uses the __xterm reference exposed on the .terminal-pane element.
+     */
+    async function selectAllTerminalText(): Promise<void> {
+      await browser.execute(() => {
+        const pane = document.querySelector('.terminal-pane.active') as any;
+        if (pane?.__xterm) {
+          pane.__xterm.selectAll();
+        }
+      });
+      await browser.pause(300);
+    }
+
+    /** Verify that xterm.js has an active selection. */
+    async function hasTerminalSelection(): Promise<boolean> {
+      return browser.execute(() => {
+        const pane = document.querySelector('.terminal-pane.active') as any;
+        if (!pane?.__xterm) return false;
+        return pane.__xterm.getSelection().length > 0;
+      });
+    }
+
+    it('Ctrl+T should create a new tab when text is selected', async () => {
+      await selectAllTerminalText();
+      expect(await hasTerminalSelection()).toBe(true);
+
+      const countBefore = await getElementCount('.tab');
+      await browser.keys(['Control', 't']);
+      await browser.waitUntil(
+        async () => (await getElementCount('.tab')) > countBefore,
+        { timeout: 15000, timeoutMsg: 'Ctrl+T with selection did not create a new tab' }
+      );
+
+      const countAfter = await getElementCount('.tab');
+      expect(countAfter).toBe(countBefore + 1);
+    });
+
+    it('Ctrl+Tab should switch tabs when text is selected', async () => {
+      // Ensure at least 2 tabs
+      const count = await getElementCount('.tab');
+      if (count < 2) {
+        await browser.keys(['Control', 't']);
+        await browser.waitUntil(
+          async () => (await getElementCount('.tab')) >= 2,
+          { timeout: 15000 }
+        );
+      }
+
+      // Activate first tab
+      await browser.execute(() => {
+        const firstTab = document.querySelector('.tab') as HTMLElement;
+        if (firstTab) firstTab.click();
+      });
+      await browser.pause(500);
+
+      await selectAllTerminalText();
+      expect(await hasTerminalSelection()).toBe(true);
+
+      const firstId = await browser.execute(() => {
+        return document.querySelector('.tab.active')?.getAttribute('data-terminal-id');
+      });
+
+      await browser.keys(['Control', 'Tab']);
+      await browser.pause(500);
+
+      const nextId = await browser.execute(() => {
+        return document.querySelector('.tab.active')?.getAttribute('data-terminal-id');
+      });
+
+      expect(nextId).not.toBe(firstId);
+    });
+
+    it('Ctrl+W should close the active tab when text is selected', async () => {
+      // Ensure at least 2 tabs so we don't close the last one
+      const countBefore = await getElementCount('.tab');
+      if (countBefore < 2) {
+        await browser.keys(['Control', 't']);
+        await browser.waitUntil(
+          async () => (await getElementCount('.tab')) >= 2,
+          { timeout: 15000 }
+        );
+        await browser.pause(1000);
+      }
+
+      await selectAllTerminalText();
+      expect(await hasTerminalSelection()).toBe(true);
+
+      const countBeforeClose = await getElementCount('.tab');
+      await browser.keys(['Control', 'w']);
+      await browser.waitUntil(
+        async () => (await getElementCount('.tab')) < countBeforeClose,
+        { timeout: 10000, timeoutMsg: 'Ctrl+W with selection did not close the tab' }
+      );
+
+      const countAfter = await getElementCount('.tab');
+      expect(countAfter).toBe(countBeforeClose - 1);
+    });
+  });
 });
