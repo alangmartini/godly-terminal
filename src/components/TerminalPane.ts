@@ -4,7 +4,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { terminalService } from '../services/terminal-service';
-import { isAppShortcut } from './keyboard';
+import { isAppShortcut, isTerminalControlKey } from './keyboard';
+import { keybindingStore } from '../state/keybinding-store';
 
 export class TerminalPane {
   private terminal: Terminal;
@@ -81,17 +82,35 @@ export class TerminalPane {
 
     // Block app-level shortcuts from being consumed by xterm.js so they
     // bubble to the document-level handler in App.ts. Also handle
-    // Ctrl+Shift+C copy inline since we need access to the terminal.
+    // copy/paste inline since we need access to the terminal.
     this.terminal.attachCustomKeyEventHandler((event) => {
-      if (event.ctrlKey && event.shiftKey && event.key === 'C' && event.type === 'keydown') {
+      const action = keybindingStore.matchAction(event);
+
+      // Copy: copy selected text to clipboard
+      if (action === 'clipboard.copy') {
         const selection = this.terminal.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection);
         }
         return false;
       }
+      // Paste: paste from clipboard into terminal
+      if (action === 'clipboard.paste') {
+        navigator.clipboard.readText().then((text) => {
+          if (text) {
+            terminalService.writeToTerminal(this.terminalId, text);
+          }
+        });
+        return false;
+      }
       if (isAppShortcut(event)) {
         return false;
+      }
+      // Prevent WebView2 from intercepting terminal control keys as browser
+      // clipboard/undo shortcuts. Without this, these keys never reach the
+      // PTY as control characters (SIGINT, SIGTSTP, etc.) on Windows.
+      if (isTerminalControlKey(event)) {
+        event.preventDefault();
       }
       return true;
     });

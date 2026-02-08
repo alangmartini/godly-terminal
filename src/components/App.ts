@@ -1,6 +1,7 @@
 import { store, ShellType } from '../state/store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
+import { keybindingStore, formatChord } from '../state/keybinding-store';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar } from './TabBar';
 import { TerminalPane } from './TerminalPane';
@@ -118,10 +119,14 @@ export class App {
     if (isEmpty && !emptyState) {
       emptyState = document.createElement('div');
       emptyState.className = 'empty-state';
-      emptyState.innerHTML = `
-        <div class="empty-state-icon">></div>
-        <div class="empty-state-text">Press Ctrl+T to create a new terminal</div>
-      `;
+      const icon = document.createElement('div');
+      icon.className = 'empty-state-icon';
+      icon.textContent = '>';
+      const text = document.createElement('div');
+      text.className = 'empty-state-text';
+      text.textContent = `Press ${formatChord(keybindingStore.getBinding('tabs.newTerminal'))} to create a new terminal`;
+      emptyState.appendChild(icon);
+      emptyState.appendChild(text);
       this.terminalContainer.appendChild(emptyState);
     } else if (!isEmpty && emptyState) {
       emptyState.remove();
@@ -138,6 +143,8 @@ export class App {
   private setupKeyboardShortcuts() {
     document.addEventListener('keydown', async (e) => {
       const state = store.getState();
+
+      // ── Hardcoded shortcuts (not customisable) ───────────────────
 
       // Ctrl+Shift+S: Manual save (for debugging)
       if (e.ctrlKey && e.shiftKey && e.key === 'S') {
@@ -167,63 +174,91 @@ export class App {
         return;
       }
 
-      // Ctrl+T: New terminal
-      if (e.ctrlKey && e.key === 't') {
+      // Ctrl+, : Open settings dialog
+      if (e.ctrlKey && !e.shiftKey && e.key === ',') {
         e.preventDefault();
-        if (state.activeWorkspaceId) {
-          const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
-          let worktreeName: string | undefined;
-
-          if (workspace?.worktreeMode) {
-            const { showWorktreeNamePrompt } = await import('./dialogs');
-            const name = await showWorktreeNamePrompt();
-            if (name === null) return; // user cancelled
-            worktreeName = name || undefined;
-          }
-
-          const result = await terminalService.createTerminal(
-            state.activeWorkspaceId,
-            { worktreeName }
-          );
-          store.addTerminal({
-            id: result.id,
-            workspaceId: state.activeWorkspaceId,
-            name: result.worktree_branch ?? 'Terminal',
-            processName: 'powershell',
-            order: 0,
-          });
-
-          if (workspace?.claudeCodeMode) {
-            setTimeout(() => {
-              terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
-            }, 500);
-          }
-        }
+        const { showSettingsDialog } = await import('./SettingsDialog');
+        await showSettingsDialog();
+        return;
       }
 
-      // Ctrl+W: Close terminal
-      if (e.ctrlKey && e.key === 'w') {
-        e.preventDefault();
-        if (state.activeTerminalId) {
-          await terminalService.closeTerminal(state.activeTerminalId);
-          store.removeTerminal(state.activeTerminalId);
-        }
-      }
+      // ── Dynamic shortcuts (customisable via settings) ────────────
 
-      // Ctrl+Tab: Next terminal
-      if (e.ctrlKey && e.key === 'Tab') {
-        e.preventDefault();
-        const terminals = store.getWorkspaceTerminals(
-          state.activeWorkspaceId || ''
-        );
-        if (terminals.length > 1 && state.activeTerminalId) {
-          const currentIndex = terminals.findIndex(
-            (t) => t.id === state.activeTerminalId
+      const action = keybindingStore.matchAction(e);
+      if (!action) return;
+
+      switch (action) {
+        case 'tabs.newTerminal': {
+          e.preventDefault();
+          if (state.activeWorkspaceId) {
+            const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+            let worktreeName: string | undefined;
+
+            if (workspace?.worktreeMode) {
+              const { showWorktreeNamePrompt } = await import('./dialogs');
+              const name = await showWorktreeNamePrompt();
+              if (name === null) return;
+              worktreeName = name || undefined;
+            }
+
+            const result = await terminalService.createTerminal(
+              state.activeWorkspaceId,
+              { worktreeName }
+            );
+            store.addTerminal({
+              id: result.id,
+              workspaceId: state.activeWorkspaceId,
+              name: result.worktree_branch ?? 'Terminal',
+              processName: 'powershell',
+              order: 0,
+            });
+
+            if (workspace?.claudeCodeMode) {
+              setTimeout(() => {
+                terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
+              }, 500);
+            }
+          }
+          break;
+        }
+
+        case 'tabs.closeTerminal': {
+          e.preventDefault();
+          if (state.activeTerminalId) {
+            await terminalService.closeTerminal(state.activeTerminalId);
+            store.removeTerminal(state.activeTerminalId);
+          }
+          break;
+        }
+
+        case 'tabs.nextTab': {
+          e.preventDefault();
+          const terminals = store.getWorkspaceTerminals(
+            state.activeWorkspaceId || ''
           );
-          const nextIndex = e.shiftKey
-            ? (currentIndex - 1 + terminals.length) % terminals.length
-            : (currentIndex + 1) % terminals.length;
-          store.setActiveTerminal(terminals[nextIndex].id);
+          if (terminals.length > 1 && state.activeTerminalId) {
+            const currentIndex = terminals.findIndex(
+              (t) => t.id === state.activeTerminalId
+            );
+            const nextIndex = (currentIndex + 1) % terminals.length;
+            store.setActiveTerminal(terminals[nextIndex].id);
+          }
+          break;
+        }
+
+        case 'tabs.previousTab': {
+          e.preventDefault();
+          const terminals = store.getWorkspaceTerminals(
+            state.activeWorkspaceId || ''
+          );
+          if (terminals.length > 1 && state.activeTerminalId) {
+            const currentIndex = terminals.findIndex(
+              (t) => t.id === state.activeTerminalId
+            );
+            const nextIndex = (currentIndex - 1 + terminals.length) % terminals.length;
+            store.setActiveTerminal(terminals[nextIndex].id);
+          }
+          break;
         }
       }
     });
