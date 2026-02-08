@@ -239,6 +239,16 @@ App.ts           - Root: manages layout, keyboard shortcuts, reconnection logic
 - `Windows` - PowerShell with `-NoLogo`
 - `Wsl { distribution }` - WSL with optional distro selection
 
+## Terminal Tab Naming (Godly Terminal)
+
+When running inside Godly Terminal, use the `godly-terminal` MCP tools to keep the terminal tab name in sync with your current task. This gives the user instant visibility into what each agent is doing.
+
+- **On task start**: Rename the tab to reflect the task (e.g., `fix: scrollback bug`, `feat: search UI`, `test: ring buffer`).
+- **On context switch**: Update the tab name when switching to a different task or phase (e.g., `build: verify`, `PR: create`).
+- **Format**: Use short conventional-commit-style prefixes: `fix:`, `feat:`, `refactor:`, `test:`, `chore:`, `debug:`, `build:`, `PR:`.
+- **How**: Call `mcp__godly-terminal__get_current_terminal` to get the terminal ID, then `mcp__godly-terminal__rename_terminal` to set the name.
+- **When idle**: Reset to a neutral name like `Claude` or the workspace name.
+
 ## Key Patterns
 
 ### Adding a new Tauri command
