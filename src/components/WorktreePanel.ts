@@ -6,8 +6,12 @@ export class WorktreePanel {
   private listContainer: HTMLElement;
   private headerToggle: HTMLElement;
   private cleanAllBtn: HTMLElement;
+  private refreshBtn: HTMLElement;
   private collapsed = false;
   private worktrees: WorktreeInfo[] = [];
+  private deleting = new Set<string>();
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshing = false;
 
   constructor() {
     this.container = document.createElement('div');
@@ -22,13 +26,27 @@ export class WorktreePanel {
     this.headerToggle.onclick = () => this.toggleCollapse();
     header.appendChild(this.headerToggle);
 
+    const headerActions = document.createElement('div');
+    headerActions.className = 'worktree-header-actions';
+
+    this.refreshBtn = document.createElement('button');
+    this.refreshBtn.className = 'worktree-refresh-btn';
+    this.refreshBtn.textContent = '\u21BB';
+    this.refreshBtn.title = 'Refresh worktree list';
+    this.refreshBtn.onclick = (e) => {
+      e.stopPropagation();
+      this.manualRefresh();
+    };
+    headerActions.appendChild(this.refreshBtn);
+
     this.cleanAllBtn = document.createElement('button');
     this.cleanAllBtn.className = 'worktree-clean-all';
     this.cleanAllBtn.textContent = 'Clean All';
     this.cleanAllBtn.title = 'Remove all godly-managed worktrees';
     this.cleanAllBtn.onclick = () => this.handleCleanAll();
-    header.appendChild(this.cleanAllBtn);
+    headerActions.appendChild(this.cleanAllBtn);
 
+    header.appendChild(headerActions);
     this.container.appendChild(header);
 
     this.listContainer = document.createElement('div');
@@ -46,23 +64,47 @@ export class WorktreePanel {
 
     if (activeWorkspace?.worktreeMode) {
       this.container.style.display = '';
-      this.refresh(activeWorkspace.folderPath);
+      this.debouncedRefresh(activeWorkspace.folderPath);
     } else {
       this.container.style.display = 'none';
     }
   }
 
+  private debouncedRefresh(folderPath: string) {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      this.refresh(folderPath);
+    }, 500);
+  }
+
+  private async manualRefresh() {
+    if (this.refreshing) return;
+    const state = store.getState();
+    const activeWorkspace = state.workspaces.find(
+      w => w.id === state.activeWorkspaceId
+    );
+    if (!activeWorkspace) return;
+    await this.refresh(activeWorkspace.folderPath);
+  }
+
   async refresh(folderPath: string) {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    this.refreshBtn.classList.add('spinning');
     try {
       this.worktrees = await workspaceService.listWorktrees(folderPath);
     } catch {
       this.worktrees = [];
     }
+    this.refreshing = false;
+    this.refreshBtn.classList.remove('spinning');
     this.render();
   }
 
   private render() {
-    // Clear children safely
     while (this.listContainer.firstChild) {
       this.listContainer.removeChild(this.listContainer.firstChild);
     }
@@ -70,11 +112,13 @@ export class WorktreePanel {
     if (this.collapsed) {
       this.listContainer.style.display = 'none';
       this.cleanAllBtn.style.display = 'none';
+      this.refreshBtn.style.display = 'none';
       return;
     }
 
     this.listContainer.style.display = '';
     this.cleanAllBtn.style.display = '';
+    this.refreshBtn.style.display = '';
 
     const nonMain = this.worktrees.filter(wt => !wt.is_main);
     if (nonMain.length === 0) {
@@ -106,13 +150,22 @@ export class WorktreePanel {
 
       item.appendChild(info);
 
+      const isDeleting = this.deleting.has(wt.path);
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'worktree-item-delete';
-      deleteBtn.textContent = '\u00d7';
-      deleteBtn.title = 'Remove this worktree';
+      if (isDeleting) {
+        deleteBtn.classList.add('deleting');
+        deleteBtn.textContent = '\u23F3';
+        deleteBtn.disabled = true;
+      } else {
+        deleteBtn.textContent = '\u00d7';
+      }
+      deleteBtn.title = isDeleting ? 'Removing...' : 'Remove this worktree';
       deleteBtn.onclick = async (e) => {
         e.stopPropagation();
-        await this.handleRemove(wt.path);
+        if (!isDeleting) {
+          await this.handleRemove(wt.path);
+        }
       };
       item.appendChild(deleteBtn);
 
@@ -133,15 +186,20 @@ export class WorktreePanel {
     );
     if (!activeWorkspace) return;
 
+    this.deleting.add(worktreePath);
+    this.render();
+
     try {
       await workspaceService.removeWorktree(
         activeWorkspace.folderPath,
         worktreePath,
         true
       );
-      await this.refresh(activeWorkspace.folderPath);
     } catch (e) {
       console.error('Failed to remove worktree:', e);
+    } finally {
+      this.deleting.delete(worktreePath);
+      await this.refresh(activeWorkspace.folderPath);
     }
   }
 
