@@ -3,6 +3,11 @@ import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { notificationStore } from '../state/notification-store';
 
+export function getDisplayName(terminal: Terminal): string {
+  if (terminal.userRenamed) return terminal.name;
+  return terminal.oscTitle || terminal.name || terminal.processName || 'Terminal';
+}
+
 export class TabBar {
   private container: HTMLElement;
   private tabsContainer: HTMLElement;
@@ -86,8 +91,7 @@ export class TabBar {
     tab.dataset.terminalId = terminal.id;
     tab.draggable = true;
 
-    // Display name priority: user rename > OSC title sequence > process name
-    const displayName = terminal.name || terminal.oscTitle || terminal.processName || 'Terminal';
+    const displayName = getDisplayName(terminal);
 
     const title = document.createElement('span');
     title.className = 'tab-title';
@@ -183,6 +187,7 @@ export class TabBar {
       const newName = input.value.trim();
       if (newName) {
         await terminalService.renameTerminal(terminal.id, newName);
+        store.updateTerminal(terminal.id, { userRenamed: true });
       }
       this.render();
     };

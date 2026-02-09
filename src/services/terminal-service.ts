@@ -67,9 +67,7 @@ class TerminalService {
       'process-changed',
       (event) => {
         const { terminal_id, process_name } = event.payload;
-        // Clear oscTitle when the underlying process changes so stale titles
-        // don't persist (e.g. after exiting Claude Code back to PowerShell)
-        store.updateTerminal(terminal_id, { processName: process_name, oscTitle: '' });
+        store.updateTerminal(terminal_id, { processName: process_name, oscTitle: undefined });
       }
     );
 
