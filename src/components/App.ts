@@ -4,6 +4,7 @@ import { workspaceService } from '../services/workspace-service';
 import { keybindingStore, formatChord } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound } from '../services/notification-sound';
+import { quotePath } from '../utils/quote-path';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar } from './TabBar';
 import { TerminalPane } from './TerminalPane';
@@ -278,6 +279,9 @@ export class App {
     // Listen for scrollback save requests from backend (on window close)
     await this.setupScrollbackSaveListener();
 
+    // Listen for file drag-drop events (paste file paths into terminal)
+    await this.setupDragDropListener();
+
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
 
@@ -448,6 +452,25 @@ export class App {
       // Signal completion to backend
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('scrollback_save_complete');
+    });
+  }
+
+  private async setupDragDropListener() {
+    const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+    await getCurrentWebview().onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type === 'enter') {
+        this.terminalContainer.classList.add('drag-file-over');
+      } else if (payload.type === 'leave') {
+        this.terminalContainer.classList.remove('drag-file-over');
+      } else if (payload.type === 'drop') {
+        this.terminalContainer.classList.remove('drag-file-over');
+        const state = store.getState();
+        if (state.activeTerminalId && payload.paths.length > 0) {
+          const text = payload.paths.map(quotePath).join(' ');
+          terminalService.writeToTerminal(state.activeTerminalId, text);
+        }
+      }
     });
   }
 
