@@ -514,8 +514,8 @@ export class App {
     });
 
     // MCP: notification triggered
-    await listen<{ terminal_id: string; message: string | null }>('mcp-notify', (event) => {
-      const { terminal_id } = event.payload;
+    await listen<{ terminal_id: string; message: string | null }>('mcp-notify', async (event) => {
+      const { terminal_id, message } = event.payload;
       const settings = notificationStore.getSettings();
       if (!settings.globalEnabled) return;
 
@@ -525,6 +525,33 @@ export class App {
       const played = notificationStore.recordNotify(terminal_id);
       if (played) {
         playNotificationSound(settings.soundPreset, settings.volume);
+
+        // Flash taskbar icon orange
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        getCurrentWindow().requestUserAttention(2); // Informational = brief orange flash
+
+        // Show Windows native notification if window is not focused
+        if (!document.hasFocus()) {
+          try {
+            const { isPermissionGranted, requestPermission, sendNotification } =
+              await import('@tauri-apps/plugin-notification');
+            let permitted = await isPermissionGranted();
+            if (!permitted) {
+              const result = await requestPermission();
+              permitted = result === 'granted';
+            }
+            if (permitted) {
+              const terminal = state.terminals.find(t => t.id === terminal_id);
+              const title = terminal?.name || 'Godly Terminal';
+              sendNotification({
+                title,
+                body: message || 'New notification',
+              });
+            }
+          } catch (e) {
+            console.warn('[App] Failed to send native notification:', e);
+          }
+        }
       }
 
       // If already the active terminal, clear badge immediately

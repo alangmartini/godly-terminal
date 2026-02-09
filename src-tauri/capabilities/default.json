@@ -6,8 +6,10 @@
   "permissions": [
     "core:default",
     "core:path:default",
+    "core:window:allow-request-user-attention",
     "store:default",
     "dialog:default",
-    "opener:default"
+    "opener:default",
+    "notification:default"
   ]
 }
