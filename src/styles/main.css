@@ -262,6 +262,17 @@ html, body {
   overflow: hidden;
 }
 
+.terminal-container.drag-file-over::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: rgba(0, 120, 212, 0.08);
+  pointer-events: none;
+  z-index: 10;
+}
+
 .terminal-pane {
   position: absolute;
   top: 0;
