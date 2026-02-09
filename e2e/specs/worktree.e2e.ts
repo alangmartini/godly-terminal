@@ -191,3 +191,184 @@ describe('Worktree Mode', () => {
     await toggleWorktreeMode(workspaceId, false);
   });
 });
+
+describe('Clean All Worktrees', function () {
+  let workspaceId: string;
+
+  before(async function () {
+    await waitForAppReady();
+    await waitForTerminalPane();
+
+    workspaceId = (await getActiveWorkspaceId())!;
+    expect(workspaceId).toBeTruthy();
+
+    const folderPath = await getActiveWorkspaceFolderPath();
+    const isGitRepo = folderPath
+      ? await invokeCommand<boolean>('is_git_repo', { folderPath })
+      : false;
+
+    // Skip entire suite if not a git repo
+    if (!isGitRepo) {
+      this.skip();
+      return;
+    }
+
+    // Enable worktree mode for the tests
+    await toggleWorktreeMode(workspaceId, true);
+    await browser.pause(500);
+  });
+
+  after(async () => {
+    // Clean up: disable worktree mode
+    await toggleWorktreeMode(workspaceId, false);
+  });
+
+  it('should show loading state when Clean All is clicked', async () => {
+    // Create a terminal to ensure there is at least one worktree to clean
+    await createNewTerminalTab();
+    await browser.pause(3000);
+
+    // Wait for Clean All button to appear (worktree list must refresh)
+    await browser.waitUntil(
+      async () => elementExists('.worktree-clean-all'),
+      { timeout: 10000, timeoutMsg: 'Clean All button did not appear' }
+    );
+
+    await clickElement('.worktree-clean-all');
+
+    // The button should get the .cleaning class
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const btn = document.querySelector('.worktree-clean-all');
+          return btn ? btn.classList.contains('cleaning') : false;
+        });
+      },
+      { timeout: 5000, timeoutMsg: '.cleaning class was not applied to button' }
+    );
+
+    // Wait for cleanup to finish
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const btn = document.querySelector('.worktree-clean-all');
+          return btn ? !btn.classList.contains('cleaning') : true;
+        });
+      },
+      { timeout: 30000, timeoutMsg: 'Cleanup did not finish within 30s' }
+    );
+  });
+
+  it('should show status text during cleanup', async () => {
+    // Create another worktree to trigger cleanup status
+    await createNewTerminalTab();
+    await browser.pause(3000);
+
+    await browser.waitUntil(
+      async () => elementExists('.worktree-clean-all'),
+      { timeout: 10000, timeoutMsg: 'Clean All button did not appear' }
+    );
+
+    await clickElement('.worktree-clean-all');
+
+    // The status container should appear with meaningful text
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const status = document.querySelector('.worktree-status');
+          if (!(status instanceof HTMLElement)) return false;
+          if (status.style.display === 'none') return false;
+          const text = status.textContent || '';
+          // Status text should contain a progress keyword
+          return text.includes('Listing') || text.includes('Removing') || text.includes('Done');
+        });
+      },
+      { timeout: 10000, timeoutMsg: 'Status text with progress keyword did not appear' }
+    );
+
+    // Wait for cleanup to finish
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const btn = document.querySelector('.worktree-clean-all');
+          return btn ? !btn.classList.contains('cleaning') : true;
+        });
+      },
+      { timeout: 30000 }
+    );
+  });
+
+  it('should show empty state after cleanup completes', async () => {
+    // Create a worktree, then clean it, then verify empty state
+    await createNewTerminalTab();
+    await browser.pause(3000);
+
+    await browser.waitUntil(
+      async () => elementExists('.worktree-clean-all'),
+      { timeout: 10000, timeoutMsg: 'Clean All button did not appear' }
+    );
+
+    await clickElement('.worktree-clean-all');
+
+    // Wait for cleanup to finish (button loses .cleaning class)
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const btn = document.querySelector('.worktree-clean-all');
+          return btn ? !btn.classList.contains('cleaning') : true;
+        });
+      },
+      { timeout: 30000, timeoutMsg: 'Cleanup did not finish' }
+    );
+
+    // After cleanup, the empty state should be shown with no worktree items
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const items = document.querySelectorAll('.worktree-item');
+          const empty = document.querySelector('.worktree-empty');
+          return items.length === 0 && empty !== null;
+        });
+      },
+      { timeout: 10000, timeoutMsg: 'Empty state was not shown after cleanup' }
+    );
+  });
+
+  it('should disable button during cleanup to prevent double-click', async () => {
+    // Create a worktree so there's something to clean
+    await createNewTerminalTab();
+    await browser.pause(3000);
+
+    await browser.waitUntil(
+      async () => elementExists('.worktree-clean-all'),
+      { timeout: 10000, timeoutMsg: 'Clean All button did not appear' }
+    );
+
+    await clickElement('.worktree-clean-all');
+
+    // Button should be disabled during cleanup
+    const isDisabled = await browser.execute(() => {
+      const btn = document.querySelector('.worktree-clean-all') as HTMLButtonElement;
+      return btn ? btn.disabled : false;
+    });
+    expect(isDisabled).toBe(true);
+
+    // Wait for cleanup to finish
+    await browser.waitUntil(
+      async () => {
+        return browser.execute(() => {
+          const btn = document.querySelector('.worktree-clean-all');
+          return btn ? !btn.classList.contains('cleaning') : true;
+        });
+      },
+      { timeout: 30000 }
+    );
+
+    // Button should be re-enabled after cleanup
+    const isReEnabled = await browser.execute(() => {
+      const btn = document.querySelector('.worktree-clean-all') as HTMLButtonElement;
+      return btn ? !btn.disabled : true;
+    });
+    expect(isReEnabled).toBe(true);
+  });
+});
