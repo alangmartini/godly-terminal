@@ -146,6 +146,7 @@ export class TabBar {
 
     tab.ondragover = (e) => {
       e.preventDefault();
+      e.dataTransfer!.dropEffect = 'move';
       if (this.draggedTab && this.draggedTab !== tab) {
         tab.classList.add('drag-over');
       }
