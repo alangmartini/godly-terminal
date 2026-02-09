@@ -256,6 +256,68 @@ describe('Store', () => {
     });
   });
 
+  describe('oscTitle and userRenamed fields', () => {
+    it('should store oscTitle via updateTerminal', () => {
+      store.addWorkspace({
+        id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.addTerminal({
+        id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
+      });
+
+      store.updateTerminal('t-1', { oscTitle: 'vim README.md' });
+
+      const t = store.getState().terminals.find(t => t.id === 't-1');
+      expect(t?.oscTitle).toBe('vim README.md');
+    });
+
+    it('should clear oscTitle by setting undefined', () => {
+      store.addWorkspace({
+        id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.addTerminal({
+        id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
+      });
+
+      store.updateTerminal('t-1', { oscTitle: 'vim' });
+      store.updateTerminal('t-1', { oscTitle: undefined });
+
+      const t = store.getState().terminals.find(t => t.id === 't-1');
+      expect(t?.oscTitle).toBeUndefined();
+    });
+
+    it('should store userRenamed via updateTerminal', () => {
+      store.addWorkspace({
+        id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.addTerminal({
+        id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
+      });
+
+      store.updateTerminal('t-1', { userRenamed: true });
+
+      const t = store.getState().terminals.find(t => t.id === 't-1');
+      expect(t?.userRenamed).toBe(true);
+    });
+
+    it('should default oscTitle and userRenamed to undefined on new terminals', () => {
+      store.addWorkspace({
+        id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.addTerminal({
+        id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
+      });
+
+      const t = store.getState().terminals.find(t => t.id === 't-1');
+      expect(t?.oscTitle).toBeUndefined();
+      expect(t?.userRenamed).toBeUndefined();
+    });
+  });
+
   describe('claude code mode', () => {
     it('should store claudeCodeMode on workspace', () => {
       const workspace: Workspace = {

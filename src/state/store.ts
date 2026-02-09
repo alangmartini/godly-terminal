@@ -5,6 +5,8 @@ export interface Terminal {
   processName: string;
   oscTitle?: string;
   order: number;
+  oscTitle?: string;
+  userRenamed?: boolean;
 }
 
 export type ShellType =
