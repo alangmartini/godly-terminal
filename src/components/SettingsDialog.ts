@@ -90,6 +90,13 @@ export function showSettingsDialog(): Promise<void> {
       { value: 'chime', label: 'Chime' },
       { value: 'bell', label: 'Bell' },
       { value: 'ping', label: 'Ping' },
+      { value: 'soft-rise', label: 'Soft Rise' },
+      { value: 'crystal', label: 'Crystal' },
+      { value: 'bubble', label: 'Bubble' },
+      { value: 'harp', label: 'Harp' },
+      { value: 'marimba', label: 'Marimba' },
+      { value: 'cosmic', label: 'Cosmic' },
+      { value: 'droplet', label: 'Droplet' },
     ];
     presets.forEach(p => {
       const opt = document.createElement('option');
@@ -99,7 +106,9 @@ export function showSettingsDialog(): Promise<void> {
       presetSelect.appendChild(opt);
     });
     presetSelect.onchange = () => {
-      notificationStore.setSoundPreset(presetSelect.value as SoundPreset);
+      const selected = presetSelect.value as SoundPreset;
+      notificationStore.setSoundPreset(selected);
+      playNotificationSound(selected, notificationStore.getSettings().volume);
     };
     presetRow.appendChild(presetSelect);
 
