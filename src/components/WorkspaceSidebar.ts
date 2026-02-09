@@ -3,6 +3,7 @@ import { workspaceService } from '../services/workspace-service';
 import { notificationStore } from '../state/notification-store';
 import { open } from '@tauri-apps/plugin-dialog';
 import { WorktreePanel } from './WorktreePanel';
+import { invoke } from '@tauri-apps/api/core';
 
 export class WorkspaceSidebar {
   private container: HTMLElement;
@@ -26,6 +27,51 @@ export class WorkspaceSidebar {
 
     this.worktreePanel = new WorktreePanel();
     this.worktreePanel.mount(this.container);
+
+    // CLAUDE.md editor buttons
+    const claudeMdSection = document.createElement('div');
+    claudeMdSection.className = 'claude-md-buttons';
+
+    const projectClaudeBtn = document.createElement('div');
+    projectClaudeBtn.className = 'claude-md-btn';
+    projectClaudeBtn.title = 'Edit project CLAUDE.md';
+    const projectIcon = document.createElement('span');
+    projectIcon.textContent = '\uD83D\uDCC4';
+    const projectLabel = document.createElement('span');
+    projectLabel.textContent = 'Project CLAUDE.md';
+    projectClaudeBtn.appendChild(projectIcon);
+    projectClaudeBtn.appendChild(projectLabel);
+    projectClaudeBtn.onclick = async () => {
+      const state = store.getState();
+      const ws = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+      if (!ws) return;
+      const filePath = ws.folderPath.replace(/[\\/]$/, '') + '\\CLAUDE.md';
+      const { showFileEditorDialog } = await import('./FileEditorDialog');
+      await showFileEditorDialog('Project CLAUDE.md', filePath);
+    };
+    claudeMdSection.appendChild(projectClaudeBtn);
+
+    const userClaudeBtn = document.createElement('div');
+    userClaudeBtn.className = 'claude-md-btn';
+    userClaudeBtn.title = 'Edit user CLAUDE.md (~/.claude/CLAUDE.md)';
+    const userIcon = document.createElement('span');
+    userIcon.textContent = '\uD83D\uDC64';
+    const userLabel = document.createElement('span');
+    userLabel.textContent = 'User CLAUDE.md';
+    userClaudeBtn.appendChild(userIcon);
+    userClaudeBtn.appendChild(userLabel);
+    userClaudeBtn.onclick = async () => {
+      try {
+        const filePath = await invoke<string>('get_user_claude_md_path');
+        const { showFileEditorDialog } = await import('./FileEditorDialog');
+        await showFileEditorDialog('User CLAUDE.md', filePath);
+      } catch (err) {
+        console.error('Failed to get user CLAUDE.md path:', err);
+      }
+    };
+    claudeMdSection.appendChild(userClaudeBtn);
+
+    this.container.appendChild(claudeMdSection);
 
     const settingsBtn = document.createElement('div');
     settingsBtn.className = 'settings-btn';
