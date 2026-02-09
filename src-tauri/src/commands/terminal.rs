@@ -59,28 +59,34 @@ pub fn create_terminal(
         // Explicit CWD override (e.g., restore) - skip worktree creation
         Some(cwd)
     } else if let Some(ref ws) = workspace {
-        if ws.worktree_mode && crate::worktree::is_git_repo(&ws.folder_path) {
-            // Worktree mode enabled and it's a git repo - create a worktree
-            match crate::worktree::get_repo_root(&ws.folder_path) {
-                Ok(repo_root) => {
-                    let custom_name = worktree_name.as_deref();
-                    match crate::worktree::create_worktree(&repo_root, &terminal_id, custom_name) {
-                        Ok(wt_result) => {
-                            eprintln!("[terminal] Created worktree at: {} (branch: {})", wt_result.path, wt_result.branch);
-                            worktree_path_result = Some(wt_result.path.clone());
-                            worktree_branch = Some(wt_result.branch);
-                            Some(wt_result.path)
-                        }
-                        Err(e) => {
-                            eprintln!("[terminal] Warning: worktree creation failed, falling back to workspace dir: {}", e);
-                            Some(ws.folder_path.clone())
+        if ws.worktree_mode {
+            // Auto-detect WSL from the workspace folder path
+            let wsl = crate::worktree::WslConfig::from_path(&ws.folder_path);
+            if crate::worktree::is_git_repo(&ws.folder_path, wsl.as_ref()) {
+                // Worktree mode enabled and it's a git repo - create a worktree
+                match crate::worktree::get_repo_root(&ws.folder_path, wsl.as_ref()) {
+                    Ok(repo_root) => {
+                        let custom_name = worktree_name.as_deref();
+                        match crate::worktree::create_worktree(&repo_root, &terminal_id, custom_name, wsl.as_ref()) {
+                            Ok(wt_result) => {
+                                eprintln!("[terminal] Created worktree at: {} (branch: {})", wt_result.path, wt_result.branch);
+                                worktree_path_result = Some(wt_result.path.clone());
+                                worktree_branch = Some(wt_result.branch);
+                                Some(wt_result.path)
+                            }
+                            Err(e) => {
+                                eprintln!("[terminal] Warning: worktree creation failed, falling back to workspace dir: {}", e);
+                                Some(ws.folder_path.clone())
+                            }
                         }
                     }
+                    Err(e) => {
+                        eprintln!("[terminal] Warning: could not get repo root, falling back to workspace dir: {}", e);
+                        Some(ws.folder_path.clone())
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[terminal] Warning: could not get repo root, falling back to workspace dir: {}", e);
-                    Some(ws.folder_path.clone())
-                }
+            } else {
+                Some(ws.folder_path.clone())
             }
         } else {
             Some(ws.folder_path.clone())
