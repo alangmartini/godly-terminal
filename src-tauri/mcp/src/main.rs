@@ -11,10 +11,13 @@ use jsonrpc::{JsonRpcResponse, read_message, write_message};
 use log::mcp_log;
 use pipe_client::McpPipeClient;
 
+/// Bump this on every godly-mcp code change so logs show which binary is running.
+const BUILD: u32 = 5;
+
 fn main() {
     log::init();
 
-    mcp_log!("=== godly-mcp starting ===");
+    mcp_log!("=== godly-mcp starting === build={}", BUILD);
     mcp_log!("PID: {}", std::process::id());
     if let Ok(exe) = std::env::current_exe() {
         mcp_log!("exe: {}", exe.display());

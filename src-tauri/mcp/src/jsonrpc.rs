@@ -60,71 +60,48 @@ impl JsonRpcResponse {
     }
 }
 
-/// Read a single JSON-RPC message from stdin using Content-Length framing.
+/// Read a single JSON-RPC message from stdin (newline-delimited JSON).
 pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<JsonRpcRequest>> {
-    // Read headers until empty line
-    let mut content_length: Option<usize> = None;
-
-    mcp_log!("read_message: waiting for headers...");
+    mcp_log!("read_message: waiting for line...");
 
     loop {
         let mut line = String::new();
         let bytes_read = reader.read_line(&mut line)?;
         if bytes_read == 0 {
-            mcp_log!("read_message: EOF while reading headers");
-            return Ok(None); // EOF
+            mcp_log!("read_message: EOF");
+            return Ok(None);
         }
 
         let trimmed = line.trim();
-        mcp_log!("read_message: header line ({} bytes): {:?}", bytes_read, trimmed);
 
-        if trimmed.is_empty() {
-            mcp_log!("read_message: end of headers");
-            break; // End of headers
+        // Skip empty lines and Content-Length headers (some clients send them)
+        if trimmed.is_empty() || trimmed.starts_with("Content-Length:") {
+            mcp_log!("read_message: skipping non-JSON line: {:?}", trimmed);
+            continue;
         }
 
-        if let Some(value) = trimmed.strip_prefix("Content-Length:") {
-            let parsed = value.trim().parse::<usize>();
-            mcp_log!("read_message: Content-Length parsed: {:?}", parsed);
-            content_length = Some(
-                parsed.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-            );
-        }
+        mcp_log!("read_message: got line ({} bytes): {}", bytes_read, trimmed);
+
+        let request: JsonRpcRequest =
+            serde_json::from_str(trimmed).map_err(|e| {
+                mcp_log!("read_message: JSON parse error: {}", e);
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
+
+        mcp_log!("read_message: parsed OK — method={}, id={:?}", request.method, request.id);
+
+        return Ok(Some(request));
     }
-
-    let length = content_length.ok_or_else(|| {
-        mcp_log!("read_message: ERROR — missing Content-Length header");
-        io::Error::new(io::ErrorKind::InvalidData, "Missing Content-Length header")
-    })?;
-
-    mcp_log!("read_message: reading body ({} bytes)...", length);
-
-    // Read body
-    let mut body = vec![0u8; length];
-    reader.read_exact(&mut body)?;
-
-    let body_str = String::from_utf8_lossy(&body);
-    mcp_log!("read_message: raw body: {}", body_str);
-
-    let request: JsonRpcRequest =
-        serde_json::from_slice(&body).map_err(|e| {
-            mcp_log!("read_message: JSON parse error: {}", e);
-            io::Error::new(io::ErrorKind::InvalidData, e)
-        })?;
-
-    mcp_log!("read_message: parsed OK — method={}, id={:?}", request.method, request.id);
-
-    Ok(Some(request))
 }
 
-/// Write a JSON-RPC response to stdout using Content-Length framing.
+/// Write a JSON-RPC response to stdout (newline-delimited JSON).
 pub fn write_message(writer: &mut impl Write, response: &JsonRpcResponse) -> io::Result<()> {
     let body = serde_json::to_string(response)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-    mcp_log!("write_message: body length={}, content: {}", body.len(), body);
+    mcp_log!("write_message: content: {}", body);
 
-    write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
+    writeln!(writer, "{}", body)?;
     writer.flush()?;
 
     mcp_log!("write_message: flushed OK");
