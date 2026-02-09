@@ -1,9 +1,18 @@
+import { listen } from '@tauri-apps/api/event';
 import { store } from '../state/store';
 import { workspaceService, WorktreeInfo } from '../services/workspace-service';
+
+interface CleanupProgress {
+  step: 'listing' | 'removing' | 'done';
+  current: number;
+  total: number;
+  worktree_name: string;
+}
 
 export class WorktreePanel {
   private container: HTMLElement;
   private listContainer: HTMLElement;
+  private statusContainer: HTMLElement;
   private headerToggle: HTMLElement;
   private cleanAllBtn: HTMLElement;
   private refreshBtn: HTMLElement;
@@ -12,6 +21,7 @@ export class WorktreePanel {
   private deleting = new Set<string>();
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshing = false;
+  private cleaningAll = false;
 
   constructor() {
     this.container = document.createElement('div');
@@ -48,6 +58,11 @@ export class WorktreePanel {
 
     header.appendChild(headerActions);
     this.container.appendChild(header);
+
+    this.statusContainer = document.createElement('div');
+    this.statusContainer.className = 'worktree-status';
+    this.statusContainer.style.display = 'none';
+    this.container.appendChild(this.statusContainer);
 
     this.listContainer = document.createElement('div');
     this.listContainer.className = 'worktree-list';
@@ -204,11 +219,17 @@ export class WorktreePanel {
   }
 
   private async handleCleanAll() {
+    if (this.cleaningAll) return;
+
     const state = store.getState();
     const activeWorkspace = state.workspaces.find(
       w => w.id === state.activeWorkspaceId
     );
     if (!activeWorkspace) return;
+
+    this.cleaningAll = true;
+    this.renderCleanAllButton();
+    this.setStatus('Starting cleanup...');
 
     try {
       const removed = await workspaceService.cleanupAllWorktrees(
@@ -218,11 +239,57 @@ export class WorktreePanel {
       await this.refresh(activeWorkspace.folderPath);
     } catch (e) {
       console.error('Failed to clean worktrees:', e);
+      this.setStatus(`Error: ${e}`);
+      setTimeout(() => this.clearStatus(), 5000);
+    } finally {
+      this.cleaningAll = false;
+      this.renderCleanAllButton();
     }
+  }
+
+  private setupCleanupListener() {
+    listen<CleanupProgress>('worktree-cleanup-progress', (event) => {
+      const { step, current, total, worktree_name } = event.payload;
+      switch (step) {
+        case 'listing':
+          this.setStatus('Listing worktrees...');
+          break;
+        case 'removing':
+          this.setStatus(`Removing ${worktree_name} (${current}/${total})...`);
+          break;
+        case 'done':
+          this.setStatus(`Done! Removed ${current} worktree${current !== 1 ? 's' : ''}`);
+          setTimeout(() => this.clearStatus(), 3000);
+          break;
+      }
+    });
+  }
+
+  private renderCleanAllButton() {
+    if (this.cleaningAll) {
+      this.cleanAllBtn.classList.add('cleaning');
+      this.cleanAllBtn.textContent = '\u23F3 Cleaning...';
+      (this.cleanAllBtn as HTMLButtonElement).disabled = true;
+    } else {
+      this.cleanAllBtn.classList.remove('cleaning');
+      this.cleanAllBtn.textContent = 'Clean All';
+      (this.cleanAllBtn as HTMLButtonElement).disabled = false;
+    }
+  }
+
+  private setStatus(text: string) {
+    this.statusContainer.textContent = text;
+    this.statusContainer.style.display = '';
+  }
+
+  private clearStatus() {
+    this.statusContainer.textContent = '';
+    this.statusContainer.style.display = 'none';
   }
 
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
+    this.setupCleanupListener();
     this.onStoreChange();
   }
 }

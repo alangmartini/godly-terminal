@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::persistence::AutoSaveManager;
 use crate::state::AppState;
@@ -59,10 +59,15 @@ pub async fn remove_worktree(
 }
 
 #[tauri::command]
-pub async fn cleanup_all_worktrees(folder_path: String) -> Result<u32, String> {
+pub async fn cleanup_all_worktrees(
+    folder_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<u32, String> {
     tokio::task::spawn_blocking(move || {
         let repo_root = worktree::get_repo_root(&folder_path)?;
-        worktree::cleanup_all_worktrees(&repo_root)
+        worktree::cleanup_all_worktrees_with_progress(&repo_root, |progress| {
+            let _ = app_handle.emit("worktree-cleanup-progress", progress);
+        })
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
