@@ -88,6 +88,7 @@ export class TerminalPane {
 
       // Copy: copy selected text to clipboard
       if (action === 'clipboard.copy') {
+        event.preventDefault();
         const selection = this.terminal.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection);
@@ -96,6 +97,7 @@ export class TerminalPane {
       }
       // Paste: paste from clipboard into terminal
       if (action === 'clipboard.paste') {
+        event.preventDefault();
         navigator.clipboard.readText().then((text) => {
           if (text) {
             terminalService.writeToTerminal(this.terminalId, text);
@@ -109,7 +111,16 @@ export class TerminalPane {
       // Prevent WebView2 from intercepting terminal control keys as browser
       // clipboard/undo shortcuts. Without this, these keys never reach the
       // PTY as control characters (SIGINT, SIGTSTP, etc.) on Windows.
+      // Must handle both keydown AND keyup — WebView2 can intercept either.
       if (isTerminalControlKey(event)) {
+        event.preventDefault();
+      } else if (event.type === 'keyup' && isTerminalControlKey({
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        key: event.key,
+        type: 'keydown',
+      })) {
         event.preventDefault();
       }
       return true;
