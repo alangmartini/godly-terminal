@@ -6,19 +6,35 @@ pub fn windows_to_wsl_path(windows_path: &str) -> String {
         return String::new();
     }
 
+    // Normalize backslashes first
+    let path = windows_path.replace('\\', "/");
+
+    // Handle WSL UNC paths: //wsl.localhost/<distro>/... or //wsl$/<distro>/...
+    // These must be converted to native Linux paths by stripping the prefix and distro name.
+    if path.starts_with("//wsl.localhost/") || path.starts_with("//wsl$/") {
+        let after_host = if path.starts_with("//wsl.localhost/") {
+            &path["//wsl.localhost/".len()..]
+        } else {
+            &path["//wsl$/".len()..]
+        };
+        // Skip the distro name (first path segment)
+        return match after_host.find('/') {
+            Some(idx) => {
+                let linux_path = &after_host[idx..];
+                if linux_path == "/" { "/".to_string() } else { linux_path.to_string() }
+            }
+            None => "/".to_string(),
+        };
+    }
+
     // Check if it's a Windows absolute path with drive letter (e.g., C:\)
-    let chars: Vec<char> = windows_path.chars().collect();
+    let chars: Vec<char> = path.chars().collect();
     if chars.len() >= 2 && chars[0].is_ascii_alphabetic() && chars[1] == ':' {
         let drive_letter = chars[0].to_ascii_lowercase();
-        let rest_of_path = &windows_path[2..];
-
-        // Convert backslashes to forward slashes
-        let unix_path = rest_of_path.replace('\\', "/");
-
-        format!("/mnt/{}{}", drive_letter, unix_path)
+        let rest_of_path = &path[2..];
+        format!("/mnt/{}{}", drive_letter, rest_of_path)
     } else {
-        // Not a Windows absolute path, just convert backslashes
-        windows_path.replace('\\', "/")
+        path
     }
 }
 
@@ -102,5 +118,61 @@ mod tests {
     fn test_windows_to_wsl_path_forward_slashes_only() {
         // Already using forward slashes
         assert_eq!(windows_to_wsl_path("C:/Users/foo"), "/mnt/c/Users/foo");
+    }
+
+    // Bug: WSL UNC paths like \\wsl.localhost\Ubuntu\home\user\project are converted to
+    // //wsl.localhost/Ubuntu/home/user/project instead of /home/user/project, causing
+    // wsl.exe --cd to receive an invalid path and chdir() fails with error 2.
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_unc() {
+        // \\wsl.localhost\<distro>\<path> should strip the UNC prefix and distro name
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\project"),
+            "/home/alanm/dev/project"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_unc_forward_slashes() {
+        // Same path with forward slashes (may arrive pre-normalized)
+        assert_eq!(
+            windows_to_wsl_path("//wsl.localhost/Ubuntu/home/alanm/dev/project"),
+            "/home/alanm/dev/project"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_dollar_unc() {
+        // Legacy \\wsl$\<distro>\<path> format
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl$\\Ubuntu\\home\\alanm\\dev\\project"),
+            "/home/alanm/dev/project"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_root() {
+        // UNC path to distro root
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu"),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_root_trailing_slash() {
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\"),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_deep_path() {
+        // Exact path from bug report
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\terraform-tests\\terraform-provider-typesense"),
+            "/home/alanm/dev/terraform-tests/terraform-provider-typesense"
+        );
     }
 }
