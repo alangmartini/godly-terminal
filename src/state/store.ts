@@ -3,6 +3,7 @@ export interface Terminal {
   workspaceId: string;
   name: string;
   processName: string;
+  oscTitle?: string;
   order: number;
 }
 
