@@ -290,6 +290,24 @@ fn append_to_ring(ring: &mut VecDeque<u8>, data: &[u8]) {
 fn windows_to_wsl_path(path: &str) -> String {
     let path = path.replace('\\', "/");
 
+    // Handle WSL UNC paths: //wsl.localhost/<distro>/... or //wsl$/<distro>/...
+    // These must be converted to native Linux paths by stripping the prefix and distro name.
+    if path.starts_with("//wsl.localhost/") || path.starts_with("//wsl$/") {
+        let after_host = if path.starts_with("//wsl.localhost/") {
+            &path["//wsl.localhost/".len()..]
+        } else {
+            &path["//wsl$/".len()..]
+        };
+        // Skip the distro name (first path segment)
+        return match after_host.find('/') {
+            Some(idx) => {
+                let linux_path = &after_host[idx..];
+                if linux_path == "/" { "/".to_string() } else { linux_path.to_string() }
+            }
+            None => "/".to_string(),
+        };
+    }
+
     // Check for drive letter pattern: C:/...
     if path.len() >= 2 && path.as_bytes()[1] == b':' {
         let drive = path.as_bytes()[0].to_ascii_lowercase() as char;
@@ -334,5 +352,61 @@ mod tests {
             "/mnt/c/Users/test"
         );
         assert_eq!(windows_to_wsl_path("/already/unix"), "/already/unix");
+    }
+
+    // Bug: WSL UNC paths like \\wsl.localhost\Ubuntu\home\user\project are converted to
+    // //wsl.localhost/Ubuntu/home/user/project instead of /home/user/project, causing
+    // chdir() to fail with error 2 and the shell starts in / instead of the target dir.
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_unc() {
+        // \\wsl.localhost\<distro>\<path> should become /<path>
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\project"),
+            "/home/alanm/dev/project"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_unc_forward_slashes() {
+        // Same path but with forward slashes (as it may arrive after partial normalization)
+        assert_eq!(
+            windows_to_wsl_path("//wsl.localhost/Ubuntu/home/alanm/dev/project"),
+            "/home/alanm/dev/project"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_dollar_unc() {
+        // Legacy \\wsl$\<distro>\<path> format should also be handled
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl$\\Ubuntu\\home\\alanm\\dev\\project"),
+            "/home/alanm/dev/project"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_root() {
+        // UNC path pointing to the distro root
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu"),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_root_trailing_slash() {
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\"),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_windows_to_wsl_path_wsl_localhost_deep_path() {
+        // Deep nesting with the exact path from the bug report
+        assert_eq!(
+            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\terraform-tests\\terraform-provider-typesense"),
+            "/home/alanm/dev/terraform-tests/terraform-provider-typesense"
+        );
     }
 }
