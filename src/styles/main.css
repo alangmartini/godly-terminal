@@ -650,6 +650,22 @@ html, body {
   border-color: var(--danger);
 }
 
+.worktree-clean-all.cleaning {
+  opacity: 0.6;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.worktree-status {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  margin: 0 8px 4px;
+}
+
 .worktree-item-delete.deleting {
   opacity: 1;
   cursor: wait;

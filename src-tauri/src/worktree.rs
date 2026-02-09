@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Instant;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -19,6 +20,15 @@ const WORKTREES_DIR: &str = "godly-worktrees";
 pub struct WorktreeResult {
     pub path: String,
     pub branch: String,
+}
+
+/// Progress information emitted during `cleanup_all_worktrees_with_progress`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CleanupProgress {
+    pub step: String,
+    pub current: u32,
+    pub total: u32,
+    pub worktree_name: String,
 }
 
 /// Info about a single worktree returned by `list_worktrees`.
@@ -210,31 +220,79 @@ pub fn remove_worktree(repo_root: &str, wt_path: &str, force: bool) -> Result<()
     Ok(())
 }
 
-/// Remove all godly-managed worktrees (those in the temp directory) for a repo.
+/// Remove all godly-managed worktrees with progress reporting.
+/// Calls `on_progress` at each stage: "listing", "removing", and "done".
 /// Returns the number of worktrees removed.
-pub fn cleanup_all_worktrees(repo_root: &str) -> Result<u32, String> {
+pub fn cleanup_all_worktrees_with_progress<F>(repo_root: &str, on_progress: F) -> Result<u32, String>
+where
+    F: Fn(&CleanupProgress),
+{
+    let start = Instant::now();
+    eprintln!("[worktree] cleanup_all: listing worktrees...");
+
+    on_progress(&CleanupProgress {
+        step: "listing".to_string(),
+        current: 0,
+        total: 0,
+        worktree_name: String::new(),
+    });
+
     let worktrees = list_worktrees(repo_root)?;
     let temp = std::env::temp_dir();
     let godly_prefix = temp.join(WORKTREES_DIR);
     let godly_prefix_str = godly_prefix.to_string_lossy().to_string();
 
-    let mut removed = 0u32;
-    for wt in &worktrees {
-        if wt.is_main {
-            continue;
-        }
-        // Only remove worktrees that live under our managed directory
-        let normalized = wt.path.replace('/', "\\");
-        let normalized_prefix = godly_prefix_str.replace('/', "\\");
-        if normalized.starts_with(&normalized_prefix) || wt.path.starts_with(&godly_prefix_str) {
-            match remove_worktree(repo_root, &wt.path, true) {
-                Ok(()) => removed += 1,
-                Err(e) => eprintln!("[worktree] Warning: failed to remove {}: {}", wt.path, e),
+    // Filter to godly-managed worktrees
+    let managed: Vec<&WorktreeInfo> = worktrees
+        .iter()
+        .filter(|wt| {
+            if wt.is_main {
+                return false;
             }
+            let normalized = wt.path.replace('/', "\\");
+            let normalized_prefix = godly_prefix_str.replace('/', "\\");
+            normalized.starts_with(&normalized_prefix) || wt.path.starts_with(&godly_prefix_str)
+        })
+        .collect();
+
+    let total = managed.len() as u32;
+    eprintln!("[worktree] cleanup_all: found {} godly-managed worktrees", total);
+
+    let mut removed = 0u32;
+    for (i, wt) in managed.iter().enumerate() {
+        let name = wt.branch.clone();
+        eprintln!("[worktree] cleanup_all: removing {} ({}/{})", name, i + 1, total);
+
+        on_progress(&CleanupProgress {
+            step: "removing".to_string(),
+            current: i as u32 + 1,
+            total,
+            worktree_name: name.clone(),
+        });
+
+        match remove_worktree(repo_root, &wt.path, true) {
+            Ok(()) => removed += 1,
+            Err(e) => eprintln!("[worktree] Warning: failed to remove {}: {}", wt.path, e),
         }
     }
 
+    let elapsed = start.elapsed();
+    eprintln!("[worktree] cleanup_all: done — removed {} worktrees in {:.1}s", removed, elapsed.as_secs_f64());
+
+    on_progress(&CleanupProgress {
+        step: "done".to_string(),
+        current: removed,
+        total,
+        worktree_name: String::new(),
+    });
+
     Ok(removed)
+}
+
+/// Remove all godly-managed worktrees (those in the temp directory) for a repo.
+/// Returns the number of worktrees removed.
+pub fn cleanup_all_worktrees(repo_root: &str) -> Result<u32, String> {
+    cleanup_all_worktrees_with_progress(repo_root, |_| {})
 }
 
 #[cfg(test)]
@@ -411,5 +469,62 @@ mod tests {
         let path_str = path.to_string_lossy().to_string();
         assert!(path_str.contains(WORKTREES_DIR));
         assert!(path_str.contains("wt-my-feature"));
+    }
+
+    #[test]
+    fn test_cleanup_all_worktrees_with_progress() {
+        use std::sync::{Arc, Mutex};
+
+        let repo = create_test_repo();
+        let repo_root = repo.path().to_str().unwrap();
+
+        // Create 2 worktrees
+        let wt1 = create_worktree(repo_root, "progress-test-1111", None)
+            .expect("create worktree 1");
+        let wt2 = create_worktree(repo_root, "progress-test-2222", None)
+            .expect("create worktree 2");
+
+        assert!(Path::new(&wt1.path).is_dir());
+        assert!(Path::new(&wt2.path).is_dir());
+
+        // Collect progress events
+        let events: Arc<Mutex<Vec<CleanupProgress>>> = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+
+        let removed = cleanup_all_worktrees_with_progress(repo_root, move |progress| {
+            events_clone.lock().unwrap().push(progress.clone());
+        })
+        .expect("cleanup should succeed");
+
+        assert_eq!(removed, 2, "should have removed 2 worktrees");
+
+        // Verify worktree directories were actually removed
+        assert!(!Path::new(&wt1.path).is_dir(), "worktree 1 directory should be deleted");
+        assert!(!Path::new(&wt2.path).is_dir(), "worktree 2 directory should be deleted");
+
+        let collected = events.lock().unwrap();
+        // Exactly 4 events: listing, removing x2, done
+        assert_eq!(collected.len(), 4, "expected exactly 4 progress events, got {}", collected.len());
+
+        // Event 0: listing
+        assert_eq!(collected[0].step, "listing");
+        assert_eq!(collected[0].current, 0);
+        assert_eq!(collected[0].total, 0);
+
+        // Events 1-2: removing (with correct current/total and non-empty name)
+        assert_eq!(collected[1].step, "removing");
+        assert_eq!(collected[1].current, 1);
+        assert_eq!(collected[1].total, 2);
+        assert!(!collected[1].worktree_name.is_empty(), "worktree_name should not be empty");
+
+        assert_eq!(collected[2].step, "removing");
+        assert_eq!(collected[2].current, 2);
+        assert_eq!(collected[2].total, 2);
+        assert!(!collected[2].worktree_name.is_empty(), "worktree_name should not be empty");
+
+        // Event 3: done
+        assert_eq!(collected[3].step, "done");
+        assert_eq!(collected[3].current, 2); // current = removed count
+        assert_eq!(collected[3].total, 2);
     }
 }
