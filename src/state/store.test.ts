@@ -400,6 +400,64 @@ describe('Store', () => {
     });
   });
 
+  describe('OSC title support', () => {
+    // Bug: terminal tab name didn't update when programs (like Claude Code) set
+    // the title via OSC escape sequences, even though this works in Windows Terminal.
+
+    beforeEach(() => {
+      store.addWorkspace({
+        id: 'ws-1', name: 'Test', folderPath: 'C:\\', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.addTerminal({
+        id: 'term-1', workspaceId: 'ws-1', name: '', processName: 'powershell', order: 0,
+      });
+    });
+
+    it('should store oscTitle when updated', () => {
+      store.updateTerminal('term-1', { oscTitle: 'Claude Code' });
+
+      const terminal = store.getState().terminals.find(t => t.id === 'term-1');
+      expect(terminal).toBeDefined();
+      expect(terminal!.oscTitle).toBe('Claude Code');
+    });
+
+    it('should default oscTitle to undefined when not set', () => {
+      const terminal = store.getState().terminals.find(t => t.id === 'term-1');
+      expect(terminal).toBeDefined();
+      expect(terminal!.oscTitle).toBeUndefined();
+    });
+
+    it('should clear oscTitle alongside process change update', () => {
+      store.updateTerminal('term-1', { oscTitle: 'Claude Code' });
+      // Simulates what terminal-service.ts does on process-changed event
+      store.updateTerminal('term-1', { processName: 'powershell', oscTitle: '' });
+
+      const terminal = store.getState().terminals.find(t => t.id === 'term-1');
+      expect(terminal).toBeDefined();
+      expect(terminal!.oscTitle).toBe('');
+    });
+
+    it('should preserve oscTitle when processName does not change', () => {
+      store.updateTerminal('term-1', { oscTitle: 'Claude Code' });
+      // Unrelated update should not clear oscTitle
+      store.updateTerminal('term-1', { name: '' });
+
+      const terminal = store.getState().terminals.find(t => t.id === 'term-1');
+      expect(terminal).toBeDefined();
+      expect(terminal!.oscTitle).toBe('Claude Code');
+    });
+
+    it('should not affect other terminals when setting oscTitle', () => {
+      store.addTerminal({ id: 'term-2', workspaceId: 'ws-1', name: '', processName: 'cmd', order: 0 });
+      store.updateTerminal('term-1', { oscTitle: 'Claude Code' });
+
+      const term2 = store.getState().terminals.find(t => t.id === 'term-2');
+      expect(term2).toBeDefined();
+      expect(term2!.oscTitle).toBeUndefined();
+    });
+  });
+
   describe('subscription', () => {
     it('should notify listeners on state change', () => {
       let notified = false;

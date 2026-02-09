@@ -4,6 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { terminalService } from '../services/terminal-service';
+import { store } from '../state/store';
 import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
 
@@ -138,6 +139,13 @@ export class TerminalPane {
         this.terminal.write(data);
       }
     );
+
+    // Update tab name when programs set the title via OSC escape sequences
+    // (e.g. \x1b]0;title\x07). This is how Claude Code, vim, etc. set the
+    // terminal title in Windows Terminal and other native terminals.
+    this.terminal.onTitleChange((title) => {
+      store.updateTerminal(this.terminalId, { oscTitle: title });
+    });
 
     // Start periodic scrollback saving (every 5 minutes)
     this.startScrollbackSaveInterval();
