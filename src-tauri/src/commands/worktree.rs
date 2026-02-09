@@ -31,14 +31,16 @@ pub fn toggle_claude_code_mode(
 
 #[tauri::command]
 pub fn is_git_repo(folder_path: String) -> bool {
-    worktree::is_git_repo(&folder_path)
+    let wsl = worktree::WslConfig::from_path(&folder_path);
+    worktree::is_git_repo(&folder_path, wsl.as_ref())
 }
 
 #[tauri::command]
 pub async fn list_worktrees(folder_path: String) -> Result<Vec<worktree::WorktreeInfo>, String> {
     tokio::task::spawn_blocking(move || {
-        let repo_root = worktree::get_repo_root(&folder_path)?;
-        worktree::list_worktrees(&repo_root)
+        let wsl = worktree::WslConfig::from_path(&folder_path);
+        let repo_root = worktree::get_repo_root(&folder_path, wsl.as_ref())?;
+        worktree::list_worktrees(&repo_root, wsl.as_ref())
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -51,8 +53,9 @@ pub async fn remove_worktree(
     force: Option<bool>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let repo_root = worktree::get_repo_root(&folder_path)?;
-        worktree::remove_worktree(&repo_root, &worktree_path, force.unwrap_or(false))
+        let wsl = worktree::WslConfig::from_path(&folder_path);
+        let repo_root = worktree::get_repo_root(&folder_path, wsl.as_ref())?;
+        worktree::remove_worktree(&repo_root, &worktree_path, force.unwrap_or(false), wsl.as_ref())
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -64,10 +67,11 @@ pub async fn cleanup_all_worktrees(
     app_handle: tauri::AppHandle,
 ) -> Result<u32, String> {
     tokio::task::spawn_blocking(move || {
-        let repo_root = worktree::get_repo_root(&folder_path)?;
+        let wsl = worktree::WslConfig::from_path(&folder_path);
+        let repo_root = worktree::get_repo_root(&folder_path, wsl.as_ref())?;
         worktree::cleanup_all_worktrees_with_progress(&repo_root, |progress| {
             let _ = app_handle.emit("worktree-cleanup-progress", progress);
-        })
+        }, wsl.as_ref())
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
