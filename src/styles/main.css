@@ -559,6 +559,14 @@ html, body {
   gap: 6px;
   overflow: hidden;
   min-width: 0;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: color 0.1s;
+}
+
+.worktree-item-info:hover {
+  color: var(--text-active);
 }
 
 .worktree-item-branch {

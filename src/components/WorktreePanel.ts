@@ -1,6 +1,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { store } from '../state/store';
 import { workspaceService, WorktreeInfo } from '../services/workspace-service';
+import { terminalService } from '../services/terminal-service';
 
 interface CleanupProgress {
   step: 'listing' | 'removing' | 'done';
@@ -151,11 +152,15 @@ export class WorktreePanel {
 
       const info = document.createElement('div');
       info.className = 'worktree-item-info';
+      info.title = `Open terminal in ${wt.path}`;
+      info.onclick = (e) => {
+        e.stopPropagation();
+        this.handleOpen(wt);
+      };
 
       const branch = document.createElement('span');
       branch.className = 'worktree-item-branch';
       branch.textContent = wt.branch;
-      branch.title = wt.path;
       info.appendChild(branch);
 
       const commit = document.createElement('span');
@@ -192,6 +197,33 @@ export class WorktreePanel {
     this.collapsed = !this.collapsed;
     this.headerToggle.classList.toggle('collapsed', this.collapsed);
     this.render();
+  }
+
+  private async handleOpen(wt: WorktreeInfo) {
+    const state = store.getState();
+    const workspace = state.workspaces.find(
+      w => w.id === state.activeWorkspaceId
+    );
+    if (!workspace) return;
+
+    const result = await terminalService.createTerminal(workspace.id, {
+      cwdOverride: wt.path,
+      nameOverride: wt.branch,
+    });
+
+    store.addTerminal({
+      id: result.id,
+      workspaceId: workspace.id,
+      name: wt.branch,
+      processName: 'powershell',
+      order: 0,
+    });
+
+    if (workspace.claudeCodeMode) {
+      setTimeout(() => {
+        terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
+      }, 500);
+    }
   }
 
   private async handleRemove(worktreePath: string) {
