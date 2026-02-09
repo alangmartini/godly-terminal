@@ -864,3 +864,67 @@ html, body {
   outline: none;
   border-color: var(--accent);
 }
+
+/* CLAUDE.md sidebar buttons */
+.claude-md-buttons {
+  border-top: 1px solid var(--border-color);
+  padding: 4px 0;
+}
+
+.claude-md-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.claude-md-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* File editor dialog */
+.file-editor-dialog {
+  min-width: 600px;
+  max-width: 700px;
+  width: 700px;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+.file-editor-path {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.file-editor-textarea {
+  width: 100%;
+  min-height: 400px;
+  flex: 1;
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  margin-bottom: 16px;
+  tab-size: 2;
+}
+
+.file-editor-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
