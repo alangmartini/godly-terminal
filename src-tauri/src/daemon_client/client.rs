@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{Request, Response};
 
-use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge};
+use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge, EmitPayload, EventEmitter};
 
 /// Client that communicates with the godly-daemon process via named pipes.
 ///
@@ -34,6 +34,8 @@ pub struct DaemonClient {
     attached_sessions: Mutex<Vec<String>>,
     /// Health state shared with the bridge I/O thread for stall detection
     bridge_health: Mutex<Option<Arc<BridgeHealth>>>,
+    /// Non-blocking event emitter shared with bridge and process monitor
+    event_emitter: Mutex<Option<EventEmitter>>,
 }
 
 impl DaemonClient {
@@ -177,6 +179,7 @@ impl DaemonClient {
             reconnect_lock: Mutex::new(()),
             attached_sessions: Mutex::new(Vec::new()),
             bridge_health: Mutex::new(None),
+            event_emitter: Mutex::new(None),
         })
     }
 
@@ -353,12 +356,20 @@ impl DaemonClient {
         let health = Arc::new(BridgeHealth::new());
         *self.bridge_health.lock() = Some(Arc::clone(&health));
 
+        let emitter = EventEmitter::spawn(app_handle.clone());
+        *self.event_emitter.lock() = Some(emitter.clone());
+
         let bridge = DaemonBridge::new();
-        bridge.start(reader, writer, request_rx, app_handle.clone(), health);
+        bridge.start(reader, writer, request_rx, emitter, health);
 
         *self.app_handle.lock() = Some(app_handle);
 
         Ok(())
+    }
+
+    /// Get a clone of the current EventEmitter (if bridge is set up).
+    pub fn event_emitter(&self) -> Option<EventEmitter> {
+        self.event_emitter.lock().clone()
     }
 
     /// Reconnect to the daemon, establishing a new pipe and bridge.
@@ -376,9 +387,10 @@ impl DaemonClient {
 
         eprintln!("[daemon_client] Reconnecting to daemon...");
 
-        // Clear stale request sender and health so no new requests go to the dead bridge
+        // Clear stale request sender, health, and emitter so no new requests go to the dead bridge
         *self.request_tx.lock() = None;
         *self.bridge_health.lock() = None;
+        *self.event_emitter.lock() = None;
 
         // Try connecting to existing daemon first, then launch if needed
         let new_client = match Self::try_connect() {
@@ -423,6 +435,7 @@ impl DaemonClient {
         // When the pipe broke, the daemon auto-detached all sessions for
         // the old client. Without re-attaching, the terminal appears frozen
         // because output events stop flowing.
+        let emitter = self.event_emitter.lock().clone();
         let sessions: Vec<String> = self.attached_sessions.lock().clone();
         for session_id in &sessions {
             let req = Request::Attach {
@@ -430,14 +443,22 @@ impl DaemonClient {
             };
             match self.try_send_request(&req) {
                 Ok(Response::Buffer { session_id, data }) => {
-                    // Emit buffered output so the user sees anything they missed
-                    let _ = app_handle.emit(
-                        "terminal-output",
-                        serde_json::json!({
-                            "terminal_id": session_id,
-                            "data": data,
-                        }),
-                    );
+                    // Emit buffered output through the non-blocking emitter
+                    if let Some(ref em) = emitter {
+                        em.try_send(EmitPayload::TerminalOutput {
+                            terminal_id: session_id.clone(),
+                            data,
+                        });
+                    } else {
+                        // Fallback to direct emit if emitter not yet available
+                        let _ = app_handle.emit(
+                            "terminal-output",
+                            serde_json::json!({
+                                "terminal_id": session_id,
+                                "data": data,
+                            }),
+                        );
+                    }
                     eprintln!(
                         "[daemon_client] Re-attached session {} (with buffer replay)",
                         session_id
@@ -539,40 +560,83 @@ impl DaemonClient {
 
     /// Start a background keepalive thread that periodically pings the daemon.
     /// Detects broken connections early and triggers reconnection proactively.
+    ///
+    /// The watchdog check runs BEFORE ping so it fires even if ping subsequently
+    /// blocks for 5-20s (which happens when the bridge I/O thread is stuck in emit).
     pub fn start_keepalive(client: Arc<Self>) {
         use std::sync::atomic::Ordering;
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
         const STALL_THRESHOLD_MS: u64 = 15_000;
 
         std::thread::Builder::new()
             .name("daemon-keepalive".into())
             .spawn(move || {
+                let mut iteration: u64 = 0;
                 loop {
+                    eprintln!("[keepalive] iter={} sleeping 10s", iteration);
                     std::thread::sleep(Duration::from_secs(10));
-                    if let Err(e) = client.ping() {
-                        eprintln!("[daemon_client] Keepalive ping failed: {}", e);
+                    iteration += 1;
+
+                    eprintln!("[keepalive] iter={} woke up", iteration);
+
+                    // Watchdog: check bridge health BEFORE ping.
+                    // If the bridge is stuck in emit_event, ping() will block too
+                    // (it sends through the same bridge channel). By checking first,
+                    // we at least log the stall before we ourselves block.
+                    if let Some(health) = client.bridge_health.lock().as_ref() {
+                        let phase = health.current_phase.load(Ordering::Relaxed);
+                        let last_ms = health.last_activity_ms.load(Ordering::Relaxed);
+                        let now_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let stall_ms = if last_ms > 0 {
+                            now_ms.saturating_sub(last_ms)
+                        } else {
+                            0
+                        };
+
+                        eprintln!(
+                            "[keepalive] iter={} bridge_phase={} stall={:.1}s",
+                            iteration,
+                            bridge::phase_name(phase),
+                            stall_ms as f64 / 1000.0
+                        );
+
+                        if stall_ms > STALL_THRESHOLD_MS {
+                            let msg = format!(
+                                "WATCHDOG: bridge stalled in {} for {:.1}s",
+                                bridge::phase_name(phase),
+                                stall_ms as f64 / 1000.0
+                            );
+                            eprintln!("[keepalive] iter={} {}", iteration, msg);
+                            bridge::bridge_log(&msg);
+                        }
+                    } else {
+                        eprintln!("[keepalive] iter={} no bridge_health (bridge not started?)", iteration);
                     }
 
-                    // Watchdog: check if the bridge I/O thread is stalled
-                    if let Some(health) = client.bridge_health.lock().as_ref() {
-                        let last_ms = health.last_activity_ms.load(Ordering::Relaxed);
-                        if last_ms > 0 {
-                            let now_ms = SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
-                            let stall_ms = now_ms.saturating_sub(last_ms);
-                            if stall_ms > STALL_THRESHOLD_MS {
-                                let phase = health.current_phase.load(Ordering::Relaxed);
-                                let msg = format!(
-                                    "WATCHDOG: bridge stalled in {} for {:.1}s",
-                                    bridge::phase_name(phase),
-                                    stall_ms as f64 / 1000.0
-                                );
-                                eprintln!("[daemon_client] {}", msg);
-                                bridge::bridge_log(&msg);
-                            }
+                    // Ping the daemon — this may block if the bridge is stuck
+                    eprintln!("[keepalive] iter={} sending ping...", iteration);
+                    let ping_start = Instant::now();
+                    match client.ping() {
+                        Ok(()) => {
+                            let elapsed = ping_start.elapsed();
+                            eprintln!(
+                                "[keepalive] iter={} ping OK in {:.1}ms",
+                                iteration,
+                                elapsed.as_secs_f64() * 1000.0
+                            );
+                        }
+                        Err(e) => {
+                            let elapsed = ping_start.elapsed();
+                            eprintln!(
+                                "[keepalive] iter={} ping FAILED in {:.1}ms: {}",
+                                iteration,
+                                elapsed.as_secs_f64() * 1000.0,
+                                e
+                            );
                         }
                     }
                 }
