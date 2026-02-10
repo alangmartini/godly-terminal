@@ -1,4 +1,4 @@
-import type { SoundPreset } from '../services/notification-sound';
+import { isBuiltinPreset, isCustomPreset, type SoundPreset } from '../services/notification-sound';
 
 const STORAGE_KEY = 'godly-notification-settings';
 const DEBOUNCE_MS = 2000;
@@ -122,7 +122,7 @@ class NotificationStore {
       const data = JSON.parse(raw) as Partial<NotificationSettings>;
       if (typeof data.globalEnabled === 'boolean') this.settings.globalEnabled = data.globalEnabled;
       if (typeof data.volume === 'number') this.settings.volume = data.volume;
-      if (data.soundPreset && ['chime', 'bell', 'ping', 'soft-rise', 'crystal', 'bubble', 'harp', 'marimba', 'cosmic', 'droplet'].includes(data.soundPreset)) {
+      if (data.soundPreset && (isBuiltinPreset(data.soundPreset) || isCustomPreset(data.soundPreset))) {
         this.settings.soundPreset = data.soundPreset;
       }
     } catch {

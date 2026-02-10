@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+
 let audioContext: AudioContext | null = null;
 
 function getAudioContext(): AudioContext {
@@ -10,15 +12,86 @@ function getAudioContext(): AudioContext {
   return audioContext;
 }
 
-export type SoundPreset =
+// ── Types ──────────────────────────────────────────────────────────
+
+export type BuiltinSoundPreset =
   | 'chime' | 'bell' | 'ping'
   | 'soft-rise' | 'crystal' | 'bubble'
   | 'harp' | 'marimba' | 'cosmic' | 'droplet';
 
-export function playNotificationSound(
+export type SoundPreset = BuiltinSoundPreset | `custom:${string}`;
+
+export const BUILTIN_PRESETS: readonly BuiltinSoundPreset[] = [
+  'chime', 'bell', 'ping', 'soft-rise', 'crystal',
+  'bubble', 'harp', 'marimba', 'cosmic', 'droplet',
+];
+
+export function isBuiltinPreset(preset: string): preset is BuiltinSoundPreset {
+  return (BUILTIN_PRESETS as readonly string[]).includes(preset);
+}
+
+export function isCustomPreset(preset: string): preset is `custom:${string}` {
+  return preset.startsWith('custom:');
+}
+
+export function getCustomFilename(preset: `custom:${string}`): string {
+  return preset.slice('custom:'.length);
+}
+
+// ── Custom sound cache ─────────────────────────────────────────────
+
+const customSoundCache = new Map<string, AudioBuffer>();
+
+async function loadCustomSound(filename: string): Promise<AudioBuffer> {
+  const cached = customSoundCache.get(filename);
+  if (cached) return cached;
+
+  const base64Data: string = await invoke('read_sound_file', { filename });
+  const binaryString = atob(base64Data);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  const ctx = getAudioContext();
+  const buffer = await ctx.decodeAudioData(bytes.buffer);
+  customSoundCache.set(filename, buffer);
+  return buffer;
+}
+
+function playCustomBuffer(buffer: AudioBuffer, volume: number): void {
+  const ctx = getAudioContext();
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = Math.max(0, Math.min(1, volume));
+  source.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  source.start();
+}
+
+// ── Public API ─────────────────────────────────────────────────────
+
+export async function playNotificationSound(
   preset: SoundPreset = 'chime',
   volume: number = 0.5,
-): void {
+): Promise<void> {
+  if (isCustomPreset(preset)) {
+    try {
+      const filename = getCustomFilename(preset);
+      const buffer = await loadCustomSound(filename);
+      playCustomBuffer(buffer, volume);
+    } catch (e) {
+      console.warn('Failed to play custom sound, falling back to chime:', e);
+      playBuiltinSound('chime', volume);
+    }
+    return;
+  }
+
+  playBuiltinSound(preset, volume);
+}
+
+function playBuiltinSound(preset: BuiltinSoundPreset, volume: number): void {
   const ctx = getAudioContext();
   const gainNode = ctx.createGain();
   gainNode.gain.value = Math.max(0, Math.min(1, volume));
