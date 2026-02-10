@@ -49,11 +49,21 @@ impl ProcessMonitor {
             let mut last_processes: HashMap<String, String> = HashMap::new();
 
             while running.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_secs(1));
+                thread::sleep(Duration::from_secs(2));
 
-                // Get session list from daemon to get PIDs
+                // Get session list from daemon to get PIDs.
+                // send_request has a 5s timeout, so this won't block forever
+                // even if the daemon is unresponsive.
                 let sessions = match daemon.send_request(&godly_protocol::Request::ListSessions) {
                     Ok(godly_protocol::Response::SessionList { sessions }) => sessions,
+                    Ok(godly_protocol::Response::Error { message }) => {
+                        eprintln!("[process_monitor] ListSessions error: {}", message);
+                        continue;
+                    }
+                    Err(e) => {
+                        eprintln!("[process_monitor] ListSessions failed: {}", e);
+                        continue;
+                    }
                     _ => continue,
                 };
 
