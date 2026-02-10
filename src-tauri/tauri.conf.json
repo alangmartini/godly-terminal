@@ -34,7 +34,8 @@
     "icon": ["icons/icon.ico"],
     "resources": {
       "target/release/godly-daemon.exe": "./",
-      "target/release/godly-mcp.exe": "./"
+      "target/release/godly-mcp.exe": "./",
+      "sounds/*": "sounds/"
     }
   },
   "plugins": {}
