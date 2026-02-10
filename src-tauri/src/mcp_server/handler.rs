@@ -72,14 +72,18 @@ pub fn handle_mcp_request(
             shell_type,
             cwd,
             worktree_name,
+            worktree,
+            command,
         } => {
             use std::collections::HashMap;
             use uuid::Uuid;
 
+            let want_worktree = worktree.unwrap_or(false) || worktree_name.is_some();
+
             // Validate mutual exclusivity
-            if cwd.is_some() && worktree_name.is_some() {
+            if cwd.is_some() && want_worktree {
                 return McpResponse::Error {
-                    message: "Cannot specify both cwd and worktree_name".to_string(),
+                    message: "Cannot specify both cwd and worktree/worktree_name".to_string(),
                 };
             }
 
@@ -89,7 +93,7 @@ pub fn handle_mcp_request(
             let mut worktree_path_result: Option<String> = None;
             let mut worktree_branch_result: Option<String> = None;
 
-            let working_dir = if let Some(ref wt_name) = worktree_name {
+            let working_dir = if want_worktree {
                 // Worktree mode: workspace must exist and be a git repo
                 let ws = match app_state.get_workspace(workspace_id) {
                     Some(ws) => ws,
@@ -118,7 +122,7 @@ pub fn handle_mcp_request(
                     }
                 };
 
-                match crate::worktree::create_worktree(&repo_root, &terminal_id, Some(wt_name)) {
+                match crate::worktree::create_worktree(&repo_root, &terminal_id, worktree_name.as_deref()) {
                     Ok(wt_result) => {
                         eprintln!(
                             "[mcp] Created worktree at: {} (branch: {})",
@@ -198,6 +202,15 @@ pub fn handle_mcp_request(
                     };
                 }
                 _ => {}
+            }
+
+            // Run command if specified
+            if let Some(ref cmd) = command {
+                let write_req = godly_protocol::Request::Write {
+                    session_id: terminal_id.clone(),
+                    data: format!("{}\r", cmd).into_bytes(),
+                };
+                let _ = daemon.send_request(&write_req);
             }
 
             // Store metadata

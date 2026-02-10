@@ -22,6 +22,10 @@ pub enum McpRequest {
         cwd: Option<String>,
         #[serde(default)]
         worktree_name: Option<String>,
+        #[serde(default)]
+        worktree: Option<bool>,
+        #[serde(default)]
+        command: Option<String>,
     },
     CloseTerminal { terminal_id: String },
     RenameTerminal { terminal_id: String, name: String },
