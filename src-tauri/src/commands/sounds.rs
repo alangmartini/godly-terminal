@@ -68,6 +68,55 @@ fn read_and_encode_sound(dir: &Path, filename: &str) -> Result<String, String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(&data))
 }
 
+/// Copy bundled sounds from the resource dir into the user's sounds dir.
+/// Skips files that already exist so user customizations are preserved.
+pub fn install_bundled_sounds(app_handle: &AppHandle) {
+    let resource_dir = match app_handle.path().resource_dir() {
+        Ok(d) => d.join(SOUNDS_DIR),
+        Err(e) => {
+            eprintln!("[sounds] Failed to get resource dir: {}", e);
+            return;
+        }
+    };
+
+    if !resource_dir.exists() {
+        eprintln!("[sounds] No bundled sounds dir at {:?}", resource_dir);
+        return;
+    }
+
+    let target_dir = match get_sounds_dir_path(app_handle) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[sounds] Failed to get app sounds dir: {}", e);
+            return;
+        }
+    };
+
+    let entries = match fs::read_dir(&resource_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[sounds] Failed to read bundled sounds: {}", e);
+            return;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !is_audio_file(&name) {
+            continue;
+        }
+        let dest = target_dir.join(&name);
+        if dest.exists() {
+            continue;
+        }
+        if let Err(e) = fs::copy(entry.path(), &dest) {
+            eprintln!("[sounds] Failed to copy bundled sound {}: {}", name, e);
+        } else {
+            eprintln!("[sounds] Installed bundled sound: {}", name);
+        }
+    }
+}
+
 #[tauri::command]
 pub fn get_sounds_dir(app_handle: AppHandle) -> Result<String, String> {
     let dir = get_sounds_dir_path(&app_handle)?;

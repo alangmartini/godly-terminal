@@ -104,7 +104,7 @@ pub fn handle_mcp_request(
                     }
                 };
 
-                if !crate::worktree::is_git_repo(&ws.folder_path) {
+                if !crate::worktree::is_git_repo(&ws.folder_path, None) {
                     return McpResponse::Error {
                         message: format!(
                             "Workspace folder is not a git repo: {}",
@@ -113,7 +113,7 @@ pub fn handle_mcp_request(
                     };
                 }
 
-                let repo_root = match crate::worktree::get_repo_root(&ws.folder_path) {
+                let repo_root = match crate::worktree::get_repo_root(&ws.folder_path, None) {
                     Ok(r) => r,
                     Err(e) => {
                         return McpResponse::Error {
@@ -122,7 +122,7 @@ pub fn handle_mcp_request(
                     }
                 };
 
-                match crate::worktree::create_worktree(&repo_root, &terminal_id, worktree_name.as_deref()) {
+                match crate::worktree::create_worktree(&repo_root, &terminal_id, worktree_name.as_deref(), None) {
                     Ok(wt_result) => {
                         eprintln!(
                             "[mcp] Created worktree at: {} (branch: {})",
