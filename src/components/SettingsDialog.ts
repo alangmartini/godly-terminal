@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   keybindingStore,
   DEFAULT_SHORTCUTS,
@@ -8,6 +10,15 @@ import {
 } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
+
+function formatCustomSoundName(filename: string): string {
+  // Strip extension
+  const name = filename.replace(/\.[^.]+$/, '');
+  // Replace _ and - with spaces, then title-case
+  return name
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
 
 /**
  * Show the settings dialog for customising keyboard shortcuts.
@@ -86,6 +97,10 @@ export function showSettingsDialog(): Promise<void> {
     presetRow.appendChild(presetLabel);
     const presetSelect = document.createElement('select');
     presetSelect.className = 'notification-preset';
+
+    // Built-in presets
+    const builtinGroup = document.createElement('optgroup');
+    builtinGroup.label = 'Built-in Sounds';
     const presets: { value: SoundPreset; label: string }[] = [
       { value: 'chime', label: 'Chime' },
       { value: 'bell', label: 'Bell' },
@@ -103,8 +118,28 @@ export function showSettingsDialog(): Promise<void> {
       opt.value = p.value;
       opt.textContent = p.label;
       if (p.value === notificationStore.getSettings().soundPreset) opt.selected = true;
-      presetSelect.appendChild(opt);
+      builtinGroup.appendChild(opt);
     });
+    presetSelect.appendChild(builtinGroup);
+
+    // Load custom sounds and populate dropdown
+    const customGroup = document.createElement('optgroup');
+    customGroup.label = 'Custom Sounds';
+    invoke<string[]>('list_custom_sounds').then(files => {
+      if (files.length === 0) return;
+      const currentPreset = notificationStore.getSettings().soundPreset;
+      files.forEach(filename => {
+        const opt = document.createElement('option');
+        opt.value = `custom:${filename}`;
+        opt.textContent = formatCustomSoundName(filename);
+        if (`custom:${filename}` === currentPreset) opt.selected = true;
+        customGroup.appendChild(opt);
+      });
+      presetSelect.appendChild(customGroup);
+    }).catch(() => {
+      // Custom sounds unavailable — silently omit the group
+    });
+
     presetSelect.onchange = () => {
       const selected = presetSelect.value as SoundPreset;
       notificationStore.setSoundPreset(selected);
@@ -122,6 +157,27 @@ export function showSettingsDialog(): Promise<void> {
     };
     presetRow.appendChild(testBtn);
     notifSection.appendChild(presetRow);
+
+    // Custom sounds folder row
+    const folderRow = document.createElement('div');
+    folderRow.className = 'shortcut-row';
+    const folderLabel = document.createElement('span');
+    folderLabel.className = 'shortcut-label';
+    folderLabel.textContent = 'Custom sounds';
+    folderRow.appendChild(folderLabel);
+    const openFolderBtn = document.createElement('button');
+    openFolderBtn.className = 'dialog-btn dialog-btn-secondary';
+    openFolderBtn.textContent = 'Open Sounds Folder';
+    openFolderBtn.onclick = async () => {
+      try {
+        const dir: string = await invoke('get_sounds_dir');
+        await revealItemInDir(dir);
+      } catch (e) {
+        console.warn('Failed to open sounds folder:', e);
+      }
+    };
+    folderRow.appendChild(openFolderBtn);
+    notifSection.appendChild(folderRow);
 
     dialog.appendChild(notifSection);
 
