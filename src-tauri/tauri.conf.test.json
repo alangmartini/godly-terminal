@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "Godly Terminal (TEST)",
+  "identifier": "com.godly.terminal.test",
+  "build": {
+    "beforeDevCommand": "vite --port 1421",
+    "devUrl": "http://localhost:1421"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Godly Terminal (TEST)"
+      }
+    ]
+  }
+}
