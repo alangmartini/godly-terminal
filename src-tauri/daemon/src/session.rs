@@ -3,11 +3,14 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::Instant;
 
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 use godly_protocol::types::ShellType;
+
+use crate::debug_log::daemon_log;
 
 const RING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB ring buffer
 
@@ -118,21 +121,54 @@ impl DaemonSession {
                 let master = reader_master.lock();
                 match master.try_clone_reader() {
                     Ok(r) => r,
-                    Err(_) => return,
+                    Err(e) => {
+                        daemon_log!("Session {} reader: failed to clone reader: {}", session_id, e);
+                        return;
+                    }
                 }
             };
 
+            daemon_log!("Session {} reader thread started", session_id);
+
             let mut buf = [0u8; 4096];
+            let mut total_bytes: u64 = 0;
+            let mut total_reads: u64 = 0;
+            let mut channel_send_failures: u64 = 0;
+            let mut last_stats = Instant::now();
+
             while reader_running.load(Ordering::Relaxed) {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        daemon_log!("Session {} reader: EOF (process exited)", session_id);
+                        break;
+                    }
                     Ok(n) => {
+                        total_bytes += n as u64;
+                        total_reads += 1;
+
                         let data = buf[..n].to_vec();
+                        let lock_start = Instant::now();
                         let tx_guard = reader_tx.lock();
+                        let lock_elapsed = lock_start.elapsed();
+
+                        if lock_elapsed.as_millis() > 50 {
+                            daemon_log!(
+                                "Session {} reader: SLOW LOCK on output_tx: {:.1}ms",
+                                session_id,
+                                lock_elapsed.as_secs_f64() * 1000.0
+                            );
+                        }
+
                         if let Some(tx) = tx_guard.as_ref() {
                             // Client attached: send live output
                             if tx.send(data).is_err() {
                                 // Client disconnected, switch to ring buffer
+                                channel_send_failures += 1;
+                                daemon_log!(
+                                    "Session {} reader: channel send failed (client disconnect #{})",
+                                    session_id,
+                                    channel_send_failures
+                                );
                                 drop(tx_guard);
                                 *reader_tx.lock() = None;
                                 // Store this chunk in ring buffer
@@ -145,11 +181,33 @@ impl DaemonSession {
                             let mut ring = reader_ring.lock();
                             append_to_ring(&mut ring, &buf[..n]);
                         }
+
+                        // Periodic stats
+                        if last_stats.elapsed().as_secs() > 30 {
+                            daemon_log!(
+                                "Session {} reader stats: reads={}, bytes={}, send_failures={}",
+                                session_id,
+                                total_reads,
+                                total_bytes,
+                                channel_send_failures
+                            );
+                            last_stats = Instant::now();
+                        }
                     }
-                    Err(_) => break,
+                    Err(e) => {
+                        daemon_log!("Session {} reader: read error: {}", session_id, e);
+                        break;
+                    }
                 }
             }
 
+            daemon_log!(
+                "Session {} reader thread exited: reads={}, bytes={}, send_failures={}",
+                session_id,
+                total_reads,
+                total_bytes,
+                channel_send_failures
+            );
             eprintln!("[daemon] Session {} reader thread exited", session_id);
         });
 
