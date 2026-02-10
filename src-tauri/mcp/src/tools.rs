@@ -43,6 +43,14 @@ pub fn list_tools() -> Value {
                         "worktree_name": {
                             "type": "string",
                             "description": "Create a git worktree with this name and use it as the terminal's working directory. The workspace must be a git repo. Mutually exclusive with cwd."
+                        },
+                        "worktree": {
+                            "type": "boolean",
+                            "description": "Create a git worktree with an auto-generated name. The workspace must be a git repo. Mutually exclusive with cwd. Can be combined with worktree_name for a custom name."
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "A command to run in the terminal immediately after creation. A newline (Enter) is appended automatically."
                         }
                     },
                     "required": ["workspace_id"]
@@ -259,11 +267,15 @@ pub fn call_tool(
                 .get("worktree_name")
                 .and_then(|v| v.as_str())
                 .map(String::from);
+            let worktree = args.get("worktree").and_then(|v| v.as_bool());
+            let command = args.get("command").and_then(|v| v.as_str()).map(String::from);
             McpRequest::CreateTerminal {
                 workspace_id,
                 shell_type: None,
                 cwd,
                 worktree_name,
+                worktree,
+                command,
             }
         }
 
