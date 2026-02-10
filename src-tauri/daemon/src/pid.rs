@@ -2,10 +2,13 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
-/// Get the PID file path at %APPDATA%/com.godly.terminal/godly-daemon.pid
+/// Get the PID file path at %APPDATA%/com.godly.terminal[suffix]/godly-daemon.pid
+/// When GODLY_INSTANCE is set (e.g. "test"), the directory becomes
+/// "com.godly.terminal-test" so test and production daemons don't collide.
 pub fn pid_file_path() -> PathBuf {
     let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    let dir = PathBuf::from(app_data).join("com.godly.terminal");
+    let dir_name = format!("com.godly.terminal{}", godly_protocol::instance_suffix());
+    let dir = PathBuf::from(app_data).join(dir_name);
     fs::create_dir_all(&dir).ok();
     dir.join("godly-daemon.pid")
 }

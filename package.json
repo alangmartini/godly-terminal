@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build:daemon && npm run build:mcp && vite",
+    "dev:test": "cross-env GODLY_INSTANCE=test npx tauri dev --config src-tauri/tauri.conf.test.json",
     "build": "tsc && vite build",
     "build:daemon": "cd src-tauri && cargo build -p godly-daemon",
     "build:daemon:release": "cd src-tauri && cargo build -p godly-daemon --release",

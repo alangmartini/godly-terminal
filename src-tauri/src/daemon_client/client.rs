@@ -201,9 +201,17 @@ impl DaemonClient {
                          0x00000200;  // CREATE_NEW_PROCESS_GROUP
         let breakaway_flag = 0x01000000; // CREATE_BREAKAWAY_FROM_JOB
 
-        let spawn_result = Command::new(&daemon_path)
-            .creation_flags(base_flags | breakaway_flag)
-            .spawn();
+        let mut cmd = Command::new(&daemon_path);
+        cmd.creation_flags(base_flags | breakaway_flag);
+
+        // Forward GODLY_INSTANCE as a CLI arg so the daemon uses the same
+        // instance-specific pipes and PID file. Direct spawn inherits env
+        // vars anyway, but CLI args make it explicit and consistent with WMI.
+        if let Ok(instance) = std::env::var("GODLY_INSTANCE") {
+            cmd.args(["--instance", &instance]);
+        }
+
+        let spawn_result = cmd.spawn();
 
         match spawn_result {
             Ok(_) => {}
@@ -249,6 +257,14 @@ impl DaemonClient {
 
         let daemon_str = daemon_path.to_string_lossy();
 
+        // Build the command line, appending --instance if GODLY_INSTANCE is set.
+        // WMI-launched processes don't inherit env vars, so CLI args are the
+        // only way to pass the instance name through this path.
+        let command_line = match std::env::var("GODLY_INSTANCE") {
+            Ok(instance) => format!("{} --instance {}", daemon_str, instance),
+            Err(_) => daemon_str.to_string(),
+        };
+
         // Use PowerShell's Invoke-CimMethod to call Win32_Process.Create().
         // This creates the process from the WMI provider host (wmiprvse.exe),
         // NOT as a child of the calling process, so it escapes any Job Object.
@@ -256,7 +272,7 @@ impl DaemonClient {
             "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create \
              -Arguments @{{CommandLine='{}'}}; \
              if ($r.ReturnValue -ne 0) {{ throw \"WMI Create failed: $($r.ReturnValue)\" }}",
-            daemon_str
+            command_line
         );
 
         let output = Command::new("powershell")
