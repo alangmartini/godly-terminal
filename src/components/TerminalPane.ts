@@ -140,11 +140,9 @@ export class TerminalPane {
       }
     );
 
-    // Update tab name when programs set the title via OSC escape sequences
-    // (e.g. \x1b]0;title\x07). This is how Claude Code, vim, etc. set the
-    // terminal title in Windows Terminal and other native terminals.
+    // Forward OSC 0/2 title changes to the store for tab display
     this.terminal.onTitleChange((title) => {
-      store.updateTerminal(this.terminalId, { oscTitle: title });
+      store.updateTerminal(this.terminalId, { oscTitle: title || undefined });
     });
 
     // Start periodic scrollback saving (every 5 minutes)
