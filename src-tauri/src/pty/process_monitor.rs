@@ -15,7 +15,7 @@ use winapi::um::tlhelp32::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 #[cfg(windows)]
-use winapi::um::winnt::PROCESS_QUERY_INFORMATION;
+use winapi::um::winnt::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -157,7 +157,7 @@ fn find_deepest_child(parent_pid: u32) -> Option<u32> {
 #[cfg(windows)]
 fn get_process_name(pid: u32) -> Option<String> {
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+        let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
         if handle.is_null() {
             return None;
         }
