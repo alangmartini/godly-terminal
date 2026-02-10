@@ -1,19 +1,91 @@
 use std::collections::VecDeque;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{DaemonMessage, Event, Request, Response};
 
+// ── Bridge debug logger ─────────────────────────────────────────────────
+
+static BRIDGE_LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
+static BRIDGE_START_TIME: OnceLock<Instant> = OnceLock::new();
+
+fn bridge_log_init() {
+    BRIDGE_START_TIME.get_or_init(Instant::now);
+
+    let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    let dir_name = format!(
+        "com.godly.terminal{}",
+        godly_protocol::instance_suffix()
+    );
+    let dir = std::path::PathBuf::from(app_data).join(dir_name);
+    std::fs::create_dir_all(&dir).ok();
+
+    let path = dir.join("godly-bridge-debug.log");
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path);
+
+    match file {
+        Ok(f) => {
+            BRIDGE_LOG_FILE.get_or_init(|| Mutex::new(f));
+        }
+        Err(_) => {
+            let fallback = std::env::temp_dir().join("godly-bridge-debug.log");
+            if let Ok(f) = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&fallback)
+            {
+                BRIDGE_LOG_FILE.get_or_init(|| Mutex::new(f));
+            }
+        }
+    }
+}
+
+fn bridge_log(msg: &str) {
+    if let Some(mutex) = BRIDGE_LOG_FILE.get() {
+        if let Ok(mut file) = mutex.lock() {
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default();
+            let elapsed = BRIDGE_START_TIME
+                .get()
+                .map(|s| s.elapsed())
+                .unwrap_or_default();
+            let _ = writeln!(
+                file,
+                "[{}.{:03}] [{:>8.3}s] {}",
+                ts.as_secs(),
+                ts.subsec_millis(),
+                elapsed.as_secs_f64(),
+                msg
+            );
+            let _ = file.flush();
+        }
+    }
+}
+
+macro_rules! blog {
+    ($($arg:tt)*) => {
+        bridge_log(&format!($($arg)*))
+    };
+}
+
+// ── Bridge implementation ───────────────────────────────────────────────
+
 /// A request to send to the daemon, paired with a channel for the response.
 pub struct BridgeRequest {
     pub request: Request,
-    pub response_tx: mpsc::Sender<Response>,
+    pub response_tx: std::sync::mpsc::Sender<Response>,
 }
 
 /// Bridge that owns the pipe's reader AND writer, performing all I/O in a single thread.
@@ -25,6 +97,10 @@ pub struct BridgeRequest {
 pub struct DaemonBridge {
     running: Arc<AtomicBool>,
 }
+
+/// Maximum number of events to read before checking for pending outgoing requests.
+/// This prevents high-throughput output from starving user input writes.
+const MAX_EVENTS_BEFORE_REQUEST_CHECK: usize = 8;
 
 impl DaemonBridge {
     pub fn new() -> Self {
@@ -40,92 +116,202 @@ impl DaemonBridge {
         &self,
         mut reader: Box<dyn Read + Send>,
         mut writer: Box<dyn Write + Send>,
-        request_rx: mpsc::Receiver<BridgeRequest>,
+        request_rx: std::sync::mpsc::Receiver<BridgeRequest>,
         app_handle: AppHandle,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
         }
 
+        bridge_log_init();
+        blog!("=== Bridge starting ===");
+
         let running = self.running.clone();
 
         thread::spawn(move || {
             eprintln!("[bridge] Event bridge started");
+            blog!("Event bridge I/O thread started");
 
             // Get the raw handle from the reader for PeekNamedPipe
             let raw_handle = get_raw_handle(&reader);
+            blog!("Pipe handle={}", raw_handle);
 
             // FIFO queue of response channels — one per in-flight request.
             // Responses from the daemon arrive in the same order as requests.
-            let mut pending_responses: VecDeque<mpsc::Sender<Response>> = VecDeque::new();
+            let mut pending_responses: VecDeque<std::sync::mpsc::Sender<Response>> =
+                VecDeque::new();
+
+            // Stats for periodic logging
+            let mut total_events: u64 = 0;
+            let mut total_requests_sent: u64 = 0;
+            let mut total_responses: u64 = 0;
+            let mut slow_emit_count: u64 = 0;
+            let mut slow_write_count: u64 = 0;
+            let mut last_stats_time = Instant::now();
 
             while running.load(Ordering::Relaxed) {
-                // Step 1: Check if there are bytes available to read (non-blocking)
-                match peek_pipe(raw_handle) {
-                    PeekResult::Data => {
-                        // Read the message
-                        match godly_protocol::read_message::<_, DaemonMessage>(&mut reader) {
-                            Ok(Some(DaemonMessage::Event(event))) => {
-                                emit_event(&app_handle, event);
-                            }
-                            Ok(Some(DaemonMessage::Response(response))) => {
-                                // Route response to the oldest waiting caller (FIFO)
-                                if let Some(tx) = pending_responses.pop_front() {
-                                    let _ = tx.send(response);
-                                } else {
-                                    eprintln!("[bridge] Got response but no pending request");
-                                }
-                            }
-                            Ok(None) => {
-                                eprintln!("[bridge] Daemon connection closed");
-                                break;
-                            }
-                            Err(e) => {
-                                if running.load(Ordering::Relaxed) {
-                                    eprintln!("[bridge] Read error: {}", e);
-                                }
-                                break;
-                            }
-                        }
-                        continue; // Check for more data immediately
-                    }
-                    PeekResult::Error => {
-                        eprintln!("[bridge] Pipe closed or broken, stopping");
+                let mut did_work = false;
+
+                // Step 1: Read incoming messages from daemon, but limit batch size.
+                // After reading MAX_EVENTS_BEFORE_REQUEST_CHECK events, check for
+                // pending requests to avoid starving user input during heavy output.
+                let mut events_this_iteration = 0;
+                loop {
+                    if events_this_iteration >= MAX_EVENTS_BEFORE_REQUEST_CHECK {
+                        blog!(
+                            "Event batch limit hit ({}), checking for pending requests",
+                            events_this_iteration
+                        );
                         break;
                     }
-                    PeekResult::Empty => {
-                        // Fall through to check for outgoing requests
+
+                    match peek_pipe(raw_handle) {
+                        PeekResult::Data => {
+                            // Read the message
+                            let read_start = Instant::now();
+                            match godly_protocol::read_message::<_, DaemonMessage>(&mut reader) {
+                                Ok(Some(DaemonMessage::Event(event))) => {
+                                    total_events += 1;
+                                    events_this_iteration += 1;
+                                    did_work = true;
+
+                                    let emit_start = Instant::now();
+                                    emit_event(&app_handle, event);
+                                    let emit_elapsed = emit_start.elapsed();
+
+                                    if emit_elapsed > Duration::from_millis(50) {
+                                        slow_emit_count += 1;
+                                        blog!(
+                                            "SLOW EMIT: {:.1}ms (slow #{})",
+                                            emit_elapsed.as_secs_f64() * 1000.0,
+                                            slow_emit_count
+                                        );
+                                    }
+                                }
+                                Ok(Some(DaemonMessage::Response(response))) => {
+                                    total_responses += 1;
+                                    did_work = true;
+                                    // Route response to the oldest waiting caller (FIFO)
+                                    if let Some(tx) = pending_responses.pop_front() {
+                                        let _ = tx.send(response);
+                                    } else {
+                                        eprintln!(
+                                            "[bridge] Got response but no pending request"
+                                        );
+                                        blog!("WARNING: response with no pending request");
+                                    }
+                                    // Always break after a response to let the request
+                                    // sender proceed, which may trigger another request
+                                    break;
+                                }
+                                Ok(None) => {
+                                    eprintln!("[bridge] Daemon connection closed");
+                                    blog!("Daemon connection closed (EOF)");
+                                    running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                                Err(e) => {
+                                    if running.load(Ordering::Relaxed) {
+                                        let elapsed = read_start.elapsed();
+                                        eprintln!("[bridge] Read error: {}", e);
+                                        blog!(
+                                            "Read error after {:.1}ms: {}",
+                                            elapsed.as_secs_f64() * 1000.0,
+                                            e
+                                        );
+                                    }
+                                    running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                        }
+                        PeekResult::Error => {
+                            eprintln!("[bridge] Pipe closed or broken, stopping");
+                            blog!("Pipe peek error, stopping");
+                            running.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                        PeekResult::Empty => {
+                            break; // No more data to read
+                        }
                     }
+                }
+
+                if !running.load(Ordering::Relaxed) {
+                    break;
                 }
 
                 // Step 2: Check if there are requests to send
                 match request_rx.try_recv() {
                     Ok(bridge_req) => {
+                        let write_start = Instant::now();
                         // Write the request to the pipe
                         match godly_protocol::write_message(&mut writer, &bridge_req.request) {
                             Ok(()) => {
+                                total_requests_sent += 1;
+                                did_work = true;
                                 pending_responses.push_back(bridge_req.response_tx);
+
+                                let elapsed = write_start.elapsed();
+                                if elapsed > Duration::from_millis(50) {
+                                    slow_write_count += 1;
+                                    blog!(
+                                        "SLOW REQUEST WRITE: {:?} took {:.1}ms (slow #{})",
+                                        std::mem::discriminant(&bridge_req.request),
+                                        elapsed.as_secs_f64() * 1000.0,
+                                        slow_write_count
+                                    );
+                                }
                             }
                             Err(e) => {
                                 eprintln!("[bridge] Write error: {}, stopping", e);
+                                blog!("Write error: {}", e);
                                 // Don't send error response — breaking drops all
                                 // pending_responses, which signals callers via RecvError
                                 break;
                             }
                         }
-                        continue; // Check for response immediately
+                        // After writing a request, loop back to read the response
+                        continue;
                     }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        // Nothing to do - brief sleep to avoid busy-waiting
-                        thread::sleep(Duration::from_millis(1));
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // Nothing to send
                     }
-                    Err(mpsc::TryRecvError::Disconnected) => {
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         eprintln!("[bridge] Request channel disconnected, stopping");
+                        blog!("Request channel disconnected, stopping");
                         break;
                     }
                 }
+
+                if !did_work {
+                    // Nothing to do - brief sleep to avoid busy-waiting
+                    thread::sleep(Duration::from_millis(1));
+                }
+
+                // Periodic stats logging
+                if last_stats_time.elapsed() > Duration::from_secs(30) {
+                    blog!(
+                        "bridge stats: events={}, requests={}, responses={}, slow_emits={}, slow_writes={}, pending={}",
+                        total_events,
+                        total_requests_sent,
+                        total_responses,
+                        slow_emit_count,
+                        slow_write_count,
+                        pending_responses.len()
+                    );
+                    last_stats_time = Instant::now();
+                }
             }
 
+            blog!(
+                "bridge stopped: events={}, requests={}, responses={}, slow_emits={}, slow_writes={}",
+                total_events,
+                total_requests_sent,
+                total_responses,
+                slow_emit_count,
+                slow_write_count
+            );
             eprintln!("[bridge] Event bridge stopped");
         });
     }
