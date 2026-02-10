@@ -39,6 +39,10 @@ pub fn list_tools() -> Value {
                         "cwd": {
                             "type": "string",
                             "description": "Working directory for the new terminal (optional)"
+                        },
+                        "worktree_name": {
+                            "type": "string",
+                            "description": "Create a git worktree with this name and use it as the terminal's working directory. The workspace must be a git repo. Mutually exclusive with cwd."
                         }
                     },
                     "required": ["workspace_id"]
@@ -251,10 +255,15 @@ pub fn call_tool(
                 .ok_or("Missing workspace_id")?
                 .to_string();
             let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+            let worktree_name = args
+                .get("worktree_name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             McpRequest::CreateTerminal {
                 workspace_id,
                 shell_type: None,
                 cwd,
+                worktree_name,
             }
         }
 
@@ -417,7 +426,20 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
                 "folder_path": w.folder_path,
             })).collect::<Vec<_>>()
         })),
-        McpResponse::Created { id } => Ok(json!({ "success": true, "id": id })),
+        McpResponse::Created {
+            id,
+            worktree_path,
+            worktree_branch,
+        } => {
+            let mut obj = json!({ "success": true, "id": id });
+            if let Some(path) = worktree_path {
+                obj["worktree_path"] = json!(path);
+            }
+            if let Some(branch) = worktree_branch {
+                obj["worktree_branch"] = json!(branch);
+            }
+            Ok(obj)
+        }
         McpResponse::NotificationStatus { enabled, source } => Ok(json!({
             "enabled": enabled,
             "source": source,
