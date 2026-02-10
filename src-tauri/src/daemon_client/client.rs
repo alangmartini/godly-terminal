@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{Request, Response};
 
-use super::bridge::{BridgeRequest, DaemonBridge};
+use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge};
 
 /// Client that communicates with the godly-daemon process via named pipes.
 ///
@@ -32,6 +32,8 @@ pub struct DaemonClient {
     reconnect_lock: Mutex<()>,
     /// Session IDs currently attached by this client (for re-attach after reconnect)
     attached_sessions: Mutex<Vec<String>>,
+    /// Health state shared with the bridge I/O thread for stall detection
+    bridge_health: Mutex<Option<Arc<BridgeHealth>>>,
 }
 
 impl DaemonClient {
@@ -174,6 +176,7 @@ impl DaemonClient {
             app_handle: Mutex::new(None),
             reconnect_lock: Mutex::new(()),
             attached_sessions: Mutex::new(Vec::new()),
+            bridge_health: Mutex::new(None),
         })
     }
 
@@ -347,8 +350,11 @@ impl DaemonClient {
         let (request_tx, request_rx) = mpsc::channel();
         *self.request_tx.lock() = Some(request_tx);
 
+        let health = Arc::new(BridgeHealth::new());
+        *self.bridge_health.lock() = Some(Arc::clone(&health));
+
         let bridge = DaemonBridge::new();
-        bridge.start(reader, writer, request_rx, app_handle.clone());
+        bridge.start(reader, writer, request_rx, app_handle.clone(), health);
 
         *self.app_handle.lock() = Some(app_handle);
 
@@ -370,8 +376,9 @@ impl DaemonClient {
 
         eprintln!("[daemon_client] Reconnecting to daemon...");
 
-        // Clear stale request sender so no new requests go to the dead bridge
+        // Clear stale request sender and health so no new requests go to the dead bridge
         *self.request_tx.lock() = None;
+        *self.bridge_health.lock() = None;
 
         // Try connecting to existing daemon first, then launch if needed
         let new_client = match Self::try_connect() {
@@ -533,6 +540,11 @@ impl DaemonClient {
     /// Start a background keepalive thread that periodically pings the daemon.
     /// Detects broken connections early and triggers reconnection proactively.
     pub fn start_keepalive(client: Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        const STALL_THRESHOLD_MS: u64 = 15_000;
+
         std::thread::Builder::new()
             .name("daemon-keepalive".into())
             .spawn(move || {
@@ -540,6 +552,28 @@ impl DaemonClient {
                     std::thread::sleep(Duration::from_secs(10));
                     if let Err(e) = client.ping() {
                         eprintln!("[daemon_client] Keepalive ping failed: {}", e);
+                    }
+
+                    // Watchdog: check if the bridge I/O thread is stalled
+                    if let Some(health) = client.bridge_health.lock().as_ref() {
+                        let last_ms = health.last_activity_ms.load(Ordering::Relaxed);
+                        if last_ms > 0 {
+                            let now_ms = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            let stall_ms = now_ms.saturating_sub(last_ms);
+                            if stall_ms > STALL_THRESHOLD_MS {
+                                let phase = health.current_phase.load(Ordering::Relaxed);
+                                let msg = format!(
+                                    "WATCHDOG: bridge stalled in {} for {:.1}s",
+                                    bridge::phase_name(phase),
+                                    stall_ms as f64 / 1000.0
+                                );
+                                eprintln!("[daemon_client] {}", msg);
+                                bridge::bridge_log(&msg);
+                            }
+                        }
                     }
                 }
             })

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -51,7 +51,7 @@ fn bridge_log_init() {
     }
 }
 
-fn bridge_log(msg: &str) {
+pub(crate) fn bridge_log(msg: &str) {
     if let Some(mutex) = BRIDGE_LOG_FILE.get() {
         if let Ok(mut file) = mutex.lock() {
             let ts = SystemTime::now()
@@ -78,6 +78,55 @@ macro_rules! blog {
     ($($arg:tt)*) => {
         bridge_log(&format!($($arg)*))
     };
+}
+
+// ── Bridge health / phase tracking ──────────────────────────────────────
+
+pub const PHASE_IDLE: u8 = 0;
+pub const PHASE_PEEK: u8 = 1;
+pub const PHASE_READ: u8 = 2;
+pub const PHASE_EMIT: u8 = 3;
+pub const PHASE_RECV_REQ: u8 = 4;
+pub const PHASE_WRITE: u8 = 5;
+pub const PHASE_STOPPED: u8 = 6;
+
+pub fn phase_name(phase: u8) -> &'static str {
+    match phase {
+        PHASE_IDLE => "idle",
+        PHASE_PEEK => "peek_pipe",
+        PHASE_READ => "read_message",
+        PHASE_EMIT => "emit_event",
+        PHASE_RECV_REQ => "recv_request",
+        PHASE_WRITE => "write_message",
+        PHASE_STOPPED => "stopped",
+        _ => "unknown",
+    }
+}
+
+pub struct BridgeHealth {
+    pub current_phase: AtomicU8,
+    pub last_activity_ms: AtomicU64,
+}
+
+impl BridgeHealth {
+    pub fn new() -> Self {
+        Self {
+            current_phase: AtomicU8::new(PHASE_IDLE),
+            last_activity_ms: AtomicU64::new(0),
+        }
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn update_phase(health: &BridgeHealth, phase: u8) {
+    health.current_phase.store(phase, Ordering::Relaxed);
+    health.last_activity_ms.store(now_ms(), Ordering::Relaxed);
 }
 
 // ── Bridge implementation ───────────────────────────────────────────────
@@ -118,6 +167,7 @@ impl DaemonBridge {
         mut writer: Box<dyn Write + Send>,
         request_rx: std::sync::mpsc::Receiver<BridgeRequest>,
         app_handle: AppHandle,
+        health: Arc<BridgeHealth>,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
@@ -151,6 +201,7 @@ impl DaemonBridge {
 
             while running.load(Ordering::Relaxed) {
                 let mut did_work = false;
+                update_phase(&health, PHASE_IDLE);
 
                 // Step 1: Read incoming messages from daemon, but limit batch size.
                 // After reading MAX_EVENTS_BEFORE_REQUEST_CHECK events, check for
@@ -165,9 +216,11 @@ impl DaemonBridge {
                         break;
                     }
 
+                    update_phase(&health, PHASE_PEEK);
                     match peek_pipe(raw_handle) {
                         PeekResult::Data => {
                             // Read the message
+                            update_phase(&health, PHASE_READ);
                             let read_start = Instant::now();
                             match godly_protocol::read_message::<_, DaemonMessage>(&mut reader) {
                                 Ok(Some(DaemonMessage::Event(event))) => {
@@ -175,6 +228,7 @@ impl DaemonBridge {
                                     events_this_iteration += 1;
                                     did_work = true;
 
+                                    update_phase(&health, PHASE_EMIT);
                                     let emit_start = Instant::now();
                                     emit_event(&app_handle, event);
                                     let emit_elapsed = emit_start.elapsed();
@@ -242,8 +296,10 @@ impl DaemonBridge {
                 }
 
                 // Step 2: Check if there are requests to send
+                update_phase(&health, PHASE_RECV_REQ);
                 match request_rx.try_recv() {
                     Ok(bridge_req) => {
+                        update_phase(&health, PHASE_WRITE);
                         let write_start = Instant::now();
                         // Write the request to the pipe
                         match godly_protocol::write_message(&mut writer, &bridge_req.request) {
@@ -303,6 +359,8 @@ impl DaemonBridge {
                     last_stats_time = Instant::now();
                 }
             }
+
+            update_phase(&health, PHASE_STOPPED);
 
             // Drain all pending response channels so callers get an error
             // instead of blocking forever on recv().
