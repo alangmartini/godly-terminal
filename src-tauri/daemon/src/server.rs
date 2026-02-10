@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 
 use godly_protocol::{DaemonMessage, Event, Request, Response};
 
+use crate::debug_log::daemon_log;
 use crate::session::DaemonSession;
 
 /// Named pipe server that manages daemon sessions and client connections.
@@ -31,6 +32,7 @@ impl DaemonServer {
     pub async fn run(&self) {
         let pipe_name = godly_protocol::pipe_name();
         eprintln!("[daemon] Server starting on {}", pipe_name);
+        daemon_log!("Server starting on {}", pipe_name);
 
         // Start process monitor
         self.start_process_monitor();
@@ -56,6 +58,7 @@ impl DaemonServer {
 
                 if sessions_empty && no_clients && elapsed > idle_timeout {
                     eprintln!("[daemon] Idle timeout reached, shutting down");
+                    daemon_log!("Idle timeout reached, shutting down");
                     running.store(false, Ordering::Relaxed);
                     break;
                 }
@@ -74,6 +77,8 @@ impl DaemonServer {
                     let has_clients = self.has_clients.clone();
                     let activity = last_activity.clone();
 
+                    daemon_log!("Client connected, spawning handler");
+
                     tokio::spawn(async move {
                         handle_client(pipe, sessions, running, activity).await;
                         // Client disconnected - we don't track individual clients count,
@@ -85,6 +90,7 @@ impl DaemonServer {
                 Err(e) => {
                     if self.running.load(Ordering::Relaxed) {
                         eprintln!("[daemon] Accept error: {}", e);
+                        daemon_log!("Accept error: {}", e);
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 }
@@ -92,6 +98,7 @@ impl DaemonServer {
         }
 
         eprintln!("[daemon] Server shutting down");
+        daemon_log!("Server shutting down");
     }
 
     /// Accept a single named pipe connection (Windows implementation).
@@ -125,8 +132,8 @@ impl DaemonServer {
                     PIPE_ACCESS_DUPLEX,
                     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                     PIPE_UNLIMITED_INSTANCES,
-                    4096,
-                    4096,
+                    262144, // 256KB outbound buffer (was 4KB - too small, caused write blocking)
+                    262144, // 256KB inbound buffer
                     0,
                     std::ptr::null_mut(),
                 )
@@ -286,9 +293,10 @@ async fn handle_client(
 
     // Async handler loop: process requests from the I/O thread
     eprintln!("[daemon] Entering request loop for client");
+    daemon_log!("Entering request loop for client");
     while let Some(request) = req_rx.recv().await {
         *last_activity.write() = Instant::now();
-        eprintln!("[daemon] Received request: {:?}", request);
+        daemon_log!("Received request: {:?}", request);
 
         let response = handle_request(
             &request,
@@ -298,9 +306,12 @@ async fn handle_client(
         )
         .await;
 
+        daemon_log!("Sending response for {:?}", std::mem::discriminant(&request));
+
         // Send response back to I/O thread for writing to pipe
         let msg = DaemonMessage::Response(response);
         if msg_tx.send(msg).is_err() {
+            daemon_log!("msg_tx send failed, breaking handler loop");
             break;
         }
     }
@@ -320,10 +331,21 @@ async fn handle_client(
                     "[daemon] Auto-detached session {} (client disconnect)",
                     session_id
                 );
+                daemon_log!(
+                    "Auto-detached session {} (client disconnect)",
+                    session_id
+                );
             }
         }
     }
+
+    daemon_log!("Client handler exiting");
 }
+
+/// Maximum number of outgoing messages to write per I/O loop iteration.
+/// After writing this many messages, we check for incoming data before writing more.
+/// This prevents write-heavy scenarios from starving request reads.
+const MAX_WRITES_PER_ITERATION: usize = 8;
 
 /// Single I/O thread: performs all pipe reads and writes.
 /// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
@@ -335,61 +357,156 @@ fn io_thread(
     server_running: Arc<AtomicBool>,
 ) {
     let raw_handle = get_raw_handle(&pipe);
+    let mut last_log_time = Instant::now();
+    let mut total_reads: u64 = 0;
+    let mut total_writes: u64 = 0;
+    let mut total_bytes_written: u64 = 0;
+    let mut write_stall_count: u64 = 0;
+
+    daemon_log!("io_thread started, handle={}", raw_handle);
 
     while io_running.load(Ordering::Relaxed) && server_running.load(Ordering::Relaxed) {
-        // Step 1: Check if there are bytes available to read (non-blocking)
+        let mut did_work = false;
+
+        // Step 1: ALWAYS check for incoming data first (requests from client).
+        // This ensures user input (Write, Resize) is never starved by outgoing events.
         match peek_pipe(raw_handle) {
             PeekResult::Data => {
                 // Read the request from the pipe
+                let read_start = Instant::now();
                 match godly_protocol::read_message::<_, Request>(&mut pipe) {
                     Ok(Some(request)) => {
+                        total_reads += 1;
+                        let elapsed = read_start.elapsed();
+                        if elapsed > Duration::from_millis(50) {
+                            daemon_log!(
+                                "SLOW READ: {:?} took {:.1}ms",
+                                std::mem::discriminant(&request),
+                                elapsed.as_secs_f64() * 1000.0
+                            );
+                        }
                         if req_tx.send(request).is_err() {
                             eprintln!("[daemon-io] Request channel closed, stopping");
+                            daemon_log!("Request channel closed, stopping");
                             break;
                         }
+                        did_work = true;
                     }
                     Ok(None) => {
                         eprintln!("[daemon-io] Client disconnected (EOF)");
+                        daemon_log!("Client disconnected (EOF)");
                         break;
                     }
                     Err(e) => {
                         if io_running.load(Ordering::Relaxed) {
                             eprintln!("[daemon-io] Read error: {}", e);
+                            daemon_log!("Read error: {}", e);
                         }
                         break;
                     }
                 }
-                continue; // Check for more data immediately
             }
             PeekResult::Error => {
                 eprintln!("[daemon-io] Pipe closed or broken, stopping");
+                daemon_log!("Pipe peek error, stopping");
                 break;
             }
             PeekResult::Empty => {
-                // Fall through to check for outgoing messages
+                // No incoming data - fall through to write outgoing messages
             }
         }
 
-        // Step 2: Check if there are outgoing messages to write
-        match msg_rx.try_recv() {
-            Ok(msg) => {
-                if godly_protocol::write_message(&mut pipe, &msg).is_err() {
-                    eprintln!("[daemon-io] Write error, stopping");
+        // Step 2: Write outgoing messages, but limit per iteration to avoid
+        // starving reads. If we have many queued events and a slow pipe,
+        // writing them all would block and prevent reading new requests.
+        let mut writes_this_iteration = 0;
+        while writes_this_iteration < MAX_WRITES_PER_ITERATION {
+            match msg_rx.try_recv() {
+                Ok(msg) => {
+                    let write_start = Instant::now();
+                    let msg_kind = match &msg {
+                        DaemonMessage::Response(_) => "Response",
+                        DaemonMessage::Event(Event::Output { .. }) => "Output",
+                        DaemonMessage::Event(Event::SessionClosed { .. }) => "SessionClosed",
+                        DaemonMessage::Event(Event::ProcessChanged { .. }) => "ProcessChanged",
+                    };
+
+                    if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                        eprintln!("[daemon-io] Write error, stopping");
+                        daemon_log!("Write error on {}, stopping", msg_kind);
+                        // Set io_running to false so the outer loop exits
+                        io_running.store(false, Ordering::Relaxed);
+                        break;
+                    }
+
+                    let elapsed = write_start.elapsed();
+                    total_writes += 1;
+                    writes_this_iteration += 1;
+                    did_work = true;
+
+                    // Track bytes written for diagnostics
+                    if let DaemonMessage::Event(Event::Output { ref data, .. }) = msg {
+                        total_bytes_written += data.len() as u64;
+                    }
+
+                    // Log slow writes (indicates pipe buffer full / client not reading)
+                    if elapsed > Duration::from_millis(50) {
+                        write_stall_count += 1;
+                        daemon_log!(
+                            "SLOW WRITE: {} took {:.1}ms (stall #{})",
+                            msg_kind,
+                            elapsed.as_secs_f64() * 1000.0,
+                            write_stall_count
+                        );
+                    }
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
                     break;
                 }
-                continue; // Check for more messages immediately
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    eprintln!("[daemon-io] Message channel disconnected, stopping");
+                    daemon_log!("Message channel disconnected, stopping");
+                    io_running.store(false, Ordering::Relaxed);
+                    break;
+                }
             }
-            Err(mpsc::error::TryRecvError::Empty) => {
-                // Nothing to do - brief sleep to avoid busy-waiting
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                eprintln!("[daemon-io] Message channel disconnected, stopping");
-                break;
-            }
+        }
+
+        // If we hit the write limit, check for incoming data before writing more
+        if writes_this_iteration >= MAX_WRITES_PER_ITERATION {
+            daemon_log!(
+                "Write batch limit hit ({}/{}), checking for incoming data",
+                writes_this_iteration,
+                MAX_WRITES_PER_ITERATION
+            );
+            continue; // Loop back to peek for incoming requests
+        }
+
+        if !did_work {
+            // Nothing to do - brief sleep to avoid busy-waiting
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        // Periodic stats logging
+        if last_log_time.elapsed() > Duration::from_secs(30) {
+            daemon_log!(
+                "io_thread stats: reads={}, writes={}, bytes_out={}, stalls={}",
+                total_reads,
+                total_writes,
+                total_bytes_written,
+                write_stall_count
+            );
+            last_log_time = Instant::now();
         }
     }
 
+    daemon_log!(
+        "io_thread stopped: reads={}, writes={}, bytes_out={}, stalls={}",
+        total_reads,
+        total_writes,
+        total_bytes_written,
+        write_stall_count
+    );
     eprintln!("[daemon-io] I/O thread stopped");
 }
 
@@ -415,10 +532,12 @@ async fn handle_request(
                     let info = session.info();
                     sessions.write().insert(id.clone(), session);
                     eprintln!("[daemon] Created session {}", id);
+                    daemon_log!("Created session {}", id);
                     Response::SessionCreated { session: info }
                 }
                 Err(e) => {
                     eprintln!("[daemon] Failed to create session {}: {}", id, e);
+                    daemon_log!("Failed to create session {}: {}", id, e);
                     Response::Error { message: e }
                 }
             }
@@ -457,6 +576,11 @@ async fn handle_request(
                         session_id,
                         buffer.len()
                     );
+                    daemon_log!(
+                        "Attached to session {} (buffer: {} bytes)",
+                        session_id,
+                        buffer.len()
+                    );
 
                     // Return buffered data for replay
                     if buffer.is_empty() {
@@ -481,6 +605,7 @@ async fn handle_request(
                     session.detach();
                     attached_sessions.write().retain(|id| id != session_id);
                     eprintln!("[daemon] Detached from session {}", session_id);
+                    daemon_log!("Detached from session {}", session_id);
                     Response::Ok
                 }
                 None => Response::Error {
@@ -526,6 +651,7 @@ async fn handle_request(
                     session.close();
                     attached_sessions.write().retain(|id| id != session_id);
                     eprintln!("[daemon] Closed session {}", session_id);
+                    daemon_log!("Closed session {}", session_id);
                     Response::Ok
                 }
                 None => Response::Error {
