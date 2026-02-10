@@ -1,3 +1,4 @@
+mod debug_log;
 mod pid;
 mod server;
 mod session;
@@ -24,6 +25,8 @@ async fn main() {
         }
     }
 
+    debug_log::init();
+    debug_log::daemon_log!("=== Daemon starting === pid={}", std::process::id());
     eprintln!("[daemon] Godly Terminal daemon starting (pid: {})", std::process::id());
 
     // Check if another instance is already running
