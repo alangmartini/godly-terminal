@@ -481,7 +481,7 @@ impl DaemonClient {
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
 
         response_rx
-            .recv()
+            .recv_timeout(Duration::from_secs(5))
             .map_err(|e| format!("Failed to receive response: {}", e))
     }
 
@@ -537,7 +537,7 @@ impl DaemonClient {
             .name("daemon-keepalive".into())
             .spawn(move || {
                 loop {
-                    std::thread::sleep(Duration::from_secs(30));
+                    std::thread::sleep(Duration::from_secs(10));
                     if let Err(e) = client.ping() {
                         eprintln!("[daemon_client] Keepalive ping failed: {}", e);
                     }
