@@ -304,6 +304,18 @@ impl DaemonBridge {
                 }
             }
 
+            // Drain all pending response channels so callers get an error
+            // instead of blocking forever on recv().
+            let pending_count = pending_responses.len();
+            for tx in pending_responses.drain(..) {
+                let _ = tx.send(Response::Error {
+                    message: "Bridge disconnected".to_string(),
+                });
+            }
+            if pending_count > 0 {
+                blog!("Drained {} pending response channels with error", pending_count);
+            }
+
             blog!(
                 "bridge stopped: events={}, requests={}, responses={}, slow_emits={}, slow_writes={}",
                 total_events,
