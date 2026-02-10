@@ -2,6 +2,7 @@ import { store, Workspace, ShellType } from '../state/store';
 import { workspaceService } from '../services/workspace-service';
 import { notificationStore } from '../state/notification-store';
 import { open } from '@tauri-apps/plugin-dialog';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { WorktreePanel } from './WorktreePanel';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -394,6 +395,15 @@ export class WorkspaceSidebar {
       this.showRenameDialog(workspace);
     };
     menu.appendChild(renameItem);
+
+    const openFolderItem = document.createElement('div');
+    openFolderItem.className = 'context-menu-item';
+    openFolderItem.textContent = 'Open in Explorer';
+    openFolderItem.onclick = () => {
+      menu.remove();
+      openPath(workspace.folderPath);
+    };
+    menu.appendChild(openFolderItem);
 
     // Worktree mode toggle (only for git repos)
     const worktreeItem = document.createElement('div');
