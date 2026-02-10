@@ -20,6 +20,8 @@ pub enum McpRequest {
         shell_type: Option<ShellType>,
         #[serde(default)]
         cwd: Option<String>,
+        #[serde(default)]
+        worktree_name: Option<String>,
     },
     CloseTerminal { terminal_id: String },
     RenameTerminal { terminal_id: String, name: String },
@@ -85,6 +87,12 @@ pub enum McpResponse {
     TerminalList { terminals: Vec<McpTerminalInfo> },
     TerminalInfo { terminal: McpTerminalInfo },
     WorkspaceList { workspaces: Vec<McpWorkspaceInfo> },
-    Created { id: String },
+    Created {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worktree_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worktree_branch: Option<String>,
+    },
     NotificationStatus { enabled: bool, source: String },
 }
