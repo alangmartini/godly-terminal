@@ -71,14 +71,70 @@ pub fn handle_mcp_request(
             workspace_id,
             shell_type,
             cwd,
+            worktree_name,
         } => {
             use std::collections::HashMap;
             use uuid::Uuid;
 
+            // Validate mutual exclusivity
+            if cwd.is_some() && worktree_name.is_some() {
+                return McpResponse::Error {
+                    message: "Cannot specify both cwd and worktree_name".to_string(),
+                };
+            }
+
             let terminal_id = Uuid::new_v4().to_string();
 
-            // Determine working dir
-            let working_dir = if let Some(dir) = cwd {
+            // Determine working dir and optional worktree info
+            let mut worktree_path_result: Option<String> = None;
+            let mut worktree_branch_result: Option<String> = None;
+
+            let working_dir = if let Some(ref wt_name) = worktree_name {
+                // Worktree mode: workspace must exist and be a git repo
+                let ws = match app_state.get_workspace(workspace_id) {
+                    Some(ws) => ws,
+                    None => {
+                        return McpResponse::Error {
+                            message: format!("Workspace {} not found", workspace_id),
+                        };
+                    }
+                };
+
+                if !crate::worktree::is_git_repo(&ws.folder_path) {
+                    return McpResponse::Error {
+                        message: format!(
+                            "Workspace folder is not a git repo: {}",
+                            ws.folder_path
+                        ),
+                    };
+                }
+
+                let repo_root = match crate::worktree::get_repo_root(&ws.folder_path) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return McpResponse::Error {
+                            message: format!("Failed to get repo root: {}", e),
+                        };
+                    }
+                };
+
+                match crate::worktree::create_worktree(&repo_root, &terminal_id, Some(wt_name)) {
+                    Ok(wt_result) => {
+                        eprintln!(
+                            "[mcp] Created worktree at: {} (branch: {})",
+                            wt_result.path, wt_result.branch
+                        );
+                        worktree_path_result = Some(wt_result.path.clone());
+                        worktree_branch_result = Some(wt_result.branch);
+                        Some(wt_result.path)
+                    }
+                    Err(e) => {
+                        return McpResponse::Error {
+                            message: format!("Failed to create worktree: {}", e),
+                        };
+                    }
+                }
+            } else if let Some(dir) = cwd {
                 Some(dir.clone())
             } else {
                 app_state
@@ -151,8 +207,8 @@ pub fn handle_mcp_request(
                 crate::state::SessionMetadata {
                     shell_type: app_shell,
                     cwd: working_dir,
-                    worktree_path: None,
-                    worktree_branch: None,
+                    worktree_path: worktree_path_result.clone(),
+                    worktree_branch: worktree_branch_result.clone(),
                 },
             );
 
@@ -170,6 +226,8 @@ pub fn handle_mcp_request(
 
             McpResponse::Created {
                 id: terminal_id,
+                worktree_path: worktree_path_result,
+                worktree_branch: worktree_branch_result,
             }
         }
 
@@ -249,7 +307,11 @@ pub fn handle_mcp_request(
             app_state.add_workspace(workspace);
             auto_save.mark_dirty();
 
-            McpResponse::Created { id: workspace_id }
+            McpResponse::Created {
+                id: workspace_id,
+                worktree_path: None,
+                worktree_branch: None,
+            }
         }
 
         McpRequest::SwitchWorkspace { workspace_id } => {
