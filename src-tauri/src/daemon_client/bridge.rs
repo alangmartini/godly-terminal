@@ -10,6 +10,100 @@ use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{DaemonMessage, Event, Request, Response};
 
+// ── Non-blocking event emitter ──────────────────────────────────────────
+
+/// Payload variants for the emitter channel — mirrors protocol::Event but
+/// also supports process-changed events from ProcessMonitor.
+pub enum EmitPayload {
+    TerminalOutput { terminal_id: String, data: Vec<u8> },
+    TerminalClosed { terminal_id: String },
+    ProcessChanged { terminal_id: String, process_name: String },
+}
+
+/// Cloneable handle that enqueues Tauri emit calls into a bounded channel.
+/// A dedicated thread drains the channel and performs the actual `app_handle.emit()`.
+/// This makes `try_send()` non-blocking (~sub-microsecond), so the bridge I/O
+/// thread is immune to main-thread stalls.
+#[derive(Clone)]
+pub struct EventEmitter {
+    tx: std::sync::mpsc::SyncSender<EmitPayload>,
+    dropped: Arc<AtomicU64>,
+}
+
+impl EventEmitter {
+    /// Spawn the emitter thread and return a cloneable handle.
+    /// Channel capacity of 256 ≈ ~4s of headroom at 60 events/s.
+    pub fn spawn(app_handle: AppHandle) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<EmitPayload>(256);
+        let dropped = Arc::new(AtomicU64::new(0));
+
+        thread::Builder::new()
+            .name("tauri-emitter".into())
+            .spawn(move || {
+                while let Ok(payload) = rx.recv() {
+                    Self::do_emit(&app_handle, payload);
+                }
+                eprintln!("[emitter] Tauri-emitter thread exiting (all senders dropped)");
+            })
+            .expect("Failed to spawn tauri-emitter thread");
+
+        Self { tx, dropped }
+    }
+
+    /// Non-blocking enqueue. Returns true if sent, false if the channel is full
+    /// (in which case the event is dropped and the counter incremented).
+    pub fn try_send(&self, payload: EmitPayload) -> bool {
+        match self.tx.try_send(payload) {
+            Ok(()) => true,
+            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+                false
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+                false
+            }
+        }
+    }
+
+    /// Number of events dropped because the channel was full.
+    pub fn dropped_count(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Perform the actual Tauri emit for one payload.
+    fn do_emit(app_handle: &AppHandle, payload: EmitPayload) {
+        match payload {
+            EmitPayload::TerminalOutput { terminal_id, data } => {
+                let _ = app_handle.emit(
+                    "terminal-output",
+                    serde_json::json!({
+                        "terminal_id": terminal_id,
+                        "data": data,
+                    }),
+                );
+            }
+            EmitPayload::TerminalClosed { terminal_id } => {
+                let _ = app_handle.emit(
+                    "terminal-closed",
+                    serde_json::json!({
+                        "terminal_id": terminal_id,
+                    }),
+                );
+            }
+            EmitPayload::ProcessChanged { terminal_id, process_name } => {
+                let _ = app_handle.emit(
+                    "process-changed",
+                    serde_json::json!({
+                        "terminal_id": terminal_id,
+                        "process_name": process_name,
+                    }),
+                );
+            }
+        }
+    }
+}
+
 // ── Bridge debug logger ─────────────────────────────────────────────────
 
 static BRIDGE_LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
@@ -166,7 +260,7 @@ impl DaemonBridge {
         mut reader: Box<dyn Read + Send>,
         mut writer: Box<dyn Write + Send>,
         request_rx: std::sync::mpsc::Receiver<BridgeRequest>,
-        app_handle: AppHandle,
+        emitter: EventEmitter,
         health: Arc<BridgeHealth>,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
@@ -195,7 +289,7 @@ impl DaemonBridge {
             let mut total_events: u64 = 0;
             let mut total_requests_sent: u64 = 0;
             let mut total_responses: u64 = 0;
-            let mut slow_emit_count: u64 = 0;
+            let mut dropped_events: u64 = 0;
             let mut slow_write_count: u64 = 0;
             let mut last_stats_time = Instant::now();
 
@@ -229,17 +323,10 @@ impl DaemonBridge {
                                     did_work = true;
 
                                     update_phase(&health, PHASE_EMIT);
-                                    let emit_start = Instant::now();
-                                    emit_event(&app_handle, event);
-                                    let emit_elapsed = emit_start.elapsed();
-
-                                    if emit_elapsed > Duration::from_millis(50) {
-                                        slow_emit_count += 1;
-                                        blog!(
-                                            "SLOW EMIT: {:.1}ms (slow #{})",
-                                            emit_elapsed.as_secs_f64() * 1000.0,
-                                            slow_emit_count
-                                        );
+                                    let payload = event_to_payload(event);
+                                    if !emitter.try_send(payload) {
+                                        dropped_events += 1;
+                                        blog!("DROPPED EVENT (channel full, total dropped={})", dropped_events);
                                     }
                                 }
                                 Ok(Some(DaemonMessage::Response(response))) => {
@@ -348,11 +435,11 @@ impl DaemonBridge {
                 // Periodic stats logging
                 if last_stats_time.elapsed() > Duration::from_secs(30) {
                     blog!(
-                        "bridge stats: events={}, requests={}, responses={}, slow_emits={}, slow_writes={}, pending={}",
+                        "bridge stats: events={}, requests={}, responses={}, dropped_events={}, slow_writes={}, pending={}",
                         total_events,
                         total_requests_sent,
                         total_responses,
-                        slow_emit_count,
+                        dropped_events,
                         slow_write_count,
                         pending_responses.len()
                     );
@@ -375,11 +462,11 @@ impl DaemonBridge {
             }
 
             blog!(
-                "bridge stopped: events={}, requests={}, responses={}, slow_emits={}, slow_writes={}",
+                "bridge stopped: events={}, requests={}, responses={}, dropped_events={}, slow_writes={}",
                 total_events,
                 total_requests_sent,
                 total_responses,
-                slow_emit_count,
+                dropped_events,
                 slow_write_count
             );
             eprintln!("[bridge] Event bridge stopped");
@@ -447,37 +534,22 @@ fn peek_pipe(_handle: isize) -> PeekResult {
     PeekResult::Empty
 }
 
-/// Emit a daemon event as a Tauri event with the same payload format as before
-fn emit_event(app_handle: &AppHandle, event: Event) {
+/// Convert a protocol Event into an EmitPayload for the non-blocking emitter channel.
+fn event_to_payload(event: Event) -> EmitPayload {
     match event {
-        Event::Output { session_id, data } => {
-            let _ = app_handle.emit(
-                "terminal-output",
-                serde_json::json!({
-                    "terminal_id": session_id,
-                    "data": data,
-                }),
-            );
-        }
-        Event::SessionClosed { session_id } => {
-            let _ = app_handle.emit(
-                "terminal-closed",
-                serde_json::json!({
-                    "terminal_id": session_id,
-                }),
-            );
-        }
+        Event::Output { session_id, data } => EmitPayload::TerminalOutput {
+            terminal_id: session_id,
+            data,
+        },
+        Event::SessionClosed { session_id } => EmitPayload::TerminalClosed {
+            terminal_id: session_id,
+        },
         Event::ProcessChanged {
             session_id,
             process_name,
-        } => {
-            let _ = app_handle.emit(
-                "process-changed",
-                serde_json::json!({
-                    "terminal_id": session_id,
-                    "process_name": process_name,
-                }),
-            );
-        }
+        } => EmitPayload::ProcessChanged {
+            terminal_id: session_id,
+            process_name,
+        },
     }
 }
