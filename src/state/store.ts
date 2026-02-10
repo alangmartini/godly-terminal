@@ -3,8 +3,9 @@ export interface Terminal {
   workspaceId: string;
   name: string;
   processName: string;
-  oscTitle?: string;
   order: number;
+  oscTitle?: string;
+  userRenamed?: boolean;
 }
 
 export type ShellType =
