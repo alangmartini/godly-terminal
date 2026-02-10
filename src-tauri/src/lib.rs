@@ -105,8 +105,11 @@ pub fn run() {
             // reconnection + session re-attachment before the user notices.
             DaemonClient::start_keepalive(daemon_client.clone());
 
+            // Get the non-blocking event emitter for the process monitor
+            let emitter = daemon_client.event_emitter();
+
             // Start process monitor (queries daemon for PIDs, resolves process names locally)
-            process_monitor.start(app_handle.clone(), state_clone.clone(), daemon_client.clone());
+            process_monitor.start(app_handle.clone(), emitter, state_clone.clone(), daemon_client.clone());
 
             // Start auto-save manager
             auto_save.start(app_handle.clone(), state_clone.clone());

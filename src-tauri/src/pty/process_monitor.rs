@@ -24,6 +24,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+use crate::daemon_client::bridge::{EmitPayload, EventEmitter};
 use crate::daemon_client::DaemonClient;
 use crate::state::{AppState, ShellType};
 
@@ -38,7 +39,7 @@ impl ProcessMonitor {
         }
     }
 
-    pub fn start(&self, app_handle: AppHandle, state: Arc<AppState>, daemon: Arc<DaemonClient>) {
+    pub fn start(&self, app_handle: AppHandle, emitter: Option<EventEmitter>, state: Arc<AppState>, daemon: Arc<DaemonClient>) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
         }
@@ -96,13 +97,20 @@ impl ProcessMonitor {
                         if last.map(|s| s.as_str()) != Some(&process_name) {
                             last_processes.insert(terminal_id.clone(), process_name.clone());
                             state.update_terminal_process(terminal_id, process_name.clone());
-                            let _ = app_handle.emit(
-                                "process-changed",
-                                serde_json::json!({
-                                    "terminal_id": terminal_id,
-                                    "process_name": process_name,
-                                }),
-                            );
+                            if let Some(ref em) = emitter {
+                                em.try_send(EmitPayload::ProcessChanged {
+                                    terminal_id: terminal_id.clone(),
+                                    process_name,
+                                });
+                            } else {
+                                let _ = app_handle.emit(
+                                    "process-changed",
+                                    serde_json::json!({
+                                        "terminal_id": terminal_id,
+                                        "process_name": process_name,
+                                    }),
+                                );
+                            }
                         }
                     }
 
