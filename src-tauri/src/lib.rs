@@ -111,6 +111,9 @@ pub fn run() {
             // Start auto-save manager
             auto_save.start(app_handle.clone(), state_clone.clone());
 
+            // Copy bundled sounds to user's sounds directory (first run)
+            commands::install_bundled_sounds(&app_handle);
+
             // Start MCP pipe server for Claude Code integration
             mcp_server::start_mcp_server(
                 app_handle.clone(),
