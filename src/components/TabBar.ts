@@ -86,8 +86,8 @@ export class TabBar {
     tab.dataset.terminalId = terminal.id;
     tab.draggable = true;
 
-    // Display name: custom name or process name
-    const displayName = terminal.name || terminal.processName || 'Terminal';
+    // Display name priority: user rename > OSC title sequence > process name
+    const displayName = terminal.name || terminal.oscTitle || terminal.processName || 'Terminal';
 
     const title = document.createElement('span');
     title.className = 'tab-title';
