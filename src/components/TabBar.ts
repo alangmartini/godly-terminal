@@ -13,6 +13,8 @@ export class TabBar {
   private tabsContainer: HTMLElement;
   private draggedTab: HTMLElement | null = null;
   private draggedTerminalId: string | null = null;
+  private tabElements: Map<string, HTMLElement> = new Map();
+  private lastRenderedOrder: string[] = [];
 
   constructor() {
     this.container = document.createElement('div');
@@ -74,12 +76,76 @@ export class TabBar {
       state.activeWorkspaceId || ''
     );
 
-    this.tabsContainer.innerHTML = '';
+    const currentIds = terminals.map(t => t.id);
+    const currentIdSet = new Set(currentIds);
 
-    terminals.forEach((terminal) => {
-      const tab = this.createTab(terminal);
-      this.tabsContainer.appendChild(tab);
-    });
+    // Remove tabs that no longer exist
+    for (const [id, el] of this.tabElements) {
+      if (!currentIdSet.has(id)) {
+        el.remove();
+        this.tabElements.delete(id);
+      }
+    }
+
+    // Check if order changed (needs DOM reorder)
+    const orderChanged =
+      currentIds.length !== this.lastRenderedOrder.length ||
+      currentIds.some((id, i) => this.lastRenderedOrder[i] !== id);
+
+    // Update existing tabs in-place, create new ones
+    for (const terminal of terminals) {
+      const existing = this.tabElements.get(terminal.id);
+      if (existing) {
+        this.updateTabInPlace(existing, terminal, state.activeTerminalId);
+      } else {
+        const tab = this.createTab(terminal);
+        this.tabElements.set(terminal.id, tab);
+        this.tabsContainer.appendChild(tab);
+      }
+    }
+
+    // Reorder DOM if needed
+    if (orderChanged) {
+      for (const terminal of terminals) {
+        const el = this.tabElements.get(terminal.id);
+        if (el) {
+          this.tabsContainer.appendChild(el);
+        }
+      }
+      this.lastRenderedOrder = currentIds;
+    }
+  }
+
+  private updateTabInPlace(tab: HTMLElement, terminal: Terminal, activeTerminalId: string | null) {
+    const isActive = activeTerminalId === terminal.id;
+    const shouldBeActive = tab.classList.contains('active');
+    if (isActive !== shouldBeActive) {
+      tab.classList.toggle('active', isActive);
+    }
+
+    const titleEl = tab.querySelector('.tab-title') as HTMLSpanElement | null;
+    if (titleEl) {
+      const displayName = getDisplayName(terminal);
+      if (titleEl.textContent !== displayName) {
+        titleEl.textContent = displayName;
+      }
+    }
+
+    const hasBadge = notificationStore.hasBadge(terminal.id) && !isActive;
+    const existingBadge = tab.querySelector('.tab-notification-badge');
+    if (hasBadge && !existingBadge) {
+      const badge = document.createElement('span');
+      badge.className = 'tab-notification-badge';
+      // Insert before close button
+      const closeBtn = tab.querySelector('.tab-close');
+      if (closeBtn) {
+        tab.insertBefore(badge, closeBtn);
+      } else {
+        tab.appendChild(badge);
+      }
+    } else if (!hasBadge && existingBadge) {
+      existingBadge.remove();
+    }
   }
 
   private createTab(terminal: Terminal): HTMLElement {
