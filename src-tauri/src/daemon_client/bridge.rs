@@ -112,6 +112,15 @@ static BRIDGE_START_TIME: OnceLock<Instant> = OnceLock::new();
 fn bridge_log_init() {
     BRIDGE_START_TIME.get_or_init(Instant::now);
 
+    // If the log file is already initialized (e.g. after reconnect), just
+    // log a separator — don't reopen. Reopening with truncate while the
+    // OnceLock holds the old file handle causes a seek-position gap filled
+    // with null bytes, destroying all previous diagnostics.
+    if BRIDGE_LOG_FILE.get().is_some() {
+        bridge_log("=== Bridge re-initialized (reconnect) ===");
+        return;
+    }
+
     let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
     let dir_name = format!(
         "com.godly.terminal{}",
