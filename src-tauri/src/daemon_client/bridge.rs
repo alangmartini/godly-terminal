@@ -111,13 +111,15 @@ impl EventEmitter {
 static BRIDGE_LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
 static BRIDGE_START_TIME: OnceLock<Instant> = OnceLock::new();
 
+/// Maximum log file size before rotation (2MB).
+const MAX_BRIDGE_LOG_SIZE: u64 = 2 * 1024 * 1024;
+
 fn bridge_log_init() {
     BRIDGE_START_TIME.get_or_init(Instant::now);
 
     // If the log file is already initialized (e.g. after reconnect), just
-    // log a separator — don't reopen. Reopening with truncate while the
-    // OnceLock holds the old file handle causes a seek-position gap filled
-    // with null bytes, destroying all previous diagnostics.
+    // log a separator — don't reopen. Reopening while the OnceLock holds
+    // the old file handle causes a seek-position gap filled with null bytes.
     if BRIDGE_LOG_FILE.get().is_some() {
         bridge_log("=== Bridge re-initialized (reconnect) ===");
         return;
@@ -132,10 +134,19 @@ fn bridge_log_init() {
     std::fs::create_dir_all(&dir).ok();
 
     let path = dir.join("godly-bridge-debug.log");
+    let prev_path = dir.join("godly-bridge-debug.prev.log");
+
+    // Rotate if the log file is too large
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > MAX_BRIDGE_LOG_SIZE {
+            let _ = std::fs::copy(&path, &prev_path);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     let file = OpenOptions::new()
         .create(true)
-        .write(true)
-        .truncate(true)
+        .append(true)
         .open(&path);
 
     match file {
@@ -146,8 +157,7 @@ fn bridge_log_init() {
             let fallback = std::env::temp_dir().join("godly-bridge-debug.log");
             if let Ok(f) = OpenOptions::new()
                 .create(true)
-                .write(true)
-                .truncate(true)
+                .append(true)
                 .open(&fallback)
             {
                 BRIDGE_LOG_FILE.get_or_init(|| Mutex::new(f));

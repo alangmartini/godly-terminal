@@ -184,12 +184,16 @@ impl DaemonSession {
 
                         // Periodic stats
                         if last_stats.elapsed().as_secs() > 30 {
+                            let ring_size = reader_ring.lock().len();
+                            let attached = reader_tx.lock().is_some();
                             daemon_log!(
-                                "Session {} reader stats: reads={}, bytes={}, send_failures={}",
+                                "Session {} reader stats: reads={}, bytes={}, send_failures={}, ring_buf={:.0}KB, attached={}",
                                 session_id,
                                 total_reads,
                                 total_bytes,
-                                channel_send_failures
+                                channel_send_failures,
+                                ring_size as f64 / 1024.0,
+                                attached
                             );
                             last_stats = Instant::now();
                         }
