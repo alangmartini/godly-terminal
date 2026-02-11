@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,12 @@ use crate::session::DaemonSession;
 pub struct DaemonServer {
     sessions: Arc<RwLock<HashMap<String, DaemonSession>>>,
     running: Arc<AtomicBool>,
-    has_clients: Arc<AtomicBool>,
+    /// Number of currently connected clients. Used by the idle timeout checker
+    /// to avoid shutting down while clients are still connected. Previously
+    /// this was an AtomicBool which caused a race: when one client disconnected,
+    /// it set has_clients=false even if other clients were still connected,
+    /// allowing the idle timeout to kill the daemon prematurely.
+    client_count: Arc<AtomicUsize>,
 }
 
 impl DaemonServer {
@@ -23,7 +28,7 @@ impl DaemonServer {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             running: Arc::new(AtomicBool::new(true)),
-            has_clients: Arc::new(AtomicBool::new(false)),
+            client_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -40,7 +45,7 @@ impl DaemonServer {
         // Start idle timeout checker
         let running = self.running.clone();
         let sessions = self.sessions.clone();
-        let has_clients = self.has_clients.clone();
+        let client_count = self.client_count.clone();
         let last_activity = Arc::new(RwLock::new(Instant::now()));
         let last_activity_for_timeout = last_activity.clone();
 
@@ -53,12 +58,12 @@ impl DaemonServer {
                 }
 
                 let sessions_empty = sessions.read().is_empty();
-                let no_clients = !has_clients.load(Ordering::Relaxed);
+                let num_clients = client_count.load(Ordering::Relaxed);
                 let elapsed = last_activity_for_timeout.read().elapsed();
 
-                if sessions_empty && no_clients && elapsed > idle_timeout {
+                if sessions_empty && num_clients == 0 && elapsed > idle_timeout {
                     eprintln!("[daemon] Idle timeout reached, shutting down");
-                    daemon_log!("Idle timeout reached, shutting down");
+                    daemon_log!("Idle timeout reached (no sessions, no clients for {:?}), shutting down", elapsed);
                     running.store(false, Ordering::Relaxed);
                     break;
                 }
@@ -70,21 +75,19 @@ impl DaemonServer {
             match self.accept_connection().await {
                 Ok(pipe) => {
                     *last_activity.write() = Instant::now();
-                    self.has_clients.store(true, Ordering::Relaxed);
+                    self.client_count.fetch_add(1, Ordering::Relaxed);
 
                     let sessions = self.sessions.clone();
                     let running = self.running.clone();
-                    let has_clients = self.has_clients.clone();
+                    let client_count = self.client_count.clone();
                     let activity = last_activity.clone();
 
-                    daemon_log!("Client connected, spawning handler");
+                    daemon_log!("Client connected, spawning handler (clients={})", self.client_count.load(Ordering::Relaxed));
 
                     tokio::spawn(async move {
                         handle_client(pipe, sessions, running, activity).await;
-                        // Client disconnected - we don't track individual clients count,
-                        // just set has_clients to false. If another client exists it will
-                        // set it back to true on its next interaction.
-                        has_clients.store(false, Ordering::Relaxed);
+                        client_count.fetch_sub(1, Ordering::Relaxed);
+                        daemon_log!("Client disconnected (clients={})", client_count.load(Ordering::Relaxed));
                     });
                 }
                 Err(e) => {
