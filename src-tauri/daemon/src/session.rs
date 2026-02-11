@@ -260,8 +260,45 @@ impl DaemonSession {
         self.output_tx.lock().is_some()
     }
 
-    /// Write data to the PTY
+    /// Write data to the PTY.
+    ///
+    /// On Windows, raw `\x03` (Ctrl+C) written to ConPTY's input pipe does NOT
+    /// generate `CTRL_C_EVENT` for child processes. ConPTY only generates console
+    /// control events from real keyboard input, not from pipe-written data.
+    /// `GenerateConsoleCtrlEvent` also doesn't work with pseudoconsoles.
+    ///
+    /// To interrupt a running process, we detect `\x03` and terminate child
+    /// processes of the shell, leaving the shell itself alive so the user gets
+    /// a fresh prompt.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
+        #[cfg(windows)]
+        if data.contains(&0x03) {
+            match terminate_child_processes(self.pid) {
+                Ok(count) => {
+                    if count > 0 {
+                        daemon_log!(
+                            "Session {} Ctrl+C: terminated {} child process(es) of shell pid {}",
+                            self.id, count, self.pid
+                        );
+                    }
+                }
+                Err(e) => {
+                    daemon_log!("Session {} Ctrl+C failed: {}", self.id, e);
+                }
+            }
+            // Also write \x03 to the PTY — while ConPTY won't generate
+            // CTRL_C_EVENT, some shells (like PSReadLine) may read it from
+            // the input buffer and cancel the current line.
+            let mut writer = self.writer.lock();
+            writer
+                .write_all(data)
+                .map_err(|e| format!("Failed to write to pty: {}", e))?;
+            writer
+                .flush()
+                .map_err(|e| format!("Failed to flush pty: {}", e))?;
+            return Ok(());
+        }
+
         let mut writer = self.writer.lock();
         writer
             .write_all(data)
@@ -325,6 +362,81 @@ impl DaemonSession {
     pub fn get_shell_type(&self) -> &ShellType {
         &self.shell_type
     }
+}
+
+/// Terminate child processes of the given shell PID to simulate Ctrl+C.
+///
+/// ConPTY does not translate raw `\x03` written to its input pipe into
+/// `CTRL_C_EVENT`, and `GenerateConsoleCtrlEvent` doesn't work with
+/// pseudoconsoles either. As a workaround, we enumerate child processes
+/// of the shell and terminate them, leaving the shell alive so it returns
+/// to the prompt.
+///
+/// Returns the number of processes terminated.
+#[cfg(windows)]
+fn terminate_child_processes(shell_pid: u32) -> Result<u32, String> {
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::{OpenProcess, TerminateProcess};
+    use winapi::um::tlhelp32::{
+        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
+    };
+    use winapi::um::winnt::PROCESS_TERMINATE;
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+        return Err("CreateToolhelp32Snapshot failed".to_string());
+    }
+
+    let mut entry: PROCESSENTRY32 = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+
+    // Collect all PIDs that are descendants of shell_pid
+    let mut all_pids: Vec<(u32, u32)> = Vec::new(); // (pid, parent_pid)
+    unsafe {
+        if Process32First(snapshot, &mut entry) != 0 {
+            loop {
+                all_pids.push((entry.th32ProcessID, entry.th32ParentProcessID));
+                if Process32Next(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+
+    // Find direct children of shell_pid (and their descendants)
+    let mut targets: Vec<u32> = Vec::new();
+    let mut queue: Vec<u32> = vec![shell_pid];
+    while let Some(parent) = queue.pop() {
+        for &(pid, ppid) in &all_pids {
+            if ppid == parent && pid != shell_pid {
+                targets.push(pid);
+                queue.push(pid); // Also find grandchildren
+            }
+        }
+    }
+
+    if targets.is_empty() {
+        return Ok(0);
+    }
+
+    // Terminate in reverse order (deepest children first)
+    targets.reverse();
+    let mut terminated = 0u32;
+    for pid in &targets {
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, *pid);
+            if !handle.is_null() {
+                // Exit code 0xC000013A = STATUS_CONTROL_C_EXIT (same as real Ctrl+C)
+                if TerminateProcess(handle, 0xC000013Au32) != 0 {
+                    terminated += 1;
+                }
+                CloseHandle(handle);
+            }
+        }
+    }
+
+    Ok(terminated)
 }
 
 /// Append data to ring buffer, evicting oldest data if necessary
@@ -467,4 +579,5 @@ mod tests {
             "/home/alanm/dev/terraform-tests/terraform-provider-typesense"
         );
     }
+
 }
