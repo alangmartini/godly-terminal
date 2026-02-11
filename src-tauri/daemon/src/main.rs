@@ -26,7 +26,14 @@ async fn main() {
     }
 
     debug_log::init();
-    debug_log::daemon_log!("=== Daemon starting === pid={}", std::process::id());
+    debug_log::install_panic_hook();
+    debug_log::daemon_log!(
+        "\n========================================\n\
+         === Daemon starting === pid={} args={:?}\n\
+         ========================================",
+        std::process::id(),
+        std::env::args().collect::<Vec<_>>()
+    );
     eprintln!("[daemon] Godly Terminal daemon starting (pid: {})", std::process::id());
 
     // Acquire singleton lock via named mutex. This is race-free — unlike the
@@ -58,6 +65,7 @@ async fn main() {
 
     // Set up cleanup on exit
     let cleanup = || {
+        debug_log::daemon_log!("=== Daemon exiting normally === pid={}", std::process::id());
         remove_pid_file();
         eprintln!("[daemon] Daemon exiting");
     };

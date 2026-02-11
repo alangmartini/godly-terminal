@@ -37,6 +37,11 @@ Always commit all staged and unstaged changes when making a commit. Do not leave
 
 Never add "Generated with Claude Code" or any similar attribution message to commits, PRs, or any other output.
 
+## Debugging Principles
+
+- **Never mask errors.** Don't add retry loops, fallback handlers, or auto-recovery that hides the root cause of a crash or failure. If something crashes, the priority is understanding WHY — not papering over it so the user doesn't notice.
+- **Preserve crash evidence.** Logs must survive process restarts. Never truncate logs on startup. Use append mode and rotate old logs so the previous run's crash info is always available for post-mortem.
+
 ## Bug Fix Workflow
 
 When the user pastes a bug report or describes a bug:
