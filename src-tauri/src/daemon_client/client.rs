@@ -437,6 +437,7 @@ impl DaemonClient {
         // because output events stop flowing.
         let emitter = self.event_emitter.lock().clone();
         let sessions: Vec<String> = self.attached_sessions.lock().clone();
+        let mut lost_session_ids: Vec<String> = Vec::new();
         for session_id in &sessions {
             let req = Request::Attach {
                 session_id: session_id.clone(),
@@ -472,7 +473,8 @@ impl DaemonClient {
                         "[daemon_client] Session {} no longer exists: {}",
                         session_id, message
                     );
-                    // Session is gone (daemon restarted) — remove from tracking
+                    // Session is gone (daemon restarted) — track for frontend notification
+                    lost_session_ids.push(session_id.clone());
                     self.attached_sessions.lock().retain(|id| id != session_id);
                 }
                 Err(e) => {
@@ -483,6 +485,24 @@ impl DaemonClient {
                 }
                 _ => {}
             }
+        }
+
+        // Notify the frontend about lost sessions so it can recreate them.
+        // Without this, terminals stay rendered but have no backing PTY —
+        // the user sees a frozen terminal with no output.
+        if !lost_session_ids.is_empty() {
+            eprintln!(
+                "[daemon_client] {} sessions lost after reconnect, notifying frontend",
+                lost_session_ids.len()
+            );
+            bridge::bridge_log(&format!(
+                "sessions-lost: {:?}",
+                lost_session_ids
+            ));
+            let _ = app_handle.emit(
+                "sessions-lost",
+                serde_json::json!({ "session_ids": lost_session_ids }),
+            );
         }
 
         eprintln!("[daemon_client] Reconnected to daemon");
