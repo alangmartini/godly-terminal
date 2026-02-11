@@ -1,15 +1,13 @@
-//! Tests for single-instance daemon enforcement.
+//! Tests for single-instance daemon enforcement via named mutex.
 //!
-//! Bug: Multiple godly_daemon.exe processes can run simultaneously when launched
-//! concurrently, causing terminal freezes and session isolation. The
-//! is_daemon_running() check has a TOCTOU race — it checks the named pipe
-//! before any daemon has created one. With PIPE_UNLIMITED_INSTANCES, all
-//! launched instances successfully create pipe instances and run in parallel.
+//! The daemon uses `DaemonLock::try_acquire()` (a Windows named mutex) to ensure
+//! only one instance runs per pipe name. The mutex is atomically created by the
+//! kernel, eliminating the TOCTOU race that existed with the old pipe-based check.
 //!
-//! Symptoms:
-//! - Multiple godly_daemon.exe visible in Task Manager
-//! - Sessions split across daemons (invisible to each other)
-//! - Terminal freeze when client reconnects to a different daemon instance
+//! These tests verify:
+//! 1. The named mutex blocks a second daemon from starting
+//! 2. Concurrent launches produce exactly one running daemon
+//! 3. After the lock holder exits, a new daemon can start
 //!
 //! Run with:
 //!   cd src-tauri && cargo test -p godly-daemon --test single_instance -- --test-threads=1
@@ -20,14 +18,14 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::FromRawHandle;
 use std::process::{Child, Command};
+use std::ptr;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use godly_protocol::frame;
 use godly_protocol::types::ShellType;
 use godly_protocol::{DaemonMessage, Request, Response};
 
-use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
@@ -51,7 +49,6 @@ fn daemon_binary_path() -> std::path::PathBuf {
 }
 
 /// Spawn a daemon process targeting a specific pipe name.
-/// Uses GODLY_NO_DETACH=1 to keep it as a child process for tracking.
 fn spawn_daemon(pipe_name: &str) -> Child {
     let daemon_path = daemon_binary_path();
     Command::new(&daemon_path)
@@ -63,7 +60,7 @@ fn spawn_daemon(pipe_name: &str) -> Child {
         .expect("Failed to spawn daemon")
 }
 
-/// Try to open a connection to the daemon's named pipe.
+/// Try to open a client connection to a named pipe.
 fn try_connect_pipe(pipe_name: &str) -> Option<std::fs::File> {
     let wide_name: Vec<u16> = OsStr::new(pipe_name)
         .encode_wide()
@@ -75,10 +72,10 @@ fn try_connect_pipe(pipe_name: &str) -> Option<std::fs::File> {
             wide_name.as_ptr(),
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            std::ptr::null_mut(),
+            ptr::null_mut(),
             OPEN_EXISTING,
             0,
-            std::ptr::null_mut(),
+            ptr::null_mut(),
         )
     };
 
@@ -91,7 +88,7 @@ fn try_connect_pipe(pipe_name: &str) -> Option<std::fs::File> {
 
 /// Wait for a pipe to become available, verifying with a Ping.
 fn wait_for_pipe(pipe_name: &str, timeout: Duration) -> std::fs::File {
-    let start = Instant::now();
+    let start = std::time::Instant::now();
     loop {
         if let Some(mut file) = try_connect_pipe(pipe_name) {
             if let Ok(Response::Pong) = std::panic::catch_unwind(
@@ -135,45 +132,98 @@ fn kill_children(children: &mut [Child]) {
     }
 }
 
+/// Wait for a pipe to fully disappear.
+fn wait_for_pipe_gone(pipe_name: &str, timeout: Duration) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if try_connect_pipe(pipe_name).is_none() {
+            thread::sleep(Duration::from_millis(200));
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Bug: Concurrent daemon launches produce multiple running instances.
+/// Named mutex prevents a second daemon from starting on the same pipe.
 ///
-/// The is_daemon_running() check has a TOCTOU race: it tries to connect to the
-/// named pipe, but there's a window between the check and CreateNamedPipeW in
-/// server.run(). When N daemons start simultaneously, all pass the check
-/// (pipe doesn't exist yet) and all create pipe instances successfully
-/// (PIPE_UNLIMITED_INSTANCES allows this).
+/// The DaemonLock uses CreateMutexW with a name derived from the pipe name.
+/// A second daemon calling DaemonLock::try_acquire() gets ERROR_ALREADY_EXISTS
+/// and exits immediately.
 ///
-/// Expected: exactly 1 daemon survives, the rest exit with code 0.
-/// Actual (buggy): multiple daemons survive and run in parallel.
+/// Bug fix verification: previously, is_daemon_running() checked the pipe,
+/// which has a TOCTOU race. The named mutex is atomic and race-free.
 #[test]
-fn test_concurrent_launch_single_instance() {
-    // Bug: is_daemon_running() has TOCTOU race allowing multiple daemon instances
+fn test_named_mutex_blocks_second_daemon() {
+    // Fix: DaemonLock (named mutex) prevents multiple daemon instances
     let pipe_name = format!(
-        r"\\.\pipe\godly-test-single-instance-{}",
+        r"\\.\pipe\godly-test-mutex-block-{}",
         std::process::id()
     );
 
-    let n = 10; // Launch 10 daemons simultaneously to maximize race hit probability
+    // Start daemon A and verify it's running
+    let mut daemon_a = spawn_daemon(&pipe_name);
+    let mut pipe = wait_for_pipe(&pipe_name, Duration::from_secs(5));
+    assert!(
+        matches!(send_request(&mut pipe, &Request::Ping), Response::Pong),
+        "Daemon A failed to respond to Ping"
+    );
+    drop(pipe);
+
+    // Start daemon B on the same pipe — it should detect the mutex and exit
+    let mut daemon_b = spawn_daemon(&pipe_name);
+    thread::sleep(Duration::from_secs(3));
+
+    let b_exited = daemon_b
+        .try_wait()
+        .ok()
+        .map_or(false, |status| status.is_some());
+
+    // Cleanup
+    let _ = daemon_b.kill();
+    let _ = daemon_b.wait();
+    let _ = daemon_a.kill();
+    let _ = daemon_a.wait();
+
+    assert!(
+        b_exited,
+        "Daemon B should have exited after detecting daemon A's mutex lock, \
+         but it's still running. The named mutex singleton enforcement is broken."
+    );
+}
+
+/// Concurrent daemon launches produce exactly one running instance.
+///
+/// When N daemon processes start simultaneously, the named mutex ensures
+/// exactly one acquires the lock. The rest detect ERROR_ALREADY_EXISTS and
+/// exit with code 0.
+///
+/// Bug fix verification: with the old pipe-based check, concurrent launches
+/// could all pass the TOCTOU window and coexist. The named mutex is atomic.
+#[test]
+fn test_concurrent_launch_single_instance() {
+    // Fix: named mutex ensures exactly 1 daemon from concurrent launches
+    let pipe_name = format!(
+        r"\\.\pipe\godly-test-concurrent-{}",
+        std::process::id()
+    );
+
+    let n = 10;
     let iterations = 3;
-    let mut max_running = 0;
+    let mut max_running: usize = 0;
 
-    for _iteration in 0..iterations {
-        // Launch N daemons at nearly the same instant (tight loop)
+    for _ in 0..iterations {
+        // Launch N daemons at nearly the same instant
         let mut children: Vec<Child> = (0..n).map(|_| spawn_daemon(&pipe_name)).collect();
-
-        // Wait for daemons to start — losers should detect the winner and exit(0)
         thread::sleep(Duration::from_secs(4));
 
-        // Count how many are still running vs exited
-        let mut running_count = 0;
-        let mut exited_count = 0;
+        let mut running_count: usize = 0;
         for child in children.iter_mut() {
             match child.try_wait() {
-                Ok(Some(_status)) => exited_count += 1,
+                Ok(Some(_)) => {} // exited — good
                 Ok(None) => running_count += 1,
                 Err(_) => {}
             }
@@ -183,167 +233,104 @@ fn test_concurrent_launch_single_instance() {
             max_running = running_count;
         }
 
-        // Cleanup
         kill_children(&mut children);
-        // Wait for pipe to disappear before next iteration
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(3) {
-            if try_connect_pipe(&pipe_name).is_none() {
-                thread::sleep(Duration::from_millis(200));
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
+        wait_for_pipe_gone(&pipe_name, Duration::from_secs(3));
     }
 
-    // Single-instance enforcement must ensure only 1 daemon survives.
-    // With the TOCTOU bug, multiple daemons run in parallel.
     assert_eq!(
         max_running, 1,
-        "Bug: Up to {} daemon processes ran simultaneously (expected 1). \
-         The is_daemon_running() TOCTOU race allows concurrent launches to all \
-         pass the check before any creates a pipe instance. \
-         PIPE_UNLIMITED_INSTANCES then lets all create valid pipe instances. \
-         This causes multiple godly_daemon.exe in Task Manager and terminal freezes.",
-        max_running
+        "Expected exactly 1 daemon from {} concurrent launches, but {} were running. \
+         The named mutex should prevent multiple instances atomically.",
+        n, max_running
     );
 }
 
-/// Bug: Multiple daemons on the same pipe cause session loss on reconnect.
+/// After the lock holder exits, a new daemon can start and serve sessions.
 ///
-/// When two daemons run on the same pipe (due to the TOCTOU race above),
-/// each daemon has its own isolated session store. A session created through
-/// one daemon's pipe instance is invisible through the other's. Client
-/// reconnections (CreateFileW) can land on either daemon, making sessions
-/// randomly appear and disappear — the user sees a "frozen terminal."
-///
-/// This test launches two daemons and verifies that a session created through
-/// one connection is always visible through subsequent connections.
-///
-/// Expected: session always found after reconnect.
-/// Actual (buggy): session disappears when reconnect lands on different daemon.
+/// The named mutex is automatically released when the process exits (even on
+/// crash), so there are no stale locks. A new daemon should be able to acquire
+/// the lock and become the singleton.
 #[test]
-fn test_multiple_daemons_cause_session_loss_on_reconnect() {
-    // Bug: sessions invisible when client reconnects to a different daemon instance
+fn test_new_daemon_starts_after_lock_holder_exits() {
+    // Fix: mutex is auto-released on exit, no stale locks
     let pipe_name = format!(
-        r"\\.\pipe\godly-test-session-loss-{}",
+        r"\\.\pipe\godly-test-reacquire-{}",
         std::process::id()
     );
 
-    // Launch two daemons at the same time to hit the race
+    // Start daemon A
     let mut daemon_a = spawn_daemon(&pipe_name);
+    let mut pipe = wait_for_pipe(&pipe_name, Duration::from_secs(5));
+    assert!(matches!(send_request(&mut pipe, &Request::Ping), Response::Pong));
+
+    // Create a session on daemon A
+    let session_id = format!("reacquire-test-{}", std::process::id());
+    let resp = send_request(
+        &mut pipe,
+        &Request::CreateSession {
+            id: session_id.clone(),
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 24,
+            cols: 80,
+            env: None,
+        },
+    );
+    assert!(
+        matches!(resp, Response::SessionCreated { .. }),
+        "CreateSession failed: {:?}",
+        resp
+    );
+    drop(pipe);
+
+    // Kill daemon A (simulates crash)
+    let _ = daemon_a.kill();
+    let _ = daemon_a.wait();
+    wait_for_pipe_gone(&pipe_name, Duration::from_secs(3));
+
+    // Start daemon B — should acquire the lock since A released it on exit
     let mut daemon_b = spawn_daemon(&pipe_name);
+    let mut pipe_b = wait_for_pipe(&pipe_name, Duration::from_secs(5));
+    assert!(
+        matches!(send_request(&mut pipe_b, &Request::Ping), Response::Pong),
+        "Daemon B should be responsive after daemon A exited"
+    );
 
-    // Wait for both to initialize
-    thread::sleep(Duration::from_secs(3));
-
-    // Check if both are running (needed for this test to be meaningful)
-    let a_running = daemon_a
-        .try_wait()
-        .ok()
-        .map_or(false, |status| status.is_none());
-    let b_running = daemon_b
-        .try_wait()
-        .ok()
-        .map_or(false, |status| status.is_none());
-
-    if !a_running || !b_running {
-        // Single-instance worked for this attempt — one daemon exited.
-        // The concurrent launch test covers this failure mode.
-        // Try again with more daemons to increase race probability.
-        let _ = daemon_a.kill();
-        let _ = daemon_a.wait();
-        let _ = daemon_b.kill();
-        let _ = daemon_b.wait();
-        // Wait for pipe cleanup
-        thread::sleep(Duration::from_millis(500));
-
-        // Retry with 10 daemons launched simultaneously
-        let mut children: Vec<Child> = (0..10).map(|_| spawn_daemon(&pipe_name)).collect();
-        thread::sleep(Duration::from_secs(4));
-
-        let running: Vec<usize> = children
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(i, c)| match c.try_wait() {
-                Ok(Some(_)) => None,
-                _ => Some(i),
-            })
-            .collect();
-
-        if running.len() < 2 {
-            // Race not hit even with 10 — clean up and report
-            kill_children(&mut children);
-            panic!(
-                "Could not reproduce multi-daemon condition (only {} running out of 10). \
-                 The TOCTOU race window may be too narrow on this machine. \
-                 The concurrent launch test should catch this more reliably.",
-                running.len()
-            );
-        }
-
-        // Use first two running daemons for the session test
-        // (we'll just continue with the children array)
-        let session_id = format!("session-loss-retry-{}", std::process::id());
-        let mut not_found_count = 0;
-
-        // Create a session through one connection
-        {
-            let mut pipe = wait_for_pipe(&pipe_name, Duration::from_secs(5));
-            let resp = send_request(
-                &mut pipe,
-                &Request::CreateSession {
-                    id: session_id.clone(),
-                    shell_type: ShellType::Windows,
-                    cwd: None,
-                    rows: 24,
-                    cols: 80,
-                    env: None,
-                },
-            );
+    // Daemon B should have an empty session store (A's sessions are gone)
+    let resp = send_request(&mut pipe_b, &Request::ListSessions);
+    match &resp {
+        Response::SessionList { sessions } => {
             assert!(
-                matches!(resp, Response::SessionCreated { .. }),
-                "CreateSession failed: {:?}",
-                resp
+                !sessions.iter().any(|s| s.id == session_id),
+                "Session from daemon A should not exist in daemon B"
             );
         }
-        thread::sleep(Duration::from_millis(300));
-
-        // Reconnect multiple times — some should hit a different daemon
-        for _ in 0..20 {
-            if let Some(mut pipe) = try_connect_pipe(&pipe_name) {
-                if let Ok(resp) =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        send_request(&mut pipe, &Request::ListSessions)
-                    }))
-                {
-                    if let Response::SessionList { sessions } = resp {
-                        if !sessions.iter().any(|s| s.id == session_id) {
-                            not_found_count += 1;
-                        }
-                    }
-                }
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-
-        kill_children(&mut children);
-
-        assert_eq!(
-            not_found_count, 0,
-            "Bug: Session '{}' was missing in {}/20 reconnect attempts. \
-             Multiple daemons on the same pipe have isolated session stores. \
-             Client reconnections randomly land on different daemons, making \
-             sessions appear/disappear — the user sees a frozen terminal.",
-            session_id, not_found_count
-        );
-        return;
+        other => panic!("Expected SessionList, got {:?}", other),
     }
 
-    // Both daemons are running — proceed with session loss test
-    let session_id = format!("session-loss-test-{}", std::process::id());
+    // Cleanup
+    drop(pipe_b);
+    let _ = daemon_b.kill();
+    let _ = daemon_b.wait();
+}
 
-    // Connect to whichever daemon picks up our connection and create a session
+/// Sessions persist when only one daemon runs (no session isolation bug).
+///
+/// With the mutex fix, there is always exactly one daemon, so all client
+/// connections go to the same daemon. Sessions created by one client are
+/// always visible to subsequent connections.
+#[test]
+fn test_sessions_visible_across_reconnect_with_single_daemon() {
+    // Fix: single daemon means no session isolation
+    let pipe_name = format!(
+        r"\\.\pipe\godly-test-reconnect-{}",
+        std::process::id()
+    );
+
+    let mut daemon = spawn_daemon(&pipe_name);
+    let session_id = format!("reconnect-test-{}", std::process::id());
+
+    // Create session via first connection
     {
         let mut pipe = wait_for_pipe(&pipe_name, Duration::from_secs(5));
         let resp = send_request(
@@ -362,50 +349,37 @@ fn test_multiple_daemons_cause_session_loss_on_reconnect() {
             "CreateSession failed: {:?}",
             resp
         );
-        // Disconnect
     }
-    thread::sleep(Duration::from_millis(300));
 
-    // Reconnect multiple times — at least some should hit the "other" daemon
-    // where the session doesn't exist
-    let mut found_count = 0;
+    // Reconnect multiple times — session should ALWAYS be visible
+    thread::sleep(Duration::from_millis(500));
     let mut not_found_count = 0;
-    let reconnect_attempts = 20;
+    let reconnect_attempts = 10;
 
     for _ in 0..reconnect_attempts {
         if let Some(mut pipe) = try_connect_pipe(&pipe_name) {
             if let Ok(resp) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 send_request(&mut pipe, &Request::ListSessions)
             })) {
-                match resp {
-                    Response::SessionList { sessions } => {
-                        if sessions.iter().any(|s| s.id == session_id) {
-                            found_count += 1;
-                        } else {
-                            not_found_count += 1;
-                        }
+                if let Response::SessionList { sessions } = resp {
+                    if !sessions.iter().any(|s| s.id == session_id) {
+                        not_found_count += 1;
                     }
-                    _ => {}
                 }
             }
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(100));
     }
 
     // Cleanup
-    let _ = daemon_a.kill();
-    let _ = daemon_a.wait();
-    let _ = daemon_b.kill();
-    let _ = daemon_b.wait();
+    let _ = daemon.kill();
+    let _ = daemon.wait();
 
-    // With a single daemon, every reconnection should find the session.
-    // With multiple daemons, some reconnections land on the daemon without the session.
     assert_eq!(
         not_found_count, 0,
-        "Bug: Session '{}' was missing in {}/{} reconnect attempts ({} found). \
-         Multiple daemons on the same pipe have isolated session stores. \
-         Client reconnections randomly land on different daemons, making \
-         sessions appear/disappear — the user sees a frozen terminal.",
-        session_id, not_found_count, reconnect_attempts, found_count
+        "Session '{}' was missing in {}/{} reconnect attempts. \
+         With a single daemon (enforced by named mutex), sessions should \
+         always be visible across reconnections.",
+        session_id, not_found_count, reconnect_attempts
     );
 }
