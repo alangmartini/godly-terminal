@@ -9,7 +9,7 @@ mod worktree;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
 use crate::daemon_client::DaemonClient;
@@ -144,31 +144,42 @@ pub fn run() {
                     eprintln!("[lib] Requesting frontend to save scrollbacks...");
                     let _ = window_for_close.emit("request-scrollback-save", ());
 
-                    // Wait for scrollback save to complete (max 3 seconds)
-                    let start = std::time::Instant::now();
-                    while !SCROLLBACK_SAVED.load(Ordering::SeqCst) {
-                        if start.elapsed() > Duration::from_secs(3) {
-                            eprintln!("[lib] Scrollback save timeout, proceeding with close");
-                            break;
+                    // Move the blocking wait to a background thread so the main
+                    // thread stays free to process the frontend's IPC callback
+                    // (scrollback_save_complete). Previously this busy-waited on
+                    // the main thread, deadlocking because the callback could
+                    // never be dispatched.
+                    let state = state_for_close.clone();
+                    let daemon = daemon_for_close.clone();
+                    let handle = handle_for_close.clone();
+                    let window = window_for_close.clone();
+                    std::thread::spawn(move || {
+                        // Wait for scrollback save to complete (max 3 seconds)
+                        let start = Instant::now();
+                        while !SCROLLBACK_SAVED.load(Ordering::SeqCst) {
+                            if start.elapsed() > Duration::from_secs(3) {
+                                eprintln!("[lib] Scrollback save timeout, proceeding with close");
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(50));
                         }
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
 
-                    // Detach all sessions (they keep running in the daemon)
-                    eprintln!("[lib] Detaching all sessions...");
-                    let terminals = state_for_close.terminals.read();
-                    for terminal_id in terminals.keys() {
-                        let request = godly_protocol::Request::Detach {
-                            session_id: terminal_id.clone(),
-                        };
-                        let _ = daemon_for_close.send_request(&request);
-                    }
-                    drop(terminals);
+                        // Detach all sessions (they keep running in the daemon)
+                        eprintln!("[lib] Detaching all sessions...");
+                        let terminals = state.terminals.read();
+                        for terminal_id in terminals.keys() {
+                            let request = godly_protocol::Request::Detach {
+                                session_id: terminal_id.clone(),
+                            };
+                            let _ = daemon.send_request(&request);
+                        }
+                        drop(terminals);
 
-                    // Save layout and close
-                    save_on_exit(&handle_for_close, &state_for_close);
-                    eprintln!("[lib] Destroying window...");
-                    let _ = window_for_close.destroy();
+                        // Save layout and close
+                        save_on_exit(&handle, &state);
+                        eprintln!("[lib] Destroying window...");
+                        let _ = window.destroy();
+                    });
                 }
             });
 

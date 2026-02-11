@@ -41,6 +41,7 @@ class Store {
 
   private listeners: Set<Listener> = new Set();
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
+  private pendingNotify = false;
 
   getState(): AppState {
     return this.state;
@@ -68,7 +69,19 @@ class Store {
   }
 
   private notify() {
-    this.listeners.forEach(listener => listener());
+    if (typeof requestAnimationFrame === 'function') {
+      // Browser: coalesce multiple setState() calls within a single frame
+      if (!this.pendingNotify) {
+        this.pendingNotify = true;
+        requestAnimationFrame(() => {
+          this.pendingNotify = false;
+          this.listeners.forEach(listener => listener());
+        });
+      }
+    } else {
+      // Non-browser (tests): notify synchronously
+      this.listeners.forEach(listener => listener());
+    }
   }
 
   // Workspace operations
@@ -131,6 +144,15 @@ class Store {
   }
 
   updateTerminal(id: string, updates: Partial<Terminal>) {
+    const existing = this.state.terminals.find(t => t.id === id);
+    if (!existing) return;
+
+    // Skip if no values actually changed
+    const changed = Object.entries(updates).some(
+      ([key, value]) => existing[key as keyof Terminal] !== value
+    );
+    if (!changed) return;
+
     this.setState({
       terminals: this.state.terminals.map(t =>
         t.id === id ? { ...t, ...updates } : t
