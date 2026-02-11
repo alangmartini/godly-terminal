@@ -11,6 +11,32 @@ use godly_protocol::{DaemonMessage, Event, Request, Response};
 use crate::debug_log::daemon_log;
 use crate::session::DaemonSession;
 
+/// Log current process memory usage (Windows: working set via GetProcessMemoryInfo).
+#[cfg(windows)]
+fn log_memory_usage(label: &str) {
+    use winapi::um::processthreadsapi::GetCurrentProcess;
+    use winapi::um::psapi::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+
+    unsafe {
+        let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        if GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
+            daemon_log!(
+                "MEMORY [{}]: working_set={:.1}MB, peak_working_set={:.1}MB, pagefile={:.1}MB",
+                label,
+                pmc.WorkingSetSize as f64 / (1024.0 * 1024.0),
+                pmc.PeakWorkingSetSize as f64 / (1024.0 * 1024.0),
+                pmc.PagefileUsage as f64 / (1024.0 * 1024.0),
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn log_memory_usage(label: &str) {
+    daemon_log!("MEMORY [{}]: (not available on this platform)", label);
+}
+
 /// Named pipe server that manages daemon sessions and client connections.
 pub struct DaemonServer {
     sessions: Arc<RwLock<HashMap<String, DaemonSession>>>,
@@ -51,19 +77,40 @@ impl DaemonServer {
 
         tokio::spawn(async move {
             let idle_timeout = Duration::from_secs(300); // 5 minutes
+            let mut health_tick: u64 = 0;
             loop {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 if !running.load(Ordering::Relaxed) {
                     break;
                 }
 
-                let sessions_empty = sessions.read().is_empty();
+                health_tick += 1;
+                let (session_count, session_ids) = {
+                    let guard = sessions.read();
+                    let count = guard.len();
+                    let ids: Vec<String> = guard.keys().cloned().collect();
+                    (count, ids)
+                };
+
                 let num_clients = client_count.load(Ordering::Relaxed);
                 let elapsed = last_activity_for_timeout.read().elapsed();
 
-                if sessions_empty && num_clients == 0 && elapsed > idle_timeout {
+                // Log health every 30s (every 3rd tick)
+                if health_tick % 3 == 0 {
+                    daemon_log!(
+                        "HEALTH: sessions={}, clients={}, idle={:.0}s, session_ids={:?}",
+                        session_count,
+                        num_clients,
+                        elapsed.as_secs_f64(),
+                        session_ids
+                    );
+                    log_memory_usage("health_check");
+                }
+
+                if session_count == 0 && num_clients == 0 && elapsed > idle_timeout {
                     eprintln!("[daemon] Idle timeout reached, shutting down");
                     daemon_log!("Idle timeout reached (no sessions, no clients for {:?}), shutting down", elapsed);
+                    log_memory_usage("idle_shutdown");
                     running.store(false, Ordering::Relaxed);
                     break;
                 }
@@ -82,12 +129,20 @@ impl DaemonServer {
                     let client_count = self.client_count.clone();
                     let activity = last_activity.clone();
 
-                    daemon_log!("Client connected, spawning handler (clients={})", self.client_count.load(Ordering::Relaxed));
+                    let client_num = self.client_count.load(Ordering::Relaxed);
+                    daemon_log!("Client connected, spawning handler (clients={})", client_num);
+                    log_memory_usage("client_connect");
 
                     tokio::spawn(async move {
-                        handle_client(pipe, sessions, running, activity).await;
-                        client_count.fetch_sub(1, Ordering::Relaxed);
-                        daemon_log!("Client disconnected (clients={})", client_count.load(Ordering::Relaxed));
+                        handle_client(pipe, sessions.clone(), running, activity).await;
+                        let remaining = client_count.fetch_sub(1, Ordering::Relaxed) - 1;
+                        let session_count = sessions.read().len();
+                        daemon_log!(
+                            "Client disconnected (clients={}, sessions={})",
+                            remaining,
+                            session_count
+                        );
+                        log_memory_usage("client_disconnect");
                     });
                 }
                 Err(e) => {
@@ -546,25 +601,41 @@ fn io_thread(
 
         // Periodic stats logging
         if last_log_time.elapsed() > Duration::from_secs(30) {
+            // Check channel depths to detect unbounded growth
+            let resp_depth = resp_rx.len();
+            let event_depth = event_rx.len();
             daemon_log!(
-                "io_thread stats: reads={}, writes={} (resp={}), bytes_out={}, stalls={}",
+                "io_thread stats: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_queue={}",
                 total_reads,
                 total_writes,
                 total_resp_writes,
                 total_bytes_written,
-                write_stall_count
+                write_stall_count,
+                resp_depth,
+                event_depth
             );
+            // Warn if event queue is growing large (indicates backpressure)
+            if event_depth > 1000 {
+                daemon_log!(
+                    "WARNING: event queue depth {} — client may not be reading fast enough",
+                    event_depth
+                );
+            }
             last_log_time = Instant::now();
         }
     }
 
+    let resp_depth = resp_rx.len();
+    let event_depth = event_rx.len();
     daemon_log!(
-        "io_thread stopped: reads={}, writes={} (resp={}), bytes_out={}, stalls={}",
+        "io_thread stopped: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_queue={}",
         total_reads,
         total_writes,
         total_resp_writes,
         total_bytes_written,
-        write_stall_count
+        write_stall_count,
+        resp_depth,
+        event_depth
     );
     eprintln!("[daemon-io] I/O thread stopped");
 }
@@ -743,8 +814,10 @@ async fn handle_request(
                 Ok(session) => {
                     let info = session.info();
                     sessions.write().insert(id.clone(), session);
+                    let session_count = sessions.read().len();
                     eprintln!("[daemon] Created session {}", id);
-                    daemon_log!("Created session {}", id);
+                    daemon_log!("Created session {} (total sessions: {})", id, session_count);
+                    log_memory_usage(&format!("session_create({})", session_count));
                     Response::SessionCreated { session: info }
                 }
                 Err(e) => {
@@ -862,8 +935,10 @@ async fn handle_request(
                 Some(session) => {
                     session.close();
                     attached_sessions.write().retain(|id| id != session_id);
+                    let remaining = sessions_guard.len(); // already removed
                     eprintln!("[daemon] Closed session {}", session_id);
-                    daemon_log!("Closed session {}", session_id);
+                    daemon_log!("Closed session {} (remaining sessions: {})", session_id, remaining);
+                    log_memory_usage(&format!("session_close({})", remaining));
                     Response::Ok
                 }
                 None => Response::Error {
