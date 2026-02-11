@@ -32,9 +32,11 @@ pub struct EventEmitter {
 
 impl EventEmitter {
     /// Spawn the emitter thread and return a cloneable handle.
-    /// Channel capacity of 256 ≈ ~4s of headroom at 60 events/s.
+    /// Channel capacity of 4096 provides ample headroom for burst output
+    /// (e.g. Claude CLI generating hundreds of KB rapidly). At ~4KB per
+    /// event, this buffers ~16MB before dropping.
     pub fn spawn(app_handle: AppHandle) -> Self {
-        let (tx, rx) = std::sync::mpsc::sync_channel::<EmitPayload>(256);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<EmitPayload>(4096);
         let dropped = Arc::new(AtomicU64::new(0));
 
         thread::Builder::new()
