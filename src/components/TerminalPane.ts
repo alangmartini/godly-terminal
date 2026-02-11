@@ -15,6 +15,7 @@ export class TerminalPane {
   private container: HTMLElement;
   private terminalId: string;
   private resizeObserver: ResizeObserver;
+  private resizeRAF: number | null = null;
   private unsubscribeOutput: (() => void) | null = null;
   private scrollbackSaveInterval: number | null = null;
   private maxScrollbackLines = 10000;
@@ -70,7 +71,8 @@ export class TerminalPane {
     this.container.dataset.terminalId = terminalId;
 
     this.resizeObserver = new ResizeObserver(() => {
-      this.fit();
+      if (this.resizeRAF) cancelAnimationFrame(this.resizeRAF);
+      this.resizeRAF = requestAnimationFrame(() => this.fit());
     });
   }
 
