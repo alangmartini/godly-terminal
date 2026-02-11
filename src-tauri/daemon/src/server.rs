@@ -281,8 +281,13 @@ async fn handle_client(
     // Channel: I/O thread -> async handler (incoming requests from client)
     let (req_tx, mut req_rx) = mpsc::unbounded_channel::<Request>();
 
-    // Channel: async handler -> I/O thread (outgoing messages to client)
-    let (msg_tx, msg_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+    // Channel: async handler -> I/O thread (responses only, HIGH PRIORITY)
+    // Responses are always written before events to prevent user input from
+    // timing out when the terminal is producing heavy output (e.g. Claude CLI).
+    let (resp_tx, resp_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+
+    // Channel: session forwarding tasks -> I/O thread (output events, NORMAL PRIORITY)
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<DaemonMessage>();
 
     // Signal to stop the I/O thread when the async handler is done
     let io_running = Arc::new(AtomicBool::new(true));
@@ -291,7 +296,7 @@ async fn handle_client(
     let io_running_clone = io_running.clone();
     let running_clone = running.clone();
     let io_handle = tokio::task::spawn_blocking(move || {
-        io_thread(pipe, req_tx, msg_rx, io_running_clone, running_clone);
+        io_thread(pipe, req_tx, resp_rx, event_rx, io_running_clone, running_clone);
     });
 
     // Async handler loop: process requests from the I/O thread
@@ -304,17 +309,19 @@ async fn handle_client(
         let response = handle_request(
             &request,
             &sessions,
-            &msg_tx,
+            &event_tx,
             &attached_sessions,
         )
         .await;
 
         daemon_log!("Sending response for {:?}", std::mem::discriminant(&request));
 
-        // Send response back to I/O thread for writing to pipe
+        // Send response to the HIGH PRIORITY channel so it's written before events.
+        // Bug fix: previously responses shared a channel with output events, causing
+        // user input to time out during heavy terminal output (e.g. Claude CLI).
         let msg = DaemonMessage::Response(response);
-        if msg_tx.send(msg).is_err() {
-            daemon_log!("msg_tx send failed, breaking handler loop");
+        if resp_tx.send(msg).is_err() {
+            daemon_log!("resp_tx send failed, breaking handler loop");
             break;
         }
     }
@@ -352,10 +359,15 @@ const MAX_WRITES_PER_ITERATION: usize = 8;
 
 /// Single I/O thread: performs all pipe reads and writes.
 /// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
+///
+/// Responses are written from `resp_rx` with HIGH PRIORITY (always drained first).
+/// Events are written from `event_rx` with NORMAL PRIORITY (batch-limited).
+/// This prevents user input responses from being delayed by output event floods.
 fn io_thread(
     mut pipe: std::fs::File,
     req_tx: mpsc::UnboundedSender<Request>,
-    mut msg_rx: mpsc::UnboundedReceiver<DaemonMessage>,
+    mut resp_rx: mpsc::UnboundedReceiver<DaemonMessage>,
+    mut event_rx: mpsc::UnboundedReceiver<DaemonMessage>,
     io_running: Arc<AtomicBool>,
     server_running: Arc<AtomicBool>,
 ) {
@@ -363,6 +375,7 @@ fn io_thread(
     let mut last_log_time = Instant::now();
     let mut total_reads: u64 = 0;
     let mut total_writes: u64 = 0;
+    let mut total_resp_writes: u64 = 0;
     let mut total_bytes_written: u64 = 0;
     let mut write_stall_count: u64 = 0;
 
@@ -419,25 +432,66 @@ fn io_thread(
             }
         }
 
-        // Step 2: Write outgoing messages, but limit per iteration to avoid
-        // starving reads. If we have many queued events and a slow pipe,
-        // writing them all would block and prevent reading new requests.
+        // Step 2a: HIGH PRIORITY — write ALL pending responses immediately.
+        // Responses (to Write, Resize, Ping, etc.) must not be delayed by
+        // queued output events. Without this, heavy terminal output (e.g. Claude
+        // CLI) causes the client to time out waiting for a response.
+        loop {
+            match resp_rx.try_recv() {
+                Ok(msg) => {
+                    let write_start = Instant::now();
+                    if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                        eprintln!("[daemon-io] Write error on response, stopping");
+                        daemon_log!("Write error on response, stopping");
+                        io_running.store(false, Ordering::Relaxed);
+                        break;
+                    }
+                    let elapsed = write_start.elapsed();
+                    total_writes += 1;
+                    total_resp_writes += 1;
+                    did_work = true;
+
+                    if elapsed > Duration::from_millis(50) {
+                        write_stall_count += 1;
+                        daemon_log!(
+                            "SLOW WRITE: Response took {:.1}ms (stall #{})",
+                            elapsed.as_secs_f64() * 1000.0,
+                            write_stall_count
+                        );
+                    }
+                }
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    // Response channel closed — handler loop exited
+                    daemon_log!("Response channel disconnected");
+                    break;
+                }
+            }
+        }
+
+        if !io_running.load(Ordering::Relaxed) {
+            break;
+        }
+
+        // Step 2b: NORMAL PRIORITY — write events with batch limit.
+        // Limit per iteration to avoid starving reads. If we have many queued
+        // events and a slow pipe, writing them all would block and prevent
+        // reading new requests.
         let mut writes_this_iteration = 0;
         while writes_this_iteration < MAX_WRITES_PER_ITERATION {
-            match msg_rx.try_recv() {
+            match event_rx.try_recv() {
                 Ok(msg) => {
                     let write_start = Instant::now();
                     let msg_kind = match &msg {
-                        DaemonMessage::Response(_) => "Response",
                         DaemonMessage::Event(Event::Output { .. }) => "Output",
                         DaemonMessage::Event(Event::SessionClosed { .. }) => "SessionClosed",
                         DaemonMessage::Event(Event::ProcessChanged { .. }) => "ProcessChanged",
+                        DaemonMessage::Response(_) => "Response", // shouldn't happen
                     };
 
                     if godly_protocol::write_message(&mut pipe, &msg).is_err() {
                         eprintln!("[daemon-io] Write error, stopping");
                         daemon_log!("Write error on {}, stopping", msg_kind);
-                        // Set io_running to false so the outer loop exits
                         io_running.store(false, Ordering::Relaxed);
                         break;
                     }
@@ -467,8 +521,8 @@ fn io_thread(
                     break;
                 }
                 Err(mpsc::error::TryRecvError::Disconnected) => {
-                    eprintln!("[daemon-io] Message channel disconnected, stopping");
-                    daemon_log!("Message channel disconnected, stopping");
+                    eprintln!("[daemon-io] Event channel disconnected, stopping");
+                    daemon_log!("Event channel disconnected, stopping");
                     io_running.store(false, Ordering::Relaxed);
                     break;
                 }
@@ -493,9 +547,10 @@ fn io_thread(
         // Periodic stats logging
         if last_log_time.elapsed() > Duration::from_secs(30) {
             daemon_log!(
-                "io_thread stats: reads={}, writes={}, bytes_out={}, stalls={}",
+                "io_thread stats: reads={}, writes={} (resp={}), bytes_out={}, stalls={}",
                 total_reads,
                 total_writes,
+                total_resp_writes,
                 total_bytes_written,
                 write_stall_count
             );
@@ -504,13 +559,167 @@ fn io_thread(
     }
 
     daemon_log!(
-        "io_thread stopped: reads={}, writes={}, bytes_out={}, stalls={}",
+        "io_thread stopped: reads={}, writes={} (resp={}), bytes_out={}, stalls={}",
         total_reads,
         total_writes,
+        total_resp_writes,
         total_bytes_written,
         write_stall_count
     );
     eprintln!("[daemon-io] I/O thread stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bug: Responses shared a channel with output events. Under heavy terminal
+    /// output (e.g. Claude CLI), hundreds of events queued before the response,
+    /// causing the client to time out after 5s.
+    ///
+    /// Fix: Separate response and event channels. I/O thread always drains the
+    /// response channel first.
+    ///
+    /// This test verifies that responses are written to the pipe before events,
+    /// even when the event channel has many queued messages.
+    #[cfg(windows)]
+    #[test]
+    fn test_io_thread_response_priority() {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::FromRawHandle;
+        use winapi::shared::winerror::ERROR_PIPE_CONNECTED;
+        use winapi::um::errhandlingapi::GetLastError;
+        use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
+        use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+        use winapi::um::namedpipeapi::{ConnectNamedPipe, CreateNamedPipeW};
+        use winapi::um::winbase::{
+            PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
+        };
+        use winapi::um::winnt::{
+            FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
+        };
+
+        // Create a unique named pipe for this test
+        let pipe_name = format!(
+            r"\\.\pipe\godly-test-priority-{}",
+            std::process::id()
+        );
+        let pipe_wide: Vec<u16> = OsStr::new(&pipe_name)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // Create server-side named pipe
+        let server_handle = unsafe {
+            CreateNamedPipeW(
+                pipe_wide.as_ptr(),
+                PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                1,
+                262144,
+                262144,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(
+            server_handle,
+            INVALID_HANDLE_VALUE,
+            "CreateNamedPipeW failed"
+        );
+
+        // Connect client in a separate thread (ConnectNamedPipe blocks)
+        let pipe_name_clone = pipe_name.clone();
+        let client_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let wide: Vec<u16> = OsStr::new(&pipe_name_clone)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    std::ptr::null_mut(),
+                    OPEN_EXISTING,
+                    0,
+                    std::ptr::null_mut(),
+                )
+            };
+            assert_ne!(handle, INVALID_HANDLE_VALUE, "Client CreateFileW failed");
+            unsafe { std::fs::File::from_raw_handle(handle as _) }
+        });
+
+        // Wait for client connection
+        let connected = unsafe { ConnectNamedPipe(server_handle, std::ptr::null_mut()) };
+        if connected == 0 {
+            let err = unsafe { GetLastError() };
+            assert_eq!(err, ERROR_PIPE_CONNECTED, "ConnectNamedPipe failed: {}", err);
+        }
+        let server_file: std::fs::File =
+            unsafe { std::fs::File::from_raw_handle(server_handle as _) };
+        let client_file = client_thread.join().unwrap();
+
+        // Set up channels
+        let (req_tx, _req_rx) = mpsc::unbounded_channel::<Request>();
+        let (resp_tx, resp_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+        let io_running = Arc::new(AtomicBool::new(true));
+        let server_running = Arc::new(AtomicBool::new(true));
+
+        // Pre-queue: 100 output events THEN 1 response.
+        // Without priority, the response would be written after all events.
+        for i in 0..100 {
+            event_tx
+                .send(DaemonMessage::Event(Event::Output {
+                    session_id: "test".into(),
+                    data: vec![i as u8; 64],
+                }))
+                .unwrap();
+        }
+        resp_tx
+            .send(DaemonMessage::Response(Response::Pong))
+            .unwrap();
+
+        // Run io_thread — it will write to the server side of the pipe
+        let io_running_clone = io_running.clone();
+        let server_running_clone = server_running.clone();
+        let io_handle = std::thread::spawn(move || {
+            let stopper = io_running_clone.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(500));
+                stopper.store(false, Ordering::Relaxed);
+            });
+            io_thread(
+                server_file,
+                req_tx,
+                resp_rx,
+                event_rx,
+                io_running_clone,
+                server_running_clone,
+            );
+        });
+
+        // Read from the client side — the FIRST message should be the Response
+        let mut reader = std::io::BufReader::new(&client_file);
+        let first_msg: DaemonMessage =
+            godly_protocol::read_message(&mut reader).unwrap().unwrap();
+
+        // The response MUST come first, before any of the 100 events
+        assert!(
+            matches!(first_msg, DaemonMessage::Response(Response::Pong)),
+            "Expected first message to be Response::Pong (priority), got {:?}",
+            match &first_msg {
+                DaemonMessage::Response(r) => format!("Response({:?})", r),
+                DaemonMessage::Event(e) => format!("Event({:?})", std::mem::discriminant(e)),
+            }
+        );
+
+        io_running.store(false, Ordering::Relaxed);
+        let _ = io_handle.join();
+    }
 }
 
 async fn handle_request(
