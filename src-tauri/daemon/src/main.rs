@@ -3,7 +3,7 @@ mod pid;
 mod server;
 mod session;
 
-use crate::pid::{is_daemon_running, remove_pid_file, write_pid_file};
+use crate::pid::{remove_pid_file, write_pid_file, DaemonLock};
 use crate::server::DaemonServer;
 
 #[cfg(feature = "leak-check")]
@@ -29,11 +29,17 @@ async fn main() {
     debug_log::daemon_log!("=== Daemon starting === pid={}", std::process::id());
     eprintln!("[daemon] Godly Terminal daemon starting (pid: {})", std::process::id());
 
-    // Check if another instance is already running
-    if is_daemon_running() {
-        eprintln!("[daemon] Another daemon instance is already running, exiting");
-        std::process::exit(0);
-    }
+    // Acquire singleton lock via named mutex. This is race-free — unlike the
+    // previous pipe-based check, a named mutex is atomically created by the
+    // kernel so two daemons cannot both succeed.
+    let _lock = match DaemonLock::try_acquire() {
+        Ok(lock) => lock,
+        Err(msg) => {
+            eprintln!("[daemon] {}, exiting", msg);
+            debug_log::daemon_log!("Singleton lock failed: {}", msg);
+            std::process::exit(0);
+        }
+    };
 
     // Detach from console on Windows (so closing the launching terminal doesn't kill us)
     // Skip when GODLY_NO_DETACH is set (used by tests to keep daemon as child process)
@@ -61,4 +67,5 @@ async fn main() {
     server.run().await;
 
     cleanup();
+    // _lock is dropped here, releasing the named mutex
 }
