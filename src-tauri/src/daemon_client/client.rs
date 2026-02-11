@@ -574,11 +574,11 @@ impl DaemonClient {
             .spawn(move || {
                 let mut iteration: u64 = 0;
                 loop {
-                    eprintln!("[keepalive] iter={} sleeping 10s", iteration);
+                    bridge::bridge_log(&format!("[keepalive] iter={} sleeping 10s", iteration));
                     std::thread::sleep(Duration::from_secs(10));
                     iteration += 1;
 
-                    eprintln!("[keepalive] iter={} woke up", iteration);
+                    bridge::bridge_log(&format!("[keepalive] iter={} woke up", iteration));
 
                     // Watchdog: check bridge health BEFORE ping.
                     // If the bridge is stuck in emit_event, ping() will block too
@@ -597,12 +597,12 @@ impl DaemonClient {
                             0
                         };
 
-                        eprintln!(
+                        bridge::bridge_log(&format!(
                             "[keepalive] iter={} bridge_phase={} stall={:.1}s",
                             iteration,
                             bridge::phase_name(phase),
                             stall_ms as f64 / 1000.0
-                        );
+                        ));
 
                         if stall_ms > STALL_THRESHOLD_MS {
                             let msg = format!(
@@ -610,33 +610,35 @@ impl DaemonClient {
                                 bridge::phase_name(phase),
                                 stall_ms as f64 / 1000.0
                             );
-                            eprintln!("[keepalive] iter={} {}", iteration, msg);
-                            bridge::bridge_log(&msg);
+                            bridge::bridge_log(&format!("[keepalive] iter={} {}", iteration, msg));
                         }
                     } else {
-                        eprintln!("[keepalive] iter={} no bridge_health (bridge not started?)", iteration);
+                        bridge::bridge_log(&format!(
+                            "[keepalive] iter={} no bridge_health (bridge not started?)",
+                            iteration
+                        ));
                     }
 
                     // Ping the daemon — this may block if the bridge is stuck
-                    eprintln!("[keepalive] iter={} sending ping...", iteration);
+                    bridge::bridge_log(&format!("[keepalive] iter={} sending ping...", iteration));
                     let ping_start = Instant::now();
                     match client.ping() {
                         Ok(()) => {
                             let elapsed = ping_start.elapsed();
-                            eprintln!(
+                            bridge::bridge_log(&format!(
                                 "[keepalive] iter={} ping OK in {:.1}ms",
                                 iteration,
                                 elapsed.as_secs_f64() * 1000.0
-                            );
+                            ));
                         }
                         Err(e) => {
                             let elapsed = ping_start.elapsed();
-                            eprintln!(
+                            bridge::bridge_log(&format!(
                                 "[keepalive] iter={} ping FAILED in {:.1}ms: {}",
                                 iteration,
                                 elapsed.as_secs_f64() * 1000.0,
                                 e
-                            );
+                            ));
                         }
                     }
                 }
