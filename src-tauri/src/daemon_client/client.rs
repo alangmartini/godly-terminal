@@ -528,8 +528,11 @@ impl DaemonClient {
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
 
+        // 15s timeout: the daemon now prioritizes responses over events, but the
+        // pipe write itself can still stall briefly under extreme output bursts.
+        // Previously 5s, which was too tight when responses queued behind events.
         response_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(15))
             .map_err(|e| format!("Failed to receive response: {}", e))
     }
 
