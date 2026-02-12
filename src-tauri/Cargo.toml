@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "protocol", "daemon", "mcp"]
+members = [".", "protocol", "daemon", "mcp", "notify"]
 resolver = "2"
 
 [package]
