@@ -1,0 +1,20 @@
+[package]
+name = "godly-notify"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+
+[[bin]]
+name = "godly-notify"
+path = "src/main.rs"
+
+[dependencies]
+godly-protocol = { path = "../protocol" }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "handleapi",
+    "fileapi",
+    "errhandlingapi",
+    "winnt",
+] }
