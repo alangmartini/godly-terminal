@@ -172,11 +172,42 @@ impl DaemonSession {
                                     // Yield to let handler threads acquire output_tx if waiting
                                     thread::yield_now();
                                 }
-                                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                    // Channel full — backpressure, store in ring buffer
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(data)) => {
+                                    // Bug A1 fix: block until channel has capacity instead of
+                                    // falling back to ring buffer. Previously, data written to
+                                    // the ring buffer during transient fullness was never
+                                    // replayed to the attached client, causing missing output.
+                                    // blocking_send provides true backpressure — the PTY read
+                                    // pauses naturally because this thread is blocked.
+                                    let tx_clone = tx.clone();
                                     drop(tx_guard);
-                                    let mut ring = reader_ring.lock();
-                                    append_to_ring(&mut ring, &buf[..n]);
+                                    let bp_start = Instant::now();
+                                    match tx_clone.blocking_send(data) {
+                                        Ok(()) => {
+                                            let bp_elapsed = bp_start.elapsed();
+                                            if bp_elapsed.as_millis() > 50 {
+                                                daemon_log!(
+                                                    "Session {} reader: backpressure {:.1}ms (channel was full)",
+                                                    session_id,
+                                                    bp_elapsed.as_secs_f64() * 1000.0
+                                                );
+                                            }
+                                            thread::yield_now();
+                                        }
+                                        Err(send_err) => {
+                                            // Channel closed during backpressure — client disconnected
+                                            channel_send_failures += 1;
+                                            daemon_log!(
+                                                "Session {} reader: channel closed during backpressure (disconnect #{})",
+                                                session_id,
+                                                channel_send_failures
+                                            );
+                                            reader_attached.store(false, Ordering::Relaxed);
+                                            *reader_tx.lock() = None;
+                                            let mut ring = reader_ring.lock();
+                                            append_to_ring(&mut ring, &send_err.0);
+                                        }
+                                    }
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                                     // Client disconnected, switch to ring buffer
@@ -399,6 +430,12 @@ impl DaemonSession {
             created_at: self.created_at,
             attached: self.is_attached(),
         }
+    }
+
+    /// Get the current ring buffer size in bytes (for diagnostics and testing).
+    #[cfg(test)]
+    pub fn ring_buffer_len(&self) -> usize {
+        self.ring_buffer.lock().len()
     }
 
     #[cfg(windows)]
@@ -683,6 +720,69 @@ mod tests {
 
         session.detach();
         assert!(!session.info().attached);
+    }
+
+    /// Bug A1: When the per-session output channel fills during heavy output,
+    /// data falls back to the ring buffer but is never replayed to the attached
+    /// client. The ring buffer should remain empty while a client is attached —
+    /// all data should flow through the channel.
+    #[cfg(windows)]
+    #[test]
+    fn test_no_data_stranded_in_ring_buffer_while_attached() {
+        let session = DaemonSession::new(
+            "test-bp".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        let (_buf, mut rx) = session.attach();
+
+        // Generate enough output to overflow the channel (capacity 64).
+        // PowerShell prints numbered lines; with small PTY reads, this produces
+        // many chunks that will fill the 64-message channel.
+        session
+            .write(b"for ($i = 1; $i -le 300; $i++) { Write-Output \"LINE$i\" }\r\n")
+            .unwrap();
+
+        // Wait for output to be produced — don't read from rx yet so the
+        // channel fills up and triggers the Full path.
+        thread::sleep(Duration::from_secs(3));
+
+        // Now drain the channel, giving the reader thread time to catch up
+        // after backpressure is relieved.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut consecutive_empties = 0;
+        loop {
+            match rx.try_recv() {
+                Ok(_) => {
+                    consecutive_empties = 0;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    consecutive_empties += 1;
+                    if consecutive_empties > 200 || Instant::now() > deadline {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        // Bug A1: ring buffer should be empty — all data should have flowed
+        // through the channel, not fallen back to the ring buffer.
+        let ring_size = session.ring_buffer_len();
+        assert_eq!(
+            ring_size, 0,
+            "Bug A1: {} bytes stranded in ring buffer while client was attached \
+             — data lost during channel backpressure",
+            ring_size
+        );
+
+        session.close();
     }
 
     #[cfg(windows)]
