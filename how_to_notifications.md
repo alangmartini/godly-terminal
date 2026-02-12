@@ -4,7 +4,7 @@ Godly Terminal can play a chime and show a badge on the terminal tab to alert yo
 
 ## Option 1: Hooks (recommended)
 
-Hooks run shell commands automatically on Claude Code events. Because the `godly-mcp` binary supports CLI mode, you can trigger notifications without any CLAUDE.md instructions — the hook fires on its own and the `GODLY_SESSION_ID` env var (set automatically in every Godly Terminal shell) tells it which tab to notify.
+Hooks run shell commands automatically on Claude Code events. The `godly-notify` binary is a lightweight, purpose-built tool for this — it connects directly to the MCP pipe, sends the notification, and exits in ~5-10ms. The `GODLY_SESSION_ID` env var (set automatically in every Godly Terminal shell) tells it which tab to notify.
 
 ### Setup
 
@@ -19,7 +19,7 @@ Add this to your Claude Code settings file (`.claude/settings.json` in your proj
         "hooks": [
           {
             "type": "command",
-            "command": "godly-mcp notify -m \"Tool completed\""
+            "command": "godly-notify \"Tool completed\""
           }
         ]
       }
@@ -39,17 +39,25 @@ You can customize when notifications fire by changing the event and matcher:
 ### CLI reference
 
 ```
-godly-mcp notify                          # Notify with no message
-godly-mcp notify -m "Build done"          # Notify with a message
-godly-mcp notify --message "Tests passed" # Long form
-godly-mcp notify --terminal-id <ID>       # Target a specific terminal tab
-godly-mcp --help                          # General help
-godly-mcp notify --help                   # Notify subcommand help
+godly-notify                          # Notify with no message
+godly-notify "Build done"             # Notify with a message
+godly-notify --terminal-id <ID>       # Target a specific terminal tab
+godly-notify --help                   # Show usage
 ```
 
 The terminal ID is resolved in this order:
 1. `--terminal-id` flag (if provided)
 2. `GODLY_SESSION_ID` environment variable (set automatically)
+
+### godly-notify vs godly-mcp
+
+| | `godly-notify` | `godly-mcp notify` |
+|---|---|---|
+| **Speed** | ~5-10ms | ~300-500ms |
+| **How it works** | Direct pipe connection, single message | Node.js startup + full MCP JSON-RPC handshake |
+| **Best for** | Hooks (fires frequently) | One-off CLI usage |
+
+You can also use `godly-mcp notify -m "message"` if you prefer — it works the same way, just slower. Use `godly-notify` in hooks where latency matters.
 
 ### Why hooks over CLAUDE.md?
 
@@ -103,7 +111,7 @@ A practical combo:
         "hooks": [
           {
             "type": "command",
-            "command": "godly-mcp notify"
+            "command": "godly-notify"
           }
         ]
       }
