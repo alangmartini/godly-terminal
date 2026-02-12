@@ -338,7 +338,10 @@ export class App {
 
         // Check daemon for live sessions that can be reattached
         const liveSessions = await terminalService.reconnectSessions();
-        const liveSessionIds = new Set(liveSessions.map((s) => s.id));
+        // Filter out dead sessions (PTY exited but session still in daemon HashMap)
+        const liveSessionIds = new Set(
+          liveSessions.filter((s) => s.running).map((s) => s.id)
+        );
         console.log('[App] Live daemon sessions:', liveSessionIds.size);
 
         // Restore terminals: reattach if alive, or create fresh with scrollback
