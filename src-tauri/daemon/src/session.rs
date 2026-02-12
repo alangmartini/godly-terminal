@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -31,6 +31,9 @@ pub struct DaemonSession {
     ring_buffer: Arc<Mutex<VecDeque<u8>>>,
     /// Channel sender for live output to an attached client
     output_tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>>,
+    /// Lock-free attachment flag — readable without locking output_tx.
+    /// Updated in attach()/detach()/close() and by the reader thread on send failure.
+    is_attached_flag: Arc<AtomicBool>,
 }
 
 impl DaemonSession {
@@ -103,6 +106,7 @@ impl DaemonSession {
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
         let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>> =
             Arc::new(Mutex::new(None));
+        let is_attached_flag = Arc::new(AtomicBool::new(false));
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -115,6 +119,7 @@ impl DaemonSession {
         let reader_ring = ring_buffer.clone();
         let reader_tx = output_tx.clone();
         let session_id = id.clone();
+        let reader_attached = is_attached_flag.clone();
 
         thread::spawn(move || {
             let mut reader = {
@@ -170,10 +175,15 @@ impl DaemonSession {
                                     channel_send_failures
                                 );
                                 drop(tx_guard);
+                                reader_attached.store(false, Ordering::Relaxed);
                                 *reader_tx.lock() = None;
                                 // Store this chunk in ring buffer
                                 let mut ring = reader_ring.lock();
                                 append_to_ring(&mut ring, &buf[..n]);
+                            } else {
+                                drop(tx_guard);
+                                // Yield to let handler threads acquire output_tx if waiting
+                                thread::yield_now();
                             }
                         } else {
                             // No client attached: buffer output
@@ -234,34 +244,59 @@ impl DaemonSession {
             running,
             ring_buffer,
             output_tx,
+            is_attached_flag,
         })
     }
 
     /// Attach a client to this session.
     /// Returns (buffered_data, receiver_for_live_output).
+    ///
+    /// Uses `try_lock_for` with timeouts to avoid blocking the handler indefinitely
+    /// when the reader thread holds ring_buffer or output_tx under heavy output.
     pub fn attach(&self) -> (Vec<u8>, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        // Drain ring buffer as initial replay
-        let buffered: Vec<u8> = {
-            let mut ring = self.ring_buffer.lock();
-            ring.drain(..).collect()
+        // Drain ring buffer as initial replay — timeout to avoid blocking handler
+        let buffered: Vec<u8> = match self.ring_buffer.try_lock_for(Duration::from_secs(2)) {
+            Some(mut ring) => ring.drain(..).collect(),
+            None => {
+                daemon_log!(
+                    "WARN: ring_buffer lock timeout in attach for session {}, returning empty buffer",
+                    self.id
+                );
+                Vec::new()
+            }
         };
 
-        // Set the output sender for live streaming
-        *self.output_tx.lock() = Some(tx);
+        // Set the output sender for live streaming — timeout to avoid blocking handler
+        match self.output_tx.try_lock_for(Duration::from_secs(2)) {
+            Some(mut guard) => *guard = Some(tx),
+            None => {
+                daemon_log!(
+                    "WARN: output_tx lock timeout in attach for session {}",
+                    self.id
+                );
+            }
+        };
+
+        self.is_attached_flag.store(true, Ordering::Relaxed);
 
         (buffered, rx)
     }
 
     /// Detach the current client. Output will accumulate in the ring buffer.
     pub fn detach(&self) {
+        self.is_attached_flag.store(false, Ordering::Relaxed);
         *self.output_tx.lock() = None;
     }
 
-    /// Check if a client is currently attached
+    /// Check if a client is currently attached (lock-free).
+    ///
+    /// Reads an AtomicBool instead of locking output_tx. This prevents the
+    /// handler from blocking on ListSessions/info() when the reader thread
+    /// holds output_tx in a tight loop under heavy output.
     pub fn is_attached(&self) -> bool {
-        self.output_tx.lock().is_some()
+        self.is_attached_flag.load(Ordering::Relaxed)
     }
 
     /// Write data to the PTY.
@@ -335,6 +370,7 @@ impl DaemonSession {
     /// Close the session
     pub fn close(&self) {
         self.running.store(false, Ordering::Relaxed);
+        self.is_attached_flag.store(false, Ordering::Relaxed);
         // Drop the output channel to notify attached clients
         *self.output_tx.lock() = None;
     }
@@ -584,4 +620,101 @@ mod tests {
         );
     }
 
+    // --- Tests for is_attached_flag (mutex starvation fix) ---
+    //
+    // Bug: handler threads blocked on is_attached()/info() because they locked
+    // output_tx, which the reader thread held in a tight loop under heavy output.
+    // Fix: is_attached_flag (AtomicBool) provides lock-free attachment state.
+
+    #[cfg(windows)]
+    #[test]
+    fn test_attached_flag_lifecycle() {
+        let session = DaemonSession::new(
+            "test-lifecycle".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        assert!(!session.is_attached(), "new session should be detached");
+
+        let (_buf, _rx) = session.attach();
+        assert!(session.is_attached(), "should be attached after attach()");
+
+        session.detach();
+        assert!(!session.is_attached(), "should be detached after detach()");
+
+        let (_buf2, _rx2) = session.attach();
+        assert!(session.is_attached(), "should be attached after re-attach");
+
+        session.close();
+        assert!(!session.is_attached(), "should be detached after close()");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_info_reflects_attachment_state() {
+        let session = DaemonSession::new(
+            "test-info".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        assert!(!session.info().attached);
+
+        let (_buf, _rx) = session.attach();
+        assert!(session.info().attached);
+
+        session.detach();
+        assert!(!session.info().attached);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_is_attached_does_not_block_on_output_tx() {
+        // Bug: is_attached() locked output_tx, causing handler starvation when the
+        // reader thread held that lock under heavy output. The fix uses AtomicBool
+        // so is_attached() never contends with the reader thread.
+        let session = DaemonSession::new(
+            "test-lockfree".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        let output_tx = session.output_tx.clone();
+
+        // Hold output_tx locked for 500ms on a background thread
+        let handle = thread::spawn(move || {
+            let _guard = output_tx.lock();
+            thread::sleep(Duration::from_millis(500));
+        });
+
+        // Give the background thread time to acquire the lock
+        thread::sleep(Duration::from_millis(50));
+
+        // is_attached() should return immediately (lock-free via AtomicBool)
+        let start = Instant::now();
+        let attached = session.is_attached();
+        let elapsed = start.elapsed();
+
+        assert!(!attached);
+        assert!(
+            elapsed.as_millis() < 50,
+            "is_attached() took {}ms — should be lock-free, not blocked on output_tx",
+            elapsed.as_millis()
+        );
+
+        handle.join().unwrap();
+    }
 }
