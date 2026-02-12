@@ -123,6 +123,68 @@ pub fn log(msg: &str) {
     }
 }
 
+/// Install a Windows exception handler to catch silent daemon crashes.
+/// Logs exception code + address before the process terminates. Without this,
+/// crashes from access violations, heap corruption, or stack overflows vanish
+/// silently — the daemon just disappears with no log entry.
+#[cfg(windows)]
+pub fn install_exception_handler() {
+    use winapi::um::errhandlingapi::SetUnhandledExceptionFilter;
+    use winapi::um::winnt::EXCEPTION_POINTERS;
+
+    unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
+        if info.is_null() {
+            return 1; // EXCEPTION_EXECUTE_HANDLER
+        }
+
+        let record = (*info).ExceptionRecord;
+        if record.is_null() {
+            return 1;
+        }
+
+        let code = (*record).ExceptionCode;
+        let address = (*record).ExceptionAddress as usize;
+
+        let code_name = match code {
+            0xC0000005 => "ACCESS_VIOLATION",
+            0xC00000FD => "STACK_OVERFLOW",
+            0xC0000374 => "HEAP_CORRUPTION",
+            0xC0000409 => "STACK_BUFFER_OVERRUN",
+            _ => "UNKNOWN",
+        };
+
+        // Use try_lock to avoid deadlock if exception occurs during logging
+        if let Some(mutex) = LOG_FILE.get() {
+            if let Ok(mut file) = mutex.try_lock() {
+                let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default();
+                let _ = writeln!(
+                    file,
+                    "[{}.{:03}] FATAL EXCEPTION: code=0x{:08X} ({}) address=0x{:X}",
+                    ts.as_secs(),
+                    ts.subsec_millis(),
+                    code,
+                    code_name,
+                    address
+                );
+                let _ = file.flush();
+            }
+        }
+
+        1 // EXCEPTION_EXECUTE_HANDLER
+    }
+
+    unsafe {
+        SetUnhandledExceptionFilter(Some(handler));
+    }
+}
+
+#[cfg(not(windows))]
+pub fn install_exception_handler() {
+    // No-op on non-Windows platforms
+}
+
 macro_rules! daemon_log {
     ($($arg:tt)*) => {
         crate::debug_log::log(&format!($($arg)*))
