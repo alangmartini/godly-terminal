@@ -358,6 +358,15 @@ async fn handle_client(
     eprintln!("[daemon] Entering request loop for client");
     daemon_log!("Entering request loop for client");
     while let Some(request) = req_rx.recv().await {
+        // If the I/O thread has died (pipe closed/broken), stop processing.
+        // Without this check, a stuck handler keeps accumulating when the bridge
+        // reconnects — each new client's handler blocks on session locks while
+        // the old handler never exits.
+        if !io_running.load(Ordering::Relaxed) {
+            daemon_log!("io_thread stopped, breaking handler loop");
+            break;
+        }
+
         *last_activity.write() = Instant::now();
         daemon_log!("Received request: {:?}", request);
 
