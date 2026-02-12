@@ -34,6 +34,7 @@ winapi = { version = "0.3", features = [
     "errhandlingapi",
     "synchapi",
     "winerror",
+    "winnt",
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]
