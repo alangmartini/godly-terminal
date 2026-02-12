@@ -785,6 +785,123 @@ mod tests {
     }
 }
 
+/// Bug: when a shell process exited, the forwarding task's rx.recv() returned
+/// None but it never sent SessionClosed — the tab just looked frozen.
+/// Fix: after the forwarding loop exits, check running_flag. If false (PTY
+/// exited), send SessionClosed. If true (client detached), don't send.
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+
+    /// When the channel closes with running=false (PTY exited), the forwarding
+    /// task should send a SessionClosed event.
+    #[tokio::test]
+    async fn test_forwarding_sends_session_closed_on_pty_exit() {
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
+        let (event_tx, mut event_rx) = mpsc::channel::<DaemonMessage>(16);
+        let running_flag = Arc::new(AtomicBool::new(true));
+        let sid = "test-fwd-closed".to_string();
+
+        let flag = running_flag.clone();
+        let handle = tokio::spawn({
+            let sid = sid.clone();
+            async move {
+                while let Some(data) = rx.recv().await {
+                    let event = DaemonMessage::Event(Event::Output {
+                        session_id: sid.clone(),
+                        data,
+                    });
+                    if event_tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+                if !flag.load(Ordering::Relaxed) {
+                    let _ = event_tx
+                        .send(DaemonMessage::Event(Event::SessionClosed {
+                            session_id: sid,
+                        }))
+                        .await;
+                }
+            }
+        });
+
+        // Send some output, then simulate PTY exit
+        tx.send(b"hello".to_vec()).await.unwrap();
+        running_flag.store(false, Ordering::Relaxed);
+        drop(tx); // close the channel
+
+        handle.await.unwrap();
+
+        // Should get Output then SessionClosed
+        let msg1 = event_rx.recv().await.unwrap();
+        assert!(
+            matches!(msg1, DaemonMessage::Event(Event::Output { .. })),
+            "first message should be Output"
+        );
+
+        let msg2 = event_rx.recv().await.unwrap();
+        match msg2 {
+            DaemonMessage::Event(Event::SessionClosed { session_id }) => {
+                assert_eq!(session_id, sid);
+            }
+            other => panic!("expected SessionClosed, got {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    /// When the channel closes with running=true (client detached), the
+    /// forwarding task should NOT send SessionClosed.
+    #[tokio::test]
+    async fn test_forwarding_no_session_closed_on_detach() {
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
+        let (event_tx, mut event_rx) = mpsc::channel::<DaemonMessage>(16);
+        let running_flag = Arc::new(AtomicBool::new(true));
+        let sid = "test-fwd-detach".to_string();
+
+        let flag = running_flag.clone();
+        let handle = tokio::spawn({
+            let sid = sid.clone();
+            async move {
+                while let Some(data) = rx.recv().await {
+                    let event = DaemonMessage::Event(Event::Output {
+                        session_id: sid.clone(),
+                        data,
+                    });
+                    if event_tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+                if !flag.load(Ordering::Relaxed) {
+                    let _ = event_tx
+                        .send(DaemonMessage::Event(Event::SessionClosed {
+                            session_id: sid,
+                        }))
+                        .await;
+                }
+            }
+        });
+
+        // Send some output, then simulate detach (running stays true)
+        tx.send(b"hello".to_vec()).await.unwrap();
+        // running_flag stays true — this is a detach, not a PTY exit
+        drop(tx);
+
+        handle.await.unwrap();
+
+        // Should get Output only, no SessionClosed
+        let msg1 = event_rx.recv().await.unwrap();
+        assert!(
+            matches!(msg1, DaemonMessage::Event(Event::Output { .. })),
+            "first message should be Output"
+        );
+
+        // Channel should be empty — no SessionClosed sent
+        assert!(
+            event_rx.try_recv().is_err(),
+            "should NOT receive SessionClosed on detach (running=true)"
+        );
+    }
+}
+
 async fn handle_request(
     request: &Request,
     sessions: &Arc<RwLock<HashMap<String, DaemonSession>>>,
@@ -833,9 +950,12 @@ async fn handle_request(
                     let (buffer, mut rx) = session.attach();
                     attached_sessions.write().push(session_id.clone());
 
-                    // Spawn a task to forward live output as events
+                    // Spawn a task to forward live output as events.
+                    // When the channel closes, check if the PTY exited (running == false)
+                    // and send SessionClosed so the client knows the process is dead.
                     let tx = msg_tx.clone();
                     let sid = session_id.clone();
+                    let running_flag = session.running_flag();
                     tokio::spawn(async move {
                         while let Some(data) = rx.recv().await {
                             let event = DaemonMessage::Event(Event::Output {
@@ -845,6 +965,17 @@ async fn handle_request(
                             if tx.send(event).await.is_err() {
                                 break;
                             }
+                        }
+                        // Channel closed — check why:
+                        // - running == false → PTY exited → notify client
+                        // - running == true  → client detached → session still alive, don't notify
+                        if !running_flag.load(Ordering::Relaxed) {
+                            daemon_log!("Session {} PTY exited, sending SessionClosed", sid);
+                            let _ = tx
+                                .send(DaemonMessage::Event(Event::SessionClosed {
+                                    session_id: sid,
+                                }))
+                                .await;
                         }
                     });
 
