@@ -30,7 +30,7 @@ pub struct DaemonSession {
     /// Ring buffer accumulates output when no client is attached
     ring_buffer: Arc<Mutex<VecDeque<u8>>>,
     /// Channel sender for live output to an attached client
-    output_tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>>,
+    output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>>,
     /// Lock-free attachment flag — readable without locking output_tx.
     /// Updated in attach()/detach()/close() and by the reader thread on send failure.
     is_attached_flag: Arc<AtomicBool>,
@@ -104,7 +104,7 @@ impl DaemonSession {
         let writer = Arc::new(Mutex::new(writer));
         let running = Arc::new(AtomicBool::new(true));
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
-        let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>> =
+        let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>> =
             Arc::new(Mutex::new(None));
         let is_attached_flag = Arc::new(AtomicBool::new(false));
 
@@ -135,7 +135,7 @@ impl DaemonSession {
 
             daemon_log!("Session {} reader thread started", session_id);
 
-            let mut buf = [0u8; 4096];
+            let mut buf = [0u8; 65536];
             let mut total_bytes: u64 = 0;
             let mut total_reads: u64 = 0;
             let mut channel_send_failures: u64 = 0;
@@ -165,25 +165,34 @@ impl DaemonSession {
                         }
 
                         if let Some(tx) = tx_guard.as_ref() {
-                            // Client attached: send live output
-                            if tx.send(data).is_err() {
-                                // Client disconnected, switch to ring buffer
-                                channel_send_failures += 1;
-                                daemon_log!(
-                                    "Session {} reader: channel send failed (client disconnect #{})",
-                                    session_id,
-                                    channel_send_failures
-                                );
-                                drop(tx_guard);
-                                reader_attached.store(false, Ordering::Relaxed);
-                                *reader_tx.lock() = None;
-                                // Store this chunk in ring buffer
-                                let mut ring = reader_ring.lock();
-                                append_to_ring(&mut ring, &buf[..n]);
-                            } else {
-                                drop(tx_guard);
-                                // Yield to let handler threads acquire output_tx if waiting
-                                thread::yield_now();
+                            // Client attached: try to send live output (bounded channel applies backpressure)
+                            match tx.try_send(data) {
+                                Ok(()) => {
+                                    drop(tx_guard);
+                                    // Yield to let handler threads acquire output_tx if waiting
+                                    thread::yield_now();
+                                }
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                    // Channel full — backpressure, store in ring buffer
+                                    drop(tx_guard);
+                                    let mut ring = reader_ring.lock();
+                                    append_to_ring(&mut ring, &buf[..n]);
+                                }
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                    // Client disconnected, switch to ring buffer
+                                    channel_send_failures += 1;
+                                    daemon_log!(
+                                        "Session {} reader: channel send failed (client disconnect #{})",
+                                        session_id,
+                                        channel_send_failures
+                                    );
+                                    drop(tx_guard);
+                                    reader_attached.store(false, Ordering::Relaxed);
+                                    *reader_tx.lock() = None;
+                                    // Store this chunk in ring buffer
+                                    let mut ring = reader_ring.lock();
+                                    append_to_ring(&mut ring, &buf[..n]);
+                                }
                             }
                         } else {
                             // No client attached: buffer output
@@ -253,8 +262,8 @@ impl DaemonSession {
     ///
     /// Uses `try_lock_for` with timeouts to avoid blocking the handler indefinitely
     /// when the reader thread holds ring_buffer or output_tx under heavy output.
-    pub fn attach(&self) -> (Vec<u8>, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    pub fn attach(&self) -> (Vec<u8>, tokio::sync::mpsc::Receiver<Vec<u8>>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
 
         // Drain ring buffer as initial replay — timeout to avoid blocking handler
         let buffered: Vec<u8> = match self.ring_buffer.try_lock_for(Duration::from_secs(2)) {
