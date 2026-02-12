@@ -2,7 +2,7 @@
 
 All fix attempts for the terminal freezing bug, in chronological order. The freeze manifests as the terminal becoming unresponsive to input and/or ceasing to display output, requiring the user to close and reopen the app.
 
-**Status**: Partially resolved. Multiple root causes identified and fixed across 11 attempts. The full IPC pipeline has been hardened — pipe buffers, channel priority, emit blocking, DOM thrashing, daemon crashes, response starvation, and mutex starvation have all been addressed.
+**Status**: Partially resolved. Multiple root causes identified and fixed across 12 attempts. The full IPC pipeline has been hardened — pipe buffers, channel priority, emit blocking, DOM thrashing, daemon crashes, response starvation, mutex starvation, and unbounded event accumulation have all been addressed.
 
 ---
 
@@ -215,6 +215,45 @@ Additionally, the singleton check (`is_daemon_running`) had a TOCTOU race — be
 
 ---
 
+## Attempt 12: Backpressure + output coalescing + crash diagnostics
+
+**PR**: [#63](https://github.com/alangmartini/godly-terminal/pull/63)
+**Branch**: `feat/godly-notify-cli`
+
+**Hypothesis**: Prior attempts fixed pipeline bottlenecks but never addressed the **source** — events accumulated unboundedly. Daemon logs showed the unbounded event channel grew to **170,388 events** in 4.7 seconds, pipe writes stalled 2.4s (bridge not reading fast enough), and the "Write batch limit hit" log fired hundreds of times/sec generating a 42MB log file. Additionally, the daemon sometimes dies silently — no panic, no error, no exception logged.
+
+**Evidence from daemon log**:
+- `event_queue=170388` — unbounded channel grew to 170K events in 4.7s
+- `SLOW WRITE: Output took 2438.2ms` — pipe write blocked 2.4s
+- 42MB log file from "Write batch limit hit" log spam (hundreds/sec)
+- Daemon disappeared with zero log entries about the cause
+
+**Fix**:
+- **Larger reader buffer (4KB → 64KB)**: ConPTY `ReadFile` returns whatever's available. Under heavy load, bigger buffer = fewer, larger events. Average event was 126 bytes — 64KB buffer coalesces dozens of small ANSI sequences per read.
+- **Bounded per-session channel (unbounded → 64)**: `try_send()` with three-way match: `Ok` → success, `Full` → fall back to ring buffer (backpressure), `Closed` → client disconnected. No data lost.
+- **Bounded event channel (unbounded → 1024)**: Caps memory at ~1024 + (64 × N sessions) events max, vs 170K+ observed. Forwarding task uses `.send().await` which suspends when full → per-session channel fills → reader falls back to ring buffer. True end-to-end backpressure.
+- **Write batch limit 8 → 128**: More events per iteration reduces loop overhead.
+- **Deleted log spam**: Removed "Write batch limit hit" `daemon_log!` that generated 42MB log files.
+- **Windows exception handler**: `SetUnhandledExceptionFilter` catches ACCESS_VIOLATION (0xC0000005), STACK_OVERFLOW (0xC00000FD), HEAP_CORRUPTION (0xC0000374), STACK_BUFFER_OVERRUN (0xC0000409) and writes exception code + address to log file using `try_lock()` to avoid deadlock.
+
+**Backpressure flow**:
+```
+PTY → reader (64KB buf) → try_send per-session channel (bounded 64)
+                               |                    |
+                          (Full)                (OK)
+                               ↓                    ↓
+                         Ring buffer (1MB)    Forwarding task
+                                                    ↓
+                                          send().await event channel (bounded 1024)
+                                              (blocks when full)
+                                                    ↓
+                                          I/O thread (128/iter) → pipe → bridge
+```
+
+**Result**: Event accumulation is now bounded. Under heavy output, the system gracefully degrades by storing excess data in ring buffers (which are already size-capped at 1MB) instead of accumulating unbounded events in memory. Silent daemon crashes will now leave diagnostic evidence in the log.
+
+---
+
 ## Related fixes (not directly freeze, but contributing factors)
 
 ### Ctrl+C interrupt failure in ConPTY
@@ -258,6 +297,7 @@ Missing `event.preventDefault()` calls caused double paste and Ctrl+C intercepti
 | Keepalive watchdog | `start_keepalive()` thread | Detects bridge stalls >15s, logs stuck phase |
 | HEALTH logs | Periodic daemon logging | Session count, client count, memory (working set) |
 | Channel depth logs | I/O thread stats | Detect unbounded channel growth under backpressure |
+| Exception handler | `SetUnhandledExceptionFilter` | Catches ACCESS_VIOLATION, STACK_OVERFLOW, HEAP_CORRUPTION, STACK_BUFFER_OVERRUN |
 | Panic hook | Daemon `main()` | Captures panics to log file (daemon has no console) |
 | Log rotation | 2MB limit | Current → `.prev.log` to avoid unbounded growth |
 
@@ -279,4 +319,4 @@ bridge I/O thread → EventEmitter → Tauri emit (was synchronous, now async)
   frontend store → DOM updates (was thrashing, now RAF-batched)
 ```
 
-Each layer had its own bottleneck. Fixing one revealed the next. All known layers have now been addressed through 11 fix attempts.
+Each layer had its own bottleneck. Fixing one revealed the next. Attempt 12 attacks the source — preventing unbounded event accumulation via backpressure, reducing event frequency via larger reads, and adding crash diagnostics for silent daemon deaths. All known layers have now been addressed through 12 fix attempts.
