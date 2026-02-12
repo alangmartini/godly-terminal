@@ -17,6 +17,8 @@ export class TerminalPane {
   private resizeObserver: ResizeObserver;
   private resizeRAF: number | null = null;
   private unsubscribeOutput: (() => void) | null = null;
+  private outputBuffer: Uint8Array[] = [];
+  private outputFlushRAF: number | null = null;
   private scrollbackSaveInterval: number | null = null;
   private maxScrollbackLines = 10000;
 
@@ -142,11 +144,16 @@ export class TerminalPane {
       terminalService.writeToTerminal(this.terminalId, data);
     });
 
-    // Handle output and capture for scrollback
+    // Handle output: buffer chunks and flush once per animation frame.
+    // Bug C1: unbatched write() calls under heavy output saturate the main
+    // thread because each call triggers xterm.js's parser synchronously.
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
       (data) => {
-        this.terminal.write(data);
+        this.outputBuffer.push(data);
+        if (this.outputFlushRAF === null) {
+          this.outputFlushRAF = requestAnimationFrame(() => this.flushOutputBuffer());
+        }
       }
     );
 
@@ -162,6 +169,31 @@ export class TerminalPane {
     requestAnimationFrame(() => {
       this.fit();
     });
+  }
+
+  private flushOutputBuffer() {
+    this.outputFlushRAF = null;
+    const chunks = this.outputBuffer;
+    if (chunks.length === 0) return;
+    this.outputBuffer = [];
+
+    if (chunks.length === 1) {
+      this.terminal.write(chunks[0]);
+      return;
+    }
+
+    // Concatenate all buffered chunks into a single Uint8Array
+    let totalLength = 0;
+    for (const chunk of chunks) {
+      totalLength += chunk.byteLength;
+    }
+    const merged = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    this.terminal.write(merged);
   }
 
   private startScrollbackSaveInterval() {
@@ -244,6 +276,11 @@ export class TerminalPane {
     // Save scrollback before destroying
     await this.saveScrollback();
 
+    if (this.outputFlushRAF !== null) {
+      cancelAnimationFrame(this.outputFlushRAF);
+      this.outputFlushRAF = null;
+    }
+    this.outputBuffer = [];
     if (this.scrollbackSaveInterval) {
       clearInterval(this.scrollbackSaveInterval);
     }
