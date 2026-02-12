@@ -27,6 +27,7 @@ async fn main() {
 
     debug_log::init();
     debug_log::install_panic_hook();
+    debug_log::install_exception_handler();
     debug_log::daemon_log!(
         "\n========================================\n\
          === Daemon starting === pid={} args={:?}\n\

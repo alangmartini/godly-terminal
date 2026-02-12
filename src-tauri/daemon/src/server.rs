@@ -342,7 +342,7 @@ async fn handle_client(
     let (resp_tx, resp_rx) = mpsc::unbounded_channel::<DaemonMessage>();
 
     // Channel: session forwarding tasks -> I/O thread (output events, NORMAL PRIORITY)
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+    let (event_tx, event_rx) = mpsc::channel::<DaemonMessage>(1024);
 
     // Signal to stop the I/O thread when the async handler is done
     let io_running = Arc::new(AtomicBool::new(true));
@@ -419,7 +419,7 @@ async fn handle_client(
 /// Maximum number of outgoing messages to write per I/O loop iteration.
 /// After writing this many messages, we check for incoming data before writing more.
 /// This prevents write-heavy scenarios from starving request reads.
-const MAX_WRITES_PER_ITERATION: usize = 8;
+const MAX_WRITES_PER_ITERATION: usize = 128;
 
 /// Single I/O thread: performs all pipe reads and writes.
 /// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
@@ -431,7 +431,7 @@ fn io_thread(
     mut pipe: std::fs::File,
     req_tx: mpsc::UnboundedSender<Request>,
     mut resp_rx: mpsc::UnboundedReceiver<DaemonMessage>,
-    mut event_rx: mpsc::UnboundedReceiver<DaemonMessage>,
+    mut event_rx: mpsc::Receiver<DaemonMessage>,
     io_running: Arc<AtomicBool>,
     server_running: Arc<AtomicBool>,
 ) {
@@ -595,11 +595,6 @@ fn io_thread(
 
         // If we hit the write limit, check for incoming data before writing more
         if writes_this_iteration >= MAX_WRITES_PER_ITERATION {
-            daemon_log!(
-                "Write batch limit hit ({}/{}), checking for incoming data",
-                writes_this_iteration,
-                MAX_WRITES_PER_ITERATION
-            );
             continue; // Loop back to peek for incoming requests
         }
 
@@ -610,41 +605,29 @@ fn io_thread(
 
         // Periodic stats logging
         if last_log_time.elapsed() > Duration::from_secs(30) {
-            // Check channel depths to detect unbounded growth
             let resp_depth = resp_rx.len();
-            let event_depth = event_rx.len();
             daemon_log!(
-                "io_thread stats: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_queue={}",
+                "io_thread stats: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_cap=1024",
                 total_reads,
                 total_writes,
                 total_resp_writes,
                 total_bytes_written,
                 write_stall_count,
-                resp_depth,
-                event_depth
+                resp_depth
             );
-            // Warn if event queue is growing large (indicates backpressure)
-            if event_depth > 1000 {
-                daemon_log!(
-                    "WARNING: event queue depth {} — client may not be reading fast enough",
-                    event_depth
-                );
-            }
             last_log_time = Instant::now();
         }
     }
 
     let resp_depth = resp_rx.len();
-    let event_depth = event_rx.len();
     daemon_log!(
-        "io_thread stopped: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_queue={}",
+        "io_thread stopped: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_cap=1024",
         total_reads,
         total_writes,
         total_resp_writes,
         total_bytes_written,
         write_stall_count,
-        resp_depth,
-        event_depth
+        resp_depth
     );
     eprintln!("[daemon-io] I/O thread stopped");
 }
@@ -745,7 +728,7 @@ mod tests {
         // Set up channels
         let (req_tx, _req_rx) = mpsc::unbounded_channel::<Request>();
         let (resp_tx, resp_rx) = mpsc::unbounded_channel::<DaemonMessage>();
-        let (event_tx, event_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+        let (event_tx, event_rx) = mpsc::channel::<DaemonMessage>(1024);
         let io_running = Arc::new(AtomicBool::new(true));
         let server_running = Arc::new(AtomicBool::new(true));
 
@@ -753,7 +736,7 @@ mod tests {
         // Without priority, the response would be written after all events.
         for i in 0..100 {
             event_tx
-                .send(DaemonMessage::Event(Event::Output {
+                .try_send(DaemonMessage::Event(Event::Output {
                     session_id: "test".into(),
                     data: vec![i as u8; 64],
                 }))
@@ -805,7 +788,7 @@ mod tests {
 async fn handle_request(
     request: &Request,
     sessions: &Arc<RwLock<HashMap<String, DaemonSession>>>,
-    msg_tx: &mpsc::UnboundedSender<DaemonMessage>,
+    msg_tx: &mpsc::Sender<DaemonMessage>,
     attached_sessions: &Arc<RwLock<Vec<String>>>,
 ) -> Response {
     match request {
@@ -859,7 +842,7 @@ async fn handle_request(
                                 session_id: sid.clone(),
                                 data,
                             });
-                            if tx.send(event).is_err() {
+                            if tx.send(event).await.is_err() {
                                 break;
                             }
                         }
