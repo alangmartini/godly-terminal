@@ -374,70 +374,107 @@ impl DaemonClient {
 
     /// Reconnect to the daemon, establishing a new pipe and bridge.
     /// Called automatically when `send_request` detects a broken connection.
+    ///
+    /// Split into two phases to minimize lock hold time:
+    /// - Phase 1 (under `reconnect_lock`): establish connection + bridge
+    /// - Phase 2 (no lock): re-attach sessions
+    ///
+    /// Previously, the lock was held for the entire duration including the
+    /// session re-attach loop. Each re-attach calls `try_send_request()` with
+    /// a 15s timeout, so with N sessions the lock was held for up to 15s × N.
+    /// During that time ALL other Tauri command threads piled up behind the
+    /// lock, causing a full app freeze.
     fn reconnect(&self) -> Result<(), String> {
-        let _guard = self.reconnect_lock.lock();
+        // Phase 1: under reconnect_lock — establish connection + bridge.
+        // Other threads that detect a broken connection will block here briefly,
+        // then find a working bridge when the lock is released.
+        {
+            let _guard = self.reconnect_lock.lock();
 
-        // Check if another thread already reconnected while we waited for the lock
-        if self.request_tx.lock().is_some() {
-            // Try a quick ping to verify the connection is alive
-            if self.try_send_request(&Request::Ping).is_ok() {
-                return Ok(());
+            // Check if another thread already reconnected while we waited for the lock
+            if self.request_tx.lock().is_some() {
+                // Try a quick ping to verify the connection is alive
+                if self.try_send_request(&Request::Ping).is_ok() {
+                    return Ok(());
+                }
             }
-        }
 
-        eprintln!("[daemon_client] Reconnecting to daemon...");
+            eprintln!("[daemon_client] Reconnecting to daemon...");
 
-        // Clear stale request sender, health, and emitter so no new requests go to the dead bridge
-        *self.request_tx.lock() = None;
-        *self.bridge_health.lock() = None;
-        *self.event_emitter.lock() = None;
+            // Clear stale request sender, health, and emitter so no new requests go to the dead bridge
+            *self.request_tx.lock() = None;
+            *self.bridge_health.lock() = None;
+            *self.event_emitter.lock() = None;
 
-        // Try connecting to existing daemon first, then launch if needed
-        let new_client = match Self::try_connect() {
-            Ok(c) => c,
-            Err(_) => {
-                eprintln!("[daemon_client] Daemon not reachable, launching new one...");
-                Self::launch_daemon()?;
+            // Try connecting to existing daemon first, then launch if needed
+            let new_client = match Self::try_connect() {
+                Ok(c) => c,
+                Err(_) => {
+                    eprintln!("[daemon_client] Daemon not reachable, launching new one...");
+                    Self::launch_daemon()?;
 
-                let mut retries = 0;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                    match Self::try_connect() {
-                        Ok(c) => break c,
-                        Err(e) => {
-                            retries += 1;
-                            if retries > 15 {
-                                return Err(format!(
-                                    "Failed to reconnect to daemon after launch: {}",
-                                    e
-                                ));
+                    let mut retries = 0;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        match Self::try_connect() {
+                            Ok(c) => break c,
+                            Err(e) => {
+                                retries += 1;
+                                if retries > 15 {
+                                    return Err(format!(
+                                        "Failed to reconnect to daemon after launch: {}",
+                                        e
+                                    ));
+                                }
                             }
                         }
                     }
                 }
+            };
+
+            // Move the new connection's reader/writer into self
+            *self.reader.lock() = new_client.reader.lock().take();
+            *self.writer.lock() = new_client.writer.lock().take();
+
+            // Set up the bridge with the stored app_handle
+            let app_handle = self
+                .app_handle
+                .lock()
+                .clone()
+                .ok_or("No app_handle stored — setup_bridge was never called")?;
+
+            self.setup_bridge(app_handle)?;
+        } // reconnect_lock released here — other threads can now send requests
+
+        // Phase 2: no lock held — re-attach sessions.
+        // Other threads can send requests through the new bridge immediately
+        // while re-attach proceeds in the background of this thread.
+        self.reattach_sessions();
+
+        eprintln!("[daemon_client] Reconnected to daemon");
+        Ok(())
+    }
+
+    /// Re-attach all previously attached sessions after a reconnect.
+    ///
+    /// Called WITHOUT the reconnect_lock held, so other threads can send
+    /// requests through the newly established bridge while re-attach is
+    /// in progress. Each re-attach calls `try_send_request()` (15s timeout);
+    /// with N sessions this could take up to 15s × N, which would block ALL
+    /// other commands if done under the lock.
+    fn reattach_sessions(&self) {
+        let app_handle = match self.app_handle.lock().clone() {
+            Some(h) => h,
+            None => {
+                eprintln!("[daemon_client] No app_handle for reattach — skipping");
+                return;
             }
         };
 
-        // Move the new connection's reader/writer into self
-        *self.reader.lock() = new_client.reader.lock().take();
-        *self.writer.lock() = new_client.writer.lock().take();
-
-        // Set up the bridge with the stored app_handle
-        let app_handle = self
-            .app_handle
-            .lock()
-            .clone()
-            .ok_or("No app_handle stored — setup_bridge was never called")?;
-
-        self.setup_bridge(app_handle.clone())?;
-
-        // Re-attach all previously attached sessions so output flows again.
-        // When the pipe broke, the daemon auto-detached all sessions for
-        // the old client. Without re-attaching, the terminal appears frozen
-        // because output events stop flowing.
         let emitter = self.event_emitter.lock().clone();
         let sessions: Vec<String> = self.attached_sessions.lock().clone();
         let mut lost_session_ids: Vec<String> = Vec::new();
+
         for session_id in &sessions {
             let req = Request::Attach {
                 session_id: session_id.clone(),
@@ -504,9 +541,6 @@ impl DaemonClient {
                 serde_json::json!({ "session_ids": lost_session_ids }),
             );
         }
-
-        eprintln!("[daemon_client] Reconnected to daemon");
-        Ok(())
     }
 
     /// Low-level send: attempts to send a request through the current bridge.
