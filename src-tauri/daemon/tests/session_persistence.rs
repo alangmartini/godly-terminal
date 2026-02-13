@@ -7,8 +7,8 @@
 //! Run with:
 //!   cd src-tauri && cargo test -p godly-daemon --test session_persistence -- --test-threads=1 --nocapture
 //!
-//! The tests MUST run serially (--test-threads=1) because they share a single
-//! named pipe endpoint and kill/restart the daemon between tests.
+//! Each test spawns its own daemon with an isolated pipe name, so they do NOT
+//! interfere with a running production daemon.
 
 #![cfg(windows)]
 
@@ -16,14 +16,14 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::process::CommandExt;
-use std::process::Command;
+use std::process::{Child, Command};
 use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use godly_protocol::frame;
 use godly_protocol::types::ShellType;
-use godly_protocol::{DaemonMessage, Request, Response, PIPE_NAME};
+use godly_protocol::{DaemonMessage, Request, Response};
 
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
@@ -41,6 +41,16 @@ type HANDLE = *mut winapi::ctypes::c_void;
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Generate a unique pipe name for this test to avoid collisions with
+/// the production daemon or other test runs.
+fn test_pipe_name(test: &str) -> String {
+    format!(
+        r"\\.\pipe\godly-test-{}-{}",
+        test,
+        std::process::id()
+    )
+}
+
 /// Find the daemon binary next to the test binary.
 /// Integration test binaries live in target/debug/deps/, daemon binary is in target/debug/.
 fn daemon_binary_path() -> std::path::PathBuf {
@@ -56,17 +66,17 @@ fn daemon_binary_path() -> std::path::PathBuf {
     path
 }
 
-/// Try to open a connection to the daemon's named pipe.
+/// Try to open a connection to a daemon pipe.
 /// Returns the File handle if successful, None if the pipe doesn't exist.
-fn try_connect_pipe() -> Option<std::fs::File> {
-    let pipe_name: Vec<u16> = OsStr::new(PIPE_NAME)
+fn try_connect_pipe(pipe_name: &str) -> Option<std::fs::File> {
+    let wide: Vec<u16> = OsStr::new(pipe_name)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
     let handle = unsafe {
         CreateFileW(
-            pipe_name.as_ptr(),
+            wide.as_ptr(),
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             ptr::null_mut(),
@@ -77,8 +87,6 @@ fn try_connect_pipe() -> Option<std::fs::File> {
     };
 
     if handle == INVALID_HANDLE_VALUE {
-        let err = unsafe { GetLastError() };
-        eprintln!("  [test] CreateFileW failed with error: {}", err);
         None
     } else {
         Some(unsafe { std::fs::File::from_raw_handle(handle as _) })
@@ -87,10 +95,10 @@ fn try_connect_pipe() -> Option<std::fs::File> {
 
 /// Wait for the daemon pipe to become available and verify it's responsive.
 /// Sends a Ping request to confirm the daemon is fully initialized.
-fn wait_for_daemon(timeout: Duration) -> std::fs::File {
+fn wait_for_daemon(pipe_name: &str, timeout: Duration) -> std::fs::File {
     let start = Instant::now();
     loop {
-        if let Some(mut file) = try_connect_pipe() {
+        if let Some(mut file) = try_connect_pipe(pipe_name) {
             // Verify the daemon is responsive with a Ping
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 send_request(&mut file, &Request::Ping)
@@ -132,39 +140,41 @@ fn send_request(pipe: &mut std::fs::File, req: &Request) -> Response {
     }
 }
 
-/// Kill any running godly-daemon process and wait for full cleanup.
-fn kill_existing_daemon() {
+/// Kill a daemon child process and wait for it to exit.
+fn kill_daemon(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Kill a daemon by PID (for WMI-launched processes that aren't child processes).
+fn kill_daemon_by_pid(pid: u32) {
     let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "godly-daemon.exe"])
+        .args(["/F", "/PID", &pid.to_string()])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
-    // Wait for pipe to disappear
+    thread::sleep(Duration::from_millis(500));
+}
+
+/// Wait for a pipe to fully disappear (after killing the daemon).
+fn wait_for_pipe_gone(pipe_name: &str, timeout: Duration) {
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(5) {
-        if try_connect_pipe().is_none() {
-            // Pipe is gone — wait a bit more for OS to fully reclaim pipe resources
-            thread::sleep(Duration::from_millis(500));
-            break;
+    while start.elapsed() < timeout {
+        if try_connect_pipe(pipe_name).is_none() {
+            thread::sleep(Duration::from_millis(200));
+            return;
         }
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
-/// Read the daemon PID file from %APPDATA%.
-fn read_pid_file() -> Option<u32> {
-    let appdata = std::env::var("APPDATA").ok()?;
-    let path = std::path::PathBuf::from(appdata)
-        .join("com.godly.terminal")
-        .join("godly-daemon.pid");
-    let content = std::fs::read_to_string(path).ok()?;
-    content.trim().parse().ok()
-}
-
-/// Launch the daemon with the same flags the Tauri app uses (no breakaway).
-fn launch_daemon_like_tauri_app() -> std::process::Child {
+/// Launch a daemon with an isolated pipe name. Uses GODLY_NO_DETACH so the
+/// daemon stays as a child process that can be killed cleanly via child.kill().
+fn launch_daemon(pipe_name: &str) -> Child {
     let daemon_path = daemon_binary_path();
     Command::new(&daemon_path)
+        .env("GODLY_PIPE_NAME", pipe_name)
+        .env("GODLY_NO_DETACH", "1")
         .creation_flags(
             0x00000008 | // DETACHED_PROCESS
             0x00000200, // CREATE_NEW_PROCESS_GROUP
@@ -176,16 +186,20 @@ fn launch_daemon_like_tauri_app() -> std::process::Child {
 /// Launch the daemon via WMI (Win32_Process.Create) using PowerShell CIM.
 /// The process is created by the WMI provider host (wmiprvse.exe), NOT as a
 /// child of the calling process, so it does not inherit any Job Object membership.
-fn launch_daemon_via_wmi() {
+///
+/// Uses `--instance` to isolate from the production daemon. Returns the PID
+/// of the launched process so it can be killed after the test.
+fn launch_daemon_via_wmi(instance: &str) -> u32 {
     let daemon_path = daemon_binary_path();
     let daemon_str = daemon_path.to_string_lossy();
+    let command_line = format!("{} --instance {}", daemon_str, instance);
 
     let ps_command = format!(
         "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create \
          -Arguments @{{CommandLine='{}'}}; \
          if ($r.ReturnValue -ne 0) {{ throw \"WMI Create failed: $($r.ReturnValue)\" }}; \
          Write-Output \"PID=$($r.ProcessId)\"",
-        daemon_str
+        command_line
     );
 
     let output = Command::new("powershell")
@@ -206,6 +220,16 @@ fn launch_daemon_via_wmi() {
         output.status,
         stderr
     );
+
+    // Parse PID from "PID=12345" output
+    stdout
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("PID=")
+                .and_then(|s| s.trim().parse::<u32>().ok())
+        })
+        .expect("Failed to parse PID from WMI output")
 }
 
 /// Create a Windows Job Object with the given limit flags.
@@ -243,11 +267,10 @@ fn create_job_object(limit_flags: u32) -> HANDLE {
 #[test]
 fn test_01_sessions_persist_across_client_reconnect() {
     eprintln!("\n=== test_01: basic session persistence across reconnect ===");
-    kill_existing_daemon();
+    let pipe_name = test_pipe_name("persist-01");
 
-    let _child = launch_daemon_like_tauri_app();
-    let mut pipe = wait_for_daemon(Duration::from_secs(5));
-    let pid1 = read_pid_file().expect("PID file should exist after daemon start");
+    let mut child = launch_daemon(&pipe_name);
+    let mut pipe = wait_for_daemon(&pipe_name, Duration::from_secs(5));
 
     // Create a session
     let session_id = "reconnect-test-session".to_string();
@@ -285,16 +308,8 @@ fn test_01_sessions_persist_across_client_reconnect() {
     drop(pipe);
     thread::sleep(Duration::from_secs(1));
 
-    // Reconnect
-    let mut pipe2 = wait_for_daemon(Duration::from_secs(5));
-    let pid2 = read_pid_file().expect("PID file should still exist");
-
-    // Same daemon — PID should not have changed
-    assert_eq!(
-        pid1, pid2,
-        "Daemon PID changed from {} to {}! A new daemon was spawned instead of reusing the existing one.",
-        pid1, pid2
-    );
+    // Reconnect to the same daemon
+    let mut pipe2 = wait_for_daemon(&pipe_name, Duration::from_secs(5));
 
     // Session should still exist
     let resp = send_request(&mut pipe2, &Request::ListSessions);
@@ -307,8 +322,8 @@ fn test_01_sessions_persist_across_client_reconnect() {
                 sessions
             );
             eprintln!(
-                "  OK: Session '{}' still present after reconnect (PID {})",
-                session_id, pid2
+                "  OK: Session '{}' still present after reconnect",
+                session_id
             );
         }
         other => panic!("Expected SessionList, got {:?}", other),
@@ -322,7 +337,7 @@ fn test_01_sessions_persist_across_client_reconnect() {
         },
     );
     drop(pipe2);
-    kill_existing_daemon();
+    kill_daemon(&mut child);
 }
 
 /// Simulates the actual `cargo tauri dev` restart workflow:
@@ -331,11 +346,8 @@ fn test_01_sessions_persist_across_client_reconnect() {
 ///   3. A SECOND daemon binary is launched (simulating `connect_or_launch`)
 ///   4. Does daemon B detect daemon A and exit? Or does it start and take over?
 ///
-/// Verification is by SESSION EXISTENCE, not PID file (which is unreliable
-/// because `taskkill /F` skips cleanup, leaving stale PID files).
-///
-/// Also checks whether the daemon binary can be overwritten, which tells us
-/// if the daemon process is truly alive (on Windows, running .exe files are locked).
+/// Verification is by SESSION EXISTENCE — if the original session survives,
+/// daemon A is still running and B correctly detected it.
 #[test]
 fn test_03_second_daemon_detects_first() {
     let iterations = 5;
@@ -346,21 +358,15 @@ fn test_03_second_daemon_detects_first() {
         iterations
     );
 
+    let pipe_name = test_pipe_name("persist-03");
+
     for i in 0..iterations {
         eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
-        kill_existing_daemon();
-        // Clean up stale PID file from previous taskkill
-        if let Some(appdata) = std::env::var("APPDATA").ok() {
-            let pid_path = std::path::PathBuf::from(&appdata)
-                .join("com.godly.terminal")
-                .join("godly-daemon.pid");
-            let _ = std::fs::remove_file(&pid_path);
-        }
 
         // Start daemon A
-        let _child_a = launch_daemon_like_tauri_app();
-        let mut pipe = wait_for_daemon(Duration::from_secs(5));
-        eprintln!("  Daemon A running (PID file: {:?})", read_pid_file());
+        let mut child_a = launch_daemon(&pipe_name);
+        let mut pipe = wait_for_daemon(&pipe_name, Duration::from_secs(5));
+        eprintln!("  Daemon A running (pid={})", child_a.id());
 
         // Create a uniquely-named session (our "marker" for daemon A)
         let session_id = format!("marker-session-iter{}-{}", i, std::process::id());
@@ -382,26 +388,16 @@ fn test_03_second_daemon_detects_first() {
         );
 
         // Disconnect (simulates app window close)
-        // Do NOT call try_connect_pipe() for diagnostics — it consumes a pipe
-        // instance and creates a race window.
         drop(pipe);
         thread::sleep(Duration::from_secs(2));
 
-        // Check if daemon binary is locked (proves the process is alive)
-        let daemon_path = daemon_binary_path();
-        let binary_locked = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&daemon_path)
-            .is_err();
-        eprintln!("  Daemon binary locked (process alive): {}", binary_locked);
-
-        // Start daemon B (exactly as the Tauri app would via launch_daemon)
+        // Start daemon B on the same pipe — it should detect A's mutex and exit
         eprintln!("  Starting daemon B...");
-        let _child_b = launch_daemon_like_tauri_app();
+        let mut child_b = launch_daemon(&pipe_name);
         thread::sleep(Duration::from_secs(3));
 
         // Connect to whatever daemon is available and check for our marker session
-        let mut pipe2 = wait_for_daemon(Duration::from_secs(5));
+        let mut pipe2 = wait_for_daemon(&pipe_name, Duration::from_secs(5));
         let resp = send_request(&mut pipe2, &Request::ListSessions);
         match &resp {
             Response::SessionList { sessions } => {
@@ -418,10 +414,6 @@ fn test_03_second_daemon_detects_first() {
                         "  LOST: Marker session '{}' missing! Sessions: {:?}",
                         session_id, session_names
                     );
-                    eprintln!(
-                        "  PID file now: {:?} (daemon B took over, sessions lost)",
-                        read_pid_file()
-                    );
                     session_lost_count += 1;
                 }
             }
@@ -436,7 +428,9 @@ fn test_03_second_daemon_detects_first() {
             },
         );
         drop(pipe2);
-        kill_existing_daemon();
+        kill_daemon(&mut child_b);
+        kill_daemon(&mut child_a);
+        wait_for_pipe_gone(&pipe_name, Duration::from_secs(3));
     }
 
     assert_eq!(
@@ -461,11 +455,18 @@ fn test_03_second_daemon_detects_first() {
 ///   4. Close the Job Object handle (this would kill job members)
 ///   5. Verify the daemon and session survived
 ///
+/// Uses `--instance` to isolate from the production daemon.
+///
 /// This should PASS — proving WMI launch is the correct escape mechanism.
 #[test]
 fn test_04_wmi_launch_escapes_job_object() {
     let iterations = 3;
     let mut killed_count = 0;
+
+    let instance = format!("test-wmi-{}", std::process::id());
+    // --instance sets GODLY_INSTANCE, which makes the pipe name:
+    // \\.\pipe\godly-terminal-daemon-<instance>
+    let pipe_name = format!(r"\\.\pipe\godly-terminal-daemon-{}", instance);
 
     eprintln!(
         "\n=== test_04: WMI-launched daemon vs Job Object ({} iterations) ===",
@@ -474,20 +475,18 @@ fn test_04_wmi_launch_escapes_job_object() {
 
     for i in 0..iterations {
         eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
-        kill_existing_daemon();
 
         // Create a Job Object with KILL_ON_JOB_CLOSE — same as cargo/tauri-cli
         let job = create_job_object(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE);
 
         // Launch daemon via WMI — this is the FIX being tested.
         // The daemon is created by wmiprvse.exe, not by us, so it's NOT in our job.
-        eprintln!("  Launching daemon via WMI...");
-        launch_daemon_via_wmi();
+        eprintln!("  Launching daemon via WMI (instance={})...", instance);
+        let pid = launch_daemon_via_wmi(&instance);
+        eprintln!("  Daemon started with PID {}", pid);
 
         // Wait for daemon to start and create a session
-        let mut pipe = wait_for_daemon(Duration::from_secs(10));
-        let pid = read_pid_file().expect("PID file should exist");
-        eprintln!("  Daemon started with PID {}", pid);
+        let mut pipe = wait_for_daemon(&pipe_name, Duration::from_secs(10));
 
         let session_id = format!("wmi-test-session-{}", i);
         let resp = send_request(
@@ -520,7 +519,7 @@ fn test_04_wmi_launch_escapes_job_object() {
         thread::sleep(Duration::from_secs(2));
 
         // Try to reconnect and verify the session is still alive
-        match try_connect_pipe() {
+        match try_connect_pipe(&pipe_name) {
             Some(mut pipe2) => {
                 let resp = send_request(&mut pipe2, &Request::ListSessions);
                 match &resp {
@@ -557,7 +556,8 @@ fn test_04_wmi_launch_escapes_job_object() {
             }
         }
 
-        kill_existing_daemon();
+        kill_daemon_by_pid(pid);
+        wait_for_pipe_gone(&pipe_name, Duration::from_secs(3));
     }
 
     assert_eq!(
