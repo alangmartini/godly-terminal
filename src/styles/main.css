@@ -594,6 +594,25 @@ html, body {
   flex-shrink: 0;
 }
 
+.worktree-item-open {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 4px;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+
+.worktree-item:hover .worktree-item-open {
+  opacity: 1;
+}
+
+.worktree-item-open:hover {
+  color: var(--accent);
+}
+
 .worktree-item-delete {
   background: none;
   border: none;
