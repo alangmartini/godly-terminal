@@ -15,6 +15,8 @@ export class TabBar {
   private draggedTerminalId: string | null = null;
   private tabElements: Map<string, HTMLElement> = new Map();
   private lastRenderedOrder: string[] = [];
+  private onSplitCallback: ((terminalId: string, direction: 'horizontal' | 'vertical') => void) | null = null;
+  private onUnsplitCallback: (() => void) | null = null;
 
   constructor() {
     this.container = document.createElement('div');
@@ -123,6 +125,15 @@ export class TabBar {
       tab.classList.toggle('active', isActive);
     }
 
+    // Split indicator: highlight tabs that are part of a split
+    const state = store.getState();
+    const split = state.activeWorkspaceId
+      ? store.getSplitView(state.activeWorkspaceId)
+      : null;
+    const isInSplit = split &&
+      (split.leftTerminalId === terminal.id || split.rightTerminalId === terminal.id);
+    tab.classList.toggle('in-split', !!isInSplit);
+
     const titleEl = tab.querySelector('.tab-title') as HTMLSpanElement | null;
     if (titleEl) {
       const displayName = getDisplayName(terminal);
@@ -184,10 +195,20 @@ export class TabBar {
       store.setActiveTerminal(terminal.id);
     };
 
-    // Double-click to rename
+    // Double-click: rename in single mode, unsplit in split mode
     title.ondblclick = (e) => {
       e.stopPropagation();
-      this.startRename(title, terminal);
+      const currentState = store.getState();
+      const split = currentState.activeWorkspaceId
+        ? store.getSplitView(currentState.activeWorkspaceId)
+        : null;
+      if (split) {
+        // Double-click in split mode: unsplit (maximize this terminal)
+        store.setActiveTerminal(terminal.id);
+        this.onUnsplitCallback?.();
+      } else {
+        this.startRename(title, terminal);
+      }
     };
 
     // Context menu
@@ -295,6 +316,48 @@ export class TabBar {
     };
     menu.appendChild(renameItem);
 
+    // Split options
+    const state = store.getState();
+    const wsTerminals = store.getWorkspaceTerminals(state.activeWorkspaceId || '');
+    const split = state.activeWorkspaceId
+      ? store.getSplitView(state.activeWorkspaceId)
+      : null;
+
+    if (wsTerminals.length >= 2) {
+      const splitSep = document.createElement('div');
+      splitSep.className = 'context-menu-separator';
+      menu.appendChild(splitSep);
+
+      if (split) {
+        const unsplitItem = document.createElement('div');
+        unsplitItem.className = 'context-menu-item';
+        unsplitItem.textContent = 'Unsplit';
+        unsplitItem.onclick = () => {
+          menu.remove();
+          this.onUnsplitCallback?.();
+        };
+        menu.appendChild(unsplitItem);
+      } else {
+        const splitRightItem = document.createElement('div');
+        splitRightItem.className = 'context-menu-item';
+        splitRightItem.textContent = 'Split Right';
+        splitRightItem.onclick = () => {
+          menu.remove();
+          this.onSplitCallback?.(terminal.id, 'horizontal');
+        };
+        menu.appendChild(splitRightItem);
+
+        const splitDownItem = document.createElement('div');
+        splitDownItem.className = 'context-menu-item';
+        splitDownItem.textContent = 'Split Down';
+        splitDownItem.onclick = () => {
+          menu.remove();
+          this.onSplitCallback?.(terminal.id, 'vertical');
+        };
+        menu.appendChild(splitDownItem);
+      }
+    }
+
     const separator = document.createElement('div');
     separator.className = 'context-menu-separator';
     menu.appendChild(separator);
@@ -342,6 +405,14 @@ export class TabBar {
 
   getDraggedTerminalId(): string | null {
     return this.draggedTerminalId;
+  }
+
+  setOnSplit(callback: (terminalId: string, direction: 'horizontal' | 'vertical') => void) {
+    this.onSplitCallback = callback;
+  }
+
+  setOnUnsplit(callback: () => void) {
+    this.onUnsplitCallback = callback;
   }
 
   mount(parent: HTMLElement) {
