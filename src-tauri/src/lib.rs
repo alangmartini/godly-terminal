@@ -35,6 +35,17 @@ pub fn run() {
     #[cfg(feature = "leak-check")]
     let _profiler = dhat::Profiler::new_heap();
 
+    // Set Windows timer resolution to 1ms. Without this, thread::sleep(1ms)
+    // actually sleeps ~15ms due to the default 15.625ms timer resolution.
+    // This is critical for input responsiveness: both the bridge I/O thread
+    // and daemon I/O thread use adaptive polling that falls back to sleep(1ms).
+    // Arrow keys pressed after a pause hit the sleep penalty on every transition,
+    // adding ~30ms of pure sleep overhead to the keystroke round-trip.
+    #[cfg(windows)]
+    unsafe {
+        winapi::um::timeapi::timeBeginPeriod(1);
+    }
+
     let app_state = Arc::new(AppState::new());
     let auto_save = Arc::new(AutoSaveManager::new());
     let process_monitor = ProcessMonitor::new();

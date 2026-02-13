@@ -25,6 +25,15 @@ async fn main() {
         }
     }
 
+    // Set Windows timer resolution to 1ms. Without this, thread::sleep(1ms)
+    // actually sleeps ~15ms due to the default 15.625ms timer resolution.
+    // The daemon I/O thread uses adaptive polling with sleep(1ms) fallback;
+    // this makes the fallback actually ~1ms instead of ~15ms.
+    #[cfg(windows)]
+    unsafe {
+        winapi::um::timeapi::timeBeginPeriod(1);
+    }
+
     debug_log::init();
     debug_log::install_panic_hook();
     debug_log::install_exception_handler();
