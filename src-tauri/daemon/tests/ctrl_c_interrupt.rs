@@ -12,8 +12,8 @@
 //! Run with:
 //!   cd src-tauri && cargo test -p godly-daemon --test ctrl_c_interrupt -- --test-threads=1
 //!
-//! The tests MUST run serially (--test-threads=1) because they share a single
-//! named pipe endpoint and kill/restart the daemon between tests.
+//! Each test spawns its own daemon with an isolated pipe name, so they do NOT
+//! interfere with a running production daemon.
 
 #![cfg(windows)]
 
@@ -21,14 +21,14 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::os::windows::process::CommandExt;
-use std::process::Command;
+use std::process::{Child, Command};
 use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use godly_protocol::frame;
 use godly_protocol::types::ShellType;
-use godly_protocol::{DaemonMessage, Event, Request, Response, PIPE_NAME};
+use godly_protocol::{DaemonMessage, Event, Request, Response};
 
 use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
@@ -38,6 +38,16 @@ use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Generate a unique pipe name for this test to avoid collisions with
+/// the production daemon or other test runs.
+fn test_pipe_name(test: &str) -> String {
+    format!(
+        r"\\.\pipe\godly-test-{}-{}",
+        test,
+        std::process::id()
+    )
+}
 
 fn daemon_binary_path() -> std::path::PathBuf {
     let exe = std::env::current_exe().unwrap();
@@ -52,15 +62,15 @@ fn daemon_binary_path() -> std::path::PathBuf {
     path
 }
 
-fn try_connect_pipe() -> Option<std::fs::File> {
-    let pipe_name: Vec<u16> = OsStr::new(PIPE_NAME)
+fn try_connect_pipe(pipe_name: &str) -> Option<std::fs::File> {
+    let wide: Vec<u16> = OsStr::new(pipe_name)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
     let handle = unsafe {
         CreateFileW(
-            pipe_name.as_ptr(),
+            wide.as_ptr(),
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             ptr::null_mut(),
@@ -186,10 +196,10 @@ fn collect_output_until(
     (output, matched)
 }
 
-fn wait_for_daemon(timeout: Duration) -> std::fs::File {
+fn wait_for_daemon(pipe_name: &str, timeout: Duration) -> std::fs::File {
     let start = Instant::now();
     loop {
-        if let Some(mut file) = try_connect_pipe() {
+        if let Some(mut file) = try_connect_pipe(pipe_name) {
             if let Ok(()) = frame::write_message(&mut file, &Request::Ping) {
                 if let Some(DaemonMessage::Response(Response::Pong)) = read_message(&mut file) {
                     return file;
@@ -204,28 +214,22 @@ fn wait_for_daemon(timeout: Duration) -> std::fs::File {
     }
 }
 
-fn kill_existing_daemon() {
-    let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "godly-daemon.exe"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(5) {
-        if try_connect_pipe().is_none() {
-            thread::sleep(Duration::from_millis(500));
-            break;
-        }
-        thread::sleep(Duration::from_millis(200));
-    }
-}
-
-fn launch_daemon() -> std::process::Child {
+/// Launch a daemon with an isolated pipe name. The daemon runs as a child
+/// process (GODLY_NO_DETACH=1) so it can be killed cleanly via child.kill().
+fn launch_daemon(pipe_name: &str) -> Child {
     let daemon_path = daemon_binary_path();
     Command::new(&daemon_path)
-        .creation_flags(0x00000008 | 0x00000200) // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        .env("GODLY_PIPE_NAME", pipe_name)
+        .env("GODLY_NO_DETACH", "1")
+        .creation_flags(0x00000200) // CREATE_NEW_PROCESS_GROUP
         .spawn()
         .expect("Failed to spawn daemon")
+}
+
+/// Kill a daemon child process and wait for it to exit.
+fn kill_daemon(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 // ---------------------------------------------------------------------------
@@ -251,10 +255,10 @@ fn launch_daemon() -> std::process::Child {
 #[test]
 fn test_ctrl_c_interrupts_running_process() {
     eprintln!("\n=== test: Ctrl+C (\\x03) must interrupt running PTY process ===");
-    kill_existing_daemon();
+    let pipe_name = test_pipe_name("ctrl-c");
 
-    let _child = launch_daemon();
-    let mut pipe = wait_for_daemon(Duration::from_secs(10));
+    let mut child = launch_daemon(&pipe_name);
+    let mut pipe = wait_for_daemon(&pipe_name, Duration::from_secs(10));
 
     let session_id = "ctrl-c-test";
     let mut output = String::new();
@@ -406,7 +410,7 @@ fn test_ctrl_c_interrupts_running_process() {
         &mut output,
     );
     drop(pipe);
-    kill_existing_daemon();
+    kill_daemon(&mut child);
 
     // Assert: the process must have been interrupted
     assert!(
@@ -434,10 +438,10 @@ fn test_ctrl_c_interrupts_running_process() {
 #[test]
 fn test_ctrl_c_interrupts_cmd_process() {
     eprintln!("\n=== test: Ctrl+C (\\x03) must interrupt cmd.exe process ===");
-    kill_existing_daemon();
+    let pipe_name = test_pipe_name("ctrl-c-cmd");
 
-    let _child = launch_daemon();
-    let mut pipe = wait_for_daemon(Duration::from_secs(10));
+    let mut child = launch_daemon(&pipe_name);
+    let mut pipe = wait_for_daemon(&pipe_name, Duration::from_secs(10));
 
     let session_id = "ctrl-c-cmd-test";
     let mut output = String::new();
@@ -553,7 +557,7 @@ fn test_ctrl_c_interrupts_cmd_process() {
         &mut output,
     );
     drop(pipe);
-    kill_existing_daemon();
+    kill_daemon(&mut child);
 
     assert!(
         interrupted,
