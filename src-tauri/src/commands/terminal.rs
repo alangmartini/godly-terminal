@@ -229,12 +229,10 @@ pub fn write_to_terminal(
         session_id: terminal_id,
         data: data.into_bytes(),
     };
-    let response = daemon.send_request(&request)?;
-    match response {
-        Response::Ok => Ok(()),
-        Response::Error { message } => Err(message),
-        other => Err(format!("Unexpected response: {:?}", other)),
-    }
+    // Fire-and-forget: don't block the Tauri thread pool waiting for the
+    // daemon's Ok response. Blocking here caused ~2s input lag under rapid
+    // keystrokes (e.g. arrow-up) because threads saturated waiting on IPC.
+    daemon.send_fire_and_forget(&request)
 }
 
 #[tauri::command]
