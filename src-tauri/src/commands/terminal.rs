@@ -229,12 +229,11 @@ pub fn write_to_terminal(
         session_id: terminal_id,
         data: data.into_bytes(),
     };
-    let response = daemon.send_request(&request)?;
-    match response {
-        Response::Ok => Ok(()),
-        Response::Error { message } => Err(message),
-        other => Err(format!("Unexpected response: {:?}", other)),
-    }
+    // Fire-and-forget: don't block the Tauri thread pool waiting for the
+    // daemon's response. The JS caller already doesn't await, and the bridge
+    // silently discards orphaned responses. This frees the thread immediately
+    // so rapid keystrokes don't saturate the pool and delay output events.
+    daemon.send_fire_and_forget(&request)
 }
 
 #[tauri::command]
