@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -36,10 +37,20 @@ pub struct Workspace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SplitView {
+    pub left_terminal_id: String,
+    pub right_terminal_id: String,
+    pub direction: String,  // "horizontal" or "vertical"
+    pub ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layout {
     pub workspaces: Vec<Workspace>,
     pub terminals: Vec<TerminalInfo>,
     pub active_workspace_id: Option<String>,
+    #[serde(default)]
+    pub split_views: HashMap<String, SplitView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +86,7 @@ impl Default for Layout {
             workspaces: Vec::new(),
             terminals: Vec::new(),
             active_workspace_id: None,
+            split_views: HashMap::new(),
         }
     }
 }
@@ -212,6 +224,7 @@ mod tests {
             ],
             terminals: vec![],
             active_workspace_id: Some("ws-1".to_string()),
+            split_views: HashMap::new(),
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -263,6 +276,7 @@ mod tests {
                 },
             ],
             active_workspace_id: Some("ws-abc123".to_string()),
+            split_views: HashMap::new(),
         };
 
         // Serialize to JSON (simulates save)
@@ -315,6 +329,7 @@ mod tests {
                 worktree_branch: None,
             }],
             active_workspace_id: Some("ws-1".to_string()),
+            split_views: HashMap::new(),
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -397,6 +412,75 @@ mod tests {
         let json = serde_json::to_string(&workspace).unwrap();
         let deserialized: Workspace = serde_json::from_str(&json).unwrap();
         assert!(deserialized.claude_code_mode);
+    }
+
+    #[test]
+    fn test_split_view_serialization_roundtrip() {
+        let split = SplitView {
+            left_terminal_id: "term-1".to_string(),
+            right_terminal_id: "term-2".to_string(),
+            direction: "horizontal".to_string(),
+            ratio: 0.6,
+        };
+
+        let json = serde_json::to_string(&split).unwrap();
+        let restored: SplitView = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.left_terminal_id, "term-1");
+        assert_eq!(restored.right_terminal_id, "term-2");
+        assert_eq!(restored.direction, "horizontal");
+        assert!((restored.ratio - 0.6).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_layout_with_split_views_roundtrip() {
+        let mut split_views = HashMap::new();
+        split_views.insert(
+            "ws-1".to_string(),
+            SplitView {
+                left_terminal_id: "term-1".to_string(),
+                right_terminal_id: "term-2".to_string(),
+                direction: "horizontal".to_string(),
+                ratio: 0.5,
+            },
+        );
+
+        let layout = Layout {
+            workspaces: vec![Workspace {
+                id: "ws-1".to_string(),
+                name: "Test".to_string(),
+                folder_path: "C:\\test".to_string(),
+                tab_order: vec![],
+                shell_type: ShellType::Windows,
+                worktree_mode: false,
+                claude_code_mode: false,
+            }],
+            terminals: vec![],
+            active_workspace_id: Some("ws-1".to_string()),
+            split_views,
+        };
+
+        let json = serde_json::to_string(&layout).unwrap();
+        let restored: Layout = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.split_views.len(), 1);
+        let sv = restored.split_views.get("ws-1").unwrap();
+        assert_eq!(sv.left_terminal_id, "term-1");
+        assert_eq!(sv.right_terminal_id, "term-2");
+        assert_eq!(sv.direction, "horizontal");
+    }
+
+    #[test]
+    fn test_layout_backward_compat_without_split_views() {
+        // Simulate old JSON without split_views field
+        let json = r#"{
+            "workspaces": [],
+            "terminals": [],
+            "active_workspace_id": null
+        }"#;
+
+        let layout: Layout = serde_json::from_str(json).unwrap();
+        assert!(layout.split_views.is_empty());
     }
 
     #[test]
