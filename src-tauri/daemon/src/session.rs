@@ -224,6 +224,13 @@ impl DaemonSession {
                 }
             }
 
+            // PTY exited — mark session as dead and close output channel.
+        // Setting output_tx = None causes rx.recv() in the forwarding task to
+        // return None, which triggers sending SessionClosed to the client.
+        reader_running.store(false, Ordering::Relaxed);
+        reader_attached.store(false, Ordering::Relaxed);
+        *reader_tx.lock() = None;
+
             daemon_log!(
                 "Session {} reader thread exited: reads={}, bytes={}, send_failures={}",
                 session_id,
@@ -371,9 +378,13 @@ impl DaemonSession {
     }
 
     /// Check if the session is still running
-    #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
+    }
+
+    /// Get the running flag for external monitoring (e.g., forwarding task).
+    pub fn running_flag(&self) -> Arc<AtomicBool> {
+        self.running.clone()
     }
 
     /// Close the session
@@ -398,6 +409,7 @@ impl DaemonSession {
             cwd: self.cwd.clone(),
             created_at: self.created_at,
             attached: self.is_attached(),
+            running: self.is_running(),
         }
     }
 
@@ -725,5 +737,77 @@ mod tests {
         );
 
         handle.join().unwrap();
+    }
+
+    // --- Tests for running flag (SessionClosed on PTY exit) ---
+    //
+    // Bug: when a shell process exited, the daemon never notified anyone. The
+    // session stayed in the HashMap, the terminal tab looked frozen, and the
+    // user could type but nothing happened.
+    // Fix: reader thread sets running=false on EOF, enabling the forwarding
+    // task to detect PTY death and send SessionClosed.
+
+    #[cfg(windows)]
+    #[test]
+    fn test_close_sets_running_false() {
+        // Bug: PTY exit left session marked as running, so dead sessions were
+        // invisible to ListSessions and reattached on reconnect.
+        let session = DaemonSession::new(
+            "test-running".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        assert!(session.is_running(), "new session should be running");
+
+        session.close();
+        assert!(!session.is_running(), "session should not be running after close()");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_info_reflects_running_state() {
+        // Bug: SessionInfo had no `running` field, so clients couldn't
+        // distinguish dead sessions from live ones via ListSessions.
+        let session = DaemonSession::new(
+            "test-info-running".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        assert!(session.info().running, "new session info should show running=true");
+
+        session.close();
+        assert!(!session.info().running, "closed session info should show running=false");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_running_flag_is_shared() {
+        // The forwarding task needs to read the running flag after the channel
+        // closes. Verify running_flag() returns the same Arc as is_running().
+        let session = DaemonSession::new(
+            "test-flag-shared".into(),
+            ShellType::Windows,
+            None,
+            24,
+            80,
+            None,
+        )
+        .unwrap();
+
+        let flag = session.running_flag();
+        assert!(flag.load(Ordering::Relaxed));
+
+        session.close();
+        assert!(!flag.load(Ordering::Relaxed), "running_flag should reflect close()");
     }
 }
