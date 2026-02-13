@@ -16,9 +16,10 @@ export type ActionId =
   | 'tabs.newTerminal'
   | 'tabs.closeTerminal'
   | 'tabs.nextTab'
-  | 'tabs.previousTab';
+  | 'tabs.previousTab'
+  | 'split.focusOtherPane';
 
-export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs';
+export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split';
 
 /** Whether the shortcut is an app-level action or a terminal control key. */
 export type ShortcutType = 'app' | 'terminal-control';
@@ -96,6 +97,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Tabs',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'tab' },
+  },
+  {
+    id: 'split.focusOtherPane',
+    label: 'Focus Other Pane',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: '\\' },
   },
 ];
 

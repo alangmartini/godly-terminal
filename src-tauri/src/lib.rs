@@ -68,6 +68,8 @@ pub fn run() {
             commands::get_workspaces,
             commands::move_tab_to_workspace,
             commands::reorder_tabs,
+            commands::set_split_view,
+            commands::clear_split_view,
             commands::get_wsl_distributions,
             commands::is_wsl_available,
             commands::toggle_worktree_mode,
