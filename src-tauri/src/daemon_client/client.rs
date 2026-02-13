@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{Request, Response};
 
-use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge, EmitPayload, EventEmitter};
+use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge, EmitPayload, EventEmitter, WakeEvent};
 
 /// Client that communicates with the godly-daemon process via named pipes.
 ///
@@ -36,6 +36,9 @@ pub struct DaemonClient {
     bridge_health: Mutex<Option<Arc<BridgeHealth>>>,
     /// Non-blocking event emitter shared with bridge and process monitor
     event_emitter: Mutex<Option<EventEmitter>>,
+    /// Wake event shared with bridge I/O thread — signaled when requests are sent
+    /// to give zero-latency wakeup instead of waiting for the sleep timeout.
+    wake_event: Mutex<Option<Arc<WakeEvent>>>,
 }
 
 impl DaemonClient {
@@ -180,6 +183,7 @@ impl DaemonClient {
             attached_sessions: Mutex::new(Vec::new()),
             bridge_health: Mutex::new(None),
             event_emitter: Mutex::new(None),
+            wake_event: Mutex::new(None),
         })
     }
 
@@ -359,8 +363,11 @@ impl DaemonClient {
         let emitter = EventEmitter::spawn(app_handle.clone());
         *self.event_emitter.lock() = Some(emitter.clone());
 
+        let wake = Arc::new(WakeEvent::new());
+        *self.wake_event.lock() = Some(Arc::clone(&wake));
+
         let bridge = DaemonBridge::new();
-        bridge.start(reader, writer, request_rx, emitter, health);
+        bridge.start(reader, writer, request_rx, emitter, health, wake);
 
         *self.app_handle.lock() = Some(app_handle);
 
@@ -401,10 +408,11 @@ impl DaemonClient {
 
             eprintln!("[daemon_client] Reconnecting to daemon...");
 
-            // Clear stale request sender, health, and emitter so no new requests go to the dead bridge
+            // Clear stale request sender, health, emitter, and wake event so no new requests go to the dead bridge
             *self.request_tx.lock() = None;
             *self.bridge_health.lock() = None;
             *self.event_emitter.lock() = None;
+            *self.wake_event.lock() = None;
 
             // Try connecting to existing daemon first, then launch if needed
             let new_client = match Self::try_connect() {
@@ -562,6 +570,11 @@ impl DaemonClient {
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
 
+        // Wake the bridge I/O thread immediately
+        if let Some(wake) = self.wake_event.lock().as_ref() {
+            wake.signal();
+        }
+
         // 15s timeout: the daemon now prioritizes responses over events, but the
         // pipe write itself can still stall briefly under extreme output bursts.
         // Previously 5s, which was too tight when responses queued behind events.
@@ -596,6 +609,13 @@ impl DaemonClient {
             response_tx: None,
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
+
+        // Wake the bridge I/O thread immediately so it picks up the request
+        // without waiting for the sleep timeout (~1ms with timeBeginPeriod,
+        // ~15ms without). This is critical for input responsiveness.
+        if let Some(wake) = self.wake_event.lock().as_ref() {
+            wake.signal();
+        }
 
         Ok(())
     }

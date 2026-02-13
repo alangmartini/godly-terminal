@@ -244,6 +244,82 @@ fn update_phase(health: &BridgeHealth, phase: u8) {
     health.last_activity_ms.store(now_ms(), Ordering::Relaxed);
 }
 
+// ── Wake event for zero-latency I/O thread wakeup ───────────────────────
+
+/// Windows Event object used to wake the bridge I/O thread immediately when
+/// a new request arrives. Without this, the I/O thread must wait for its
+/// sleep(1ms) to complete before noticing the request, adding up to 1ms of
+/// latency per keystroke (or ~15ms without timeBeginPeriod).
+#[cfg(windows)]
+pub(crate) struct WakeEvent {
+    /// Raw HANDLE stored as isize (same pattern as pipe handles elsewhere in the codebase)
+    handle: isize,
+}
+
+#[cfg(windows)]
+unsafe impl Send for WakeEvent {}
+#[cfg(windows)]
+unsafe impl Sync for WakeEvent {}
+
+#[cfg(windows)]
+impl WakeEvent {
+    pub fn new() -> Self {
+        use winapi::um::synchapi::CreateEventW;
+        let handle = unsafe {
+            CreateEventW(
+                std::ptr::null_mut(), // default security
+                0,                    // auto-reset
+                0,                    // initially non-signaled
+                std::ptr::null(),     // unnamed
+            )
+        };
+        assert!(!handle.is_null(), "CreateEventW failed");
+        Self { handle: handle as isize }
+    }
+
+    /// Signal the event, waking the waiting thread immediately.
+    pub fn signal(&self) {
+        use winapi::um::synchapi::SetEvent;
+        unsafe {
+            SetEvent(self.handle as *mut _);
+        }
+    }
+
+    /// Wait for the event to be signaled, or until timeout_ms elapses.
+    /// Returns true if the event was signaled, false on timeout.
+    pub fn wait_timeout(&self, timeout_ms: u32) -> bool {
+        use winapi::um::synchapi::WaitForSingleObject;
+        use winapi::um::winbase::WAIT_OBJECT_0;
+        let result = unsafe { WaitForSingleObject(self.handle as *mut _, timeout_ms) };
+        result == WAIT_OBJECT_0
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WakeEvent {
+    fn drop(&mut self) {
+        use winapi::um::handleapi::CloseHandle;
+        unsafe {
+            CloseHandle(self.handle as *mut _);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) struct WakeEvent;
+
+#[cfg(not(windows))]
+impl WakeEvent {
+    pub fn new() -> Self {
+        Self
+    }
+    pub fn signal(&self) {}
+    pub fn wait_timeout(&self, timeout_ms: u32) -> bool {
+        std::thread::sleep(Duration::from_millis(timeout_ms as u64));
+        false
+    }
+}
+
 // ── Bridge implementation ───────────────────────────────────────────────
 
 /// A request to send to the daemon, paired with an optional channel for the response.
@@ -284,6 +360,10 @@ impl DaemonBridge {
     /// Start the bridge I/O thread.
     /// Takes ownership of both the pipe reader AND writer, plus channels for
     /// request submission and response routing.
+    ///
+    /// The `wake_event` is signaled by `send_fire_and_forget` and `try_send_request`
+    /// to wake the I/O thread immediately when a new request arrives, instead of
+    /// waiting for the sleep timeout.
     pub fn start(
         &self,
         mut reader: Box<dyn Read + Send>,
@@ -291,6 +371,7 @@ impl DaemonBridge {
         request_rx: std::sync::mpsc::Receiver<BridgeRequest>,
         emitter: EventEmitter,
         health: Arc<BridgeHealth>,
+        wake_event: Arc<WakeEvent>,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
@@ -477,14 +558,14 @@ impl DaemonBridge {
                 }
 
                 if !did_work {
-                    // Adaptive polling: spin for a while before sleeping.
-                    // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to
-                    // the default system timer resolution (15.625ms). During active I/O,
-                    // spinning avoids this penalty. When truly idle, we fall back to
-                    // sleep to avoid burning CPU.
+                    // Adaptive polling: spin briefly, then wait on the wake event.
+                    // The wake event is signaled by send_fire_and_forget / try_send_request
+                    // when a new request arrives, giving zero-latency wakeup for input.
+                    // For incoming pipe data (daemon events), the 1ms timeout ensures we
+                    // poll PeekNamedPipe frequently enough.
                     idle_count += 1;
                     if idle_count > SPIN_BEFORE_SLEEP {
-                        thread::sleep(Duration::from_millis(1));
+                        wake_event.wait_timeout(1);
                     } else {
                         thread::yield_now();
                     }
@@ -612,5 +693,60 @@ fn event_to_payload(event: Event) -> EmitPayload {
             terminal_id: session_id,
             process_name,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bug: WakeEvent.signal() must immediately unblock WakeEvent.wait_timeout().
+    /// Without this, the bridge I/O thread sleeps for the full timeout (1ms with
+    /// timeBeginPeriod, ~15ms without) on every keystroke that arrives while idle.
+    #[cfg(windows)]
+    #[test]
+    fn test_wake_event_signal_unblocks_wait() {
+        let event = Arc::new(WakeEvent::new());
+        let event_clone = Arc::clone(&event);
+
+        // Spawn a thread that waits on the event with a long timeout
+        let handle = std::thread::spawn(move || {
+            let start = Instant::now();
+            // Wait up to 5 seconds — if signal works, this returns immediately
+            event_clone.wait_timeout(5000);
+            start.elapsed()
+        });
+
+        // Give the thread time to enter the wait
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Signal the event
+        event.signal();
+
+        // The thread should wake up nearly immediately
+        let elapsed = handle.join().unwrap();
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "WakeEvent.signal() should unblock wait immediately, but took {:?}",
+            elapsed
+        );
+    }
+
+    /// Verify that wait_timeout returns false (timeout) when not signaled.
+    #[cfg(windows)]
+    #[test]
+    fn test_wake_event_timeout_without_signal() {
+        let event = WakeEvent::new();
+        let start = Instant::now();
+        let signaled = event.wait_timeout(1);
+        let elapsed = start.elapsed();
+
+        assert!(!signaled, "Should return false on timeout");
+        // Should complete in roughly 1-20ms (timer resolution dependent)
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "Timeout should complete quickly, took {:?}",
+            elapsed
+        );
     }
 }
