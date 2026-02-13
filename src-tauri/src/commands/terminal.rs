@@ -341,6 +341,16 @@ pub fn attach_session(
     Ok(())
 }
 
+/// Sync the active terminal ID from frontend to backend state (for MCP get_active_terminal)
+#[tauri::command]
+pub fn sync_active_terminal(
+    terminal_id: Option<String>,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    state.set_active_terminal_id(terminal_id);
+    Ok(())
+}
+
 /// Detach all sessions (called on window close instead of killing them)
 #[tauri::command]
 pub fn detach_all_sessions(
