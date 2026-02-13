@@ -180,6 +180,35 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "read_terminal",
+                "description": "Returns all console output from a terminal's rolling 1MB buffer",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to read from"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["full", "head", "tail"],
+                            "default": "tail",
+                            "description": "Output mode: 'full' returns entire buffer, 'head' returns first N lines, 'tail' (default) returns last N lines"
+                        },
+                        "lines": {
+                            "type": "number",
+                            "default": 100,
+                            "description": "Number of lines to return (default: 100). Ignored when mode is 'full'."
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "Save output to file instead of returning it in the response."
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
                 "name": "notify",
                 "description": "Send a sound notification to alert the user. Plays a chime and shows a badge on the terminal tab if the user isn't looking at it.",
                 "inputSchema": {
@@ -367,6 +396,45 @@ pub fn call_tool(
             McpRequest::WriteToTerminal { terminal_id, data }
         }
 
+        "read_terminal" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let mode = args.get("mode").and_then(|v| v.as_str()).map(String::from);
+            let lines = args.get("lines").and_then(|v| v.as_u64()).map(|n| n as usize);
+            let filename = args.get("filename").and_then(|v| v.as_str()).map(String::from);
+
+            let request = McpRequest::ReadTerminal {
+                terminal_id,
+                mode,
+                lines,
+            };
+
+            let response = client
+                .send_request(&request)
+                .map_err(|e| format!("Pipe error: {}", e))?;
+
+            match response {
+                McpResponse::TerminalOutput { content } => {
+                    if let Some(path) = filename {
+                        std::fs::write(&path, &content)
+                            .map_err(|e| format!("Failed to write to {}: {}", path, e))?;
+                        return Ok(json!({
+                            "success": true,
+                            "message": format!("Output saved to {}", path),
+                            "path": path,
+                            "bytes": content.len()
+                        }));
+                    }
+                    return Ok(json!({ "content": content }));
+                }
+                McpResponse::Error { message } => return Err(message),
+                other => return response_to_json(other),
+            }
+        }
+
         "notify" => {
             let sid = session_id
                 .as_ref()
@@ -455,6 +523,9 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         McpResponse::NotificationStatus { enabled, source } => Ok(json!({
             "enabled": enabled,
             "source": source,
+        })),
+        McpResponse::TerminalOutput { content } => Ok(json!({
+            "content": content,
         })),
     }
 }

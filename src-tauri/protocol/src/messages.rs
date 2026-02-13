@@ -36,6 +36,9 @@ pub enum Request {
     CloseSession {
         session_id: String,
     },
+    ReadBuffer {
+        session_id: String,
+    },
     Ping,
 }
 

@@ -58,11 +58,13 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
     let workspaces = state.get_all_workspaces();
     let terminals = build_terminal_infos(&state);
     let active_workspace_id = state.active_workspace_id.read().clone();
+    let split_views = state.get_all_split_views();
 
     let layout = Layout {
         workspaces,
         terminals,
         active_workspace_id,
+        split_views,
     };
 
     let json_value = serde_json::to_value(&layout)
@@ -157,11 +159,13 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     let workspaces = state.get_all_workspaces();
     let terminals = build_terminal_infos(state);
     let active_workspace_id = state.active_workspace_id.read().clone();
+    let split_views = state.get_all_split_views();
 
     let layout = Layout {
         workspaces,
         terminals,
         active_workspace_id,
+        split_views,
     };
 
     match serde_json::to_value(&layout) {
@@ -253,11 +257,13 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
     let workspaces = state.get_all_workspaces();
     let terminals = build_terminal_infos(state);
     let active_workspace_id = state.active_workspace_id.read().clone();
+    let split_views = state.get_all_split_views();
 
     let layout = Layout {
         workspaces,
         terminals,
         active_workspace_id,
+        split_views,
     };
 
     let json_value = serde_json::to_value(&layout)
