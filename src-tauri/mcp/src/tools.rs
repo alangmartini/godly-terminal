@@ -203,9 +203,81 @@ pub fn list_tools() -> Value {
                         "filename": {
                             "type": "string",
                             "description": "Save output to file instead of returning it in the response."
+                        },
+                        "strip_ansi": {
+                            "type": "boolean",
+                            "description": "Strip ANSI escape codes from the output for clean plain-text. Default: false."
                         }
                     },
                     "required": ["terminal_id"]
+                }
+            },
+            {
+                "name": "resize_terminal",
+                "description": "Resize the terminal PTY dimensions",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to resize"
+                        },
+                        "rows": {
+                            "type": "number",
+                            "description": "Number of rows"
+                        },
+                        "cols": {
+                            "type": "number",
+                            "description": "Number of columns"
+                        }
+                    },
+                    "required": ["terminal_id", "rows", "cols"]
+                }
+            },
+            {
+                "name": "delete_workspace",
+                "description": "Delete a workspace and close all its terminals",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to delete"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "get_active_workspace",
+                "description": "Get the currently active workspace",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_active_terminal",
+                "description": "Get the currently focused terminal",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "remove_worktree",
+                "description": "Remove a git worktree by path. Useful for cleaning up worktrees created by create_terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Path to the worktree to remove"
+                        }
+                    },
+                    "required": ["worktree_path"]
                 }
             },
             {
@@ -405,11 +477,13 @@ pub fn call_tool(
             let mode = args.get("mode").and_then(|v| v.as_str()).map(String::from);
             let lines = args.get("lines").and_then(|v| v.as_u64()).map(|n| n as usize);
             let filename = args.get("filename").and_then(|v| v.as_str()).map(String::from);
+            let strip_ansi = args.get("strip_ansi").and_then(|v| v.as_bool());
 
             let request = McpRequest::ReadTerminal {
                 terminal_id,
                 mode,
                 lines,
+                strip_ansi,
             };
 
             let response = client
@@ -467,6 +541,49 @@ pub fn call_tool(
                 terminal_id,
                 workspace_id,
             }
+        }
+
+        "resize_terminal" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let rows = args
+                .get("rows")
+                .and_then(|v| v.as_u64())
+                .ok_or("Missing rows")? as u16;
+            let cols = args
+                .get("cols")
+                .and_then(|v| v.as_u64())
+                .ok_or("Missing cols")? as u16;
+            McpRequest::ResizeTerminal {
+                terminal_id,
+                rows,
+                cols,
+            }
+        }
+
+        "delete_workspace" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            McpRequest::DeleteWorkspace { workspace_id }
+        }
+
+        "get_active_workspace" => McpRequest::GetActiveWorkspace,
+
+        "get_active_terminal" => McpRequest::GetActiveTerminal,
+
+        "remove_worktree" => {
+            let worktree_path = args
+                .get("worktree_path")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing worktree_path")?
+                .to_string();
+            McpRequest::RemoveWorktree { worktree_path }
         }
 
         _ => return Err(format!("Unknown tool: {}", name)),
@@ -527,5 +644,22 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         McpResponse::TerminalOutput { content } => Ok(json!({
             "content": content,
         })),
+        McpResponse::ActiveWorkspace { workspace } => match workspace {
+            Some(w) => Ok(json!({
+                "id": w.id,
+                "name": w.name,
+                "folder_path": w.folder_path,
+            })),
+            None => Ok(json!({ "workspace": null })),
+        },
+        McpResponse::ActiveTerminal { terminal } => match terminal {
+            Some(t) => Ok(json!({
+                "id": t.id,
+                "workspace_id": t.workspace_id,
+                "name": t.name,
+                "process_name": t.process_name,
+            })),
+            None => Ok(json!({ "terminal": null })),
+        },
     }
 }
