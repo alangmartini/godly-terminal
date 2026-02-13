@@ -170,6 +170,16 @@ export class WorktreePanel {
 
       item.appendChild(info);
 
+      const openBtn = document.createElement('button');
+      openBtn.className = 'worktree-item-open';
+      openBtn.textContent = '\u25B6';
+      openBtn.title = `Open terminal in ${wt.branch}`;
+      openBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.handleOpen(wt);
+      };
+      item.appendChild(openBtn);
+
       const isDeleting = this.deleting.has(wt.path);
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'worktree-item-delete';

@@ -167,10 +167,64 @@ fn worktree_path_wsl(repo_root: &str, terminal_id: &str, custom_name: Option<&st
     format!("/tmp/{}/{}/{}", WORKTREES_DIR, repo_hash, wt_name)
 }
 
+/// Detect the default branch name (master or main) for the repo.
+fn detect_default_branch(repo_root: &str, wsl: Option<&WslConfig>) -> Option<String> {
+    // Try symbolic-ref first (works when origin/HEAD is set)
+    if let Ok(output) = run_git(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo_root, wsl) {
+        if output.status.success() {
+            let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // "origin/main" -> "main"
+            if let Some(branch) = refname.strip_prefix("origin/") {
+                return Some(branch.to_string());
+            }
+        }
+    }
+
+    // Fallback: check if master or main exists locally
+    for candidate in &["master", "main"] {
+        if let Ok(output) = run_git(&["rev-parse", "--verify", candidate], repo_root, wsl) {
+            if output.status.success() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Pull the latest changes from origin for the default branch.
+/// Silently does nothing if there is no remote or the pull fails.
+fn pull_latest(repo_root: &str, wsl: Option<&WslConfig>) {
+    let branch = match detect_default_branch(repo_root, wsl) {
+        Some(b) => b,
+        None => return,
+    };
+
+    eprintln!("[worktree] Pulling latest from origin/{} before creating worktree...", branch);
+
+    match run_git(&["pull", "origin", &branch], repo_root, wsl) {
+        Ok(output) => {
+            if output.status.success() {
+                eprintln!("[worktree] Pull succeeded");
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("[worktree] Pull failed (non-fatal): {}", stderr.trim());
+            }
+        }
+        Err(e) => {
+            eprintln!("[worktree] Pull failed (non-fatal): {}", e);
+        }
+    }
+}
+
 /// Create a new worktree for the given terminal.
 /// If `custom_name` is provided, it is used as the branch/folder suffix instead of the terminal id prefix.
+/// Pulls latest from origin before creating the worktree so it branches from the latest state.
 /// Returns a `WorktreeResult` with the path and branch name.
 pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&str>, wsl: Option<&WslConfig>) -> Result<WorktreeResult, String> {
+    // Pull latest from origin so the worktree branches from the up-to-date default branch
+    pull_latest(repo_root, wsl);
+
     let branch_name = wt_name_from(custom_name, terminal_id);
 
     if let Some(wsl_config) = wsl {

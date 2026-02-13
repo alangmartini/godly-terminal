@@ -230,9 +230,8 @@ pub fn write_to_terminal(
         data: data.into_bytes(),
     };
     // Fire-and-forget: don't block the Tauri thread pool waiting for the
-    // daemon's response. The JS caller already doesn't await, and the bridge
-    // silently discards orphaned responses. This frees the thread immediately
-    // so rapid keystrokes don't saturate the pool and delay output events.
+    // daemon's Ok response. Blocking here caused ~2s input lag under rapid
+    // keystrokes (e.g. arrow-up) because threads saturated waiting on IPC.
     daemon.send_fire_and_forget(&request)
 }
 
