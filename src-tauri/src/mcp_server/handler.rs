@@ -245,6 +245,13 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::CloseTerminal { terminal_id } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
             let request = godly_protocol::Request::CloseSession {
                 session_id: terminal_id.clone(),
             };
@@ -266,6 +273,13 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::RenameTerminal { terminal_id, name } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
             app_state.update_terminal_name(terminal_id, name.clone());
             auto_save.mark_dirty();
 
@@ -287,6 +301,14 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::FocusTerminal { terminal_id } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            app_state.set_active_terminal_id(Some(terminal_id.clone()));
             let _ = app_handle.emit("focus-terminal", terminal_id);
             McpResponse::Ok
         }
@@ -327,7 +349,82 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::DeleteWorkspace { workspace_id } => {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
+                return McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                };
+            }
+
+            // Close all terminals in the workspace
+            let terminals_to_close: Vec<String> = app_state
+                .get_workspace_terminals(workspace_id)
+                .iter()
+                .map(|t| t.id.clone())
+                .collect();
+
+            for tid in &terminals_to_close {
+                let request = godly_protocol::Request::CloseSession {
+                    session_id: tid.clone(),
+                };
+                match daemon.send_request(&request) {
+                    Ok(godly_protocol::Response::Ok) => {}
+                    Ok(godly_protocol::Response::Error { message }) => {
+                        eprintln!("[mcp] Warning: close session error for {}: {}", tid, message);
+                    }
+                    _ => {}
+                }
+                app_state.remove_session_metadata(tid);
+                app_state.remove_terminal(tid);
+            }
+
+            // Remove the workspace
+            app_state.remove_workspace(workspace_id);
+            auto_save.mark_dirty();
+
+            let _ = app_handle.emit("mcp-workspace-deleted", workspace_id);
+
+            McpResponse::Ok
+        }
+
+        McpRequest::GetActiveWorkspace => {
+            let active_id = app_state.active_workspace_id.read().clone();
+            let workspace = active_id
+                .as_deref()
+                .and_then(|id| app_state.get_workspace(id))
+                .map(|w| McpWorkspaceInfo {
+                    id: w.id,
+                    name: w.name,
+                    folder_path: w.folder_path,
+                });
+            McpResponse::ActiveWorkspace { workspace }
+        }
+
+        McpRequest::GetActiveTerminal => {
+            let active_id = app_state.get_active_terminal_id();
+            let terminal = active_id
+                .as_deref()
+                .and_then(|id| {
+                    let terminals = app_state.terminals.read();
+                    terminals.get(id).map(|t| McpTerminalInfo {
+                        id: t.id.clone(),
+                        workspace_id: t.workspace_id.clone(),
+                        name: t.name.clone(),
+                        process_name: t.process_name.clone(),
+                    })
+                });
+            McpResponse::ActiveTerminal { terminal }
+        }
+
         McpRequest::SwitchWorkspace { workspace_id } => {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
+                return McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                };
+            }
+
             let _ = app_handle.emit("switch-workspace", workspace_id);
             McpResponse::Ok
         }
@@ -336,6 +433,19 @@ pub fn handle_mcp_request(
             terminal_id,
             workspace_id,
         } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+            // Validate target workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
+                return McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                };
+            }
+
             app_state.update_terminal_workspace(terminal_id, workspace_id.clone());
             auto_save.mark_dirty();
 
@@ -356,10 +466,67 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        McpRequest::ResizeTerminal {
+            terminal_id,
+            rows,
+            cols,
+        } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            let request = godly_protocol::Request::Resize {
+                session_id: terminal_id.clone(),
+                rows: *rows,
+                cols: *cols,
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error { message: e },
+            }
+        }
+
+        McpRequest::RemoveWorktree { worktree_path } => {
+            // Find a workspace whose folder_path is a git repo containing this worktree
+            let workspaces = app_state.get_all_workspaces();
+            let mut repo_root_found: Option<String> = None;
+            for ws in &workspaces {
+                if crate::worktree::is_git_repo(&ws.folder_path, None) {
+                    if let Ok(root) = crate::worktree::get_repo_root(&ws.folder_path, None) {
+                        repo_root_found = Some(root);
+                        break;
+                    }
+                }
+            }
+            match repo_root_found {
+                Some(repo_root) => {
+                    match crate::worktree::remove_worktree(&repo_root, worktree_path, true, None) {
+                        Ok(()) => McpResponse::Ok,
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to remove worktree: {}", e),
+                        },
+                    }
+                }
+                None => McpResponse::Error {
+                    message: "No workspace with a git repo found to resolve worktree".to_string(),
+                },
+            }
+        }
+
         McpRequest::ReadTerminal {
             terminal_id,
             mode,
             lines,
+            strip_ansi: do_strip,
         } => {
             let request = godly_protocol::Request::ReadBuffer {
                 session_id: terminal_id.clone(),
@@ -367,7 +534,10 @@ pub fn handle_mcp_request(
             match daemon.send_request(&request) {
                 Ok(godly_protocol::Response::Buffer { data, .. }) => {
                     let text = String::from_utf8_lossy(&data).into_owned();
-                    let content = truncate_output(&text, mode.as_deref(), *lines);
+                    let mut content = truncate_output(&text, mode.as_deref(), *lines);
+                    if do_strip.unwrap_or(false) {
+                        content = strip_ansi(&content);
+                    }
                     McpResponse::TerminalOutput { content }
                 }
                 Ok(godly_protocol::Response::Error { message }) => {
@@ -506,6 +676,57 @@ fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::She
     }
 }
 
+/// Strip ANSI escape sequences from terminal output.
+/// Handles CSI sequences (\x1b[...X), OSC sequences (\x1b]...BEL/ST),
+/// and simple 2-byte sequences (\x1b + single char).
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    // CSI sequence: consume until final byte (0x40..=0x7E)
+                    chars.next(); // consume '['
+                    while let Some(&c) = chars.peek() {
+                        chars.next();
+                        if (0x40..=0x7E).contains(&(c as u32)) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    // OSC sequence: consume until BEL (\x07) or ST (\x1b\\)
+                    chars.next(); // consume ']'
+                    while let Some(c) = chars.next() {
+                        if c == '\x07' {
+                            break;
+                        }
+                        if c == '\x1b' {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next(); // consume '\\'
+                            }
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    // Simple 2-byte sequence: skip one char
+                    chars.next();
+                }
+                None => {
+                    // Trailing ESC at end of string
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +779,49 @@ mod tests {
     fn test_truncate_output_empty() {
         let result = truncate_output("", None, None);
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_strip_ansi_csi_sequences() {
+        // SGR (color) sequences
+        assert_eq!(strip_ansi("\x1b[31mhello\x1b[0m"), "hello");
+        // Cursor movement
+        assert_eq!(strip_ansi("\x1b[2Jscreen"), "screen");
+        // Multiple params
+        assert_eq!(strip_ansi("\x1b[1;32mbold green\x1b[0m"), "bold green");
+    }
+
+    #[test]
+    fn test_strip_ansi_osc_with_bel() {
+        // OSC title set terminated by BEL
+        assert_eq!(strip_ansi("\x1b]0;My Title\x07prompt$"), "prompt$");
+    }
+
+    #[test]
+    fn test_strip_ansi_osc_with_st() {
+        // OSC sequence terminated by ST (\x1b\\)
+        assert_eq!(strip_ansi("\x1b]0;Title\x1b\\text"), "text");
+    }
+
+    #[test]
+    fn test_strip_ansi_no_escapes() {
+        assert_eq!(strip_ansi("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_strip_ansi_empty() {
+        assert_eq!(strip_ansi(""), "");
+    }
+
+    #[test]
+    fn test_strip_ansi_mixed() {
+        let input = "\x1b[32mPS C:\\>\x1b[0m echo \x1b]0;powershell\x07hello";
+        assert_eq!(strip_ansi(input), "PS C:\\> echo hello");
+    }
+
+    #[test]
+    fn test_strip_ansi_two_byte_sequence() {
+        // e.g. \x1b= (set alternate keypad mode)
+        assert_eq!(strip_ansi("\x1b=text"), "text");
     }
 }
