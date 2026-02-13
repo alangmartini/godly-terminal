@@ -577,6 +577,28 @@ impl DaemonClient {
             || err.contains("Bridge not started yet")
     }
 
+    /// Send a request without waiting for the response.
+    /// Used for latency-sensitive writes where blocking on the round-trip
+    /// would saturate the Tauri thread pool and cause input lag.
+    pub fn send_fire_and_forget(&self, request: &Request) -> Result<(), String> {
+        let tx = self
+            .request_tx
+            .lock()
+            .as_ref()
+            .ok_or("Bridge not started yet")?
+            .clone();
+
+        let (response_tx, _response_rx) = mpsc::channel();
+
+        tx.send(BridgeRequest {
+            request: request.clone(),
+            response_tx,
+        })
+        .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
+
+        Ok(())
+    }
+
     /// Send a request and wait for the response.
     /// If the connection is broken, automatically reconnects and retries once.
     pub fn send_request(&self, request: &Request) -> Result<Response, String> {
