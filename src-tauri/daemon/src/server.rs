@@ -347,11 +347,14 @@ async fn handle_client(
     // Signal to stop the I/O thread when the async handler is done
     let io_running = Arc::new(AtomicBool::new(true));
 
-    // Spawn the single I/O thread that does ALL pipe reads and writes
+    // Spawn the single I/O thread that does ALL pipe reads and writes.
+    // Passes sessions so Write/Resize can be handled directly in the I/O thread
+    // without bouncing through the async handler (eliminates 2 channel hops).
     let io_running_clone = io_running.clone();
     let running_clone = running.clone();
+    let io_sessions = sessions.clone();
     let io_handle = tokio::task::spawn_blocking(move || {
-        io_thread(pipe, req_tx, resp_rx, event_rx, io_running_clone, running_clone);
+        io_thread(pipe, req_tx, resp_rx, event_rx, io_running_clone, running_clone, io_sessions);
     });
 
     // Async handler loop: process requests from the I/O thread
@@ -421,8 +424,19 @@ async fn handle_client(
 /// This prevents write-heavy scenarios from starving request reads.
 const MAX_WRITES_PER_ITERATION: usize = 128;
 
+/// Number of idle loop iterations to spin (yield_now) before falling back to sleep.
+/// During active I/O this keeps latency near-zero; when truly idle, the sleep
+/// prevents burning CPU. On Windows, thread::sleep(1ms) can actually sleep ~15ms
+/// due to the default timer resolution (15.625ms), so avoiding sleep during
+/// active use is critical for input responsiveness.
+const SPIN_BEFORE_SLEEP: u32 = 100;
+
 /// Single I/O thread: performs all pipe reads and writes.
 /// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
+///
+/// Write and Resize requests are handled DIRECTLY in this thread to avoid
+/// bouncing through the async handler (eliminates 2 tokio channel hops and
+/// scheduler latency per keystroke). Other requests still go to the async handler.
 ///
 /// Responses are written from `resp_rx` with HIGH PRIORITY (always drained first).
 /// Events are written from `event_rx` with NORMAL PRIORITY (batch-limited).
@@ -434,6 +448,7 @@ fn io_thread(
     mut event_rx: mpsc::Receiver<DaemonMessage>,
     io_running: Arc<AtomicBool>,
     server_running: Arc<AtomicBool>,
+    sessions: Arc<RwLock<HashMap<String, DaemonSession>>>,
 ) {
     let raw_handle = get_raw_handle(&pipe);
     let mut last_log_time = Instant::now();
@@ -442,6 +457,12 @@ fn io_thread(
     let mut total_resp_writes: u64 = 0;
     let mut total_bytes_written: u64 = 0;
     let mut write_stall_count: u64 = 0;
+    let mut direct_writes: u64 = 0;
+
+    // Adaptive polling: spin (yield_now) before falling back to sleep.
+    // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to the
+    // default system timer resolution (15.625ms). Spinning avoids this.
+    let mut idle_count: u32 = 0;
 
     daemon_log!("io_thread started, handle={}", raw_handle);
 
@@ -465,12 +486,69 @@ fn io_thread(
                                 elapsed.as_secs_f64() * 1000.0
                             );
                         }
-                        if req_tx.send(request).is_err() {
-                            eprintln!("[daemon-io] Request channel closed, stopping");
-                            daemon_log!("Request channel closed, stopping");
-                            break;
+
+                        // Handle Write and Resize directly in the I/O thread.
+                        // These are latency-sensitive and don't need async processing.
+                        // Bypassing the async handler eliminates 2 channel hops and
+                        // tokio scheduler latency per keystroke.
+                        match &request {
+                            Request::Write { session_id, data } => {
+                                let response = {
+                                    let sessions_guard = sessions.read();
+                                    match sessions_guard.get(session_id) {
+                                        Some(session) => match session.write(data) {
+                                            Ok(()) => Response::Ok,
+                                            Err(e) => Response::Error { message: e },
+                                        },
+                                        None => Response::Error {
+                                            message: format!("Session {} not found", session_id),
+                                        },
+                                    }
+                                };
+                                let msg = DaemonMessage::Response(response);
+                                if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                                    daemon_log!("Write error on direct Write response, stopping");
+                                    io_running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                                direct_writes += 1;
+                                total_resp_writes += 1;
+                                total_writes += 1;
+                                did_work = true;
+                            }
+                            Request::Resize { session_id, rows, cols } => {
+                                let response = {
+                                    let sessions_guard = sessions.read();
+                                    match sessions_guard.get(session_id) {
+                                        Some(session) => match session.resize(*rows, *cols) {
+                                            Ok(()) => Response::Ok,
+                                            Err(e) => Response::Error { message: e },
+                                        },
+                                        None => Response::Error {
+                                            message: format!("Session {} not found", session_id),
+                                        },
+                                    }
+                                };
+                                let msg = DaemonMessage::Response(response);
+                                if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                                    daemon_log!("Write error on direct Resize response, stopping");
+                                    io_running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                                total_resp_writes += 1;
+                                total_writes += 1;
+                                did_work = true;
+                            }
+                            _ => {
+                                // All other requests go through the async handler
+                                if req_tx.send(request).is_err() {
+                                    eprintln!("[daemon-io] Request channel closed, stopping");
+                                    daemon_log!("Request channel closed, stopping");
+                                    break;
+                                }
+                                did_work = true;
+                            }
                         }
-                        did_work = true;
                     }
                     Ok(None) => {
                         eprintln!("[daemon-io] Client disconnected (EOF)");
@@ -497,9 +575,9 @@ fn io_thread(
         }
 
         // Step 2a: HIGH PRIORITY — write ALL pending responses immediately.
-        // Responses (to Write, Resize, Ping, etc.) must not be delayed by
-        // queued output events. Without this, heavy terminal output (e.g. Claude
-        // CLI) causes the client to time out waiting for a response.
+        // Responses (to Ping, CreateSession, etc.) must not be delayed by
+        // queued output events. Write/Resize responses are already written
+        // directly in step 1, so this handles only async-handler responses.
         loop {
             match resp_rx.try_recv() {
                 Ok(msg) => {
@@ -599,18 +677,30 @@ fn io_thread(
         }
 
         if !did_work {
-            // Nothing to do - brief sleep to avoid busy-waiting
-            std::thread::sleep(Duration::from_millis(1));
+            // Adaptive polling: spin for a while before sleeping.
+            // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to
+            // the default system timer resolution (15.625ms). During active I/O,
+            // spinning avoids this penalty. When truly idle, we fall back to
+            // sleep to avoid burning CPU.
+            idle_count += 1;
+            if idle_count > SPIN_BEFORE_SLEEP {
+                std::thread::sleep(Duration::from_millis(1));
+            } else {
+                std::thread::yield_now();
+            }
+        } else {
+            idle_count = 0;
         }
 
         // Periodic stats logging
         if last_log_time.elapsed() > Duration::from_secs(30) {
             let resp_depth = resp_rx.len();
             daemon_log!(
-                "io_thread stats: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_cap=1024",
+                "io_thread stats: reads={}, writes={} (resp={}, direct={}), bytes_out={}, stalls={}, resp_queue={}, event_cap=1024",
                 total_reads,
                 total_writes,
                 total_resp_writes,
+                direct_writes,
                 total_bytes_written,
                 write_stall_count,
                 resp_depth
@@ -621,10 +711,11 @@ fn io_thread(
 
     let resp_depth = resp_rx.len();
     daemon_log!(
-        "io_thread stopped: reads={}, writes={} (resp={}), bytes_out={}, stalls={}, resp_queue={}, event_cap=1024",
+        "io_thread stopped: reads={}, writes={} (resp={}, direct={}), bytes_out={}, stalls={}, resp_queue={}, event_cap=1024",
         total_reads,
         total_writes,
         total_resp_writes,
+        direct_writes,
         total_bytes_written,
         write_stall_count,
         resp_depth
@@ -749,6 +840,7 @@ mod tests {
         // Run io_thread — it will write to the server side of the pipe
         let io_running_clone = io_running.clone();
         let server_running_clone = server_running.clone();
+        let test_sessions = Arc::new(RwLock::new(HashMap::new()));
         let io_handle = std::thread::spawn(move || {
             let stopper = io_running_clone.clone();
             std::thread::spawn(move || {
@@ -762,6 +854,7 @@ mod tests {
                 event_rx,
                 io_running_clone,
                 server_running_clone,
+                test_sessions,
             );
         });
 
