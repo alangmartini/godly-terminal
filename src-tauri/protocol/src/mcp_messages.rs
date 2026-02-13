@@ -34,11 +34,15 @@ pub enum McpRequest {
     // Workspace queries/mutations
     ListWorkspaces,
     CreateWorkspace { name: String, folder_path: String },
+    DeleteWorkspace { workspace_id: String },
     SwitchWorkspace { workspace_id: String },
+    GetActiveWorkspace,
+    GetActiveTerminal,
     MoveTerminalToWorkspace {
         terminal_id: String,
         workspace_id: String,
     },
+    RemoveWorktree { worktree_path: String },
 
     // Terminal I/O
     WriteToTerminal { terminal_id: String, data: String },
@@ -48,6 +52,13 @@ pub enum McpRequest {
         mode: Option<String>,
         #[serde(default)]
         lines: Option<usize>,
+        #[serde(default)]
+        strip_ansi: Option<bool>,
+    },
+    ResizeTerminal {
+        terminal_id: String,
+        rows: u16,
+        cols: u16,
     },
 
     // Notifications
@@ -107,4 +118,10 @@ pub enum McpResponse {
     },
     NotificationStatus { enabled: bool, source: String },
     TerminalOutput { content: String },
+    ActiveWorkspace {
+        workspace: Option<McpWorkspaceInfo>,
+    },
+    ActiveTerminal {
+        terminal: Option<McpTerminalInfo>,
+    },
 }

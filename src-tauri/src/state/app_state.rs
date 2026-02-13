@@ -9,6 +9,7 @@ pub struct AppState {
     /// Session metadata for persistence (shell_type, cwd) - replaces direct PTY session access
     pub session_metadata: RwLock<HashMap<String, SessionMetadata>>,
     pub active_workspace_id: RwLock<Option<String>>,
+    pub active_terminal_id: RwLock<Option<String>>,
     /// Per-terminal notification overrides (terminal_id → enabled)
     pub notification_overrides_terminal: RwLock<HashMap<String, bool>>,
     /// Per-workspace notification overrides (workspace_id → enabled)
@@ -24,6 +25,7 @@ impl AppState {
             terminals: RwLock::new(HashMap::new()),
             session_metadata: RwLock::new(HashMap::new()),
             active_workspace_id: RwLock::new(None),
+            active_terminal_id: RwLock::new(None),
             notification_overrides_terminal: RwLock::new(HashMap::new()),
             notification_overrides_workspace: RwLock::new(HashMap::new()),
             split_views: RwLock::new(HashMap::new()),
@@ -165,6 +167,14 @@ impl AppState {
     pub fn set_notification_enabled_workspace(&self, workspace_id: &str, enabled: bool) {
         let mut overrides = self.notification_overrides_workspace.write();
         overrides.insert(workspace_id.to_string(), enabled);
+    }
+
+    pub fn set_active_terminal_id(&self, id: Option<String>) {
+        *self.active_terminal_id.write() = id;
+    }
+
+    pub fn get_active_terminal_id(&self) -> Option<String> {
+        self.active_terminal_id.read().clone()
     }
 }
 
