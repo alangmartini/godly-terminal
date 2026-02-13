@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+
 export interface Terminal {
   id: string;
   workspaceId: string;
@@ -213,6 +215,7 @@ class Store {
       this.lastActiveTerminalByWorkspace.set(this.state.activeWorkspaceId, id);
     }
     this.setState({ activeTerminalId: id });
+    invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
   }
 
   moveTerminalToWorkspace(terminalId: string, workspaceId: string) {
