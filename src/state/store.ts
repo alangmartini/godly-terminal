@@ -22,11 +22,19 @@ export interface Workspace {
   claudeCodeMode: boolean;
 }
 
+export interface SplitView {
+  leftTerminalId: string;   // or "top" in vertical
+  rightTerminalId: string;  // or "bottom" in vertical
+  direction: 'horizontal' | 'vertical';
+  ratio: number;            // 0.0-1.0, default 0.5
+}
+
 export interface AppState {
   workspaces: Workspace[];
   terminals: Terminal[];
   activeWorkspaceId: string | null;
   activeTerminalId: string | null;
+  splitViews: Record<string, SplitView>;  // keyed by workspaceId
 }
 
 type Listener = () => void;
@@ -37,6 +45,7 @@ class Store {
     terminals: [],
     activeWorkspaceId: null,
     activeTerminalId: null,
+    splitViews: {},
   };
 
   private listeners: Set<Listener> = new Set();
@@ -58,6 +67,7 @@ class Store {
       terminals: [],
       activeWorkspaceId: null,
       activeTerminalId: null,
+      splitViews: {},
     };
     this.lastActiveTerminalByWorkspace.clear();
     this.notify();
@@ -101,12 +111,14 @@ class Store {
 
   removeWorkspace(id: string) {
     this.lastActiveTerminalByWorkspace.delete(id);
+    const { [id]: _, ...remainingSplitViews } = this.state.splitViews;
     this.setState({
       workspaces: this.state.workspaces.filter(w => w.id !== id),
       terminals: this.state.terminals.filter(t => t.workspaceId !== id),
       activeWorkspaceId: this.state.activeWorkspaceId === id
         ? (this.state.workspaces[0]?.id ?? null)
         : this.state.activeWorkspaceId,
+      splitViews: remainingSplitViews,
     });
   }
 
@@ -172,9 +184,27 @@ class Store {
       newActiveId = sameWorkspace[0]?.id ?? null;
     }
 
+    // Clear split if removed terminal was part of one
+    let splitViews = this.state.splitViews;
+    if (terminal) {
+      const split = splitViews[terminal.workspaceId];
+      if (split && (split.leftTerminalId === id || split.rightTerminalId === id)) {
+        const { [terminal.workspaceId]: _, ...rest } = splitViews;
+        splitViews = rest;
+        // Set remaining split terminal as active
+        const remainingId = split.leftTerminalId === id
+          ? split.rightTerminalId
+          : split.leftTerminalId;
+        if (remainingTerminals.some(t => t.id === remainingId)) {
+          newActiveId = remainingId;
+        }
+      }
+    }
+
     this.setState({
       terminals: remainingTerminals,
       activeTerminalId: newActiveId,
+      splitViews,
     });
   }
 
@@ -186,10 +216,23 @@ class Store {
   }
 
   moveTerminalToWorkspace(terminalId: string, workspaceId: string) {
+    const terminal = this.state.terminals.find(t => t.id === terminalId);
+    let splitViews = this.state.splitViews;
+
+    // Clear split on source workspace if moved terminal was in it
+    if (terminal) {
+      const split = splitViews[terminal.workspaceId];
+      if (split && (split.leftTerminalId === terminalId || split.rightTerminalId === terminalId)) {
+        const { [terminal.workspaceId]: _, ...rest } = splitViews;
+        splitViews = rest;
+      }
+    }
+
     this.setState({
       terminals: this.state.terminals.map(t =>
         t.id === terminalId ? { ...t, workspaceId } : t
       ),
+      splitViews,
     });
   }
 
@@ -208,6 +251,42 @@ class Store {
         const order = tabOrder.indexOf(t.id);
         return { ...t, order: order >= 0 ? order : t.order };
       }),
+    });
+  }
+
+  // Split view operations
+  setSplitView(
+    workspaceId: string,
+    leftTerminalId: string,
+    rightTerminalId: string,
+    direction: 'horizontal' | 'vertical',
+    ratio = 0.5,
+  ) {
+    this.setState({
+      splitViews: {
+        ...this.state.splitViews,
+        [workspaceId]: { leftTerminalId, rightTerminalId, direction, ratio },
+      },
+    });
+  }
+
+  clearSplitView(workspaceId: string) {
+    const { [workspaceId]: _, ...rest } = this.state.splitViews;
+    this.setState({ splitViews: rest });
+  }
+
+  getSplitView(workspaceId: string): SplitView | null {
+    return this.state.splitViews[workspaceId] ?? null;
+  }
+
+  updateSplitRatio(workspaceId: string, ratio: number) {
+    const split = this.state.splitViews[workspaceId];
+    if (!split) return;
+    this.setState({
+      splitViews: {
+        ...this.state.splitViews,
+        [workspaceId]: { ...split, ratio },
+      },
     });
   }
 
