@@ -246,10 +246,11 @@ fn update_phase(health: &BridgeHealth, phase: u8) {
 
 // ── Bridge implementation ───────────────────────────────────────────────
 
-/// A request to send to the daemon, paired with a channel for the response.
+/// A request to send to the daemon, paired with an optional channel for the response.
+/// Fire-and-forget writes set `response_tx = None` to avoid tracking dead channels.
 pub struct BridgeRequest {
     pub request: Request,
-    pub response_tx: std::sync::mpsc::Sender<Response>,
+    pub response_tx: Option<std::sync::mpsc::Sender<Response>>,
 }
 
 /// Bridge that owns the pipe's reader AND writer, performing all I/O in a single thread.
@@ -265,6 +266,13 @@ pub struct DaemonBridge {
 /// Maximum number of events to read before checking for pending outgoing requests.
 /// This prevents high-throughput output from starving user input writes.
 const MAX_EVENTS_BEFORE_REQUEST_CHECK: usize = 8;
+
+/// Number of idle loop iterations to spin (yield_now) before falling back to sleep.
+/// During active I/O this keeps latency near-zero; when truly idle, the sleep
+/// prevents burning CPU. On Windows, thread::sleep(1ms) can actually sleep ~15ms
+/// due to the default timer resolution (15.625ms), so avoiding sleep during
+/// active use is critical for input responsiveness.
+const SPIN_BEFORE_SLEEP: u32 = 100;
 
 impl DaemonBridge {
     pub fn new() -> Self {
@@ -314,6 +322,16 @@ impl DaemonBridge {
             let mut slow_write_count: u64 = 0;
             let mut last_stats_time = Instant::now();
 
+            // Adaptive polling: spin (yield_now) for SPIN_BEFORE_SLEEP iterations
+            // before falling back to sleep(1ms). This avoids the Windows timer
+            // resolution penalty (~15ms) during active I/O while saving CPU when idle.
+            let mut idle_count: u32 = 0;
+
+            // Count of fire-and-forget responses to skip (no pending_responses entry).
+            // Fire-and-forget writes don't track a response channel, but the daemon
+            // still sends Response::Ok. We skip these without routing.
+            let mut orphan_responses: usize = 0;
+
             while running.load(Ordering::Relaxed) {
                 let mut did_work = false;
                 update_phase(&health, PHASE_IDLE);
@@ -353,8 +371,10 @@ impl DaemonBridge {
                                 Ok(Some(DaemonMessage::Response(response))) => {
                                     total_responses += 1;
                                     did_work = true;
-                                    // Route response to the oldest waiting caller (FIFO)
-                                    if let Some(tx) = pending_responses.pop_front() {
+                                    // Skip orphan responses from fire-and-forget writes
+                                    if orphan_responses > 0 {
+                                        orphan_responses -= 1;
+                                    } else if let Some(tx) = pending_responses.pop_front() {
                                         let _ = tx.send(response);
                                     } else {
                                         eprintln!(
@@ -414,7 +434,12 @@ impl DaemonBridge {
                             Ok(()) => {
                                 total_requests_sent += 1;
                                 did_work = true;
-                                pending_responses.push_back(bridge_req.response_tx);
+
+                                // Only track response channel for non-fire-and-forget requests
+                                match bridge_req.response_tx {
+                                    Some(tx) => pending_responses.push_back(tx),
+                                    None => orphan_responses += 1,
+                                }
 
                                 let elapsed = write_start.elapsed();
                                 if elapsed > Duration::from_millis(50) {
@@ -435,7 +460,10 @@ impl DaemonBridge {
                                 break;
                             }
                         }
-                        // After writing a request, loop back to read the response
+                        // After writing a request, loop back to read the response.
+                        // Reset idle_count so we spin instead of sleeping — the
+                        // daemon response/event will arrive within microseconds.
+                        idle_count = 0;
                         continue;
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -449,20 +477,32 @@ impl DaemonBridge {
                 }
 
                 if !did_work {
-                    // Nothing to do - brief sleep to avoid busy-waiting
-                    thread::sleep(Duration::from_millis(1));
+                    // Adaptive polling: spin for a while before sleeping.
+                    // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to
+                    // the default system timer resolution (15.625ms). During active I/O,
+                    // spinning avoids this penalty. When truly idle, we fall back to
+                    // sleep to avoid burning CPU.
+                    idle_count += 1;
+                    if idle_count > SPIN_BEFORE_SLEEP {
+                        thread::sleep(Duration::from_millis(1));
+                    } else {
+                        thread::yield_now();
+                    }
+                } else {
+                    idle_count = 0;
                 }
 
                 // Periodic stats logging
                 if last_stats_time.elapsed() > Duration::from_secs(30) {
                     blog!(
-                        "bridge stats: events={}, requests={}, responses={}, dropped_events={}, slow_writes={}, pending={}",
+                        "bridge stats: events={}, requests={}, responses={}, dropped_events={}, slow_writes={}, pending={}, orphans={}",
                         total_events,
                         total_requests_sent,
                         total_responses,
                         dropped_events,
                         slow_write_count,
-                        pending_responses.len()
+                        pending_responses.len(),
+                        orphan_responses
                     );
                     last_stats_time = Instant::now();
                 }

@@ -558,7 +558,7 @@ impl DaemonClient {
 
         tx.send(BridgeRequest {
             request: request.clone(),
-            response_tx,
+            response_tx: Some(response_tx),
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
 
@@ -580,6 +580,9 @@ impl DaemonClient {
     /// Send a request without waiting for the response.
     /// Used for latency-sensitive writes where blocking on the round-trip
     /// would saturate the Tauri thread pool and cause input lag.
+    ///
+    /// Sets response_tx = None so the bridge skips tracking a dead channel
+    /// and instead counts orphan responses to discard when they arrive.
     pub fn send_fire_and_forget(&self, request: &Request) -> Result<(), String> {
         let tx = self
             .request_tx
@@ -588,11 +591,9 @@ impl DaemonClient {
             .ok_or("Bridge not started yet")?
             .clone();
 
-        let (response_tx, _response_rx) = mpsc::channel();
-
         tx.send(BridgeRequest {
             request: request.clone(),
-            response_tx,
+            response_tx: None,
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
 
