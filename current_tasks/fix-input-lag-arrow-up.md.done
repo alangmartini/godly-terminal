@@ -1,0 +1,21 @@
+# Fix ~2s input lag on arrow-up and rapid keystrokes
+
+## Branch: `feat/worktree-open-terminal-btn`
+## PR: https://github.com/alangmartini/godly-terminal/pull/73
+## Status: DONE
+
+## Problem
+
+`write_to_terminal` blocked the Tauri thread pool waiting for the daemon's `Ok` response on every keystroke. Under rapid input (e.g. arrow-up), threads saturated on IPC round-trips, causing compounding delays up to ~2s.
+
+## Fix
+
+1. Added `send_fire_and_forget()` to `DaemonClient` — enqueues request without blocking on response.
+2. `write_to_terminal` uses fire-and-forget instead of `send_request()`.
+3. Replaced `requestAnimationFrame` (~16ms) with `setTimeout(0)` (~1ms) for output buffer flushing.
+
+### Files modified
+
+- `src-tauri/src/daemon_client/client.rs`
+- `src-tauri/src/commands/terminal.rs`
+- `src/components/TerminalPane.ts`
