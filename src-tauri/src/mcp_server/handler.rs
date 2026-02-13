@@ -356,6 +356,30 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        McpRequest::ReadTerminal {
+            terminal_id,
+            mode,
+            lines,
+        } => {
+            let request = godly_protocol::Request::ReadBuffer {
+                session_id: terminal_id.clone(),
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::Buffer { data, .. }) => {
+                    let text = String::from_utf8_lossy(&data).into_owned();
+                    let content = truncate_output(&text, mode.as_deref(), *lines);
+                    McpResponse::TerminalOutput { content }
+                }
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error { message: e },
+            }
+        }
+
         McpRequest::WriteToTerminal { terminal_id, data } => {
             let request = godly_protocol::Request::Write {
                 session_id: terminal_id.clone(),
@@ -451,6 +475,27 @@ fn to_protocol_shell_type(st: &crate::state::ShellType) -> godly_protocol::Shell
     }
 }
 
+/// Truncate terminal output by mode and line count.
+/// - "full" → return entire text
+/// - "head" → first N lines (default 100)
+/// - "tail" (default) → last N lines (default 100)
+fn truncate_output(text: &str, mode: Option<&str>, lines: Option<usize>) -> String {
+    let n = lines.unwrap_or(100);
+    match mode.unwrap_or("tail") {
+        "full" => text.to_string(),
+        "head" => {
+            let result: Vec<&str> = text.lines().take(n).collect();
+            result.join("\n")
+        }
+        _ => {
+            // "tail" or any unrecognized mode
+            let all_lines: Vec<&str> = text.lines().collect();
+            let start = all_lines.len().saturating_sub(n);
+            all_lines[start..].join("\n")
+        }
+    }
+}
+
 /// Convert protocol ShellType to app ShellType
 fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::ShellType {
     match st {
@@ -458,5 +503,60 @@ fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::She
         godly_protocol::ShellType::Wsl { distribution } => crate::state::ShellType::Wsl {
             distribution: distribution.clone(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_output_tail_default() {
+        let text = (1..=200).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let result = truncate_output(&text, None, None);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 100);
+        assert_eq!(lines[0], "line 101");
+        assert_eq!(lines[99], "line 200");
+    }
+
+    #[test]
+    fn test_truncate_output_head() {
+        let text = (1..=200).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let result = truncate_output(&text, Some("head"), Some(5));
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[0], "line 1");
+        assert_eq!(lines[4], "line 5");
+    }
+
+    #[test]
+    fn test_truncate_output_tail_custom_lines() {
+        let text = (1..=50).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let result = truncate_output(&text, Some("tail"), Some(10));
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 10);
+        assert_eq!(lines[0], "line 41");
+        assert_eq!(lines[9], "line 50");
+    }
+
+    #[test]
+    fn test_truncate_output_full() {
+        let text = "line 1\nline 2\nline 3";
+        let result = truncate_output(text, Some("full"), None);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_truncate_output_fewer_lines_than_requested() {
+        let text = "line 1\nline 2\nline 3";
+        let result = truncate_output(text, Some("tail"), Some(100));
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_truncate_output_empty() {
+        let result = truncate_output("", None, None);
+        assert_eq!(result, "");
     }
 }
