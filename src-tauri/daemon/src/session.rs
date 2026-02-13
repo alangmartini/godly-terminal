@@ -34,6 +34,10 @@ pub struct DaemonSession {
     /// Lock-free attachment flag — readable without locking output_tx.
     /// Updated in attach()/detach()/close() and by the reader thread on send failure.
     is_attached_flag: Arc<AtomicBool>,
+    /// Always-on output history buffer — captures all PTY output regardless of
+    /// attachment state. Used by the ReadBuffer command to let MCP clients read
+    /// terminal output without attaching.
+    output_history: Arc<Mutex<VecDeque<u8>>>,
 }
 
 impl DaemonSession {
@@ -104,6 +108,7 @@ impl DaemonSession {
         let writer = Arc::new(Mutex::new(writer));
         let running = Arc::new(AtomicBool::new(true));
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
+        let output_history = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
         let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>> =
             Arc::new(Mutex::new(None));
         let is_attached_flag = Arc::new(AtomicBool::new(false));
@@ -117,6 +122,7 @@ impl DaemonSession {
         let reader_master = master.clone();
         let reader_running = running.clone();
         let reader_ring = ring_buffer.clone();
+        let reader_history = output_history.clone();
         let reader_tx = output_tx.clone();
         let session_id = id.clone();
         let reader_attached = is_attached_flag.clone();
@@ -150,6 +156,12 @@ impl DaemonSession {
                     Ok(n) => {
                         total_bytes += n as u64;
                         total_reads += 1;
+
+                        // Always append to output_history for ReadBuffer access
+                        {
+                            let mut history = reader_history.lock();
+                            append_to_ring(&mut history, &buf[..n]);
+                        }
 
                         let data = buf[..n].to_vec();
                         let lock_start = Instant::now();
@@ -292,6 +304,7 @@ impl DaemonSession {
             ring_buffer,
             output_tx,
             is_attached_flag,
+            output_history,
         })
     }
 
@@ -442,6 +455,12 @@ impl DaemonSession {
             attached: self.is_attached(),
             running: self.is_running(),
         }
+    }
+
+    /// Read the output history buffer (non-destructive).
+    /// Returns all captured PTY output up to the 1MB rolling limit.
+    pub fn read_output_history(&self) -> Vec<u8> {
+        self.output_history.lock().iter().copied().collect()
     }
 
     /// Get the current ring buffer size in bytes (for diagnostics and testing).
