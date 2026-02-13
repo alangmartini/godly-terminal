@@ -332,6 +332,7 @@ export class WorkspaceSidebar {
     // Drop zone for tabs and workspace reordering
     item.ondragover = (e) => {
       e.preventDefault();
+      e.dataTransfer!.dropEffect = 'move';
       const isWorkspaceDrag = e.dataTransfer?.types.includes('application/x-workspace-id');
       if (isWorkspaceDrag && this.draggedItem && this.draggedItem !== item) {
         item.classList.add('drag-over-workspace');
