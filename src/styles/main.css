@@ -963,3 +963,54 @@ html, body {
   outline: none;
   border-color: var(--accent);
 }
+
+/* Toast notifications */
+.toast-container {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-width: 240px;
+  max-width: 340px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  animation: toast-slide-in 0.25s ease-out;
+}
+
+.toast-title {
+  font-weight: 600;
+  color: var(--text-active);
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.toast-body {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.toast.toast-exit {
+  animation: toast-fade-out 0.3s ease-in forwards;
+}
+
+@keyframes toast-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes toast-fade-out {
+  to { opacity: 0; transform: translateX(30%); }
+}

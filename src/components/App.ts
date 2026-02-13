@@ -8,6 +8,7 @@ import { quotePath } from '../utils/quote-path';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar } from './TabBar';
 import { TerminalPane } from './TerminalPane';
+import { ToastContainer } from './ToastContainer';
 
 type BackendShellType =
   | 'windows'
@@ -31,6 +32,7 @@ export class App {
   private sidebar: WorkspaceSidebar;
   private tabBar: TabBar;
   private terminalContainer: HTMLElement;
+  private toastContainer: ToastContainer;
   private terminalPanes: Map<string, TerminalPane> = new Map();
   private restoredTerminalIds: Set<string> = new Set();
   /** Terminal IDs that were reattached to live daemon sessions (no scrollback load needed) */
@@ -59,11 +61,15 @@ export class App {
     this.terminalContainer = document.createElement('div');
     this.terminalContainer.className = 'terminal-container';
 
+    // Create toast container for in-app notifications
+    this.toastContainer = new ToastContainer();
+
     // Mount components
     this.sidebar.mount(this.container);
     this.tabBar.mount(mainContent);
     mainContent.appendChild(this.terminalContainer);
     this.container.appendChild(mainContent);
+    this.toastContainer.mount(document.body);
 
     // Subscribe to state changes
     store.subscribe(() => this.handleStateChange());
@@ -551,6 +557,11 @@ export class App {
       const played = notificationStore.recordNotify(terminal_id);
       if (played) {
         playNotificationSound(settings.soundPreset, settings.volume);
+
+        // Show in-app toast (always, regardless of focus)
+        const terminal = state.terminals.find(t => t.id === terminal_id);
+        const toastTitle = terminal?.name || 'Terminal';
+        this.toastContainer.show(toastTitle, message || 'New notification', terminal_id);
 
         // Flash taskbar icon orange
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
