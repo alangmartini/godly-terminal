@@ -1,5 +1,13 @@
 $ErrorActionPreference = "Stop"
 
+Write-Host "Switching to master..." -ForegroundColor Cyan
+git checkout master
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+Write-Host "Fetching and pulling latest changes..." -ForegroundColor Cyan
+git pull origin master
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 Write-Host "Building daemon (release)..." -ForegroundColor Cyan
 npm run build:daemon:release
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
