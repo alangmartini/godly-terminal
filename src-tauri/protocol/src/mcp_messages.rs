@@ -61,6 +61,18 @@ pub enum McpRequest {
         cols: u16,
     },
 
+    // Wait/polling tools
+    WaitForIdle {
+        terminal_id: String,
+        idle_ms: u64,
+        timeout_ms: u64,
+    },
+    WaitForText {
+        terminal_id: String,
+        text: String,
+        timeout_ms: u64,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,
@@ -123,5 +135,9 @@ pub enum McpResponse {
     },
     ActiveTerminal {
         terminal: Option<McpTerminalInfo>,
+    },
+    WaitResult {
+        completed: bool,
+        last_output_ago_ms: u64,
     },
 }

@@ -39,6 +39,14 @@ pub enum Request {
     ReadBuffer {
         session_id: String,
     },
+    GetLastOutputTime {
+        session_id: String,
+    },
+    SearchBuffer {
+        session_id: String,
+        text: String,
+        strip_ansi: bool,
+    },
     Ping,
 }
 
@@ -53,6 +61,8 @@ pub enum Response {
     Pong,
     /// Initial buffer replay when attaching to a session
     Buffer { session_id: String, data: Vec<u8> },
+    LastOutputTime { epoch_ms: u64, running: bool },
+    SearchResult { found: bool, running: bool },
 }
 
 /// Asynchronous events pushed from the daemon to attached clients
