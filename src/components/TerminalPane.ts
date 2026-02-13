@@ -85,6 +85,13 @@ export class TerminalPane {
     (this.container as any).__serializeAddon = this.serializeAddon;
     this.resizeObserver.observe(this.container);
 
+    // Click-to-focus in split mode: set this terminal as active
+    this.container.addEventListener('mousedown', () => {
+      if (this.container.classList.contains('split-visible')) {
+        store.setActiveTerminal(this.terminalId);
+      }
+    });
+
     // Block app-level shortcuts from being consumed by xterm.js so they
     // bubble to the document-level handler in App.ts. Also handle
     // copy/paste inline since we need access to the terminal.
@@ -259,11 +266,26 @@ export class TerminalPane {
   }
 
   setActive(active: boolean) {
+    this.container.classList.remove('split-visible', 'split-focused');
     this.container.classList.toggle('active', active);
     if (active) {
       requestAnimationFrame(() => {
         this.fit();
         this.terminal.focus();
+      });
+    }
+  }
+
+  setSplitVisible(visible: boolean, focused: boolean) {
+    this.container.classList.remove('active');
+    this.container.classList.toggle('split-visible', visible);
+    this.container.classList.toggle('split-focused', focused);
+    if (visible) {
+      requestAnimationFrame(() => {
+        this.fit();
+        if (focused) {
+          this.terminal.focus();
+        }
       });
     }
   }
@@ -293,6 +315,10 @@ export class TerminalPane {
   }
 
   getElement(): HTMLElement {
+    return this.container;
+  }
+
+  getContainer(): HTMLElement {
     return this.container;
   }
 

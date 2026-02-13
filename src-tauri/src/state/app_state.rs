@@ -1,7 +1,7 @@
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
-use super::models::{SessionMetadata, Terminal, Workspace};
+use super::models::{SessionMetadata, SplitView, Terminal, Workspace};
 
 pub struct AppState {
     pub workspaces: RwLock<HashMap<String, Workspace>>,
@@ -13,6 +13,8 @@ pub struct AppState {
     pub notification_overrides_terminal: RwLock<HashMap<String, bool>>,
     /// Per-workspace notification overrides (workspace_id → enabled)
     pub notification_overrides_workspace: RwLock<HashMap<String, bool>>,
+    /// Split views per workspace (workspace_id → SplitView)
+    pub split_views: RwLock<HashMap<String, SplitView>>,
 }
 
 impl AppState {
@@ -24,6 +26,7 @@ impl AppState {
             active_workspace_id: RwLock::new(None),
             notification_overrides_terminal: RwLock::new(HashMap::new()),
             notification_overrides_workspace: RwLock::new(HashMap::new()),
+            split_views: RwLock::new(HashMap::new()),
         }
     }
 
@@ -115,6 +118,20 @@ impl AppState {
     pub fn remove_session_metadata(&self, id: &str) {
         let mut meta = self.session_metadata.write();
         meta.remove(id);
+    }
+
+    pub fn set_split_view(&self, workspace_id: &str, split_view: SplitView) {
+        let mut views = self.split_views.write();
+        views.insert(workspace_id.to_string(), split_view);
+    }
+
+    pub fn clear_split_view(&self, workspace_id: &str) {
+        let mut views = self.split_views.write();
+        views.remove(workspace_id);
+    }
+
+    pub fn get_all_split_views(&self) -> HashMap<String, SplitView> {
+        self.split_views.read().clone()
     }
 
     /// Check if notifications are enabled for a given terminal/workspace.

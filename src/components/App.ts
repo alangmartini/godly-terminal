@@ -35,6 +35,8 @@ export class App {
   private restoredTerminalIds: Set<string> = new Set();
   /** Terminal IDs that were reattached to live daemon sessions (no scrollback load needed) */
   private reattachedTerminalIds: Set<string> = new Set();
+  private splitDivider: HTMLElement | null = null;
+  private splitDropOverlay: HTMLElement | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -54,6 +56,12 @@ export class App {
 
     // Create tab bar
     this.tabBar = new TabBar();
+    this.tabBar.setOnSplit((terminalId, direction) => {
+      this.handleSplitRequest(terminalId, direction);
+    });
+    this.tabBar.setOnUnsplit(() => {
+      this.handleUnsplitRequest();
+    });
 
     // Create terminal container
     this.terminalContainer = document.createElement('div');
@@ -70,6 +78,9 @@ export class App {
 
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
+
+    // Setup split drop zones for tab drag-drop
+    this.setupSplitDropZone();
   }
 
   private handleStateChange() {
@@ -100,14 +111,73 @@ export class App {
       }
     });
 
-    // Update active state
-    this.terminalPanes.forEach((pane, id) => {
-      const terminal = state.terminals.find((t) => t.id === id);
-      const isVisible =
-        terminal?.workspaceId === state.activeWorkspaceId &&
-        id === state.activeTerminalId;
-      pane.setActive(isVisible);
-    });
+    // Update active state (split-aware)
+    const split = state.activeWorkspaceId
+      ? store.getSplitView(state.activeWorkspaceId)
+      : null;
+
+    if (split) {
+      // Split mode: show two panes
+      this.terminalContainer.classList.remove('split-horizontal', 'split-vertical');
+      this.terminalContainer.classList.add(
+        split.direction === 'horizontal' ? 'split-horizontal' : 'split-vertical'
+      );
+
+      const leftPane = this.terminalPanes.get(split.leftTerminalId);
+      const rightPane = this.terminalPanes.get(split.rightTerminalId);
+
+      // Ensure divider exists
+      this.ensureSplitDivider(split.direction);
+
+      // Reorder DOM: left pane, divider, right pane
+      if (leftPane) {
+        this.terminalContainer.insertBefore(
+          leftPane.getContainer(),
+          this.terminalContainer.firstChild
+        );
+      }
+      if (this.splitDivider && leftPane) {
+        leftPane.getContainer().after(this.splitDivider);
+      }
+      if (rightPane && this.splitDivider) {
+        this.splitDivider.after(rightPane.getContainer());
+      }
+
+      // Set flex-basis based on ratio
+      const leftBasis = `calc(${split.ratio * 100}% - 2px)`;
+      const rightBasis = `calc(${(1 - split.ratio) * 100}% - 2px)`;
+
+      this.terminalPanes.forEach((pane, id) => {
+        const terminal = state.terminals.find((t) => t.id === id);
+        if (terminal?.workspaceId !== state.activeWorkspaceId) {
+          pane.setActive(false);
+          return;
+        }
+
+        if (id === split.leftTerminalId) {
+          pane.getContainer().style.flexBasis = leftBasis;
+          pane.setSplitVisible(true, state.activeTerminalId === id);
+        } else if (id === split.rightTerminalId) {
+          pane.getContainer().style.flexBasis = rightBasis;
+          pane.setSplitVisible(true, state.activeTerminalId === id);
+        } else {
+          pane.setActive(false);
+        }
+      });
+    } else {
+      // Single pane mode
+      this.terminalContainer.classList.remove('split-horizontal', 'split-vertical');
+      this.removeSplitDivider();
+
+      this.terminalPanes.forEach((pane, id) => {
+        pane.getContainer().style.flexBasis = '';
+        const terminal = state.terminals.find((t) => t.id === id);
+        const isVisible =
+          terminal?.workspaceId === state.activeWorkspaceId &&
+          id === state.activeTerminalId;
+        pane.setActive(isVisible);
+      });
+    }
 
     // Clear notification badge for the now-active terminal
     if (state.activeTerminalId) {
@@ -268,6 +338,20 @@ export class App {
           }
           break;
         }
+
+        case 'split.focusOtherPane': {
+          e.preventDefault();
+          if (state.activeWorkspaceId && state.activeTerminalId) {
+            const activeSplit = store.getSplitView(state.activeWorkspaceId);
+            if (activeSplit) {
+              const otherId = state.activeTerminalId === activeSplit.leftTerminalId
+                ? activeSplit.rightTerminalId
+                : activeSplit.leftTerminalId;
+              store.setActiveTerminal(otherId);
+            }
+          }
+          break;
+        }
       }
     });
   }
@@ -309,6 +393,12 @@ export class App {
           worktree_branch?: string | null;
         }>;
         active_workspace_id: string | null;
+        split_views?: Record<string, {
+          left_terminal_id: string;
+          right_terminal_id: string;
+          direction: string;
+          ratio: number;
+        }>;
       }>('load_layout');
 
       console.log('[App] Layout loaded:', JSON.stringify(layout, null, 2));
@@ -398,6 +488,24 @@ export class App {
             order: 0,
           });
         }
+        // Restore split views
+        if (layout.split_views) {
+          const terminalIds = new Set(store.getState().terminals.map(t => t.id));
+          for (const [wsId, sv] of Object.entries(layout.split_views)) {
+            if (terminalIds.has(sv.left_terminal_id) && terminalIds.has(sv.right_terminal_id)) {
+              const dir = sv.direction === 'vertical' ? 'vertical' : 'horizontal';
+              store.setSplitView(wsId, sv.left_terminal_id, sv.right_terminal_id, dir, sv.ratio);
+              await this.syncSplitToBackend(wsId, {
+                leftTerminalId: sv.left_terminal_id,
+                rightTerminalId: sv.right_terminal_id,
+                direction: dir,
+                ratio: sv.ratio,
+              });
+            }
+          }
+          console.log('[App] Split views restored:', Object.keys(layout.split_views).length);
+        }
+
         console.log('[App] Restore complete!');
       } else {
         console.log('[App] No workspaces in layout, creating default...');
@@ -440,6 +548,240 @@ export class App {
       order: 0,
     });
     console.log('[App] Terminal added to store');
+  }
+
+  private ensureSplitDivider(direction: string) {
+    if (this.splitDivider) {
+      // Update direction class if needed
+      this.splitDivider.classList.remove('horizontal', 'vertical');
+      this.splitDivider.classList.add(direction);
+      return;
+    }
+
+    this.splitDivider = document.createElement('div');
+    this.splitDivider.className = `split-divider ${direction}`;
+    this.terminalContainer.appendChild(this.splitDivider);
+
+    // Drag to resize
+    this.splitDivider.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const state = store.getState();
+      if (!state.activeWorkspaceId) return;
+      const split = store.getSplitView(state.activeWorkspaceId);
+      if (!split) return;
+
+      const isHorizontal = split.direction === 'horizontal';
+      const rect = this.terminalContainer.getBoundingClientRect();
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        let ratio: number;
+        if (isHorizontal) {
+          ratio = (moveEvent.clientX - rect.left) / rect.width;
+        } else {
+          ratio = (moveEvent.clientY - rect.top) / rect.height;
+        }
+        ratio = Math.max(0.15, Math.min(0.85, ratio));
+        store.updateSplitRatio(state.activeWorkspaceId!, ratio);
+      };
+
+      const onMouseUp = async () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        // Sync final ratio to backend
+        const currentSplit = store.getSplitView(state.activeWorkspaceId!);
+        if (currentSplit) {
+          await this.syncSplitToBackend(state.activeWorkspaceId!, currentSplit);
+        }
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
+  private removeSplitDivider() {
+    if (this.splitDivider) {
+      this.splitDivider.remove();
+      this.splitDivider = null;
+    }
+  }
+
+  private setupSplitDropZone() {
+    // Create drop overlay element
+    this.splitDropOverlay = document.createElement('div');
+    this.splitDropOverlay.className = 'split-drop-overlay';
+    this.terminalContainer.appendChild(this.splitDropOverlay);
+
+    this.terminalContainer.addEventListener('dragover', (e) => {
+      // Only handle tab drags (text/plain contains terminal ID)
+      if (!e.dataTransfer?.types.includes('text/plain')) return;
+
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = 'move';
+
+      const rect = this.terminalContainer.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+
+      const overlay = this.splitDropOverlay!;
+
+      // Determine drop zone
+      if (x > 0.7) {
+        // Right edge
+        overlay.style.left = '50%';
+        overlay.style.top = '0';
+        overlay.style.width = '50%';
+        overlay.style.height = '100%';
+        overlay.textContent = 'Split Right';
+        overlay.classList.add('visible');
+        overlay.dataset.zone = 'right';
+      } else if (x < 0.3) {
+        // Left edge
+        overlay.style.left = '0';
+        overlay.style.top = '0';
+        overlay.style.width = '50%';
+        overlay.style.height = '100%';
+        overlay.textContent = 'Split Left';
+        overlay.classList.add('visible');
+        overlay.dataset.zone = 'left';
+      } else if (y > 0.7) {
+        // Bottom edge
+        overlay.style.left = '0';
+        overlay.style.top = '50%';
+        overlay.style.width = '100%';
+        overlay.style.height = '50%';
+        overlay.textContent = 'Split Down';
+        overlay.classList.add('visible');
+        overlay.dataset.zone = 'bottom';
+      } else if (y < 0.3) {
+        // Top edge
+        overlay.style.left = '0';
+        overlay.style.top = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '50%';
+        overlay.textContent = 'Split Up';
+        overlay.classList.add('visible');
+        overlay.dataset.zone = 'top';
+      } else {
+        // Center: no split indicator
+        overlay.classList.remove('visible');
+        overlay.dataset.zone = '';
+      }
+    });
+
+    this.terminalContainer.addEventListener('dragleave', (e) => {
+      // Only hide if leaving the container entirely
+      const related = e.relatedTarget as HTMLElement | null;
+      if (!related || !this.terminalContainer.contains(related)) {
+        this.splitDropOverlay?.classList.remove('visible');
+      }
+    });
+
+    this.terminalContainer.addEventListener('drop', async (e) => {
+      this.splitDropOverlay?.classList.remove('visible');
+
+      const droppedTerminalId = e.dataTransfer?.getData('text/plain');
+      const zone = this.splitDropOverlay?.dataset.zone;
+      if (!droppedTerminalId || !zone) return;
+
+      const state = store.getState();
+      if (!state.activeWorkspaceId || !state.activeTerminalId) return;
+
+      // Don't split with the same terminal
+      if (droppedTerminalId === state.activeTerminalId) return;
+
+      // Verify the dropped terminal belongs to this workspace
+      const droppedTerminal = state.terminals.find(t => t.id === droppedTerminalId);
+      if (!droppedTerminal || droppedTerminal.workspaceId !== state.activeWorkspaceId) return;
+
+      // Determine direction and pane assignment
+      let direction: 'horizontal' | 'vertical';
+      let leftId: string;
+      let rightId: string;
+
+      const existingSplit = store.getSplitView(state.activeWorkspaceId);
+
+      if (existingSplit) {
+        // Already split: replace the pane closest to drop position
+        if (zone === 'right' || zone === 'bottom') {
+          leftId = existingSplit.leftTerminalId;
+          rightId = droppedTerminalId;
+          direction = existingSplit.direction;
+        } else {
+          leftId = droppedTerminalId;
+          rightId = existingSplit.rightTerminalId;
+          direction = existingSplit.direction;
+        }
+      } else {
+        // New split
+        if (zone === 'right') {
+          direction = 'horizontal';
+          leftId = state.activeTerminalId;
+          rightId = droppedTerminalId;
+        } else if (zone === 'left') {
+          direction = 'horizontal';
+          leftId = droppedTerminalId;
+          rightId = state.activeTerminalId;
+        } else if (zone === 'bottom') {
+          direction = 'vertical';
+          leftId = state.activeTerminalId;
+          rightId = droppedTerminalId;
+        } else {
+          // top
+          direction = 'vertical';
+          leftId = droppedTerminalId;
+          rightId = state.activeTerminalId;
+        }
+      }
+
+      store.setSplitView(state.activeWorkspaceId, leftId, rightId, direction);
+      const split = store.getSplitView(state.activeWorkspaceId)!;
+      await this.syncSplitToBackend(state.activeWorkspaceId, split);
+    });
+  }
+
+  private async syncSplitToBackend(workspaceId: string, split: { leftTerminalId: string; rightTerminalId: string; direction: string; ratio: number }) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('set_split_view', {
+        workspaceId,
+        leftTerminalId: split.leftTerminalId,
+        rightTerminalId: split.rightTerminalId,
+        direction: split.direction,
+        ratio: split.ratio,
+      });
+    } catch (error) {
+      console.error('[App] Failed to sync split view to backend:', error);
+    }
+  }
+
+  private async handleSplitRequest(terminalId: string, direction: 'horizontal' | 'vertical') {
+    const state = store.getState();
+    if (!state.activeWorkspaceId || !state.activeTerminalId) return;
+    if (terminalId === state.activeTerminalId) return;
+
+    const leftId = state.activeTerminalId;
+    const rightId = terminalId;
+
+    store.setSplitView(state.activeWorkspaceId, leftId, rightId, direction);
+    const split = store.getSplitView(state.activeWorkspaceId)!;
+    await this.syncSplitToBackend(state.activeWorkspaceId, split);
+  }
+
+  private async handleUnsplitRequest() {
+    const state = store.getState();
+    if (!state.activeWorkspaceId) return;
+    store.clearSplitView(state.activeWorkspaceId);
+    await this.clearSplitFromBackend(state.activeWorkspaceId);
+  }
+
+  private async clearSplitFromBackend(workspaceId: string) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('clear_split_view', { workspaceId });
+    } catch (error) {
+      console.error('[App] Failed to clear split view from backend:', error);
+    }
   }
 
   private async setupScrollbackSaveListener() {

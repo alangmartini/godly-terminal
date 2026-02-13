@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
-use crate::state::{AppState, ShellType, Workspace};
+use crate::state::{AppState, ShellType, SplitView, Workspace};
 
 #[tauri::command]
 pub fn create_workspace(
@@ -85,6 +85,40 @@ pub fn reorder_tabs(
     if let Some(workspace) = workspaces.get_mut(&workspace_id) {
         workspace.tab_order = tab_order;
     }
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_split_view(
+    workspace_id: String,
+    left_terminal_id: String,
+    right_terminal_id: String,
+    direction: String,
+    ratio: f64,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    state.set_split_view(
+        &workspace_id,
+        SplitView {
+            left_terminal_id,
+            right_terminal_id,
+            direction,
+            ratio,
+        },
+    );
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_split_view(
+    workspace_id: String,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    state.clear_split_view(&workspace_id);
     auto_save.mark_dirty();
     Ok(())
 }
