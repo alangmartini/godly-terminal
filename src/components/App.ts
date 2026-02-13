@@ -369,8 +369,8 @@ export class App {
     // Listen for scrollback save requests from backend (on window close)
     await this.setupScrollbackSaveListener();
 
-    // Listen for file drag-drop events (paste file paths into terminal)
-    await this.setupDragDropListener();
+    // Listen for file drag-drop events (paste file names into terminal)
+    this.setupDragDropListener();
 
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
@@ -806,22 +806,46 @@ export class App {
     });
   }
 
-  private async setupDragDropListener() {
-    const { getCurrentWebview } = await import('@tauri-apps/api/webview');
-    await getCurrentWebview().onDragDropEvent((event) => {
-      const payload = event.payload;
-      if (payload.type === 'enter') {
-        this.terminalContainer.classList.add('drag-file-over');
-      } else if (payload.type === 'leave') {
+  private setupDragDropListener() {
+    // File drop handling via HTML5 events.
+    // We use dragDropEnabled: false in tauri.conf.json because Tauri's native
+    // IDropTarget intercepts ALL drag operations (including internal HTML5 DnD
+    // for tab/workspace reordering) and returns DROPEFFECT_NONE for non-file
+    // drags, causing Windows to show a forbidden cursor and preventing drops.
+    // With dragDropEnabled: false, WebView2 uses its default drop handling
+    // which supports both internal DnD and external file drops via HTML5 events.
+    // Limitation: File.path is not available in WebView2, so we paste filenames
+    // instead of full paths when files are dropped from Explorer.
+    let dragCounter = 0;
+
+    this.terminalContainer.addEventListener('dragenter', (e) => {
+      // Only react to external file drags, not internal tab drags
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      dragCounter++;
+      this.terminalContainer.classList.add('drag-file-over');
+    });
+
+    this.terminalContainer.addEventListener('dragleave', (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
         this.terminalContainer.classList.remove('drag-file-over');
-      } else if (payload.type === 'drop') {
-        this.terminalContainer.classList.remove('drag-file-over');
-        const state = store.getState();
-        if (state.activeTerminalId && payload.paths.length > 0) {
-          const text = payload.paths.map(quotePath).join(' ');
-          terminalService.writeToTerminal(state.activeTerminalId, text);
-        }
       }
+    });
+
+    this.terminalContainer.addEventListener('drop', (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      dragCounter = 0;
+      this.terminalContainer.classList.remove('drag-file-over');
+
+      const state = store.getState();
+      if (!state.activeTerminalId || !e.dataTransfer.files.length) return;
+
+      const names = Array.from(e.dataTransfer.files).map(f => f.name);
+      const text = names.map(quotePath).join(' ');
+      terminalService.writeToTerminal(state.activeTerminalId, text);
     });
   }
 
