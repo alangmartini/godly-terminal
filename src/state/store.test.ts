@@ -568,4 +568,129 @@ describe('Store', () => {
       expect(count).toBe(1); // Should still be 1
     });
   });
+
+  describe('split view operations', () => {
+    const ws1: Workspace = {
+      id: 'ws-1', name: 'WS 1', folderPath: 'C:\\ws1', tabOrder: [],
+      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    };
+
+    beforeEach(() => {
+      store.addWorkspace(ws1);
+      store.addTerminal({ id: 't1', workspaceId: 'ws-1', name: 'Tab 1', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't2', workspaceId: 'ws-1', name: 'Tab 2', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't3', workspaceId: 'ws-1', name: 'Tab 3', processName: 'cmd', order: 0 });
+    });
+
+    it('should create a split view', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+
+      const split = store.getSplitView('ws-1');
+      expect(split).not.toBeNull();
+      expect(split!.leftTerminalId).toBe('t1');
+      expect(split!.rightTerminalId).toBe('t2');
+      expect(split!.direction).toBe('horizontal');
+      expect(split!.ratio).toBe(0.5);
+    });
+
+    it('should create a vertical split view', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'vertical', 0.7);
+
+      const split = store.getSplitView('ws-1');
+      expect(split!.direction).toBe('vertical');
+      expect(split!.ratio).toBe(0.7);
+    });
+
+    it('should clear a split view', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.clearSplitView('ws-1');
+
+      expect(store.getSplitView('ws-1')).toBeNull();
+    });
+
+    it('should return null for workspace without split', () => {
+      expect(store.getSplitView('ws-1')).toBeNull();
+    });
+
+    it('should update split ratio', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.updateSplitRatio('ws-1', 0.3);
+
+      expect(store.getSplitView('ws-1')!.ratio).toBe(0.3);
+    });
+
+    it('should not update ratio for nonexistent split', () => {
+      store.updateSplitRatio('ws-1', 0.3);
+      expect(store.getSplitView('ws-1')).toBeNull();
+    });
+
+    it('should auto-clear split when removing a split terminal', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.removeTerminal('t1');
+
+      expect(store.getSplitView('ws-1')).toBeNull();
+      // Remaining terminal should be active
+      expect(store.getState().activeTerminalId).toBe('t2');
+    });
+
+    it('should auto-clear split when removing the other split terminal', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.removeTerminal('t2');
+
+      expect(store.getSplitView('ws-1')).toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t1');
+    });
+
+    it('should not affect split when removing a non-split terminal', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.removeTerminal('t3');
+
+      expect(store.getSplitView('ws-1')).not.toBeNull();
+    });
+
+    it('should auto-clear split when moving a split terminal to another workspace', () => {
+      store.addWorkspace({
+        id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.moveTerminalToWorkspace('t1', 'ws-2');
+
+      expect(store.getSplitView('ws-1')).toBeNull();
+    });
+
+    it('should clean up split when removing workspace', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.removeWorkspace('ws-1');
+
+      expect(store.getSplitView('ws-1')).toBeNull();
+      expect(store.getState().splitViews).toEqual({});
+    });
+
+    it('should support independent splits per workspace', () => {
+      store.addWorkspace({
+        id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
+        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      });
+      store.addTerminal({ id: 't4', workspaceId: 'ws-2', name: 'Tab 4', processName: 'cmd', order: 0 });
+      store.addTerminal({ id: 't5', workspaceId: 'ws-2', name: 'Tab 5', processName: 'cmd', order: 0 });
+
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.setSplitView('ws-2', 't4', 't5', 'vertical');
+
+      expect(store.getSplitView('ws-1')!.direction).toBe('horizontal');
+      expect(store.getSplitView('ws-2')!.direction).toBe('vertical');
+
+      store.clearSplitView('ws-1');
+      expect(store.getSplitView('ws-1')).toBeNull();
+      expect(store.getSplitView('ws-2')).not.toBeNull();
+    });
+
+    it('should clear splitViews on reset', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.reset();
+
+      expect(store.getState().splitViews).toEqual({});
+    });
+  });
 });
