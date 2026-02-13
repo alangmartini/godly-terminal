@@ -18,7 +18,7 @@ export class TerminalPane {
   private resizeRAF: number | null = null;
   private unsubscribeOutput: (() => void) | null = null;
   private outputBuffer: Uint8Array[] = [];
-  private outputFlushRAF: number | null = null;
+  private outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private scrollbackSaveInterval: number | null = null;
   private maxScrollbackLines = 10000;
 
@@ -144,15 +144,17 @@ export class TerminalPane {
       terminalService.writeToTerminal(this.terminalId, data);
     });
 
-    // Handle output: buffer chunks and flush once per animation frame.
+    // Handle output: buffer chunks and flush once per event-loop turn.
     // Bug C1: unbatched write() calls under heavy output saturate the main
     // thread because each call triggers xterm.js's parser synchronously.
+    // setTimeout(0) fires in ~1ms (vs ~16ms for RAF), reducing echo latency
+    // while still coalescing burst output within the same event-loop turn.
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
       (data) => {
         this.outputBuffer.push(data);
-        if (this.outputFlushRAF === null) {
-          this.outputFlushRAF = requestAnimationFrame(() => this.flushOutputBuffer());
+        if (this.outputFlushTimer === null) {
+          this.outputFlushTimer = setTimeout(() => this.flushOutputBuffer(), 0);
         }
       }
     );
@@ -172,7 +174,7 @@ export class TerminalPane {
   }
 
   private flushOutputBuffer() {
-    this.outputFlushRAF = null;
+    this.outputFlushTimer = null;
     const chunks = this.outputBuffer;
     if (chunks.length === 0) return;
     this.outputBuffer = [];
@@ -276,9 +278,9 @@ export class TerminalPane {
     // Save scrollback before destroying
     await this.saveScrollback();
 
-    if (this.outputFlushRAF !== null) {
-      cancelAnimationFrame(this.outputFlushRAF);
-      this.outputFlushRAF = null;
+    if (this.outputFlushTimer !== null) {
+      clearTimeout(this.outputFlushTimer);
+      this.outputFlushTimer = null;
     }
     this.outputBuffer = [];
     if (this.scrollbackSaveInterval) {

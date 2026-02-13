@@ -577,6 +577,34 @@ impl DaemonClient {
             || err.contains("Bridge not started yet")
     }
 
+    /// Send a request without waiting for the daemon's response.
+    ///
+    /// The request is submitted to the bridge channel, but the response receiver
+    /// is immediately dropped. The bridge's FIFO response routing handles this
+    /// gracefully — `let _ = tx.send(response)` in the bridge silently discards
+    /// the response when the receiver is gone.
+    ///
+    /// Returns Err only if the bridge channel is disconnected (connection dead).
+    pub fn send_fire_and_forget(&self, request: &Request) -> Result<(), String> {
+        let tx = self
+            .request_tx
+            .lock()
+            .as_ref()
+            .ok_or("Bridge not started yet")?
+            .clone();
+
+        // Create a one-shot channel but immediately drop the receiver
+        let (response_tx, _response_rx) = mpsc::channel();
+
+        tx.send(BridgeRequest {
+            request: request.clone(),
+            response_tx,
+        })
+        .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
+
+        Ok(())
+    }
+
     /// Send a request and wait for the response.
     /// If the connection is broken, automatically reconnects and retries once.
     pub fn send_request(&self, request: &Request) -> Result<Response, String> {
