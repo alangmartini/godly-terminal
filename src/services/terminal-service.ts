@@ -45,6 +45,7 @@ export interface SessionInfo {
   cwd: string | null;
   created_at: number;
   attached: boolean;
+  running: boolean;
 }
 
 class TerminalService {

@@ -25,4 +25,5 @@ pub struct SessionInfo {
     pub cwd: Option<String>,
     pub created_at: u64,
     pub attached: bool,
+    pub running: bool,
 }
