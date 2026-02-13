@@ -1052,6 +1052,22 @@ async fn handle_request(
             }
         }
 
+        Request::ReadBuffer { session_id } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => {
+                    let data = session.read_output_history();
+                    Response::Buffer {
+                        session_id: session_id.clone(),
+                        data,
+                    }
+                }
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
         Request::CloseSession { session_id } => {
             let mut sessions_guard = sessions.write();
             match sessions_guard.remove(session_id) {

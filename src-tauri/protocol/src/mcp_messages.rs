@@ -42,6 +42,13 @@ pub enum McpRequest {
 
     // Terminal I/O
     WriteToTerminal { terminal_id: String, data: String },
+    ReadTerminal {
+        terminal_id: String,
+        #[serde(default)]
+        mode: Option<String>,
+        #[serde(default)]
+        lines: Option<usize>,
+    },
 
     // Notifications
     Notify {
@@ -99,4 +106,5 @@ pub enum McpResponse {
         worktree_branch: Option<String>,
     },
     NotificationStatus { enabled: bool, source: String },
+    TerminalOutput { content: String },
 }
