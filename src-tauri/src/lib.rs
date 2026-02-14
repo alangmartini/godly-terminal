@@ -30,6 +30,30 @@ fn scrollback_save_complete() {
     SCROLLBACK_SAVED.store(true, Ordering::SeqCst);
 }
 
+/// Delete `.old` binaries left in the resource directory from previous upgrades.
+/// During builds and installs, locked executables are renamed to `.old` so new
+/// binaries can be written. This cleans them up once the old processes have exited.
+fn cleanup_old_binaries(app_handle: &tauri::AppHandle) {
+    let resource_dir = match app_handle.path().resource_dir() {
+        Ok(dir) => dir,
+        Err(_) => return,
+    };
+
+    for name in &[
+        "godly-daemon.exe.old",
+        "godly-mcp.exe.old",
+        "godly-notify.exe.old",
+    ] {
+        let path = resource_dir.join(name);
+        if path.exists() {
+            match std::fs::remove_file(&path) {
+                Ok(_) => eprintln!("[lib] Cleaned up {}", name),
+                Err(e) => eprintln!("[lib] Could not clean up {} (still locked?): {}", name, e),
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(feature = "leak-check")]
@@ -127,6 +151,12 @@ pub fn run() {
 
             // Start auto-save manager
             auto_save.start(app_handle.clone(), state_clone.clone());
+
+            // Clean up .old binaries left from previous upgrades.
+            // During builds/installs, locked .exe files are renamed to .old so
+            // new binaries can be written. Delete them now if the old processes
+            // have exited.
+            cleanup_old_binaries(&app_handle);
 
             // Copy bundled sounds to user's sounds directory (first run)
             commands::install_bundled_sounds(&app_handle);
