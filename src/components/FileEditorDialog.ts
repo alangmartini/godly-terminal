@@ -1,4 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+marked.setOptions({ gfm: true, breaks: true });
+
+/** Render markdown to sanitized HTML. Exported for testing. */
+export function renderMarkdown(src: string): string {
+  const raw = marked.parse(src) as string;
+  return DOMPurify.sanitize(raw);
+}
 
 /**
  * Show a file editor dialog for editing a text file (e.g. CLAUDE.md).
@@ -26,11 +36,28 @@ export async function showFileEditorDialog(title: string, filePath: string): Pro
     pathEl.title = filePath;
     dialog.appendChild(pathEl);
 
+    // Split container: textarea (left) + preview (right)
+    const split = document.createElement('div');
+    split.className = 'file-editor-split';
+
     const textarea = document.createElement('textarea');
     textarea.className = 'file-editor-textarea';
     textarea.value = content;
     textarea.spellcheck = false;
-    dialog.appendChild(textarea);
+
+    const preview = document.createElement('div');
+    preview.className = 'file-editor-preview';
+    preview.textContent = '';
+    updatePreview(preview, content);
+
+    split.appendChild(textarea);
+    split.appendChild(preview);
+    dialog.appendChild(split);
+
+    // Update preview on every input
+    textarea.addEventListener('input', () => {
+      updatePreview(preview, textarea.value);
+    });
 
     const buttons = document.createElement('div');
     buttons.className = 'dialog-buttons';
@@ -81,4 +108,13 @@ export async function showFileEditorDialog(title: string, filePath: string): Pro
     document.body.appendChild(overlay);
     textarea.focus();
   });
+}
+
+function updatePreview(el: HTMLElement, markdown: string): void {
+  const sanitized = renderMarkdown(markdown);
+  // Safe: content is sanitized by DOMPurify
+  el.replaceChildren();
+  const template = document.createElement('template');
+  template.innerHTML = sanitized;
+  el.appendChild(template.content);
 }
