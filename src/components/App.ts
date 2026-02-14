@@ -6,7 +6,7 @@ import { notificationStore } from '../state/notification-store';
 import { playNotificationSound } from '../services/notification-sound';
 import { quotePath } from '../utils/quote-path';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
-import { TabBar } from './TabBar';
+import { TabBar, getDisplayName } from './TabBar';
 import { TerminalPane } from './TerminalPane';
 import { ToastContainer } from './ToastContainer';
 
@@ -999,7 +999,7 @@ export class App {
 
         // Show in-app toast (always, regardless of focus)
         const terminal = state.terminals.find(t => t.id === terminal_id);
-        const toastTitle = terminal?.name || 'Terminal';
+        const toastTitle = terminal ? getDisplayName(terminal) : 'Terminal';
         this.toastContainer.show(toastTitle, message || 'New notification', terminal_id);
 
         // Flash taskbar icon orange
@@ -1018,7 +1018,7 @@ export class App {
             }
             if (permitted) {
               const terminal = state.terminals.find(t => t.id === terminal_id);
-              const title = terminal?.name || 'Godly Terminal';
+              const title = terminal ? getDisplayName(terminal) : 'Godly Terminal';
               sendNotification({
                 title,
                 body: message || 'New notification',
