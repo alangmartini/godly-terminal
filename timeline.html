@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Godly Terminal - Development Timeline</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --bg-card: #12121a;
+    --bg-card-hover: #1a1a28;
+    --border: #1e1e2e;
+    --text: #e2e2f0;
+    --text-dim: #8888a8;
+    --accent: #7c5cfc;
+    --accent-glow: rgba(124, 92, 252, 0.3);
+    --feat: #7c5cfc;
+    --fix: #f0583a;
+    --test: #2dd4a8;
+    --docs: #f5a623;
+    --chore: #6b7280;
+    --refactor: #38bdf8;
+    --line: #2a2a3e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* Starfield background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.15), transparent),
+      radial-gradient(1px 1px at 30% 60%, rgba(255,255,255,0.1), transparent),
+      radial-gradient(1px 1px at 50% 10%, rgba(255,255,255,0.12), transparent),
+      radial-gradient(1px 1px at 70% 40%, rgba(255,255,255,0.08), transparent),
+      radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,0.1), transparent),
+      radial-gradient(1.5px 1.5px at 15% 90%, rgba(124,92,252,0.2), transparent),
+      radial-gradient(1.5px 1.5px at 85% 15%, rgba(45,212,168,0.15), transparent);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 4rem 0 3rem;
+    position: relative;
+  }
+
+  .hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  }
+
+  .hero-icon {
+    font-size: 3.5rem;
+    margin-bottom: 1rem;
+    display: inline-block;
+    animation: float 3s ease-in-out infinite;
+    filter: drop-shadow(0 0 20px var(--accent-glow));
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  .hero h1 {
+    font-size: 2.8rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #fff 0%, #c4b5fd 50%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+  }
+
+  .hero p {
+    color: var(--text-dim);
+    font-size: 1.05rem;
+    font-weight: 300;
+  }
+
+  .hero .stats {
+    display: flex;
+    justify-content: center;
+    gap: 2.5rem;
+    margin-top: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-number {
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+  }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    padding: 3rem 0 2rem;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 28px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, transparent, var(--line) 5%, var(--line) 95%, transparent);
+  }
+
+  /* Day group */
+  .day-group {
+    margin-bottom: 2.5rem;
+    position: relative;
+  }
+
+  .day-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    position: relative;
+  }
+
+  .day-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--bg);
+    box-shadow: 0 0 0 2px var(--accent), 0 0 15px var(--accent-glow);
+    flex-shrink: 0;
+    position: relative;
+    left: 20px;
+    z-index: 2;
+  }
+
+  .day-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    background: var(--bg);
+    padding: 0.3rem 0.8rem;
+    border-radius: 99px;
+    border: 1px solid rgba(124, 92, 252, 0.3);
+    margin-left: 0.8rem;
+  }
+
+  .day-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+
+  /* Cards */
+  .cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-left: 58px;
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    transition: all 0.2s ease;
+    cursor: default;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .card:hover {
+    background: var(--bg-card-hover);
+    border-color: rgba(124, 92, 252, 0.2);
+    transform: translateX(4px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+
+  .card-type {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .card-type.feat { background: rgba(124,92,252,0.15); color: var(--feat); }
+  .card-type.fix { background: rgba(240,88,58,0.15); color: var(--fix); }
+  .card-type.test { background: rgba(45,212,168,0.12); color: var(--test); }
+  .card-type.docs { background: rgba(245,166,35,0.12); color: var(--docs); }
+  .card-type.chore { background: rgba(107,114,128,0.15); color: var(--chore); }
+  .card-type.refactor { background: rgba(56,189,248,0.12); color: var(--refactor); }
+  .card-type.milestone { background: rgba(245,166,35,0.2); color: #fbbf24; border: 1px solid rgba(245,166,35,0.3); }
+
+  .card-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .card-desc {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-top: 0.2rem;
+    line-height: 1.4;
+  }
+
+  .card-pr {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    opacity: 0.6;
+  }
+
+  /* Milestone card */
+  .card.milestone-card {
+    background: linear-gradient(135deg, rgba(124,92,252,0.08), rgba(45,212,168,0.05));
+    border-color: rgba(124,92,252,0.25);
+  }
+
+  .card.milestone-card:hover {
+    border-color: rgba(124,92,252,0.4);
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 3rem 0 2rem;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+
+  .footer .pulse {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--test);
+    margin-right: 0.4rem;
+    animation: pulse 2s ease-in-out infinite;
+    vertical-align: middle;
+  }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(45,212,168,0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(45,212,168,0); }
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 1.2rem;
+    margin: 1.5rem 0 0;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+
+  .legend-dot.feat { background: var(--feat); }
+  .legend-dot.fix { background: var(--fix); }
+  .legend-dot.test { background: var(--test); }
+  .legend-dot.refactor { background: var(--refactor); }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .hero h1 { font-size: 1.8rem; }
+    .hero .stats { gap: 1.5rem; }
+    .cards { margin-left: 48px; }
+    .timeline::before { left: 22px; }
+    .day-dot { left: 14px; }
+  }
+
+  /* Scroll animations */
+  .day-group {
+    opacity: 0;
+    transform: translateY(20px);
+    animation: fadeUp 0.5s ease forwards;
+  }
+
+  .day-group:nth-child(1) { animation-delay: 0.1s; }
+  .day-group:nth-child(2) { animation-delay: 0.15s; }
+  .day-group:nth-child(3) { animation-delay: 0.2s; }
+  .day-group:nth-child(4) { animation-delay: 0.25s; }
+  .day-group:nth-child(5) { animation-delay: 0.3s; }
+  .day-group:nth-child(6) { animation-delay: 0.35s; }
+  .day-group:nth-child(7) { animation-delay: 0.4s; }
+  .day-group:nth-child(8) { animation-delay: 0.45s; }
+  .day-group:nth-child(9) { animation-delay: 0.5s; }
+  .day-group:nth-child(10) { animation-delay: 0.55s; }
+
+  @keyframes fadeUp {
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-icon">&#9889;</div>
+    <h1>Godly Terminal</h1>
+    <p>A Windows terminal with tmux-style persistence, built in 10 days</p>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-number">83</div>
+        <div class="stat-label">Pull Requests</div>
+      </div>
+      <div class="stat">
+        <div class="stat-number">256</div>
+        <div class="stat-label">Commits</div>
+      </div>
+      <div class="stat">
+        <div class="stat-number">10</div>
+        <div class="stat-label">Days</div>
+      </div>
+      <div class="stat">
+        <div class="stat-number">15</div>
+        <div class="stat-label">MCP Tools</div>
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot feat"></div>Feature</div>
+      <div class="legend-item"><div class="legend-dot fix"></div>Bug Fix</div>
+      <div class="legend-item"><div class="legend-dot test"></div>Test</div>
+      <div class="legend-item"><div class="legend-dot refactor"></div>Refactor</div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline">
+
+    <!-- Day 1 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 5</span>
+        <span class="day-title">Day 1 &mdash; Foundation</span>
+      </div>
+      <div class="cards">
+        <div class="card milestone-card">
+          <span class="card-type milestone">launch</span>
+          <div class="card-content">
+            <div class="card-title">Project initialized from scratch</div>
+            <div class="card-desc">Tauri 2.0 + Rust backend + TypeScript/xterm.js frontend scaffolded in one session</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Backend state, PTY management, layout persistence</div>
+            <div class="card-desc">Core terminal infrastructure: state store, PTY spawning, and workspace layout save/restore</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Full frontend: TabBar, WorkspaceSidebar, TerminalPane</div>
+            <div class="card-desc">Drag-drop tab reordering, workspace management, and xterm.js terminal rendering</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">WSL support with distribution selection</div>
+            <div class="card-desc">ShellType enum for PowerShell and WSL, auto-save, scrollback persistence</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Terminal persistence bugs for CWD and scrollback</div>
+            <div class="card-desc">First bug fix PR merged</div>
+            <div class="card-pr">PR #1</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 2 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 6</span>
+        <span class="day-title">Day 2 &mdash; Daemon Architecture</span>
+      </div>
+      <div class="cards">
+        <div class="card milestone-card">
+          <span class="card-type milestone">arch</span>
+          <div class="card-content">
+            <div class="card-title">Background daemon for persistent PTY sessions</div>
+            <div class="card-desc">Sessions survive app close. Named pipe IPC between Tauri app and background daemon process</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Protocol crate with shared message types</div>
+            <div class="card-desc">godly-protocol: frame encoding, request/response types shared between app and daemon</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Frontend reconnection logic</div>
+            <div class="card-desc">App reconnects to live daemon sessions on restart, replays ring buffer for missed output</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Named pipe deadlock fixes (x4)</div>
+            <div class="card-desc">Single I/O thread, bridge error recovery, flush removal &mdash; the great pipe debugging saga</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type test">test</span>
+          <div class="card-content">
+            <div class="card-title">WebdriverIO E2E test infrastructure</div>
+            <div class="card-desc">E2E tests with tauri-driver, execute-based helpers, diagnostic specs</div>
+            <div class="card-pr">PR #2</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 3 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 7</span>
+        <span class="day-title">Day 3 &mdash; Stability &amp; Major Features</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Launch daemon via WMI to escape Job Object kills</div>
+            <div class="card-desc">Windows Job Objects were killing the daemon when the parent app closed. WMI launch breaks the inheritance chain</div>
+            <div class="card-pr">PR #8, #9</div>
+          </div>
+        </div>
+        <div class="card milestone-card">
+          <span class="card-type milestone">big</span>
+          <div class="card-content">
+            <div class="card-title">Git worktree mode for AI agent workflows</div>
+            <div class="card-desc">Isolated branches per terminal with worktree panel, tab names, toggle button &mdash; built for parallel Claude Code sessions</div>
+            <div class="card-pr">PR #11</div>
+          </div>
+        </div>
+        <div class="card milestone-card">
+          <span class="card-type milestone">big</span>
+          <div class="card-content">
+            <div class="card-title">MCP server for Claude Code integration</div>
+            <div class="card-desc">godly-mcp binary: terminal CRUD, workspace management, and UI control via Model Context Protocol</div>
+            <div class="card-pr">PR #17</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Ctrl+Click URL open &amp; Ctrl+Shift+C copy</div>
+            <div class="card-desc">Links open in browser, selection copies to clipboard</div>
+            <div class="card-pr">PR #14, #15</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">DHAT heap profiling &amp; memory stress tests</div>
+            <div class="card-desc">Leak detection feature flag, RSS memory tests for daemon</div>
+            <div class="card-pr">PR #6</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 4 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 8</span>
+        <span class="day-title">Day 4 &mdash; Notifications &amp; Polish</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Claude Code toggle button in sidebar</div>
+            <div class="card-desc">One-click mode switching for AI-assisted terminal sessions</div>
+            <div class="card-pr">PR #21</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Customizable keyboard shortcuts with settings dialog</div>
+            <div class="card-desc">KeybindingStore, action-based dispatching, full UI for rebinding</div>
+            <div class="card-pr">PR #26</div>
+          </div>
+        </div>
+        <div class="card milestone-card">
+          <span class="card-type milestone">big</span>
+          <div class="card-content">
+            <div class="card-title">MCP notification system with sound alerts</div>
+            <div class="card-desc">Sound presets, badge indicators, CLI mode for hooks, taskbar flash &amp; Windows native notifications</div>
+            <div class="card-pr">PR #29, #31</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Workspace drag-and-drop reordering</div>
+            <div class="card-desc">Sidebar workspaces can be reordered by dragging</div>
+            <div class="card-pr">PR #18</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">MCP stdio transport fixes</div>
+            <div class="card-desc">Content-Length framing, raw JSON lines, newline-delimited JSON &mdash; making Claude Code happy</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 5 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 9</span>
+        <span class="day-title">Day 5 &mdash; Quality of Life</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">CLAUDE.md editor buttons in sidebar</div>
+            <div class="card-desc">Quick-edit project instructions without leaving the terminal</div>
+            <div class="card-pr">PR #33</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Prevent double paste &amp; restore Ctrl+C interrupt</div>
+            <div class="card-desc">Keyboard handling regression fixed with regression tests</div>
+            <div class="card-pr">PR #34</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Drag-and-drop file path paste into terminal</div>
+            <div class="card-desc">Drop a file onto the terminal to paste its path</div>
+            <div class="card-pr">PR #39</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">OSC title escape sequences for tab names</div>
+            <div class="card-desc">Terminal tabs auto-update from shell escape sequences</div>
+            <div class="card-pr">PR #40</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">WSL UTF-16LE parsing &amp; UNC path conversion</div>
+            <div class="card-desc">Fixed WSL distro detection and path mapping between Windows and Linux</div>
+            <div class="card-pr">PR #36, #37</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 6 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 10</span>
+        <span class="day-title">Day 6 &mdash; MCP Expansion &amp; The Freeze Hunt Begins</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Custom notification sounds &amp; Warcraft preset</div>
+            <div class="card-desc">Upload your own notification sounds, bundled Warcraft option</div>
+            <div class="card-pr">PR #45, #48</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">MCP create_terminal with worktree &amp; command flags</div>
+            <div class="card-desc">Claude Code can now spawn isolated worktree terminals with startup commands</div>
+            <div class="card-pr">PR #47</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Terminal freeze: pipe deadlock &amp; priority inversion</div>
+            <div class="card-desc">First round of the terminal freeze investigation &mdash; pipe deadlocks and missing IPC timeouts</div>
+            <div class="card-pr">PR #49, #50</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Bridge phase tracking &amp; keepalive watchdog</div>
+            <div class="card-desc">Diagnostics to track where the daemon connection stalls</div>
+            <div class="card-pr">PR #51, #52</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 7 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 11</span>
+        <span class="day-title">Day 7 &mdash; The Great Freeze Battle</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Eliminate frontend DOM thrashing</div>
+            <div class="card-desc">Progressive terminal freeze caused by layout recalculation on every output chunk</div>
+            <div class="card-pr">PR #55</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Session recovery &amp; diagnostics overhaul</div>
+            <div class="card-desc">Bridge log corruption fix, atomic client counting, sessions-lost event for reconnect</div>
+            <div class="card-pr">PR #56</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Split daemon I/O: response &amp; event channels</div>
+            <div class="card-desc">Separated response priority from streaming events to prevent heavy output from blocking commands</div>
+            <div class="card-pr">PR #57</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Ctrl+C now terminates child processes in ConPTY</div>
+            <div class="card-desc">ConPTY sessions properly propagate interrupt signals</div>
+            <div class="card-pr">PR #58</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Named mutex for race-free daemon singleton</div>
+            <div class="card-desc">Replaced PID file with Windows named mutex to prevent duplicate daemons</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 8 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 12</span>
+        <span class="day-title">Day 8 &mdash; Reliability &amp; Performance</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Resolve mutex starvation under heavy output</div>
+            <div class="card-desc">Attempt #11 in the freeze investigation &mdash; lock contention between output streaming and command handling</div>
+            <div class="card-pr">PR #60</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">godly-notify: lightweight CLI for hook notifications</div>
+            <div class="card-desc">Fast, standalone binary for Claude Code hook integration without the full MCP stack</div>
+            <div class="card-pr">PR #62</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Backpressure, crash diagnostics &amp; batch xterm writes</div>
+            <div class="card-desc">Per-session output channel bounds, Windows exception handler, requestAnimationFrame batching</div>
+            <div class="card-pr">PR #63, #64, #65</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Send SessionClosed event when PTY process exits</div>
+            <div class="card-desc">Terminals now properly show exit status and can be cleaned up</div>
+            <div class="card-pr">PR #66</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 9 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 13</span>
+        <span class="day-title">Day 9 &mdash; Split Panes &amp; MCP Superpowers</span>
+      </div>
+      <div class="cards">
+        <div class="card milestone-card">
+          <span class="card-type milestone">big</span>
+          <div class="card-content">
+            <div class="card-title">Split pane terminal</div>
+            <div class="card-desc">Horizontal and vertical splits with drag-to-resize dividers, drop zones, and keyboard shortcuts</div>
+            <div class="card-pr">PR #74</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type fix">fix</span>
+          <div class="card-content">
+            <div class="card-title">Eliminate ~2s input lag on arrow keys</div>
+            <div class="card-desc">Adaptive polling and direct I/O writes for responsive keystroke handling</div>
+            <div class="card-pr">PR #71, #77</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">5 new MCP tools + ID validation fixes</div>
+            <div class="card-desc">read_terminal, delete_workspace, get_active_workspace, get_active_terminal, resize_terminal, strip_ansi</div>
+            <div class="card-pr">PR #70, #79</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">WaitForIdle &amp; WaitForText MCP tools</div>
+            <div class="card-desc">Claude Code can now wait for terminal output to settle or for specific text to appear</div>
+            <div class="card-pr">PR #80</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">In-app toast notifications</div>
+            <div class="card-desc">MCP notify events show as overlay toasts inside the terminal</div>
+            <div class="card-pr">PR #75</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type test">test</span>
+          <div class="card-content">
+            <div class="card-title">Daemon test isolation guardrail</div>
+            <div class="card-desc">Tests can never kill the production daemon &mdash; enforced by automated scan</div>
+            <div class="card-pr">PR #68</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 10 -->
+    <div class="day-group">
+      <div class="day-header">
+        <div class="day-dot"></div>
+        <span class="day-label">Feb 14</span>
+        <span class="day-title">Day 10 &mdash; Today</span>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">MCP-created terminals open in separate Agent window</div>
+            <div class="card-desc">AI agent terminals get their own window to avoid cluttering the main workspace</div>
+            <div class="card-pr">PR #80</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="card-type feat">feat</span>
+          <div class="card-content">
+            <div class="card-title">Ctrl+Shift+W/E workspace shortcuts</div>
+            <div class="card-desc">Quick keyboard navigation between workspaces</div>
+            <div class="card-pr">PR #83</div>
+          </div>
+        </div>
+        <div class="card milestone-card">
+          <span class="card-type milestone">now</span>
+          <div class="card-content">
+            <div class="card-title">Actively developing...</div>
+            <div class="card-desc">Arrow-key autocomplete lag investigation, and whatever comes next</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span class="pulse"></span> Built with Tauri 2.0 + Rust + TypeScript + xterm.js
+    <br>
+    <span style="opacity: 0.5; font-size: 0.7rem; margin-top: 0.5rem; display: inline-block;">
+      Crafted by a human and an AI, pair-programming at the speed of thought
+    </span>
+  </div>
+
+</div>
+
+</body>
+</html>
