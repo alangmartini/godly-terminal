@@ -333,6 +333,53 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "wait_for_idle",
+                "description": "Wait for a terminal to stop producing output (idle detection). Returns when no output has been produced for `idle_ms` milliseconds, or when the timeout is reached.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to monitor"
+                        },
+                        "idle_ms": {
+                            "type": "number",
+                            "default": 2000,
+                            "description": "Milliseconds of silence before considering the terminal idle (default: 2000)"
+                        },
+                        "timeout_ms": {
+                            "type": "number",
+                            "default": 30000,
+                            "description": "Maximum time to wait in milliseconds (default: 30000)"
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
+                "name": "wait_for_text",
+                "description": "Wait for specific text to appear in terminal output. ANSI codes are stripped before matching. Searches the terminal's rolling 1MB output buffer.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to monitor"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to search for in the terminal output"
+                        },
+                        "timeout_ms": {
+                            "type": "number",
+                            "default": 30000,
+                            "description": "Maximum time to wait in milliseconds (default: 30000)"
+                        }
+                    },
+                    "required": ["terminal_id", "text"]
+                }
             }
         ]
     })
@@ -586,6 +633,49 @@ pub fn call_tool(
             McpRequest::RemoveWorktree { worktree_path }
         }
 
+        "wait_for_idle" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let idle_ms = args
+                .get("idle_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(2000);
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30000);
+            McpRequest::WaitForIdle {
+                terminal_id,
+                idle_ms,
+                timeout_ms,
+            }
+        }
+
+        "wait_for_text" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let text = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing text")?
+                .to_string();
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30000);
+            McpRequest::WaitForText {
+                terminal_id,
+                text,
+                timeout_ms,
+            }
+        }
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -661,5 +751,12 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             })),
             None => Ok(json!({ "terminal": null })),
         },
+        McpResponse::WaitResult {
+            completed,
+            last_output_ago_ms,
+        } => Ok(json!({
+            "completed": completed,
+            "last_output_ago_ms": last_output_ago_ms,
+        })),
     }
 }
