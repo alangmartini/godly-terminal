@@ -17,9 +17,11 @@ export type ActionId =
   | 'tabs.closeTerminal'
   | 'tabs.nextTab'
   | 'tabs.previousTab'
-  | 'split.focusOtherPane';
+  | 'split.focusOtherPane'
+  | 'workspace.toggleWorktreeMode'
+  | 'workspace.toggleClaudeCodeMode';
 
-export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split';
+export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace';
 
 /** Whether the shortcut is an app-level action or a terminal control key. */
 export type ShortcutType = 'app' | 'terminal-control';
@@ -104,6 +106,20 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Split',
     type: 'app',
     defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: '\\' },
+  },
+  {
+    id: 'workspace.toggleWorktreeMode',
+    label: 'Toggle Worktree Mode',
+    category: 'Workspace',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'w' },
+  },
+  {
+    id: 'workspace.toggleClaudeCodeMode',
+    label: 'Toggle Claude Code Mode',
+    category: 'Workspace',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'e' },
   },
 ];
 
