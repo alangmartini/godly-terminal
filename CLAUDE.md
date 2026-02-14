@@ -42,6 +42,18 @@ Never add "Generated with Claude Code" or any similar attribution message to com
 - **Never mask errors.** Don't add retry loops, fallback handlers, or auto-recovery that hides the root cause of a crash or failure. If something crashes, the priority is understanding WHY — not papering over it so the user doesn't notice.
 - **Preserve crash evidence.** Logs must survive process restarts. Never truncate logs on startup. Use append mode and rotate old logs so the previous run's crash info is always available for post-mortem.
 
+## Issue Investigation Tracking
+
+For every issue you work on (bug fix, feature problem, investigation), create or update a file in `docs/` to track your progress:
+
+- **File naming**: `docs/<issue-slug>.md` (e.g., `docs/daemon-pipe-hang.md`, `docs/scrollback-truncation.md`)
+- **Contents**: Log every attempt already made, what was tried, what the result was, and any insights gained — even from failed attempts.
+- **Before starting**: Check `docs/` for an existing file on the same issue. Read it first to avoid repeating failed approaches.
+- **During work**: Update the file as you go with each new attempt and its outcome.
+- **On resolution**: Mark the file with the final fix and why it worked.
+
+This prevents wasting context re-trying approaches that already failed in previous sessions.
+
 ## Bug Fix Workflow
 
 When the user pastes a bug report or describes a bug:
