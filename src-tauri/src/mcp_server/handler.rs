@@ -1,12 +1,85 @@
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
 use crate::state::AppState;
 
 use godly_protocol::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
+
+/// Ensure the MCP "Agent" workspace and window exist, creating them on first call.
+/// Returns the Agent workspace ID.
+fn ensure_mcp_window(
+    app_state: &Arc<AppState>,
+    app_handle: &AppHandle,
+) -> String {
+    // Fast path: workspace already created
+    if let Some(id) = app_state.mcp_workspace_id.read().clone() {
+        // Ensure the window still exists (user may have closed it)
+        if app_handle.get_webview_window("mcp").is_none() {
+            let _ = create_mcp_window(app_handle);
+        }
+        return id;
+    }
+
+    // Slow path: create workspace + window
+    let workspace_id = uuid::Uuid::new_v4().to_string();
+
+    // Use the first workspace's folder_path as a fallback, or home dir
+    let folder_path = app_state
+        .get_all_workspaces()
+        .first()
+        .map(|ws| ws.folder_path.clone())
+        .unwrap_or_else(|| {
+            std::env::var("USERPROFILE")
+                .or_else(|_| std::env::var("HOME"))
+                .unwrap_or_else(|_| "C:\\".to_string())
+        });
+
+    let workspace = crate::state::Workspace {
+        id: workspace_id.clone(),
+        name: "Agent".to_string(),
+        folder_path,
+        tab_order: Vec::new(),
+        shell_type: crate::state::ShellType::default(),
+        worktree_mode: false,
+        claude_code_mode: false,
+    };
+
+    app_state.add_workspace(workspace);
+    *app_state.mcp_workspace_id.write() = Some(workspace_id.clone());
+
+    // Create the MCP window
+    let _ = create_mcp_window(app_handle);
+
+    workspace_id
+}
+
+/// Create the secondary MCP window.
+fn create_mcp_window(app_handle: &AppHandle) -> Result<(), String> {
+    if app_handle.get_webview_window("mcp").is_some() {
+        return Ok(()); // Already exists
+    }
+
+    let url = WebviewUrl::App("index.html?mode=mcp".into());
+    match WebviewWindowBuilder::new(app_handle, "mcp", url)
+        .title("Godly Terminal - Agent")
+        .inner_size(1200.0, 800.0)
+        .resizable(true)
+        .decorations(true)
+        .build()
+    {
+        Ok(_) => {
+            eprintln!("[mcp] Created MCP agent window");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("[mcp] Failed to create MCP window: {}", e);
+            Err(format!("Failed to create MCP window: {}", e))
+        }
+    }
+}
 
 /// Handle an MCP request by delegating to AppState and DaemonClient.
 pub fn handle_mcp_request(
@@ -68,7 +141,7 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::CreateTerminal {
-            workspace_id,
+            workspace_id: _original_workspace_id,
             shell_type,
             cwd,
             worktree_name,
@@ -77,6 +150,9 @@ pub fn handle_mcp_request(
         } => {
             use std::collections::HashMap;
             use uuid::Uuid;
+
+            // MCP terminals always go into the Agent workspace (separate window)
+            let workspace_id = &ensure_mcp_window(app_state, app_handle);
 
             let want_worktree = worktree.unwrap_or(false) || worktree_name.is_some();
 
@@ -234,8 +310,19 @@ pub fn handle_mcp_request(
 
             auto_save.mark_dirty();
 
-            // Notify frontend
-            let _ = app_handle.emit("mcp-terminal-created", &terminal_id);
+            // Notify frontend (include workspace_id so the MCP window adds it correctly)
+            #[derive(serde::Serialize, Clone)]
+            struct McpTerminalCreatedPayload {
+                terminal_id: String,
+                workspace_id: String,
+            }
+            let _ = app_handle.emit(
+                "mcp-terminal-created",
+                McpTerminalCreatedPayload {
+                    terminal_id: terminal_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                },
+            );
 
             McpResponse::Created {
                 id: terminal_id,
