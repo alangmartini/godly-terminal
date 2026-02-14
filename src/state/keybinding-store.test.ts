@@ -80,6 +80,20 @@ describe('KeybindingStore', () => {
       );
     });
 
+    it('matches Ctrl+Shift+W to workspace.toggleWorktreeMode', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('W', { ctrlKey: true, shiftKey: true }))).toBe(
+        'workspace.toggleWorktreeMode'
+      );
+    });
+
+    it('matches Ctrl+Shift+E to workspace.toggleClaudeCodeMode', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('E', { ctrlKey: true, shiftKey: true }))).toBe(
+        'workspace.toggleClaudeCodeMode'
+      );
+    });
+
     it('returns null for unbound keys', () => {
       const store = new KeybindingStore();
       expect(store.matchAction(keydown('a', { ctrlKey: true }))).toBeNull();
@@ -192,6 +206,18 @@ describe('KeybindingStore', () => {
       const store = new KeybindingStore();
       expect(store.isAppShortcut(keydown('t', { ctrlKey: true }))).toBe(true);
       expect(store.isTerminalControlKey(keydown('t', { ctrlKey: true }))).toBe(false);
+    });
+
+    it('classifies Ctrl+Shift+W (toggle worktree) as an app shortcut', () => {
+      const store = new KeybindingStore();
+      expect(store.isAppShortcut(keydown('W', { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(store.isTerminalControlKey(keydown('W', { ctrlKey: true, shiftKey: true }))).toBe(false);
+    });
+
+    it('classifies Ctrl+Shift+E (toggle Claude Code) as an app shortcut', () => {
+      const store = new KeybindingStore();
+      expect(store.isAppShortcut(keydown('E', { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(store.isTerminalControlKey(keydown('E', { ctrlKey: true, shiftKey: true }))).toBe(false);
     });
 
     it('classifies Ctrl+C as a terminal control key', () => {
