@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build:daemon:release && npm run build:mcp:release && npm run build:notify:release && npm run build",
+    "beforeBuildCommand": "npm run unlock && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release && cd .. && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
