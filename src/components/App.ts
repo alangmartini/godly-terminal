@@ -360,6 +360,35 @@ export class App {
           }
           break;
         }
+
+        case 'workspace.toggleWorktreeMode': {
+          e.preventDefault();
+          if (state.activeWorkspaceId) {
+            const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+            if (workspace) {
+              if (!workspace.worktreeMode) {
+                const isGit = await workspaceService.isGitRepo(workspace.folderPath).catch(() => false);
+                if (!isGit) {
+                  console.warn('[App] Cannot enable worktree mode: not a git repository');
+                  break;
+                }
+              }
+              await workspaceService.toggleWorktreeMode(workspace.id, !workspace.worktreeMode);
+            }
+          }
+          break;
+        }
+
+        case 'workspace.toggleClaudeCodeMode': {
+          e.preventDefault();
+          if (state.activeWorkspaceId) {
+            const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+            if (workspace) {
+              await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
+            }
+          }
+          break;
+        }
       }
     });
   }

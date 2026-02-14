@@ -59,6 +59,14 @@ describe('isAppShortcut', () => {
     expect(isAppShortcut(keydown('V', { ctrlKey: true, shiftKey: true }))).toBe(true);
   });
 
+  it('returns true for Ctrl+Shift+W (toggle worktree mode)', () => {
+    expect(isAppShortcut(keydown('W', { ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+
+  it('returns true for Ctrl+Shift+E (toggle Claude Code mode)', () => {
+    expect(isAppShortcut(keydown('E', { ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+
   it('returns false for Ctrl+C (terminal interrupt — must pass through)', () => {
     expect(isAppShortcut(keydown('c', { ctrlKey: true }))).toBe(false);
   });
