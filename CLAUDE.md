@@ -279,6 +279,10 @@ App.ts           - Root: manages layout, keyboard shortcuts, reconnection logic
 - Imports the production `PIPE_NAME` constant
 - Spawns a daemon without `GODLY_PIPE_NAME` or `--instance` isolation
 
+## Keyboard Shortcuts
+
+All keyboard shortcuts defined in `DEFAULT_SHORTCUTS` (`src/state/keybinding-store.ts`) must be displayed in the Settings dialog (`src/components/SettingsDialog.ts`). When adding a new shortcut category, add it to the `categories` array in `renderShortcuts()` so it appears in the UI.
+
 ## Key Patterns
 
 ### Adding a new Tauri command
