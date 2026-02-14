@@ -32,6 +32,11 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "nsis-hooks.nsh"
+      }
+    },
     "resources": {
       "target/release/godly-daemon.exe": "./",
       "target/release/godly-mcp.exe": "./",
