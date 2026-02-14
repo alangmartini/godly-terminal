@@ -46,6 +46,14 @@ pub fn run() {
         winapi::um::timeapi::timeBeginPeriod(1);
     }
 
+    // Expose Chrome DevTools Protocol on port 9222 so external tools
+    // (Playwright, browser DevTools) can connect to the WebView2 instance
+    // for screenshots, DOM inspection, and JS evaluation.
+    std::env::set_var(
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        "--remote-debugging-port=9222",
+    );
+
     let app_state = Arc::new(AppState::new());
     let auto_save = Arc::new(AutoSaveManager::new());
     let process_monitor = ProcessMonitor::new();
