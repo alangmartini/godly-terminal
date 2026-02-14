@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -38,6 +38,9 @@ pub struct DaemonSession {
     /// attachment state. Used by the ReadBuffer command to let MCP clients read
     /// terminal output without attaching.
     output_history: Arc<Mutex<VecDeque<u8>>>,
+    /// Epoch ms of the last PTY output. Used by WaitForIdle to detect when
+    /// terminal output has stopped.
+    last_output_epoch_ms: Arc<AtomicU64>,
 }
 
 impl DaemonSession {
@@ -118,6 +121,12 @@ impl DaemonSession {
             .unwrap_or_default()
             .as_secs();
 
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
+
         // Spawn reader thread that routes output to either the attached client or ring buffer
         let reader_master = master.clone();
         let reader_running = running.clone();
@@ -126,6 +135,7 @@ impl DaemonSession {
         let reader_tx = output_tx.clone();
         let session_id = id.clone();
         let reader_attached = is_attached_flag.clone();
+        let reader_last_output = last_output_epoch_ms.clone();
 
         thread::spawn(move || {
             let mut reader = {
@@ -156,6 +166,13 @@ impl DaemonSession {
                     Ok(n) => {
                         total_bytes += n as u64;
                         total_reads += 1;
+
+                        // Update last output timestamp for idle detection
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        reader_last_output.store(now_ms, Ordering::Relaxed);
 
                         // Always append to output_history for ReadBuffer access
                         {
@@ -305,6 +322,7 @@ impl DaemonSession {
             output_tx,
             is_attached_flag,
             output_history,
+            last_output_epoch_ms,
         })
     }
 
@@ -461,6 +479,32 @@ impl DaemonSession {
     /// Returns all captured PTY output up to the 1MB rolling limit.
     pub fn read_output_history(&self) -> Vec<u8> {
         self.output_history.lock().iter().copied().collect()
+    }
+
+    /// Get the epoch ms of the last PTY output.
+    pub fn last_output_epoch_ms(&self) -> u64 {
+        self.last_output_epoch_ms.load(Ordering::Relaxed)
+    }
+
+    /// Get the current epoch ms (helper for callers computing idle time).
+    #[allow(dead_code)]
+    pub fn current_epoch_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    /// Search the output history for a text string.
+    /// Optionally strips ANSI escape sequences before matching.
+    pub fn search_output_history(&self, text: &str, do_strip_ansi: bool) -> bool {
+        let data = self.output_history.lock().iter().copied().collect::<Vec<u8>>();
+        let haystack = String::from_utf8_lossy(&data);
+        if do_strip_ansi {
+            godly_protocol::ansi::strip_ansi(&haystack).contains(text)
+        } else {
+            haystack.contains(text)
+        }
     }
 
     /// Get the current ring buffer size in bytes (for diagnostics and testing).

@@ -551,9 +551,13 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::WriteToTerminal { terminal_id, data } => {
+            // Convert \n → \r for PTY: terminals expect CR (Enter), not LF.
+            // Normalize \r\n → \r first to avoid double CR.
+            // Only affects MCP path — frontend xterm.js already sends correct bytes.
+            let converted = data.replace("\r\n", "\r").replace('\n', "\r");
             let request = godly_protocol::Request::Write {
                 session_id: terminal_id.clone(),
-                data: data.as_bytes().to_vec(),
+                data: converted.as_bytes().to_vec(),
             };
             match daemon.send_request(&request) {
                 Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
@@ -632,6 +636,152 @@ pub fn handle_mcp_request(
                 source: source.to_string(),
             }
         }
+
+        McpRequest::WaitForIdle {
+            terminal_id,
+            idle_ms,
+            timeout_ms,
+        } => {
+            // Validate terminal exists in app state
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(*timeout_ms);
+            // Poll interval: min(idle_ms/4, 500ms), clamped to min 50ms
+            let poll_ms = (*idle_ms / 4).min(500).max(50);
+
+            loop {
+                let req = godly_protocol::Request::GetLastOutputTime {
+                    session_id: terminal_id.clone(),
+                };
+                match daemon.send_request(&req) {
+                    Ok(godly_protocol::Response::LastOutputTime { epoch_ms, running }) => {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let ago = now_ms.saturating_sub(epoch_ms);
+
+                        if ago >= *idle_ms {
+                            return McpResponse::WaitResult {
+                                completed: true,
+                                last_output_ago_ms: ago,
+                            };
+                        }
+
+                        if !running {
+                            // Process exited — it's idle by definition
+                            return McpResponse::WaitResult {
+                                completed: true,
+                                last_output_ago_ms: ago,
+                            };
+                        }
+
+                        if std::time::Instant::now() >= deadline {
+                            return McpResponse::WaitResult {
+                                completed: false,
+                                last_output_ago_ms: ago,
+                            };
+                        }
+                    }
+                    Ok(godly_protocol::Response::Error { message }) => {
+                        return McpResponse::Error { message };
+                    }
+                    Ok(_) => {
+                        return McpResponse::Error {
+                            message: "Unexpected daemon response".to_string(),
+                        };
+                    }
+                    Err(e) => {
+                        return McpResponse::Error { message: e };
+                    }
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+            }
+        }
+
+        McpRequest::WaitForText {
+            terminal_id,
+            text,
+            timeout_ms,
+        } => {
+            // Validate terminal exists in app state
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(*timeout_ms);
+            let poll_ms = 200u64;
+
+            loop {
+                let req = godly_protocol::Request::SearchBuffer {
+                    session_id: terminal_id.clone(),
+                    text: text.clone(),
+                    strip_ansi: true, // always strip ANSI for matching
+                };
+                match daemon.send_request(&req) {
+                    Ok(godly_protocol::Response::SearchResult { found, running }) => {
+                        if found {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            // Get actual last output time for the response
+                            let ago = match daemon.send_request(
+                                &godly_protocol::Request::GetLastOutputTime {
+                                    session_id: terminal_id.clone(),
+                                },
+                            ) {
+                                Ok(godly_protocol::Response::LastOutputTime {
+                                    epoch_ms, ..
+                                }) => now_ms.saturating_sub(epoch_ms),
+                                _ => 0,
+                            };
+                            return McpResponse::WaitResult {
+                                completed: true,
+                                last_output_ago_ms: ago,
+                            };
+                        }
+
+                        if !running {
+                            // Process exited and text wasn't found
+                            return McpResponse::WaitResult {
+                                completed: false,
+                                last_output_ago_ms: 0,
+                            };
+                        }
+
+                        if std::time::Instant::now() >= deadline {
+                            return McpResponse::WaitResult {
+                                completed: false,
+                                last_output_ago_ms: 0,
+                            };
+                        }
+                    }
+                    Ok(godly_protocol::Response::Error { message }) => {
+                        return McpResponse::Error { message };
+                    }
+                    Ok(_) => {
+                        return McpResponse::Error {
+                            message: "Unexpected daemon response".to_string(),
+                        };
+                    }
+                    Err(e) => {
+                        return McpResponse::Error { message: e };
+                    }
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+            }
+        }
     }
 }
 
@@ -676,55 +826,9 @@ fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::She
     }
 }
 
-/// Strip ANSI escape sequences from terminal output.
-/// Handles CSI sequences (\x1b[...X), OSC sequences (\x1b]...BEL/ST),
-/// and simple 2-byte sequences (\x1b + single char).
+/// Re-export strip_ansi from the shared protocol crate.
 fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            match chars.peek() {
-                Some('[') => {
-                    // CSI sequence: consume until final byte (0x40..=0x7E)
-                    chars.next(); // consume '['
-                    while let Some(&c) = chars.peek() {
-                        chars.next();
-                        if (0x40..=0x7E).contains(&(c as u32)) {
-                            break;
-                        }
-                    }
-                }
-                Some(']') => {
-                    // OSC sequence: consume until BEL (\x07) or ST (\x1b\\)
-                    chars.next(); // consume ']'
-                    while let Some(c) = chars.next() {
-                        if c == '\x07' {
-                            break;
-                        }
-                        if c == '\x1b' {
-                            if chars.peek() == Some(&'\\') {
-                                chars.next(); // consume '\\'
-                            }
-                            break;
-                        }
-                    }
-                }
-                Some(_) => {
-                    // Simple 2-byte sequence: skip one char
-                    chars.next();
-                }
-                None => {
-                    // Trailing ESC at end of string
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-
-    out
+    godly_protocol::ansi::strip_ansi(input)
 }
 
 #[cfg(test)]

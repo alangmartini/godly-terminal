@@ -1161,6 +1161,36 @@ async fn handle_request(
             }
         }
 
+        Request::GetLastOutputTime { session_id } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => Response::LastOutputTime {
+                    epoch_ms: session.last_output_epoch_ms(),
+                    running: session.is_running(),
+                },
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
+        Request::SearchBuffer {
+            session_id,
+            text,
+            strip_ansi,
+        } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => Response::SearchResult {
+                    found: session.search_output_history(text, *strip_ansi),
+                    running: session.is_running(),
+                },
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
         Request::CloseSession { session_id } => {
             let mut sessions_guard = sessions.write();
             match sessions_guard.remove(session_id) {
