@@ -8,15 +8,7 @@ Write-Host "Fetching and pulling latest changes..." -ForegroundColor Cyan
 git pull origin master
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Building daemon (release)..." -ForegroundColor Cyan
-npm run build:daemon:release
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "Building MCP server (release)..." -ForegroundColor Cyan
-npm run build:mcp:release
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "Building Tauri app..." -ForegroundColor Cyan
+Write-Host "Building Tauri app (includes daemon, MCP, notify)..." -ForegroundColor Cyan
 npm run tauri build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
