@@ -222,11 +222,13 @@ export class WorkspaceSidebar {
   }
 
   private render() {
-    const state = store.getState();
+    // Clear existing items
+    while (this.listContainer.firstChild) {
+      this.listContainer.removeChild(this.listContainer.firstChild);
+    }
 
-    this.listContainer.innerHTML = '';
-
-    state.workspaces.forEach((workspace) => {
+    // Use filtered list: hides Agent workspace in main window
+    store.getVisibleWorkspaces().forEach((workspace) => {
       const item = this.createWorkspaceItem(workspace);
       this.listContainer.appendChild(item);
     });

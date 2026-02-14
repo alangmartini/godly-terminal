@@ -16,6 +16,8 @@ pub struct AppState {
     pub notification_overrides_workspace: RwLock<HashMap<String, bool>>,
     /// Split views per workspace (workspace_id → SplitView)
     pub split_views: RwLock<HashMap<String, SplitView>>,
+    /// Workspace ID for MCP-created terminals (Agent workspace in separate window)
+    pub mcp_workspace_id: RwLock<Option<String>>,
 }
 
 impl AppState {
@@ -29,6 +31,7 @@ impl AppState {
             notification_overrides_terminal: RwLock::new(HashMap::new()),
             notification_overrides_workspace: RwLock::new(HashMap::new()),
             split_views: RwLock::new(HashMap::new()),
+            mcp_workspace_id: RwLock::new(None),
         }
     }
 

@@ -73,7 +73,9 @@ export class App {
     this.toastContainer = new ToastContainer();
 
     // Mount components
-    this.sidebar.mount(this.container);
+    if (store.windowMode === 'main') {
+      this.sidebar.mount(this.container);
+    }
     this.tabBar.mount(mainContent);
     mainContent.appendChild(this.terminalContainer);
     this.container.appendChild(mainContent);
@@ -367,13 +369,22 @@ export class App {
     await terminalService.init();
 
     // Listen for scrollback save requests from backend (on window close)
-    await this.setupScrollbackSaveListener();
+    // (only main window handles scrollback saves)
+    if (store.windowMode === 'main') {
+      await this.setupScrollbackSaveListener();
+    }
 
     // Listen for file drag-drop events (paste file names into terminal)
     this.setupDragDropListener();
 
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
+
+    // MCP window: no layout to restore, just wait for events
+    if (store.windowMode === 'mcp') {
+      console.log('[App] MCP mode — waiting for agent terminals');
+      return;
+    }
 
     // Load persisted state
     try {
@@ -878,18 +889,51 @@ export class App {
     });
 
     // MCP: terminal created by MCP handler
-    await listen<string>('mcp-terminal-created', async (event) => {
-      const terminalId = event.payload;
-      console.log('[App] MCP terminal created:', terminalId);
-      // The terminal was already added to backend state by the MCP handler.
-      // Add it to the frontend store with a default name.
-      // The process-changed event will update the process name later.
+    await listen<{ terminal_id: string; workspace_id: string }>('mcp-terminal-created', async (event) => {
+      const { terminal_id: terminalId, workspace_id: workspaceId } = event.payload;
+      console.log('[App] MCP terminal created:', terminalId, 'in workspace:', workspaceId);
+
+      // In main window: ignore Agent workspace terminals (they belong to the MCP window)
+      // In MCP window: only handle Agent workspace terminals
+      if (store.windowMode === 'main') {
+        // Ensure the Agent workspace exists in main window store (hidden from sidebar)
+        const state = store.getState();
+        if (!state.workspaces.find(w => w.id === workspaceId)) {
+          // Add the Agent workspace to the store (sidebar will filter it out)
+          store.addWorkspace({
+            id: workspaceId,
+            name: 'Agent',
+            folderPath: '',
+            tabOrder: [],
+            shellType: { type: 'windows' },
+            worktreeMode: false,
+            claudeCodeMode: false,
+          });
+        }
+        // Don't add the terminal to the main window — MCP window handles it
+        return;
+      }
+
+      // MCP window: add the terminal
       const state = store.getState();
       const existing = state.terminals.find((t) => t.id === terminalId);
       if (!existing) {
+        // Ensure workspace exists in MCP window store
+        if (!state.workspaces.find(w => w.id === workspaceId)) {
+          store.addWorkspace({
+            id: workspaceId,
+            name: 'Agent',
+            folderPath: '',
+            tabOrder: [],
+            shellType: { type: 'windows' },
+            worktreeMode: false,
+            claudeCodeMode: false,
+          });
+          store.setActiveWorkspace(workspaceId);
+        }
         store.addTerminal({
           id: terminalId,
-          workspaceId: state.activeWorkspaceId || '',
+          workspaceId,
           name: 'Terminal',
           processName: 'powershell',
           order: 0,
