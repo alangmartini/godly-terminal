@@ -37,6 +37,11 @@ Always commit all staged and unstaged changes when making a commit. Do not leave
 
 Never add "Generated with Claude Code" or any similar attribution message to commits, PRs, or any other output.
 
+### PR Policy
+
+- **Features (`feat:`) and bug fixes (`fix:`)**: Create a feature branch, open a PR to master, and wait for merge.
+- **Documentation (`docs:`), chores (`chore:`), style (`style:`), and other minor changes**: Commit and push directly to master — no PR needed.
+
 ## Debugging Principles
 
 - **Never mask errors.** Don't add retry loops, fallback handlers, or auto-recovery that hides the root cause of a crash or failure. If something crashes, the priority is understanding WHY — not papering over it so the user doesn't notice.
