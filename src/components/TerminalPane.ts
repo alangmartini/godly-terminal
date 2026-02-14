@@ -7,6 +7,7 @@ import { terminalService } from '../services/terminal-service';
 import { store } from '../state/store';
 import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
+import { activatePane } from './pane-activation';
 
 export class TerminalPane {
   private terminal: Terminal;
@@ -271,8 +272,7 @@ export class TerminalPane {
     this.container.classList.toggle('active', active);
     if (active) {
       requestAnimationFrame(() => {
-        this.fit();
-        this.terminal.focus();
+        activatePane(this.terminal, () => this.fit(), true);
       });
     }
   }
@@ -283,10 +283,7 @@ export class TerminalPane {
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
       requestAnimationFrame(() => {
-        this.fit();
-        if (focused) {
-          this.terminal.focus();
-        }
+        activatePane(this.terminal, () => this.fit(), focused);
       });
     }
   }
