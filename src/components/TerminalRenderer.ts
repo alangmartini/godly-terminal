@@ -185,16 +185,20 @@ export class TerminalRenderer {
     const gl = this.canvas.getContext('webgl2', { alpha: false, antialias: false });
     if (gl) {
       try {
+        console.log('[TerminalRenderer] WebGL2 context obtained, initializing GPU renderer...');
         this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
         this.useWebGL = true;
+        console.log('[TerminalRenderer] WebGL2 renderer initialized successfully');
         // Create overlay canvas for scrollbar and URL hover
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCanvas.className = 'terminal-overlay-canvas';
         this.overlayCanvas.style.display = 'block';
         this.overlayCtx = this.overlayCanvas.getContext('2d')!;
       } catch (e) {
-        console.warn('WebGL2 renderer init failed, falling back to Canvas2D:', e);
+        console.warn('[TerminalRenderer] WebGL2 renderer init failed, falling back to Canvas2D:', e);
       }
+    } else {
+      console.log('[TerminalRenderer] WebGL2 not available, using Canvas2D');
     }
 
     if (!this.useWebGL) {
@@ -202,6 +206,7 @@ export class TerminalRenderer {
       // the canvas is locked to WebGL and can't get a 2D context. Create a new canvas.
       let ctx2d = this.canvas.getContext('2d', { alpha: false });
       if (!ctx2d) {
+        console.log('[TerminalRenderer] Canvas locked to WebGL, creating fresh canvas for 2D fallback');
         this.canvas = document.createElement('canvas');
         this.canvas.className = 'terminal-canvas';
         this.canvas.style.display = 'block';
@@ -212,6 +217,7 @@ export class TerminalRenderer {
         ctx2d = this.canvas.getContext('2d', { alpha: false })!;
       }
       this.ctx = ctx2d;
+      console.log('[TerminalRenderer] Canvas2D fallback active');
     }
 
     if (this.useWebGL && this.webglRenderer) {

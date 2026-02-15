@@ -85,9 +85,11 @@ export class WebGLRenderer {
     this.encoder = new CellDataEncoder();
 
     // Compile and link shaders
+    console.log('[WebGLRenderer] Compiling shaders...');
     const vs = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
     const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
     this.program = linkProgram(gl, vs, fs);
+    console.log('[WebGLRenderer] Shaders compiled and linked');
 
     // Get all uniform locations
     this.uniforms = {} as Record<UniformName, WebGLUniformLocation>;
@@ -96,6 +98,7 @@ export class WebGLRenderer {
       if (!loc) throw new Error(`Uniform '${name}' not found in shader program`);
       this.uniforms[name] = loc;
     }
+    console.log('[WebGLRenderer] All uniforms located:', UNIFORM_NAMES.join(', '));
 
     // Create empty VAO (vertex data generated in shader from gl_VertexID/gl_InstanceID)
     const vao = gl.createVertexArray();
