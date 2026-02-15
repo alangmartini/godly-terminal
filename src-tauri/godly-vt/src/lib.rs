@@ -55,6 +55,7 @@ mod attrs;
 mod callbacks;
 mod cell;
 mod grid;
+pub mod image;
 mod parser;
 mod perform;
 mod row;
@@ -65,6 +66,9 @@ mod term;
 
 pub use attrs::Color;
 pub use callbacks::Callbacks;
-pub use cell::Cell;
+pub use cell::{Cell, CellContent};
 pub use parser::Parser;
 pub use screen::{MouseProtocolEncoding, MouseProtocolMode, Screen};
+
+#[cfg(feature = "images")]
+pub use image::{assign_image_to_cells, DecodedImage, ImageCellRef, ImageStore};
