@@ -198,7 +198,20 @@ export class TerminalRenderer {
     }
 
     if (!this.useWebGL) {
-      this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+      // If WebGL was attempted (getContext('webgl2') succeeded but renderer threw),
+      // the canvas is locked to WebGL and can't get a 2D context. Create a new canvas.
+      let ctx2d = this.canvas.getContext('2d', { alpha: false });
+      if (!ctx2d) {
+        this.canvas = document.createElement('canvas');
+        this.canvas.className = 'terminal-canvas';
+        this.canvas.style.display = 'block';
+        this.canvas.style.width = '100%';
+        this.canvas.style.height = '100%';
+        this.canvas.tabIndex = 0;
+        this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        ctx2d = this.canvas.getContext('2d', { alpha: false })!;
+      }
+      this.ctx = ctx2d;
     }
 
     if (this.useWebGL && this.webglRenderer) {
