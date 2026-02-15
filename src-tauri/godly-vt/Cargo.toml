@@ -9,7 +9,13 @@ description = "High-performance terminal state engine with SIMD parsing and imag
 unicode-width = "0.2"
 itoa = "1.0"
 memchr = "2"
+simdutf8 = "0.1"
 
 [dev-dependencies]
+criterion = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[[bench]]
+name = "throughput"
+harness = false
