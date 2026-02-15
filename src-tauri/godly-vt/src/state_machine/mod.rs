@@ -559,72 +559,129 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
     ///
     /// The ground state is handled separately since it can only be left using
     /// the escape character (`\x1b`). This allows more efficient parsing by
-    /// using SIMD search with [`memchr`].
+    /// using SIMD scanning.
+    ///
+    /// Optimization strategy:
+    /// 1. Use SIMD `scan_for_control()` to find the first C0 control or DEL.
+    ///    Everything before it is printable bytes (0x20..=0x7E or 0x80..=0xFF).
+    /// 2. For the printable portion: use `is_all_ascii()` to skip UTF-8 decode
+    ///    when possible, or `simdutf8` for fast validation otherwise.
+    /// 3. Dispatch the entire printable run via `print_str()` — no per-char
+    ///    control check needed since the scanner already excluded them.
+    /// 4. Handle the control character (ESC transitions state, others execute).
     #[inline]
     fn advance_ground<P: Perform>(&mut self, performer: &mut P, bytes: &[u8]) -> usize {
-        // Find the next escape character.
         let num_bytes = bytes.len();
-        let plain_chars = memchr::memchr(0x1B, bytes).unwrap_or(num_bytes);
 
-        // If the next character is ESC, just process it and short-circuit.
-        if plain_chars == 0 {
-            self.state = State::Escape;
-            self.reset_params();
+        // Find the first control character (< 0x20 or 0x7F) using SIMD.
+        let control_pos = crate::simd::scan_for_control(bytes).unwrap_or(num_bytes);
+
+        // If the first byte is a control character, handle it immediately.
+        if control_pos == 0 {
+            let byte = bytes[0];
+            if byte == 0x1B {
+                self.state = State::Escape;
+                self.reset_params();
+            } else {
+                performer.execute(byte);
+            }
             return 1;
         }
 
-        match str::from_utf8(&bytes[..plain_chars]) {
+        // Everything in bytes[..control_pos] is printable (>= 0x20, != 0x7F).
+        // Validate as UTF-8 and dispatch.
+        let printable = &bytes[..control_pos];
+        let processed = self.dispatch_printable(performer, printable, control_pos, num_bytes);
+        if processed < control_pos {
+            // UTF-8 error cut things short; return what was consumed.
+            return processed;
+        }
+
+        // Now handle the control character (if any).
+        let mut total = control_pos;
+        if total < num_bytes {
+            let byte = bytes[total];
+            if byte == 0x1B {
+                self.state = State::Escape;
+                self.reset_params();
+            } else {
+                performer.execute(byte);
+            }
+            total += 1;
+        }
+
+        total
+    }
+
+    /// Validate a printable byte slice as UTF-8 and dispatch via `print_str()`.
+    ///
+    /// The input is guaranteed to contain no C0 controls or DEL, only bytes
+    /// >= 0x20 and != 0x7F. However, bytes 0x80-0x9F may appear as part of
+    /// multi-byte UTF-8 sequences, and the corresponding Unicode code points
+    /// (U+0080..U+009F) are C1 controls that `ground_dispatch` handles.
+    #[inline]
+    fn dispatch_printable<P: Perform>(
+        &mut self,
+        performer: &mut P,
+        printable: &[u8],
+        control_pos: usize,
+        num_bytes: usize,
+    ) -> usize {
+        // ASCII fast path: if all bytes are < 0x80, skip UTF-8 validation entirely.
+        if crate::simd::is_all_ascii(printable) {
+            // Pure ASCII — safe to use from_utf8_unchecked, and no C1 controls
+            // are possible (all bytes are 0x20..=0x7E).
+            let text = unsafe { str::from_utf8_unchecked(printable) };
+            performer.print_str(text);
+            return control_pos;
+        }
+
+        // Non-ASCII path: use simdutf8 for fast validation.
+        match simdutf8::basic::from_utf8(printable) {
             Ok(parsed) => {
+                // The printable range has no C0/DEL controls, but may contain
+                // C1 code points (U+0080..U+009F) encoded as 2-byte UTF-8.
+                // Use ground_dispatch to handle those.
                 Self::ground_dispatch(performer, parsed);
-                let mut processed = plain_chars;
-
-                // If there's another character, it must be escape so process it directly.
-                if processed < num_bytes {
-                    self.state = State::Escape;
-                    self.reset_params();
-                    processed += 1;
-                }
-
-                processed
+                control_pos
             },
-            // Handle invalid and partial utf8.
-            Err(err) => {
-                // Dispatch all the valid bytes.
-                let valid_bytes = err.valid_up_to();
-                let parsed = unsafe { str::from_utf8_unchecked(&bytes[..valid_bytes]) };
-                Self::ground_dispatch(performer, parsed);
-
-                match err.error_len() {
-                    Some(len) => {
-                        // Execute C1 escapes or emit replacement character.
-                        if len == 1 && bytes[valid_bytes] <= 0x9F {
-                            performer.execute(bytes[valid_bytes]);
-                        } else {
-                            performer.print('�');
+            Err(_) => {
+                // simdutf8's basic error doesn't give us valid_up_to, so fall
+                // back to std for error details on the uncommon invalid-UTF-8 path.
+                match str::from_utf8(printable) {
+                    Ok(_) => unreachable!("simdutf8 and std disagree"),
+                    Err(err) => {
+                        let valid_bytes = err.valid_up_to();
+                        if valid_bytes > 0 {
+                            let parsed = unsafe { str::from_utf8_unchecked(&printable[..valid_bytes]) };
+                            Self::ground_dispatch(performer, parsed);
                         }
 
-                        // Restart processing after the invalid bytes.
-                        //
-                        // While we could theoretically try to just re-parse
-                        // `bytes[valid_bytes + len..plain_chars]`, it's easier
-                        // to just skip it and invalid utf8 is pretty rare anyway.
-                        valid_bytes + len
-                    },
-                    None => {
-                        if plain_chars < num_bytes {
-                            // Process bytes cut off by escape.
-                            performer.print('�');
-                            self.state = State::Escape;
-                            self.reset_params();
-                            plain_chars + 1
-                        } else {
-                            // Process bytes cut off by the buffer end.
-                            let extra_bytes = num_bytes - valid_bytes;
-                            let partial_len = self.partial_utf8_len + extra_bytes;
-                            self.partial_utf8[self.partial_utf8_len..partial_len]
-                                .copy_from_slice(&bytes[valid_bytes..valid_bytes + extra_bytes]);
-                            self.partial_utf8_len = partial_len;
-                            num_bytes
+                        match err.error_len() {
+                            Some(len) => {
+                                // Execute C1 escapes or emit replacement character.
+                                if len == 1 && printable[valid_bytes] <= 0x9F {
+                                    performer.execute(printable[valid_bytes]);
+                                } else {
+                                    performer.print('�');
+                                }
+                                valid_bytes + len
+                            },
+                            None => {
+                                if control_pos < num_bytes {
+                                    // Partial UTF-8 cut off by a control char.
+                                    performer.print('�');
+                                    control_pos
+                                } else {
+                                    // Partial UTF-8 at buffer end — store for next call.
+                                    let extra_bytes = printable.len() - valid_bytes;
+                                    let partial_len = self.partial_utf8_len + extra_bytes;
+                                    self.partial_utf8[self.partial_utf8_len..partial_len]
+                                        .copy_from_slice(&printable[valid_bytes..]);
+                                    self.partial_utf8_len = partial_len;
+                                    num_bytes
+                                }
+                            },
                         }
                     },
                 }
