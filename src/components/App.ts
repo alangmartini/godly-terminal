@@ -906,6 +906,15 @@ export class App {
       this.terminalContainer.classList.add('drag-file-over');
     });
 
+    this.terminalContainer.addEventListener('dragover', (e) => {
+      // Must preventDefault on dragover to allow the drop event to fire.
+      // Without this, the browser refuses the drop and our cleanup in the
+      // drop handler never runs, leaving the overlay stuck.
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = 'copy';
+    });
+
     this.terminalContainer.addEventListener('dragleave', (e) => {
       if (!e.dataTransfer?.types.includes('Files')) return;
       dragCounter--;
@@ -927,6 +936,13 @@ export class App {
       const names = Array.from(e.dataTransfer.files).map(f => f.name);
       const text = names.map(quotePath).join(' ');
       terminalService.writeToTerminal(state.activeTerminalId, text);
+    });
+
+    // Safety net: if a file drag ends without a clean drop (e.g. dropped
+    // outside the window, or Escape pressed), clear the overlay.
+    document.addEventListener('dragend', () => {
+      dragCounter = 0;
+      this.terminalContainer.classList.remove('drag-file-over');
     });
   }
 
