@@ -580,6 +580,10 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         if control_pos == 0 {
             let byte = bytes[0];
             if byte == 0x1B {
+                // Try CSI fast-path: ESC [ <params> <final>
+                if let Some(consumed) = self.try_csi_fast_path(performer, bytes) {
+                    return consumed;
+                }
                 self.state = State::Escape;
                 self.reset_params();
             } else {
@@ -602,6 +606,10 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         if total < num_bytes {
             let byte = bytes[total];
             if byte == 0x1B {
+                // Try CSI fast-path for ESC after printable text.
+                if let Some(consumed) = self.try_csi_fast_path(performer, &bytes[total..]) {
+                    return total + consumed;
+                }
                 self.state = State::Escape;
                 self.reset_params();
             } else {
@@ -739,6 +747,112 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                 }
             },
         }
+    }
+
+    /// Try to parse a CSI sequence inline without entering the state machine.
+    ///
+    /// Called when `bytes[0] == 0x1B`. Looks ahead for `[` and tries to parse
+    /// the entire CSI sequence in one shot. Returns `Some(consumed)` if the
+    /// fast path succeeded, `None` if the caller should fall back to the
+    /// normal state machine.
+    ///
+    /// Handles common sequences without intermediates:
+    /// - SGR (m): `ESC [ <params> m`
+    /// - CUP (H/f): `ESC [ <params> H` or `f`
+    /// - ED (J): `ESC [ <params> J`
+    /// - EL (K): `ESC [ <params> K`
+    /// - Cursor movement (A/B/C/D): `ESC [ <params> A/B/C/D`
+    /// - Other simple CSI: any `ESC [ <digits;> <0x40..0x7E>`
+    ///
+    /// Falls back to normal parsing for:
+    /// - Incomplete sequences (buffer boundary)
+    /// - Private marker sequences (`ESC [ ?`)
+    /// - Sequences with intermediates (`ESC [ <params> <0x20..0x2F> <final>`)
+    /// - Subparameters (`:`)
+    #[inline]
+    fn try_csi_fast_path<P: Perform>(
+        &mut self,
+        performer: &mut P,
+        bytes: &[u8],
+    ) -> Option<usize> {
+        // Need at least ESC [ <final> = 3 bytes
+        if bytes.len() < 3 {
+            return None;
+        }
+
+        // bytes[0] is ESC (0x1B), check for [
+        if bytes[1] != b'[' {
+            return None;
+        }
+
+        // Scan for the final byte (0x40..=0x7E) starting at position 2.
+        // Bail out if we see intermediates (0x20..=0x2F), private markers
+        // (0x3C..=0x3F at position 2), subparameters (:), or control chars.
+        let start = 2;
+
+        // Check for private marker at first param position
+        if bytes[start] >= 0x3C && bytes[start] <= 0x3F {
+            // Private CSI like ESC[? — fall back to state machine
+            return None;
+        }
+
+        // Parse parameters inline. We support up to MAX_PARAMS parameters
+        // (same as the state machine) with digits and semicolons only.
+        let mut params = Params::default();
+        let mut current_param: u16 = 0;
+        let mut has_param_digit = false;
+        let mut i = start;
+
+        while i < bytes.len() {
+            let byte = bytes[i];
+            match byte {
+                // Digit: accumulate parameter
+                b'0'..=b'9' => {
+                    current_param = current_param.saturating_mul(10);
+                    current_param = current_param.saturating_add((byte - b'0') as u16);
+                    has_param_digit = true;
+                }
+                // Semicolon: parameter separator
+                b';' => {
+                    if params.is_full() {
+                        return None; // Too many params, fall back
+                    }
+                    params.push(current_param);
+                    current_param = 0;
+                    has_param_digit = false;
+                }
+                // Colon: subparameter — fall back to state machine
+                b':' => return None,
+                // Intermediate bytes — fall back
+                0x20..=0x2F => return None,
+                // Final byte: dispatch!
+                0x40..=0x7E => {
+                    // Push the last parameter
+                    if has_param_digit || i > start {
+                        if params.is_full() {
+                            // Too many params — still dispatch but with ignore flag
+                            performer.csi_dispatch(&params, &[], true, byte as char);
+                        } else {
+                            params.push(current_param);
+                            performer.csi_dispatch(&params, &[], false, byte as char);
+                        }
+                    } else {
+                        // No parameters at all (e.g., ESC [ m)
+                        params.push(0);
+                        performer.csi_dispatch(&params, &[], false, byte as char);
+                    }
+                    self.state = State::Ground;
+                    return Some(i + 1);
+                }
+                // Control character or anything unexpected — fall back
+                _ => return None,
+            }
+            i += 1;
+        }
+
+        // Reached end of buffer without finding final byte — incomplete sequence.
+        // Fall back to state machine which handles partial sequences.
+        None
     }
 
     /// Handle ground dispatch of print/execute for all characters in a string.
