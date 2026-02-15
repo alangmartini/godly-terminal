@@ -124,6 +124,7 @@ pub fn run() {
             commands::get_grid_snapshot,
             commands::get_grid_dimensions,
             commands::get_grid_text,
+            commands::set_scrollback,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,

@@ -131,7 +131,7 @@ impl DaemonSession {
             .as_millis() as u64;
         let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
 
-        let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 0)));
+        let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 10_000)));
 
         // Spawn reader thread that routes output to either the attached client or ring buffer
         let reader_master = master.clone();
@@ -462,6 +462,13 @@ impl DaemonSession {
         Ok(())
     }
 
+    /// Set the scrollback viewport offset.
+    /// offset=0 means live view, offset>0 scrolls into history.
+    pub fn set_scrollback(&self, offset: usize) {
+        let mut vt = self.vt_parser.lock();
+        vt.screen_mut().set_scrollback(offset);
+    }
+
     /// Check if the session is still running
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -596,6 +603,8 @@ impl DaemonSession {
             alternate_screen: screen.alternate_screen(),
             cursor_hidden: screen.hide_cursor(),
             title: String::new(), // OSC title is tracked at the Tauri app level
+            scrollback_offset: screen.scrollback(),
+            total_scrollback: screen.scrollback_count(),
         }
     }
 

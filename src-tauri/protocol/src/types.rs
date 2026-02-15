@@ -62,6 +62,12 @@ pub struct RichGridData {
     pub cursor_hidden: bool,
     /// OSC window title, if set.
     pub title: String,
+    /// Current scrollback offset (0 = live view, >0 = scrolled into history).
+    #[serde(default)]
+    pub scrollback_offset: usize,
+    /// Total number of scrollback rows available.
+    #[serde(default)]
+    pub total_scrollback: usize,
 }
 
 /// A single row in the rich grid.

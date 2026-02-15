@@ -119,6 +119,12 @@ impl Screen {
         self.grid_mut().set_scrollback(rows);
     }
 
+    /// Returns the actual number of rows currently stored in scrollback.
+    #[must_use]
+    pub fn scrollback_count(&self) -> usize {
+        self.grid().scrollback_count()
+    }
+
     /// Returns the current position in the scrollback.
     ///
     /// This position indicates the offset from the top of the screen, and is
