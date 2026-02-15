@@ -301,6 +301,26 @@ impl Backend for DaemonDirectBackend {
                 }
             }
 
+            McpRequest::ReadGrid { terminal_id } => {
+                let resp = self.daemon_request(&Request::ReadGrid {
+                    session_id: terminal_id.clone(),
+                })?;
+                match resp {
+                    Response::Grid { grid } => Ok(McpResponse::GridSnapshot {
+                        rows: grid.rows,
+                        cursor_row: grid.cursor_row,
+                        cursor_col: grid.cursor_col,
+                        cols: grid.cols,
+                        num_rows: grid.num_rows,
+                        alternate_screen: grid.alternate_screen,
+                    }),
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
             McpRequest::ResizeTerminal {
                 terminal_id,
                 rows,
