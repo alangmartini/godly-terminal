@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use godly_protocol::{McpRequest, McpResponse};
 
-use crate::pipe_client::McpPipeClient;
+use crate::backend::Backend;
 
 /// Return the list of MCP tool definitions.
 pub fn list_tools() -> Value {
@@ -387,7 +387,7 @@ pub fn list_tools() -> Value {
 
 /// Dispatch a tool call to the appropriate MCP request.
 pub fn call_tool(
-    client: &mut McpPipeClient,
+    client: &mut dyn Backend,
     name: &str,
     args: &Value,
     session_id: &Option<String>,
@@ -533,9 +533,7 @@ pub fn call_tool(
                 strip_ansi,
             };
 
-            let response = client
-                .send_request(&request)
-                .map_err(|e| format!("Pipe error: {}", e))?;
+            let response = client.send_request(&request)?;
 
             match response {
                 McpResponse::TerminalOutput { content } => {
@@ -679,9 +677,7 @@ pub fn call_tool(
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
-    let response = client
-        .send_request(&request)
-        .map_err(|e| format!("Pipe error: {}", e))?;
+    let response = client.send_request(&request)?;
 
     response_to_json(response)
 }
