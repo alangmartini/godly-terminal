@@ -161,6 +161,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             State::EscapeIntermediate => self.advance_esc_intermediate(performer, byte),
             State::OscString => self.advance_osc_string(performer, byte),
             State::SosPmApcString => self.anywhere(performer, byte),
+            State::ApcString => self.advance_apc_string(performer, byte),
             State::Ground => unreachable!(),
         }
     }
@@ -355,7 +356,11 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                 self.osc_num_params = 0;
                 self.state = State::OscString
             },
-            0x5E..=0x5F => self.state = State::SosPmApcString,
+            0x5E => self.state = State::SosPmApcString,
+            0x5F => {
+                performer.apc_start();
+                self.state = State::ApcString
+            },
             0x60..=0x7E => {
                 performer.esc_dispatch(self.intermediates(), self.ignoring, byte);
                 self.state = State::Ground
@@ -404,6 +409,41 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             },
             0x3B => self.action_osc_put_param(),
             _ => self.action_osc_put(byte),
+        }
+    }
+
+    /// Handle bytes in APC string state.
+    ///
+    /// APC (Application Program Command) strings are introduced by ESC _ and
+    /// terminated by ST (ESC \), CAN (0x18), SUB (0x1A), or C1 ST (0x9C).
+    /// Data bytes are streamed to the Perform implementation via `apc_put()`.
+    /// This is used by the Kitty graphics protocol.
+    #[inline(always)]
+    fn advance_apc_string<P: Perform>(&mut self, performer: &mut P, byte: u8) {
+        match byte {
+            // Data bytes: pass through to handler (same range as DCS passthrough)
+            0x00..=0x17 | 0x19 | 0x1C..=0x7E => performer.apc_put(byte),
+            // CAN/SUB: abort APC, execute control, return to ground
+            0x18 | 0x1A => {
+                performer.apc_end();
+                performer.execute(byte);
+                self.state = State::Ground
+            },
+            // ESC: could be ST (ESC \) which terminates APC, or start of new sequence
+            0x1B => {
+                performer.apc_end();
+                self.reset_params();
+                self.state = State::Escape
+            },
+            // DEL: ignore
+            0x7F => (),
+            // C1 ST (0x9C): terminates APC
+            0x9C => {
+                performer.apc_end();
+                self.state = State::Ground
+            },
+            // Other C1 controls or high bytes: ignore
+            _ => (),
         }
     }
 
@@ -902,6 +942,10 @@ enum State {
     EscapeIntermediate,
     OscString,
     SosPmApcString,
+    /// APC string state for Application Program Commands (ESC _).
+    /// Unlike SosPmApcString which silently discards data, this state
+    /// streams data to the Perform implementation (used by Kitty graphics).
+    ApcString,
     #[default]
     Ground,
 }
@@ -990,6 +1034,31 @@ pub trait Perform {
     /// subsequent characters were ignored.
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 
+    /// Called when an APC (Application Program Command) string begins.
+    ///
+    /// APC is introduced by `ESC _`. This is used by the Kitty graphics
+    /// protocol to transmit image data. The handler should prepare to
+    /// receive data bytes via `apc_put()`.
+    fn apc_start(&mut self) {}
+
+    /// Pass a byte as part of an APC string.
+    fn apc_put(&mut self, _byte: u8) {}
+
+    /// Pass a slice of bytes as part of an APC string (batch optimization).
+    ///
+    /// The default falls back to per-byte `apc_put()` calls.
+    fn apc_put_slice(&mut self, data: &[u8]) {
+        for &b in data {
+            self.apc_put(b);
+        }
+    }
+
+    /// Called when an APC string is terminated.
+    ///
+    /// Termination can be via ST (`ESC \`), CAN (0x18), SUB (0x1A),
+    /// or C1 ST (0x9C).
+    fn apc_end(&mut self) {}
+
     /// Whether the parser should terminate prematurely.
     ///
     /// This can be used in conjunction with
@@ -1032,6 +1101,9 @@ mod tests {
         Print(char),
         Execute(u8),
         DcsUnhook,
+        ApcStart,
+        ApcPut(u8),
+        ApcEnd,
     }
 
     impl Perform for Dispatcher {
@@ -1071,6 +1143,18 @@ mod tests {
 
         fn execute(&mut self, byte: u8) {
             self.dispatched.push(Sequence::Execute(byte));
+        }
+
+        fn apc_start(&mut self) {
+            self.dispatched.push(Sequence::ApcStart);
+        }
+
+        fn apc_put(&mut self, byte: u8) {
+            self.dispatched.push(Sequence::ApcPut(byte));
+        }
+
+        fn apc_end(&mut self) {
+            self.dispatched.push(Sequence::ApcEnd);
         }
     }
 
@@ -1631,5 +1715,203 @@ mod tests {
         assert_eq!(dispatcher.dispatched.len(), 2);
         assert_eq!(dispatcher.dispatched[0], Sequence::Execute(0x18));
         assert_eq!(dispatcher.dispatched[1], Sequence::Execute(0x1A));
+    }
+
+    // APC (Application Program Command) tests
+
+    #[test]
+    fn parse_apc_basic() {
+        // ESC _ <data> ESC \ (ST)
+        const INPUT: &[u8] = b"\x1b_hello\x1b\\";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        assert_eq!(dispatcher.dispatched[1], Sequence::ApcPut(b'h'));
+        assert_eq!(dispatcher.dispatched[2], Sequence::ApcPut(b'e'));
+        assert_eq!(dispatcher.dispatched[3], Sequence::ApcPut(b'l'));
+        assert_eq!(dispatcher.dispatched[4], Sequence::ApcPut(b'l'));
+        assert_eq!(dispatcher.dispatched[5], Sequence::ApcPut(b'o'));
+        assert_eq!(dispatcher.dispatched[6], Sequence::ApcEnd);
+        // ESC \ is parsed as ESC dispatch with byte 0x5C
+        assert_eq!(dispatcher.dispatched[7], Sequence::Esc(vec![], false, 0x5C));
+        assert_eq!(dispatcher.dispatched.len(), 8);
+    }
+
+    #[test]
+    fn parse_apc_empty() {
+        // ESC _ ESC \ (empty APC)
+        const INPUT: &[u8] = b"\x1b_\x1b\\";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        assert_eq!(dispatcher.dispatched[1], Sequence::ApcEnd);
+        assert_eq!(dispatcher.dispatched[2], Sequence::Esc(vec![], false, 0x5C));
+        assert_eq!(dispatcher.dispatched.len(), 3);
+    }
+
+    #[test]
+    fn parse_apc_terminated_by_can() {
+        // ESC _ <data> CAN — CAN (0x18) aborts APC
+        const INPUT: &[u8] = b"\x1b_data\x18more";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        // 'd', 'a', 't', 'a'
+        assert_eq!(dispatcher.dispatched[1], Sequence::ApcPut(b'd'));
+        assert_eq!(dispatcher.dispatched[2], Sequence::ApcPut(b'a'));
+        assert_eq!(dispatcher.dispatched[3], Sequence::ApcPut(b't'));
+        assert_eq!(dispatcher.dispatched[4], Sequence::ApcPut(b'a'));
+        assert_eq!(dispatcher.dispatched[5], Sequence::ApcEnd);
+        assert_eq!(dispatcher.dispatched[6], Sequence::Execute(0x18));
+        // "more" printed as characters
+        assert_eq!(dispatcher.dispatched[7], Sequence::Print('m'));
+        assert_eq!(dispatcher.dispatched[8], Sequence::Print('o'));
+        assert_eq!(dispatcher.dispatched[9], Sequence::Print('r'));
+        assert_eq!(dispatcher.dispatched[10], Sequence::Print('e'));
+    }
+
+    #[test]
+    fn parse_apc_terminated_by_sub() {
+        // ESC _ <data> SUB — SUB (0x1A) aborts APC
+        const INPUT: &[u8] = b"\x1b_xy\x1a";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        assert_eq!(dispatcher.dispatched[1], Sequence::ApcPut(b'x'));
+        assert_eq!(dispatcher.dispatched[2], Sequence::ApcPut(b'y'));
+        assert_eq!(dispatcher.dispatched[3], Sequence::ApcEnd);
+        assert_eq!(dispatcher.dispatched[4], Sequence::Execute(0x1A));
+    }
+
+    #[test]
+    fn parse_apc_terminated_by_c1_st() {
+        // ESC _ <data> 0x9C — C1 ST terminates APC
+        const INPUT: &[u8] = b"\x1b_ab\x9c";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        assert_eq!(dispatcher.dispatched[1], Sequence::ApcPut(b'a'));
+        assert_eq!(dispatcher.dispatched[2], Sequence::ApcPut(b'b'));
+        assert_eq!(dispatcher.dispatched[3], Sequence::ApcEnd);
+        assert_eq!(dispatcher.dispatched.len(), 4);
+    }
+
+    #[test]
+    fn parse_apc_kitty_graphics_sequence() {
+        // Kitty graphics: ESC _ G <key=value;...> ; <base64-payload> ESC \
+        // A minimal Kitty "transmit" command: a=T,f=100 with tiny PNG-like data
+        let input = b"\x1b_Ga=T,f=100;AQAAAA==\x1b\\";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, input);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        // Verify all payload bytes are streamed
+        let payload = b"Ga=T,f=100;AQAAAA==";
+        for (i, &byte) in payload.iter().enumerate() {
+            assert_eq!(dispatcher.dispatched[1 + i], Sequence::ApcPut(byte));
+        }
+        assert_eq!(dispatcher.dispatched[1 + payload.len()], Sequence::ApcEnd);
+    }
+
+    #[test]
+    fn parse_apc_del_ignored() {
+        // DEL (0x7F) inside APC should be silently ignored
+        const INPUT: &[u8] = b"\x1b_a\x7Fb\x1b\\";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        assert_eq!(dispatcher.dispatched[1], Sequence::ApcPut(b'a'));
+        // 0x7F is ignored, not passed through
+        assert_eq!(dispatcher.dispatched[2], Sequence::ApcPut(b'b'));
+        assert_eq!(dispatcher.dispatched[3], Sequence::ApcEnd);
+    }
+
+    #[test]
+    fn parse_apc_with_preceding_text() {
+        // Text followed by APC
+        const INPUT: &[u8] = b"hello\x1b_data\x1b\\world";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, INPUT);
+
+        // "hello" printed
+        assert_eq!(dispatcher.dispatched[0], Sequence::Print('h'));
+        assert_eq!(dispatcher.dispatched[1], Sequence::Print('e'));
+        assert_eq!(dispatcher.dispatched[2], Sequence::Print('l'));
+        assert_eq!(dispatcher.dispatched[3], Sequence::Print('l'));
+        assert_eq!(dispatcher.dispatched[4], Sequence::Print('o'));
+        // APC
+        assert_eq!(dispatcher.dispatched[5], Sequence::ApcStart);
+        assert_eq!(dispatcher.dispatched[6], Sequence::ApcPut(b'd'));
+        assert_eq!(dispatcher.dispatched[7], Sequence::ApcPut(b'a'));
+        assert_eq!(dispatcher.dispatched[8], Sequence::ApcPut(b't'));
+        assert_eq!(dispatcher.dispatched[9], Sequence::ApcPut(b'a'));
+        assert_eq!(dispatcher.dispatched[10], Sequence::ApcEnd);
+        // ESC \ dispatched
+        assert_eq!(dispatcher.dispatched[11], Sequence::Esc(vec![], false, 0x5C));
+        // "world" printed
+        assert_eq!(dispatcher.dispatched[12], Sequence::Print('w'));
+    }
+
+    #[test]
+    fn parse_apc_chunked_kitty() {
+        // Kitty chunked transfer: first chunk (m=1), then final chunk (m=0)
+        let chunk1 = b"\x1b_Ga=T,m=1;AQAA\x1b\\";
+        let chunk2 = b"\x1b_Gm=0;AA==\x1b\\";
+
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        // First chunk
+        parser.advance(&mut dispatcher, chunk1);
+        assert_eq!(dispatcher.dispatched[0], Sequence::ApcStart);
+        let payload1 = b"Ga=T,m=1;AQAA";
+        for (i, &byte) in payload1.iter().enumerate() {
+            assert_eq!(dispatcher.dispatched[1 + i], Sequence::ApcPut(byte));
+        }
+        assert_eq!(dispatcher.dispatched[1 + payload1.len()], Sequence::ApcEnd);
+
+        let offset = 2 + payload1.len(); // ApcStart + payload + ApcEnd + Esc
+        // Second chunk
+        parser.advance(&mut dispatcher, chunk2);
+        let second_start = offset + 1; // after Esc dispatch from ST
+        assert_eq!(dispatcher.dispatched[second_start], Sequence::ApcStart);
+    }
+
+    #[test]
+    fn parse_sos_pm_still_discards() {
+        // SOS (ESC X, 0x58) and PM (ESC ^, 0x5E) should still be silently discarded
+        // via SosPmApcString state
+        const SOS_INPUT: &[u8] = b"\x1b\x58hello\x1b\\world";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        parser.advance(&mut dispatcher, SOS_INPUT);
+
+        // SOS data "hello" should be discarded (no ApcPut dispatched)
+        // Only ESC \ dispatch and "world" should appear
+        let has_apc = dispatcher.dispatched.iter().any(|s| matches!(s, Sequence::ApcStart | Sequence::ApcPut(_)));
+        assert!(!has_apc, "SOS should not trigger APC callbacks");
     }
 }
