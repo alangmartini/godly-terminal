@@ -12,7 +12,7 @@
     "build:daemon": "npm run unlock && cd src-tauri && cargo build -p godly-daemon",
     "build:daemon:release": "npm run unlock && cd src-tauri && cargo build -p godly-daemon --release",
     "build:mcp": "npm run unlock && cd src-tauri && cargo build -p godly-mcp",
-    "build:mcp:release": "npm run unlock && cd src-tauri && cargo build -p godly-mcp --release",
+    "build:mcp:release": "npm run unlock && cd src-tauri && cargo build -p godly-mcp --release && node -e \"require('fs').mkdirSync('plugin/bin',{recursive:true}); require('fs').copyFileSync('src-tauri/target/release/godly-mcp.exe','plugin/bin/godly-mcp.exe');\"",
     "build:notify": "npm run unlock && cd src-tauri && cargo build -p godly-notify",
     "build:notify:release": "npm run unlock && cd src-tauri && cargo build -p godly-notify --release",
     "preview": "vite preview",
