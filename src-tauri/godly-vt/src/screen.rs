@@ -1,3 +1,8 @@
+// Originally from vt100-rust by Jesse Luehrs (https://github.com/doy/vt100-rust)
+// Copyright (c) Jesse Luehrs
+// Licensed under MIT — see LICENSE-vt100 in this crate
+// Modified for godly-vt
+
 use crate::term::BufWrite as _;
 use unicode_width::UnicodeWidthChar as _;
 

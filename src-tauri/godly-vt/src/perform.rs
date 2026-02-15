@@ -1,3 +1,8 @@
+// Originally from vt100-rust by Jesse Luehrs (https://github.com/doy/vt100-rust)
+// Copyright (c) Jesse Luehrs
+// Licensed under MIT — see LICENSE-vt100 in this crate
+// Modified for godly-vt
+
 const BASE64: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 const CLIPBOARD_SELECTOR: &[u8] = b"cpqs01234567";
