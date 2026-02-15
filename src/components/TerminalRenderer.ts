@@ -13,6 +13,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { WebGLRenderer } from './renderer/WebGLRenderer';
 
 // ---- Types matching the Rust RichGridData ----
 
@@ -123,8 +124,14 @@ const URL_REGEX = /https?:\/\/[^\s<>'")\]]+/g;
 
 export class TerminalRenderer {
   private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private ctx: CanvasRenderingContext2D | null = null;
   private theme: TerminalTheme;
+
+  // WebGL
+  private webglRenderer: WebGLRenderer | null = null;
+  private overlayCanvas: HTMLCanvasElement | null = null;
+  private overlayCtx: CanvasRenderingContext2D | null = null;
+  private useWebGL = false;
 
   // Font metrics
   private fontFamily = 'Cascadia Code, Consolas, monospace';
@@ -173,8 +180,34 @@ export class TerminalRenderer {
     this.canvas.tabIndex = 0;
     // Prevent default context menu on right-click (we handle copy ourselves)
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.ctx = this.canvas.getContext('2d', { alpha: false })!;
-    this.measureFont();
+
+    // Try WebGL2 first
+    const gl = this.canvas.getContext('webgl2', { alpha: false, antialias: false });
+    if (gl) {
+      try {
+        this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
+        this.useWebGL = true;
+        // Create overlay canvas for scrollbar and URL hover
+        this.overlayCanvas = document.createElement('canvas');
+        this.overlayCanvas.className = 'terminal-overlay-canvas';
+        this.overlayCanvas.style.display = 'block';
+        this.overlayCtx = this.overlayCanvas.getContext('2d')!;
+      } catch (e) {
+        console.warn('WebGL2 renderer init failed, falling back to Canvas2D:', e);
+      }
+    }
+
+    if (!this.useWebGL) {
+      this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+    }
+
+    if (this.useWebGL && this.webglRenderer) {
+      const metrics = this.webglRenderer.measureFont();
+      this.cellWidth = metrics.cellWidth;
+      this.cellHeight = metrics.cellHeight;
+    } else {
+      this.measureFont();
+    }
     this.setupMouseHandlers();
     this.setupWheelHandler();
     this.startCursorBlink();
@@ -255,7 +288,20 @@ export class TerminalRenderer {
     this.devicePixelRatio = dpr;
     this.canvas.width = newWidth;
     this.canvas.height = newHeight;
-    this.measureFont();
+
+    if (this.useWebGL && this.webglRenderer) {
+      this.webglRenderer.resize(newWidth, newHeight, dpr);
+      const metrics = this.webglRenderer.measureFont();
+      this.cellWidth = metrics.cellWidth;
+      this.cellHeight = metrics.cellHeight;
+      // Resize overlay canvas
+      if (this.overlayCanvas) {
+        this.overlayCanvas.width = newWidth;
+        this.overlayCanvas.height = newHeight;
+      }
+    } else {
+      this.measureFont();
+    }
     return true;
   }
 
@@ -304,6 +350,10 @@ export class TerminalRenderer {
       clearInterval(this.cursorBlinkInterval);
       this.cursorBlinkInterval = null;
     }
+    if (this.webglRenderer) {
+      this.webglRenderer.dispose();
+      this.webglRenderer = null;
+    }
   }
 
   // ---- Scrollback ----
@@ -327,6 +377,7 @@ export class TerminalRenderer {
   // ---- Private: Font measurement ----
 
   private measureFont() {
+    if (!this.ctx) return; // WebGL mode — font measured by WebGLRenderer
     const dpr = this.devicePixelRatio;
     const scaledSize = this.fontSize * dpr;
     this.ctx.font = `${scaledSize}px ${this.fontFamily}`;
@@ -344,7 +395,17 @@ export class TerminalRenderer {
     const snap = this.currentSnapshot;
     if (!snap) return;
 
-    const ctx = this.ctx;
+    if (this.useWebGL && this.webglRenderer) {
+      // WebGL path: delegate grid rendering to GPU
+      const sel = this.selection.active ? this.normalizeSelection(this.selection) : null;
+      this.webglRenderer.paint(snap, this.theme, sel, this.cursorVisible && !snap.cursor_hidden && snap.scrollback_offset === 0);
+      // Draw scrollbar and URL hover on overlay
+      this.paintOverlay(snap);
+      return;
+    }
+
+    // Canvas2D fallback
+    const ctx = this.ctx!;
     const { cellWidth, cellHeight, baselineOffset } = this;
     const dpr = this.devicePixelRatio;
 
@@ -448,7 +509,7 @@ export class TerminalRenderer {
   }
 
   private paintCursor(row: number, col: number) {
-    const ctx = this.ctx;
+    const ctx = this.ctx!;
     const x = col * this.cellWidth;
     const y = row * this.cellHeight;
     const dpr = this.devicePixelRatio;
@@ -650,7 +711,7 @@ export class TerminalRenderer {
   private paintScrollbar(snap: RichGridData) {
     if (snap.scrollback_offset <= 0 || snap.total_scrollback <= 0) return;
 
-    const ctx = this.ctx;
+    const ctx = this.ctx!;
     const canvasHeight = this.canvas.height;
     const canvasWidth = this.canvas.width;
     const dpr = this.devicePixelRatio;
@@ -676,6 +737,53 @@ export class TerminalRenderer {
 
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.fillRect(trackX + 1 * dpr, thumbY, trackWidth - 2 * dpr, thumbHeight);
+  }
+
+  // ---- Private: WebGL overlay painting ----
+
+  private paintOverlay(snap: RichGridData) {
+    if (!this.overlayCanvas || !this.overlayCtx) return;
+    const ctx = this.overlayCtx;
+    const dpr = this.devicePixelRatio;
+    ctx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+
+    // Scrollbar
+    if (snap.scrollback_offset > 0 && snap.total_scrollback > 0) {
+      const canvasHeight = this.overlayCanvas.height;
+      const canvasWidth = this.overlayCanvas.width;
+      const trackWidth = 6 * dpr;
+      const trackX = canvasWidth - trackWidth;
+      const trackPadding = 2 * dpr;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.fillRect(trackX, trackPadding, trackWidth, canvasHeight - trackPadding * 2);
+      const totalRange = snap.total_scrollback;
+      const visibleRows = snap.dimensions.rows;
+      const totalContent = totalRange + visibleRows;
+      const thumbHeight = Math.max(20 * dpr, (visibleRows / totalContent) * (canvasHeight - trackPadding * 2));
+      const scrollFraction = snap.scrollback_offset / totalRange;
+      const trackHeight = canvasHeight - trackPadding * 2 - thumbHeight;
+      const thumbY = trackPadding + trackHeight * (1 - scrollFraction);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillRect(trackX + 1 * dpr, thumbY, trackWidth - 2 * dpr, thumbHeight);
+    }
+
+    // URL hover underline
+    if (this.hoveredUrl && this.hoveredUrlRow >= 0) {
+      const urlX = this.hoveredUrlStartCol * this.cellWidth;
+      const urlW = (this.hoveredUrlEndCol - this.hoveredUrlStartCol) * this.cellWidth;
+      const y = this.hoveredUrlRow * this.cellHeight;
+      ctx.strokeStyle = this.theme.blue;
+      ctx.lineWidth = dpr;
+      ctx.beginPath();
+      ctx.moveTo(urlX, y + this.cellHeight - dpr);
+      ctx.lineTo(urlX + urlW, y + this.cellHeight - dpr);
+      ctx.stroke();
+    }
+  }
+
+  /** Get the overlay canvas element (WebGL mode only). */
+  getOverlayElement(): HTMLCanvasElement | null {
+    return this.overlayCanvas;
   }
 
   // ---- Private: Cursor blink ----
