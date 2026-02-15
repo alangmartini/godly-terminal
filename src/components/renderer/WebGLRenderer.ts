@@ -50,7 +50,7 @@ const UNIFORM_NAMES = [
   'u_resolution', 'u_cellSize', 'u_gridCols', 'u_gridRows', 'u_atlasSize',
   'u_cellData', 'u_atlas',
   'u_cursorRow', 'u_cursorCol', 'u_cursorVisible', 'u_cursorColor',
-  'u_selColor', 'u_bgColor',
+  'u_selColor',
 ] as const;
 
 type UniformName = typeof UNIFORM_NAMES[number];
@@ -172,10 +172,6 @@ export class WebGLRenderer {
     // Selection color uniform
     const selColor = packedToVec4(this.colorCache.parse(theme.selectionBackground));
     gl.uniform4f(this.uniforms.u_selColor, selColor[0], selColor[1], selColor[2], selColor[3]);
-
-    // Background color uniform
-    const bgColor = packedToVec4(this.colorCache.parse(theme.background));
-    gl.uniform4f(this.uniforms.u_bgColor, bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
 
     // Bind textures to sampler units
     gl.uniform1i(this.uniforms.u_cellData, 0);
