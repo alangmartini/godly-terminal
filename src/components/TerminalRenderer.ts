@@ -23,6 +23,8 @@ export interface RichGridData {
   alternate_screen: boolean;
   cursor_hidden: boolean;
   title: string;
+  scrollback_offset: number;
+  total_scrollback: number;
 }
 
 export interface RichGridRow {
@@ -159,6 +161,7 @@ export class TerminalRenderer {
 
   // Callbacks
   private onTitleChange?: (title: string) => void;
+  private onScrollCallback?: (deltaLines: number) => void;
 
   constructor(theme?: Partial<TerminalTheme>) {
     this.theme = { ...DEFAULT_THEME, ...theme };
@@ -173,6 +176,7 @@ export class TerminalRenderer {
     this.ctx = this.canvas.getContext('2d', { alpha: false })!;
     this.measureFont();
     this.setupMouseHandlers();
+    this.setupWheelHandler();
     this.startCursorBlink();
   }
 
@@ -195,6 +199,11 @@ export class TerminalRenderer {
   /** Set title change callback. */
   setOnTitleChange(cb: (title: string) => void) {
     this.onTitleChange = cb;
+  }
+
+  /** Set scroll callback. deltaLines > 0 = scroll up (into history), < 0 = scroll down (toward live). */
+  setOnScroll(cb: (deltaLines: number) => void) {
+    this.onScrollCallback = cb;
   }
 
   /**
@@ -297,11 +306,22 @@ export class TerminalRenderer {
     }
   }
 
-  // ---- Scrollback stub ----
+  // ---- Scrollback ----
 
-  /** Stub: scrollToBottom does nothing since godly-vt manages scrollback. */
+  /** Scroll to the bottom (live view) by requesting offset 0 via the scroll callback. */
   scrollToBottom() {
-    // No-op: the daemon's godly-vt parser manages the visible viewport.
+    if (this.onScrollCallback) {
+      // Use a very large negative delta to ensure we reach offset 0
+      const currentOffset = this.currentSnapshot?.scrollback_offset ?? 0;
+      if (currentOffset > 0) {
+        this.onScrollCallback(-currentOffset);
+      }
+    }
+  }
+
+  /** Returns the current scrollback offset from the latest snapshot. */
+  getScrollbackOffset(): number {
+    return this.currentSnapshot?.scrollback_offset ?? 0;
   }
 
   // ---- Private: Font measurement ----
@@ -418,10 +438,13 @@ export class TerminalRenderer {
       }
     }
 
-    // Draw cursor
-    if (!snap.cursor_hidden && this.cursorVisible) {
+    // Draw cursor (only when at live view — no cursor when scrolled up)
+    if (!snap.cursor_hidden && this.cursorVisible && snap.scrollback_offset === 0) {
       this.paintCursor(snap.cursor.row, snap.cursor.col);
     }
+
+    // Draw scrollbar indicator when scrolled into history
+    this.paintScrollbar(snap);
   }
 
   private paintCursor(row: number, col: number) {
@@ -603,6 +626,56 @@ export class TerminalRenderer {
       this.hoveredUrl = null;
       this.repaint();
     }
+  }
+
+  // ---- Private: Wheel handler ----
+
+  private setupWheelHandler() {
+    this.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (!this.onScrollCallback) return;
+
+      // Convert pixel delta to lines (3 lines per standard wheel tick of 100px)
+      const LINES_PER_TICK = 3;
+      const lines = Math.round((e.deltaY / 100) * LINES_PER_TICK) || (e.deltaY > 0 ? 1 : -1);
+
+      // deltaY > 0 = scroll down in page terms = scroll toward live (negative delta)
+      // deltaY < 0 = scroll up in page terms = scroll into history (positive delta)
+      this.onScrollCallback(-lines);
+    }, { passive: false });
+  }
+
+  // ---- Private: Scrollbar indicator ----
+
+  private paintScrollbar(snap: RichGridData) {
+    if (snap.scrollback_offset <= 0 || snap.total_scrollback <= 0) return;
+
+    const ctx = this.ctx;
+    const canvasHeight = this.canvas.height;
+    const canvasWidth = this.canvas.width;
+    const dpr = this.devicePixelRatio;
+
+    const trackWidth = 6 * dpr;
+    const trackX = canvasWidth - trackWidth;
+    const trackPadding = 2 * dpr;
+
+    // Track background
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(trackX, trackPadding, trackWidth, canvasHeight - trackPadding * 2);
+
+    // Thumb: position reflects where in scrollback we are
+    const totalRange = snap.total_scrollback;
+    const visibleRows = snap.dimensions.rows;
+    const totalContent = totalRange + visibleRows;
+    const thumbHeight = Math.max(20 * dpr, (visibleRows / totalContent) * (canvasHeight - trackPadding * 2));
+
+    // offset=0 is bottom (live), offset=totalScrollback is top
+    const scrollFraction = snap.scrollback_offset / totalRange;
+    const trackHeight = canvasHeight - trackPadding * 2 - thumbHeight;
+    const thumbY = trackPadding + trackHeight * (1 - scrollFraction);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.fillRect(trackX + 1 * dpr, thumbY, trackWidth - 2 * dpr, thumbHeight);
   }
 
   // ---- Private: Cursor blink ----
