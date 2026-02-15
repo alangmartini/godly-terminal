@@ -17,11 +17,16 @@ flat out float v_underline;
 flat out float v_wideCont;
 flat out float v_selected;
 flat out vec4 v_glyphRect;    // x, y, w, h in atlas pixels
+flat out float v_cellRow;
+flat out float v_cellCol;
 
 void main() {
   int cellIndex = gl_InstanceID;
   int col = cellIndex % u_gridCols;
   int row = cellIndex / u_gridCols;
+
+  v_cellRow = float(row);
+  v_cellCol = float(col);
 
   // Skip rows beyond grid
   if (row >= u_gridRows) { gl_Position = vec4(0.0); return; }
@@ -101,9 +106,6 @@ uniform vec4 u_cursorColor;
 // Selection highlight color
 uniform vec4 u_selColor;
 
-// Background color (for detecting "no bg")
-uniform vec4 u_bgColor;
-
 in vec2 v_uv;
 flat in vec4 v_fgColor;
 flat in vec4 v_bgColor;
@@ -111,6 +113,8 @@ flat in float v_underline;
 flat in float v_wideCont;
 flat in float v_selected;
 flat in vec4 v_glyphRect; // x, y, w, h in atlas pixels
+flat in float v_cellRow;
+flat in float v_cellCol;
 
 out vec4 fragColor;
 
@@ -137,6 +141,13 @@ void main() {
   // Underline: bottom 1px of cell
   if (v_underline > 0.5 && v_uv.y > (1.0 - 1.0 / u_cellSize.y)) {
     color = vec4(v_fgColor.rgb, 1.0);
+  }
+
+  // Cursor: block overlay with alpha blending
+  if (u_cursorVisible > 0.5 &&
+      int(v_cellRow) == u_cursorRow &&
+      int(v_cellCol) == u_cursorCol) {
+    color = vec4(mix(color.rgb, u_cursorColor.rgb, 0.7), 1.0);
   }
 
   fragColor = color;
