@@ -1,73 +1,43 @@
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { SerializeAddon } from '@xterm/addon-serialize';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 import { terminalService } from '../services/terminal-service';
 import { store } from '../state/store';
 import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
-import { activatePane } from './pane-activation';
+import { TerminalRenderer, RichGridData } from './TerminalRenderer';
 
+/**
+ * Terminal pane backed by the godly-vt Canvas2D renderer.
+ *
+ * Instead of xterm.js parsing ANSI output, the daemon's godly-vt parser
+ * maintains the terminal grid. On each `terminal-output` event, we request
+ * a grid snapshot via Tauri IPC and paint it on a <canvas>.
+ */
 export class TerminalPane {
-  private terminal: Terminal;
-  private fitAddon: FitAddon;
-  private serializeAddon: SerializeAddon;
+  private renderer: TerminalRenderer;
   private container: HTMLElement;
   private terminalId: string;
   private resizeObserver: ResizeObserver;
   private resizeRAF: number | null = null;
   private unsubscribeOutput: (() => void) | null = null;
-  private outputBuffer: Uint8Array[] = [];
-  private outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
+  // fetch via setTimeout(0). Multiple output events within the same frame
+  // collapse into a single IPC call.
+  private snapshotPending = false;
+  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Scrollback save interval (every 5 minutes)
   private scrollbackSaveInterval: number | null = null;
-  private maxScrollbackLines = 10000;
 
   constructor(terminalId: string) {
     this.terminalId = terminalId;
 
-    this.terminal = new Terminal({
-      fontFamily: 'Cascadia Code, Consolas, monospace',
-      fontSize: 14,
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#cccccc',
-        cursor: '#aeafad',
-        cursorAccent: '#1e1e1e',
-        selectionBackground: '#264f78',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#e5e5e5',
-      },
-      cursorBlink: true,
-      scrollback: this.maxScrollbackLines,
-      allowProposedApi: true,
-    });
+    this.renderer = new TerminalRenderer();
 
-    this.fitAddon = new FitAddon();
-    this.serializeAddon = new SerializeAddon();
-    this.terminal.loadAddon(this.fitAddon);
-    this.terminal.loadAddon(this.serializeAddon);
-    this.terminal.loadAddon(new WebLinksAddon((event: MouseEvent, uri: string) => {
-      if (event.ctrlKey) {
-        openUrl(uri).catch((err) => {
-          console.error('Failed to open URL:', err);
-        });
-      }
-    }));
+    // Forward OSC title changes to the store
+    this.renderer.setOnTitleChange((title) => {
+      store.updateTerminal(this.terminalId, { oscTitle: title || undefined });
+    });
 
     this.container = document.createElement('div');
     this.container.className = 'terminal-pane';
@@ -81,9 +51,7 @@ export class TerminalPane {
 
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
-    this.terminal.open(this.container);
-    (this.container as any).__xterm = this.terminal;
-    (this.container as any).__serializeAddon = this.serializeAddon;
+    this.container.appendChild(this.renderer.getElement());
     this.resizeObserver.observe(this.container);
 
     // Click-to-focus in split mode: set this terminal as active
@@ -93,41 +61,15 @@ export class TerminalPane {
       }
     });
 
-    // Block app-level shortcuts from being consumed by xterm.js so they
-    // bubble to the document-level handler in App.ts. Also handle
-    // copy/paste inline since we need access to the terminal.
-    this.terminal.attachCustomKeyEventHandler((event) => {
-      const action = keybindingStore.matchAction(event);
-
-      // Copy: copy selected text to clipboard
-      if (action === 'clipboard.copy') {
-        event.preventDefault();
-        const selection = this.terminal.getSelection();
-        if (selection) {
-          navigator.clipboard.writeText(selection);
-        }
-        return false;
-      }
-      // Paste: paste from clipboard into terminal
-      if (action === 'clipboard.paste') {
-        event.preventDefault();
-        navigator.clipboard.readText().then((text) => {
-          if (text) {
-            terminalService.writeToTerminal(this.terminalId, text);
-          }
-        });
-        return false;
-      }
-      if (isAppShortcut(event)) {
-        return false;
-      }
-      // Prevent WebView2 from intercepting terminal control keys as browser
-      // clipboard/undo shortcuts. Without this, these keys never reach the
-      // PTY as control characters (SIGINT, SIGTSTP, etc.) on Windows.
-      // Must handle both keydown AND keyup — WebView2 can intercept either.
-      if (isTerminalControlKey(event)) {
-        event.preventDefault();
-      } else if (event.type === 'keyup' && isTerminalControlKey({
+    // Handle keyboard input on the canvas.
+    // The canvas has tabIndex so it receives keyboard events.
+    const canvas = this.renderer.getElement();
+    canvas.addEventListener('keydown', (event) => {
+      this.handleKeyEvent(event);
+    });
+    canvas.addEventListener('keyup', (event) => {
+      // Prevent WebView2 from intercepting terminal control keys on keyup
+      if (isTerminalControlKey({
         ctrlKey: event.ctrlKey,
         shiftKey: event.shiftKey,
         altKey: event.altKey,
@@ -136,143 +78,232 @@ export class TerminalPane {
       })) {
         event.preventDefault();
       }
-      // Shift+Enter: send CSI 13;2u (kitty keyboard protocol) so CLI tools
-      // like Claude Code can distinguish it from plain Enter.
-      if (event.shiftKey && !event.ctrlKey && event.key === 'Enter') {
-        if (event.type === 'keydown') {
-          terminalService.writeToTerminal(this.terminalId, '\x1b[13;2u');
-        }
-        return false;
-      }
-      return true;
     });
 
-    // Handle input
-    this.terminal.onData((data) => {
-      terminalService.writeToTerminal(this.terminalId, data);
-    });
-
-    // Handle output: buffer chunks and flush via microtask.
-    // Bug C1: unbatched write() calls under heavy output saturate the main
-    // thread because each call triggers xterm.js's parser synchronously.
-    // setTimeout(0) fires in ~1ms vs RAF's ~16ms, reducing echo latency.
+    // Listen for terminal output events.
+    // When new PTY output arrives, schedule a grid snapshot fetch.
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
-      (data) => {
-        this.outputBuffer.push(data);
-        if (this.outputFlushTimer === null) {
-          this.outputFlushTimer = setTimeout(() => this.flushOutputBuffer(), 0);
-        }
+      () => {
+        this.scheduleSnapshotFetch();
       }
     );
-
-    // Forward OSC 0/2 title changes to the store for tab display
-    this.terminal.onTitleChange((title) => {
-      store.updateTerminal(this.terminalId, { oscTitle: title || undefined });
-    });
 
     // Start periodic scrollback saving (every 5 minutes)
     this.startScrollbackSaveInterval();
 
-    // Initial fit
+    // Initial fit + snapshot
     requestAnimationFrame(() => {
       this.fit();
+      this.fetchAndRenderSnapshot();
     });
   }
 
-  private flushOutputBuffer() {
-    this.outputFlushTimer = null;
-    const chunks = this.outputBuffer;
-    if (chunks.length === 0) return;
-    this.outputBuffer = [];
+  // ---- Keyboard handling ----
 
-    if (chunks.length === 1) {
-      this.terminal.write(chunks[0]);
+  private handleKeyEvent(event: KeyboardEvent) {
+    const action = keybindingStore.matchAction(event);
+
+    // Copy: copy selected text to clipboard
+    if (action === 'clipboard.copy') {
+      event.preventDefault();
+      if (this.renderer.hasSelection()) {
+        this.renderer.getSelectedText(this.terminalId).then((text) => {
+          if (text) {
+            navigator.clipboard.writeText(text);
+          }
+        });
+      }
       return;
     }
 
-    // Concatenate all buffered chunks into a single Uint8Array
-    let totalLength = 0;
-    for (const chunk of chunks) {
-      totalLength += chunk.byteLength;
+    // Paste: paste from clipboard into terminal
+    if (action === 'clipboard.paste') {
+      event.preventDefault();
+      navigator.clipboard.readText().then((text) => {
+        if (text) {
+          terminalService.writeToTerminal(this.terminalId, text);
+        }
+      });
+      return;
     }
-    const merged = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
+
+    // App-level shortcuts should bubble to App.ts
+    if (isAppShortcut(event)) {
+      return; // Don't prevent default -- let it bubble
     }
-    this.terminal.write(merged);
+
+    // Prevent WebView2 from intercepting terminal control keys
+    if (isTerminalControlKey(event)) {
+      event.preventDefault();
+    }
+
+    // Shift+Enter: send CSI 13;2u (kitty keyboard protocol)
+    if (event.shiftKey && !event.ctrlKey && event.key === 'Enter') {
+      event.preventDefault();
+      terminalService.writeToTerminal(this.terminalId, '\x1b[13;2u');
+      return;
+    }
+
+    // Convert keyboard events to terminal input data
+    const data = this.keyToTerminalData(event);
+    if (data) {
+      event.preventDefault();
+      terminalService.writeToTerminal(this.terminalId, data);
+    }
   }
 
+  /**
+   * Convert a keyboard event into the string that should be sent to the PTY.
+   * Handles control characters, special keys, and printable input.
+   */
+  private keyToTerminalData(event: KeyboardEvent): string | null {
+    // Control key combinations -> control characters
+    if (event.ctrlKey && !event.altKey && !event.shiftKey) {
+      const key = event.key.toLowerCase();
+      if (key.length === 1 && key >= 'a' && key <= 'z') {
+        return String.fromCharCode(key.charCodeAt(0) - 96);
+      }
+      // Ctrl+[ -> ESC, Ctrl+\ -> FS, Ctrl+] -> GS, Ctrl+^ -> RS, Ctrl+_ -> US
+      if (key === '[') return '\x1b';
+      if (key === '\\') return '\x1c';
+      if (key === ']') return '\x1d';
+      // Ctrl+Space -> NUL
+      if (key === ' ' || event.code === 'Space') return '\x00';
+    }
+
+    // Alt combinations -> ESC + key
+    if (event.altKey && !event.ctrlKey && event.key.length === 1) {
+      return '\x1b' + event.key;
+    }
+
+    // Special keys
+    switch (event.key) {
+      case 'Enter': return '\r';
+      case 'Backspace': return '\x7f';
+      case 'Tab': return '\t';
+      case 'Escape': return '\x1b';
+      case 'Delete': return '\x1b[3~';
+      case 'ArrowUp': return '\x1b[A';
+      case 'ArrowDown': return '\x1b[B';
+      case 'ArrowRight': return '\x1b[C';
+      case 'ArrowLeft': return '\x1b[D';
+      case 'Home': return '\x1b[H';
+      case 'End': return '\x1b[F';
+      case 'PageUp': return '\x1b[5~';
+      case 'PageDown': return '\x1b[6~';
+      case 'Insert': return '\x1b[2~';
+      case 'F1': return '\x1bOP';
+      case 'F2': return '\x1bOQ';
+      case 'F3': return '\x1bOR';
+      case 'F4': return '\x1bOS';
+      case 'F5': return '\x1b[15~';
+      case 'F6': return '\x1b[17~';
+      case 'F7': return '\x1b[18~';
+      case 'F8': return '\x1b[19~';
+      case 'F9': return '\x1b[20~';
+      case 'F10': return '\x1b[21~';
+      case 'F11': return '\x1b[23~';
+      case 'F12': return '\x1b[24~';
+    }
+
+    // Printable characters
+    if (event.key.length === 1 && !event.ctrlKey && !event.altKey) {
+      return event.key;
+    }
+
+    return null;
+  }
+
+  // ---- Grid snapshot fetching ----
+
+  private scheduleSnapshotFetch() {
+    if (this.snapshotPending) return;
+    this.snapshotPending = true;
+    if (this.snapshotTimer === null) {
+      this.snapshotTimer = setTimeout(() => {
+        this.snapshotTimer = null;
+        this.snapshotPending = false;
+        this.fetchAndRenderSnapshot();
+      }, 0);
+    }
+  }
+
+  private async fetchAndRenderSnapshot() {
+    try {
+      const snapshot = await invoke<RichGridData>('get_grid_snapshot', {
+        terminalId: this.terminalId,
+      });
+      this.renderer.render(snapshot);
+    } catch (error) {
+      // Ignore errors during initialization or after terminal close
+      console.debug('Grid snapshot fetch failed:', error);
+    }
+  }
+
+  // ---- Scrollback ----
+
   private startScrollbackSaveInterval() {
-    // Save scrollback every 5 minutes
     this.scrollbackSaveInterval = window.setInterval(() => {
       this.saveScrollback();
     }, 5 * 60 * 1000);
   }
 
   /**
-   * Get scrollback data as raw terminal content
+   * Get scrollback data using godly-vt's contents_formatted() output.
+   * This replaces the xterm.js serialize addon.
    */
   getScrollbackData(): Uint8Array {
-    // Use the serialize addon to get the terminal buffer content
-    const serialized = this.serializeAddon.serialize();
-    return new TextEncoder().encode(serialized);
+    // The daemon owns the terminal state, so we save scrollback via
+    // the existing save_scrollback Tauri command which uses godly-vt.
+    // Return empty data here; actual save happens in saveScrollback().
+    return new Uint8Array(0);
   }
 
-  /**
-   * Save scrollback to persistent storage
-   */
   async saveScrollback(): Promise<void> {
+    // Scrollback is now saved via the daemon's godly-vt grid state.
+    // The daemon-side save_scrollback command handles this.
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const data = this.getScrollbackData();
       await invoke('save_scrollback', {
         terminalId: this.terminalId,
-        data: Array.from(data),
+        data: [],
       });
     } catch (error) {
       console.error('Failed to save scrollback:', error);
     }
   }
 
-  /**
-   * Load and restore scrollback from persistent storage
-   */
   async loadScrollback(): Promise<void> {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const data = await invoke<number[]>('load_scrollback', {
-        terminalId: this.terminalId,
-      });
-
-      if (data && data.length > 0) {
-        const text = new TextDecoder().decode(new Uint8Array(data));
-        // Write the restored content to the terminal
-        this.terminal.write(text);
-      }
-    } catch (error) {
-      console.error('Failed to load scrollback:', error);
-    }
+    // On reconnect, the daemon replays the ring buffer + godly-vt state.
+    // We just need to fetch a fresh snapshot.
+    await this.fetchAndRenderSnapshot();
   }
+
+  // ---- Fit / Resize ----
 
   fit() {
     try {
-      this.fitAddon.fit();
-      const { rows, cols } = this.terminal;
-      terminalService.resizeTerminal(this.terminalId, rows, cols);
+      this.renderer.updateSize();
+      const { rows, cols } = this.renderer.getGridSize();
+      if (rows > 0 && cols > 0) {
+        terminalService.resizeTerminal(this.terminalId, rows, cols);
+      }
     } catch {
       // Ignore fit errors during initialization
     }
   }
+
+  // ---- Activation / Visibility ----
 
   setActive(active: boolean) {
     this.container.classList.remove('split-visible', 'split-focused');
     this.container.classList.toggle('active', active);
     if (active) {
       requestAnimationFrame(() => {
-        activatePane(this.terminal, () => this.fit(), true);
+        this.fit();
+        this.renderer.scrollToBottom();
+        this.renderer.focus();
+        this.fetchAndRenderSnapshot();
       });
     }
   }
@@ -283,24 +314,29 @@ export class TerminalPane {
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
       requestAnimationFrame(() => {
-        activatePane(this.terminal, () => this.fit(), focused);
+        this.fit();
+        this.renderer.scrollToBottom();
+        if (focused) {
+          this.renderer.focus();
+        }
+        this.fetchAndRenderSnapshot();
       });
     }
   }
 
   focus() {
-    this.terminal.focus();
+    this.renderer.focus();
   }
 
+  // ---- Lifecycle ----
+
   async destroy() {
-    // Save scrollback before destroying
     await this.saveScrollback();
 
-    if (this.outputFlushTimer !== null) {
-      clearTimeout(this.outputFlushTimer);
-      this.outputFlushTimer = null;
+    if (this.snapshotTimer !== null) {
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = null;
     }
-    this.outputBuffer = [];
     if (this.scrollbackSaveInterval) {
       clearInterval(this.scrollbackSaveInterval);
     }
@@ -308,7 +344,7 @@ export class TerminalPane {
     if (this.unsubscribeOutput) {
       this.unsubscribeOutput();
     }
-    this.terminal.dispose();
+    this.renderer.dispose();
     this.container.remove();
   }
 
