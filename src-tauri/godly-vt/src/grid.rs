@@ -196,6 +196,11 @@ impl Grid {
         self.scrollback_len
     }
 
+    /// Returns the actual number of rows currently stored in scrollback.
+    pub fn scrollback_count(&self) -> usize {
+        self.scrollback.len()
+    }
+
     pub fn scrollback(&self) -> usize {
         self.scrollback_offset
     }

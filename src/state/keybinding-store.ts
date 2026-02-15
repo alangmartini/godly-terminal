@@ -19,9 +19,13 @@ export type ActionId =
   | 'tabs.previousTab'
   | 'split.focusOtherPane'
   | 'workspace.toggleWorktreeMode'
-  | 'workspace.toggleClaudeCodeMode';
+  | 'workspace.toggleClaudeCodeMode'
+  | 'scroll.pageUp'
+  | 'scroll.pageDown'
+  | 'scroll.toTop'
+  | 'scroll.toBottom';
 
-export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace';
+export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll';
 
 /** Whether the shortcut is an app-level action or a terminal control key. */
 export type ShortcutType = 'app' | 'terminal-control';
@@ -121,6 +125,34 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'e' },
   },
+  {
+    id: 'scroll.pageUp',
+    label: 'Scroll Page Up',
+    category: 'Scroll',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: true, altKey: false, key: 'pageup' },
+  },
+  {
+    id: 'scroll.pageDown',
+    label: 'Scroll Page Down',
+    category: 'Scroll',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: true, altKey: false, key: 'pagedown' },
+  },
+  {
+    id: 'scroll.toTop',
+    label: 'Scroll to Top',
+    category: 'Scroll',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: true, altKey: false, key: 'home' },
+  },
+  {
+    id: 'scroll.toBottom',
+    label: 'Scroll to Bottom',
+    category: 'Scroll',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: true, altKey: false, key: 'end' },
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -162,7 +194,14 @@ export function formatChord(chord: KeyChord): string {
   if (chord.shiftKey) parts.push('Shift');
   if (chord.altKey) parts.push('Alt');
   // Capitalise the key for display
-  const displayKey = chord.key === 'tab' ? 'Tab' : chord.key.toUpperCase();
+  const keyDisplayMap: Record<string, string> = {
+    tab: 'Tab',
+    pageup: 'PageUp',
+    pagedown: 'PageDown',
+    home: 'Home',
+    end: 'End',
+  };
+  const displayKey = keyDisplayMap[chord.key] ?? chord.key.toUpperCase();
   parts.push(displayKey);
   return parts.join('+');
 }
