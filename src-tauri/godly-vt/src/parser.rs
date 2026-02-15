@@ -1,3 +1,8 @@
+// Originally from vt100-rust by Jesse Luehrs (https://github.com/doy/vt100-rust)
+// Copyright (c) Jesse Luehrs
+// Licensed under MIT — see LICENSE-vt100 in this crate
+// Modified for godly-vt
+
 /// A parser for terminal output which produces an in-memory representation of
 /// the terminal contents.
 pub struct Parser<CB: crate::callbacks::Callbacks = ()> {

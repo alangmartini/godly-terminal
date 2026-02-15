@@ -1,5 +1,7 @@
-// Originally forked from vt100-rust by doy (https://github.com/doy/vt100-rust)
-// Licensed under MIT. See LICENSE-MIT-vt100 for details.
+// Originally from vt100-rust by Jesse Luehrs (https://github.com/doy/vt100-rust)
+// Copyright (c) Jesse Luehrs
+// Licensed under MIT — see LICENSE-vt100 in this crate
+// Modified for godly-vt
 //
 //! This crate parses a terminal byte stream and provides an in-memory
 //! representation of the rendered contents.

@@ -1,5 +1,7 @@
-// Originally from vte by alacritty (https://github.com/alacritty/vte)
-// Licensed under Apache-2.0 OR MIT. See LICENSE-MIT-vte and LICENSE-APACHE-vte.
+// Originally from vte by Joe Wilm / alacritty (https://github.com/alacritty/vte)
+// Copyright (c) 2016 Joe Wilm
+// Licensed under MIT — see LICENSE-MIT in this directory
+// Modified for godly-vt
 //
 //! Fixed size parameters list with optional subparameters.
 
