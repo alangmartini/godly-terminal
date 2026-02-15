@@ -1,4 +1,0 @@
-{
-  "name": "godly-terminal",
-  "description": "Skills and tools for the Godly Terminal application — a Windows terminal with tmux-style session persistence via a background daemon"
-}
