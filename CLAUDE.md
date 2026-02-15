@@ -49,92 +49,28 @@ Never add "Generated with Claude Code" or any similar attribution message to com
 
 ## Issue Investigation Tracking
 
-For every issue you work on (bug fix, feature problem, investigation), create or update a file in `docs/` to track your progress:
+For every issue you work on, create or update `docs/<issue-slug>.md` to track attempts and outcomes. Check `docs/` first to avoid repeating failed approaches from previous sessions.
 
-- **File naming**: `docs/<issue-slug>.md` (e.g., `docs/daemon-pipe-hang.md`, `docs/scrollback-truncation.md`)
-- **Contents**: Log every attempt already made, what was tried, what the result was, and any insights gained — even from failed attempts.
-- **Before starting**: Check `docs/` for an existing file on the same issue. Read it first to avoid repeating failed approaches.
-- **During work**: Update the file as you go with each new attempt and its outcome.
-- **On resolution**: Mark the file with the final fix and why it worked.
+## Project-Specific Workflow Notes
 
-This prevents wasting context re-trying approaches that already failed in previous sessions.
+These extend the global CLAUDE.md workflows (bug fix, feature development):
 
-## Bug Fix Workflow
-
-When the user pastes a bug report or describes a bug:
-
-1. **Write a test suite first** that reproduces the bug. The tests must fail, confirming the bug exists.
-2. **Run the test suite** to verify the tests actually fail as expected (red phase).
-3. **Fix the bug** by modifying the source code.
-4. **Run the test suite again** and loop until all tests pass (green phase).
-5. Continue with the standard verification requirements below (full build + all tests).
-
-Do NOT skip the reproduction step. The test must fail before you start fixing.
-
-### Test Quality Standards
-
-- Tests must be **specific** enough that passing them means the bug is actually fixed, not just that something changed.
-- Each test should assert the **exact expected behavior**, not just "no error."
-- Regression tests should include the original bug trigger as a comment (e.g., `// Bug: scrollback was truncated when buffer exceeded 5MB`).
-
-## Feature Development Workflow
-
-When adding a new feature:
-
-1. **Implement the feature** in the source code.
-2. **Write an E2E test suite** covering the feature's key user-facing behaviors.
-3. **Run the E2E tests** (`npm run test:e2e`) and loop until all tests pass.
-4. Continue with the standard verification requirements below (full build + all tests).
-
-Do NOT consider a feature complete without an accompanying E2E test suite.
+- **Bug fixes**: Write a full test **suite** (not a single test) to reproduce the bug.
+- **Features**: Write **E2E tests** (`npm run test:e2e`), not just unit tests.
 
 ## Parallel Agent Workflow
 
-When multiple Claude instances work simultaneously in worktrees:
-
-### Task Claiming
-
-Before starting work, create a file `current_tasks/<branch-name>.md` describing the task scope and files likely to be modified. Check existing files in `current_tasks/` first to avoid overlap. Remove the file when the PR is merged.
-
-### Branch Naming
-
-Worktree branches should use descriptive names: `wt-<scope>` (e.g., `wt-fix-scrollback`, `wt-feat-search`). Avoid generic names like `wt-abc123`.
-
-### Staying in Sync
-
-Pull and rebase from master before opening a PR. If another agent's PR merges first, rebase on top of it before pushing.
-
-### Scope Boundaries
-
-Each agent should own a clearly scoped task. Avoid modifying the same files as another active agent. If overlap is unavoidable, coordinate via smaller, more frequent commits and PRs.
-
-### Task Scoping
-
-Each agent should receive a single, well-defined task when launched. Good tasks have clear boundaries:
-- "Implement search in the terminal pane" (one feature, known files)
-- "Write tests for the ring buffer module" (one module, test-only changes)
-- "Refactor daemon session cleanup logic" (one concern, contained scope)
-
-Avoid giving one agent a broad task like "improve the codebase" — it will collide with other agents. The narrower the task, the fewer merge conflicts.
+- **Task claiming**: Create `current_tasks/<branch-name>.md` with scope and files. Check for overlap first. Remove when PR merges.
+- **Branch naming**: `wt-<scope>` (e.g., `wt-fix-scrollback`, `wt-feat-search`).
+- **Stay in sync**: Rebase from master before opening a PR. If another agent merges first, rebase on top.
+- **Scope boundaries**: Each agent owns one clearly scoped task. Avoid modifying the same files as another active agent.
 
 ## Output Hygiene
 
-Rules to keep context windows clean during long agent sessions:
-
-- **Run targeted tests first**: When working on a specific crate or module, run just that crate's tests (`cargo test -p godly-daemon`) before the full suite.
-- **Summarize failures**: When tests fail, identify the root cause and state it concisely rather than pasting full stack traces.
-- **Avoid verbose flags**: Don't use `--verbose`, `--nocapture`, or similar flags unless actively debugging a specific test.
-- **Incremental verification**: Check compilation (`cargo check`) before running tests. Check one crate before all crates.
-
-### Clean Test Output
-
-Tests should produce minimal, parseable output — not walls of text that pollute the context window.
-
-- **Minimal on success**: A passing test suite should print a summary line (e.g., `45 passed, 0 failed`), not per-test details. Use the default output level; avoid `--show-output` or `--nocapture` for routine runs.
-- **Structured on failure**: Failed tests should print a single-line error identifier (e.g., `FAIL: test_ring_buffer_overflow — expected 1024 bytes, got 0`) followed by the relevant assertion, not the entire backtrace.
-- **Log to files, not stdout**: When debugging requires verbose output, redirect to a file (`cargo test 2> test-debug.log`) and read the file selectively rather than flooding the terminal.
-- **Grep-friendly format**: Error messages should be self-contained on one line so they can be found with `grep FAIL` or `grep ERROR`. Avoid multi-line error formatting in test harnesses.
-- **Pre-compute summaries**: When running large test suites, use summary flags (`--format terse` for Rust, `--reporter=dot` for JS) to get aggregate pass/fail counts without per-test noise.
+- **Run targeted tests first**: `cargo test -p godly-daemon` before the full suite.
+- **Summarize failures**: State the root cause concisely, don't paste full stack traces.
+- **Avoid verbose flags**: No `--verbose` or `--nocapture` unless actively debugging a specific test.
+- **Incremental verification**: `cargo check` before `cargo test`. One crate before all crates.
 
 ## Verification Requirements
 
@@ -152,12 +88,6 @@ Tests should produce minimal, parseable output — not walls of text that pollut
    ```
 
 3. If any step fails, fix the issues and repeat until everything passes.
-
-This catches:
-- TypeScript compilation errors
-- Rust compilation errors
-- Test failures
-- Configuration errors (tauri.conf.json, etc.)
 
 ## Architecture Overview
 
@@ -311,78 +241,6 @@ Inject `State<Arc<AutoSaveManager>>` and call `auto_save.mark_dirty()` after sta
 User input → `terminalService.writeToTerminal()` → IPC → DaemonClient → named pipe → daemon → PTY
 Shell output → daemon reader thread → named pipe → DaemonBridge → `terminal-output` event → `TerminalPane.terminal.write()`
 
-## MCP Testing Procedure
+## MCP Testing
 
-When asked to test the godly-terminal MCP, use the MCP tools directly from Claude Code. The MCP binary (`godly-mcp`) exposes 15 tools via JSON-RPC over stdio, proxied through the Tauri app via named pipe IPC.
-
-### Test Sequence
-
-Run these tests in order. Each phase builds on the previous one. Clean up all test artifacts (terminals, workspaces, worktrees) when done.
-
-**Phase 1 — Read-only queries (no side effects):**
-1. `get_current_terminal` → expect `{id, name, process_name, workspace_id}`
-2. `list_terminals` → expect array of terminal objects
-3. `list_workspaces` → expect array of workspace objects
-4. `get_notification_status` (no params) → expect `{enabled, source: "global"}`
-
-**Phase 2 — Notifications:**
-5. `notify` with `message` → expect `{success: true}`, verify chime plays
-6. `set_notification_enabled` with `terminal_id` + `enabled: false` → expect success
-7. `get_notification_status` with `terminal_id` → expect `{enabled: false, source: "terminal"}`
-8. `set_notification_enabled` with `terminal_id` + `enabled: true` → re-enable
-9. Repeat steps 6-8 for `workspace_id` instead of `terminal_id`
-
-**Phase 3 — Terminal CRUD:**
-10. `create_terminal` (basic, just `workspace_id`) → expect `{id, success: true}`
-11. `create_terminal` with `cwd` param → expect success
-12. `create_terminal` with `command` param → expect success, then `read_terminal` to verify command output appears
-13. `create_terminal` with `worktree: true` → expect `{id, worktree_path, worktree_branch}`
-14. `create_terminal` with `worktree_name` → expect custom branch name in response
-15. `rename_terminal` → rename a test terminal, verify via `list_terminals`
-16. `focus_terminal` → expect success (visual confirmation needed — see gaps)
-17. `write_to_terminal` → send `echo "MARKER"`, then `read_terminal` to verify
-18. `read_terminal` with `mode: "tail"` → expect terminal content
-19. `read_terminal` with `mode: "head"` → expect terminal content
-20. `read_terminal` with `mode: "full"` → expect terminal content
-21. `read_terminal` with `filename` param → expect file written to disk
-22. `close_terminal` → close all test terminals
-
-**Phase 4 — Workspace operations:**
-23. `create_workspace` with `name` + `folder_path` → expect `{id, success: true}`
-24. `switch_workspace` to new workspace → expect success
-25. `move_terminal_to_workspace` → move a terminal, verify via `list_terminals`
-26. `switch_workspace` back to original → expect success
-27. Clean up: close test terminals, remove worktrees via git CLI
-
-**Phase 5 — Error handling:**
-28. `write_to_terminal` with invalid ID → expect error (daemon validates: "Session not found")
-29. `read_terminal` with invalid ID → expect error (daemon validates: "Session not found")
-30. `close_terminal` with invalid ID → **BUG: returns `{success: true}` silently**
-31. `switch_workspace` with invalid ID → **BUG: returns `{success: true}` silently**
-32. `rename_terminal` with invalid ID → **BUG: returns `{success: true}` silently**
-33. `focus_terminal` with invalid ID → **BUG: returns `{success: true}` silently**
-34. `move_terminal_to_workspace` with invalid ID → **BUG: returns `{success: true}` silently**
-
-Note: Operations routed through the daemon (`write_to_terminal`, `read_terminal`) properly validate IDs.
-Operations handled by Tauri app state (`close`, `switch`, `rename`, `focus`, `move`) silently succeed with invalid IDs — they need validation added.
-
-### Cleanup Checklist
-
-After testing, ensure:
-- [ ] All test terminals are closed
-- [ ] All test worktrees are removed (`git worktree remove` + `git branch -d`)
-- [ ] Test workspace still exists (no `delete_workspace` tool — manual cleanup needed)
-
-### Known Gaps (cannot test via MCP alone)
-
-| Gap | Description | Suggested MCP Tool |
-|-----|-------------|-------------------|
-| No `delete_workspace` | Can create but not delete workspaces; leaves orphans | `delete_workspace` |
-| No `delete_worktree` | Worktrees from `create_terminal` need manual git cleanup | `delete_worktree` or auto-cleanup on `close_terminal` |
-| No `get_active_workspace` | Cannot verify `switch_workspace` actually changed the UI | `get_active_workspace` |
-| No `get_active_terminal` | Cannot verify `focus_terminal` actually switched the tab | `get_active_terminal` |
-| No plain-text `read_terminal` | Output contains raw ANSI escapes, hard to parse programmatically | Add `strip_ansi: true` param to `read_terminal` |
-| No `get_terminal_cwd` | Cannot verify `cwd` param on `create_terminal` worked | `get_terminal_cwd` or include cwd in terminal info |
-| No `resize_terminal` via MCP | The daemon supports resize but MCP doesn't expose it | `resize_terminal` |
-| Silent success on invalid IDs | `close`, `switch_workspace`, `rename`, `focus`, `move` return `{success: true}` for nonexistent IDs | Add ID validation in Tauri MCP handler before dispatching |
-| No error case testing docs | Error format inconsistent between daemon-routed and Tauri-routed tools | Standardize error responses across all tools |
+See [docs/mcp-testing.md](docs/mcp-testing.md) for the full MCP test procedure and known gaps.
