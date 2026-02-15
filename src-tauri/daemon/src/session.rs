@@ -536,6 +536,82 @@ impl DaemonSession {
         }
     }
 
+    /// Read rich grid snapshot with per-cell attributes for Canvas2D rendering.
+    pub fn read_rich_grid(&self) -> godly_protocol::types::RichGridData {
+        let vt = self.vt_parser.lock();
+        let screen = vt.screen();
+        let (num_rows, cols) = screen.size();
+        let (cursor_row, cursor_col) = screen.cursor_position();
+
+        let mut rows = Vec::with_capacity(usize::from(num_rows));
+        for row_idx in 0..num_rows {
+            let mut cells = Vec::with_capacity(usize::from(cols));
+            for col_idx in 0..cols {
+                let cell = screen.cell(row_idx, col_idx);
+                match cell {
+                    Some(c) => {
+                        cells.push(godly_protocol::types::RichGridCell {
+                            content: c.contents().to_string(),
+                            fg: color_to_hex(c.fgcolor()),
+                            bg: color_to_hex(c.bgcolor()),
+                            bold: c.bold(),
+                            dim: c.dim(),
+                            italic: c.italic(),
+                            underline: c.underline(),
+                            inverse: c.inverse(),
+                            wide: c.is_wide(),
+                            wide_continuation: c.is_wide_continuation(),
+                        });
+                    }
+                    None => {
+                        cells.push(godly_protocol::types::RichGridCell {
+                            content: String::new(),
+                            fg: "default".to_string(),
+                            bg: "default".to_string(),
+                            bold: false,
+                            dim: false,
+                            italic: false,
+                            underline: false,
+                            inverse: false,
+                            wide: false,
+                            wide_continuation: false,
+                        });
+                    }
+                }
+            }
+            let wrapped = screen.row_wrapped(row_idx);
+            rows.push(godly_protocol::types::RichGridRow { cells, wrapped });
+        }
+
+        godly_protocol::types::RichGridData {
+            rows,
+            cursor: godly_protocol::types::CursorState {
+                row: cursor_row,
+                col: cursor_col,
+            },
+            dimensions: godly_protocol::types::GridDimensions {
+                rows: num_rows,
+                cols,
+            },
+            alternate_screen: screen.alternate_screen(),
+            cursor_hidden: screen.hide_cursor(),
+            title: String::new(), // OSC title is tracked at the Tauri app level
+        }
+    }
+
+    /// Read text between two grid positions (for selection/copy).
+    pub fn read_grid_text(
+        &self,
+        start_row: u16,
+        start_col: u16,
+        end_row: u16,
+        end_col: u16,
+    ) -> String {
+        let vt = self.vt_parser.lock();
+        let screen = vt.screen();
+        screen.contents_between(start_row, start_col, end_row, end_col)
+    }
+
     /// Search the output history for a text string.
     /// Optionally strips ANSI escape sequences before matching.
     pub fn search_output_history(&self, text: &str, do_strip_ansi: bool) -> bool {
@@ -563,6 +639,52 @@ impl DaemonSession {
     #[allow(dead_code)]
     pub fn get_shell_type(&self) -> &ShellType {
         &self.shell_type
+    }
+}
+
+/// Convert a godly-vt Color to a hex string for the frontend renderer.
+fn color_to_hex(color: godly_vt::Color) -> String {
+    match color {
+        godly_vt::Color::Default => "default".to_string(),
+        godly_vt::Color::Idx(idx) => {
+            // Standard 256-color xterm palette
+            match idx {
+                // Standard 16 colors
+                0 => "#000000".to_string(),
+                1 => "#cd3131".to_string(),
+                2 => "#0dbc79".to_string(),
+                3 => "#e5e510".to_string(),
+                4 => "#2472c8".to_string(),
+                5 => "#bc3fbc".to_string(),
+                6 => "#11a8cd".to_string(),
+                7 => "#e5e5e5".to_string(),
+                8 => "#666666".to_string(),
+                9 => "#f14c4c".to_string(),
+                10 => "#23d18b".to_string(),
+                11 => "#f5f543".to_string(),
+                12 => "#3b8eea".to_string(),
+                13 => "#d670d6".to_string(),
+                14 => "#29b8db".to_string(),
+                15 => "#e5e5e5".to_string(),
+                // 216-color cube (indices 16-231)
+                16..=231 => {
+                    let i = idx - 16;
+                    let r = i / 36;
+                    let g = (i % 36) / 6;
+                    let b = i % 6;
+                    let r = if r == 0 { 0 } else { 55 + 40 * r };
+                    let g = if g == 0 { 0 } else { 55 + 40 * g };
+                    let b = if b == 0 { 0 } else { 55 + 40 * b };
+                    format!("#{:02x}{:02x}{:02x}", r, g, b)
+                }
+                // 24 grayscale (indices 232-255)
+                232..=255 => {
+                    let v = 8 + 10 * (idx - 232);
+                    format!("#{:02x}{:02x}{:02x}", v, v, v)
+                }
+            }
+        }
+        godly_vt::Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
     }
 }
 
