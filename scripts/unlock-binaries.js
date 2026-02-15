@@ -7,7 +7,15 @@ import { join } from 'path';
 
 const BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe'];
 const TARGET_DIR = join(import.meta.dirname, '..', 'src-tauri', 'target');
-const PROFILES = ['debug', 'release'];
+// Only unlock the requested profile. Default to 'debug' to avoid destroying
+// release binaries that Tauri's build.rs needs for resource path validation.
+// Pass --release or --all via: npm run unlock -- --release
+const args = process.argv.slice(2);
+const PROFILES = args.includes('--all')
+  ? ['debug', 'release']
+  : args.includes('--release')
+    ? ['release']
+    : ['debug'];
 
 async function unlockBinary(filePath) {
   const oldPath = filePath + '.old';
