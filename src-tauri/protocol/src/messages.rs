@@ -47,6 +47,10 @@ pub enum Request {
         text: String,
         strip_ansi: bool,
     },
+    /// Read the godly-vt grid (parsed terminal state) for a session.
+    ReadGrid {
+        session_id: String,
+    },
     Ping,
 }
 
@@ -63,6 +67,8 @@ pub enum Response {
     Buffer { session_id: String, data: Vec<u8> },
     LastOutputTime { epoch_ms: u64, running: bool },
     SearchResult { found: bool, running: bool },
+    /// Grid snapshot from the godly-vt terminal state engine.
+    Grid { grid: crate::types::GridData },
 }
 
 /// Asynchronous events pushed from the daemon to attached clients
