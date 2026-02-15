@@ -2,6 +2,8 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { SerializeAddon } from '@xterm/addon-serialize';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { terminalService } from '../services/terminal-service';
 import { store } from '../state/store';
@@ -13,6 +15,7 @@ export class TerminalPane {
   private terminal: Terminal;
   private fitAddon: FitAddon;
   private serializeAddon: SerializeAddon;
+  private gpuAddon: WebglAddon | CanvasAddon | null = null;
   private container: HTMLElement;
   private terminalId: string;
   private resizeObserver: ResizeObserver;
@@ -82,6 +85,7 @@ export class TerminalPane {
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
     this.terminal.open(this.container);
+    this.activateGpuRenderer();
     (this.container as any).__xterm = this.terminal;
     (this.container as any).__serializeAddon = this.serializeAddon;
     this.resizeObserver.observe(this.container);
@@ -178,6 +182,27 @@ export class TerminalPane {
     requestAnimationFrame(() => {
       this.fit();
     });
+  }
+
+  private activateGpuRenderer() {
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+        this.gpuAddon = null;
+        this.activateGpuRenderer();
+      });
+      this.terminal.loadAddon(webgl);
+      this.gpuAddon = webgl;
+    } catch {
+      try {
+        const canvas = new CanvasAddon();
+        this.terminal.loadAddon(canvas);
+        this.gpuAddon = canvas;
+      } catch {
+        // DOM renderer fallback — no action needed
+      }
+    }
   }
 
   private flushOutputBuffer() {
@@ -307,6 +332,10 @@ export class TerminalPane {
     this.resizeObserver.disconnect();
     if (this.unsubscribeOutput) {
       this.unsubscribeOutput();
+    }
+    if (this.gpuAddon) {
+      this.gpuAddon.dispose();
+      this.gpuAddon = null;
     }
     this.terminal.dispose();
     this.container.remove();
