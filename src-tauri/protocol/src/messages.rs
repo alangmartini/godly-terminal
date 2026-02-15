@@ -51,6 +51,18 @@ pub enum Request {
     ReadGrid {
         session_id: String,
     },
+    /// Read rich grid snapshot with per-cell attributes for Canvas2D rendering.
+    ReadRichGrid {
+        session_id: String,
+    },
+    /// Read text between two grid positions (for selection/copy).
+    ReadGridText {
+        session_id: String,
+        start_row: u16,
+        start_col: u16,
+        end_row: u16,
+        end_col: u16,
+    },
     Ping,
 }
 
@@ -69,6 +81,10 @@ pub enum Response {
     SearchResult { found: bool, running: bool },
     /// Grid snapshot from the godly-vt terminal state engine.
     Grid { grid: crate::types::GridData },
+    /// Rich grid snapshot with per-cell attributes for Canvas2D rendering.
+    RichGrid { grid: crate::types::RichGridData },
+    /// Text extracted from grid between two positions.
+    GridText { text: String },
 }
 
 /// Asynchronous events pushed from the daemon to attached clients
