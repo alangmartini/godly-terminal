@@ -49,6 +49,27 @@ pub fn strip_ansi(input: &str) -> String {
     out
 }
 
+/// Truncate terminal output by mode and line count.
+/// - "full" → return entire text
+/// - "head" → first N lines (default 100)
+/// - "tail" (default) → last N lines (default 100)
+pub fn truncate_output(text: &str, mode: Option<&str>, lines: Option<usize>) -> String {
+    let n = lines.unwrap_or(100);
+    match mode.unwrap_or("tail") {
+        "full" => text.to_string(),
+        "head" => {
+            let result: Vec<&str> = text.lines().take(n).collect();
+            result.join("\n")
+        }
+        _ => {
+            // "tail" or any unrecognized mode
+            let all_lines: Vec<&str> = text.lines().collect();
+            let start = all_lines.len().saturating_sub(n);
+            all_lines[start..].join("\n")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +116,38 @@ mod tests {
     fn test_strip_ansi_two_byte_sequence() {
         // e.g. \x1b= (set alternate keypad mode)
         assert_eq!(strip_ansi("\x1b=text"), "text");
+    }
+
+    #[test]
+    fn test_truncate_output_tail_default() {
+        let text = (1..=200).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let result = truncate_output(&text, None, None);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 100);
+        assert_eq!(lines[0], "line 101");
+        assert_eq!(lines[99], "line 200");
+    }
+
+    #[test]
+    fn test_truncate_output_head() {
+        let text = (1..=200).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let result = truncate_output(&text, Some("head"), Some(5));
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[0], "line 1");
+        assert_eq!(lines[4], "line 5");
+    }
+
+    #[test]
+    fn test_truncate_output_full() {
+        let text = "line 1\nline 2\nline 3";
+        let result = truncate_output(text, Some("full"), None);
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_truncate_output_empty() {
+        let result = truncate_output("", None, None);
+        assert_eq!(result, "");
     }
 }
