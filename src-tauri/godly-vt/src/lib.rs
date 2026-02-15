@@ -59,6 +59,7 @@ mod parser;
 mod perform;
 mod row;
 mod screen;
+pub mod simd;
 pub mod state_machine;
 mod term;
 
