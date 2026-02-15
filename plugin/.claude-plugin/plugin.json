@@ -1,0 +1,8 @@
+{
+  "name": "godly-terminal",
+  "description": "Skills and MCP server for Godly Terminal — a Windows terminal with tmux-style session persistence via a background daemon. Provides terminal management, workspace operations, daemon isolation, and notification tools.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Alan Martini"
+  }
+}

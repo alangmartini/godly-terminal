@@ -106,6 +106,7 @@ pub fn run() {
             commands::reorder_tabs,
             commands::set_split_view,
             commands::clear_split_view,
+            commands::get_mcp_state,
             commands::get_wsl_distributions,
             commands::is_wsl_available,
             commands::toggle_worktree_mode,

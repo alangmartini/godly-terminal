@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 dist/
 **/target/
+plugin/bin/
 
 # Generated files
 src-tauri/gen/

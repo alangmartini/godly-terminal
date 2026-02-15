@@ -68,6 +68,7 @@ fn create_mcp_window(app_handle: &AppHandle) -> Result<(), String> {
         .inner_size(1200.0, 800.0)
         .resizable(true)
         .decorations(true)
+        .focused(false)
         .build()
     {
         Ok(_) => {
