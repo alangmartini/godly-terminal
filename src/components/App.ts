@@ -409,9 +409,50 @@ export class App {
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
 
-    // MCP window: no layout to restore, just wait for events
+    // MCP window: bootstrap state from backend (handles race with mcp-terminal-created event)
     if (store.windowMode === 'mcp') {
-      console.log('[App] MCP mode — waiting for agent terminals');
+      console.log('[App] MCP mode — loading existing agent terminals');
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const mcpState = await invoke<{
+          workspace: { id: string; name: string; folder_path: string; tab_order: string[]; shell_type?: BackendShellType; worktree_mode?: boolean; claude_code_mode?: boolean } | null;
+          terminals: Array<{ id: string; workspace_id: string; name: string; process_name: string }>;
+        }>('get_mcp_state');
+
+        if (mcpState.workspace) {
+          const ws = mcpState.workspace;
+          const existing = store.getState().workspaces.find(w => w.id === ws.id);
+          if (!existing) {
+            store.addWorkspace({
+              id: ws.id,
+              name: ws.name,
+              folderPath: ws.folder_path,
+              tabOrder: ws.tab_order,
+              shellType: convertShellType(ws.shell_type),
+              worktreeMode: ws.worktree_mode ?? false,
+              claudeCodeMode: ws.claude_code_mode ?? false,
+            });
+          }
+          store.setActiveWorkspace(ws.id);
+
+          for (const t of mcpState.terminals) {
+            if (!store.getState().terminals.find(term => term.id === t.id)) {
+              store.addTerminal({
+                id: t.id,
+                workspaceId: t.workspace_id,
+                name: t.name,
+                processName: t.process_name,
+                order: 0,
+              });
+            }
+          }
+          console.log('[App] MCP mode — loaded', mcpState.terminals.length, 'terminals');
+        } else {
+          console.log('[App] MCP mode — no agent workspace yet, waiting for events');
+        }
+      } catch (error) {
+        console.error('[App] MCP mode — failed to load state:', error);
+      }
       return;
     }
 
