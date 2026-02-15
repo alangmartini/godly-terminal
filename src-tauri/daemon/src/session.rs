@@ -608,6 +608,83 @@ impl DaemonSession {
         }
     }
 
+    /// Read differential rich grid snapshot: only rows that changed since last call.
+    /// Falls back to full repaint when >=50% of rows are dirty (e.g. after scroll).
+    pub fn read_rich_grid_diff(&self) -> godly_protocol::types::RichGridDiff {
+        let mut vt = self.vt_parser.lock();
+        let screen = vt.screen_mut();
+        let (num_rows, cols) = screen.size();
+        let (cursor_row, cursor_col) = screen.cursor_position();
+
+        let dirty_flags = screen.take_dirty_rows();
+        let dirty_count = dirty_flags.iter().filter(|&&d| d).count();
+        let total_rows = usize::from(num_rows);
+        let full_repaint = dirty_count * 2 >= total_rows;
+
+        // Read the screen immutably now that we've taken dirty flags
+        let screen = vt.screen();
+        let mut dirty_rows = Vec::with_capacity(if full_repaint { total_rows } else { dirty_count });
+
+        for row_idx in 0..num_rows {
+            if full_repaint || dirty_flags.get(usize::from(row_idx)).copied().unwrap_or(false) {
+                let mut cells = Vec::with_capacity(usize::from(cols));
+                for col_idx in 0..cols {
+                    let cell = screen.cell(row_idx, col_idx);
+                    match cell {
+                        Some(c) => {
+                            cells.push(godly_protocol::types::RichGridCell {
+                                content: c.contents().to_string(),
+                                fg: color_to_hex(c.fgcolor()),
+                                bg: color_to_hex(c.bgcolor()),
+                                bold: c.bold(),
+                                dim: c.dim(),
+                                italic: c.italic(),
+                                underline: c.underline(),
+                                inverse: c.inverse(),
+                                wide: c.is_wide(),
+                                wide_continuation: c.is_wide_continuation(),
+                            });
+                        }
+                        None => {
+                            cells.push(godly_protocol::types::RichGridCell {
+                                content: String::new(),
+                                fg: "default".to_string(),
+                                bg: "default".to_string(),
+                                bold: false,
+                                dim: false,
+                                italic: false,
+                                underline: false,
+                                inverse: false,
+                                wide: false,
+                                wide_continuation: false,
+                            });
+                        }
+                    }
+                }
+                let wrapped = screen.row_wrapped(row_idx);
+                dirty_rows.push((row_idx, godly_protocol::types::RichGridRow { cells, wrapped }));
+            }
+        }
+
+        godly_protocol::types::RichGridDiff {
+            dirty_rows,
+            cursor: godly_protocol::types::CursorState {
+                row: cursor_row,
+                col: cursor_col,
+            },
+            dimensions: godly_protocol::types::GridDimensions {
+                rows: num_rows,
+                cols,
+            },
+            alternate_screen: screen.alternate_screen(),
+            cursor_hidden: screen.hide_cursor(),
+            title: String::new(),
+            scrollback_offset: screen.scrollback(),
+            total_scrollback: screen.scrollback_count(),
+            full_repaint,
+        }
+    }
+
     /// Read text between two grid positions (for selection/copy).
     pub fn read_grid_text(
         &self,
