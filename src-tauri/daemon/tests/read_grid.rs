@@ -16,6 +16,7 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use godly_protocol::{DaemonMessage, GridData, Request, Response, ShellType};
+use godly_protocol::types::RichGridData;
 
 // ---------------------------------------------------------------------------
 // Helpers (DaemonFixture pattern — see handler_starvation.rs)
@@ -514,4 +515,188 @@ fn test_read_grid_without_attach() {
             session_id: session_id.clone(),
         },
     );
+}
+
+// ---------------------------------------------------------------------------
+// Scrollback integration tests
+// ---------------------------------------------------------------------------
+
+fn read_rich_grid(pipe: &mut std::fs::File, session_id: &str) -> RichGridData {
+    let resp = send_request(
+        pipe,
+        &Request::ReadRichGrid {
+            session_id: session_id.to_string(),
+        },
+    );
+    match resp {
+        Response::RichGrid { grid } => grid,
+        other => panic!("Expected RichGrid, got: {:?}", other),
+    }
+}
+
+fn wait_for_rich_grid_text(
+    pipe: &mut std::fs::File,
+    session_id: &str,
+    expected: &str,
+    timeout: Duration,
+) -> RichGridData {
+    let start = Instant::now();
+    loop {
+        let grid = read_rich_grid(pipe, session_id);
+        let full_text: String = grid
+            .rows
+            .iter()
+            .map(|r| r.cells.iter().map(|c| c.content.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if full_text.contains(expected) {
+            return grid;
+        }
+        if start.elapsed() > timeout {
+            panic!("Timeout waiting for rich grid to contain {:?}", expected);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// After enough output, RichGridData reports total_scrollback > 0
+/// and scrollback_offset = 0 (live view).
+#[test]
+fn test_scrollback_fields_in_rich_grid() {
+    let daemon = DaemonFixture::spawn("scroll-fields");
+    let mut pipe = daemon.connect();
+
+    let session_id = "scroll-fields".to_string();
+    let resp = send_request(
+        &mut pipe,
+        &Request::CreateSession {
+            id: session_id.clone(),
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 10,
+            cols: 80,
+            env: None,
+        },
+    );
+    assert!(matches!(resp, Response::SessionCreated { .. }));
+
+    let resp = send_request(
+        &mut pipe,
+        &Request::Attach { session_id: session_id.clone() },
+    );
+    assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
+    std::thread::sleep(Duration::from_secs(2));
+
+    let marker = "SCROLL_END_MARKER";
+    let cmd = format!("for /L %i in (1,1,30) do @echo LINE_%i\r\necho {}\r\n", marker);
+    send_request(
+        &mut pipe,
+        &Request::Write { session_id: session_id.clone(), data: cmd.into_bytes() },
+    );
+
+    let grid = wait_for_rich_grid_text(&mut pipe, &session_id, marker, Duration::from_secs(10));
+    assert_eq!(grid.scrollback_offset, 0, "Should be in live view");
+    assert!(grid.total_scrollback > 0, "Should have scrollback rows, got {}", grid.total_scrollback);
+
+    send_request(&mut pipe, &Request::CloseSession { session_id: session_id.clone() });
+}
+
+/// SetScrollback changes the viewport offset visible via ReadRichGrid.
+#[test]
+fn test_set_scrollback_changes_viewport() {
+    let daemon = DaemonFixture::spawn("scroll-viewport");
+    let mut pipe = daemon.connect();
+
+    let session_id = "scroll-vp".to_string();
+    let resp = send_request(
+        &mut pipe,
+        &Request::CreateSession {
+            id: session_id.clone(),
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 10,
+            cols: 80,
+            env: None,
+        },
+    );
+    assert!(matches!(resp, Response::SessionCreated { .. }));
+
+    let resp = send_request(
+        &mut pipe,
+        &Request::Attach { session_id: session_id.clone() },
+    );
+    assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
+    std::thread::sleep(Duration::from_secs(2));
+
+    let marker = "VP_DONE";
+    let cmd = format!("for /L %i in (1,1,30) do @echo LINE_%i\r\necho {}\r\n", marker);
+    send_request(
+        &mut pipe,
+        &Request::Write { session_id: session_id.clone(), data: cmd.into_bytes() },
+    );
+    wait_for_rich_grid_text(&mut pipe, &session_id, marker, Duration::from_secs(10));
+
+    // Capture live view
+    let live_grid = read_rich_grid(&mut pipe, &session_id);
+    let live_row0: String = live_grid.rows[0].cells.iter().map(|c| c.content.as_str()).collect();
+
+    // Scroll up by 5
+    let resp = send_request(
+        &mut pipe,
+        &Request::SetScrollback { session_id: session_id.clone(), offset: 5 },
+    );
+    assert!(matches!(resp, Response::Ok));
+
+    let scrolled = read_rich_grid(&mut pipe, &session_id);
+    assert!(scrolled.scrollback_offset > 0, "Should have non-zero offset after SetScrollback(5), got {}", scrolled.scrollback_offset);
+    let scrolled_row0: String = scrolled.rows[0].cells.iter().map(|c| c.content.as_str()).collect();
+    assert_ne!(live_row0.trim(), scrolled_row0.trim(), "Scrolled viewport should differ from live");
+
+    // Scroll back to bottom
+    let resp = send_request(
+        &mut pipe,
+        &Request::SetScrollback { session_id: session_id.clone(), offset: 0 },
+    );
+    assert!(matches!(resp, Response::Ok));
+    let bottom = read_rich_grid(&mut pipe, &session_id);
+    assert_eq!(bottom.scrollback_offset, 0);
+
+    send_request(&mut pipe, &Request::CloseSession { session_id: session_id.clone() });
+}
+
+/// SetScrollback with offset > total clamps to available scrollback.
+#[test]
+fn test_scrollback_offset_clamped() {
+    let daemon = DaemonFixture::spawn("scroll-clamp");
+    let mut pipe = daemon.connect();
+
+    let session_id = "scroll-clamp".to_string();
+    let resp = send_request(
+        &mut pipe,
+        &Request::CreateSession {
+            id: session_id.clone(),
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 10,
+            cols: 80,
+            env: None,
+        },
+    );
+    assert!(matches!(resp, Response::SessionCreated { .. }));
+
+    // Large offset on empty scrollback → clamps to 0
+    let resp = send_request(
+        &mut pipe,
+        &Request::SetScrollback { session_id: session_id.clone(), offset: 99999 },
+    );
+    assert!(matches!(resp, Response::Ok));
+
+    let grid = read_rich_grid(&mut pipe, &session_id);
+    assert!(
+        grid.scrollback_offset <= grid.total_scrollback,
+        "Offset {} should be <= total {}",
+        grid.scrollback_offset, grid.total_scrollback
+    );
+
+    send_request(&mut pipe, &Request::CloseSession { session_id: session_id.clone() });
 }
