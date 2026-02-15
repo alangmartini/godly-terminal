@@ -41,6 +41,26 @@ pub fn get_grid_dimensions(
     }
 }
 
+/// Set the scrollback viewport offset for a terminal session.
+/// offset=0 means live view, offset>0 scrolls into history.
+#[tauri::command]
+pub fn set_scrollback(
+    terminal_id: String,
+    offset: usize,
+    daemon: State<Arc<DaemonClient>>,
+) -> Result<(), String> {
+    let request = Request::SetScrollback {
+        session_id: terminal_id,
+        offset,
+    };
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::Ok => Ok(()),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
+}
+
 /// Get selected text from the terminal grid between two positions.
 #[tauri::command]
 pub fn get_grid_text(
