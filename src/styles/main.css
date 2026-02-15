@@ -290,11 +290,6 @@ html, body {
   display: block;
 }
 
-.terminal-pane .xterm {
-  height: 100%;
-  padding: 4px;
-}
-
 /* Split mode: container becomes flex */
 .terminal-container.split-horizontal {
   display: flex;

@@ -1,7 +1,7 @@
 /**
- * Creates a key event handler for xterm.js terminals.
+ * Creates a key event handler for terminal input.
  *
- * Returns false to block the event from reaching xterm.js,
+ * Returns false to block the event from reaching the terminal,
  * true to let it pass through normally.
  */
 export function createTerminalKeyHandler(

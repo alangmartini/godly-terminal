@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Terminal } from '@xterm/headless';
 import { store } from '../state/store';
 import { getDisplayName } from './TabBar';
 
-// Integration test: OSC escape sequences → xterm.js parser → store → tab display.
-// Uses @xterm/headless so we get a real xterm.js parser without needing a DOM.
+// Integration test: OSC title from grid snapshot -> store -> tab display.
+//
+// In the godly-vt pipeline, the daemon parses OSC escape sequences and the
+// parsed title is included in the RichGridData snapshot's `title` field.
+// When TerminalPane receives a snapshot, it calls:
+//   store.updateTerminal(id, { oscTitle: title || undefined })
+//
+// This test verifies the store + tab display behavior, which is the same
+// regardless of whether the title came from xterm.js or godly-vt.
 
-describe('OSC title integration', () => {
+describe('OSC title integration (godly-vt pipeline)', () => {
   const TERMINAL_ID = 'osc-test-terminal';
 
   beforeEach(() => {
@@ -21,112 +27,78 @@ describe('OSC title integration', () => {
     });
   });
 
-  function createWiredTerminal(): Terminal {
-    const terminal = new Terminal();
-    terminal.onTitleChange((title) => {
-      store.updateTerminal(TERMINAL_ID, { oscTitle: title || undefined });
-    });
-    return terminal;
-  }
-
-  function writeOscAndFlush(terminal: Terminal, seq: string): Promise<void> {
-    return new Promise((resolve) => {
-      terminal.write(seq, resolve);
-    });
+  /**
+   * Simulate what TerminalPane does when it receives a grid snapshot with a title.
+   * The renderer fires onTitleChange, which calls:
+   *   store.updateTerminal(id, { oscTitle: title || undefined })
+   */
+  function simulateTitleFromSnapshot(title: string) {
+    store.updateTerminal(TERMINAL_ID, { oscTitle: title || undefined });
   }
 
   function getStoredTerminal() {
     return store.getState().terminals.find(t => t.id === TERMINAL_ID)!;
   }
 
-  it('OSC 0 sequence updates store oscTitle (like Claude Code emitting \\e]0;title\\a)', async () => {
-    const terminal = createWiredTerminal();
-
-    // Claude Code emits: ESC ] 0 ; <title> BEL
-    await writeOscAndFlush(terminal, '\x1b]0;claude: fixing scrollback bug\x07');
+  it('grid snapshot title updates store oscTitle (like Claude Code emitting OSC 0)', () => {
+    // Daemon parses: ESC ] 0 ; <title> BEL and puts it in snapshot.title
+    simulateTitleFromSnapshot('claude: fixing scrollback bug');
 
     const t = getStoredTerminal();
     expect(t.oscTitle).toBe('claude: fixing scrollback bug');
     expect(getDisplayName(t)).toBe('claude: fixing scrollback bug');
-
-    terminal.dispose();
   });
 
-  it('OSC 2 sequence also sets the title (alternate form used by some programs)', async () => {
-    const terminal = createWiredTerminal();
-
-    // OSC 2 = "Set Window Title" — functionally same as OSC 0 for tab titles
-    await writeOscAndFlush(terminal, '\x1b]2;vim README.md\x07');
-
-    expect(getStoredTerminal().oscTitle).toBe('vim README.md');
-
-    terminal.dispose();
-  });
-
-  it('successive OSC sequences update the title (Claude Code changes task status)', async () => {
-    const terminal = createWiredTerminal();
-
-    await writeOscAndFlush(terminal, '\x1b]0;claude: reading files\x07');
+  it('successive snapshots update the title (Claude Code changes task status)', () => {
+    simulateTitleFromSnapshot('claude: reading files');
     expect(getDisplayName(getStoredTerminal())).toBe('claude: reading files');
 
-    await writeOscAndFlush(terminal, '\x1b]0;claude: running tests\x07');
+    simulateTitleFromSnapshot('claude: running tests');
     expect(getDisplayName(getStoredTerminal())).toBe('claude: running tests');
-
-    terminal.dispose();
   });
 
-  it('OSC title embedded in normal output is still parsed', async () => {
-    const terminal = createWiredTerminal();
-
-    // Real terminal output: regular text mixed with an OSC sequence
-    await writeOscAndFlush(terminal, 'Building project...\r\n\x1b]0;npm run build\x07Done.\r\n');
-
-    expect(getStoredTerminal().oscTitle).toBe('npm run build');
-
-    terminal.dispose();
-  });
-
-  it('ST terminator (ESC \\) works as well as BEL (\\x07)', async () => {
-    const terminal = createWiredTerminal();
-
-    // Some programs use ESC \ (ST) instead of BEL to terminate OSC
-    await writeOscAndFlush(terminal, '\x1b]0;htop\x1b\\');
-
-    expect(getStoredTerminal().oscTitle).toBe('htop');
-
-    terminal.dispose();
-  });
-
-  it('empty OSC title clears oscTitle back to undefined', async () => {
-    const terminal = createWiredTerminal();
-
-    await writeOscAndFlush(terminal, '\x1b]0;something\x07');
+  it('empty title clears oscTitle back to undefined', () => {
+    simulateTitleFromSnapshot('something');
     expect(getStoredTerminal().oscTitle).toBe('something');
 
-    // Program clears its title (e.g., on exit) — xterm.js fires onTitleChange('')
-    await writeOscAndFlush(terminal, '\x1b]0;\x07');
+    // Program clears its title (e.g., on exit) — daemon returns empty string
+    simulateTitleFromSnapshot('');
     expect(getStoredTerminal().oscTitle).toBeUndefined();
 
     // Display falls back to name since oscTitle is cleared
     expect(getDisplayName(getStoredTerminal())).toBe('Terminal');
-
-    terminal.dispose();
   });
 
-  it('userRenamed tab is not affected by OSC titles', async () => {
+  it('userRenamed tab is not affected by OSC titles', () => {
     // Simulate user double-click rename
     store.updateTerminal(TERMINAL_ID, { name: 'My Build Tab', userRenamed: true });
 
-    const terminal = createWiredTerminal();
-
-    await writeOscAndFlush(terminal, '\x1b]0;some program title\x07');
+    simulateTitleFromSnapshot('some program title');
 
     const t = getStoredTerminal();
     // OSC title IS stored (in case user un-renames later)
     expect(t.oscTitle).toBe('some program title');
     // But getDisplayName returns the user-chosen name
     expect(getDisplayName(t)).toBe('My Build Tab');
+  });
 
-    terminal.dispose();
+  it('title persists across multiple renders with the same title', () => {
+    simulateTitleFromSnapshot('npm run build');
+    simulateTitleFromSnapshot('npm run build');
+    simulateTitleFromSnapshot('npm run build');
+
+    expect(getStoredTerminal().oscTitle).toBe('npm run build');
+  });
+
+  it('long OSC title is stored as-is (no truncation at store level)', () => {
+    const longTitle = 'a'.repeat(500);
+    simulateTitleFromSnapshot(longTitle);
+
+    expect(getStoredTerminal().oscTitle).toBe(longTitle);
+  });
+
+  it('title with special characters is preserved', () => {
+    simulateTitleFromSnapshot('vim ~/projects/godly-terminal/src/main.ts [+]');
+    expect(getStoredTerminal().oscTitle).toBe('vim ~/projects/godly-terminal/src/main.ts [+]');
   });
 });
