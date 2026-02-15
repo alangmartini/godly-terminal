@@ -41,6 +41,10 @@ pub struct DaemonSession {
     /// Epoch ms of the last PTY output. Used by WaitForIdle to detect when
     /// terminal output has stopped.
     last_output_epoch_ms: Arc<AtomicU64>,
+    /// godly-vt terminal state engine — parses all PTY output and maintains an
+    /// in-memory grid. Used by ReadGrid to provide clean, parsed terminal content
+    /// without ANSI escape stripping.
+    vt_parser: Arc<Mutex<godly_vt::Parser>>,
 }
 
 impl DaemonSession {
@@ -127,6 +131,8 @@ impl DaemonSession {
             .as_millis() as u64;
         let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
 
+        let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 0)));
+
         // Spawn reader thread that routes output to either the attached client or ring buffer
         let reader_master = master.clone();
         let reader_running = running.clone();
@@ -136,6 +142,7 @@ impl DaemonSession {
         let session_id = id.clone();
         let reader_attached = is_attached_flag.clone();
         let reader_last_output = last_output_epoch_ms.clone();
+        let reader_vt = vt_parser.clone();
 
         thread::spawn(move || {
             let mut reader = {
@@ -178,6 +185,12 @@ impl DaemonSession {
                         {
                             let mut history = reader_history.lock();
                             append_to_ring(&mut history, &buf[..n]);
+                        }
+
+                        // Feed PTY output into godly-vt parser for grid state
+                        {
+                            let mut vt = reader_vt.lock();
+                            vt.process(&buf[..n]);
                         }
 
                         let data = buf[..n].to_vec();
@@ -323,6 +336,7 @@ impl DaemonSession {
             is_attached_flag,
             output_history,
             last_output_epoch_ms,
+            vt_parser,
         })
     }
 
@@ -426,7 +440,7 @@ impl DaemonSession {
         Ok(())
     }
 
-    /// Resize the PTY
+    /// Resize the PTY and update the godly-vt parser dimensions.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
         let master = self.master.lock();
         master
@@ -436,7 +450,16 @@ impl DaemonSession {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| format!("Failed to resize pty: {}", e))
+            .map_err(|e| format!("Failed to resize pty: {}", e))?;
+
+        // Keep the godly-vt parser in sync with the PTY size so that
+        // ReadGrid returns a grid matching the current terminal dimensions.
+        {
+            let mut vt = self.vt_parser.lock();
+            vt.screen_mut().set_size(rows, cols);
+        }
+
+        Ok(())
     }
 
     /// Check if the session is still running
@@ -493,6 +516,24 @@ impl DaemonSession {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64
+    }
+
+    /// Read the godly-vt grid state as a GridData snapshot.
+    /// Returns plain-text rows (no ANSI escapes) plus cursor position.
+    pub fn read_grid(&self) -> godly_protocol::GridData {
+        let vt = self.vt_parser.lock();
+        let screen = vt.screen();
+        let (num_rows, cols) = screen.size();
+        let (cursor_row, cursor_col) = screen.cursor_position();
+        let rows: Vec<String> = screen.rows(0, cols).collect();
+        godly_protocol::GridData {
+            rows,
+            cursor_row,
+            cursor_col,
+            cols,
+            num_rows,
+            alternate_screen: screen.alternate_screen(),
+        }
     }
 
     /// Search the output history for a text string.
