@@ -883,25 +883,9 @@ fn to_protocol_shell_type(st: &crate::state::ShellType) -> godly_protocol::Shell
     }
 }
 
-/// Truncate terminal output by mode and line count.
-/// - "full" → return entire text
-/// - "head" → first N lines (default 100)
-/// - "tail" (default) → last N lines (default 100)
+/// Re-export truncate_output from the shared protocol crate.
 fn truncate_output(text: &str, mode: Option<&str>, lines: Option<usize>) -> String {
-    let n = lines.unwrap_or(100);
-    match mode.unwrap_or("tail") {
-        "full" => text.to_string(),
-        "head" => {
-            let result: Vec<&str> = text.lines().take(n).collect();
-            result.join("\n")
-        }
-        _ => {
-            // "tail" or any unrecognized mode
-            let all_lines: Vec<&str> = text.lines().collect();
-            let start = all_lines.len().saturating_sub(n);
-            all_lines[start..].join("\n")
-        }
-    }
+    godly_protocol::ansi::truncate_output(text, mode, lines)
 }
 
 /// Convert protocol ShellType to app ShellType
