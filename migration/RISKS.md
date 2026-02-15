@@ -115,6 +115,9 @@
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-02-15 | Fork vt100 + vendor vte (not use as dependency) | Full ownership, avoid upstream breakage |
+| 2026-02-15 | Elect MIT for vendored vte code (dual Apache-2.0 OR MIT) | Simpler compliance, consistent with vt100's MIT |
+| 2026-02-15 | Require `THIRD-PARTY-LICENSES` + per-file headers for forked code | MIT requires preserving copyright notice in all copies |
+| 2026-02-15 | Clean-room policy for Kitty/iTerm2 protocol implementations | Both source projects are GPL; implement from public specs only |
 | 2026-02-15 | Extensible CellContent enum (not fixed byte array) | Enables images, AI annotations, future features |
 | 2026-02-15 | SIMD via `std::arch` + `memchr` + `simdutf8` | Maximum performance with minimal dependencies |
 | 2026-02-15 | Image priority: Kitty > iTerm2 > Sixel | Kitty is most capable and fits daemon arch |

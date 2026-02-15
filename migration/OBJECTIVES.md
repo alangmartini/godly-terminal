@@ -28,7 +28,11 @@
 - [ ] **Single crate**: godly-vt is one crate in our workspace with vte parser vendored as a module — no external terminal state dependencies
 - [ ] **Custom Cell type**: Our Cell struct has extensible fields beyond what vt100/alacritty offer
 - [ ] **No upstream breakage risk**: Updating Rust toolchain or other deps never breaks our terminal state engine
-- [ ] **MIT license compliance**: Attribution preserved, license file included in crate
+- [ ] **License compliance**:
+  - [ ] `LICENSE-vt100` file in crate root with original copyright notice from doy/vt100-rust (MIT)
+  - [ ] `LICENSE-MIT` in `src/state_machine/` with original copyright notice from alacritty/vte (MIT elected from dual Apache-2.0 OR MIT)
+  - [ ] `THIRD-PARTY-LICENSES` file listing both upstream projects, authors, URLs, and full license texts
+  - [ ] Header comments in all forked/vendored files noting original project, copyright, and license
 
 ### Measurable target
 - 0 external crate dependencies for terminal parsing/state (only std + unicode-width)

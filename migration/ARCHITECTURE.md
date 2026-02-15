@@ -102,6 +102,45 @@ name = "throughput"
 harness = false
 ```
 
+## Licensing & Attribution
+
+godly-vt is licensed MIT, but contains vendored/forked code from two upstream projects with their own copyright. Both use permissive licenses that allow this, **provided attribution is preserved**.
+
+| Upstream | License | What we use | Location in godly-vt |
+|----------|---------|-------------|---------------------|
+| [doy/vt100-rust](https://github.com/doy/vt100-rust) | MIT | Forked — grid, screen, cell, row, attrs, term, parser wrapper | `src/` (most files) |
+| [alacritty/vte](https://github.com/alacritty/vte) | Apache-2.0 OR MIT (we elect **MIT**) | Vendored — state machine, params, UTF-8 handling | `src/state_machine/` |
+
+### Required files in the crate
+
+```
+src-tauri/godly-vt/
+  LICENSE                    ← godly-vt's own MIT license
+  LICENSE-vt100              ← original MIT license + copyright from doy/vt100-rust
+  THIRD-PARTY-LICENSES       ← consolidated attribution for both upstreams
+  src/
+    state_machine/
+      LICENSE-MIT            ← original MIT license + copyright from alacritty/vte
+```
+
+### Source file headers
+
+Every forked/vendored file must include a header comment:
+
+```rust
+// Originally from <project> (<url>)
+// Copyright (c) <year> <author>
+// Licensed under MIT — see LICENSE-<name> in this crate
+// Modified for godly-vt
+```
+
+### Clean-room policy for protocol implementations
+
+The Kitty graphics protocol (GPLv3 source) and iTerm2 inline images (GPLv2 source) are implemented **from their publicly documented specifications only** — never by referencing or copying source code from those GPL-licensed projects. This is standard practice (WezTerm, Ghostty, and others do the same).
+
+- Kitty spec: https://sw.kovidgoyal.net/kitty/graphics-protocol/
+- iTerm2 spec: https://iterm2.com/documentation-images.html
+
 ## Key Design Decisions
 
 ### 1. Cell Type — Extensible via Enum
