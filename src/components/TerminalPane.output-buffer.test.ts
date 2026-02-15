@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Bug C1: Each terminal-output event triggered a separate xterm.js write() call.
-// Under heavy output (hundreds of events/sec), each write() runs the parser
-// synchronously, saturating the main thread. Fix: buffer chunks and flush once
-// per animation frame.
+// Bug C1: Each terminal-output event triggered a separate render call.
+// Under heavy output (hundreds of events/sec), each call runs synchronously,
+// saturating the main thread. Fix: buffer events and flush once per animation
+// frame via debounced grid snapshot requests.
 //
 // This test exercises the buffering + flush logic extracted from TerminalPane.
 

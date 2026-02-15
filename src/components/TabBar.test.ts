@@ -67,7 +67,7 @@ describe('getDisplayName', () => {
   });
 
   it('treats empty-string oscTitle as absent (falls through to name)', () => {
-    // xterm.js may fire onTitleChange('') when title is cleared
+    // godly-vt may return an empty title string when title is cleared
     expect(getDisplayName(terminal({
       name: 'Main',
       oscTitle: '',

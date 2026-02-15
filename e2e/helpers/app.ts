@@ -6,7 +6,7 @@
  * browser.$() / browser.$$().
  *
  * Uses browser.executeAsync() + Tauri IPC for terminal I/O since
- * browser.keys() doesn't reliably reach xterm.js in WebView2.
+ * browser.keys() doesn't reliably reach the terminal canvas in WebView2.
  */
 
 /**

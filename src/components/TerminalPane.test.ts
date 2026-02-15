@@ -25,7 +25,7 @@ function keyup(key: string, opts: { ctrlKey?: boolean; shiftKey?: boolean; altKe
 
 describe('isAppShortcut', () => {
   // Bug: keyboard shortcuts stopped working when text was selected in the terminal
-  // because xterm.js consumed the keydown event as terminal input (e.g. Ctrl+T = ASCII DC4).
+  // because the key handler sent them to the PTY as terminal input (e.g. Ctrl+T = ASCII DC4).
 
   it('returns true for Ctrl+T (new terminal)', () => {
     expect(isAppShortcut(keydown('t', { ctrlKey: true }))).toBe(true);
@@ -98,7 +98,7 @@ describe('isAppShortcut', () => {
 
 describe('isTerminalControlKey', () => {
   // Bug: WebView2 intercepts Ctrl+C (copy) and Ctrl+Z (undo) at the browser
-  // level, preventing xterm.js from sending SIGINT/SIGTSTP to the PTY.
+  // level, preventing the terminal from sending SIGINT/SIGTSTP to the PTY.
   // These keys need event.preventDefault() so the browser doesn't consume them.
 
   it('returns true for Ctrl+C (SIGINT — browser would intercept as copy)', () => {
@@ -266,7 +266,7 @@ describe('Terminal key event handler', () => {
       const event = { type: 'keydown', key: 'Enter', shiftKey: true, ctrlKey: true } as KeyboardEvent;
       const result = handler(event);
 
-      // Ctrl+Shift+Enter should pass through to xterm.js, not trigger Shift+Enter handler
+      // Ctrl+Shift+Enter should pass through to the PTY, not trigger Shift+Enter handler
       expect(result).toBe(true);
       expect(writeData).not.toHaveBeenCalled();
     });

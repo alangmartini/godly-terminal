@@ -137,18 +137,19 @@ describe('Claude Code Mode', () => {
     // Wait for shell to initialize
     await browser.pause(3000);
 
-    // Read the terminal buffer of the newly active terminal
-    const text = await browser.execute(() => {
-      const pane = document.querySelector('.terminal-pane.active') as any;
-      if (!pane?.__xterm) return '';
-      const term = pane.__xterm;
-      const buf = term.buffer.active;
-      const lines: string[] = [];
-      for (let i = 0; i < buf.length; i++) {
-        const line = buf.getLine(i);
-        if (line) lines.push(line.translateToString(true));
-      }
-      return lines.join('\n');
+    // Read the terminal grid text via Tauri IPC
+    const text = await browser.executeAsync(async (done: (result: string) => void) => {
+      try {
+        const pane = document.querySelector('.terminal-pane.active') as any;
+        const terminalId = pane?.getAttribute('data-terminal-id');
+        if (!terminalId) { done(''); return; }
+        const invoke = (window as any).__TAURI__?.core?.invoke;
+        if (!invoke) { done(''); return; }
+        const result = await invoke('get_grid_text', {
+          terminalId, startRow: 0, startCol: 0, endRow: 999, endCol: 999,
+        });
+        done(result ?? '');
+      } catch { done(''); }
     });
 
     // The 'claude -dangerously-skip-permissions' command should NOT be present

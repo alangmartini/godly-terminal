@@ -10,7 +10,7 @@ import { getDisplayName } from './TabBar';
 //   store.updateTerminal(id, { oscTitle: title || undefined })
 //
 // This test verifies the store + tab display behavior, which is the same
-// regardless of whether the title came from xterm.js or godly-vt.
+// regardless of how the title arrived (via godly-vt OSC parsing).
 
 describe('OSC title integration (godly-vt pipeline)', () => {
   const TERMINAL_ID = 'osc-test-terminal';

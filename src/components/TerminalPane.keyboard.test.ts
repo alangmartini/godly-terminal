@@ -41,12 +41,12 @@ function createMockKeyboardEvent(
 }
 
 /**
- * Reproduces the custom key event handler logic from TerminalPane.ts:86-127.
+ * Reproduces the custom key event handler logic from TerminalPane.ts.
  * This mirrors the exact decision logic so we can test it without a full
- * xterm.js Terminal + Tauri environment. Keep in sync with the source.
+ * Canvas2D renderer + Tauri environment. Keep in sync with the source.
  *
  * Returns:
- * - handlerReturn: the boolean returned to xterm (false = don't process, true = process)
+ * - handlerReturn: true = event will be sent to PTY, false = consumed by app
  * - preventDefaultCalled: whether event.preventDefault() was called
  * - pasteTriggered: whether the handler initiated a clipboard paste
  */
@@ -155,7 +155,7 @@ describe('TerminalPane custom key event handler bugs', () => {
 
   describe('Bug 3: Ctrl+C does not interrupt running terminal processes', () => {
     // Bug: Ctrl+C is mapped to terminal.interrupt (type: terminal-control).
-    // The handler must: 1) call preventDefault, 2) return true so xterm sends \x03.
+    // The handler must: 1) call preventDefault, 2) return true so the PTY receives \x03.
 
     it('Ctrl+C keydown must call preventDefault and return true', () => {
       const event = createMockKeyboardEvent('c', { ctrlKey: true });
@@ -175,7 +175,7 @@ describe('TerminalPane custom key event handler bugs', () => {
     });
 
     it('Ctrl+C keyup must also call preventDefault to prevent WebView2 copy', () => {
-      // Bug: xterm calls attachCustomKeyEventHandler for both keydown AND keyup.
+      // Bug: The canvas receives both keydown AND keyup events.
       // On keyup, matchAction returns null (only matches keydown), so the handler
       // falls through without calling preventDefault(). WebView2 may intercept the
       // keyup event and trigger a clipboard copy, preventing SIGINT from working.

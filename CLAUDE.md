@@ -94,9 +94,28 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 Godly Terminal is a Windows terminal application built with Tauri 2.0, featuring workspaces and tmux-style session persistence via a background daemon.
 
 ### Stack
-- **Frontend**: TypeScript + vanilla DOM + xterm.js
+- **Frontend**: TypeScript + vanilla DOM + Canvas2D renderer (backed by godly-vt)
 - **Backend**: Rust + Tauri 2.0 (GUI client) + godly-daemon (background PTY manager)
+- **Terminal engine**: godly-vt (forked from vt100-rust, SIMD VT parser with scrollback)
 - **Build**: Vite (frontend) + Cargo workspace (backend)
+
+### Rendering Pipeline
+
+The daemon owns all terminal state via godly-vt parsers. The frontend is a pure display layer:
+
+```
+Shell output → daemon PTY reader → ring buffer + godly-vt parser
+                                          │
+                              ┌───────────┘
+                              ▼
+Frontend: terminal-output event → fetch RichGridData snapshot via IPC
+                                          │
+                              ┌───────────┘
+                              ▼
+              TerminalRenderer.render(snapshot) → Canvas2D paint
+```
+
+Key design: **no terminal parsing happens in the frontend**. The daemon's godly-vt parser is the single source of truth for grid state, cursor position, colors, scrollback, etc.
 
 ### Daemon Architecture
 
@@ -107,12 +126,13 @@ Godly Terminal is a Windows terminal application built with Tauri 2.0, featuring
 │              │  at will                │                  │
 │  DaemonClient│                        │  PTY Sessions    │
 │  Bridge      │                        │  Ring Buffers    │
-└─────────────┘                         └─────────────────┘
-     │                                        │
-     │ Tauri events                           │ portable-pty
-     ▼                                        ▼
-  Frontend                               Shell processes
-  (unchanged)                            (survive app close)
+└─────────────┘                         │  godly-vt Parsers│
+     │                                  └─────────────────┘
+     │ Tauri events                           │
+     ▼                                        │ portable-pty
+  Frontend                                    ▼
+  (Canvas2D renderer)                    Shell processes
+                                         (survive app close)
 ```
 
 ### Workspace Crate Structure
@@ -124,6 +144,8 @@ src-tauri/
     src/lib.rs, messages.rs, frame.rs, types.rs
   daemon/                 ← background daemon binary (godly-daemon)
     src/main.rs, server.rs, session.rs, pid.rs
+  godly-vt/               ← terminal state engine (forked from vt100-rust)
+    src/lib.rs, grid.rs, screen.rs, parser.rs
   src/                    ← Tauri app
     daemon_client/        ← IPC client + event bridge
       mod.rs, client.rs, bridge.rs
@@ -140,6 +162,9 @@ All terminal and workspace operations use Tauri IPC commands defined in `src-tau
 Key IPC commands:
 - `create_terminal` / `close_terminal` - Creates/closes daemon session + attaches
 - `write_to_terminal` / `resize_terminal` - Proxied to daemon session
+- `get_grid_snapshot` - Fetch RichGridData from daemon's godly-vt parser
+- `get_grid_dimensions` / `get_grid_text` - Query grid state
+- `set_scrollback` - Set scrollback viewport offset
 - `reconnect_sessions` / `attach_session` - Reconnect to live daemon sessions on restart
 - `detach_all_sessions` - Detach on window close (sessions keep running)
 - `create_workspace` / `delete_workspace` - Workspace management
@@ -147,7 +172,7 @@ Key IPC commands:
 - `save_scrollback` / `load_scrollback` - Terminal history
 
 Backend emits events to frontend (via DaemonBridge):
-- `terminal-output` - PTY output data
+- `terminal-output` - PTY output data (triggers grid snapshot fetch)
 - `terminal-closed` - Process exit
 - `process-changed` - Shell process name updates
 
@@ -160,10 +185,10 @@ Backend emits events to frontend (via DaemonBridge):
 ### Session Lifecycle
 
 1. **Create**: App sends `CreateSession` + `Attach` to daemon via named pipe
-2. **Running**: Daemon owns PTY, streams output to attached client
+2. **Running**: Daemon owns PTY + godly-vt parser, streams output events to attached client
 3. **App close**: App sends `Detach` for all sessions, saves layout
 4. **App reopen**: Loads layout, checks daemon for live sessions via `ListSessions`
-5. **Reattach**: If session alive → `Attach` (ring buffer replays missed output)
+5. **Reattach**: If session alive → `Attach` (ring buffer replays missed output into godly-vt)
 6. **Fallback**: If session dead → create fresh terminal with saved CWD + load scrollback
 7. **Idle**: Daemon self-terminates after 5min with no sessions and no clients
 
@@ -182,7 +207,8 @@ Data stored via `tauri-plugin-store` in app data directory.
 App.ts           - Root: manages layout, keyboard shortcuts, reconnection logic
 ├── WorkspaceSidebar.ts  - Workspace list, new workspace dialog, drop target
 ├── TabBar.ts            - Terminal tabs with drag-drop reordering
-└── TerminalPane.ts      - xterm.js wrapper with scrollback save/load
+└── TerminalPane.ts      - Canvas2D terminal pane (delegates to TerminalRenderer)
+    └── TerminalRenderer.ts - Canvas2D rendering of godly-vt grid snapshots
 ```
 
 ### Shell Types
@@ -239,7 +265,7 @@ Inject `State<Arc<AutoSaveManager>>` and call `auto_save.mark_dirty()` after sta
 ### Terminal state flow
 
 User input → `terminalService.writeToTerminal()` → IPC → DaemonClient → named pipe → daemon → PTY
-Shell output → daemon reader thread → named pipe → DaemonBridge → `terminal-output` event → `TerminalPane.terminal.write()`
+Shell output → daemon reader thread → ring buffer + godly-vt parser → named pipe → DaemonBridge → `terminal-output` event → `TerminalPane.fetchAndRenderSnapshot()` → Canvas2D paint
 
 ## MCP Testing
 
