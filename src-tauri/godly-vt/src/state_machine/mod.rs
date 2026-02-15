@@ -685,13 +685,33 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
     }
 
     /// Handle ground dispatch of print/execute for all characters in a string.
+    ///
+    /// Batches runs of printable characters into `print_str()` calls, only
+    /// falling back to per-character `execute()` for control codes.
     #[inline]
     fn ground_dispatch<P: Perform>(performer: &mut P, text: &str) {
-        for c in text.chars() {
+        let mut printable_start: Option<usize> = None;
+
+        for (i, c) in text.char_indices() {
             match c {
-                '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => performer.execute(c as u8),
-                _ => performer.print(c),
+                '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => {
+                    // Flush any accumulated printable run before the control char.
+                    if let Some(start) = printable_start.take() {
+                        performer.print_str(&text[start..i]);
+                    }
+                    performer.execute(c as u8);
+                }
+                _ => {
+                    if printable_start.is_none() {
+                        printable_start = Some(i);
+                    }
+                }
             }
+        }
+
+        // Flush remaining printable run.
+        if let Some(start) = printable_start {
+            performer.print_str(&text[start..]);
         }
     }
 }
@@ -729,6 +749,18 @@ pub trait Perform {
     /// Draw a character to the screen and update states.
     fn print(&mut self, _c: char) {}
 
+    /// Draw a string of printable characters to the screen (batch optimization).
+    ///
+    /// The provided string is guaranteed to contain only printable characters
+    /// (no C0/C1 control codes). Implementations can override this for
+    /// efficient batch processing. The default falls back to per-character
+    /// `print()` calls.
+    fn print_str(&mut self, text: &str) {
+        for c in text.chars() {
+            self.print(c);
+        }
+    }
+
     /// Execute a C0 or C1 control function.
     fn execute(&mut self, _byte: u8) {}
 
@@ -748,6 +780,15 @@ pub trait Perform {
     /// Pass bytes as part of a device control string to the handle chosen in
     /// `hook`. C0 controls will also be passed to the handler.
     fn put(&mut self, _byte: u8) {}
+
+    /// Pass a slice of bytes as part of a device control string (batch optimization).
+    ///
+    /// The default falls back to per-byte `put()` calls.
+    fn put_slice(&mut self, data: &[u8]) {
+        for &b in data {
+            self.put(b);
+        }
+    }
 
     /// Called when a device control string is terminated.
     ///
