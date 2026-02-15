@@ -63,6 +63,12 @@ pub enum Request {
         end_row: u16,
         end_col: u16,
     },
+    /// Set the scrollback viewport offset for a session.
+    /// offset=0 means live view, offset>0 scrolls into history.
+    SetScrollback {
+        session_id: String,
+        offset: usize,
+    },
     Ping,
 }
 
