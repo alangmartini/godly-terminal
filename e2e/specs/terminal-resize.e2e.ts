@@ -6,14 +6,19 @@ import {
 import { waitForTerminalText } from '../helpers/terminal-reader';
 
 /**
- * Get the current terminal dimensions (rows x cols) from xterm.js.
+ * Get the current terminal dimensions (rows x cols) via Tauri IPC.
  */
 async function getTerminalDimensions(): Promise<{ rows: number; cols: number }> {
-  return browser.execute(() => {
-    const pane = document.querySelector('.terminal-pane.active') as any;
-    if (!pane?.__xterm) return { rows: 0, cols: 0 };
-    const term = pane.__xterm;
-    return { rows: term.rows, cols: term.cols };
+  return browser.executeAsync(async (done: (result: { rows: number; cols: number }) => void) => {
+    try {
+      const pane = document.querySelector('.terminal-pane.active') as any;
+      const terminalId = pane?.getAttribute('data-terminal-id');
+      if (!terminalId) { done({ rows: 0, cols: 0 }); return; }
+      const invoke = (window as any).__TAURI__?.core?.invoke;
+      if (!invoke) { done({ rows: 0, cols: 0 }); return; }
+      const [rows, cols] = await invoke('get_grid_dimensions', { terminalId });
+      done({ rows, cols });
+    } catch { done({ rows: 0, cols: 0 }); }
   });
 }
 
@@ -95,7 +100,7 @@ describe('Terminal Resize', () => {
 
       // The command should complete without errors
       // (the exact dimensions may differ from what we sent since the
-      // PTY and xterm.js negotiate independently, but the IPC should not fail)
+      // PTY and renderer negotiate independently, but the IPC should not fail)
     });
   });
 

@@ -1,7 +1,7 @@
 /**
  * Canvas2D terminal renderer.
  *
- * Replaces xterm.js by painting grid snapshots from godly-vt (via Tauri IPC)
+ * Paints grid snapshots from godly-vt (via Tauri IPC)
  * onto a <canvas> element. The godly-vt parser in the daemon owns the terminal
  * state; this renderer is purely a display layer.
  *
@@ -53,7 +53,7 @@ export interface GridDimensions {
   cols: number;
 }
 
-// ---- Theme (matches xterm.js theme from TerminalPane.ts) ----
+// ---- Theme ----
 
 export interface TerminalTheme {
   background: string;

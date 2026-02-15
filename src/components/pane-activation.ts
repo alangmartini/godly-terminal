@@ -2,7 +2,7 @@
  * Activation sequence for terminal panes.
  *
  * Extracted from TerminalPane so the sequence (fit → scrollToBottom → focus)
- * can be unit-tested without a DOM or real xterm.js instance.
+ * can be unit-tested without a DOM or real terminal renderer instance.
  *
  * Called inside requestAnimationFrame after the pane's CSS visibility is toggled.
  */

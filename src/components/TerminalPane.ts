@@ -8,9 +8,9 @@ import { TerminalRenderer, RichGridData } from './TerminalRenderer';
 /**
  * Terminal pane backed by the godly-vt Canvas2D renderer.
  *
- * Instead of xterm.js parsing ANSI output, the daemon's godly-vt parser
- * maintains the terminal grid. On each `terminal-output` event, we request
- * a grid snapshot via Tauri IPC and paint it on a <canvas>.
+ * The daemon's godly-vt parser maintains the terminal grid. On each
+ * `terminal-output` event, we request a grid snapshot via Tauri IPC
+ * and paint it on a <canvas> via TerminalRenderer.
  */
 export class TerminalPane {
   private renderer: TerminalRenderer;
@@ -251,7 +251,7 @@ export class TerminalPane {
 
   /**
    * Get scrollback data using godly-vt's contents_formatted() output.
-   * This replaces the xterm.js serialize addon.
+   * Scrollback data is managed by the daemon's godly-vt parser.
    */
   getScrollbackData(): Uint8Array {
     // The daemon owns the terminal state, so we save scrollback via

@@ -227,7 +227,7 @@ export class KeybindingStore {
 
   /**
    * Returns true if the event matches any shortcut whose *type* is `app`.
-   * Used by the xterm custom key handler to let events bubble.
+   * Used by the canvas key handler to let events bubble.
    */
   isAppShortcut(event: {
     ctrlKey: boolean;

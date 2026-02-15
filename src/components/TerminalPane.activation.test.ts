@@ -2,11 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { activatePane } from './pane-activation';
 
 // Bug: When switching tabs, the terminal viewport resets to the top of the
-// buffer instead of staying at the bottom (where the cursor is). Even scrolling
-// to what xterm.js thinks is the "bottom" shows truncated content because the
-// viewport's scroll area wasn't updated for data written while the pane was
-// display:none. Typing input forces a viewport refresh that reveals the real
-// bottom — proving the buffer is correct but the viewport is stale.
+// buffer instead of staying at the bottom (where the cursor is). The renderer
+// must call scrollToBottom() during activation to ensure the live view is shown.
 //
 // Fix: After making a pane visible, call scrollToBottom() after fit() to
 // reposition the viewport at the actual end of the buffer.

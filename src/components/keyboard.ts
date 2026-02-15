@@ -2,8 +2,7 @@ import { keybindingStore } from '../state/keybinding-store';
 
 /**
  * Returns true if the keyboard event is an app-level shortcut that should NOT
- * be processed by xterm.js. When the custom key handler returns false for these,
- * the event bubbles to the document-level listener in App.ts.
+ * be sent to the PTY. These events bubble to the document-level listener in App.ts.
  *
  * Delegates to KeybindingStore so users can customise bindings via settings.
  *
