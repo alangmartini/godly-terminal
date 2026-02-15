@@ -160,6 +160,10 @@ class TerminalService {
     await invoke('attach_session', { sessionId, workspaceId, name });
   }
 
+  async setScrollback(terminalId: string, offset: number): Promise<void> {
+    await invoke('set_scrollback', { terminalId, offset });
+  }
+
   onTerminalOutput(terminalId: string, callback: (data: Uint8Array) => void) {
     this.outputListeners.set(terminalId, callback);
     return () => this.outputListeners.delete(terminalId);

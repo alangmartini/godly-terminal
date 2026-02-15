@@ -26,6 +26,10 @@ export class TerminalPane {
   private snapshotPending = false;
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Scrollback state: tracked from the latest snapshot
+  private scrollbackOffset = 0;
+  private totalScrollback = 0;
+
   // Scrollback save interval (every 5 minutes)
   private scrollbackSaveInterval: number | null = null;
 
@@ -37,6 +41,11 @@ export class TerminalPane {
     // Forward OSC title changes to the store
     this.renderer.setOnTitleChange((title) => {
       store.updateTerminal(this.terminalId, { oscTitle: title || undefined });
+    });
+
+    // Handle wheel scroll events from the renderer
+    this.renderer.setOnScroll((deltaLines) => {
+      this.handleScroll(deltaLines);
     });
 
     this.container = document.createElement('div');
@@ -104,6 +113,28 @@ export class TerminalPane {
   private handleKeyEvent(event: KeyboardEvent) {
     const action = keybindingStore.matchAction(event);
 
+    // Scroll shortcuts: handle locally without sending to PTY
+    if (action === 'scroll.pageUp') {
+      event.preventDefault();
+      this.handleScroll(this.renderer.getGridSize().rows);
+      return;
+    }
+    if (action === 'scroll.pageDown') {
+      event.preventDefault();
+      this.handleScroll(-this.renderer.getGridSize().rows);
+      return;
+    }
+    if (action === 'scroll.toTop') {
+      event.preventDefault();
+      this.handleScroll(this.totalScrollback);
+      return;
+    }
+    if (action === 'scroll.toBottom') {
+      event.preventDefault();
+      this.handleScroll(-this.scrollbackOffset);
+      return;
+    }
+
     // Copy: copy selected text to clipboard
     if (action === 'clipboard.copy') {
       event.preventDefault();
@@ -143,6 +174,11 @@ export class TerminalPane {
       event.preventDefault();
       terminalService.writeToTerminal(this.terminalId, '\x1b[13;2u');
       return;
+    }
+
+    // Snap to bottom on any input when scrolled up
+    if (this.scrollbackOffset > 0) {
+      this.snapToBottom();
     }
 
     // Convert keyboard events to terminal input data
@@ -215,6 +251,30 @@ export class TerminalPane {
     return null;
   }
 
+  // ---- Scroll handling ----
+
+  /**
+   * Handle a scroll request. deltaLines > 0 = scroll up (into history),
+   * deltaLines < 0 = scroll down (toward live view).
+   */
+  private handleScroll(deltaLines: number) {
+    const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
+    if (newOffset === this.scrollbackOffset) return;
+    this.scrollbackOffset = newOffset;
+    terminalService.setScrollback(this.terminalId, newOffset).then(() => {
+      this.fetchAndRenderSnapshot();
+    });
+  }
+
+  /** Snap viewport back to live view (offset 0). */
+  private snapToBottom() {
+    if (this.scrollbackOffset === 0) return;
+    this.scrollbackOffset = 0;
+    terminalService.setScrollback(this.terminalId, 0).then(() => {
+      this.fetchAndRenderSnapshot();
+    });
+  }
+
   // ---- Grid snapshot fetching ----
 
   private scheduleSnapshotFetch() {
@@ -234,6 +294,9 @@ export class TerminalPane {
       const snapshot = await invoke<RichGridData>('get_grid_snapshot', {
         terminalId: this.terminalId,
       });
+      // Track scrollback state from the daemon's authoritative values
+      this.scrollbackOffset = snapshot.scrollback_offset;
+      this.totalScrollback = snapshot.total_scrollback;
       this.renderer.render(snapshot);
     } catch (error) {
       // Ignore errors during initialization or after terminal close
