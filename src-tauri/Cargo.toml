@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "protocol", "daemon", "mcp", "notify"]
+members = [".", "protocol", "daemon", "mcp", "notify", "godly-vt"]
 resolver = "2"
 
 [package]

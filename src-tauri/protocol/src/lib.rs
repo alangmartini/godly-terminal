@@ -7,7 +7,7 @@ pub mod types;
 pub use frame::{read_message, write_message};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 pub use messages::{DaemonMessage, Event, Request, Response};
-pub use types::{SessionInfo, ShellType};
+pub use types::{GridData, SessionInfo, ShellType};
 
 /// Default named pipe path used by both daemon and client
 pub const PIPE_NAME: &str = r"\\.\pipe\godly-terminal-daemon";

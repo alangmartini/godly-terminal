@@ -359,6 +359,20 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "read_grid",
+                "description": "Read the current visible terminal screen as parsed plain text. Uses the godly-vt terminal state engine to return clean rows without ANSI escapes. Unlike read_terminal (which returns raw scrollback history), read_grid returns exactly what the user sees on screen right now, with cursor position.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to read"
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
                 "name": "wait_for_text",
                 "description": "Wait for specific text to appear in terminal output. ANSI codes are stripped before matching. Searches the terminal's rolling 1MB output buffer.",
                 "inputSchema": {
@@ -631,6 +645,15 @@ pub fn call_tool(
             McpRequest::RemoveWorktree { worktree_path }
         }
 
+        "read_grid" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            McpRequest::ReadGrid { terminal_id }
+        }
+
         "wait_for_idle" => {
             let terminal_id = args
                 .get("terminal_id")
@@ -754,5 +777,29 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "completed": completed,
             "last_output_ago_ms": last_output_ago_ms,
         })),
+        McpResponse::GridSnapshot {
+            rows,
+            cursor_row,
+            cursor_col,
+            cols,
+            num_rows,
+            alternate_screen,
+        } => {
+            // Join rows into a single content string, trimming trailing whitespace
+            // from each row for a cleaner output.
+            let content: String = rows
+                .iter()
+                .map(|r| r.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n");
+            Ok(json!({
+                "content": content,
+                "cursor_row": cursor_row,
+                "cursor_col": cursor_col,
+                "cols": cols,
+                "num_rows": num_rows,
+                "alternate_screen": alternate_screen,
+            }))
+        }
     }
 }

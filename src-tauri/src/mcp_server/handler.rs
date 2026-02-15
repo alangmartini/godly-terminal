@@ -610,6 +610,29 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::ReadGrid { terminal_id } => {
+            let request = godly_protocol::Request::ReadGrid {
+                session_id: terminal_id.clone(),
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::Grid { grid }) => McpResponse::GridSnapshot {
+                    rows: grid.rows,
+                    cursor_row: grid.cursor_row,
+                    cursor_col: grid.cursor_col,
+                    cols: grid.cols,
+                    num_rows: grid.num_rows,
+                    alternate_screen: grid.alternate_screen,
+                },
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error { message: e },
+            }
+        }
+
         McpRequest::ReadTerminal {
             terminal_id,
             mode,

@@ -61,6 +61,9 @@ pub enum McpRequest {
         cols: u16,
     },
 
+    // Grid state (godly-vt parsed terminal)
+    ReadGrid { terminal_id: String },
+
     // Wait/polling tools
     WaitForIdle {
         terminal_id: String,
@@ -139,5 +142,13 @@ pub enum McpResponse {
     WaitResult {
         completed: bool,
         last_output_ago_ms: u64,
+    },
+    GridSnapshot {
+        rows: Vec<String>,
+        cursor_row: u16,
+        cursor_col: u16,
+        cols: u16,
+        num_rows: u16,
+        alternate_screen: bool,
     },
 }
