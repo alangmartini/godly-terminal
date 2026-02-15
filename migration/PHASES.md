@@ -11,9 +11,14 @@
 - [ ] **0.3** Remove vte as external dependency; wire internal module references
 - [ ] **0.4** Create `Cargo.toml` with workspace member registration
 - [ ] **0.5** Rename crate references: `vt100` → `godly_vt`, update all `use` paths
-- [ ] **0.6** Add MIT license file with attribution to both doy/vt100-rust and alacritty/vte
+- [ ] **0.6** License attribution (required for compliance):
+  - [ ] **0.6.1** Copy `LICENSE` from [doy/vt100-rust](https://github.com/doy/vt100-rust) into `src-tauri/godly-vt/LICENSE-vt100` preserving the original copyright notice (`Copyright (c) Jesse Luehrs`)
+  - [ ] **0.6.2** Copy `LICENSE-MIT` from [alacritty/vte](https://github.com/alacritty/vte) into `src-tauri/godly-vt/src/state_machine/LICENSE-MIT` preserving the original copyright notice (`Copyright (c) 2016 Joe Wilm and individual contributors`)
+  - [ ] **0.6.3** Elect MIT as the license for vendored vte code (vte is dual-licensed Apache-2.0 OR MIT; we choose MIT for simplicity and consistency with vt100)
+  - [ ] **0.6.4** Create `src-tauri/godly-vt/THIRD-PARTY-LICENSES` listing both upstream projects, their authors, license texts, and URLs
+  - [ ] **0.6.5** Add a header comment to each vendored/forked source file noting: original project, original copyright, license, and that the file has been modified
 - [ ] **0.7** Verify `cargo check -p godly-vt` passes
-- [ ] **0.8** Port vt100's test suite (copy tests/, update imports)
+- [ ] **0.8** Port vt100's test suite (copy tests/, update imports) — preserve MIT copyright notice from vt100 in each copied test file
 - [ ] **0.9** Verify `cargo test -p godly-vt` passes
 - [ ] **0.10** Verify existing workspace tests still pass (`cargo test -p godly-protocol`, `-p godly-daemon`, `-p godly-terminal`)
 
