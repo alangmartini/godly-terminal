@@ -27,3 +27,21 @@ pub struct SessionInfo {
     pub attached: bool,
     pub running: bool,
 }
+
+/// Grid snapshot from the godly-vt terminal state engine.
+/// Contains the visible terminal content as plain-text rows plus cursor info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridData {
+    /// Each element is one row of plain text (no ANSI escapes).
+    pub rows: Vec<String>,
+    /// Cursor row (0-based).
+    pub cursor_row: u16,
+    /// Cursor col (0-based).
+    pub cursor_col: u16,
+    /// Terminal width (columns).
+    pub cols: u16,
+    /// Terminal height (rows).
+    pub num_rows: u16,
+    /// Whether the alternate screen is active.
+    pub alternate_screen: bool,
+}
