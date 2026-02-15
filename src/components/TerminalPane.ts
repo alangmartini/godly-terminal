@@ -3,7 +3,8 @@ import { terminalService } from '../services/terminal-service';
 import { store } from '../state/store';
 import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
-import { TerminalRenderer, RichGridData } from './TerminalRenderer';
+import { TerminalRenderer, RichGridData, RichGridDiff } from './TerminalRenderer';
+import { perfTracer } from '../utils/PerfTracer';
 
 /**
  * Terminal pane backed by the godly-vt Canvas2D renderer.
@@ -32,6 +33,10 @@ export class TerminalPane {
 
   // Scrollback save interval (every 5 minutes)
   private scrollbackSaveInterval: number | null = null;
+
+  // Cached full snapshot for differential updates.
+  // null until first full snapshot is received.
+  private cachedSnapshot: RichGridData | null = null;
 
   constructor(terminalId: string) {
     this.terminalId = terminalId;
@@ -98,6 +103,8 @@ export class TerminalPane {
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
       () => {
+        perfTracer.mark('terminal_output_event');
+        perfTracer.measure('keydown_to_output', 'keydown');
         this.scheduleSnapshotFetch();
       }
     );
@@ -115,6 +122,7 @@ export class TerminalPane {
   // ---- Keyboard handling ----
 
   private handleKeyEvent(event: KeyboardEvent) {
+    perfTracer.mark('keydown');
     const action = keybindingStore.matchAction(event);
 
     // Scroll shortcuts: handle locally without sending to PTY
@@ -189,7 +197,10 @@ export class TerminalPane {
     const data = this.keyToTerminalData(event);
     if (data) {
       event.preventDefault();
-      terminalService.writeToTerminal(this.terminalId, data);
+      perfTracer.mark('write_ipc_start');
+      terminalService.writeToTerminal(this.terminalId, data).then(() => {
+        perfTracer.measure('write_to_terminal_ipc', 'write_ipc_start');
+      });
     }
   }
 
@@ -265,8 +276,10 @@ export class TerminalPane {
     const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
+    // Scroll changes the viewport — invalidate cache and do a full snapshot
+    this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, newOffset).then(() => {
-      this.fetchAndRenderSnapshot();
+      this.fetchFullSnapshot();
     });
   }
 
@@ -274,8 +287,9 @@ export class TerminalPane {
   private snapToBottom() {
     if (this.scrollbackOffset === 0) return;
     this.scrollbackOffset = 0;
+    this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, 0).then(() => {
-      this.fetchAndRenderSnapshot();
+      this.fetchFullSnapshot();
     });
   }
 
@@ -284,10 +298,12 @@ export class TerminalPane {
   private scheduleSnapshotFetch() {
     if (this.snapshotPending) return;
     this.snapshotPending = true;
+    perfTracer.mark('schedule_snapshot');
     if (this.snapshotTimer === null) {
       this.snapshotTimer = setTimeout(() => {
         this.snapshotTimer = null;
         this.snapshotPending = false;
+        perfTracer.measure('snapshot_schedule_delay', 'schedule_snapshot');
         this.fetchAndRenderSnapshot();
       }, 0);
     }
@@ -295,16 +311,77 @@ export class TerminalPane {
 
   private async fetchAndRenderSnapshot() {
     try {
+      // Use diff snapshots when we have a cached full snapshot.
+      // This avoids serializing the full grid (3600+ cells) on every keystroke.
+      if (this.cachedSnapshot) {
+        const diff = await invoke<RichGridDiff>('get_grid_snapshot_diff', {
+          terminalId: this.terminalId,
+        });
+
+        // Merge dirty rows into the cached snapshot
+        if (diff.full_repaint) {
+          // Full repaint: rebuild the entire cached snapshot from the diff
+          const rows: RichGridData['rows'] = this.cachedSnapshot.rows;
+          // Resize if dimensions changed
+          while (rows.length < diff.dimensions.rows) {
+            rows.push({ cells: [], wrapped: false });
+          }
+          rows.length = diff.dimensions.rows;
+          for (const [rowIdx, rowData] of diff.dirty_rows) {
+            rows[rowIdx] = rowData;
+          }
+          this.cachedSnapshot = {
+            rows,
+            cursor: diff.cursor,
+            dimensions: diff.dimensions,
+            alternate_screen: diff.alternate_screen,
+            cursor_hidden: diff.cursor_hidden,
+            title: diff.title,
+            scrollback_offset: diff.scrollback_offset,
+            total_scrollback: diff.total_scrollback,
+          };
+        } else {
+          // Partial update: merge only dirty rows
+          for (const [rowIdx, rowData] of diff.dirty_rows) {
+            if (rowIdx < this.cachedSnapshot.rows.length) {
+              this.cachedSnapshot.rows[rowIdx] = rowData;
+            }
+          }
+          this.cachedSnapshot.cursor = diff.cursor;
+          this.cachedSnapshot.cursor_hidden = diff.cursor_hidden;
+          this.cachedSnapshot.scrollback_offset = diff.scrollback_offset;
+          this.cachedSnapshot.total_scrollback = diff.total_scrollback;
+          this.cachedSnapshot.alternate_screen = diff.alternate_screen;
+          if (diff.title) {
+            this.cachedSnapshot.title = diff.title;
+          }
+        }
+
+        this.scrollbackOffset = diff.scrollback_offset;
+        this.totalScrollback = diff.total_scrollback;
+        this.renderer.render(this.cachedSnapshot);
+      } else {
+        // No cache yet: fetch a full snapshot
+        await this.fetchFullSnapshot();
+      }
+    } catch (error) {
+      // Ignore errors during initialization or after terminal close
+      console.debug('Grid snapshot fetch failed:', error);
+    }
+  }
+
+  /** Fetch a full grid snapshot (used for initial render and after scroll). */
+  private async fetchFullSnapshot() {
+    try {
       const snapshot = await invoke<RichGridData>('get_grid_snapshot', {
         terminalId: this.terminalId,
       });
-      // Track scrollback state from the daemon's authoritative values
+      this.cachedSnapshot = snapshot;
       this.scrollbackOffset = snapshot.scrollback_offset;
       this.totalScrollback = snapshot.total_scrollback;
       this.renderer.render(snapshot);
     } catch (error) {
-      // Ignore errors during initialization or after terminal close
-      console.debug('Grid snapshot fetch failed:', error);
+      console.debug('Full grid snapshot fetch failed:', error);
     }
   }
 
@@ -353,6 +430,12 @@ export class TerminalPane {
       this.renderer.updateSize();
       const { rows, cols } = this.renderer.getGridSize();
       if (rows > 0 && cols > 0) {
+        // Resize changes grid dimensions — invalidate cache
+        if (this.cachedSnapshot &&
+            (this.cachedSnapshot.dimensions.rows !== rows ||
+             this.cachedSnapshot.dimensions.cols !== cols)) {
+          this.cachedSnapshot = null;
+        }
         terminalService.resizeTerminal(this.terminalId, rows, cols);
       }
     } catch {

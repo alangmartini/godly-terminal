@@ -18,6 +18,9 @@ pub struct Grid {
     scrollback: std::collections::VecDeque<crate::row::Row>,
     scrollback_len: usize,
     scrollback_offset: usize,
+    /// Row-level dirty flags: true if the row has been modified since last
+    /// `take_dirty_rows()` call. Used for differential grid snapshots.
+    dirty_rows: Vec<bool>,
 }
 
 impl Grid {
@@ -34,6 +37,7 @@ impl Grid {
             scrollback: std::collections::VecDeque::new(),
             scrollback_len,
             scrollback_offset: 0,
+            dirty_rows: vec![true; usize::from(size.rows)],
         }
     }
 
@@ -45,6 +49,7 @@ impl Grid {
                 })
                 .take(usize::from(self.size.rows)),
             );
+            self.mark_all_dirty();
         }
     }
 
@@ -62,6 +67,7 @@ impl Grid {
         self.scroll_bottom = self.size.rows - 1;
         self.origin_mode = false;
         self.saved_origin_mode = false;
+        self.mark_all_dirty();
     }
 
     pub fn size(&self) -> Size {
@@ -102,6 +108,9 @@ impl Grid {
         if self.saved_pos.col > self.size.cols - 1 {
             self.saved_pos.col = self.size.cols - 1;
         }
+
+        self.dirty_rows.resize(usize::from(size.rows), true);
+        self.mark_all_dirty();
     }
 
     pub fn pos(&self) -> Pos {
@@ -174,6 +183,7 @@ impl Grid {
     }
 
     pub fn current_row_mut(&mut self) -> &mut crate::row::Row {
+        self.mark_row_dirty(self.pos.row);
         self.drawing_row_mut(self.pos.row)
             // we assume self.pos.row is always valid
             .unwrap()
@@ -188,6 +198,7 @@ impl Grid {
     }
 
     pub fn drawing_cell_mut(&mut self, pos: Pos) -> Option<&mut crate::Cell> {
+        self.mark_row_dirty(pos.row);
         self.drawing_row_mut(pos.row)
             .and_then(|r| r.get_mut(pos.col))
     }
@@ -207,6 +218,35 @@ impl Grid {
 
     pub fn set_scrollback(&mut self, rows: usize) {
         self.scrollback_offset = rows.min(self.scrollback.len());
+    }
+
+    /// Mark a specific drawing row as dirty.
+    pub fn mark_row_dirty(&mut self, row: u16) {
+        if let Some(flag) = self.dirty_rows.get_mut(usize::from(row)) {
+            *flag = true;
+        }
+    }
+
+    /// Mark all rows as dirty (e.g. after scroll, resize, clear).
+    pub fn mark_all_dirty(&mut self) {
+        for flag in &mut self.dirty_rows {
+            *flag = true;
+        }
+    }
+
+    /// Returns which rows are dirty and clears the dirty flags.
+    /// Returns a Vec<bool> where index = row number, value = dirty.
+    pub fn take_dirty_rows(&mut self) -> Vec<bool> {
+        let result = self.dirty_rows.clone();
+        for flag in &mut self.dirty_rows {
+            *flag = false;
+        }
+        result
+    }
+
+    /// Check if any row is dirty (without consuming).
+    pub fn has_dirty_rows(&self) -> bool {
+        self.dirty_rows.iter().any(|&d| d)
     }
 
     pub fn write_contents(&self, contents: &mut String) {
@@ -466,23 +506,30 @@ impl Grid {
         for row in self.drawing_rows_mut() {
             row.clear(attrs);
         }
+        self.mark_all_dirty();
     }
 
     pub fn erase_all_forward(&mut self, attrs: crate::attrs::Attrs) {
         let pos = self.pos;
+        // Mark all rows from current position onward as dirty
+        for i in usize::from(pos.row)..self.dirty_rows.len() {
+            self.dirty_rows[i] = true;
+        }
         for row in self.drawing_rows_mut().skip(usize::from(pos.row) + 1) {
             row.clear(attrs);
         }
-
         self.erase_row_forward(attrs);
     }
 
     pub fn erase_all_backward(&mut self, attrs: crate::attrs::Attrs) {
         let pos = self.pos;
+        // Mark all rows up to and including current position as dirty
+        for i in 0..=usize::from(pos.row).min(self.dirty_rows.len().saturating_sub(1)) {
+            self.dirty_rows[i] = true;
+        }
         for row in self.drawing_rows_mut().take(usize::from(pos.row)) {
             row.clear(attrs);
         }
-
         self.erase_row_backward(attrs);
     }
 
@@ -558,6 +605,8 @@ impl Grid {
             // self.scroll_bottom is maintained to always be a valid row
             self.rows[usize::from(self.scroll_bottom)].wrap(false);
         }
+        // Rows shifted — mark affected range dirty
+        self.mark_all_dirty();
     }
 
     pub fn delete_lines(&mut self, count: u16) {
@@ -566,6 +615,7 @@ impl Grid {
                 .insert(usize::from(self.scroll_bottom) + 1, self.new_row());
             self.rows.remove(usize::from(self.pos.row));
         }
+        self.mark_all_dirty();
     }
 
     pub fn scroll_up(&mut self, count: u16) {
@@ -584,6 +634,7 @@ impl Grid {
                 }
             }
         }
+        self.mark_all_dirty();
     }
 
     pub fn scroll_down(&mut self, count: u16) {
@@ -594,6 +645,7 @@ impl Grid {
             // self.scroll_bottom is maintained to always be a valid row
             self.rows[usize::from(self.scroll_bottom)].wrap(false);
         }
+        self.mark_all_dirty();
     }
 
     pub fn set_scroll_region(&mut self, top: u16, bottom: u16) {
@@ -692,6 +744,8 @@ impl Grid {
             let scrolled = self.row_inc_scroll(1);
             prev_pos.row -= scrolled;
             let new_pos = self.pos;
+            self.mark_row_dirty(prev_pos.row);
+            self.mark_row_dirty(new_pos.row);
             self.drawing_row_mut(prev_pos.row)
                 // we assume self.pos.row is always valid, and so prev_pos.row
                 // must be valid because it is always less than or equal to
