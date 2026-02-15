@@ -359,8 +359,10 @@ mod windows_tests {
             growth as f64 / 1_048_576.0
         );
 
-        // Allow up to 5MB growth for allocator fragmentation and Windows overhead
-        let max_growth = 5 * 1024 * 1024;
+        // Allow up to 12MB growth for allocator fragmentation, Windows overhead,
+        // and godly-vt parser grid buffers (~60KB per session from 80x24 grid of
+        // 32-byte cells) that linger until reader threads exit their blocking read.
+        let max_growth = 12 * 1024 * 1024;
         assert!(
             growth < max_growth,
             "Memory grew by {} bytes ({:.1} MB) after {} create/destroy cycles — exceeds {} MB threshold. Likely leak!",
