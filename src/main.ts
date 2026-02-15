@@ -1,4 +1,3 @@
-import '@xterm/xterm/css/xterm.css';
 import { App } from './components/App';
 
 const container = document.getElementById('app');
