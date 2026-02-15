@@ -559,72 +559,137 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
     ///
     /// The ground state is handled separately since it can only be left using
     /// the escape character (`\x1b`). This allows more efficient parsing by
-    /// using SIMD search with [`memchr`].
+    /// using SIMD scanning.
+    ///
+    /// Optimization strategy:
+    /// 1. Use SIMD `scan_for_control()` to find the first C0 control or DEL.
+    ///    Everything before it is printable bytes (0x20..=0x7E or 0x80..=0xFF).
+    /// 2. For the printable portion: use `is_all_ascii()` to skip UTF-8 decode
+    ///    when possible, or `simdutf8` for fast validation otherwise.
+    /// 3. Dispatch the entire printable run via `print_str()` — no per-char
+    ///    control check needed since the scanner already excluded them.
+    /// 4. Handle the control character (ESC transitions state, others execute).
     #[inline]
     fn advance_ground<P: Perform>(&mut self, performer: &mut P, bytes: &[u8]) -> usize {
-        // Find the next escape character.
         let num_bytes = bytes.len();
-        let plain_chars = memchr::memchr(0x1B, bytes).unwrap_or(num_bytes);
 
-        // If the next character is ESC, just process it and short-circuit.
-        if plain_chars == 0 {
-            self.state = State::Escape;
-            self.reset_params();
+        // Find the first control character (< 0x20 or 0x7F) using SIMD.
+        let control_pos = crate::simd::scan_for_control(bytes).unwrap_or(num_bytes);
+
+        // If the first byte is a control character, handle it immediately.
+        if control_pos == 0 {
+            let byte = bytes[0];
+            if byte == 0x1B {
+                // Try CSI fast-path: ESC [ <params> <final>
+                if let Some(consumed) = self.try_csi_fast_path(performer, bytes) {
+                    return consumed;
+                }
+                self.state = State::Escape;
+                self.reset_params();
+            } else {
+                performer.execute(byte);
+            }
             return 1;
         }
 
-        match str::from_utf8(&bytes[..plain_chars]) {
-            Ok(parsed) => {
-                Self::ground_dispatch(performer, parsed);
-                let mut processed = plain_chars;
+        // Everything in bytes[..control_pos] is printable (>= 0x20, != 0x7F).
+        // Validate as UTF-8 and dispatch.
+        let printable = &bytes[..control_pos];
+        let processed = self.dispatch_printable(performer, printable, control_pos, num_bytes);
+        if processed < control_pos {
+            // UTF-8 error cut things short; return what was consumed.
+            return processed;
+        }
 
-                // If there's another character, it must be escape so process it directly.
-                if processed < num_bytes {
-                    self.state = State::Escape;
-                    self.reset_params();
-                    processed += 1;
+        // Now handle the control character (if any).
+        let mut total = control_pos;
+        if total < num_bytes {
+            let byte = bytes[total];
+            if byte == 0x1B {
+                // Try CSI fast-path for ESC after printable text.
+                if let Some(consumed) = self.try_csi_fast_path(performer, &bytes[total..]) {
+                    return total + consumed;
                 }
+                self.state = State::Escape;
+                self.reset_params();
+            } else {
+                performer.execute(byte);
+            }
+            total += 1;
+        }
 
-                processed
-            },
-            // Handle invalid and partial utf8.
-            Err(err) => {
-                // Dispatch all the valid bytes.
-                let valid_bytes = err.valid_up_to();
-                let parsed = unsafe { str::from_utf8_unchecked(&bytes[..valid_bytes]) };
+        total
+    }
+
+    /// Validate a printable byte slice as UTF-8 and dispatch via `print_str()`.
+    ///
+    /// The input is guaranteed to contain no C0 controls or DEL, only bytes
+    /// >= 0x20 and != 0x7F. However, bytes 0x80-0x9F may appear as part of
+    /// multi-byte UTF-8 sequences, and the corresponding Unicode code points
+    /// (U+0080..U+009F) are C1 controls that `ground_dispatch` handles.
+    #[inline]
+    fn dispatch_printable<P: Perform>(
+        &mut self,
+        performer: &mut P,
+        printable: &[u8],
+        control_pos: usize,
+        num_bytes: usize,
+    ) -> usize {
+        // ASCII fast path: if all bytes are < 0x80, skip UTF-8 validation entirely.
+        if crate::simd::is_all_ascii(printable) {
+            // Pure ASCII — safe to use from_utf8_unchecked, and no C1 controls
+            // are possible (all bytes are 0x20..=0x7E).
+            let text = unsafe { str::from_utf8_unchecked(printable) };
+            performer.print_str(text);
+            return control_pos;
+        }
+
+        // Non-ASCII path: use simdutf8 for fast validation.
+        match simdutf8::basic::from_utf8(printable) {
+            Ok(parsed) => {
+                // The printable range has no C0/DEL controls, but may contain
+                // C1 code points (U+0080..U+009F) encoded as 2-byte UTF-8.
+                // Use ground_dispatch to handle those.
                 Self::ground_dispatch(performer, parsed);
-
-                match err.error_len() {
-                    Some(len) => {
-                        // Execute C1 escapes or emit replacement character.
-                        if len == 1 && bytes[valid_bytes] <= 0x9F {
-                            performer.execute(bytes[valid_bytes]);
-                        } else {
-                            performer.print('�');
+                control_pos
+            },
+            Err(_) => {
+                // simdutf8's basic error doesn't give us valid_up_to, so fall
+                // back to std for error details on the uncommon invalid-UTF-8 path.
+                match str::from_utf8(printable) {
+                    Ok(_) => unreachable!("simdutf8 and std disagree"),
+                    Err(err) => {
+                        let valid_bytes = err.valid_up_to();
+                        if valid_bytes > 0 {
+                            let parsed = unsafe { str::from_utf8_unchecked(&printable[..valid_bytes]) };
+                            Self::ground_dispatch(performer, parsed);
                         }
 
-                        // Restart processing after the invalid bytes.
-                        //
-                        // While we could theoretically try to just re-parse
-                        // `bytes[valid_bytes + len..plain_chars]`, it's easier
-                        // to just skip it and invalid utf8 is pretty rare anyway.
-                        valid_bytes + len
-                    },
-                    None => {
-                        if plain_chars < num_bytes {
-                            // Process bytes cut off by escape.
-                            performer.print('�');
-                            self.state = State::Escape;
-                            self.reset_params();
-                            plain_chars + 1
-                        } else {
-                            // Process bytes cut off by the buffer end.
-                            let extra_bytes = num_bytes - valid_bytes;
-                            let partial_len = self.partial_utf8_len + extra_bytes;
-                            self.partial_utf8[self.partial_utf8_len..partial_len]
-                                .copy_from_slice(&bytes[valid_bytes..valid_bytes + extra_bytes]);
-                            self.partial_utf8_len = partial_len;
-                            num_bytes
+                        match err.error_len() {
+                            Some(len) => {
+                                // Execute C1 escapes or emit replacement character.
+                                if len == 1 && printable[valid_bytes] <= 0x9F {
+                                    performer.execute(printable[valid_bytes]);
+                                } else {
+                                    performer.print('�');
+                                }
+                                valid_bytes + len
+                            },
+                            None => {
+                                if control_pos < num_bytes {
+                                    // Partial UTF-8 cut off by a control char.
+                                    performer.print('�');
+                                    control_pos
+                                } else {
+                                    // Partial UTF-8 at buffer end — store for next call.
+                                    let extra_bytes = printable.len() - valid_bytes;
+                                    let partial_len = self.partial_utf8_len + extra_bytes;
+                                    self.partial_utf8[self.partial_utf8_len..partial_len]
+                                        .copy_from_slice(&printable[valid_bytes..]);
+                                    self.partial_utf8_len = partial_len;
+                                    num_bytes
+                                }
+                            },
                         }
                     },
                 }
@@ -684,14 +749,140 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         }
     }
 
+    /// Try to parse a CSI sequence inline without entering the state machine.
+    ///
+    /// Called when `bytes[0] == 0x1B`. Looks ahead for `[` and tries to parse
+    /// the entire CSI sequence in one shot. Returns `Some(consumed)` if the
+    /// fast path succeeded, `None` if the caller should fall back to the
+    /// normal state machine.
+    ///
+    /// Handles common sequences without intermediates:
+    /// - SGR (m): `ESC [ <params> m`
+    /// - CUP (H/f): `ESC [ <params> H` or `f`
+    /// - ED (J): `ESC [ <params> J`
+    /// - EL (K): `ESC [ <params> K`
+    /// - Cursor movement (A/B/C/D): `ESC [ <params> A/B/C/D`
+    /// - Other simple CSI: any `ESC [ <digits;> <0x40..0x7E>`
+    ///
+    /// Falls back to normal parsing for:
+    /// - Incomplete sequences (buffer boundary)
+    /// - Private marker sequences (`ESC [ ?`)
+    /// - Sequences with intermediates (`ESC [ <params> <0x20..0x2F> <final>`)
+    /// - Subparameters (`:`)
+    #[inline]
+    fn try_csi_fast_path<P: Perform>(
+        &mut self,
+        performer: &mut P,
+        bytes: &[u8],
+    ) -> Option<usize> {
+        // Need at least ESC [ <final> = 3 bytes
+        if bytes.len() < 3 {
+            return None;
+        }
+
+        // bytes[0] is ESC (0x1B), check for [
+        if bytes[1] != b'[' {
+            return None;
+        }
+
+        // Scan for the final byte (0x40..=0x7E) starting at position 2.
+        // Bail out if we see intermediates (0x20..=0x2F), private markers
+        // (0x3C..=0x3F at position 2), subparameters (:), or control chars.
+        let start = 2;
+
+        // Check for private marker at first param position
+        if bytes[start] >= 0x3C && bytes[start] <= 0x3F {
+            // Private CSI like ESC[? — fall back to state machine
+            return None;
+        }
+
+        // Parse parameters inline. We support up to MAX_PARAMS parameters
+        // (same as the state machine) with digits and semicolons only.
+        let mut params = Params::default();
+        let mut current_param: u16 = 0;
+        let mut has_param_digit = false;
+        let mut i = start;
+
+        while i < bytes.len() {
+            let byte = bytes[i];
+            match byte {
+                // Digit: accumulate parameter
+                b'0'..=b'9' => {
+                    current_param = current_param.saturating_mul(10);
+                    current_param = current_param.saturating_add((byte - b'0') as u16);
+                    has_param_digit = true;
+                }
+                // Semicolon: parameter separator
+                b';' => {
+                    if params.is_full() {
+                        return None; // Too many params, fall back
+                    }
+                    params.push(current_param);
+                    current_param = 0;
+                    has_param_digit = false;
+                }
+                // Colon: subparameter — fall back to state machine
+                b':' => return None,
+                // Intermediate bytes — fall back
+                0x20..=0x2F => return None,
+                // Final byte: dispatch!
+                0x40..=0x7E => {
+                    // Push the last parameter
+                    if has_param_digit || i > start {
+                        if params.is_full() {
+                            // Too many params — still dispatch but with ignore flag
+                            performer.csi_dispatch(&params, &[], true, byte as char);
+                        } else {
+                            params.push(current_param);
+                            performer.csi_dispatch(&params, &[], false, byte as char);
+                        }
+                    } else {
+                        // No parameters at all (e.g., ESC [ m)
+                        params.push(0);
+                        performer.csi_dispatch(&params, &[], false, byte as char);
+                    }
+                    self.state = State::Ground;
+                    return Some(i + 1);
+                }
+                // Control character or anything unexpected — fall back
+                _ => return None,
+            }
+            i += 1;
+        }
+
+        // Reached end of buffer without finding final byte — incomplete sequence.
+        // Fall back to state machine which handles partial sequences.
+        None
+    }
+
     /// Handle ground dispatch of print/execute for all characters in a string.
+    ///
+    /// Batches runs of printable characters into `print_str()` calls, only
+    /// falling back to per-character `execute()` for control codes.
     #[inline]
     fn ground_dispatch<P: Perform>(performer: &mut P, text: &str) {
-        for c in text.chars() {
+        let mut printable_start: Option<usize> = None;
+
+        for (i, c) in text.char_indices() {
             match c {
-                '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => performer.execute(c as u8),
-                _ => performer.print(c),
+                '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => {
+                    // Flush any accumulated printable run before the control char.
+                    if let Some(start) = printable_start.take() {
+                        performer.print_str(&text[start..i]);
+                    }
+                    performer.execute(c as u8);
+                }
+                _ => {
+                    if printable_start.is_none() {
+                        printable_start = Some(i);
+                    }
+                }
             }
+        }
+
+        // Flush remaining printable run.
+        if let Some(start) = printable_start {
+            performer.print_str(&text[start..]);
         }
     }
 }
@@ -729,6 +920,18 @@ pub trait Perform {
     /// Draw a character to the screen and update states.
     fn print(&mut self, _c: char) {}
 
+    /// Draw a string of printable characters to the screen (batch optimization).
+    ///
+    /// The provided string is guaranteed to contain only printable characters
+    /// (no C0/C1 control codes). Implementations can override this for
+    /// efficient batch processing. The default falls back to per-character
+    /// `print()` calls.
+    fn print_str(&mut self, text: &str) {
+        for c in text.chars() {
+            self.print(c);
+        }
+    }
+
     /// Execute a C0 or C1 control function.
     fn execute(&mut self, _byte: u8) {}
 
@@ -748,6 +951,15 @@ pub trait Perform {
     /// Pass bytes as part of a device control string to the handle chosen in
     /// `hook`. C0 controls will also be passed to the handler.
     fn put(&mut self, _byte: u8) {}
+
+    /// Pass a slice of bytes as part of a device control string (batch optimization).
+    ///
+    /// The default falls back to per-byte `put()` calls.
+    fn put_slice(&mut self, data: &[u8]) {
+        for &b in data {
+            self.put(b);
+        }
+    }
 
     /// Called when a device control string is terminated.
     ///
