@@ -643,6 +643,17 @@ impl Screen {
         self.attrs.inverse()
     }
 
+    /// Returns which rows are dirty and clears the dirty flags.
+    /// Returns a Vec<bool> where index = row number, value = dirty.
+    pub fn take_dirty_rows(&mut self) -> Vec<bool> {
+        self.grid_mut().take_dirty_rows()
+    }
+
+    /// Check if any row is dirty (without consuming).
+    pub fn has_dirty_rows(&self) -> bool {
+        self.grid().has_dirty_rows()
+    }
+
     pub(crate) fn grid(&self) -> &crate::grid::Grid {
         if self.mode(MODE_ALTERNATE_SCREEN) {
             &self.alternate_grid

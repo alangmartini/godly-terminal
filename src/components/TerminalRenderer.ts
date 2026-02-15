@@ -14,6 +14,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { WebGLRenderer } from './renderer/WebGLRenderer';
+import { perfTracer } from '../utils/PerfTracer';
 
 // ---- Types matching the Rust RichGridData ----
 
@@ -54,6 +55,19 @@ export interface CursorState {
 export interface GridDimensions {
   rows: number;
   cols: number;
+}
+
+/** Differential grid snapshot: only contains rows that changed since last read. */
+export interface RichGridDiff {
+  dirty_rows: [number, RichGridRow][];
+  cursor: CursorState;
+  dimensions: GridDimensions;
+  alternate_screen: boolean;
+  cursor_hidden: boolean;
+  title: string;
+  scrollback_offset: number;
+  total_scrollback: number;
+  full_repaint: boolean;
 }
 
 // ---- Theme ----
@@ -277,7 +291,9 @@ export class TerminalRenderer {
         if (this.pendingSnapshot) {
           this.currentSnapshot = this.pendingSnapshot;
           this.pendingSnapshot = null;
+          perfTracer.measure('raf_wait', 'render_start');
           this.paint();
+          perfTracer.tick();
         }
       });
     }
@@ -414,10 +430,13 @@ export class TerminalRenderer {
     const snap = this.currentSnapshot;
     if (!snap) return;
 
+    perfTracer.mark('paint_start');
+
     if (this.useWebGL && this.webglRenderer) {
       // WebGL path: delegate grid rendering to GPU
       const sel = this.selection.active ? this.normalizeSelection(this.selection) : null;
       this.webglRenderer.paint(snap, this.theme, sel, this.cursorVisible && !snap.cursor_hidden && snap.scrollback_offset === 0);
+      perfTracer.measure('webgl_paint', 'paint_start');
       // Draw scrollbar and URL hover on overlay
       this.paintOverlay(snap);
       return;
