@@ -61,6 +61,10 @@ export class TerminalPane {
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
     this.container.appendChild(this.renderer.getElement());
+    const overlay = this.renderer.getOverlayElement();
+    if (overlay) {
+      this.container.appendChild(overlay);
+    }
     this.resizeObserver.observe(this.container);
 
     // Click-to-focus in split mode: set this terminal as active
