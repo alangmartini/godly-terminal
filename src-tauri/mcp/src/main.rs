@@ -18,7 +18,7 @@ use log::mcp_log;
 use pipe_client::McpPipeClient;
 
 /// Bump this on every godly-mcp code change so logs show which binary is running.
-const BUILD: u32 = 12;
+const BUILD: u32 = 13;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
