@@ -21,7 +21,8 @@
         "fullscreen": false,
         "decorations": true,
         "transparent": false,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222"
       }
     ],
     "security": {
