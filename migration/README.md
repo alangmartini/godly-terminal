@@ -44,9 +44,9 @@ This folder tracks the migration from xterm.js to **godly-vt** — our own Rust 
 
 ## Current Status
 
-- [ ] Phase 0: Fork & Setup (godly-vt crate in workspace)
-- [ ] Phase 1: Wire into daemon as state backend + unit tests
-- [ ] Phase 2: SIMD + batch print performance
-- [ ] Phase 3: Image protocol support
+- [x] Phase 0: Fork & Setup (godly-vt crate in workspace) — PR #96
+- [x] Phase 1: Wire into daemon as state backend + unit tests — PR #96
+- [x] Phase 2: SIMD + batch print performance — PR #97 (80-125 MB/s, SIMD scanner 25+ GiB/s)
+- [x] Phase 3: Image protocol support — PR #98 (Kitty, iTerm2, Sixel, APC parser)
 - [ ] Phase 4: Frontend renderer migration
 - [ ] Phase 5: Remove xterm.js dependency
