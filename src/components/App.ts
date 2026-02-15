@@ -403,8 +403,8 @@ export class App {
       await this.setupScrollbackSaveListener();
     }
 
-    // Listen for file drag-drop events (paste file names into terminal)
-    this.setupDragDropListener();
+    // Listen for file drag-drop events (paste full file paths into terminal)
+    await this.setupDragDropListener();
 
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
@@ -887,62 +887,29 @@ export class App {
     });
   }
 
-  private setupDragDropListener() {
-    // File drop handling via HTML5 events.
-    // We use dragDropEnabled: false in tauri.conf.json because Tauri's native
-    // IDropTarget intercepts ALL drag operations (including internal HTML5 DnD
-    // for tab/workspace reordering) and returns DROPEFFECT_NONE for non-file
-    // drags, causing Windows to show a forbidden cursor and preventing drops.
-    // With dragDropEnabled: false, WebView2 uses its default drop handling
-    // which supports both internal DnD and external file drops via HTML5 events.
-    // Limitation: File.path is not available in WebView2, so we paste filenames
-    // instead of full paths when files are dropped from Explorer.
-    let dragCounter = 0;
+  private async setupDragDropListener() {
+    // File drop handling via Tauri's native drag-drop events.
+    // With dragDropEnabled: true, Tauri's IDropTarget intercepts external file
+    // drags and provides full file system paths (unlike HTML5 File API which
+    // only exposes filenames in WebView2). Internal HTML5 DnD (tab reordering,
+    // workspace moves, split zones) still works because Chromium handles
+    // intra-webview drags internally without going through the OS drop target.
+    const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
 
-    this.terminalContainer.addEventListener('dragenter', (e) => {
-      // Only react to external file drags, not internal tab drags
-      if (!e.dataTransfer?.types.includes('Files')) return;
-      dragCounter++;
-      this.terminalContainer.classList.add('drag-file-over');
-    });
-
-    this.terminalContainer.addEventListener('dragover', (e) => {
-      // Must preventDefault on dragover to allow the drop event to fire.
-      // Without this, the browser refuses the drop and our cleanup in the
-      // drop handler never runs, leaving the overlay stuck.
-      if (!e.dataTransfer?.types.includes('Files')) return;
-      e.preventDefault();
-      e.dataTransfer!.dropEffect = 'copy';
-    });
-
-    this.terminalContainer.addEventListener('dragleave', (e) => {
-      if (!e.dataTransfer?.types.includes('Files')) return;
-      dragCounter--;
-      if (dragCounter <= 0) {
-        dragCounter = 0;
+    await getCurrentWebviewWindow().onDragDropEvent((event) => {
+      if (event.payload.type === 'enter') {
+        this.terminalContainer.classList.add('drag-file-over');
+      } else if (event.payload.type === 'leave') {
         this.terminalContainer.classList.remove('drag-file-over');
+      } else if (event.payload.type === 'drop') {
+        this.terminalContainer.classList.remove('drag-file-over');
+
+        const state = store.getState();
+        if (!state.activeTerminalId || !event.payload.paths.length) return;
+
+        const text = event.payload.paths.map(quotePath).join(' ');
+        terminalService.writeToTerminal(state.activeTerminalId, text);
       }
-    });
-
-    this.terminalContainer.addEventListener('drop', (e) => {
-      if (!e.dataTransfer?.types.includes('Files')) return;
-      e.preventDefault();
-      dragCounter = 0;
-      this.terminalContainer.classList.remove('drag-file-over');
-
-      const state = store.getState();
-      if (!state.activeTerminalId || !e.dataTransfer.files.length) return;
-
-      const names = Array.from(e.dataTransfer.files).map(f => f.name);
-      const text = names.map(quotePath).join(' ');
-      terminalService.writeToTerminal(state.activeTerminalId, text);
-    });
-
-    // Safety net: if a file drag ends without a clean drop (e.g. dropped
-    // outside the window, or Escape pressed), clear the overlay.
-    document.addEventListener('dragend', () => {
-      dragCounter = 0;
-      this.terminalContainer.classList.remove('drag-file-over');
     });
   }
 
