@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "godly-terminal": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/godly-mcp.exe"
+    }
+  }
+}
