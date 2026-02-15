@@ -44,6 +44,20 @@ impl<CB: crate::callbacks::Callbacks> crate::state_machine::Perform for WrappedS
         }
     }
 
+    fn print_str(&mut self, text: &str) {
+        // print_str is only called with printable characters (no C0/C1).
+        // However, U+FFFD replacement chars may appear from invalid UTF-8.
+        // For the common case (no special chars), write each char to screen
+        // directly without the extra checks.
+        for c in text.chars() {
+            if c == '\u{fffd}' {
+                self.callbacks.unhandled_char(&mut self.screen, c);
+            } else {
+                self.screen.text(c);
+            }
+        }
+    }
+
     fn execute(&mut self, b: u8) {
         match b {
             7 => self.callbacks.audible_bell(&mut self.screen),
