@@ -133,7 +133,10 @@ void main() {
   // Sample glyph from atlas
   if (v_glyphRect.z > 0.0 && v_glyphRect.w > 0.0) {
     vec2 glyphUV = (v_glyphRect.xy + v_uv * v_glyphRect.zw) / u_atlasSize;
-    float alpha = texture(u_atlas, glyphUV).r;
+    // Use max(r,g,b) to handle Windows ClearType subpixel rendering,
+    // which writes different values per RGB channel
+    vec4 texel = texture(u_atlas, glyphUV);
+    float alpha = max(texel.r, max(texel.g, texel.b));
     vec3 textColor = v_selected > 0.5 ? vec3(1.0) : v_fgColor.rgb;
     color = vec4(mix(color.rgb, textColor, alpha), 1.0);
   }

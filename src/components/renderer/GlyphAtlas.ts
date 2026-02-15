@@ -8,6 +8,7 @@ export interface GlyphEntry {
 const INITIAL_SIZE = 1024;
 const MAX_SIZE = 4096;
 const LINE_HEIGHT_FACTOR = 1.2;
+const GLYPH_PAD = 1; // 1px padding between glyphs to prevent texture bleeding
 
 export class GlyphAtlas {
   private canvas: OffscreenCanvas;
@@ -59,8 +60,8 @@ export class GlyphAtlas {
     if (!this.texture) {
       this.texture = gl.createTexture()!;
       gl.bindTexture(gl.TEXTURE_2D, this.texture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     } else {
@@ -146,10 +147,10 @@ export class GlyphAtlas {
     const baselineOffset = Math.round((h - scaledSize) / 2);
     this.ctx.fillText(char, x, y + baselineOffset);
 
-    // Advance shelf cursor
-    this.shelfX += w;
-    if (h > this.shelfHeight) {
-      this.shelfHeight = h;
+    // Advance shelf cursor with padding
+    this.shelfX += w + GLYPH_PAD;
+    if (h + GLYPH_PAD > this.shelfHeight) {
+      this.shelfHeight = h + GLYPH_PAD;
     }
 
     const entry: GlyphEntry = { x, y, w, h };
@@ -159,16 +160,16 @@ export class GlyphAtlas {
   }
 
   private ensureSpace(glyphW: number, glyphH: number): void {
-    // Check if glyph fits in current shelf horizontally
-    if (this.shelfX + glyphW > this.atlasWidth) {
+    // Check if glyph fits in current shelf horizontally (with padding)
+    if (this.shelfX + glyphW + GLYPH_PAD > this.atlasWidth) {
       // Start a new shelf
       this.shelfY += this.shelfHeight;
       this.shelfX = 0;
       this.shelfHeight = 0;
     }
 
-    // Check if we have vertical space
-    const neededHeight = this.shelfY + Math.max(this.shelfHeight, glyphH);
+    // Check if we have vertical space (with padding)
+    const neededHeight = this.shelfY + Math.max(this.shelfHeight, glyphH + GLYPH_PAD);
     if (neededHeight > this.atlasHeight) {
       this.grow(neededHeight);
     }
