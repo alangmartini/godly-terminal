@@ -1,0 +1,98 @@
+/**
+ * Built-in themes that ship with Godly Terminal.
+ */
+
+import type { ThemeDefinition } from './types';
+
+export const TOKYO_NIGHT: ThemeDefinition = {
+  id: 'tokyo-night',
+  name: 'Tokyo Night',
+  description: 'Cool-toned dark theme with vibrant accents',
+  author: 'Godly Terminal',
+  builtin: true,
+  terminal: {
+    background: '#1a1b26',
+    foreground: '#c0caf5',
+    cursor: '#c0caf5',
+    cursorAccent: '#1a1b26',
+    selectionBackground: '#283457',
+    black: '#15161e',
+    red: '#f7768e',
+    green: '#9ece6a',
+    yellow: '#e0af68',
+    blue: '#7aa2f7',
+    magenta: '#bb9af7',
+    cyan: '#7dcfff',
+    white: '#a9b1d6',
+    brightBlack: '#414868',
+    brightRed: '#f7768e',
+    brightGreen: '#9ece6a',
+    brightYellow: '#e0af68',
+    brightBlue: '#7aa2f7',
+    brightMagenta: '#bb9af7',
+    brightCyan: '#7dcfff',
+    brightWhite: '#c0caf5',
+  },
+  ui: {
+    bgPrimary: '#1a1b26',
+    bgSecondary: '#16161e',
+    bgTertiary: '#292e42',
+    bgActive: '#33467c',
+    textPrimary: '#a9b1d6',
+    textSecondary: '#565f89',
+    textActive: '#c0caf5',
+    accent: '#7aa2f7',
+    accentHover: '#89b4fa',
+    borderColor: '#292e42',
+    danger: '#f7768e',
+    success: '#9ece6a',
+  },
+};
+
+export const DUSK: ThemeDefinition = {
+  id: 'dusk',
+  name: 'Dusk',
+  description: 'Warm, low-contrast theme designed for long sessions',
+  author: 'Godly Terminal',
+  builtin: true,
+  terminal: {
+    background: '#1d1f21',
+    foreground: '#c5c0b6',
+    cursor: '#e8a87c',
+    cursorAccent: '#1d1f21',
+    selectionBackground: '#3a3632',
+    black: '#2c2a27',
+    red: '#c27070',
+    green: '#8fad7e',
+    yellow: '#d4a96a',
+    blue: '#7b9bb5',
+    magenta: '#b58b9e',
+    cyan: '#7fb5aa',
+    white: '#c5c0b6',
+    brightBlack: '#5a564f',
+    brightRed: '#d49090',
+    brightGreen: '#a8c49a',
+    brightYellow: '#e0be88',
+    brightBlue: '#96b4cc',
+    brightMagenta: '#caa4b5',
+    brightCyan: '#99ccc2',
+    brightWhite: '#d8d3c9',
+  },
+  ui: {
+    bgPrimary: '#1d1f21',
+    bgSecondary: '#181a1b',
+    bgTertiary: '#2e2b28',
+    bgActive: '#3d3733',
+    textPrimary: '#b0ab9f',
+    textSecondary: '#6b665c',
+    textActive: '#c5c0b6',
+    accent: '#d4a96a',
+    accentHover: '#e0be88',
+    borderColor: '#2e2b28',
+    danger: '#c27070',
+    success: '#8fad7e',
+  },
+};
+
+/** All built-in themes, in display order. */
+export const BUILTIN_THEMES: ThemeDefinition[] = [TOKYO_NIGHT, DUSK];
