@@ -604,8 +604,11 @@ fn io_thread(
                 }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
-                    // Response channel closed — handler loop exited
-                    daemon_log!("Response channel disconnected");
+                    // Response channel closed — async handler died (possibly from
+                    // an eprintln! panic when running without a console).
+                    // Stop the io_thread so the client gets EOF instead of hanging.
+                    daemon_log!("Response channel disconnected, stopping io_thread");
+                    io_running.store(false, Ordering::Relaxed);
                     break;
                 }
             }
