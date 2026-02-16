@@ -348,6 +348,12 @@ export class App {
           break;
         }
 
+        case 'tabs.renameTerminal': {
+          e.preventDefault();
+          this.tabBar.startRenameActive();
+          break;
+        }
+
         case 'split.focusOtherPane': {
           e.preventDefault();
           if (state.activeWorkspaceId && state.activeTerminalId) {

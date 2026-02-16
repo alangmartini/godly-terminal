@@ -23,7 +23,8 @@ export type ActionId =
   | 'scroll.pageUp'
   | 'scroll.pageDown'
   | 'scroll.toTop'
-  | 'scroll.toBottom';
+  | 'scroll.toBottom'
+  | 'tabs.renameTerminal';
 
 export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll';
 
@@ -153,6 +154,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     type: 'app',
     defaultChord: { ctrlKey: false, shiftKey: true, altKey: false, key: 'end' },
   },
+  {
+    id: 'tabs.renameTerminal',
+    label: 'Rename Terminal',
+    category: 'Tabs',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: false, altKey: false, key: 'f2' },
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -200,6 +208,7 @@ export function formatChord(chord: KeyChord): string {
     pagedown: 'PageDown',
     home: 'Home',
     end: 'End',
+    f2: 'F2',
   };
   const displayKey = keyDisplayMap[chord.key] ?? chord.key.toUpperCase();
   parts.push(displayKey);
