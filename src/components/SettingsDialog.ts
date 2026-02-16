@@ -9,11 +9,14 @@ import {
   type ShortcutCategory,
 } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
+import { workspaceService } from '../services/workspace-service';
 import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
 import { getRendererBackend } from './TerminalRenderer';
 import { themeStore } from '../state/theme-store';
 import type { ThemeDefinition } from '../themes/types';
 import { createThemePreview } from './ThemePreview';
+import type { ShellType } from '../state/store';
 
 function formatCustomSoundName(filename: string): string {
   // Strip extension
@@ -56,6 +59,7 @@ export function showSettingsDialog(): Promise<void> {
 
     const tabs: { id: string; label: string }[] = [
       { id: 'themes', label: 'Themes' },
+      { id: 'terminal', label: 'Terminal' },
       { id: 'notifications', label: 'Notifications' },
       { id: 'shortcuts', label: 'Shortcuts' },
     ];
@@ -194,6 +198,214 @@ export function showSettingsDialog(): Promise<void> {
     themesContent.appendChild(importBtn);
 
     dialog.appendChild(themesContent);
+
+    // ── Terminal tab content ─────────────────────────────────────
+    const terminalContent = document.createElement('div');
+    terminalContent.className = 'settings-tab-content';
+    tabContents['terminal'] = terminalContent;
+
+    const termSection = document.createElement('div');
+    termSection.className = 'settings-section';
+
+    const termTitle = document.createElement('div');
+    termTitle.className = 'settings-section-title';
+    termTitle.textContent = 'Default Shell';
+    termSection.appendChild(termTitle);
+
+    const termDesc = document.createElement('div');
+    termDesc.className = 'settings-description';
+    termDesc.textContent = 'Choose which shell to use when creating new terminals and workspaces.';
+    termSection.appendChild(termDesc);
+
+    interface ShellOption {
+      id: string;
+      label: string;
+      tooltip: string;
+      shellType: ShellType;
+      checkAvailability?: () => Promise<boolean>;
+    }
+
+    const shellOptions: ShellOption[] = [
+      {
+        id: 'windows',
+        label: 'PowerShell',
+        tooltip: 'Built-in on all Windows. Rich scripting, but slower startup (~1-2s).',
+        shellType: { type: 'windows' },
+      },
+      {
+        id: 'pwsh',
+        label: 'PowerShell 7',
+        tooltip: 'Modern, faster startup, cross-platform. Must be installed separately.',
+        shellType: { type: 'pwsh' },
+        checkAvailability: () => invoke<boolean>('is_pwsh_available'),
+      },
+      {
+        id: 'cmd',
+        label: 'Command Prompt',
+        tooltip: 'Fastest startup. Lightweight but limited scripting capabilities.',
+        shellType: { type: 'cmd' },
+      },
+      {
+        id: 'wsl',
+        label: 'WSL',
+        tooltip: 'Full Linux environment. Requires WSL to be installed.',
+        shellType: { type: 'wsl' },
+        checkAvailability: () => workspaceService.isWslAvailable(),
+      },
+    ];
+
+    const currentDefault = terminalSettingsStore.getDefaultShell();
+    let selectedShellId = currentDefault.type === 'windows' ? 'windows' : currentDefault.type;
+
+    const radioGroup = document.createElement('div');
+    radioGroup.className = 'shell-radio-group';
+
+    // WSL distribution dropdown (hidden unless WSL is selected)
+    const wslDistroRow = document.createElement('div');
+    wslDistroRow.className = 'shell-wsl-distro-row';
+    wslDistroRow.style.display = 'none';
+
+    const wslDistroLabel = document.createElement('span');
+    wslDistroLabel.className = 'shortcut-label';
+    wslDistroLabel.textContent = 'Distribution';
+    wslDistroRow.appendChild(wslDistroLabel);
+
+    const wslDistroSelect = document.createElement('select');
+    wslDistroSelect.className = 'notification-preset';
+    wslDistroRow.appendChild(wslDistroSelect);
+
+    // Track availability per option
+    const optionAvailability: Record<string, boolean> = {};
+    const optionElements: Record<string, HTMLDivElement> = {};
+
+    for (const opt of shellOptions) {
+      const row = document.createElement('div');
+      row.className = 'shell-option-row';
+
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'default-shell';
+      radio.id = `shell-${opt.id}`;
+      radio.value = opt.id;
+      radio.checked = selectedShellId === opt.id;
+      row.appendChild(radio);
+
+      const label = document.createElement('label');
+      label.htmlFor = `shell-${opt.id}`;
+      label.className = 'shell-option-label';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'shell-option-name';
+      nameSpan.textContent = opt.label;
+      label.appendChild(nameSpan);
+
+      // Info tooltip icon
+      const infoIcon = document.createElement('span');
+      infoIcon.className = 'shell-info-icon';
+      infoIcon.textContent = '\u24D8'; // circled i
+      infoIcon.title = opt.tooltip;
+      label.appendChild(infoIcon);
+
+      // "(not installed)" label placeholder
+      const unavailableLabel = document.createElement('span');
+      unavailableLabel.className = 'shell-unavailable-label';
+      unavailableLabel.style.display = 'none';
+      unavailableLabel.textContent = '(not installed)';
+      label.appendChild(unavailableLabel);
+
+      row.appendChild(label);
+
+      radio.onchange = () => {
+        if (!radio.checked) return;
+        selectedShellId = opt.id;
+
+        if (opt.id === 'wsl') {
+          wslDistroRow.style.display = 'flex';
+          const distro = wslDistroSelect.value || undefined;
+          terminalSettingsStore.setDefaultShell({ type: 'wsl', distribution: distro });
+        } else {
+          wslDistroRow.style.display = 'none';
+          terminalSettingsStore.setDefaultShell(opt.shellType);
+        }
+      };
+
+      radioGroup.appendChild(row);
+      optionElements[opt.id] = row;
+    }
+
+    termSection.appendChild(radioGroup);
+    termSection.appendChild(wslDistroRow);
+
+    // WSL distro select change handler
+    wslDistroSelect.onchange = () => {
+      if (selectedShellId === 'wsl') {
+        const distro = wslDistroSelect.value || undefined;
+        terminalSettingsStore.setDefaultShell({ type: 'wsl', distribution: distro });
+      }
+    };
+
+    // Check availability asynchronously and disable unavailable options
+    for (const opt of shellOptions) {
+      if (!opt.checkAvailability) {
+        optionAvailability[opt.id] = true;
+        continue;
+      }
+      opt.checkAvailability().then(available => {
+        optionAvailability[opt.id] = available;
+        if (!available) {
+          const row = optionElements[opt.id];
+          const radio = row.querySelector('input') as HTMLInputElement;
+          radio.disabled = true;
+          row.classList.add('disabled');
+          const unavailableSpan = row.querySelector('.shell-unavailable-label') as HTMLElement;
+          if (unavailableSpan) unavailableSpan.style.display = 'inline';
+        }
+      }).catch(() => {
+        // Treat check failure as available
+        optionAvailability[opt.id] = true;
+      });
+    }
+
+    // If WSL is currently selected, show the distro dropdown and load distributions
+    if (currentDefault.type === 'wsl') {
+      wslDistroRow.style.display = 'flex';
+      workspaceService.getWslDistributions().then(distros => {
+        wslDistroSelect.textContent = '';
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Default';
+        wslDistroSelect.appendChild(defaultOpt);
+
+        for (const d of distros) {
+          const dOpt = document.createElement('option');
+          dOpt.value = d;
+          dOpt.textContent = d;
+          if ((currentDefault as { type: 'wsl'; distribution?: string }).distribution === d) {
+            dOpt.selected = true;
+          }
+          wslDistroSelect.appendChild(dOpt);
+        }
+      }).catch(() => {});
+    } else {
+      // Pre-load distros so they're ready if user switches to WSL
+      workspaceService.getWslDistributions().then(distros => {
+        wslDistroSelect.textContent = '';
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Default';
+        wslDistroSelect.appendChild(defaultOpt);
+
+        for (const d of distros) {
+          const dOpt = document.createElement('option');
+          dOpt.value = d;
+          dOpt.textContent = d;
+          wslDistroSelect.appendChild(dOpt);
+        }
+      }).catch(() => {});
+    }
+
+    terminalContent.appendChild(termSection);
+    dialog.appendChild(terminalContent);
 
     // ── Notifications tab content ───────────────────────────────
     const notifContent = document.createElement('div');

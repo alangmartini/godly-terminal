@@ -1304,6 +1304,71 @@ body.dragging-active * {
   display: block;
 }
 
+/* Terminal settings */
+.settings-description {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.shell-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shell-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.shell-option-row:hover {
+  background: var(--bg-secondary);
+}
+
+.shell-option-row.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shell-option-row.disabled label {
+  cursor: not-allowed;
+}
+
+.shell-option-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.shell-option-name {
+  font-weight: 500;
+}
+
+.shell-info-icon {
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: help;
+}
+
+.shell-unavailable-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.shell-wsl-distro-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 28px;
+}
+
 /* Theme grid */
 .theme-grid {
   display: grid;
