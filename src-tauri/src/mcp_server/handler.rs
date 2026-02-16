@@ -235,6 +235,8 @@ pub fn handle_mcp_request(
 
             let process_name = match &shell {
                 godly_protocol::ShellType::Windows => String::from("powershell"),
+                godly_protocol::ShellType::Pwsh => String::from("pwsh"),
+                godly_protocol::ShellType::Cmd => String::from("cmd"),
                 godly_protocol::ShellType::Wsl { distribution } => {
                     distribution.clone().unwrap_or_else(|| String::from("wsl"))
                 }
@@ -900,6 +902,8 @@ pub fn handle_mcp_request(
 fn to_protocol_shell_type(st: &crate::state::ShellType) -> godly_protocol::ShellType {
     match st {
         crate::state::ShellType::Windows => godly_protocol::ShellType::Windows,
+        crate::state::ShellType::Pwsh => godly_protocol::ShellType::Pwsh,
+        crate::state::ShellType::Cmd => godly_protocol::ShellType::Cmd,
         crate::state::ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
             distribution: distribution.clone(),
         },
@@ -915,6 +919,8 @@ fn truncate_output(text: &str, mode: Option<&str>, lines: Option<usize>) -> Stri
 fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::ShellType {
     match st {
         godly_protocol::ShellType::Windows => crate::state::ShellType::Windows,
+        godly_protocol::ShellType::Pwsh => crate::state::ShellType::Pwsh,
+        godly_protocol::ShellType::Cmd => crate::state::ShellType::Cmd,
         godly_protocol::ShellType::Wsl { distribution } => crate::state::ShellType::Wsl {
             distribution: distribution.clone(),
         },

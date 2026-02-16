@@ -1,12 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { store, Workspace, ShellType } from '../state/store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 
 export interface WorkspaceData {
   id: string;
   name: string;
   folder_path: string;
   tab_order: string[];
-  shell_type?: 'windows' | { wsl: { distribution: string | null } };
+  shell_type?: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } };
   worktree_mode?: boolean;
   claude_code_mode?: boolean;
 }
@@ -22,13 +23,15 @@ class WorkspaceService {
   async createWorkspace(
     name: string,
     folderPath: string,
-    shellType: ShellType = { type: 'windows' }
+    shellType: ShellType = terminalSettingsStore.getDefaultShell()
   ): Promise<string> {
     // Convert frontend ShellType to backend format
-    const backendShellType =
-      shellType.type === 'windows'
-        ? 'windows'
-        : { wsl: { distribution: shellType.distribution ?? null } };
+    let backendShellType: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } };
+    if (shellType.type === 'wsl') {
+      backendShellType = { wsl: { distribution: (shellType as { type: 'wsl'; distribution?: string }).distribution ?? null } };
+    } else {
+      backendShellType = shellType.type;
+    }
 
     const workspaceId = await invoke<string>('create_workspace', {
       name,
@@ -126,11 +129,11 @@ class WorkspaceService {
   }
 
   private convertShellType(
-    backendType?: 'windows' | { wsl: { distribution: string | null } }
+    backendType?: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } }
   ): ShellType {
-    if (!backendType || backendType === 'windows') {
-      return { type: 'windows' };
-    }
+    if (!backendType || backendType === 'windows') return { type: 'windows' };
+    if (backendType === 'pwsh') return { type: 'pwsh' };
+    if (backendType === 'cmd') return { type: 'cmd' };
     if (typeof backendType === 'object' && 'wsl' in backendType) {
       return {
         type: 'wsl',

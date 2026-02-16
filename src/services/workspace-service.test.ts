@@ -107,6 +107,42 @@ describe('WorkspaceService', () => {
         expect(workspaces[0].shellType.distribution).toBeUndefined();
       }
     });
+
+    it('should convert "pwsh" string to pwsh shell type', async () => {
+      const workspaceData: WorkspaceData[] = [
+        {
+          id: 'ws-1',
+          name: 'Pwsh Test',
+          folder_path: 'C:\\Users\\test',
+          tab_order: [],
+          shell_type: 'pwsh',
+        },
+      ];
+
+      mockedInvoke.mockResolvedValue(workspaceData);
+
+      const workspaces = await workspaceService.loadWorkspaces();
+
+      expect(workspaces[0].shellType).toEqual({ type: 'pwsh' });
+    });
+
+    it('should convert "cmd" string to cmd shell type', async () => {
+      const workspaceData: WorkspaceData[] = [
+        {
+          id: 'ws-1',
+          name: 'Cmd Test',
+          folder_path: 'C:\\Users\\test',
+          tab_order: [],
+          shell_type: 'cmd',
+        },
+      ];
+
+      mockedInvoke.mockResolvedValue(workspaceData);
+
+      const workspaces = await workspaceService.loadWorkspaces();
+
+      expect(workspaces[0].shellType).toEqual({ type: 'cmd' });
+    });
   });
 
   describe('createWorkspace', () => {
@@ -150,6 +186,34 @@ describe('WorkspaceService', () => {
         name: 'WSL Default',
         folderPath: '/home/user',
         shellType: { wsl: { distribution: null } },
+      });
+    });
+
+    it('should send pwsh shell type in correct backend format', async () => {
+      mockedInvoke.mockResolvedValue('ws-new');
+
+      await workspaceService.createWorkspace('Pwsh Workspace', 'C:\\test', {
+        type: 'pwsh',
+      });
+
+      expect(mockedInvoke).toHaveBeenCalledWith('create_workspace', {
+        name: 'Pwsh Workspace',
+        folderPath: 'C:\\test',
+        shellType: 'pwsh',
+      });
+    });
+
+    it('should send cmd shell type in correct backend format', async () => {
+      mockedInvoke.mockResolvedValue('ws-new');
+
+      await workspaceService.createWorkspace('Cmd Workspace', 'C:\\test', {
+        type: 'cmd',
+      });
+
+      expect(mockedInvoke).toHaveBeenCalledWith('create_workspace', {
+        name: 'Cmd Workspace',
+        folderPath: 'C:\\test',
+        shellType: 'cmd',
       });
     });
 
