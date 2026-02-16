@@ -505,6 +505,11 @@ export function showSettingsDialog(): Promise<void> {
     footer.textContent = `Renderer: ${getRendererBackend()}`;
     dialog.appendChild(footer);
 
+    const versionLine = document.createElement('div');
+    versionLine.className = 'settings-footer settings-version';
+    versionLine.textContent = `Version: ${__APP_VERSION__}`;
+    dialog.appendChild(versionLine);
+
     // ── Close handling ──────────────────────────────────────────
     const close = () => {
       stopCapture();
