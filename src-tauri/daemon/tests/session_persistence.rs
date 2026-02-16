@@ -463,17 +463,19 @@ fn test_04_wmi_launch_escapes_job_object() {
     let iterations = 3;
     let mut killed_count = 0;
 
-    let instance = format!("test-wmi-{}", std::process::id());
-    // --instance sets GODLY_INSTANCE, which makes the pipe name:
-    // \\.\pipe\godly-terminal-daemon-<instance>
-    let pipe_name = format!(r"\\.\pipe\godly-terminal-daemon-{}", instance);
-
     eprintln!(
         "\n=== test_04: WMI-launched daemon vs Job Object ({} iterations) ===",
         iterations
     );
 
     for i in 0..iterations {
+        // Use a unique instance per iteration to avoid inter-iteration races.
+        // When the previous daemon is killed, its DaemonLock (named mutex) may
+        // not be fully released before the next WMI-launched daemon tries to
+        // acquire it, causing the new daemon to exit immediately.
+        let instance = format!("test-wmi-{}-{}", std::process::id(), i);
+        let pipe_name = format!(r"\\.\pipe\godly-terminal-daemon-{}", instance);
+
         eprintln!("--- Iteration {}/{} ---", i + 1, iterations);
 
         // Create a Job Object with KILL_ON_JOB_CLOSE — same as cargo/tauri-cli
