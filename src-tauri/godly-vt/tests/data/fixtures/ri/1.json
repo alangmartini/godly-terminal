@@ -1,5 +1,5 @@
 {
-  "contents": "foo   baz\n   bar",
+  "contents": "foobaz\nbar",
   "cells": {
     "0,0": {
       "contents": "f"
@@ -10,27 +10,27 @@
     "0,2": {
       "contents": "o"
     },
-    "0,6": {
+    "0,3": {
       "contents": "b"
     },
-    "0,7": {
+    "0,4": {
       "contents": "a"
     },
-    "0,8": {
+    "0,5": {
       "contents": "z"
     },
-    "1,3": {
+    "1,0": {
       "contents": "b"
     },
-    "1,4": {
+    "1,1": {
       "contents": "a"
     },
-    "1,5": {
+    "1,2": {
       "contents": "r"
     }
   },
   "cursor_position": [
     0,
-    9
+    6
   ]
 }
