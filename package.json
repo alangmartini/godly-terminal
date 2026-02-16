@@ -23,7 +23,8 @@
     "test:e2e": "wdio run e2e/wdio.conf.ts",
     "test:e2e:no-build": "cross-env SKIP_BUILD=1 wdio run e2e/wdio.conf.ts",
     "test:all": "npm run test && npm run test:rust && npm run test:e2e",
-    "check:persistence": "npx ts-node e2e/check-persistence.ts"
+    "check:persistence": "npx ts-node e2e/check-persistence.ts",
+    "version:bump": "node scripts/bump-version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

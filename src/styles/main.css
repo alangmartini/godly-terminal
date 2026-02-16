@@ -976,6 +976,12 @@ body.dragging-active * {
   text-align: right;
 }
 
+.settings-version {
+  margin-top: 2px;
+  padding-top: 0;
+  border-top: none;
+}
+
 /* Notification badges */
 .tab-notification-badge {
   width: 8px;
