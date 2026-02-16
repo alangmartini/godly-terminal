@@ -1,4 +1,7 @@
 import { App } from './components/App';
+import { initLogger } from './utils/Logger';
+
+initLogger();
 
 const container = document.getElementById('app');
 if (!container) {
