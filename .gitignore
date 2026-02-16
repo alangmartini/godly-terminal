@@ -28,5 +28,6 @@ NUL
 TODO.md
 commands.txt
 
-# Local settings (agent memory is private, skills/agents are shared)
+# Local settings (agent memory and local permissions are private)
 .claude/agent-memory/
+.claude/settings.local.json

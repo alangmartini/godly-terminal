@@ -272,6 +272,17 @@ Inject `State<Arc<AutoSaveManager>>` and call `auto_save.mark_dirty()` after sta
 User input → `terminalService.writeToTerminal()` → IPC → DaemonClient → named pipe → daemon → PTY
 Shell output → daemon reader thread → ring buffer + godly-vt parser → named pipe → DaemonBridge → `terminal-output` event → `TerminalPane.fetchAndRenderSnapshot()` → Canvas2D paint
 
+## Log File Locations
+
+| Component | File | Location |
+|-----------|------|----------|
+| Daemon | `godly-daemon-debug.log` | `%APPDATA%/com.godly.terminal/` |
+| Bridge | `godly-bridge-debug.log` | `%APPDATA%/com.godly.terminal/` |
+| MCP | `godly-mcp.log` | Next to `godly-mcp.exe` binary |
+| Frontend | `frontend.log` | `%APPDATA%/com.godly.terminal/logs/` |
+
+All rotate to `.prev.log` at 2MB. Append-mode, survive restarts.
+
 ## MCP Testing
 
 See [docs/mcp-testing.md](docs/mcp-testing.md) for the full MCP test procedure and known gaps.
