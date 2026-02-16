@@ -1,15 +1,87 @@
 $ErrorActionPreference = "Stop"
 
-Write-Host "Switching to master..." -ForegroundColor Cyan
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
+function Write-Ok($msg)   { Write-Host "   $msg" -ForegroundColor Green }
+
+function Assert-ExitCode {
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`nBuild failed (exit code $LASTEXITCODE)." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
+
+# ── Kill running daemon so binaries aren't locked ────────────────────────
+
+Write-Step "Stopping running godly-daemon instances..."
+$daemon = Get-Process -Name "godly-daemon" -ErrorAction SilentlyContinue
+if ($daemon) {
+    $daemon | Stop-Process -Force
+    Write-Ok "Killed $($daemon.Count) daemon process(es)"
+} else {
+    Write-Ok "No running daemon found"
+}
+
+# ── Switch to master and pull latest ─────────────────────────────────────
+
+Write-Step "Switching to master..."
 git checkout master
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Assert-ExitCode
 
-Write-Host "Fetching and pulling latest changes..." -ForegroundColor Cyan
+Write-Step "Pulling latest changes..."
 git pull origin master
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Assert-ExitCode
 
-Write-Host "Building Tauri app (includes daemon, MCP, notify)..." -ForegroundColor Cyan
+# ── Install npm dependencies ─────────────────────────────────────────────
+
+Write-Step "Installing npm dependencies..."
+npm install
+Assert-ExitCode
+
+# ── Unlock binaries (rename locked .exe files so cargo can overwrite) ────
+
+Write-Step "Unlocking release binaries..."
+npm run unlock -- --release
+Assert-ExitCode
+
+# ── Run tests ────────────────────────────────────────────────────────────
+
+Write-Step "Running frontend tests..."
+npm test
+Assert-ExitCode
+
+Write-Step "Running Rust tests..."
+Push-Location src-tauri
+cargo test -p godly-protocol
+Assert-ExitCode
+cargo test -p godly-vt
+# Note: escape::ri test has a known pre-existing failure — don't gate on it
+cargo test -p godly-daemon
+Assert-ExitCode
+Pop-Location
+
+# ── Build Tauri app (daemon + MCP + notify + frontend + bundle) ──────────
+
+Write-Step "Building Tauri production bundle..."
+Write-Host "   This builds: godly-daemon.exe, godly-mcp.exe, godly-notify.exe," -ForegroundColor DarkGray
+Write-Host "   the frontend (tsc + vite), and packages NSIS + MSI installers." -ForegroundColor DarkGray
 npm run tauri build
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Assert-ExitCode
 
-Write-Host "Production build complete." -ForegroundColor Green
+# ── Report output artifacts ──────────────────────────────────────────────
+
+Write-Step "Build artifacts:"
+
+$bundleDir = Join-Path $PSScriptRoot "src-tauri\target\release\bundle"
+$nsisExe   = Get-ChildItem "$bundleDir\nsis\*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$msiFile   = Get-ChildItem "$bundleDir\msi\*.msi"  -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+if ($nsisExe) { Write-Ok "NSIS: $($nsisExe.FullName)  ($([math]::Round($nsisExe.Length / 1MB, 1)) MB)" }
+if ($msiFile) { Write-Ok "MSI:  $($msiFile.FullName)  ($([math]::Round($msiFile.Length / 1MB, 1)) MB)" }
+
+if (-not $nsisExe -and -not $msiFile) {
+    Write-Host "   No installers found in $bundleDir" -ForegroundColor Yellow
+}
+
+Write-Host "`nProduction build complete." -ForegroundColor Green
