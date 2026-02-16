@@ -51,6 +51,10 @@ Never add "Generated with Claude Code" or any similar attribution message to com
 
 For every issue you work on, create or update `docs/<issue-slug>.md` to track attempts and outcomes. Check `docs/` first to avoid repeating failed approaches from previous sessions.
 
+### Regression check
+
+Before investigating a bug, scan `docs/INDEX.md` (if it exists) for resolved issues with similar symptoms. A resolved bug may have regressed — check the "Regression Risk" column. If the current bug matches a previously resolved issue, start from that doc's root cause analysis instead of investigating from scratch.
+
 ## Project-Specific Workflow Notes
 
 These extend the global CLAUDE.md workflows (bug fix, feature development):
