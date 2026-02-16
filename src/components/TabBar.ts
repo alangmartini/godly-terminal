@@ -2,21 +2,29 @@ import { store, Terminal } from '../state/store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { notificationStore } from '../state/notification-store';
+import {
+  startDrag, endDrag,
+  createGhost, moveGhost,
+  onDragMove, onDragDrop, notifyMove, notifyDrop,
+} from '../state/drag-state';
 
 export function getDisplayName(terminal: Terminal): string {
   if (terminal.userRenamed) return terminal.name;
   return terminal.oscTitle || terminal.name || terminal.processName || 'Terminal';
 }
 
+const DRAG_THRESHOLD = 5; // px of movement before drag starts
+
 export class TabBar {
   private container: HTMLElement;
   private tabsContainer: HTMLElement;
-  private draggedTab: HTMLElement | null = null;
-  private draggedTerminalId: string | null = null;
   private tabElements: Map<string, HTMLElement> = new Map();
   private lastRenderedOrder: string[] = [];
   private onSplitCallback: ((terminalId: string, direction: 'horizontal' | 'vertical') => void) | null = null;
   private onUnsplitCallback: (() => void) | null = null;
+
+  /** Timestamp of the last drag end, used to suppress the click that fires after pointerup. */
+  private _lastDragEndTime = 0;
 
   constructor() {
     this.container = document.createElement('div');
@@ -30,10 +38,44 @@ export class TabBar {
 
     const addBtn = document.createElement('div');
     addBtn.className = 'add-tab-btn';
-    addBtn.innerHTML = '+';
+    addBtn.textContent = '+';
     addBtn.title = 'New terminal (Ctrl+T)';
     addBtn.onclick = () => this.handleNewTab();
     this.container.appendChild(addBtn);
+
+    // Register as a drop target for tab drags (reorder)
+    onDragMove((x, y, data) => {
+      if (data.kind !== 'tab') return;
+      // Clear all drag-over highlights first
+      for (const el of this.tabElements.values()) {
+        el.classList.remove('drag-over');
+      }
+      // Find which tab the pointer is over
+      for (const [id, el] of this.tabElements) {
+        if (id === data.id) continue;
+        const rect = el.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          el.classList.add('drag-over');
+          break;
+        }
+      }
+    });
+
+    onDragDrop((x, y, data) => {
+      if (data.kind !== 'tab') return;
+      for (const el of this.tabElements.values()) {
+        el.classList.remove('drag-over');
+      }
+      // Find drop target
+      for (const [id, el] of this.tabElements) {
+        if (id === data.id) continue;
+        const rect = el.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          this.handleReorder(data.id, id);
+          break;
+        }
+      }
+    });
 
     store.subscribe(() => this.render());
     notificationStore.subscribe(() => this.render());
@@ -166,7 +208,6 @@ export class TabBar {
     const tab = document.createElement('div');
     tab.className = `tab${isActive ? ' active' : ''}`;
     tab.dataset.terminalId = terminal.id;
-    tab.draggable = true;
 
     const displayName = getDisplayName(terminal);
 
@@ -183,15 +224,16 @@ export class TabBar {
 
     const closeBtn = document.createElement('span');
     closeBtn.className = 'tab-close';
-    closeBtn.innerHTML = '×';
+    closeBtn.textContent = '\u00d7';
     closeBtn.onclick = (e) => {
       e.stopPropagation();
       this.handleCloseTab(terminal.id);
     };
     tab.appendChild(closeBtn);
 
-    // Click to activate
+    // Click to activate (suppress if drag just ended)
     tab.onclick = () => {
+      if (Date.now() - this._lastDragEndTime < 100) return;
       store.setActiveTerminal(terminal.id);
     };
 
@@ -217,46 +259,62 @@ export class TabBar {
       this.showContextMenu(e, terminal);
     };
 
-    // Drag events
-    tab.ondragstart = (e) => {
-      this.draggedTab = tab;
-      this.draggedTerminalId = terminal.id;
-      tab.classList.add('dragging');
-      e.dataTransfer!.effectAllowed = 'move';
-      e.dataTransfer!.setData('text/plain', terminal.id);
-    };
-
-    tab.ondragend = () => {
-      tab.classList.remove('dragging');
-      this.draggedTab = null;
-      this.draggedTerminalId = null;
-      document.querySelectorAll('.drag-over').forEach((el) => {
-        el.classList.remove('drag-over');
-      });
-    };
-
-    tab.ondragover = (e) => {
-      e.preventDefault();
-      e.dataTransfer!.dropEffect = 'move';
-      if (this.draggedTab && this.draggedTab !== tab) {
-        tab.classList.add('drag-over');
-      }
-    };
-
-    tab.ondragleave = () => {
-      tab.classList.remove('drag-over');
-    };
-
-    tab.ondrop = (e) => {
-      e.preventDefault();
-      tab.classList.remove('drag-over');
-
-      if (this.draggedTerminalId && this.draggedTerminalId !== terminal.id) {
-        this.handleReorder(this.draggedTerminalId, terminal.id);
-      }
-    };
+    // Pointer-event drag (replaces HTML5 DnD)
+    this.setupPointerDrag(tab, terminal.id);
 
     return tab;
+  }
+
+  private setupPointerDrag(tab: HTMLElement, terminalId: string): void {
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+
+    tab.addEventListener('pointerdown', (e: PointerEvent) => {
+      // Only left button
+      if (e.button !== 0) return;
+      // Don't start drag from close button
+      if ((e.target as HTMLElement).closest('.tab-close')) return;
+
+      startX = e.clientX;
+      startY = e.clientY;
+      dragging = false;
+
+      tab.setPointerCapture(e.pointerId);
+
+      const onMove = (me: PointerEvent) => {
+        const dx = me.clientX - startX;
+        const dy = me.clientY - startY;
+
+        if (!dragging) {
+          if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+          // Start drag
+          dragging = true;
+          tab.classList.add('dragging');
+          startDrag({ kind: 'tab', id: terminalId, sourceElement: tab });
+          createGhost(tab);
+        }
+
+        moveGhost(me.clientX, me.clientY);
+        notifyMove(me.clientX, me.clientY);
+      };
+
+      const onUp = (ue: PointerEvent) => {
+        tab.removeEventListener('pointermove', onMove);
+        tab.removeEventListener('pointerup', onUp);
+        tab.releasePointerCapture(ue.pointerId);
+
+        if (dragging) {
+          notifyDrop(ue.clientX, ue.clientY);
+          tab.classList.remove('dragging');
+          endDrag();
+          this._lastDragEndTime = Date.now();
+        }
+      };
+
+      tab.addEventListener('pointermove', onMove);
+      tab.addEventListener('pointerup', onUp);
+    });
   }
 
   private async handleCloseTab(terminalId: string) {
@@ -401,10 +459,6 @@ export class TabBar {
     ids.splice(targetIndex, 0, draggedId);
 
     await workspaceService.reorderTabs(state.activeWorkspaceId, ids);
-  }
-
-  getDraggedTerminalId(): string | null {
-    return this.draggedTerminalId;
   }
 
   setOnSplit(callback: (terminalId: string, direction: 'horizontal' | 'vertical') => void) {
