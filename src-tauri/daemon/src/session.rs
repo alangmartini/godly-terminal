@@ -78,6 +78,21 @@ impl DaemonSession {
                 }
                 cmd
             }
+            ShellType::Pwsh => {
+                let mut cmd = CommandBuilder::new("pwsh.exe");
+                cmd.arg("-NoLogo");
+                if let Some(dir) = &cwd {
+                    cmd.cwd(dir);
+                }
+                cmd
+            }
+            ShellType::Cmd => {
+                let mut cmd = CommandBuilder::new("cmd.exe");
+                if let Some(dir) = &cwd {
+                    cmd.cwd(dir);
+                }
+                cmd
+            }
             ShellType::Wsl { distribution } => {
                 let mut cmd = CommandBuilder::new("wsl.exe");
                 if let Some(distro) = distribution {

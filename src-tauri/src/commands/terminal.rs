@@ -19,6 +19,8 @@ pub struct CreateTerminalResult {
 fn to_protocol_shell_type(st: &ShellType) -> godly_protocol::ShellType {
     match st {
         ShellType::Windows => godly_protocol::ShellType::Windows,
+        ShellType::Pwsh => godly_protocol::ShellType::Pwsh,
+        ShellType::Cmd => godly_protocol::ShellType::Cmd,
         ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
             distribution: distribution.clone(),
         },
@@ -29,6 +31,8 @@ fn to_protocol_shell_type(st: &ShellType) -> godly_protocol::ShellType {
 fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> ShellType {
     match st {
         godly_protocol::ShellType::Windows => ShellType::Windows,
+        godly_protocol::ShellType::Pwsh => ShellType::Pwsh,
+        godly_protocol::ShellType::Cmd => ShellType::Cmd,
         godly_protocol::ShellType::Wsl { distribution } => ShellType::Wsl {
             distribution: distribution.clone(),
         },
@@ -100,6 +104,8 @@ pub fn create_terminal(
     // Determine initial process name based on shell type
     let process_name = match &shell_type {
         ShellType::Windows => String::from("powershell"),
+        ShellType::Pwsh => String::from("pwsh"),
+        ShellType::Cmd => String::from("cmd"),
         ShellType::Wsl { distribution } => {
             distribution.clone().unwrap_or_else(|| String::from("wsl"))
         }
@@ -309,6 +315,8 @@ pub fn attach_session(
             let shell_type = from_protocol_shell_type(&info.shell_type);
             let process_name = match &shell_type {
                 ShellType::Windows => String::from("powershell"),
+                ShellType::Pwsh => String::from("pwsh"),
+                ShellType::Cmd => String::from("cmd"),
                 ShellType::Wsl { distribution } => {
                     distribution.clone().unwrap_or_else(|| String::from("wsl"))
                 }

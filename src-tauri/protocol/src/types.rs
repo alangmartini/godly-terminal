@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum ShellType {
     Windows,
+    Pwsh,
+    Cmd,
     Wsl { distribution: Option<String> },
 }
 
@@ -147,4 +149,58 @@ pub struct RichGridDiff {
     /// If true, this is effectively a full repaint (all rows included).
     /// The frontend should replace its entire cached grid.
     pub full_repaint: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shell_type_windows_serialization() {
+        let shell = ShellType::Windows;
+        let json = serde_json::to_string(&shell).unwrap();
+        assert_eq!(json, "\"windows\"");
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ShellType::Windows);
+    }
+
+    #[test]
+    fn test_shell_type_pwsh_serialization() {
+        let shell = ShellType::Pwsh;
+        let json = serde_json::to_string(&shell).unwrap();
+        assert_eq!(json, "\"pwsh\"");
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ShellType::Pwsh);
+    }
+
+    #[test]
+    fn test_shell_type_cmd_serialization() {
+        let shell = ShellType::Cmd;
+        let json = serde_json::to_string(&shell).unwrap();
+        assert_eq!(json, "\"cmd\"");
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ShellType::Cmd);
+    }
+
+    #[test]
+    fn test_shell_type_wsl_serialization() {
+        let shell = ShellType::Wsl { distribution: Some("Ubuntu".to_string()) };
+        let json = serde_json::to_string(&shell).unwrap();
+        assert!(json.contains("wsl"));
+        assert!(json.contains("Ubuntu"));
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, shell);
+    }
+
+    #[test]
+    fn test_shell_type_backward_compat() {
+        // "windows" JSON from older versions must still deserialize
+        let shell: ShellType = serde_json::from_str("\"windows\"").unwrap();
+        assert_eq!(shell, ShellType::Windows);
+    }
+
+    #[test]
+    fn test_shell_type_default() {
+        assert_eq!(ShellType::default(), ShellType::Windows);
+    }
 }
