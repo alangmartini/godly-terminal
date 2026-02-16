@@ -1,4 +1,5 @@
 import { store, ShellType } from '../state/store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { keybindingStore, formatChord } from '../state/keybinding-store';
@@ -13,12 +14,14 @@ import { onDragMove, onDragDrop } from '../state/drag-state';
 
 type BackendShellType =
   | 'windows'
+  | 'pwsh'
+  | 'cmd'
   | { wsl: { distribution: string | null } };
 
 function convertShellType(backendType?: BackendShellType): ShellType {
-  if (!backendType || backendType === 'windows') {
-    return { type: 'windows' };
-  }
+  if (!backendType || backendType === 'windows') return { type: 'windows' };
+  if (backendType === 'pwsh') return { type: 'pwsh' };
+  if (backendType === 'cmd') return { type: 'cmd' };
   if (typeof backendType === 'object' && 'wsl' in backendType) {
     return {
       type: 'wsl',
@@ -26,6 +29,15 @@ function convertShellType(backendType?: BackendShellType): ShellType {
     };
   }
   return { type: 'windows' };
+}
+
+function shellTypeToProcessName(shellType: ShellType): string {
+  switch (shellType.type) {
+    case 'windows': return 'powershell';
+    case 'pwsh': return 'pwsh';
+    case 'cmd': return 'cmd';
+    case 'wsl': return shellType.distribution ?? 'wsl';
+  }
 }
 
 export class App {
@@ -296,7 +308,7 @@ export class App {
               id: result.id,
               workspaceId: state.activeWorkspaceId,
               name: result.worktree_branch ?? 'Terminal',
-              processName: 'powershell',
+              processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
               order: 0,
             });
 
@@ -538,10 +550,7 @@ export class App {
         console.log('[App] Restoring terminals...');
         for (const t of layout.terminals) {
           const shellType = convertShellType(t.shell_type);
-          const processName =
-            shellType.type === 'wsl'
-              ? shellType.distribution ?? 'wsl'
-              : 'powershell';
+          const processName = shellTypeToProcessName(shellType);
 
           const tabName = t.worktree_branch || t.name;
 
@@ -644,7 +653,7 @@ export class App {
       id: result.id,
       workspaceId,
       name: result.worktree_branch ?? 'Terminal',
-      processName: 'powershell',
+      processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
       order: 0,
     });
     console.log('[App] Terminal added to store');
@@ -987,7 +996,7 @@ export class App {
           id: terminalId,
           workspaceId,
           name: 'Terminal',
-          processName: 'powershell',
+          processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
           order: 0,
         });
       }

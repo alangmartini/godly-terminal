@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum ShellType {
     Windows,
+    Pwsh,
+    Cmd,
     Wsl { distribution: Option<String> },
 }
 
@@ -127,6 +129,34 @@ mod tests {
 
         let deserialized: ShellType = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, shell);
+    }
+
+    #[test]
+    fn test_shell_type_pwsh_serialization() {
+        let shell = ShellType::Pwsh;
+        let json = serde_json::to_string(&shell).unwrap();
+        assert_eq!(json, "\"pwsh\"");
+
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ShellType::Pwsh);
+    }
+
+    #[test]
+    fn test_shell_type_cmd_serialization() {
+        let shell = ShellType::Cmd;
+        let json = serde_json::to_string(&shell).unwrap();
+        assert_eq!(json, "\"cmd\"");
+
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ShellType::Cmd);
+    }
+
+    #[test]
+    fn test_shell_type_windows_backward_compat() {
+        // Existing persisted data with "windows" should still deserialize correctly
+        let json = "\"windows\"";
+        let shell: ShellType = serde_json::from_str(json).unwrap();
+        assert_eq!(shell, ShellType::Windows);
     }
 
     #[test]
