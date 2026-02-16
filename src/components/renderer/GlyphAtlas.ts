@@ -115,7 +115,7 @@ export class GlyphAtlas {
   }
 
   private computeCellMetrics(): void {
-    const scaledSize = this.fontSize * this.dpr;
+    const scaledSize = Math.round(this.fontSize * this.dpr);
     this.cellHeight = Math.ceil(scaledSize * LINE_HEIGHT_FACTOR);
     // Measure 'M' width for monospace cell width
     this.ctx.font = `${scaledSize}px ${this.fontFamily}`;
@@ -123,7 +123,7 @@ export class GlyphAtlas {
   }
 
   private rasterize(char: string, bold: boolean, italic: boolean, key: string): GlyphEntry {
-    const scaledSize = this.fontSize * this.dpr;
+    const scaledSize = Math.round(this.fontSize * this.dpr);
     const w = this.cellWidth;
     const h = this.cellHeight;
 
