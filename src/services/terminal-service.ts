@@ -17,7 +17,6 @@ function toBackendShellType(shellType: ShellType): BackendShellType {
 
 export interface TerminalOutputPayload {
   terminal_id: string;
-  data: number[];
 }
 
 export interface ProcessChangedPayload {
@@ -49,17 +48,17 @@ export interface SessionInfo {
 }
 
 class TerminalService {
-  private outputListeners: Map<string, (data: Uint8Array) => void> = new Map();
+  private outputListeners: Map<string, () => void> = new Map();
   private unlistenFns: UnlistenFn[] = [];
 
   async init() {
     const unlistenOutput = await listen<TerminalOutputPayload>(
       'terminal-output',
       (event) => {
-        const { terminal_id, data } = event.payload;
+        const { terminal_id } = event.payload;
         const listener = this.outputListeners.get(terminal_id);
         if (listener) {
-          listener(new Uint8Array(data));
+          listener();
         }
       }
     );
@@ -164,7 +163,7 @@ class TerminalService {
     await invoke('set_scrollback', { terminalId, offset });
   }
 
-  onTerminalOutput(terminalId: string, callback: (data: Uint8Array) => void) {
+  onTerminalOutput(terminalId: string, callback: () => void) {
     this.outputListeners.set(terminalId, callback);
     return () => this.outputListeners.delete(terminalId);
   }
