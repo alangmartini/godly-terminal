@@ -226,6 +226,16 @@ class Store {
   setActiveTerminal(id: string | null) {
     if (id && this.state.activeWorkspaceId) {
       this.lastActiveTerminalByWorkspace.set(this.state.activeWorkspaceId, id);
+
+      // If navigating to a terminal outside the current split → auto-clear the split
+      const split = this.state.splitViews[this.state.activeWorkspaceId];
+      if (split && id !== split.leftTerminalId && id !== split.rightTerminalId) {
+        const { [this.state.activeWorkspaceId]: _, ...rest } = this.state.splitViews;
+        this.setState({ activeTerminalId: id, splitViews: rest });
+        invoke('clear_split_view', { workspaceId: this.state.activeWorkspaceId }).catch(() => {});
+        invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+        return;
+      }
     }
     this.setState({ activeTerminalId: id });
     invoke('sync_active_terminal', { terminalId: id }).catch(() => {});

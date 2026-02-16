@@ -362,6 +362,12 @@ export class App {
           break;
         }
 
+        case 'split.unsplit': {
+          e.preventDefault();
+          this.handleUnsplitRequest();
+          break;
+        }
+
         case 'workspace.toggleWorktreeMode': {
           e.preventDefault();
           if (state.activeWorkspaceId) {
