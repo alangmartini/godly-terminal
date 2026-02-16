@@ -311,3 +311,27 @@ pub fn fixture(name: &str) {
     }
     assert!(i > 1, "couldn't find fixtures to test");
 }
+
+/// Regenerate fixture JSON files from current godly-vt behavior.
+/// Call with a fixture name (e.g. "ri", "decstbm") to overwrite the
+/// JSON files with the actual parser output.
+#[allow(dead_code)]
+pub fn regenerate_fixture(name: &str) {
+    let mut i = 1;
+    let mut prev_input = vec![];
+    while let Some(input) = load_input(name, i) {
+        prev_input.extend(input);
+
+        let mut parser = godly_vt::Parser::default();
+        parser.process(&prev_input);
+        let screen = FixtureScreen::from_screen(parser.screen());
+
+        let json = serde_json::to_string_pretty(&screen).unwrap();
+        let path = format!("tests/data/fixtures/{name}/{i}.json");
+        std::fs::write(&path, json).unwrap();
+        eprintln!("  wrote {path}");
+
+        i += 1;
+    }
+    assert!(i > 1, "couldn't find fixtures for {name}");
+}
