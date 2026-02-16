@@ -134,6 +134,15 @@ interface Selection {
 
 const URL_REGEX = /https?:\/\/[^\s<>'")\]]+/g;
 
+// ---- Renderer backend info (set once on first construction) ----
+
+let _rendererBackend: string | null = null;
+
+/** Returns the rendering backend used by terminal panes ('WebGL2' or 'Canvas2D'). */
+export function getRendererBackend(): string {
+  return _rendererBackend ?? 'unknown';
+}
+
 // ---- Renderer ----
 
 export class TerminalRenderer {
@@ -241,6 +250,9 @@ export class TerminalRenderer {
     } else {
       this.measureFont();
     }
+
+    _rendererBackend = this.useWebGL ? 'WebGL2' : 'Canvas2D';
+
     this.setupMouseHandlers();
     this.setupWheelHandler();
     this.startCursorBlink();
@@ -249,6 +261,11 @@ export class TerminalRenderer {
   /** Get the canvas element for mounting into the DOM. */
   getElement(): HTMLCanvasElement {
     return this.canvas;
+  }
+
+  /** Returns the active rendering backend name. */
+  getBackend(): string {
+    return this.useWebGL ? 'WebGL2' : 'Canvas2D';
   }
 
   /** Get the current grid dimensions in rows/cols based on canvas size. */
