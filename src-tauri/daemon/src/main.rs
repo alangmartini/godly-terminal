@@ -6,6 +6,27 @@ mod session;
 use crate::pid::{remove_pid_file, write_pid_file, DaemonLock};
 use crate::server::DaemonServer;
 
+/// Redirect stdout and stderr to NUL so that print macros (eprintln!, println!)
+/// silently discard output instead of panicking on invalid handles.
+/// Called after FreeConsole() when the daemon runs without a console.
+#[cfg(windows)]
+fn redirect_std_to_nul() {
+    use std::fs::OpenOptions;
+    use std::os::windows::io::AsRawHandle;
+    use winapi::um::processenv::SetStdHandle;
+    use winapi::um::winbase::{STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
+
+    if let Ok(nul) = OpenOptions::new().write(true).open("NUL") {
+        let handle = nul.as_raw_handle();
+        unsafe {
+            SetStdHandle(STD_OUTPUT_HANDLE, handle as _);
+            SetStdHandle(STD_ERROR_HANDLE, handle as _);
+        }
+        // Leak the handle so it stays valid for the process lifetime
+        std::mem::forget(nul);
+    }
+}
+
 #[cfg(feature = "leak-check")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -67,6 +88,12 @@ async fn main() {
             unsafe {
                 FreeConsole();
             }
+            // After FreeConsole, stderr/stdout handles become invalid. When the
+            // daemon is launched via WMI (Win32_Process.Create), any eprintln!
+            // call would panic with ERROR_NO_DATA (232), killing the async
+            // handler and causing the daemon to hang without responding to clients.
+            // Redirect both to NUL so print macros silently discard output.
+            redirect_std_to_nul();
         }
     }
 
