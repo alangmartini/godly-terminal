@@ -69,11 +69,17 @@ export class GlyphAtlas {
     }
 
     if (this._dirty) {
+      // Canvas internally stores premultiplied alpha. Keep it premultiplied
+      // so the shader's max(r,g,b) correctly recovers antialiasing coverage.
+      // Without this, the browser un-premultiplies before upload, making RGB=1.0
+      // for all non-transparent pixels of white text, destroying all antialiasing.
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
       gl.texImage2D(
         gl.TEXTURE_2D, 0, gl.RGBA,
         gl.RGBA, gl.UNSIGNED_BYTE,
         this.canvas,
       );
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
       this._dirty = false;
     }
 
