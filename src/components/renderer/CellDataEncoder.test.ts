@@ -45,10 +45,10 @@ describe('CellDataEncoder', () => {
     const result = encoder.encode(snap, DEFAULT_THEME, stubAtlas, colorCache, null);
 
     expect(result.length).toBe(4); // 1 cell × 4 uint32s
-    // fg = default foreground #cccccc → 0xCCCCCCFF
-    expect(result[0]).toBe(0xCCCCCCFF);
-    // bg = default background #1e1e1e → 0x1E1E1EFF
-    expect(result[1]).toBe(0x1E1E1EFF);
+    // fg = default foreground #c0caf5 → 0xC0CAF5FF
+    expect(result[0]).toBe(0xC0CAF5FF);
+    // bg = default background #1a1b26 → 0x1A1B26FF
+    expect(result[1]).toBe(0x1A1B26FF);
     // Empty space → no atlas entry
     expect(result[2]).toBe(0);
     expect(result[3]).toBe(0);
@@ -152,8 +152,8 @@ describe('CellDataEncoder', () => {
 
     expect(result.length).toBe(8); // 2 cells × 4 uint32s
     // Second row should be default colors with no glyph
-    expect(result[4]).toBe(0xCCCCCCFF);
-    expect(result[5]).toBe(0x1E1E1EFF);
+    expect(result[4]).toBe(0xC0CAF5FF);
+    expect(result[5]).toBe(0x1A1B26FF);
     expect(result[6]).toBe(0);
     expect(result[7]).toBe(0);
   });
@@ -166,6 +166,6 @@ describe('CellDataEncoder', () => {
     const result2 = encoder.encode(snap, DEFAULT_THEME, stubAtlas, colorCache, null);
     // Both should return valid data (buffer is reused internally)
     expect(result1.length).toBe(result2.length);
-    expect(result2[0]).toBe(0xCCCCCCFF);
+    expect(result2[0]).toBe(0xC0CAF5FF);
   });
 });

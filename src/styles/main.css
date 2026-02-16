@@ -1,16 +1,16 @@
 :root {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-tertiary: #2d2d2d;
-  --bg-active: #37373d;
-  --text-primary: #cccccc;
-  --text-secondary: #969696;
-  --text-active: #ffffff;
-  --accent: #0078d4;
-  --accent-hover: #1e8ad4;
-  --border-color: #3c3c3c;
-  --danger: #f14c4c;
-  --success: #4ec9b0;
+  --bg-primary: #1a1b26;        /* Main background (Tokyo Night) */
+  --bg-secondary: #16161e;      /* Sidebar/tab bar (darker) */
+  --bg-tertiary: #292e42;       /* Hover states */
+  --bg-active: #33467c;         /* Active/focused states */
+  --text-primary: #a9b1d6;      /* Default text */
+  --text-secondary: #565f89;    /* Dimmed text */
+  --text-active: #c0caf5;       /* Bright/active text */
+  --accent: #7aa2f7;            /* Blue accent */
+  --accent-hover: #89b4fa;      /* Lighter blue on hover */
+  --border-color: #292e42;      /* Subtle borders */
+  --danger: #f7768e;            /* Red */
+  --success: #9ece6a;           /* Green */
   --sidebar-width: 200px;
   --tabbar-height: 35px;
 }
@@ -76,7 +76,9 @@ html, body {
 }
 
 .workspace-item.active {
-  background: var(--bg-active);
+  background: transparent;
+  border-left: 2px solid var(--accent);
+  color: var(--text-active);
 }
 
 .workspace-item.dragging {
@@ -192,7 +194,8 @@ html, body {
 
 .tab.active {
   background: var(--bg-primary);
-  border-bottom: 2px solid var(--accent);
+  border-top: 2px solid var(--accent);
+  border-bottom: none;
 }
 
 .tab.in-split {
@@ -272,7 +275,7 @@ html, body {
   inset: 4px;
   border: 2px dashed var(--accent);
   border-radius: 8px;
-  background: rgba(0, 120, 212, 0.08);
+  background: rgba(122, 162, 247, 0.08);
   pointer-events: none;
   z-index: 10;
 }
@@ -344,7 +347,7 @@ html, body {
   position: absolute;
   z-index: 10;
   pointer-events: none;
-  background: rgba(0, 120, 212, 0.1);
+  background: rgba(122, 162, 247, 0.1);
   border: 2px dashed var(--accent);
   display: none;
   align-items: center;
@@ -363,10 +366,11 @@ html, body {
   position: fixed;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 4px 0;
   min-width: 150px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
   z-index: 1000;
 }
 
@@ -541,13 +545,13 @@ html, body {
 
 .worktree-toggle.active {
   background: var(--success);
-  color: #1e1e1e;
+  color: #1a1b26;
   border-color: var(--success);
 }
 
 .worktree-toggle.active:hover {
-  background: #3bb89a;
-  border-color: #3bb89a;
+  background: #b9db7a;
+  border-color: #b9db7a;
 }
 
 /* Claude Code toggle button */
@@ -809,7 +813,7 @@ html, body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 10px;
+  width: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -818,7 +822,7 @@ html, body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-color);
-  border-radius: 5px;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
