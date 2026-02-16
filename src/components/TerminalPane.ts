@@ -22,8 +22,10 @@ export class TerminalPane {
   private unsubscribeOutput: (() => void) | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
-  // fetch via setTimeout(0). Multiple output events within the same frame
-  // collapse into a single IPC call.
+  // fetch via setTimeout(SNAPSHOT_MIN_INTERVAL_MS). Multiple output events
+  // within the interval collapse into a single IPC call, capping snapshot
+  // fetches to ~60fps under sustained output.
+  private static readonly SNAPSHOT_MIN_INTERVAL_MS = 16;
   private snapshotPending = false;
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -311,7 +313,7 @@ export class TerminalPane {
           // IPC requests that saturate the Tauri thread pool.
           this.snapshotPending = false;
         }
-      }, 0);
+      }, TerminalPane.SNAPSHOT_MIN_INTERVAL_MS);
     }
   }
 
