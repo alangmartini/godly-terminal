@@ -5,13 +5,22 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { WorktreePanel } from './WorktreePanel';
 import { invoke } from '@tauri-apps/api/core';
+import {
+  startDrag, getDrag, endDrag,
+  createGhost, moveGhost,
+  onDragMove, onDragDrop, notifyMove, notifyDrop,
+} from '../state/drag-state';
+
+const DRAG_THRESHOLD = 5;
 
 export class WorkspaceSidebar {
   private container: HTMLElement;
   private listContainer: HTMLElement;
   private worktreePanel: WorktreePanel;
   private onDrop: ((workspaceId: string, terminalId: string) => void) | null = null;
-  private draggedItem: HTMLElement | null = null;
+
+  /** Timestamp of the last drag end, used to suppress the click that fires after pointerup. */
+  private _lastDragEndTime = 0;
 
   constructor() {
     this.container = document.createElement('div');
@@ -99,6 +108,56 @@ export class WorkspaceSidebar {
     addBtn.onclick = () => this.handleAddWorkspace();
     this.container.appendChild(addBtn);
 
+    // Register as drop target for workspace reorder + tab-to-workspace drops
+    onDragMove((x, y, data) => {
+      // Clear all workspace highlights first
+      const items = this.listContainer.querySelectorAll('.workspace-item');
+      items.forEach(el => {
+        el.classList.remove('drag-over', 'drag-over-workspace');
+      });
+
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+
+        const wsId = (item as HTMLElement).dataset.workspaceId;
+        if (!wsId) continue;
+
+        if (data.kind === 'workspace' && wsId !== data.id) {
+          item.classList.add('drag-over-workspace');
+        } else if (data.kind === 'tab') {
+          const state = store.getState();
+          const isActive = state.activeWorkspaceId === wsId;
+          if (!isActive) {
+            item.classList.add('drag-over');
+          }
+        }
+        break;
+      }
+    });
+
+    onDragDrop((x, y, data) => {
+      const items = this.listContainer.querySelectorAll('.workspace-item');
+      items.forEach(el => {
+        el.classList.remove('drag-over', 'drag-over-workspace');
+      });
+
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+
+        const wsId = (item as HTMLElement).dataset.workspaceId;
+        if (!wsId) continue;
+
+        if (data.kind === 'workspace' && wsId !== data.id) {
+          this.handleWorkspaceReorder(data.id, wsId);
+        } else if (data.kind === 'tab') {
+          this.onDrop?.(wsId, data.id);
+        }
+        break;
+      }
+    });
+
     store.subscribe(() => this.render());
     notificationStore.subscribe(() => this.render());
   }
@@ -150,51 +209,91 @@ export class WorkspaceSidebar {
 
       const showWslOption = wslAvailable && wslDistributions.length > 0;
 
-      dialog.innerHTML = `
-        <div class="dialog-title">New Workspace</div>
-        <div class="shell-type-options">
-          <label class="shell-type-option">
-            <input type="radio" name="shellType" value="windows" checked />
-            <span>Windows (PowerShell)</span>
-          </label>
-          ${
-            showWslOption
-              ? `
-          <label class="shell-type-option">
-            <input type="radio" name="shellType" value="wsl" />
-            <span>WSL (Linux)</span>
-          </label>
-          <div class="wsl-distro-container" style="display: none;">
-            <label class="wsl-distro-label">Distribution:</label>
-            <select class="wsl-distro-select dialog-input">
-              ${wslDistributions.map(d => `<option value="${d}">${d}</option>`).join('')}
-            </select>
-          </div>
-          `
-              : ''
-          }
-        </div>
-        <div class="dialog-buttons">
-          <button class="dialog-btn dialog-btn-secondary">Cancel</button>
-          <button class="dialog-btn dialog-btn-primary">Continue</button>
-        </div>
-      `;
+      const title = document.createElement('div');
+      title.className = 'dialog-title';
+      title.textContent = 'New Workspace';
+      dialog.appendChild(title);
+
+      const options = document.createElement('div');
+      options.className = 'shell-type-options';
+
+      // Windows option
+      const winLabel = document.createElement('label');
+      winLabel.className = 'shell-type-option';
+      const winRadio = document.createElement('input');
+      winRadio.type = 'radio';
+      winRadio.name = 'shellType';
+      winRadio.value = 'windows';
+      winRadio.checked = true;
+      const winText = document.createElement('span');
+      winText.textContent = 'Windows (PowerShell)';
+      winLabel.appendChild(winRadio);
+      winLabel.appendChild(winText);
+      options.appendChild(winLabel);
+
+      let distroContainer: HTMLElement | null = null;
+      let distroSelect: HTMLSelectElement | null = null;
+
+      if (showWslOption) {
+        const wslLabel = document.createElement('label');
+        wslLabel.className = 'shell-type-option';
+        const wslRadio = document.createElement('input');
+        wslRadio.type = 'radio';
+        wslRadio.name = 'shellType';
+        wslRadio.value = 'wsl';
+        const wslText = document.createElement('span');
+        wslText.textContent = 'WSL (Linux)';
+        wslLabel.appendChild(wslRadio);
+        wslLabel.appendChild(wslText);
+        options.appendChild(wslLabel);
+
+        distroContainer = document.createElement('div');
+        distroContainer.className = 'wsl-distro-container';
+        distroContainer.style.display = 'none';
+
+        const distroLabel = document.createElement('label');
+        distroLabel.className = 'wsl-distro-label';
+        distroLabel.textContent = 'Distribution:';
+        distroContainer.appendChild(distroLabel);
+
+        distroSelect = document.createElement('select');
+        distroSelect.className = 'wsl-distro-select dialog-input';
+        for (const d of wslDistributions) {
+          const opt = document.createElement('option');
+          opt.value = d;
+          opt.textContent = d;
+          distroSelect.appendChild(opt);
+        }
+        distroContainer.appendChild(distroSelect);
+        options.appendChild(distroContainer);
+
+        // Toggle distro dropdown visibility
+        winRadio.addEventListener('change', () => {
+          if (distroContainer) distroContainer.style.display = 'none';
+        });
+        wslRadio.addEventListener('change', () => {
+          if (distroContainer) distroContainer.style.display = 'block';
+        });
+      }
+
+      dialog.appendChild(options);
+
+      const buttons = document.createElement('div');
+      buttons.className = 'dialog-buttons';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'dialog-btn dialog-btn-secondary';
+      cancelBtn.textContent = 'Cancel';
+      buttons.appendChild(cancelBtn);
+
+      const continueBtn = document.createElement('button');
+      continueBtn.className = 'dialog-btn dialog-btn-primary';
+      continueBtn.textContent = 'Continue';
+      buttons.appendChild(continueBtn);
+
+      dialog.appendChild(buttons);
 
       const close = () => overlay.remove();
-
-      const [cancelBtn, continueBtn] = dialog.querySelectorAll('button');
-      const radioInputs = dialog.querySelectorAll<HTMLInputElement>('input[name="shellType"]');
-      const distroContainer = dialog.querySelector<HTMLElement>('.wsl-distro-container');
-      const distroSelect = dialog.querySelector<HTMLSelectElement>('.wsl-distro-select');
-
-      // Toggle distro dropdown visibility
-      radioInputs.forEach(radio => {
-        radio.addEventListener('change', () => {
-          if (distroContainer) {
-            distroContainer.style.display = radio.value === 'wsl' ? 'block' : 'none';
-          }
-        });
-      });
 
       cancelBtn.onclick = () => {
         close();
@@ -202,9 +301,10 @@ export class WorkspaceSidebar {
       };
 
       continueBtn.onclick = () => {
-        const selectedType = dialog.querySelector<HTMLInputElement>(
+        const selectedRadio = dialog.querySelector<HTMLInputElement>(
           'input[name="shellType"]:checked'
-        )?.value;
+        );
+        const selectedType = selectedRadio?.value;
 
         if (selectedType === 'wsl') {
           const distribution = distroSelect?.value;
@@ -222,6 +322,11 @@ export class WorkspaceSidebar {
   }
 
   private render() {
+    // Guard: skip full rebuild while a workspace drag is active
+    // (render does clear+recreate which would destroy the dragged element)
+    const drag = getDrag();
+    if (drag?.kind === 'workspace') return;
+
     // Clear existing items
     while (this.listContainer.firstChild) {
       this.listContainer.removeChild(this.listContainer.firstChild);
@@ -304,7 +409,9 @@ export class WorkspaceSidebar {
     badge.textContent = terminalCount.toString();
     item.appendChild(badge);
 
+    // Click to activate (suppress if drag just ended)
     item.onclick = () => {
+      if (Date.now() - this._lastDragEndTime < 100) return;
       store.setActiveWorkspace(workspace.id);
     };
 
@@ -313,59 +420,61 @@ export class WorkspaceSidebar {
       this.showContextMenu(e, workspace);
     };
 
-    // Drag source for workspace reordering
-    item.draggable = true;
-
-    item.ondragstart = (e) => {
-      this.draggedItem = item;
-      item.classList.add('dragging');
-      e.dataTransfer!.effectAllowed = 'move';
-      e.dataTransfer!.setData('application/x-workspace-id', workspace.id);
-    };
-
-    item.ondragend = () => {
-      item.classList.remove('dragging');
-      this.draggedItem = null;
-      document.querySelectorAll('.drag-over-workspace').forEach(el => {
-        el.classList.remove('drag-over-workspace');
-      });
-    };
-
-    // Drop zone for tabs and workspace reordering
-    item.ondragover = (e) => {
-      e.preventDefault();
-      e.dataTransfer!.dropEffect = 'move';
-      const isWorkspaceDrag = e.dataTransfer?.types.includes('application/x-workspace-id');
-      if (isWorkspaceDrag && this.draggedItem && this.draggedItem !== item) {
-        item.classList.add('drag-over-workspace');
-      } else if (!isWorkspaceDrag && e.dataTransfer?.types.includes('text/plain') && !isActive) {
-        item.classList.add('drag-over');
-      }
-    };
-
-    item.ondragleave = () => {
-      item.classList.remove('drag-over');
-      item.classList.remove('drag-over-workspace');
-    };
-
-    item.ondrop = (e) => {
-      e.preventDefault();
-      item.classList.remove('drag-over');
-      item.classList.remove('drag-over-workspace');
-
-      const droppedWorkspaceId = e.dataTransfer?.getData('application/x-workspace-id');
-      if (droppedWorkspaceId && droppedWorkspaceId !== workspace.id) {
-        this.handleWorkspaceReorder(droppedWorkspaceId, workspace.id);
-        return;
-      }
-
-      const terminalId = e.dataTransfer?.getData('text/plain');
-      if (terminalId && this.onDrop) {
-        this.onDrop(workspace.id, terminalId);
-      }
-    };
+    // Pointer-event drag for workspace reordering
+    this.setupPointerDrag(item, workspace.id);
 
     return item;
+  }
+
+  private setupPointerDrag(item: HTMLElement, workspaceId: string): void {
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+
+    item.addEventListener('pointerdown', (e: PointerEvent) => {
+      // Only left button
+      if (e.button !== 0) return;
+      // Don't start drag from buttons
+      if ((e.target as HTMLElement).closest('button')) return;
+
+      startX = e.clientX;
+      startY = e.clientY;
+      dragging = false;
+
+      item.setPointerCapture(e.pointerId);
+
+      const onMove = (me: PointerEvent) => {
+        const dx = me.clientX - startX;
+        const dy = me.clientY - startY;
+
+        if (!dragging) {
+          if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+          dragging = true;
+          item.classList.add('dragging');
+          startDrag({ kind: 'workspace', id: workspaceId, sourceElement: item });
+          createGhost(item);
+        }
+
+        moveGhost(me.clientX, me.clientY);
+        notifyMove(me.clientX, me.clientY);
+      };
+
+      const onUp = (ue: PointerEvent) => {
+        item.removeEventListener('pointermove', onMove);
+        item.removeEventListener('pointerup', onUp);
+        item.releasePointerCapture(ue.pointerId);
+
+        if (dragging) {
+          notifyDrop(ue.clientX, ue.clientY);
+          item.classList.remove('dragging');
+          endDrag();
+          this._lastDragEndTime = Date.now();
+        }
+      };
+
+      item.addEventListener('pointermove', onMove);
+      item.addEventListener('pointerup', onUp);
+    });
   }
 
   private handleWorkspaceReorder(draggedId: string, targetId: string) {
@@ -467,17 +576,31 @@ export class WorkspaceSidebar {
     const dialog = document.createElement('div');
     dialog.className = 'dialog';
 
-    dialog.innerHTML = `
-      <div class="dialog-title">Rename Workspace</div>
-      <input type="text" class="dialog-input" value="${workspace.name}" />
-      <div class="dialog-buttons">
-        <button class="dialog-btn dialog-btn-secondary">Cancel</button>
-        <button class="dialog-btn dialog-btn-primary">Rename</button>
-      </div>
-    `;
+    const title = document.createElement('div');
+    title.className = 'dialog-title';
+    title.textContent = 'Rename Workspace';
+    dialog.appendChild(title);
 
-    const input = dialog.querySelector('input')!;
-    const [cancelBtn, renameBtn] = dialog.querySelectorAll('button');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'dialog-input';
+    input.value = workspace.name;
+    dialog.appendChild(input);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'dialog-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dialog-btn dialog-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    buttons.appendChild(cancelBtn);
+
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'dialog-btn dialog-btn-primary';
+    renameBtn.textContent = 'Rename';
+    buttons.appendChild(renameBtn);
+
+    dialog.appendChild(buttons);
 
     const close = () => overlay.remove();
 
