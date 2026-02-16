@@ -300,72 +300,81 @@ export class TerminalPane {
     this.snapshotPending = true;
     perfTracer.mark('schedule_snapshot');
     if (this.snapshotTimer === null) {
-      this.snapshotTimer = setTimeout(() => {
+      this.snapshotTimer = setTimeout(async () => {
         this.snapshotTimer = null;
-        this.snapshotPending = false;
         perfTracer.measure('snapshot_schedule_delay', 'schedule_snapshot');
-        this.fetchAndRenderSnapshot();
+        try {
+          await this.fetchAndRenderSnapshot();
+        } finally {
+          // Reset AFTER fetch completes to prevent cascading snapshot requests.
+          // Without this, events during the ~85ms fetch would schedule overlapping
+          // IPC requests that saturate the Tauri thread pool.
+          this.snapshotPending = false;
+        }
       }, 0);
     }
   }
 
+  private useDiffSnapshots = true;
+
   private async fetchAndRenderSnapshot() {
     try {
-      // Use diff snapshots when we have a cached full snapshot.
-      // This avoids serializing the full grid (3600+ cells) on every keystroke.
-      if (this.cachedSnapshot) {
-        const diff = await invoke<RichGridDiff>('get_grid_snapshot_diff', {
-          terminalId: this.terminalId,
-        });
+      // Use diff snapshots when we have a cached full snapshot and diff is supported.
+      if (this.cachedSnapshot && this.useDiffSnapshots) {
+        try {
+          const diff = await invoke<RichGridDiff>('get_grid_snapshot_diff', {
+            terminalId: this.terminalId,
+          });
 
-        // Merge dirty rows into the cached snapshot
-        if (diff.full_repaint) {
-          // Full repaint: rebuild the entire cached snapshot from the diff
-          const rows: RichGridData['rows'] = this.cachedSnapshot.rows;
-          // Resize if dimensions changed
-          while (rows.length < diff.dimensions.rows) {
-            rows.push({ cells: [], wrapped: false });
-          }
-          rows.length = diff.dimensions.rows;
-          for (const [rowIdx, rowData] of diff.dirty_rows) {
-            rows[rowIdx] = rowData;
-          }
-          this.cachedSnapshot = {
-            rows,
-            cursor: diff.cursor,
-            dimensions: diff.dimensions,
-            alternate_screen: diff.alternate_screen,
-            cursor_hidden: diff.cursor_hidden,
-            title: diff.title,
-            scrollback_offset: diff.scrollback_offset,
-            total_scrollback: diff.total_scrollback,
-          };
-        } else {
-          // Partial update: merge only dirty rows
-          for (const [rowIdx, rowData] of diff.dirty_rows) {
-            if (rowIdx < this.cachedSnapshot.rows.length) {
-              this.cachedSnapshot.rows[rowIdx] = rowData;
+          // Merge dirty rows into the cached snapshot
+          if (diff.full_repaint) {
+            const rows: RichGridData['rows'] = this.cachedSnapshot.rows;
+            while (rows.length < diff.dimensions.rows) {
+              rows.push({ cells: [], wrapped: false });
+            }
+            rows.length = diff.dimensions.rows;
+            for (const [rowIdx, rowData] of diff.dirty_rows) {
+              rows[rowIdx] = rowData;
+            }
+            this.cachedSnapshot = {
+              rows,
+              cursor: diff.cursor,
+              dimensions: diff.dimensions,
+              alternate_screen: diff.alternate_screen,
+              cursor_hidden: diff.cursor_hidden,
+              title: diff.title,
+              scrollback_offset: diff.scrollback_offset,
+              total_scrollback: diff.total_scrollback,
+            };
+          } else {
+            for (const [rowIdx, rowData] of diff.dirty_rows) {
+              if (rowIdx < this.cachedSnapshot.rows.length) {
+                this.cachedSnapshot.rows[rowIdx] = rowData;
+              }
+            }
+            this.cachedSnapshot.cursor = diff.cursor;
+            this.cachedSnapshot.cursor_hidden = diff.cursor_hidden;
+            this.cachedSnapshot.scrollback_offset = diff.scrollback_offset;
+            this.cachedSnapshot.total_scrollback = diff.total_scrollback;
+            this.cachedSnapshot.alternate_screen = diff.alternate_screen;
+            if (diff.title) {
+              this.cachedSnapshot.title = diff.title;
             }
           }
-          this.cachedSnapshot.cursor = diff.cursor;
-          this.cachedSnapshot.cursor_hidden = diff.cursor_hidden;
-          this.cachedSnapshot.scrollback_offset = diff.scrollback_offset;
-          this.cachedSnapshot.total_scrollback = diff.total_scrollback;
-          this.cachedSnapshot.alternate_screen = diff.alternate_screen;
-          if (diff.title) {
-            this.cachedSnapshot.title = diff.title;
-          }
-        }
 
-        this.scrollbackOffset = diff.scrollback_offset;
-        this.totalScrollback = diff.total_scrollback;
-        this.renderer.render(this.cachedSnapshot);
-      } else {
-        // No cache yet: fetch a full snapshot
-        await this.fetchFullSnapshot();
+          this.scrollbackOffset = diff.scrollback_offset;
+          this.totalScrollback = diff.total_scrollback;
+          this.renderer.render(this.cachedSnapshot);
+          return;
+        } catch {
+          // Diff not supported by daemon — fall back to full snapshots permanently
+          console.debug('Diff snapshots not available, falling back to full snapshots');
+          this.useDiffSnapshots = false;
+        }
       }
+      // Full snapshot path (initial render, after scroll, or diff not supported)
+      await this.fetchFullSnapshot();
     } catch (error) {
-      // Ignore errors during initialization or after terminal close
       console.debug('Grid snapshot fetch failed:', error);
     }
   }
