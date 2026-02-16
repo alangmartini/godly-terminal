@@ -57,7 +57,9 @@ cargo test -p godly-protocol
 Assert-ExitCode
 cargo test -p godly-vt
 # Note: escape::ri test has a known pre-existing failure — don't gate on it
-cargo test -p godly-daemon
+# Daemon tests must run single-threaded: integration tests spawn daemon + PTY
+# processes, and parallel spawning triggers Windows 0xc0000142 (DLL init failure)
+cargo test -p godly-daemon -- --test-threads=1
 Assert-ExitCode
 Pop-Location
 
