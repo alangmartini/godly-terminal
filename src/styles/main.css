@@ -361,6 +361,27 @@ html, body {
   display: flex;
 }
 
+/* Pointer-event drag ghost + body state */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.8;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+body.dragging-active {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+body.dragging-active * {
+  cursor: grabbing !important;
+}
+
 /* Context menu */
 .context-menu {
   position: fixed;
