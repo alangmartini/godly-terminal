@@ -94,6 +94,16 @@ describe('KeybindingStore', () => {
       );
     });
 
+    it('matches F2 to tabs.renameTerminal', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('F2'))).toBe('tabs.renameTerminal');
+    });
+
+    it('classifies tabs.renameTerminal as an app shortcut', () => {
+      const store = new KeybindingStore();
+      expect(store.isAppShortcut(keydown('F2'))).toBe(true);
+    });
+
     it('returns null for unbound keys', () => {
       const store = new KeybindingStore();
       expect(store.matchAction(keydown('a', { ctrlKey: true }))).toBeNull();
