@@ -101,6 +101,8 @@ impl DaemonDirectBackend {
                             name: format!("Session {}", &s.id[..8.min(s.id.len())]),
                             process_name: match &s.shell_type {
                                 ShellType::Windows => "powershell".to_string(),
+                                ShellType::Pwsh => "pwsh".to_string(),
+                                ShellType::Cmd => "cmd".to_string(),
                                 ShellType::Wsl { distribution } => distribution
                                     .clone()
                                     .unwrap_or_else(|| "wsl".to_string()),
@@ -156,6 +158,8 @@ impl Backend for DaemonDirectBackend {
                                 name: format!("Session {}", &s.id[..8.min(s.id.len())]),
                                 process_name: match &s.shell_type {
                                     ShellType::Windows => "powershell".to_string(),
+                                    ShellType::Pwsh => "pwsh".to_string(),
+                                    ShellType::Cmd => "cmd".to_string(),
                                     ShellType::Wsl { distribution } => distribution
                                         .clone()
                                         .unwrap_or_else(|| "wsl".to_string()),

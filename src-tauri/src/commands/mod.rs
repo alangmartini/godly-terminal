@@ -1,6 +1,7 @@
 pub mod files;
 pub mod grid;
 pub mod log;
+pub mod shell;
 pub mod sounds;
 pub mod terminal;
 pub mod worktree;
@@ -10,6 +11,7 @@ pub mod wsl;
 pub use files::*;
 pub use grid::*;
 pub use log::*;
+pub use shell::*;
 pub use sounds::*;
 pub use terminal::*;
 pub use worktree::*;
