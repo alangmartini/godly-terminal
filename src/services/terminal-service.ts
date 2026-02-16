@@ -1,17 +1,20 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { store, ShellType } from '../state/store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 
 // Backend shell type format - matches Rust serde externally tagged enum
 export type BackendShellType =
   | 'windows'
+  | 'pwsh'
+  | 'cmd'
   | { wsl: { distribution: string | null } };
 
 // Convert frontend ShellType to backend format
 function toBackendShellType(shellType: ShellType): BackendShellType {
-  if (shellType.type === 'windows') {
-    return 'windows';
-  }
+  if (shellType.type === 'windows') return 'windows';
+  if (shellType.type === 'pwsh') return 'pwsh';
+  if (shellType.type === 'cmd') return 'cmd';
   return { wsl: { distribution: shellType.distribution ?? null } };
 }
 
@@ -93,12 +96,14 @@ class TerminalService {
       nameOverride?: string;
     }
   ): Promise<CreateTerminalResult> {
+    // Apply global default shell when no explicit override is provided
+    const shellOverride = options?.shellTypeOverride
+      ?? terminalSettingsStore.getDefaultShell();
+
     const result = await invoke<CreateTerminalResult>('create_terminal', {
       workspaceId,
       cwdOverride: options?.cwdOverride ?? null,
-      shellTypeOverride: options?.shellTypeOverride
-        ? toBackendShellType(options.shellTypeOverride)
-        : null,
+      shellTypeOverride: toBackendShellType(shellOverride),
       idOverride: options?.idOverride ?? null,
       worktreeName: options?.worktreeName ?? null,
       nameOverride: options?.nameOverride ?? null,

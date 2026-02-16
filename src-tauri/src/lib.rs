@@ -109,6 +109,7 @@ pub fn run() {
             commands::get_mcp_state,
             commands::get_wsl_distributions,
             commands::is_wsl_available,
+            commands::is_pwsh_available,
             commands::toggle_worktree_mode,
             commands::toggle_claude_code_mode,
             commands::is_git_repo,

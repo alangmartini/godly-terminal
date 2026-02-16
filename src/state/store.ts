@@ -12,6 +12,8 @@ export interface Terminal {
 
 export type ShellType =
   | { type: 'windows' }
+  | { type: 'pwsh' }
+  | { type: 'cmd' }
   | { type: 'wsl'; distribution?: string };
 
 export interface Workspace {

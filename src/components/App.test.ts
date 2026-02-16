@@ -21,15 +21,15 @@ import { terminalService } from '../services/terminal-service';
 const mockedInvoke = vi.mocked(invoke);
 
 // Type for backend shell type format
-type BackendShellType = 'windows' | { wsl: { distribution: string | null } };
+type BackendShellType = 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } };
 
 // Helper to convert shell type (mirrors App.ts logic)
 function convertShellType(
   backendType?: BackendShellType
-): { type: 'windows' } | { type: 'wsl'; distribution?: string } {
-  if (!backendType || backendType === 'windows') {
-    return { type: 'windows' };
-  }
+): { type: 'windows' } | { type: 'pwsh' } | { type: 'cmd' } | { type: 'wsl'; distribution?: string } {
+  if (!backendType || backendType === 'windows') return { type: 'windows' };
+  if (backendType === 'pwsh') return { type: 'pwsh' };
+  if (backendType === 'cmd') return { type: 'cmd' };
   if (typeof backendType === 'object' && 'wsl' in backendType) {
     return {
       type: 'wsl',
@@ -220,6 +220,50 @@ describe('App Persistence', () => {
       expect(layout.terminals[0].shell_type).toEqual({
         wsl: { distribution: 'Ubuntu' },
       });
+    });
+
+    it('should handle pwsh shell type in layout', async () => {
+      const pwshLayout = {
+        workspaces: [
+          {
+            id: 'ws-pwsh',
+            name: 'PowerShell 7 Workspace',
+            folder_path: 'C:\\Projects',
+            tab_order: [],
+            shell_type: 'pwsh' as const,
+          },
+        ],
+        terminals: [],
+        active_workspace_id: 'ws-pwsh',
+      };
+
+      mockedInvoke.mockResolvedValue(pwshLayout);
+      const layout = await invoke<typeof pwshLayout>('load_layout');
+
+      const shellType = convertShellType(layout.workspaces[0].shell_type);
+      expect(shellType).toEqual({ type: 'pwsh' });
+    });
+
+    it('should handle cmd shell type in layout', async () => {
+      const cmdLayout = {
+        workspaces: [
+          {
+            id: 'ws-cmd',
+            name: 'Command Prompt Workspace',
+            folder_path: 'C:\\Projects',
+            tab_order: [],
+            shell_type: 'cmd' as const,
+          },
+        ],
+        terminals: [],
+        active_workspace_id: 'ws-cmd',
+      };
+
+      mockedInvoke.mockResolvedValue(cmdLayout);
+      const layout = await invoke<typeof cmdLayout>('load_layout');
+
+      const shellType = convertShellType(layout.workspaces[0].shell_type);
+      expect(shellType).toEqual({ type: 'cmd' });
     });
   });
 
