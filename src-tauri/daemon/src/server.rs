@@ -1217,6 +1217,19 @@ async fn handle_request(
             }
         }
 
+        Request::ReadRichGridDiff { session_id } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => {
+                    let diff = session.read_rich_grid_diff();
+                    Response::RichGridDiff { diff }
+                }
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
         Request::ReadGridText {
             session_id,
             start_row,

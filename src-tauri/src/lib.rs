@@ -122,6 +122,7 @@ pub fn run() {
             commands::list_custom_sounds,
             commands::read_sound_file,
             commands::get_grid_snapshot,
+            commands::get_grid_snapshot_diff,
             commands::get_grid_dimensions,
             commands::get_grid_text,
             commands::set_scrollback,

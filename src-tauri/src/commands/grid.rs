@@ -1,10 +1,11 @@
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::State;
 
 use crate::daemon_client::DaemonClient;
 
 use godly_protocol::{Request, Response};
-use godly_protocol::types::RichGridData;
+use godly_protocol::types::{RichGridData, RichGridDiff};
 
 /// Get a rich grid snapshot with per-cell attributes for Canvas2D rendering.
 #[tauri::command]
@@ -13,11 +14,37 @@ pub fn get_grid_snapshot(
     daemon: State<Arc<DaemonClient>>,
 ) -> Result<RichGridData, String> {
     let request = Request::ReadRichGrid {
+        session_id: terminal_id.clone(),
+    };
+    let start = Instant::now();
+    let response = daemon.send_request(&request)?;
+    let elapsed = start.elapsed();
+    if elapsed.as_millis() > 5 {
+        eprintln!(
+            "[perf] get_grid_snapshot pipe round-trip: {:.2}ms (terminal={})",
+            elapsed.as_secs_f64() * 1000.0,
+            terminal_id,
+        );
+    }
+    match response {
+        Response::RichGrid { grid } => Ok(grid),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
+}
+
+/// Get a differential grid snapshot (only changed rows since last fetch).
+#[tauri::command]
+pub fn get_grid_snapshot_diff(
+    terminal_id: String,
+    daemon: State<Arc<DaemonClient>>,
+) -> Result<RichGridDiff, String> {
+    let request = Request::ReadRichGridDiff {
         session_id: terminal_id,
     };
     let response = daemon.send_request(&request)?;
     match response {
-        Response::RichGrid { grid } => Ok(grid),
+        Response::RichGridDiff { diff } => Ok(diff),
         Response::Error { message } => Err(message),
         other => Err(format!("Unexpected response: {:?}", other)),
     }
