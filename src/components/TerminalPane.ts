@@ -5,6 +5,7 @@ import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
 import { TerminalRenderer, RichGridData, RichGridDiff } from './TerminalRenderer';
 import { perfTracer } from '../utils/PerfTracer';
+import { themeStore } from '../state/theme-store';
 
 /**
  * Terminal pane backed by the godly-vt Canvas2D renderer.
@@ -20,6 +21,7 @@ export class TerminalPane {
   private resizeObserver: ResizeObserver;
   private resizeRAF: number | null = null;
   private unsubscribeOutput: (() => void) | null = null;
+  private unsubscribeTheme: (() => void) | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
   // fetch via setTimeout(SNAPSHOT_MIN_INTERVAL_MS). Multiple output events
@@ -44,6 +46,10 @@ export class TerminalPane {
     this.terminalId = terminalId;
 
     this.renderer = new TerminalRenderer();
+
+    this.unsubscribeTheme = themeStore.subscribe(() => {
+      this.renderer.setTheme(themeStore.getTerminalTheme());
+    });
 
     // Forward OSC title changes to the store
     this.renderer.setOnTitleChange((title) => {
@@ -512,6 +518,7 @@ export class TerminalPane {
     if (this.unsubscribeOutput) {
       this.unsubscribeOutput();
     }
+    this.unsubscribeTheme?.();
     this.renderer.dispose();
     this.container.remove();
   }

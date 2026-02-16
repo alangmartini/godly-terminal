@@ -15,6 +15,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { WebGLRenderer } from './renderer/WebGLRenderer';
 import { perfTracer } from '../utils/PerfTracer';
+import { themeStore } from '../state/theme-store';
+import type { TerminalTheme } from '../themes/types';
+
+export type { TerminalTheme } from '../themes/types';
 
 // ---- Types matching the Rust RichGridData ----
 
@@ -70,55 +74,10 @@ export interface RichGridDiff {
   full_repaint: boolean;
 }
 
-// ---- Theme ----
+// ---- Backward compatibility: re-export DEFAULT_THEME from builtin ----
 
-export interface TerminalTheme {
-  background: string;
-  foreground: string;
-  cursor: string;
-  cursorAccent: string;
-  selectionBackground: string;
-  black: string;
-  red: string;
-  green: string;
-  yellow: string;
-  blue: string;
-  magenta: string;
-  cyan: string;
-  white: string;
-  brightBlack: string;
-  brightRed: string;
-  brightGreen: string;
-  brightYellow: string;
-  brightBlue: string;
-  brightMagenta: string;
-  brightCyan: string;
-  brightWhite: string;
-}
-
-export const DEFAULT_THEME: TerminalTheme = {
-  background: '#1a1b26',
-  foreground: '#c0caf5',
-  cursor: '#c0caf5',
-  cursorAccent: '#1a1b26',
-  selectionBackground: '#283457',
-  black: '#15161e',
-  red: '#f7768e',
-  green: '#9ece6a',
-  yellow: '#e0af68',
-  blue: '#7aa2f7',
-  magenta: '#bb9af7',
-  cyan: '#7dcfff',
-  white: '#a9b1d6',
-  brightBlack: '#414868',
-  brightRed: '#f7768e',
-  brightGreen: '#9ece6a',
-  brightYellow: '#e0af68',
-  brightBlue: '#7aa2f7',
-  brightMagenta: '#bb9af7',
-  brightCyan: '#7dcfff',
-  brightWhite: '#c0caf5',
-};
+import { TOKYO_NIGHT } from '../themes/builtin';
+export const DEFAULT_THEME: TerminalTheme = TOKYO_NIGHT.terminal;
 
 // ---- Selection state ----
 
@@ -194,7 +153,7 @@ export class TerminalRenderer {
   private onScrollCallback?: (deltaLines: number) => void;
 
   constructor(theme?: Partial<TerminalTheme>) {
-    this.theme = { ...DEFAULT_THEME, ...theme };
+    this.theme = theme ? { ...themeStore.getTerminalTheme(), ...theme } : themeStore.getTerminalTheme();
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'terminal-canvas';
     this.canvas.style.display = 'block';
@@ -266,6 +225,12 @@ export class TerminalRenderer {
   /** Returns the active rendering backend name. */
   getBackend(): string {
     return this.useWebGL ? 'WebGL2' : 'Canvas2D';
+  }
+
+  /** Update the terminal theme and trigger a repaint. */
+  setTheme(theme: TerminalTheme): void {
+    this.theme = theme;
+    this.repaint();
   }
 
   /** Get the current grid dimensions in rows/cols based on canvas size. */

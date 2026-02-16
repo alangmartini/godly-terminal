@@ -11,6 +11,9 @@ import {
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
 import { getRendererBackend } from './TerminalRenderer';
+import { themeStore } from '../state/theme-store';
+import type { ThemeDefinition } from '../themes/types';
+import { createThemePreview } from './ThemePreview';
 
 function formatCustomSoundName(filename: string): string {
   // Strip extension
@@ -22,8 +25,9 @@ function formatCustomSoundName(filename: string): string {
 }
 
 /**
- * Show the settings dialog for customising keyboard shortcuts.
- * Returns a promise that resolves when the dialog is closed.
+ * Show the settings dialog for customising themes, notifications, and
+ * keyboard shortcuts. Returns a promise that resolves when the dialog
+ * is closed.
  */
 export function showSettingsDialog(): Promise<void> {
   return new Promise((resolve) => {
@@ -44,7 +48,158 @@ export function showSettingsDialog(): Promise<void> {
 
     dialog.appendChild(header);
 
-    // ── Notifications section ───────────────────────────────────
+    // ── Tab bar ──────────────────────────────────────────────────
+    let activeTab = 'themes';
+
+    const tabBar = document.createElement('div');
+    tabBar.className = 'settings-tabs';
+
+    const tabs: { id: string; label: string }[] = [
+      { id: 'themes', label: 'Themes' },
+      { id: 'notifications', label: 'Notifications' },
+      { id: 'shortcuts', label: 'Shortcuts' },
+    ];
+
+    const tabButtons: Record<string, HTMLButtonElement> = {};
+    const tabContents: Record<string, HTMLDivElement> = {};
+
+    for (const tab of tabs) {
+      const btn = document.createElement('button');
+      btn.className = 'settings-tab' + (tab.id === activeTab ? ' active' : '');
+      btn.textContent = tab.label;
+      btn.onclick = () => switchTab(tab.id);
+      tabBar.appendChild(btn);
+      tabButtons[tab.id] = btn;
+    }
+
+    dialog.appendChild(tabBar);
+
+    function switchTab(tabId: string) {
+      activeTab = tabId;
+      for (const id of Object.keys(tabButtons)) {
+        tabButtons[id].className = 'settings-tab' + (id === tabId ? ' active' : '');
+        tabContents[id].className = 'settings-tab-content' + (id === tabId ? ' active' : '');
+      }
+    }
+
+    // ── Themes tab content ──────────────────────────────────────
+    const themesContent = document.createElement('div');
+    themesContent.className = 'settings-tab-content active';
+    tabContents['themes'] = themesContent;
+
+    const themeGrid = document.createElement('div');
+    themeGrid.className = 'theme-grid';
+    themesContent.appendChild(themeGrid);
+
+    function renderThemeGrid() {
+      themeGrid.textContent = '';
+      const allThemes = themeStore.getAllThemes();
+      const activeTheme = themeStore.getActiveTheme();
+
+      for (const theme of allThemes) {
+        const card = document.createElement('div');
+        card.className = 'theme-card' + (theme.id === activeTheme.id ? ' active' : '');
+
+        // Canvas preview
+        const preview = createThemePreview(theme, 280, 140);
+        card.appendChild(preview);
+
+        // Info area
+        const info = document.createElement('div');
+        info.className = 'theme-card-info';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'theme-card-name';
+        nameEl.textContent = theme.name;
+        info.appendChild(nameEl);
+
+        const descEl = document.createElement('div');
+        descEl.className = 'theme-card-description';
+        descEl.textContent = theme.description;
+        info.appendChild(descEl);
+
+        const authorEl = document.createElement('div');
+        authorEl.className = 'theme-card-author';
+        authorEl.textContent = theme.author;
+        info.appendChild(authorEl);
+
+        card.appendChild(info);
+
+        // Remove button for non-builtin themes
+        if (!theme.builtin) {
+          const actions = document.createElement('div');
+          actions.className = 'theme-card-actions';
+
+          const removeBtn = document.createElement('button');
+          removeBtn.className = 'dialog-btn dialog-btn-secondary';
+          removeBtn.textContent = 'Remove';
+          removeBtn.style.fontSize = '11px';
+          removeBtn.style.padding = '2px 10px';
+          removeBtn.onclick = (e) => {
+            e.stopPropagation();
+            themeStore.removeCustomTheme(theme.id);
+            renderThemeGrid();
+          };
+          actions.appendChild(removeBtn);
+          card.appendChild(actions);
+        }
+
+        card.onclick = () => {
+          themeStore.setActiveTheme(theme.id);
+          renderThemeGrid();
+        };
+
+        themeGrid.appendChild(card);
+      }
+    }
+
+    renderThemeGrid();
+
+    // Import button
+    const importBtn = document.createElement('button');
+    importBtn.className = 'dialog-btn dialog-btn-secondary theme-import-btn';
+    importBtn.textContent = 'Import Theme (JSON)';
+    importBtn.onclick = () => {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.json';
+      fileInput.style.display = 'none';
+      fileInput.onchange = async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const parsed = JSON.parse(text) as ThemeDefinition;
+          // Validate required fields
+          if (
+            !parsed.id ||
+            !parsed.name ||
+            !parsed.terminal ||
+            !parsed.ui
+          ) {
+            alert('Invalid theme file: missing required fields (id, name, terminal, ui).');
+            return;
+          }
+          parsed.builtin = false;
+          themeStore.addCustomTheme(parsed);
+          renderThemeGrid();
+        } catch (err) {
+          alert('Failed to import theme: ' + (err instanceof Error ? err.message : String(err)));
+        }
+        fileInput.remove();
+      };
+      document.body.appendChild(fileInput);
+      fileInput.click();
+    };
+    themesContent.appendChild(importBtn);
+
+    dialog.appendChild(themesContent);
+
+    // ── Notifications tab content ───────────────────────────────
+    const notifContent = document.createElement('div');
+    notifContent.className = 'settings-tab-content';
+    tabContents['notifications'] = notifContent;
+
     const notifSection = document.createElement('div');
     notifSection.className = 'settings-section';
 
@@ -180,12 +335,17 @@ export function showSettingsDialog(): Promise<void> {
     folderRow.appendChild(openFolderBtn);
     notifSection.appendChild(folderRow);
 
-    dialog.appendChild(notifSection);
+    notifContent.appendChild(notifSection);
+    dialog.appendChild(notifContent);
 
-    // ── Keyboard Shortcuts header ────────────────────────────────
+    // ── Shortcuts tab content ───────────────────────────────────
+    const shortcutsContent = document.createElement('div');
+    shortcutsContent.className = 'settings-tab-content';
+    tabContents['shortcuts'] = shortcutsContent;
+
+    // Keyboard Shortcuts header with Reset All button
     const kbHeader = document.createElement('div');
     kbHeader.className = 'settings-header';
-    kbHeader.style.marginTop = '16px';
 
     const kbTitle = document.createElement('div');
     kbTitle.className = 'settings-section-title';
@@ -201,12 +361,14 @@ export function showSettingsDialog(): Promise<void> {
     };
     kbHeader.appendChild(resetAllBtn);
 
-    dialog.appendChild(kbHeader);
+    shortcutsContent.appendChild(kbHeader);
 
-    // ── Shortcuts container ─────────────────────────────────────
+    // Shortcuts container
     const shortcutsContainer = document.createElement('div');
     shortcutsContainer.className = 'settings-shortcuts';
-    dialog.appendChild(shortcutsContainer);
+    shortcutsContent.appendChild(shortcutsContainer);
+
+    dialog.appendChild(shortcutsContent);
 
     // Currently capturing element (if any)
     let capturingBadge: HTMLElement | null = null;
