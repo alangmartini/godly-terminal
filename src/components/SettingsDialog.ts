@@ -10,6 +10,7 @@ import {
 } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
+import { getRendererBackend } from './TerminalRenderer';
 
 function formatCustomSoundName(filename: string): string {
   // Strip extension
@@ -335,6 +336,12 @@ export function showSettingsDialog(): Promise<void> {
     }
 
     renderShortcuts();
+
+    // ── Info footer ──────────────────────────────────────────────
+    const footer = document.createElement('div');
+    footer.className = 'settings-footer';
+    footer.textContent = `Renderer: ${getRendererBackend()}`;
+    dialog.appendChild(footer);
 
     // ── Close handling ──────────────────────────────────────────
     const close = () => {
