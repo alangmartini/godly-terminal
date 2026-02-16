@@ -1,0 +1,29 @@
+{
+  "skills": [
+    {
+      "name": "build",
+      "description": "Build and run Godly Terminal in dev or production mode",
+      "path": "skills/build.md"
+    },
+    {
+      "name": "component",
+      "description": "Generate new UI components following the existing pattern",
+      "path": "skills/component.md"
+    },
+    {
+      "name": "feature",
+      "description": "Implement new terminal features (frontend + backend)",
+      "path": "skills/feature.md"
+    },
+    {
+      "name": "tauri-command",
+      "description": "Add new Tauri IPC commands with Rust handler and TS service",
+      "path": "skills/tauri-command.md"
+    },
+    {
+      "name": "tidy-up-docs",
+      "description": "Audit, organize, and distill the docs/ investigation folder",
+      "path": "skills/tidy-up-docs.md"
+    }
+  ]
+}

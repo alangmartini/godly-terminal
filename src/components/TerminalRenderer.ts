@@ -414,7 +414,9 @@ export class TerminalRenderer {
   private measureFont() {
     if (!this.ctx) return; // WebGL mode — font measured by WebGLRenderer
     const dpr = this.devicePixelRatio;
-    const scaledSize = this.fontSize * dpr;
+    // Round to integer pixel size for clean font hinting (avoids subpixel artifacts
+    // at fractional DPR like 1.25 where 13*1.25=16.25 causes poor ClearType rendering)
+    const scaledSize = Math.round(this.fontSize * dpr);
     this.ctx.font = `${scaledSize}px ${this.fontFamily}`;
     const metrics = this.ctx.measureText('M');
     this.cellWidth = Math.ceil(metrics.width);
@@ -442,10 +444,12 @@ export class TerminalRenderer {
       return;
     }
 
-    // Canvas2D fallback
+    // Canvas2D fallback — two-pass rendering to prevent background rects
+    // from clipping adjacent glyphs (e.g. 'm' trailing edge cut by next cell's bg)
     const ctx = this.ctx!;
     const { cellWidth, cellHeight, baselineOffset } = this;
     const dpr = this.devicePixelRatio;
+    const scaledSize = Math.round(this.fontSize * dpr);
 
     // Clear canvas with background
     ctx.fillStyle = this.theme.background;
@@ -453,40 +457,25 @@ export class TerminalRenderer {
 
     const normalizedSel = this.selection.active ? this.normalizeSelection(this.selection) : null;
 
-    // Paint each row
+    // Pass 1: Draw all backgrounds
     for (let row = 0; row < snap.rows.length; row++) {
       const gridRow = snap.rows[row];
       const y = row * cellHeight;
 
       for (let col = 0; col < gridRow.cells.length; col++) {
         const cell = gridRow.cells[col];
-
-        // Skip wide continuation cells (the wide character occupies 2 cells)
         if (cell.wide_continuation) continue;
 
         const x = col * cellWidth;
         const w = cell.wide ? cellWidth * 2 : cellWidth;
 
-        // Resolve colors
-        let fg = cell.fg === 'default' ? this.theme.foreground : cell.fg;
         let bg = cell.bg === 'default' ? this.theme.background : cell.bg;
-
-        // Handle inverse video
         if (cell.inverse) {
-          const tmp = fg;
-          fg = bg;
-          bg = tmp;
+          bg = cell.fg === 'default' ? this.theme.foreground : cell.fg;
         }
 
-        // Handle dim
-        if (cell.dim) {
-          fg = this.dimColor(fg);
-        }
-
-        // Check if this cell is in the selection
         const inSelection = normalizedSel && this.cellInSelection(row, col, normalizedSel);
 
-        // Draw background
         if (inSelection) {
           ctx.fillStyle = this.theme.selectionBackground;
           ctx.fillRect(x, y, w, cellHeight);
@@ -494,17 +483,38 @@ export class TerminalRenderer {
           ctx.fillStyle = bg;
           ctx.fillRect(x, y, w, cellHeight);
         }
+      }
+    }
+
+    // Pass 2: Draw all text and decorations (on top of backgrounds)
+    for (let row = 0; row < snap.rows.length; row++) {
+      const gridRow = snap.rows[row];
+      const y = row * cellHeight;
+
+      for (let col = 0; col < gridRow.cells.length; col++) {
+        const cell = gridRow.cells[col];
+        if (cell.wide_continuation) continue;
+
+        const x = col * cellWidth;
+        const w = cell.wide ? cellWidth * 2 : cellWidth;
+
+        let fg = cell.fg === 'default' ? this.theme.foreground : cell.fg;
+        if (cell.inverse) {
+          fg = cell.bg === 'default' ? this.theme.background : cell.bg;
+        }
+        if (cell.dim) {
+          fg = this.dimColor(fg);
+        }
+
+        const inSelection = normalizedSel && this.cellInSelection(row, col, normalizedSel);
 
         // Draw text
         if (cell.content && cell.content !== ' ') {
-          // Build font string
           const fontWeight = cell.bold ? 'bold ' : '';
           const fontStyle = cell.italic ? 'italic ' : '';
-          const scaledSize = this.fontSize * dpr;
           ctx.font = `${fontStyle}${fontWeight}${scaledSize}px ${this.fontFamily}`;
 
           if (inSelection) {
-            // Use foreground on selection background for readability
             ctx.fillStyle = this.theme.foreground;
           } else {
             ctx.fillStyle = fg;
@@ -564,7 +574,7 @@ export class TerminalRenderer {
       if (gridRow) {
         const cell = gridRow.cells[col];
         if (cell && cell.content && cell.content !== ' ') {
-          const scaledSize = this.fontSize * dpr;
+          const scaledSize = Math.round(this.fontSize * dpr);
           ctx.font = `${scaledSize}px ${this.fontFamily}`;
           ctx.fillStyle = this.theme.cursorAccent;
           ctx.fillText(cell.content, x, y + this.baselineOffset);
