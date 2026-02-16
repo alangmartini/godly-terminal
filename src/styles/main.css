@@ -848,8 +848,8 @@ html, body {
 
 /* Settings dialog */
 .settings-dialog {
-  max-width: 500px;
-  min-width: 400px;
+  max-width: 640px;
+  min-width: 560px;
   max-height: 80vh;
   overflow-y: auto;
 }
@@ -1239,4 +1239,105 @@ html, body {
 
 @keyframes toast-fade-out {
   to { opacity: 0; transform: translateX(30%); }
+}
+
+/* Settings tabs */
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 16px;
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  color: var(--text-active);
+  border-bottom-color: var(--accent);
+}
+
+.settings-tab-content {
+  display: none;
+}
+
+.settings-tab-content.active {
+  display: block;
+}
+
+/* Theme grid */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.theme-card {
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.theme-card:hover {
+  border-color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
+.theme-card.active {
+  border-color: var(--accent);
+}
+
+.theme-card canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.theme-card-info {
+  padding: 10px 12px;
+}
+
+.theme-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-active);
+  margin-bottom: 2px;
+}
+
+.theme-card-description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.theme-card-author {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.theme-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 8px;
+}
+
+.theme-import-btn {
+  margin-top: 8px;
 }
