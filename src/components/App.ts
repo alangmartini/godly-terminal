@@ -9,6 +9,7 @@ import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar, getDisplayName } from './TabBar';
 import { TerminalPane } from './TerminalPane';
 import { ToastContainer } from './ToastContainer';
+import { onDragMove, onDragDrop } from '../state/drag-state';
 
 type BackendShellType =
   | 'windows'
@@ -87,7 +88,7 @@ export class App {
     // Setup keyboard shortcuts
     this.setupKeyboardShortcuts();
 
-    // Setup split drop zones for tab drag-drop
+    // Setup split drop zones for tab drag-drop (pointer-event based)
     this.setupSplitDropZone();
   }
 
@@ -694,27 +695,28 @@ export class App {
   }
 
   private setupSplitDropZone() {
-    // Create drop overlay element
+    // Create drop overlay element (reused from previous implementation)
     this.splitDropOverlay = document.createElement('div');
     this.splitDropOverlay.className = 'split-drop-overlay';
     this.terminalContainer.appendChild(this.splitDropOverlay);
 
-    this.terminalContainer.addEventListener('dragover', (e) => {
-      // Only handle tab drags (text/plain contains terminal ID)
-      if (!e.dataTransfer?.types.includes('text/plain')) return;
-
-      e.preventDefault();
-      e.dataTransfer!.dropEffect = 'move';
+    // Pointer-event drag move: show split zone overlay for tab drags
+    onDragMove((x, y, data) => {
+      if (data.kind !== 'tab') return;
 
       const rect = this.terminalContainer.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
+      // Ignore if pointer is outside the terminal container
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+        this.splitDropOverlay?.classList.remove('visible');
+        if (this.splitDropOverlay) this.splitDropOverlay.dataset.zone = '';
+        return;
+      }
 
+      const nx = (x - rect.left) / rect.width;
+      const ny = (y - rect.top) / rect.height;
       const overlay = this.splitDropOverlay!;
 
-      // Determine drop zone
-      if (x > 0.7) {
-        // Right edge
+      if (nx > 0.7) {
         overlay.style.left = '50%';
         overlay.style.top = '0';
         overlay.style.width = '50%';
@@ -722,8 +724,7 @@ export class App {
         overlay.textContent = 'Split Right';
         overlay.classList.add('visible');
         overlay.dataset.zone = 'right';
-      } else if (x < 0.3) {
-        // Left edge
+      } else if (nx < 0.3) {
         overlay.style.left = '0';
         overlay.style.top = '0';
         overlay.style.width = '50%';
@@ -731,8 +732,7 @@ export class App {
         overlay.textContent = 'Split Left';
         overlay.classList.add('visible');
         overlay.dataset.zone = 'left';
-      } else if (y > 0.7) {
-        // Bottom edge
+      } else if (ny > 0.7) {
         overlay.style.left = '0';
         overlay.style.top = '50%';
         overlay.style.width = '100%';
@@ -740,8 +740,7 @@ export class App {
         overlay.textContent = 'Split Down';
         overlay.classList.add('visible');
         overlay.dataset.zone = 'bottom';
-      } else if (y < 0.3) {
-        // Top edge
+      } else if (ny < 0.3) {
         overlay.style.left = '0';
         overlay.style.top = '0';
         overlay.style.width = '100%';
@@ -750,27 +749,20 @@ export class App {
         overlay.classList.add('visible');
         overlay.dataset.zone = 'top';
       } else {
-        // Center: no split indicator
         overlay.classList.remove('visible');
         overlay.dataset.zone = '';
       }
     });
 
-    this.terminalContainer.addEventListener('dragleave', (e) => {
-      // Only hide if leaving the container entirely
-      const related = e.relatedTarget as HTMLElement | null;
-      if (!related || !this.terminalContainer.contains(related)) {
-        this.splitDropOverlay?.classList.remove('visible');
-      }
-    });
+    // Pointer-event drag drop: handle split creation
+    onDragDrop((_x, _y, data) => {
+      if (data.kind !== 'tab') return;
 
-    this.terminalContainer.addEventListener('drop', async (e) => {
       this.splitDropOverlay?.classList.remove('visible');
-
-      const droppedTerminalId = e.dataTransfer?.getData('text/plain');
       const zone = this.splitDropOverlay?.dataset.zone;
-      if (!droppedTerminalId || !zone) return;
+      if (!zone) return;
 
+      const droppedTerminalId = data.id;
       const state = store.getState();
       if (!state.activeWorkspaceId || !state.activeTerminalId) return;
 
@@ -781,7 +773,6 @@ export class App {
       const droppedTerminal = state.terminals.find(t => t.id === droppedTerminalId);
       if (!droppedTerminal || droppedTerminal.workspaceId !== state.activeWorkspaceId) return;
 
-      // Determine direction and pane assignment
       let direction: 'horizontal' | 'vertical';
       let leftId: string;
       let rightId: string;
@@ -789,7 +780,6 @@ export class App {
       const existingSplit = store.getSplitView(state.activeWorkspaceId);
 
       if (existingSplit) {
-        // Already split: replace the pane closest to drop position
         if (zone === 'right' || zone === 'bottom') {
           leftId = existingSplit.leftTerminalId;
           rightId = droppedTerminalId;
@@ -800,7 +790,6 @@ export class App {
           direction = existingSplit.direction;
         }
       } else {
-        // New split
         if (zone === 'right') {
           direction = 'horizontal';
           leftId = state.activeTerminalId;
@@ -814,7 +803,6 @@ export class App {
           leftId = state.activeTerminalId;
           rightId = droppedTerminalId;
         } else {
-          // top
           direction = 'vertical';
           leftId = droppedTerminalId;
           rightId = state.activeTerminalId;
@@ -823,7 +811,7 @@ export class App {
 
       store.setSplitView(state.activeWorkspaceId, leftId, rightId, direction);
       const split = store.getSplitView(state.activeWorkspaceId)!;
-      await this.syncSplitToBackend(state.activeWorkspaceId, split);
+      this.syncSplitToBackend(state.activeWorkspaceId, split);
     });
   }
 
@@ -890,10 +878,9 @@ export class App {
   private async setupDragDropListener() {
     // File drop handling via Tauri's native drag-drop events.
     // With dragDropEnabled: true, Tauri's IDropTarget intercepts external file
-    // drags and provides full file system paths (unlike HTML5 File API which
-    // only exposes filenames in WebView2). Internal HTML5 DnD (tab reordering,
-    // workspace moves, split zones) still works because Chromium handles
-    // intra-webview drags internally without going through the OS drop target.
+    // drags and provides full file system paths. Internal DnD (tab reorder,
+    // workspace reorder, split zones) uses pointer events instead of HTML5 DnD
+    // to avoid conflict with Tauri's IDropTarget (see drag-state.ts).
     const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
 
     await getCurrentWebviewWindow().onDragDropEvent((event) => {
