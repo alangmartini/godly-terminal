@@ -204,7 +204,7 @@ export class WebGLRenderer {
   }
 
   measureFont(): { cellWidth: number; cellHeight: number } {
-    const scaledSize = this.fontSize * this.dpr;
+    const scaledSize = Math.round(this.fontSize * this.dpr);
     const canvas = new OffscreenCanvas(64, 64);
     const ctx = canvas.getContext('2d')!;
     ctx.font = `${scaledSize}px ${this.fontFamily}`;
