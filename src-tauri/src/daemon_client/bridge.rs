@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -15,7 +15,11 @@ use godly_protocol::{DaemonMessage, Event, Request, Response};
 /// Payload variants for the emitter channel — mirrors protocol::Event but
 /// also supports process-changed events from ProcessMonitor.
 pub enum EmitPayload {
-    TerminalOutput { terminal_id: String, data: Vec<u8> },
+    /// Notification that new output is available for a terminal.
+    /// Does NOT carry the output data — the frontend fetches a grid snapshot
+    /// via IPC instead. Omitting data avoids serializing potentially 65KB+
+    /// binary payloads as JSON arrays on every chunk.
+    TerminalOutput { terminal_id: String },
     TerminalClosed { terminal_id: String },
     ProcessChanged { terminal_id: String, process_name: String },
 }
@@ -32,9 +36,10 @@ pub struct EventEmitter {
 
 impl EventEmitter {
     /// Spawn the emitter thread and return a cloneable handle.
-    /// Channel capacity of 4096 provides ample headroom for burst output
-    /// (e.g. Claude CLI generating hundreds of KB rapidly). At ~4KB per
-    /// event, this buffers ~16MB before dropping.
+    /// Channel capacity of 4096 provides ample headroom for burst output.
+    /// The emitter thread coalesces consecutive TerminalOutput events for
+    /// the same terminal — under sustained output, only one notification per
+    /// terminal is emitted per drain cycle, preventing Tauri event flood.
     pub fn spawn(app_handle: AppHandle) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<EmitPayload>(4096);
         let dropped = Arc::new(AtomicU64::new(0));
@@ -42,14 +47,52 @@ impl EventEmitter {
         thread::Builder::new()
             .name("tauri-emitter".into())
             .spawn(move || {
-                while let Ok(payload) = rx.recv() {
-                    Self::do_emit(&app_handle, payload);
+                while let Ok(first) = rx.recv() {
+                    // Drain all immediately-available events and coalesce
+                    // TerminalOutput notifications per terminal. Non-output
+                    // events (closed, process-changed) are emitted in order.
+                    let mut output_terminals: HashSet<String> = HashSet::new();
+                    let mut other_events: Vec<EmitPayload> = Vec::new();
+
+                    Self::classify_payload(first, &mut output_terminals, &mut other_events);
+
+                    // Drain any pending events without blocking
+                    while let Ok(payload) = rx.try_recv() {
+                        Self::classify_payload(payload, &mut output_terminals, &mut other_events);
+                    }
+
+                    // Emit one notification per terminal that had output
+                    for terminal_id in output_terminals {
+                        Self::do_emit(
+                            &app_handle,
+                            EmitPayload::TerminalOutput { terminal_id },
+                        );
+                    }
+                    // Emit non-output events in order
+                    for payload in other_events {
+                        Self::do_emit(&app_handle, payload);
+                    }
                 }
                 eprintln!("[emitter] Tauri-emitter thread exiting (all senders dropped)");
             })
             .expect("Failed to spawn tauri-emitter thread");
 
         Self { tx, dropped }
+    }
+
+    /// Classify a payload as either a terminal output (coalesced by terminal_id)
+    /// or a non-output event (preserved in order).
+    fn classify_payload(
+        payload: EmitPayload,
+        output_terminals: &mut HashSet<String>,
+        other_events: &mut Vec<EmitPayload>,
+    ) {
+        match payload {
+            EmitPayload::TerminalOutput { terminal_id } => {
+                output_terminals.insert(terminal_id);
+            }
+            other => other_events.push(other),
+        }
     }
 
     /// Non-blocking enqueue. Returns true if sent, false if the channel is full
@@ -76,12 +119,11 @@ impl EventEmitter {
     /// Perform the actual Tauri emit for one payload.
     fn do_emit(app_handle: &AppHandle, payload: EmitPayload) {
         match payload {
-            EmitPayload::TerminalOutput { terminal_id, data } => {
+            EmitPayload::TerminalOutput { terminal_id } => {
                 let _ = app_handle.emit(
                     "terminal-output",
                     serde_json::json!({
                         "terminal_id": terminal_id,
-                        "data": data,
                     }),
                 );
             }
@@ -679,9 +721,8 @@ fn peek_pipe(_handle: isize) -> PeekResult {
 /// Convert a protocol Event into an EmitPayload for the non-blocking emitter channel.
 fn event_to_payload(event: Event) -> EmitPayload {
     match event {
-        Event::Output { session_id, data } => EmitPayload::TerminalOutput {
+        Event::Output { session_id, .. } => EmitPayload::TerminalOutput {
             terminal_id: session_id,
-            data,
         },
         Event::SessionClosed { session_id } => EmitPayload::TerminalClosed {
             terminal_id: session_id,
