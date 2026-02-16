@@ -121,3 +121,30 @@ pub struct GridDimensions {
     /// Number of columns.
     pub cols: u16,
 }
+
+/// Differential grid snapshot: only contains rows that changed since last read.
+/// When `full_repaint` is true, `dirty_rows` contains ALL rows (same as a full snapshot).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RichGridDiff {
+    /// Only the rows that changed, as (row_index, row_data) pairs.
+    pub dirty_rows: Vec<(u16, RichGridRow)>,
+    /// Cursor state.
+    pub cursor: CursorState,
+    /// Terminal dimensions.
+    pub dimensions: GridDimensions,
+    /// Whether the alternate screen buffer is active.
+    pub alternate_screen: bool,
+    /// Whether the cursor should be hidden.
+    pub cursor_hidden: bool,
+    /// OSC window title, if set.
+    pub title: String,
+    /// Current scrollback offset (0 = live view, >0 = scrolled into history).
+    #[serde(default)]
+    pub scrollback_offset: usize,
+    /// Total number of scrollback rows available.
+    #[serde(default)]
+    pub total_scrollback: usize,
+    /// If true, this is effectively a full repaint (all rows included).
+    /// The frontend should replace its entire cached grid.
+    pub full_repaint: bool,
+}

@@ -63,6 +63,10 @@ pub enum Request {
         end_row: u16,
         end_col: u16,
     },
+    /// Read differential rich grid snapshot (only dirty rows since last read).
+    ReadRichGridDiff {
+        session_id: String,
+    },
     /// Set the scrollback viewport offset for a session.
     /// offset=0 means live view, offset>0 scrolls into history.
     SetScrollback {
@@ -89,6 +93,8 @@ pub enum Response {
     Grid { grid: crate::types::GridData },
     /// Rich grid snapshot with per-cell attributes for Canvas2D rendering.
     RichGrid { grid: crate::types::RichGridData },
+    /// Differential rich grid snapshot (only changed rows).
+    RichGridDiff { diff: crate::types::RichGridDiff },
     /// Text extracted from grid between two positions.
     GridText { text: String },
 }

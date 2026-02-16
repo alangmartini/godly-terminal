@@ -57,6 +57,7 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 
 - **Bug fixes**: Write a full test **suite** (not a single test) to reproduce the bug.
 - **Features**: Write **E2E tests** (`npm run test:e2e`), not just unit tests.
+- **Performance issues**: Always write automated reproducible tests that demonstrate the problem under realistic conditions. Isolated component benchmarks are useful but insufficient — the test must exercise the real bottleneck (e.g., concurrent I/O, lock contention, IPC round-trips). See `daemon/tests/input_latency.rs` and `daemon/tests/handler_starvation.rs` for patterns.
 
 ## Parallel Agent Workflow
 
