@@ -438,6 +438,13 @@ export class TerminalPane {
 
   fit() {
     try {
+      // Guard: skip resize when container is hidden (display:none).
+      // Hidden containers have 0×0 dimensions, causing getGridSize() to
+      // return 1×1. Sending resize(1,1) to the daemon truncates the
+      // godly-vt grid and permanently destroys all terminal content.
+      if (!this.container.offsetWidth || !this.container.offsetHeight) {
+        return;
+      }
       this.renderer.updateSize();
       const { rows, cols } = this.renderer.getGridSize();
       if (rows > 0 && cols > 0) {
