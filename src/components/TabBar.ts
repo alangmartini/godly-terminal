@@ -461,6 +461,22 @@ export class TabBar {
     await workspaceService.reorderTabs(state.activeWorkspaceId, ids);
   }
 
+  /** Programmatically start renaming the active terminal tab. */
+  startRenameActive() {
+    const state = store.getState();
+    if (!state.activeTerminalId) return;
+    const terminal = state.workspaces
+      .flatMap(w => store.getWorkspaceTerminals(w.id))
+      .find(t => t.id === state.activeTerminalId);
+    if (!terminal) return;
+    const titleEl = this.container.querySelector(
+      `.tab[data-terminal-id="${terminal.id}"] .tab-title`
+    ) as HTMLSpanElement | null;
+    if (titleEl) {
+      this.startRename(titleEl, terminal);
+    }
+  }
+
   setOnSplit(callback: (terminalId: string, direction: 'horizontal' | 'vertical') => void) {
     this.onSplitCallback = callback;
   }
