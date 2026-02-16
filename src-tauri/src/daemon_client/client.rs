@@ -488,12 +488,11 @@ impl DaemonClient {
                 session_id: session_id.clone(),
             };
             match self.try_send_request(&req) {
-                Ok(Response::Buffer { session_id, data }) => {
-                    // Emit buffered output through the non-blocking emitter
+                Ok(Response::Buffer { session_id, .. }) => {
+                    // Emit output notification (data is fetched via snapshot IPC)
                     if let Some(ref em) = emitter {
                         em.try_send(EmitPayload::TerminalOutput {
                             terminal_id: session_id.clone(),
-                            data,
                         });
                     } else {
                         // Fallback to direct emit if emitter not yet available
@@ -501,7 +500,6 @@ impl DaemonClient {
                             "terminal-output",
                             serde_json::json!({
                                 "terminal_id": session_id,
-                                "data": data,
                             }),
                         );
                     }
