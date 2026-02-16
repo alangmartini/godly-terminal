@@ -3,6 +3,7 @@ import { GlyphAtlas } from './GlyphAtlas';
 import { CellDataEncoder, Selection } from './CellDataEncoder';
 import { VERTEX_SHADER, FRAGMENT_SHADER } from './shaders';
 import type { RichGridData, TerminalTheme } from '../TerminalRenderer';
+import { perfTracer } from '../../utils/PerfTracer';
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -138,9 +139,12 @@ export class WebGLRenderer {
     const { rows: gridRows, cols: gridCols } = snapshot.dimensions;
 
     // Encode cell data
+    perfTracer.mark('encode_start');
     const cellData = this.encoder.encode(snapshot, theme, this.atlas, this.colorCache, selection);
+    perfTracer.measure('cell_data_encode', 'encode_start');
 
     // Upload cell data to texture
+    perfTracer.mark('gpu_upload_start');
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.cellDataTexture);
     gl.texImage2D(
@@ -182,6 +186,7 @@ export class WebGLRenderer {
 
     // Draw: 6 vertices per cell (2 triangles), one instance per cell
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, gridCols * gridRows);
+    perfTracer.measure('gpu_upload_and_draw', 'gpu_upload_start');
   }
 
   resize(width: number, height: number, dpr: number): void {
