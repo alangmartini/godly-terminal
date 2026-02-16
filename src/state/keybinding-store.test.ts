@@ -358,6 +358,27 @@ describe('KeybindingStore', () => {
     });
   });
 
+  describe('split.unsplit shortcut', () => {
+    it('matches Ctrl+Shift+\\ to split.unsplit', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('\\', { ctrlKey: true, shiftKey: true }))).toBe(
+        'split.unsplit'
+      );
+    });
+
+    it('classifies Ctrl+Shift+\\ as an app shortcut', () => {
+      const store = new KeybindingStore();
+      expect(store.isAppShortcut(keydown('\\', { ctrlKey: true, shiftKey: true }))).toBe(true);
+      expect(store.isTerminalControlKey(keydown('\\', { ctrlKey: true, shiftKey: true }))).toBe(false);
+    });
+
+    it('does not conflict with Alt+\\ (focus other pane)', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('\\', { altKey: true }))).toBe('split.focusOtherPane');
+      expect(store.matchAction(keydown('\\', { ctrlKey: true, shiftKey: true }))).toBe('split.unsplit');
+    });
+  });
+
   describe('CapsLock edge case', () => {
     // Bug: With CapsLock on, browser sends uppercase key without shiftKey
     it('matches Ctrl+C when CapsLock sends uppercase C without shift', () => {

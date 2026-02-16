@@ -692,5 +692,59 @@ describe('Store', () => {
 
       expect(store.getState().splitViews).toEqual({});
     });
+
+    it('should auto-clear split when navigating to a terminal outside the split', () => {
+      // Bug: clicking a tab not in the split left the split active,
+      // so the clicked tab was never displayed
+      store.setActiveWorkspace('ws-1');
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.setActiveTerminal('t1');
+
+      // Navigate to t3 which is NOT in the split
+      store.setActiveTerminal('t3');
+
+      expect(store.getSplitView('ws-1')).toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t3');
+    });
+
+    it('should preserve split when navigating within the split', () => {
+      store.setActiveWorkspace('ws-1');
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.setActiveTerminal('t1');
+
+      // Navigate to t2 which IS in the split (e.g. Alt+\ focus other pane)
+      store.setActiveTerminal('t2');
+
+      expect(store.getSplitView('ws-1')).not.toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t2');
+    });
+
+    it('should preserve split when navigating to leftTerminalId', () => {
+      store.setActiveWorkspace('ws-1');
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      store.setActiveTerminal('t2');
+
+      store.setActiveTerminal('t1');
+
+      expect(store.getSplitView('ws-1')).not.toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t1');
+    });
+
+    it('should not clear split when setting active terminal to null', () => {
+      store.setActiveWorkspace('ws-1');
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+
+      store.setActiveTerminal(null);
+
+      expect(store.getSplitView('ws-1')).not.toBeNull();
+    });
+
+    it('should not throw when no active workspace and navigating outside split', () => {
+      store.setSplitView('ws-1', 't1', 't2', 'horizontal');
+      // No active workspace set — setActiveTerminal should not crash
+      store.setActiveTerminal('t3');
+
+      expect(store.getState().activeTerminalId).toBe('t3');
+    });
   });
 });
