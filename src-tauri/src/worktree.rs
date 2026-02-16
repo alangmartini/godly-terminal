@@ -192,38 +192,47 @@ fn detect_default_branch(repo_root: &str, wsl: Option<&WslConfig>) -> Option<Str
     None
 }
 
-/// Pull the latest changes from origin for the default branch.
-/// Silently does nothing if there is no remote or the pull fails.
-fn pull_latest(repo_root: &str, wsl: Option<&WslConfig>) {
-    let branch = match detect_default_branch(repo_root, wsl) {
-        Some(b) => b,
-        None => return,
-    };
+/// Fetch the latest changes from origin for the default branch and return
+/// the remote tracking ref to use as the worktree start point.
+///
+/// Uses `git fetch origin <branch> --no-tags` instead of `git pull` because:
+/// 1. No merge step needed — we branch from the remote ref directly
+/// 2. Single-branch fetch is faster than fetching all refs
+/// 3. `--no-tags` skips tag negotiation overhead
+///
+/// Returns `Some("origin/<branch>")` on success, `None` if fetch fails or
+/// no default branch is detected (the worktree will branch from HEAD instead).
+fn fetch_latest(repo_root: &str, wsl: Option<&WslConfig>) -> Option<String> {
+    let branch = detect_default_branch(repo_root, wsl)?;
 
-    eprintln!("[worktree] Pulling latest from origin/{} before creating worktree...", branch);
+    eprintln!("[worktree] Fetching origin/{} before creating worktree...", branch);
 
-    match run_git(&["pull", "origin", &branch], repo_root, wsl) {
+    match run_git(&["fetch", "origin", &branch, "--no-tags"], repo_root, wsl) {
         Ok(output) => {
             if output.status.success() {
-                eprintln!("[worktree] Pull succeeded");
+                eprintln!("[worktree] Fetch succeeded");
+                Some(format!("origin/{}", branch))
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("[worktree] Pull failed (non-fatal): {}", stderr.trim());
+                eprintln!("[worktree] Fetch failed (non-fatal): {}", stderr.trim());
+                None
             }
         }
         Err(e) => {
-            eprintln!("[worktree] Pull failed (non-fatal): {}", e);
+            eprintln!("[worktree] Fetch failed (non-fatal): {}", e);
+            None
         }
     }
 }
 
 /// Create a new worktree for the given terminal.
 /// If `custom_name` is provided, it is used as the branch/folder suffix instead of the terminal id prefix.
-/// Pulls latest from origin before creating the worktree so it branches from the latest state.
+/// Fetches latest from origin before creating the worktree so it branches from the latest state.
 /// Returns a `WorktreeResult` with the path and branch name.
 pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&str>, wsl: Option<&WslConfig>) -> Result<WorktreeResult, String> {
-    // Pull latest from origin so the worktree branches from the up-to-date default branch
-    pull_latest(repo_root, wsl);
+    // Fetch latest from origin and get the remote tracking ref to branch from.
+    // This is much faster than `git pull` because it skips the merge step entirely.
+    let start_point = fetch_latest(repo_root, wsl);
 
     let branch_name = wt_name_from(custom_name, terminal_id);
 
@@ -236,11 +245,13 @@ pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&
             let _ = run_wsl_cmd(wsl_config, "mkdir", &["-p", parent]);
         }
 
-        let output = run_git(
-            &["worktree", "add", &wt_linux_path, "-b", &branch_name],
-            repo_root, Some(wsl_config),
-        )
-        .map_err(|e| format!("Failed to run git worktree add: {}", e))?;
+        let mut args = vec!["worktree", "add", &wt_linux_path, "-b", &branch_name];
+        if let Some(ref sp) = start_point {
+            args.push(sp);
+        }
+
+        let output = run_git(&args, repo_root, Some(wsl_config))
+            .map_err(|e| format!("Failed to run git worktree add: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -260,11 +271,13 @@ pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&
 
         let wt_path_str = wt_path.to_string_lossy().to_string();
 
-        let output = run_git(
-            &["worktree", "add", &wt_path_str, "-b", &branch_name],
-            repo_root, None,
-        )
-        .map_err(|e| format!("Failed to run git worktree add: {}", e))?;
+        let mut args = vec!["worktree", "add", &wt_path_str, "-b", &branch_name];
+        if let Some(ref sp) = start_point {
+            args.push(sp);
+        }
+
+        let output = run_git(&args, repo_root, None)
+            .map_err(|e| format!("Failed to run git worktree add: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
