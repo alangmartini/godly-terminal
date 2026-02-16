@@ -18,6 +18,7 @@ export type ActionId =
   | 'tabs.nextTab'
   | 'tabs.previousTab'
   | 'split.focusOtherPane'
+  | 'split.unsplit'
   | 'workspace.toggleWorktreeMode'
   | 'workspace.toggleClaudeCodeMode'
   | 'scroll.pageUp'
@@ -111,6 +112,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Split',
     type: 'app',
     defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: '\\' },
+  },
+  {
+    id: 'split.unsplit',
+    label: 'Unsplit',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: '\\' },
   },
   {
     id: 'workspace.toggleWorktreeMode',
