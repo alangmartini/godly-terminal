@@ -946,6 +946,15 @@ html, body {
   border-color: var(--text-secondary);
 }
 
+.settings-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
 /* Notification badges */
 .tab-notification-badge {
   width: 8px;
