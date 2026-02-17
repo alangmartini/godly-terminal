@@ -24,6 +24,10 @@ fn to_protocol_shell_type(st: &ShellType) -> godly_protocol::ShellType {
         ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
             distribution: distribution.clone(),
         },
+        ShellType::Custom { program, args } => godly_protocol::ShellType::Custom {
+            program: program.clone(),
+            args: args.clone(),
+        },
     }
 }
 
@@ -35,6 +39,10 @@ fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> ShellType {
         godly_protocol::ShellType::Cmd => ShellType::Cmd,
         godly_protocol::ShellType::Wsl { distribution } => ShellType::Wsl {
             distribution: distribution.clone(),
+        },
+        godly_protocol::ShellType::Custom { program, args } => ShellType::Custom {
+            program: program.clone(),
+            args: args.clone(),
         },
     }
 }
@@ -102,14 +110,7 @@ pub fn create_terminal(
         .unwrap_or_default();
 
     // Determine initial process name based on shell type
-    let process_name = match &shell_type {
-        ShellType::Windows => String::from("powershell"),
-        ShellType::Pwsh => String::from("pwsh"),
-        ShellType::Cmd => String::from("cmd"),
-        ShellType::Wsl { distribution } => {
-            distribution.clone().unwrap_or_else(|| String::from("wsl"))
-        }
-    };
+    let process_name = shell_type.display_name();
 
     // Build environment variables for the PTY session
     let mut env_vars = HashMap::new();
@@ -313,14 +314,7 @@ pub fn attach_session(
     if let Response::SessionList { sessions } = sessions_response {
         if let Some(info) = sessions.iter().find(|s| s.id == session_id) {
             let shell_type = from_protocol_shell_type(&info.shell_type);
-            let process_name = match &shell_type {
-                ShellType::Windows => String::from("powershell"),
-                ShellType::Pwsh => String::from("pwsh"),
-                ShellType::Cmd => String::from("cmd"),
-                ShellType::Wsl { distribution } => {
-                    distribution.clone().unwrap_or_else(|| String::from("wsl"))
-                }
-            };
+            let process_name = shell_type.display_name();
 
             state.add_session_metadata(
                 session_id.clone(),

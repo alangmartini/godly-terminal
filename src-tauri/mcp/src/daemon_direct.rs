@@ -99,14 +99,7 @@ impl DaemonDirectBackend {
                             id: s.id.clone(),
                             workspace_id: String::new(),
                             name: format!("Session {}", &s.id[..8.min(s.id.len())]),
-                            process_name: match &s.shell_type {
-                                ShellType::Windows => "powershell".to_string(),
-                                ShellType::Pwsh => "pwsh".to_string(),
-                                ShellType::Cmd => "cmd".to_string(),
-                                ShellType::Wsl { distribution } => distribution
-                                    .clone()
-                                    .unwrap_or_else(|| "wsl".to_string()),
-                            },
+                            process_name: s.shell_type.display_name(),
                         },
                     }),
                     None => Ok(McpResponse::Error {
@@ -156,14 +149,7 @@ impl Backend for DaemonDirectBackend {
                                 id: s.id.clone(),
                                 workspace_id: String::new(), // unknown in direct mode
                                 name: format!("Session {}", &s.id[..8.min(s.id.len())]),
-                                process_name: match &s.shell_type {
-                                    ShellType::Windows => "powershell".to_string(),
-                                    ShellType::Pwsh => "pwsh".to_string(),
-                                    ShellType::Cmd => "cmd".to_string(),
-                                    ShellType::Wsl { distribution } => distribution
-                                        .clone()
-                                        .unwrap_or_else(|| "wsl".to_string()),
-                                },
+                                process_name: s.shell_type.display_name(),
                             })
                             .collect();
                         Ok(McpResponse::TerminalList { terminals })

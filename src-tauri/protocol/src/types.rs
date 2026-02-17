@@ -8,6 +8,28 @@ pub enum ShellType {
     Pwsh,
     Cmd,
     Wsl { distribution: Option<String> },
+    Custom { program: String, args: Option<Vec<String>> },
+}
+
+impl ShellType {
+    /// Human-readable display name (extracts basename for Custom).
+    pub fn display_name(&self) -> String {
+        match self {
+            ShellType::Windows => "powershell".to_string(),
+            ShellType::Pwsh => "pwsh".to_string(),
+            ShellType::Cmd => "cmd".to_string(),
+            ShellType::Wsl { distribution } => {
+                distribution.clone().unwrap_or_else(|| "wsl".to_string())
+            }
+            ShellType::Custom { program, .. } => {
+                std::path::Path::new(program)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(program)
+                    .to_string()
+            }
+        }
+    }
 }
 
 impl Default for ShellType {
@@ -202,5 +224,53 @@ mod tests {
     #[test]
     fn test_shell_type_default() {
         assert_eq!(ShellType::default(), ShellType::Windows);
+    }
+
+    #[test]
+    fn test_shell_type_custom_serialization() {
+        let shell = ShellType::Custom {
+            program: "nu.exe".to_string(),
+            args: Some(vec!["-l".to_string()]),
+        };
+        let json = serde_json::to_string(&shell).unwrap();
+        assert!(json.contains("custom"));
+        assert!(json.contains("nu.exe"));
+        assert!(json.contains("-l"));
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, shell);
+    }
+
+    #[test]
+    fn test_shell_type_custom_no_args() {
+        let shell = ShellType::Custom {
+            program: "fish".to_string(),
+            args: None,
+        };
+        let json = serde_json::to_string(&shell).unwrap();
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, shell);
+    }
+
+    #[test]
+    fn test_shell_type_display_name() {
+        assert_eq!(ShellType::Windows.display_name(), "powershell");
+        assert_eq!(ShellType::Pwsh.display_name(), "pwsh");
+        assert_eq!(ShellType::Cmd.display_name(), "cmd");
+        assert_eq!(
+            ShellType::Wsl { distribution: Some("Ubuntu".to_string()) }.display_name(),
+            "Ubuntu"
+        );
+        assert_eq!(
+            ShellType::Wsl { distribution: None }.display_name(),
+            "wsl"
+        );
+        assert_eq!(
+            ShellType::Custom { program: "C:\\Program Files\\nu\\nu.exe".to_string(), args: None }.display_name(),
+            "nu"
+        );
+        assert_eq!(
+            ShellType::Custom { program: "fish".to_string(), args: None }.display_name(),
+            "fish"
+        );
     }
 }
