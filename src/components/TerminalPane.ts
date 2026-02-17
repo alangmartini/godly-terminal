@@ -120,6 +120,12 @@ export class TerminalPane {
     // Start periodic scrollback saving (every 5 minutes)
     this.startScrollbackSaveInterval();
 
+    // Sync canvas bitmap immediately if container is already visible,
+    // preventing a zoom flash on the initially active terminal after reopen.
+    if (this.container.offsetWidth && this.container.offsetHeight) {
+      this.renderer.updateSize();
+    }
+
     // Initial fit + snapshot
     requestAnimationFrame(() => {
       this.fit();
@@ -473,6 +479,10 @@ export class TerminalPane {
     this.container.classList.remove('split-visible', 'split-focused');
     this.container.classList.toggle('active', active);
     if (active) {
+      // Sync canvas bitmap to container size immediately to prevent the browser
+      // from stretching the stale bitmap (300×150 default) for one frame,
+      // which causes a "zoomed in" flash on tab switch / reopen.
+      this.renderer.updateSize();
       requestAnimationFrame(() => {
         this.fit();
         this.renderer.scrollToBottom();
@@ -487,6 +497,8 @@ export class TerminalPane {
     this.container.classList.toggle('split-visible', visible);
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
+      // Sync canvas bitmap to container size immediately to prevent zoom flash.
+      this.renderer.updateSize();
       requestAnimationFrame(() => {
         this.fit();
         this.renderer.scrollToBottom();
