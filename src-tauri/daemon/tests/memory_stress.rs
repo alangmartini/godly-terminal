@@ -600,9 +600,16 @@ mod windows_tests {
             total_bytes as f64 / 1_048_576.0
         );
 
-        // Ring buffer caps at 1MB, so growth should be modest even after 10MB of throughput.
-        // Allow 5MB for allocator fragmentation + Windows working set behavior.
-        let max_growth = 5 * 1024 * 1024;
+        // Ring buffer caps at 1MB, but the godly-vt parser maintains a 10K-line scrollback
+        // that fills as data flows through. Expected bounded allocations:
+        //   - Ring buffer: 1MB (capped)
+        //   - output_history: 1MB (capped)
+        //   - godly-vt scrollback: up to ~25MB at full 10K lines (bounded)
+        //   - Allocator fragmentation + Windows working set noise
+        // Allow 10MB to accommodate scrollback fill + allocator behavior under system load
+        // (e.g. CI pipelines), while still catching true leaks where growth would be
+        // proportional to total data throughput.
+        let max_growth = 10 * 1024 * 1024;
         assert!(
             growth < max_growth,
             "Memory grew by {:.1} MB after writing {:.1} MB — ring buffer may not be capping correctly",
