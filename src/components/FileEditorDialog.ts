@@ -13,10 +13,14 @@ export function renderMarkdown(src: string): string {
 /**
  * Show a file editor dialog for editing a text file (e.g. CLAUDE.md).
  * Auto-creates the file if it doesn't exist (starts with empty content).
+ * If `defaultContent` is provided, new files are pre-populated with it.
  */
-export async function showFileEditorDialog(title: string, filePath: string): Promise<void> {
+export async function showFileEditorDialog(title: string, filePath: string, defaultContent?: string): Promise<void> {
   // Read current content (returns empty string if file doesn't exist)
-  const content = await invoke<string>('read_file', { path: filePath });
+  let content = await invoke<string>('read_file', { path: filePath });
+  if (!content && defaultContent) {
+    content = defaultContent;
+  }
 
   return new Promise((resolve) => {
     const overlay = document.createElement('div');

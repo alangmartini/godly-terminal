@@ -17,6 +17,7 @@ import { themeStore } from '../state/theme-store';
 import type { ThemeDefinition } from '../themes/types';
 import { createThemePreview } from './ThemePreview';
 import type { ShellType } from '../state/store';
+import { showFileEditorDialog } from './FileEditorDialog';
 
 function formatCustomSoundName(filename: string): string {
   // Strip extension
@@ -405,6 +406,61 @@ export function showSettingsDialog(): Promise<void> {
     }
 
     terminalContent.appendChild(termSection);
+
+    // ── CMD Aliases section ────────────────────────────────────
+    const aliasSection = document.createElement('div');
+    aliasSection.className = 'settings-section';
+
+    const aliasTitle = document.createElement('div');
+    aliasTitle.className = 'settings-section-title';
+    aliasTitle.textContent = 'CMD Aliases';
+    aliasSection.appendChild(aliasTitle);
+
+    const aliasDesc = document.createElement('div');
+    aliasDesc.className = 'settings-description';
+    aliasDesc.textContent = 'Define command aliases for Command Prompt sessions. Aliases load automatically via the Windows AutoRun registry key.';
+    aliasSection.appendChild(aliasDesc);
+
+    const aliasRow = document.createElement('div');
+    aliasRow.className = 'shortcut-row';
+
+    const aliasLabel = document.createElement('span');
+    aliasLabel.className = 'shortcut-label';
+    aliasLabel.textContent = 'Aliases file';
+    aliasRow.appendChild(aliasLabel);
+
+    const aliasStatus = document.createElement('span');
+    aliasStatus.className = 'shell-info-icon';
+    aliasStatus.style.marginLeft = '8px';
+    aliasStatus.style.fontSize = '11px';
+    aliasStatus.style.opacity = '0.7';
+
+    const editAliasBtn = document.createElement('button');
+    editAliasBtn.className = 'dialog-btn dialog-btn-secondary';
+    editAliasBtn.textContent = 'Edit Aliases';
+    editAliasBtn.onclick = async () => {
+      try {
+        const aliasPath = await invoke<string>('get_cmd_aliases_path');
+        const defaultTemplate = '@echo off\ndoskey dclaude=claude --dangerously-skip-permissions $*\n';
+        await showFileEditorDialog('CMD Aliases', aliasPath, defaultTemplate);
+        // After editor closes, ensure registry is configured
+        const status = await invoke<string>('ensure_cmd_autorun');
+        if (status === 'configured' || status === 'appended') {
+          aliasStatus.textContent = 'AutoRun configured';
+        } else {
+          aliasStatus.textContent = 'Already configured';
+        }
+      } catch (err) {
+        console.warn('CMD aliases setup failed:', err);
+        aliasStatus.textContent = 'Setup failed';
+      }
+    };
+    aliasRow.appendChild(editAliasBtn);
+    aliasRow.appendChild(aliasStatus);
+    aliasSection.appendChild(aliasRow);
+
+    terminalContent.appendChild(aliasSection);
+
     dialog.appendChild(terminalContent);
 
     // ── Notifications tab content ───────────────────────────────
