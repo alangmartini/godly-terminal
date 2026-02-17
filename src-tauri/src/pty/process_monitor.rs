@@ -84,7 +84,7 @@ impl ProcessMonitor {
                             ShellType::Wsl { distribution } => {
                                 distribution.clone().unwrap_or_else(|| String::from("wsl"))
                             }
-                            ShellType::Windows | ShellType::Pwsh | ShellType::Cmd => {
+                            ShellType::Windows | ShellType::Pwsh | ShellType::Cmd | ShellType::Custom { .. } => {
                                 let pid = session_info.pid;
                                 match get_foreground_process(pid) {
                                     Some(name) => name,
