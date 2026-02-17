@@ -329,9 +329,54 @@ impl DaemonSession {
             eprintln!("[daemon] Session {} reader thread exited", session_id);
         });
 
-        // Keep child handle alive
+        // Spawn child process monitor: waits for the shell process to exit and
+        // triggers cleanup. On Windows, ConPTY does NOT produce EOF on the PTY
+        // pipe when the child process exits — the reader thread's read() call
+        // blocks forever. This monitor thread detects process exit via wait()
+        // and sets running=false + drops the output channel, which causes the
+        // forwarding task to send SessionClosed to the client.
+        // Bug A2: without this, dead sessions stay "running" forever and the
+        // frontend never gets notified, creating zombie terminal tabs.
+        let monitor_running = running.clone();
+        let monitor_attached = is_attached_flag.clone();
+        let monitor_tx = output_tx.clone();
+        let monitor_session_id = id.clone();
         thread::spawn(move || {
-            let _ = child;
+            let mut child = child;
+            // wait() blocks until the child process exits
+            match child.wait() {
+                Ok(status) => {
+                    daemon_log!(
+                        "Session {} child process exited with status: {:?}",
+                        monitor_session_id,
+                        status
+                    );
+                }
+                Err(e) => {
+                    daemon_log!(
+                        "Session {} child process wait error: {}",
+                        monitor_session_id,
+                        e
+                    );
+                }
+            }
+
+            // Mark session as dead and close output channel (same cleanup
+            // as the reader thread EOF path). This is safe to call even if
+            // the reader thread already did this — storing false to an
+            // AtomicBool and setting an already-None Option to None are no-ops.
+            monitor_running.store(false, Ordering::Relaxed);
+            monitor_attached.store(false, Ordering::Relaxed);
+            *monitor_tx.lock() = None;
+
+            daemon_log!(
+                "Session {} child monitor: cleanup complete",
+                monitor_session_id
+            );
+            eprintln!(
+                "[daemon] Session {} child process exited",
+                monitor_session_id
+            );
         });
 
         Ok(Self {
