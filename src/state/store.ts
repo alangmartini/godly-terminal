@@ -67,6 +67,7 @@ class Store {
 
   private listeners: Set<Listener> = new Set();
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
+  private suspendedSplitViews: Map<string, SplitView> = new Map();
   private pendingNotify = false;
 
   getState(): AppState {
@@ -87,6 +88,7 @@ class Store {
       splitViews: {},
     };
     this.lastActiveTerminalByWorkspace.clear();
+    this.suspendedSplitViews.clear();
     this.notify();
   }
 
@@ -128,6 +130,7 @@ class Store {
 
   removeWorkspace(id: string) {
     this.lastActiveTerminalByWorkspace.delete(id);
+    this.suspendedSplitViews.delete(id);
     const { [id]: _, ...remainingSplitViews } = this.state.splitViews;
     this.setState({
       workspaces: this.state.workspaces.filter(w => w.id !== id),
@@ -201,7 +204,7 @@ class Store {
       newActiveId = sameWorkspace[0]?.id ?? null;
     }
 
-    // Clear split if removed terminal was part of one
+    // Clear split (active or suspended) if removed terminal was part of one
     let splitViews = this.state.splitViews;
     if (terminal) {
       const split = splitViews[terminal.workspaceId];
@@ -216,6 +219,11 @@ class Store {
           newActiveId = remainingId;
         }
       }
+
+      const suspended = this.suspendedSplitViews.get(terminal.workspaceId);
+      if (suspended && (suspended.leftTerminalId === id || suspended.rightTerminalId === id)) {
+        this.suspendedSplitViews.delete(terminal.workspaceId);
+      }
     }
 
     this.setState({
@@ -228,13 +236,34 @@ class Store {
   setActiveTerminal(id: string | null) {
     if (id && this.state.activeWorkspaceId) {
       this.lastActiveTerminalByWorkspace.set(this.state.activeWorkspaceId, id);
+      const wsId = this.state.activeWorkspaceId;
 
-      // If navigating to a terminal outside the current split → auto-clear the split
-      const split = this.state.splitViews[this.state.activeWorkspaceId];
+      // If navigating to a terminal outside the current split → suspend the split
+      const split = this.state.splitViews[wsId];
       if (split && id !== split.leftTerminalId && id !== split.rightTerminalId) {
-        const { [this.state.activeWorkspaceId]: _, ...rest } = this.state.splitViews;
+        this.suspendedSplitViews.set(wsId, split);
+        const { [wsId]: _, ...rest } = this.state.splitViews;
         this.setState({ activeTerminalId: id, splitViews: rest });
-        invoke('clear_split_view', { workspaceId: this.state.activeWorkspaceId }).catch(() => {});
+        invoke('clear_split_view', { workspaceId: wsId }).catch(() => {});
+        invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+        return;
+      }
+
+      // If navigating to a terminal that was part of a suspended split → restore it
+      const suspended = this.suspendedSplitViews.get(wsId);
+      if (suspended && (id === suspended.leftTerminalId || id === suspended.rightTerminalId)) {
+        this.suspendedSplitViews.delete(wsId);
+        this.setState({
+          activeTerminalId: id,
+          splitViews: { ...this.state.splitViews, [wsId]: suspended },
+        });
+        invoke('set_split_view', {
+          workspaceId: wsId,
+          leftTerminalId: suspended.leftTerminalId,
+          rightTerminalId: suspended.rightTerminalId,
+          direction: suspended.direction,
+          ratio: suspended.ratio,
+        }).catch(() => {});
         invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
         return;
       }
@@ -247,12 +276,16 @@ class Store {
     const terminal = this.state.terminals.find(t => t.id === terminalId);
     let splitViews = this.state.splitViews;
 
-    // Clear split on source workspace if moved terminal was in it
+    // Clear split (active or suspended) on source workspace if moved terminal was in it
     if (terminal) {
       const split = splitViews[terminal.workspaceId];
       if (split && (split.leftTerminalId === terminalId || split.rightTerminalId === terminalId)) {
         const { [terminal.workspaceId]: _, ...rest } = splitViews;
         splitViews = rest;
+      }
+      const suspended = this.suspendedSplitViews.get(terminal.workspaceId);
+      if (suspended && (suspended.leftTerminalId === terminalId || suspended.rightTerminalId === terminalId)) {
+        this.suspendedSplitViews.delete(terminal.workspaceId);
       }
     }
 
@@ -299,6 +332,7 @@ class Store {
   }
 
   clearSplitView(workspaceId: string) {
+    this.suspendedSplitViews.delete(workspaceId);
     const { [workspaceId]: _, ...rest } = this.state.splitViews;
     this.setState({ splitViews: rest });
   }
