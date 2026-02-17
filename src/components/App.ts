@@ -17,7 +17,8 @@ type BackendShellType =
   | 'windows'
   | 'pwsh'
   | 'cmd'
-  | { wsl: { distribution: string | null } };
+  | { wsl: { distribution: string | null } }
+  | { custom: { program: string; args: string[] | null } };
 
 function convertShellType(backendType?: BackendShellType): ShellType {
   if (!backendType || backendType === 'windows') return { type: 'windows' };
@@ -29,6 +30,13 @@ function convertShellType(backendType?: BackendShellType): ShellType {
       distribution: backendType.wsl.distribution ?? undefined,
     };
   }
+  if (typeof backendType === 'object' && 'custom' in backendType) {
+    return {
+      type: 'custom',
+      program: backendType.custom.program,
+      args: backendType.custom.args ?? undefined,
+    };
+  }
   return { type: 'windows' };
 }
 
@@ -38,6 +46,10 @@ function shellTypeToProcessName(shellType: ShellType): string {
     case 'pwsh': return 'pwsh';
     case 'cmd': return 'cmd';
     case 'wsl': return shellType.distribution ?? 'wsl';
+    case 'custom': {
+      const name = shellType.program.replace(/\\/g, '/').split('/').pop() ?? shellType.program;
+      return name.replace(/\.exe$/i, '') || shellType.program;
+    }
   }
 }
 
