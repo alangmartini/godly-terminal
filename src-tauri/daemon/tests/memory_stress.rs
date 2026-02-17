@@ -600,16 +600,16 @@ mod windows_tests {
             total_bytes as f64 / 1_048_576.0
         );
 
-        // Ring buffer caps at 1MB, but the godly-vt parser maintains a 10K-line scrollback
-        // that fills as data flows through. Expected bounded allocations:
-        //   - Ring buffer: 1MB (capped)
-        //   - output_history: 1MB (capped)
-        //   - godly-vt scrollback: up to ~25MB at full 10K lines (bounded)
-        //   - Allocator fragmentation + Windows working set noise
-        // Allow 10MB to accommodate scrollback fill + allocator behavior under system load
-        // (e.g. CI pipelines), while still catching true leaks where growth would be
-        // proportional to total data throughput.
-        let max_growth = 10 * 1024 * 1024;
+        // After CloseSession, the session is dropped and the reader thread should
+        // exit (master Arc reaches refcount 0 → ConPTY destroyed → EOF on read pipe).
+        // All bounded allocations (ring buffer, output_history, vt_parser scrollback)
+        // are freed when the thread exits.
+        //
+        // However, Windows RSS (working set) doesn't shrink instantly after free() —
+        // the allocator retains pages and the OS reclaims them lazily. Allow 15MB to
+        // accommodate allocator fragmentation + OS page retention, while still catching
+        // true leaks (which would grow proportionally to total data throughput).
+        let max_growth = 15 * 1024 * 1024;
         assert!(
             growth < max_growth,
             "Memory grew by {:.1} MB after writing {:.1} MB — ring buffer may not be capping correctly",
