@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
+export type PaneType = 'terminal' | 'figma';
+
 export interface Terminal {
   id: string;
   workspaceId: string;
@@ -8,6 +10,8 @@ export interface Terminal {
   order: number;
   oscTitle?: string;
   userRenamed?: boolean;
+  paneType?: PaneType;
+  figmaUrl?: string;
 }
 
 export type ShellType =

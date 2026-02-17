@@ -39,8 +39,12 @@ export class TabBar {
     const addBtn = document.createElement('div');
     addBtn.className = 'add-tab-btn';
     addBtn.textContent = '+';
-    addBtn.title = 'New terminal (Ctrl+T)';
+    addBtn.title = 'New terminal (Ctrl+T) / Right-click for Figma';
     addBtn.onclick = () => this.handleNewTab();
+    addBtn.oncontextmenu = (e) => {
+      e.preventDefault();
+      this.showNewTabMenu(e);
+    };
     this.container.appendChild(addBtn);
 
     // Register as a drop target for tab drags (reorder)
@@ -112,6 +116,67 @@ export class TabBar {
         terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
       }, 500);
     }
+  }
+
+  private showNewTabMenu(e: MouseEvent) {
+    document.querySelector('.context-menu')?.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+
+    const terminalItem = document.createElement('div');
+    terminalItem.className = 'context-menu-item';
+    terminalItem.textContent = 'New Terminal';
+    terminalItem.onclick = () => {
+      menu.remove();
+      this.handleNewTab();
+    };
+    menu.appendChild(terminalItem);
+
+    const figmaItem = document.createElement('div');
+    figmaItem.className = 'context-menu-item';
+    figmaItem.textContent = 'Open Figma Design';
+    figmaItem.onclick = () => {
+      menu.remove();
+      this.handleNewFigmaTab();
+    };
+    menu.appendChild(figmaItem);
+
+    document.body.appendChild(menu);
+    const closeMenu = () => {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 0);
+  }
+
+  private async handleNewFigmaTab() {
+    const state = store.getState();
+    if (!state.activeWorkspaceId) return;
+
+    const { showFigmaUrlPrompt } = await import('./dialogs');
+    const url = await showFigmaUrlPrompt();
+    if (!url) return;
+
+    // Extract a name from the URL
+    let name = 'Figma';
+    const match = url.match(/figma\.com\/(?:design|file)\/[^/]+\/([^?]+)/);
+    if (match) {
+      name = decodeURIComponent(match[1]).replace(/-/g, ' ');
+    }
+
+    const id = crypto.randomUUID();
+    store.addTerminal({
+      id,
+      workspaceId: state.activeWorkspaceId,
+      name,
+      processName: 'figma',
+      order: 0,
+      paneType: 'figma',
+      figmaUrl: url,
+    });
   }
 
   private render() {
@@ -207,6 +272,9 @@ export class TabBar {
 
     const tab = document.createElement('div');
     tab.className = `tab${isActive ? ' active' : ''}`;
+    if (terminal.paneType === 'figma') {
+      tab.classList.add('figma-tab');
+    }
     tab.dataset.terminalId = terminal.id;
 
     const displayName = getDisplayName(terminal);
@@ -318,7 +386,11 @@ export class TabBar {
   }
 
   private async handleCloseTab(terminalId: string) {
-    await terminalService.closeTerminal(terminalId);
+    const terminal = store.getState().terminals.find(t => t.id === terminalId);
+    // Figma panes have no daemon session — just remove from store
+    if (terminal?.paneType !== 'figma') {
+      await terminalService.closeTerminal(terminalId);
+    }
     store.removeTerminal(terminalId);
   }
 
