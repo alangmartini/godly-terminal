@@ -80,11 +80,19 @@ export class TerminalPane {
     }
     this.resizeObserver.observe(this.container);
 
-    // Click-to-focus in split mode: set this terminal as active
+    // Click-to-focus: always focus the canvas when clicking in the terminal
+    // area. In split mode, also set this terminal as the active one.
+    // Previously this only ran in split mode, which meant single-pane mode
+    // relied solely on the browser's default focus behavior. If anything
+    // stole focus (tab bar click, dialog, WebView2 native frame), the canvas
+    // lost keyboard input with no recovery mechanism.
     this.container.addEventListener('mousedown', () => {
       if (this.container.classList.contains('split-visible')) {
         store.setActiveTerminal(this.terminalId);
       }
+      // Always focus the canvas — this is the primary keyboard recovery mechanism.
+      // requestAnimationFrame ensures the mousedown default behavior completes first.
+      requestAnimationFrame(() => this.renderer.focus());
     });
 
     // Handle keyboard input on the canvas.
@@ -103,6 +111,20 @@ export class TerminalPane {
         type: 'keydown',
       })) {
         event.preventDefault();
+      }
+    });
+
+    // Focus diagnostics: detect when the canvas loses focus while this pane
+    // is active. This helps diagnose keyboard input freezes — if the canvas
+    // loses focus, keydown events stop reaching handleKeyEvent entirely.
+    canvas.addEventListener('blur', () => {
+      if (this.container.classList.contains('active') ||
+          this.container.classList.contains('split-focused')) {
+        const thief = document.activeElement;
+        console.warn(
+          `[TerminalPane] Canvas lost focus while active (terminal=${this.terminalId}, ` +
+          `now focused: ${thief?.tagName}${thief?.className ? '.' + thief.className : ''})`
+        );
       }
     });
 
@@ -489,6 +511,15 @@ export class TerminalPane {
         this.renderer.focus();
         this.fetchAndRenderSnapshot();
       });
+      // Double-tap focus: some WebView2 focus changes race with RAF.
+      // Schedule a second focus attempt after a short delay to catch cases
+      // where the first RAF-based focus is stolen by tab bar click cleanup,
+      // dialog dismissal, or WebView2 native frame focus events.
+      setTimeout(() => {
+        if (this.container.classList.contains('active')) {
+          this.renderer.focus();
+        }
+      }, 50);
     }
   }
 
