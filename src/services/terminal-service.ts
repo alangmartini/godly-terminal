@@ -8,13 +8,15 @@ export type BackendShellType =
   | 'windows'
   | 'pwsh'
   | 'cmd'
-  | { wsl: { distribution: string | null } };
+  | { wsl: { distribution: string | null } }
+  | { custom: { program: string; args: string[] | null } };
 
 // Convert frontend ShellType to backend format
 function toBackendShellType(shellType: ShellType): BackendShellType {
   if (shellType.type === 'windows') return 'windows';
   if (shellType.type === 'pwsh') return 'pwsh';
   if (shellType.type === 'cmd') return 'cmd';
+  if (shellType.type === 'custom') return { custom: { program: shellType.program, args: shellType.args ?? null } };
   return { wsl: { distribution: shellType.distribution ?? null } };
 }
 

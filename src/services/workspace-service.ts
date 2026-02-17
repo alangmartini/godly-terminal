@@ -7,7 +7,7 @@ export interface WorkspaceData {
   name: string;
   folder_path: string;
   tab_order: string[];
-  shell_type?: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } };
+  shell_type?: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } } | { custom: { program: string; args: string[] | null } };
   worktree_mode?: boolean;
   claude_code_mode?: boolean;
 }
@@ -26,9 +26,12 @@ class WorkspaceService {
     shellType: ShellType = terminalSettingsStore.getDefaultShell()
   ): Promise<string> {
     // Convert frontend ShellType to backend format
-    let backendShellType: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } };
+    let backendShellType: WorkspaceData['shell_type'];
     if (shellType.type === 'wsl') {
       backendShellType = { wsl: { distribution: (shellType as { type: 'wsl'; distribution?: string }).distribution ?? null } };
+    } else if (shellType.type === 'custom') {
+      const custom = shellType as { type: 'custom'; program: string; args?: string[] };
+      backendShellType = { custom: { program: custom.program, args: custom.args ?? null } };
     } else {
       backendShellType = shellType.type;
     }
@@ -129,7 +132,7 @@ class WorkspaceService {
   }
 
   private convertShellType(
-    backendType?: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } }
+    backendType?: WorkspaceData['shell_type']
   ): ShellType {
     if (!backendType || backendType === 'windows') return { type: 'windows' };
     if (backendType === 'pwsh') return { type: 'pwsh' };
@@ -138,6 +141,13 @@ class WorkspaceService {
       return {
         type: 'wsl',
         distribution: backendType.wsl.distribution ?? undefined,
+      };
+    }
+    if (typeof backendType === 'object' && 'custom' in backendType) {
+      return {
+        type: 'custom',
+        program: backendType.custom.program,
+        args: backendType.custom.args ?? undefined,
       };
     }
     return { type: 'windows' };
