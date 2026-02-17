@@ -8,6 +8,28 @@ pub enum ShellType {
     Pwsh,
     Cmd,
     Wsl { distribution: Option<String> },
+    Custom { program: String, args: Option<Vec<String>> },
+}
+
+impl ShellType {
+    /// Human-readable display name (extracts basename for Custom).
+    pub fn display_name(&self) -> String {
+        match self {
+            ShellType::Windows => "powershell".to_string(),
+            ShellType::Pwsh => "pwsh".to_string(),
+            ShellType::Cmd => "cmd".to_string(),
+            ShellType::Wsl { distribution } => {
+                distribution.clone().unwrap_or_else(|| "wsl".to_string())
+            }
+            ShellType::Custom { program, .. } => {
+                std::path::Path::new(program)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(program)
+                    .to_string()
+            }
+        }
+    }
 }
 
 impl Default for ShellType {
@@ -522,5 +544,85 @@ mod tests {
 
         let meta: SessionMetadata = serde_json::from_str(json).unwrap();
         assert!(meta.worktree_path.is_none());
+    }
+
+    #[test]
+    fn test_shell_type_custom_serialization() {
+        let shell = ShellType::Custom {
+            program: "nu.exe".to_string(),
+            args: Some(vec!["-l".to_string()]),
+        };
+        let json = serde_json::to_string(&shell).unwrap();
+        let deserialized: ShellType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, shell);
+    }
+
+    #[test]
+    fn test_shell_type_custom_display_name() {
+        let shell = ShellType::Custom {
+            program: "C:\\Tools\\nu.exe".to_string(),
+            args: None,
+        };
+        assert_eq!(shell.display_name(), "nu");
+    }
+
+    #[test]
+    fn test_workspace_roundtrip_with_custom_shell() {
+        let workspace = Workspace {
+            id: "ws-1".to_string(),
+            name: "Custom Shell".to_string(),
+            folder_path: "C:\\Projects".to_string(),
+            tab_order: vec![],
+            shell_type: ShellType::Custom {
+                program: "nu.exe".to_string(),
+                args: Some(vec!["-l".to_string()]),
+            },
+            worktree_mode: false,
+            claude_code_mode: false,
+        };
+
+        let json = serde_json::to_string(&workspace).unwrap();
+        let deserialized: Workspace = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.shell_type, workspace.shell_type);
+    }
+
+    #[test]
+    fn test_layout_with_custom_and_mixed_shell_types() {
+        let layout = Layout {
+            workspaces: vec![],
+            terminals: vec![
+                TerminalInfo {
+                    id: "term-1".to_string(),
+                    workspace_id: "ws-1".to_string(),
+                    name: "Nu Shell".to_string(),
+                    shell_type: ShellType::Custom {
+                        program: "nu.exe".to_string(),
+                        args: None,
+                    },
+                    cwd: Some("C:\\Projects".to_string()),
+                    worktree_path: None,
+                    worktree_branch: None,
+                },
+                TerminalInfo {
+                    id: "term-2".to_string(),
+                    workspace_id: "ws-1".to_string(),
+                    name: "PowerShell".to_string(),
+                    shell_type: ShellType::Windows,
+                    cwd: None,
+                    worktree_path: None,
+                    worktree_branch: None,
+                },
+            ],
+            active_workspace_id: None,
+            split_views: HashMap::new(),
+        };
+
+        let json = serde_json::to_string(&layout).unwrap();
+        let restored: Layout = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored.terminals[0].shell_type,
+            ShellType::Custom { program: "nu.exe".to_string(), args: None }
+        );
+        assert_eq!(restored.terminals[1].shell_type, ShellType::Windows);
     }
 }

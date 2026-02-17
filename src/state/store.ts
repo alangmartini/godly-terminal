@@ -18,7 +18,8 @@ export type ShellType =
   | { type: 'windows' }
   | { type: 'pwsh' }
   | { type: 'cmd' }
-  | { type: 'wsl'; distribution?: string };
+  | { type: 'wsl'; distribution?: string }
+  | { type: 'custom'; program: string; args?: string[] };
 
 export interface Workspace {
   id: string;
