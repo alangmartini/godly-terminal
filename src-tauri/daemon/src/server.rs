@@ -457,7 +457,7 @@ fn io_thread(
     let mut total_resp_writes: u64 = 0;
     let mut total_bytes_written: u64 = 0;
     let mut write_stall_count: u64 = 0;
-    let mut direct_writes: u64 = 0;
+    let direct_writes: u64 = 0; // Always 0: writes now go through async handler (deadlock fix)
 
     // Adaptive polling: spin (yield_now) before falling back to sleep.
     // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to the
@@ -487,35 +487,11 @@ fn io_thread(
                             );
                         }
 
-                        // Handle Write and Resize directly in the I/O thread.
-                        // These are latency-sensitive and don't need async processing.
-                        // Bypassing the async handler eliminates 2 channel hops and
-                        // tokio scheduler latency per keystroke.
+                        // Handle Resize directly in the I/O thread.
+                        // Resize is fast (no I/O to ConPTY input pipe) and latency-sensitive.
+                        // Write is handled async via spawn_blocking to avoid blocking the
+                        // I/O thread when ConPTY input fills during heavy output (deadlock fix).
                         match &request {
-                            Request::Write { session_id, data } => {
-                                let response = {
-                                    let sessions_guard = sessions.read();
-                                    match sessions_guard.get(session_id) {
-                                        Some(session) => match session.write(data) {
-                                            Ok(()) => Response::Ok,
-                                            Err(e) => Response::Error { message: e },
-                                        },
-                                        None => Response::Error {
-                                            message: format!("Session {} not found", session_id),
-                                        },
-                                    }
-                                };
-                                let msg = DaemonMessage::Response(response);
-                                if godly_protocol::write_message(&mut pipe, &msg).is_err() {
-                                    daemon_log!("Write error on direct Write response, stopping");
-                                    io_running.store(false, Ordering::Relaxed);
-                                    break;
-                                }
-                                direct_writes += 1;
-                                total_resp_writes += 1;
-                                total_writes += 1;
-                                did_work = true;
-                            }
                             Request::Resize { session_id, rows, cols } => {
                                 let response = {
                                     let sessions_guard = sessions.read();
@@ -1119,16 +1095,22 @@ async fn handle_request(
         }
 
         Request::Write { session_id, data } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => match session.write(data) {
-                    Ok(()) => Response::Ok,
-                    Err(e) => Response::Error { message: e },
-                },
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
+            // Fire-and-forget: spawn_blocking so write_all() never blocks
+            // the async handler or the I/O thread. This breaks the circular
+            // deadlock when ConPTY input fills during heavy output.
+            // Write ordering is preserved by session.writer Mutex.
+            let sessions = sessions.clone();
+            let session_id = session_id.clone();
+            let data = data.clone();
+            tokio::task::spawn_blocking(move || {
+                let sessions_guard = sessions.read();
+                if let Some(session) = sessions_guard.get(&session_id) {
+                    if let Err(e) = session.write(&data) {
+                        daemon_log!("Write failed for session {}: {}", session_id, e);
+                    }
+                }
+            });
+            Response::Ok
         }
 
         Request::Resize {
