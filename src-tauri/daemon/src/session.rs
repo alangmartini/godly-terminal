@@ -186,6 +186,20 @@ impl DaemonSession {
                 }
             };
 
+            // We hold reader_master (an Arc clone of the PTY master) only to call
+            // try_clone_reader() above. We must drop it so that when CloseSession
+            // destroys the DaemonSession, the master Arc reaches refcount 0 →
+            // ConPTY is destroyed → write-end pipe closes → reader gets EOF →
+            // thread exits → all Arcs (vt_parser, ring_buffer, etc.) freed.
+            //
+            // However, dropping immediately after try_clone_reader() causes a race
+            // on Windows: ConPTY's DuplicateHandle (used internally by try_clone_reader)
+            // needs the original handle to remain alive briefly for the cloned reader
+            // handle to properly receive EOF signals later. We defer the drop until
+            // after the first successful read, by which point ConPTY is fully
+            // operational and the cloned handle is stable.
+            let mut master_to_drop = Some(reader_master);
+
             daemon_log!("Session {} reader thread started", session_id);
 
             let mut buf = [0u8; 65536];
@@ -201,6 +215,12 @@ impl DaemonSession {
                         break;
                     }
                     Ok(n) => {
+                        // Drop master Arc after first read — ConPTY is now operational
+                        // and the cloned reader handle is stable. See comment above.
+                        if let Some(m) = master_to_drop.take() {
+                            drop(m);
+                        }
+
                         total_bytes += n as u64;
                         total_reads += 1;
 
