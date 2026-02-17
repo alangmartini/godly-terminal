@@ -9,6 +9,7 @@ import { quotePath } from '../utils/quote-path';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar, getDisplayName } from './TabBar';
 import { TerminalPane } from './TerminalPane';
+import { FigmaPane } from './FigmaPane';
 import { ToastContainer } from './ToastContainer';
 import { onDragMove, onDragDrop } from '../state/drag-state';
 
@@ -46,7 +47,7 @@ export class App {
   private tabBar: TabBar;
   private terminalContainer: HTMLElement;
   private toastContainer: ToastContainer;
-  private terminalPanes: Map<string, TerminalPane> = new Map();
+  private terminalPanes: Map<string, TerminalPane | FigmaPane> = new Map();
   private restoredTerminalIds: Set<string> = new Set();
   /** Terminal IDs that were reattached to live daemon sessions (no scrollback load needed) */
   private reattachedTerminalIds: Set<string> = new Set();
@@ -110,14 +111,21 @@ export class App {
     // Create panes for new terminals
     state.terminals.forEach((terminal) => {
       if (!this.terminalPanes.has(terminal.id)) {
-        const pane = new TerminalPane(terminal.id);
+        let pane: TerminalPane | FigmaPane;
+
+        if (terminal.paneType === 'figma' && terminal.figmaUrl) {
+          pane = new FigmaPane(terminal.id, terminal.figmaUrl);
+        } else {
+          pane = new TerminalPane(terminal.id);
+        }
+
         pane.mount(this.terminalContainer);
         this.terminalPanes.set(terminal.id, pane);
 
-        // Load scrollback for restored terminals
-        if (this.restoredTerminalIds.has(terminal.id)) {
+        // Load scrollback for restored terminals (only terminal panes)
+        if (pane instanceof TerminalPane && this.restoredTerminalIds.has(terminal.id)) {
           // Small delay to ensure terminal is mounted
-          setTimeout(() => pane.loadScrollback(), 100);
+          setTimeout(() => (pane as TerminalPane).loadScrollback(), 100);
           this.restoredTerminalIds.delete(terminal.id);
         }
       }
@@ -324,7 +332,10 @@ export class App {
         case 'tabs.closeTerminal': {
           e.preventDefault();
           if (state.activeTerminalId) {
-            await terminalService.closeTerminal(state.activeTerminalId);
+            const terminal = state.terminals.find(t => t.id === state.activeTerminalId);
+            if (terminal?.paneType !== 'figma') {
+              await terminalService.closeTerminal(state.activeTerminalId);
+            }
             store.removeTerminal(state.activeTerminalId);
           }
           break;
@@ -884,9 +895,9 @@ export class App {
     const { listen } = await import('@tauri-apps/api/event');
     await listen('request-scrollback-save', async () => {
       console.log('[App] Saving all scrollbacks before exit...');
-      const saves = Array.from(this.terminalPanes.values()).map((pane) =>
-        pane.saveScrollback()
-      );
+      const saves = Array.from(this.terminalPanes.values())
+        .filter((pane): pane is TerminalPane => pane instanceof TerminalPane)
+        .map((pane) => pane.saveScrollback());
       await Promise.all(saves);
       console.log('[App] All scrollbacks saved, signaling completion...');
 
@@ -914,6 +925,10 @@ export class App {
 
         const state = store.getState();
         if (!state.activeTerminalId || !event.payload.paths.length) return;
+
+        // Don't paste file paths into Figma panes
+        const activeTerminal = state.terminals.find(t => t.id === state.activeTerminalId);
+        if (activeTerminal?.paneType === 'figma') return;
 
         const text = event.payload.paths.map(quotePath).join(' ');
         terminalService.writeToTerminal(state.activeTerminalId, text);
