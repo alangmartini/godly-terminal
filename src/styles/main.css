@@ -220,9 +220,12 @@ html, body {
 
 .tab-title.editing {
   background: var(--bg-primary);
+  color: var(--text-primary);
   border: 1px solid var(--accent);
   padding: 2px 4px;
   outline: none;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .tab-close {
