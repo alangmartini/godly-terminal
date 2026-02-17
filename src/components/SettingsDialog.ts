@@ -253,10 +253,16 @@ export function showSettingsDialog(): Promise<void> {
         shellType: { type: 'wsl' },
         checkAvailability: () => workspaceService.isWslAvailable(),
       },
+      {
+        id: 'custom',
+        label: 'Custom Shell',
+        tooltip: 'Run any shell executable (e.g. nu.exe, fish, bash.exe).',
+        shellType: { type: 'custom', program: '' },
+      },
     ];
 
     const currentDefault = terminalSettingsStore.getDefaultShell();
-    let selectedShellId = currentDefault.type === 'windows' ? 'windows' : currentDefault.type;
+    let selectedShellId: string = currentDefault.type;
 
     const radioGroup = document.createElement('div');
     radioGroup.className = 'shell-radio-group';
@@ -265,6 +271,60 @@ export function showSettingsDialog(): Promise<void> {
     const wslDistroRow = document.createElement('div');
     wslDistroRow.className = 'shell-wsl-distro-row';
     wslDistroRow.style.display = 'none';
+
+    // Custom shell inputs (hidden unless Custom is selected)
+    const customShellRow = document.createElement('div');
+    customShellRow.className = 'shell-wsl-distro-row';
+    customShellRow.style.display = 'none';
+
+    const customProgramLabel = document.createElement('span');
+    customProgramLabel.className = 'shortcut-label';
+    customProgramLabel.textContent = 'Program';
+    customShellRow.appendChild(customProgramLabel);
+
+    const customProgramInput = document.createElement('input');
+    customProgramInput.type = 'text';
+    customProgramInput.className = 'notification-preset';
+    customProgramInput.placeholder = 'e.g. nu.exe, fish, bash.exe';
+    customProgramInput.style.flex = '1';
+    customShellRow.appendChild(customProgramInput);
+
+    const customArgsLabel = document.createElement('span');
+    customArgsLabel.className = 'shortcut-label';
+    customArgsLabel.textContent = 'Args';
+    customArgsLabel.style.marginLeft = '8px';
+    customShellRow.appendChild(customArgsLabel);
+
+    const customArgsInput = document.createElement('input');
+    customArgsInput.type = 'text';
+    customArgsInput.className = 'notification-preset';
+    customArgsInput.placeholder = 'e.g. -l --config';
+    customArgsInput.style.flex = '1';
+    customShellRow.appendChild(customArgsInput);
+
+    // Pre-populate if current default is custom
+    if (currentDefault.type === 'custom') {
+      const custom = currentDefault as { type: 'custom'; program: string; args?: string[] };
+      customProgramInput.value = custom.program;
+      customArgsInput.value = (custom.args ?? []).join(' ');
+      customShellRow.style.display = 'flex';
+    }
+
+    // Custom shell input change handlers
+    const updateCustomShell = () => {
+      if (selectedShellId === 'custom' && customProgramInput.value.trim()) {
+        const args = customArgsInput.value.trim()
+          ? customArgsInput.value.trim().split(/\s+/)
+          : undefined;
+        terminalSettingsStore.setDefaultShell({
+          type: 'custom',
+          program: customProgramInput.value.trim(),
+          args,
+        });
+      }
+    };
+    customProgramInput.onchange = updateCustomShell;
+    customArgsInput.onchange = updateCustomShell;
 
     const wslDistroLabel = document.createElement('span');
     wslDistroLabel.className = 'shortcut-label';
@@ -320,12 +380,25 @@ export function showSettingsDialog(): Promise<void> {
         if (!radio.checked) return;
         selectedShellId = opt.id;
 
+        // Show/hide conditional rows
+        wslDistroRow.style.display = opt.id === 'wsl' ? 'flex' : 'none';
+        customShellRow.style.display = opt.id === 'custom' ? 'flex' : 'none';
+
         if (opt.id === 'wsl') {
-          wslDistroRow.style.display = 'flex';
           const distro = wslDistroSelect.value || undefined;
           terminalSettingsStore.setDefaultShell({ type: 'wsl', distribution: distro });
+        } else if (opt.id === 'custom') {
+          if (customProgramInput.value.trim()) {
+            const args = customArgsInput.value.trim()
+              ? customArgsInput.value.trim().split(/\s+/)
+              : undefined;
+            terminalSettingsStore.setDefaultShell({
+              type: 'custom',
+              program: customProgramInput.value.trim(),
+              args,
+            });
+          }
         } else {
-          wslDistroRow.style.display = 'none';
           terminalSettingsStore.setDefaultShell(opt.shellType);
         }
       };
@@ -336,6 +409,7 @@ export function showSettingsDialog(): Promise<void> {
 
     termSection.appendChild(radioGroup);
     termSection.appendChild(wslDistroRow);
+    termSection.appendChild(customShellRow);
 
     // WSL distro select change handler
     wslDistroSelect.onchange = () => {

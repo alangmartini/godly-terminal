@@ -233,14 +233,7 @@ pub fn handle_mcp_request(
                 })
                 .unwrap_or(godly_protocol::ShellType::Windows);
 
-            let process_name = match &shell {
-                godly_protocol::ShellType::Windows => String::from("powershell"),
-                godly_protocol::ShellType::Pwsh => String::from("pwsh"),
-                godly_protocol::ShellType::Cmd => String::from("cmd"),
-                godly_protocol::ShellType::Wsl { distribution } => {
-                    distribution.clone().unwrap_or_else(|| String::from("wsl"))
-                }
-            };
+            let process_name = shell.display_name();
 
             // Build env vars
             let mut env_vars = HashMap::new();
@@ -907,6 +900,10 @@ fn to_protocol_shell_type(st: &crate::state::ShellType) -> godly_protocol::Shell
         crate::state::ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
             distribution: distribution.clone(),
         },
+        crate::state::ShellType::Custom { program, args } => godly_protocol::ShellType::Custom {
+            program: program.clone(),
+            args: args.clone(),
+        },
     }
 }
 
@@ -923,6 +920,10 @@ fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::She
         godly_protocol::ShellType::Cmd => crate::state::ShellType::Cmd,
         godly_protocol::ShellType::Wsl { distribution } => crate::state::ShellType::Wsl {
             distribution: distribution.clone(),
+        },
+        godly_protocol::ShellType::Custom { program, args } => crate::state::ShellType::Custom {
+            program: program.clone(),
+            args: args.clone(),
         },
     }
 }

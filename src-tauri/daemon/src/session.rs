@@ -104,6 +104,21 @@ impl DaemonSession {
                 }
                 cmd
             }
+            ShellType::Custom { program, args } => {
+                if program.is_empty() {
+                    return Err("Custom shell program cannot be empty".to_string());
+                }
+                let mut cmd = CommandBuilder::new(program);
+                if let Some(arg_list) = args {
+                    for arg in arg_list {
+                        cmd.arg(arg);
+                    }
+                }
+                if let Some(dir) = &cwd {
+                    cmd.cwd(dir);
+                }
+                cmd
+            }
         };
 
         // Inject environment variables into the PTY session

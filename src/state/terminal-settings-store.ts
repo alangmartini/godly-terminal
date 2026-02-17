@@ -47,6 +47,10 @@ class TerminalSettingsStore {
       if (!raw) return;
       const data = JSON.parse(raw) as Partial<TerminalSettings>;
       if (data.defaultShell && typeof data.defaultShell === 'object' && 'type' in data.defaultShell) {
+        // Reject custom shell with empty program
+        if (data.defaultShell.type === 'custom' && !(data.defaultShell as { type: 'custom'; program?: string }).program) {
+          return;
+        }
         this.settings.defaultShell = data.defaultShell;
       }
     } catch {
