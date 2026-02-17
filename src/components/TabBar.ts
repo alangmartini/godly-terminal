@@ -241,7 +241,14 @@ export class TabBar {
       (split.leftTerminalId === terminal.id || split.rightTerminalId === terminal.id);
     tab.classList.toggle('in-split', !!isInSplit);
 
-    const titleEl = tab.querySelector('.tab-title') as HTMLSpanElement | null;
+    let titleEl = tab.querySelector('.tab-title') as HTMLElement | null;
+    // If a rename input is still in the DOM, replace it back with a span
+    if (titleEl && titleEl.tagName === 'INPUT') {
+      const span = document.createElement('span');
+      span.className = 'tab-title';
+      titleEl.replaceWith(span);
+      titleEl = span;
+    }
     if (titleEl) {
       const displayName = getDisplayName(terminal);
       if (titleEl.textContent !== displayName) {
@@ -400,7 +407,10 @@ export class TabBar {
     input.className = 'tab-title editing';
     input.value = terminal.name || terminal.processName || '';
 
+    let finished = false;
     const finishRename = async () => {
+      if (finished) return;
+      finished = true;
       const newName = input.value.trim();
       if (newName) {
         await terminalService.renameTerminal(terminal.id, newName);
@@ -412,8 +422,10 @@ export class TabBar {
     input.onblur = finishRename;
     input.onkeydown = (e) => {
       if (e.key === 'Enter') {
-        finishRename();
+        e.preventDefault();
+        input.blur();
       } else if (e.key === 'Escape') {
+        finished = true;
         this.render();
       }
     };
