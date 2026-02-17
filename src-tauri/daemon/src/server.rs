@@ -972,6 +972,61 @@ mod forwarding_tests {
             "should NOT receive SessionClosed on detach (running=true)"
         );
     }
+
+    /// Bug A2: Attaching to a session whose PTY already exited should send
+    /// SessionClosed immediately, not block forever on rx.recv().
+    #[tokio::test]
+    async fn test_attach_to_dead_session_sends_session_closed() {
+        let (_tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
+        let (event_tx, mut event_rx) = mpsc::channel::<DaemonMessage>(16);
+        let running_flag = Arc::new(AtomicBool::new(false));
+        let sid = "test-attach-dead".to_string();
+        let is_already_dead = true;
+
+        let flag = running_flag.clone();
+        let handle = tokio::spawn({
+            let sid = sid.clone();
+            async move {
+                if is_already_dead {
+                    let _ = event_tx
+                        .send(DaemonMessage::Event(Event::SessionClosed {
+                            session_id: sid,
+                        }))
+                        .await;
+                    return;
+                }
+                while let Some(data) = rx.recv().await {
+                    let event = DaemonMessage::Event(Event::Output {
+                        session_id: sid.clone(),
+                        data,
+                    });
+                    if event_tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+                if !flag.load(Ordering::Relaxed) {
+                    let _ = event_tx
+                        .send(DaemonMessage::Event(Event::SessionClosed {
+                            session_id: sid,
+                        }))
+                        .await;
+                }
+            }
+        });
+
+        handle.await.unwrap();
+
+        let msg = event_rx.recv().await.unwrap();
+        match msg {
+            DaemonMessage::Event(Event::SessionClosed { session_id }) => {
+                assert_eq!(session_id, "test-attach-dead");
+            }
+            other => panic!(
+                "expected SessionClosed, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        }
+    }
 }
 
 async fn handle_request(
@@ -1019,6 +1074,7 @@ async fn handle_request(
             let sessions_guard = sessions.read();
             match sessions_guard.get(session_id) {
                 Some(session) => {
+                    let is_already_dead = !session.is_running();
                     let (buffer, mut rx) = session.attach();
                     attached_sessions.write().push(session_id.clone());
 
@@ -1029,6 +1085,23 @@ async fn handle_request(
                     let sid = session_id.clone();
                     let running_flag = session.running_flag();
                     tokio::spawn(async move {
+                        // Bug A2 fix: if the session is already dead when we attach,
+                        // send SessionClosed immediately. The reader thread and child
+                        // monitor are already gone, so the output channel will never
+                        // close on its own — rx.recv() would block forever.
+                        if is_already_dead {
+                            daemon_log!(
+                                "Session {} already dead at attach time, sending SessionClosed",
+                                sid
+                            );
+                            let _ = tx
+                                .send(DaemonMessage::Event(Event::SessionClosed {
+                                    session_id: sid,
+                                }))
+                                .await;
+                            return;
+                        }
+
                         while let Some(data) = rx.recv().await {
                             let event = DaemonMessage::Event(Event::Output {
                                 session_id: sid.clone(),
