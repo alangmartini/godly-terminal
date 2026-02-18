@@ -22,8 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "npm"
-      - run: npm ci
+      - run: npm install
       - run: npx tsc --noEmit
       - run: npm test
       - run: cd src-tauri && cargo check --workspace
@@ -39,6 +38,8 @@ jobs:
       - run: cd src-tauri && cargo test -p godly-protocol
       - run: cd src-tauri && cargo test -p godly-vt
       - run: cd src-tauri && cargo test -p godly-daemon
+      # Build release binaries first — Tauri's build.rs validates resource paths at compile time
+      - run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
       - run: cd src-tauri && cargo test -p godly-terminal
 
   build:
@@ -52,7 +53,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "npm"
-      - run: npm ci
+      - run: npm install
       - run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
       - run: npm run build
