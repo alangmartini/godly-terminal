@@ -65,8 +65,9 @@ describe('OSC title integration (godly-vt pipeline)', () => {
     simulateTitleFromSnapshot('');
     expect(getStoredTerminal().oscTitle).toBeUndefined();
 
-    // Display falls back to name since oscTitle is cleared
-    expect(getDisplayName(getStoredTerminal())).toBe('Terminal');
+    // Display falls back to processName since oscTitle is cleared and
+    // default name 'Terminal' is not a meaningful name
+    expect(getDisplayName(getStoredTerminal())).toBe('powershell');
   });
 
   it('userRenamed tab is not affected by OSC titles', () => {
