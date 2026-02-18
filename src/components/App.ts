@@ -53,6 +53,15 @@ function shellTypeToProcessName(shellType: ShellType): string {
   }
 }
 
+export function buildNotificationTitle(terminalId: string): string {
+  const state = store.getState();
+  const terminal = state.terminals.find(t => t.id === terminalId);
+  if (!terminal) return 'Godly Terminal';
+  const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
+  const terminalName = getDisplayName(terminal);
+  return workspace ? `${workspace.name} › ${terminalName}` : terminalName;
+}
+
 export class App {
   private container: HTMLElement;
   private sidebar: WorkspaceSidebar;
@@ -65,6 +74,8 @@ export class App {
   private reattachedTerminalIds: Set<string> = new Set();
   private splitDivider: HTMLElement | null = null;
   private splitDropOverlay: HTMLElement | null = null;
+  private pendingNotificationTerminalId: string | null = null;
+  private pendingNotificationTimestamp: number = 0;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -991,8 +1002,25 @@ export class App {
     });
   }
 
+  private handlePendingNotificationNavigation(): void {
+    const terminalId = this.pendingNotificationTerminalId;
+    if (!terminalId) return;
+    const elapsed = Date.now() - this.pendingNotificationTimestamp;
+    this.pendingNotificationTerminalId = null;
+    this.pendingNotificationTimestamp = 0;
+    if (elapsed > 30_000) return;
+    const terminal = store.getState().terminals.find(t => t.id === terminalId);
+    if (terminal) {
+      store.setActiveWorkspace(terminal.workspaceId);
+      store.setActiveTerminal(terminalId);
+    }
+  }
+
   private async setupMcpEventListeners() {
     const { listen } = await import('@tauri-apps/api/event');
+
+    // Navigate to notification source when window regains focus
+    window.addEventListener('focus', () => this.handlePendingNotificationNavigation());
 
     // MCP: focus a terminal tab
     await listen<string>('focus-terminal', (event) => {
@@ -1106,8 +1134,7 @@ export class App {
         playNotificationSound(settings.soundPreset, settings.volume);
 
         // Show in-app toast (always, regardless of focus)
-        const terminal = state.terminals.find(t => t.id === terminal_id);
-        const toastTitle = terminal ? getDisplayName(terminal) : 'Terminal';
+        const toastTitle = buildNotificationTitle(terminal_id);
         this.toastContainer.show(toastTitle, message || 'New notification', terminal_id);
 
         // Flash taskbar icon orange
@@ -1125,12 +1152,13 @@ export class App {
               permitted = result === 'granted';
             }
             if (permitted) {
-              const terminal = state.terminals.find(t => t.id === terminal_id);
-              const title = terminal ? getDisplayName(terminal) : 'Godly Terminal';
+              const title = buildNotificationTitle(terminal_id);
               sendNotification({
                 title,
                 body: message || 'New notification',
               });
+              this.pendingNotificationTerminalId = terminal_id;
+              this.pendingNotificationTimestamp = Date.now();
             }
           } catch (e) {
             console.warn('[App] Failed to send native notification:', e);
