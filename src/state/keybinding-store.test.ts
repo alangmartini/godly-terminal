@@ -104,6 +104,28 @@ describe('KeybindingStore', () => {
       expect(store.isAppShortcut(keydown('F2'))).toBe(true);
     });
 
+    it('matches Ctrl+Shift+Alt+C to clipboard.copyClean', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('C', { ctrlKey: true, shiftKey: true, altKey: true }))).toBe(
+        'clipboard.copyClean'
+      );
+    });
+
+    it('clipboard.copyClean does not conflict with clipboard.copy', () => {
+      const store = new KeybindingStore();
+      expect(store.matchAction(keydown('C', { ctrlKey: true, shiftKey: true }))).toBe('clipboard.copy');
+      expect(store.matchAction(keydown('C', { ctrlKey: true, shiftKey: true, altKey: true }))).toBe('clipboard.copyClean');
+      expect(store.findConflict(
+        { ctrlKey: true, shiftKey: true, altKey: true, key: 'c' },
+        'clipboard.copyClean'
+      )).toBeNull();
+    });
+
+    it('classifies clipboard.copyClean as an app shortcut', () => {
+      const store = new KeybindingStore();
+      expect(store.isAppShortcut(keydown('C', { ctrlKey: true, shiftKey: true, altKey: true }))).toBe(true);
+    });
+
     it('returns null for unbound keys', () => {
       const store = new KeybindingStore();
       expect(store.matchAction(keydown('a', { ctrlKey: true }))).toBeNull();
