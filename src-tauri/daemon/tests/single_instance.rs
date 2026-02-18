@@ -110,9 +110,9 @@ fn wait_for_pipe(pipe_name: &str, timeout: Duration) -> std::fs::File {
 
 /// Send a request and read the response, skipping async Event messages.
 fn send_request(pipe: &mut std::fs::File, req: &Request) -> Response {
-    frame::write_message(pipe, req).expect("Failed to write request");
+    frame::write_request(pipe, req).expect("Failed to write request");
     loop {
-        let msg: DaemonMessage = frame::read_message(pipe)
+        let msg: DaemonMessage = frame::read_daemon_message(pipe)
             .expect("Failed to read message")
             .expect("Unexpected EOF on pipe");
         match msg {
