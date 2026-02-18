@@ -9,12 +9,7 @@ name = "godly-notify"
 path = "src/main.rs"
 
 [dependencies]
-godly-protocol = { path = "../protocol" }
+godly-protocol.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = [
-    "handleapi",
-    "fileapi",
-    "errhandlingapi",
-    "winnt",
-] }
+winapi.workspace = true
