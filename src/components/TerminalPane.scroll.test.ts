@@ -23,14 +23,37 @@ class ScrollSimulator {
   gridRows = 24;
   isUserScrolled = false;
 
+  // scrollSeq counter mirrors TerminalPane for race-condition testing
+  scrollSeq = 0;
+
   /** Mirror of TerminalPane.handleScroll */
   handleScroll(deltaLines: number) {
     const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
     this.isUserScrolled = newOffset > 0;
+    const seq = ++this.scrollSeq;
     mockSetScrollback(newOffset);
-    mockFetchSnapshot();
+    // Simulate async fetch that checks seq
+    return { seq, fetch: () => {
+      if (seq === this.scrollSeq) {
+        mockFetchSnapshot();
+      }
+    }};
+  }
+
+  /** Mirror of TerminalPane.handleScrollTo (absolute offset from scrollbar drag) */
+  handleScrollTo(absoluteOffset: number) {
+    const newOffset = Math.max(0, Math.round(absoluteOffset));
+    if (newOffset === this.scrollbackOffset) return;
+    this.scrollbackOffset = newOffset;
+    const seq = ++this.scrollSeq;
+    mockSetScrollback(newOffset);
+    return { seq, fetch: () => {
+      if (seq === this.scrollSeq) {
+        mockFetchSnapshot();
+      }
+    }};
   }
 
   /** Mirror of TerminalPane.snapToBottom */
@@ -38,8 +61,13 @@ class ScrollSimulator {
     if (this.scrollbackOffset === 0) return;
     this.scrollbackOffset = 0;
     this.isUserScrolled = false;
+    const seq = ++this.scrollSeq;
     mockSetScrollback(0);
-    mockFetchSnapshot();
+    return { seq, fetch: () => {
+      if (seq === this.scrollSeq) {
+        mockFetchSnapshot();
+      }
+    }};
   }
 
   /** Simulate snapshot update (as fetchAndRenderSnapshot does) */
@@ -92,34 +120,49 @@ describe('TerminalPane scroll handling', () => {
   });
 
   describe('keyboard shortcut routing', () => {
-    it('Shift+PageUp matches scroll.pageUp action', () => {
-      const action = keybindingStore.matchAction(keydown('PageUp', { shiftKey: true }));
+    it('bare PageUp matches scroll.pageUp action', () => {
+      const action = keybindingStore.matchAction(keydown('PageUp'));
       expect(action).toBe('scroll.pageUp');
     });
 
-    it('Shift+PageDown matches scroll.pageDown action', () => {
-      const action = keybindingStore.matchAction(keydown('PageDown', { shiftKey: true }));
+    it('bare PageDown matches scroll.pageDown action', () => {
+      const action = keybindingStore.matchAction(keydown('PageDown'));
       expect(action).toBe('scroll.pageDown');
     });
 
-    it('Shift+Home matches scroll.toTop action', () => {
-      const action = keybindingStore.matchAction(keydown('Home', { shiftKey: true }));
+    it('bare Home matches scroll.toTop action', () => {
+      const action = keybindingStore.matchAction(keydown('Home'));
       expect(action).toBe('scroll.toTop');
     });
 
-    it('Shift+End matches scroll.toBottom action', () => {
-      const action = keybindingStore.matchAction(keydown('End', { shiftKey: true }));
+    it('bare End matches scroll.toBottom action', () => {
+      const action = keybindingStore.matchAction(keydown('End'));
       expect(action).toBe('scroll.toBottom');
     });
 
-    it('bare PageUp does NOT match any action (passes through to PTY)', () => {
-      const action = keybindingStore.matchAction(keydown('PageUp'));
+    it('Shift+PageUp does NOT match scroll action (keys changed to bare)', () => {
+      const action = keybindingStore.matchAction(keydown('PageUp', { shiftKey: true }));
       expect(action).toBeNull();
     });
 
-    it('bare PageDown does NOT match any action (passes through to PTY)', () => {
-      const action = keybindingStore.matchAction(keydown('PageDown'));
+    it('Shift+PageDown does NOT match scroll action (keys changed to bare)', () => {
+      const action = keybindingStore.matchAction(keydown('PageDown', { shiftKey: true }));
       expect(action).toBeNull();
+    });
+  });
+
+  describe('alternate screen pass-through', () => {
+    // When on alternate screen (vim, less, htop), scroll shortcuts should
+    // NOT be intercepted — they pass through to the PTY app. This is
+    // verified at the TerminalPane.handleKeyEvent level; here we just
+    // confirm the keybinding store still matches so the guard logic in
+    // handleKeyEvent is what decides.
+    it('scroll.pageUp action still matches bare PageUp (guard is in TerminalPane)', () => {
+      expect(keybindingStore.matchAction(keydown('PageUp'))).toBe('scroll.pageUp');
+    });
+
+    it('scroll.toTop action still matches bare Home', () => {
+      expect(keybindingStore.matchAction(keydown('Home'))).toBe('scroll.toTop');
     });
   });
 
@@ -191,6 +234,78 @@ describe('TerminalPane scroll handling', () => {
       sim.scrollbackOffset = 2;
       sim.handleScroll(-5);
       expect(mockSetScrollback).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('scrollbar drag (handleScrollTo)', () => {
+    it('sets absolute offset directly', () => {
+      sim.totalScrollback = 500;
+      sim.handleScrollTo(250);
+      expect(mockSetScrollback).toHaveBeenCalledWith(250);
+      expect(sim.scrollbackOffset).toBe(250);
+    });
+
+    it('clamps to 0 for negative values', () => {
+      sim.totalScrollback = 500;
+      sim.scrollbackOffset = 50; // must be non-zero so clamped-to-0 is a change
+      sim.handleScrollTo(-10);
+      expect(mockSetScrollback).toHaveBeenCalledWith(0);
+    });
+
+    it('rounds fractional offsets', () => {
+      sim.totalScrollback = 500;
+      sim.handleScrollTo(123.7);
+      expect(mockSetScrollback).toHaveBeenCalledWith(124);
+    });
+
+    it('does nothing when offset is unchanged', () => {
+      sim.scrollbackOffset = 100;
+      sim.handleScrollTo(100);
+      expect(mockSetScrollback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scroll race condition (scrollSeq guard)', () => {
+    it('discards stale fetch when a newer scroll happened', () => {
+      sim.totalScrollback = 1000;
+
+      // First scroll: offset 50
+      const first = sim.handleScroll(50);
+      expect(sim.scrollSeq).toBe(1);
+
+      // Second scroll before first fetch completes: offset 100
+      sim.handleScroll(50);
+      expect(sim.scrollSeq).toBe(2);
+
+      // First fetch completes — should be discarded (stale seq)
+      first!.fetch();
+      expect(mockFetchSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('accepts fetch when no newer scroll happened', () => {
+      sim.totalScrollback = 1000;
+      const result = sim.handleScroll(50);
+      result!.fetch();
+      expect(mockFetchSnapshot).toHaveBeenCalledTimes(1);
+    });
+
+    it('scrollSeq increments across handleScroll and handleScrollTo', () => {
+      sim.totalScrollback = 1000;
+      sim.handleScroll(10);      // seq=1
+      sim.handleScrollTo(200);   // seq=2
+      sim.handleScroll(10);      // seq=3
+      expect(sim.scrollSeq).toBe(3);
+    });
+
+    it('snapToBottom increments scrollSeq and guards stale fetches', () => {
+      sim.totalScrollback = 1000;
+      sim.scrollbackOffset = 50;
+      const scrollResult = sim.handleScroll(10);  // seq=1
+      sim.snapToBottom();                          // seq=2
+
+      // Stale scroll fetch
+      scrollResult!.fetch();
+      expect(mockFetchSnapshot).not.toHaveBeenCalled();
     });
   });
 
@@ -317,13 +432,13 @@ describe('TerminalPane scroll handling', () => {
   describe('scroll shortcuts are app-type (not terminal-control)', () => {
     it('scroll.pageUp is an app shortcut', () => {
       expect(
-        keybindingStore.isAppShortcut(keydown('PageUp', { shiftKey: true }))
+        keybindingStore.isAppShortcut(keydown('PageUp'))
       ).toBe(true);
     });
 
     it('scroll.pageUp is NOT a terminal control key', () => {
       expect(
-        keybindingStore.isTerminalControlKey(keydown('PageUp', { shiftKey: true }))
+        keybindingStore.isTerminalControlKey(keydown('PageUp'))
       ).toBe(false);
     });
   });
