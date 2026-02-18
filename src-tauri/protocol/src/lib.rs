@@ -4,7 +4,7 @@ pub mod mcp_messages;
 pub mod messages;
 pub mod types;
 
-pub use frame::{read_message, write_message};
+pub use frame::{read_daemon_message, read_message, read_request, write_daemon_message, write_message, write_request};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 pub use messages::{DaemonMessage, Event, Request, Response};
 pub use types::{GridData, SessionInfo, ShellType};
