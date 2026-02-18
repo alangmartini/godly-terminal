@@ -567,9 +567,11 @@ export class TerminalPane {
    */
   private async fetchFullSnapshot(scrollSeqAtStart?: number) {
     try {
+      perfTracer.mark('snapshot_ipc_start');
       const snapshot = await invoke<RichGridData>('get_grid_snapshot', {
         terminalId: this.terminalId,
       });
+      perfTracer.measure('snapshot_ipc', 'snapshot_ipc_start');
       // Discard stale response if the user scrolled while we were fetching
       if (scrollSeqAtStart !== undefined && scrollSeqAtStart !== this.scrollSeq) return;
       this.cachedSnapshot = snapshot;
