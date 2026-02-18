@@ -394,6 +394,32 @@ pub fn list_tools() -> Value {
                     },
                     "required": ["terminal_id", "text"]
                 }
+            },
+            {
+                "name": "quick_claude",
+                "description": "Spawn a new Claude Code session with a prompt. Creates a terminal with a git worktree (skipping fetch by default for speed), starts Claude Code, waits for it to be ready, and writes the prompt — all in background. Returns immediately with the terminal ID. Fire multiple calls in rapid succession for quick idea capture.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to create the terminal in"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The prompt to send to Claude Code once it is ready"
+                        },
+                        "branch_name": {
+                            "type": "string",
+                            "description": "Optional custom worktree branch name (e.g. 'fix-login-bug'). Auto-generated if omitted."
+                        },
+                        "skip_fetch": {
+                            "type": "boolean",
+                            "description": "Skip git fetch before creating worktree (default: true for speed). Set false to branch from latest remote state."
+                        }
+                    },
+                    "required": ["workspace_id", "prompt"]
+                }
             }
         ]
     })
@@ -694,6 +720,27 @@ pub fn call_tool(
                 terminal_id,
                 text,
                 timeout_ms,
+            }
+        }
+
+        "quick_claude" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            let prompt = args
+                .get("prompt")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing prompt")?
+                .to_string();
+            let branch_name = args.get("branch_name").and_then(|v| v.as_str()).map(String::from);
+            let skip_fetch = args.get("skip_fetch").and_then(|v| v.as_bool());
+            McpRequest::QuickClaude {
+                workspace_id,
+                prompt,
+                branch_name,
+                skip_fetch,
             }
         }
 

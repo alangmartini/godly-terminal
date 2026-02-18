@@ -26,7 +26,8 @@ export type ActionId =
   | 'scroll.pageDown'
   | 'scroll.toTop'
   | 'scroll.toBottom'
-  | 'tabs.renameTerminal';
+  | 'tabs.renameTerminal'
+  | 'tabs.quickClaude';
 
 export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll';
 
@@ -176,6 +177,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Tabs',
     type: 'app',
     defaultChord: { ctrlKey: false, shiftKey: false, altKey: false, key: 'f2' },
+  },
+  {
+    id: 'tabs.quickClaude',
+    label: 'Quick Claude',
+    category: 'Tabs',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'q' },
   },
 ];
 
