@@ -33,7 +33,6 @@ export class TabBar {
     this.tabsContainer = document.createElement('div');
     this.tabsContainer.style.display = 'flex';
     this.tabsContainer.style.flex = '1';
-    this.tabsContainer.style.minWidth = '0';
     this.container.appendChild(this.tabsContainer);
 
     const addBtn = document.createElement('div');
