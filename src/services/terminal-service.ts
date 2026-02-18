@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { store, ShellType } from '../state/store';
+import { perfTracer } from '../utils/PerfTracer';
 
 
 // Backend shell type format - matches Rust serde externally tagged enum
@@ -154,9 +155,13 @@ class TerminalService {
 
   /** List live daemon sessions (for reconnection on app restart) */
   async reconnectSessions(): Promise<SessionInfo[]> {
+    perfTracer.mark('reconnect_start');
     try {
-      return await invoke<SessionInfo[]>('reconnect_sessions');
+      const result = await invoke<SessionInfo[]>('reconnect_sessions');
+      perfTracer.measure('reconnect_sessions', 'reconnect_start');
+      return result;
     } catch {
+      perfTracer.measure('reconnect_sessions', 'reconnect_start');
       return [];
     }
   }
