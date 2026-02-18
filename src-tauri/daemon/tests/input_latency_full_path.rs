@@ -97,9 +97,9 @@ fn peek_pipe(handle: *mut winapi::ctypes::c_void) -> PeekResult {
 }
 
 fn send_request_blocking(pipe: &mut std::fs::File, request: &Request) -> Response {
-    godly_protocol::write_message(pipe, request).expect("write");
+    godly_protocol::write_request(pipe, request).expect("write");
     loop {
-        let msg: DaemonMessage = godly_protocol::read_message(pipe).expect("read").expect("EOF");
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(pipe).expect("read").expect("EOF");
         match msg {
             DaemonMessage::Response(r) => return r,
             DaemonMessage::Event(_) => continue,
@@ -184,7 +184,7 @@ fn bridge_io_loop(
 
             match peek_pipe(raw_handle) {
                 PeekResult::Data => {
-                    match godly_protocol::read_message::<_, DaemonMessage>(&mut pipe) {
+                    match godly_protocol::read_daemon_message(&mut pipe) {
                         Ok(Some(DaemonMessage::Event(_))) => {
                             event_counter.fetch_add(1, Ordering::Relaxed);
                             events_this_round += 1;
@@ -218,7 +218,7 @@ fn bridge_io_loop(
         // Step 2: Check for pending requests
         match request_rx.try_recv() {
             Ok(req) => {
-                godly_protocol::write_message(&mut pipe, &req.request).expect("bridge write");
+                godly_protocol::write_request(&mut pipe, &req.request).expect("bridge write");
                 pending_responses.push_back(req.response_tx);
                 // Loop back immediately to read the response
                 continue;
@@ -301,11 +301,11 @@ fn full_path_keystroke_latency_idle_terminal() {
 
     // Attach on the bridge pipe (this is the pipe the bridge thread will use)
     let mut bridge_pipe = pipe;
-    godly_protocol::write_message(&mut bridge_pipe, &Request::Attach {
+    godly_protocol::write_request(&mut bridge_pipe, &Request::Attach {
         session_id: session_id.clone(),
     }).expect("attach write");
     loop {
-        let msg: DaemonMessage = godly_protocol::read_message(&mut bridge_pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(&mut bridge_pipe)
             .expect("read").expect("EOF");
         match msg {
             DaemonMessage::Response(_) => break,
@@ -421,11 +421,11 @@ fn full_path_keystroke_latency_during_heavy_output() {
     assert!(matches!(resp, Response::SessionCreated { .. }));
 
     let mut bridge_pipe = pipe;
-    godly_protocol::write_message(&mut bridge_pipe, &Request::Attach {
+    godly_protocol::write_request(&mut bridge_pipe, &Request::Attach {
         session_id: session_id.clone(),
     }).expect("attach write");
     loop {
-        let msg: DaemonMessage = godly_protocol::read_message(&mut bridge_pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(&mut bridge_pipe)
             .expect("read").expect("EOF");
         match msg {
             DaemonMessage::Response(_) => break,

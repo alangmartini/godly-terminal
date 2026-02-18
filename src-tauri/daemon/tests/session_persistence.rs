@@ -128,9 +128,9 @@ fn wait_for_daemon(pipe_name: &str, timeout: Duration) -> std::fs::File {
 /// Send a request on the pipe and wait for the response.
 /// Skips any async Event messages that arrive before the response.
 fn send_request(pipe: &mut std::fs::File, req: &Request) -> Response {
-    frame::write_message(pipe, req).expect("Failed to write request to pipe");
+    frame::write_request(pipe, req).expect("Failed to write request to pipe");
     loop {
-        let msg: DaemonMessage = frame::read_message(pipe)
+        let msg: DaemonMessage = frame::read_daemon_message(pipe)
             .expect("Failed to read message from pipe")
             .expect("Unexpected EOF on pipe");
         match msg {

@@ -4,6 +4,7 @@ use std::io::Write;
 use godly_protocol::ansi::{strip_ansi, truncate_output};
 use godly_protocol::{
     DaemonMessage, McpRequest, McpResponse, McpTerminalInfo, Request, Response, ShellType,
+    read_daemon_message, write_request,
 };
 
 use crate::backend::Backend;
@@ -68,13 +69,13 @@ impl DaemonDirectBackend {
 
     /// Send a daemon Request and read the Response, discarding async Events.
     fn daemon_request(&mut self, request: &Request) -> Result<Response, String> {
-        godly_protocol::write_message(&mut self.pipe, request)
+        write_request(&mut self.pipe, request)
             .map_err(|e| format!("Daemon write error: {}", e))?;
         self.pipe.flush().ok();
 
         // Read messages, discarding Events until we get a Response
         loop {
-            let msg: DaemonMessage = godly_protocol::read_message(&mut self.pipe)
+            let msg: DaemonMessage = read_daemon_message(&mut self.pipe)
                 .map_err(|e| format!("Daemon read error: {}", e))?
                 .ok_or_else(|| "Daemon pipe closed".to_string())?;
 

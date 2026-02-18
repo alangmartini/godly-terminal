@@ -106,7 +106,7 @@ fn pipe_has_data(pipe: &std::fs::File) -> bool {
 
 /// Read a single DaemonMessage from the pipe (blocking).
 fn read_message(pipe: &mut std::fs::File) -> Option<DaemonMessage> {
-    frame::read_message(pipe).ok().flatten()
+    frame::read_daemon_message(pipe).ok().flatten()
 }
 
 /// Send a request and wait for its Response, collecting any Output events into
@@ -117,7 +117,7 @@ fn send_request_collecting_output(
     session_id: &str,
     output: &mut String,
 ) -> Response {
-    frame::write_message(pipe, req).expect("Failed to write request to pipe");
+    frame::write_request(pipe, req).expect("Failed to write request to pipe");
     loop {
         match read_message(pipe) {
             Some(DaemonMessage::Response(r)) => return r,
@@ -200,7 +200,7 @@ fn wait_for_daemon(pipe_name: &str, timeout: Duration) -> std::fs::File {
     let start = Instant::now();
     loop {
         if let Some(mut file) = try_connect_pipe(pipe_name) {
-            if let Ok(()) = frame::write_message(&mut file, &Request::Ping) {
+            if let Ok(()) = frame::write_request(&mut file, &Request::Ping) {
                 if let Some(DaemonMessage::Response(Response::Pong)) = read_message(&mut file) {
                     return file;
                 }
@@ -587,11 +587,11 @@ fn test_ctrl_c_byte_survives_protocol_serialization() {
 
     // Serialize to wire format (length-prefixed JSON)
     let mut buf = Vec::new();
-    frame::write_message(&mut buf, &request).expect("serialize");
+    frame::write_request(&mut buf, &request).expect("serialize");
 
     // Deserialize back
     let mut cursor = Cursor::new(buf);
-    let deserialized: Request = frame::read_message(&mut cursor)
+    let deserialized = frame::read_request(&mut cursor)
         .expect("deserialize")
         .expect("should not be None");
 
@@ -630,10 +630,10 @@ fn test_all_control_characters_survive_serialization() {
         };
 
         let mut buf = Vec::new();
-        frame::write_message(&mut buf, &request).expect("serialize");
+        frame::write_request(&mut buf, &request).expect("serialize");
 
         let mut cursor = Cursor::new(buf);
-        let deserialized: Request = frame::read_message(&mut cursor)
+        let deserialized = frame::read_request(&mut cursor)
             .expect("deserialize")
             .expect("not None");
 
@@ -667,10 +667,10 @@ fn test_ctrl_c_in_mixed_payload_survives_serialization() {
     };
 
     let mut buf = Vec::new();
-    frame::write_message(&mut buf, &request).expect("serialize");
+    frame::write_request(&mut buf, &request).expect("serialize");
 
     let mut cursor = Cursor::new(buf);
-    let deserialized: Request = frame::read_message(&mut cursor)
+    let deserialized = frame::read_request(&mut cursor)
         .expect("deserialize")
         .expect("not None");
 

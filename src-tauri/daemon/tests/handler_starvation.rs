@@ -99,7 +99,7 @@ fn send_request_with_deadline(
     request: &Request,
     deadline: Duration,
 ) -> Result<(Response, Duration, u32), String> {
-    godly_protocol::write_message(pipe, request)
+    godly_protocol::write_request(pipe, request)
         .map_err(|e| format!("Failed to write request: {}", e))?;
 
     let start = Instant::now();
@@ -119,7 +119,7 @@ fn send_request_with_deadline(
             continue;
         }
 
-        let msg: DaemonMessage = godly_protocol::read_message(pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(pipe)
             .map_err(|e| format!("Read error: {}", e))?
             .ok_or_else(|| "Unexpected EOF".to_string())?;
 
@@ -137,9 +137,9 @@ fn send_request_with_deadline(
 
 /// Send a request and read the response (blocking, no deadline). For setup only.
 fn send_request(pipe: &mut std::fs::File, request: &Request) -> Response {
-    godly_protocol::write_message(pipe, request).expect("Failed to write request");
+    godly_protocol::write_request(pipe, request).expect("Failed to write request");
     loop {
-        let msg: DaemonMessage = godly_protocol::read_message(pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(pipe)
             .expect("Failed to read message")
             .expect("Unexpected EOF");
         match msg {
