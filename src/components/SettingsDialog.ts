@@ -481,6 +481,38 @@ export function showSettingsDialog(): Promise<void> {
 
     terminalContent.appendChild(termSection);
 
+    // ── Scrollback section ─────────────────────────────────────
+    const scrollSection = document.createElement('div');
+    scrollSection.className = 'settings-section';
+
+    const scrollTitle = document.createElement('div');
+    scrollTitle.className = 'settings-section-title';
+    scrollTitle.textContent = 'Scrollback';
+    scrollSection.appendChild(scrollTitle);
+
+    const autoScrollRow = document.createElement('div');
+    autoScrollRow.className = 'shortcut-row';
+    const autoScrollLabel = document.createElement('span');
+    autoScrollLabel.className = 'shortcut-label';
+    autoScrollLabel.textContent = 'Auto-scroll to bottom on new output';
+    autoScrollRow.appendChild(autoScrollLabel);
+    const autoScrollCheckbox = document.createElement('input');
+    autoScrollCheckbox.type = 'checkbox';
+    autoScrollCheckbox.className = 'notification-checkbox';
+    autoScrollCheckbox.checked = terminalSettingsStore.getAutoScrollOnOutput();
+    autoScrollCheckbox.onchange = () => {
+      terminalSettingsStore.setAutoScrollOnOutput(autoScrollCheckbox.checked);
+    };
+    autoScrollRow.appendChild(autoScrollCheckbox);
+    scrollSection.appendChild(autoScrollRow);
+
+    const autoScrollDesc = document.createElement('div');
+    autoScrollDesc.className = 'settings-description';
+    autoScrollDesc.textContent = 'When enabled, new terminal output will snap the view to the bottom even while you are scrolled up. When disabled (default), your scroll position is preserved.';
+    scrollSection.appendChild(autoScrollDesc);
+
+    terminalContent.appendChild(scrollSection);
+
     // ── CMD Aliases section ────────────────────────────────────
     const aliasSection = document.createElement('div');
     aliasSection.className = 'settings-section';

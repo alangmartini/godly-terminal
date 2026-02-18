@@ -4,6 +4,8 @@ const STORAGE_KEY = 'godly-terminal-settings';
 
 export interface TerminalSettings {
   defaultShell: ShellType;
+  /** When true, new output snaps the view to bottom even when scrolled up. */
+  autoScrollOnOutput: boolean;
 }
 
 type Subscriber = () => void;
@@ -11,6 +13,7 @@ type Subscriber = () => void;
 class TerminalSettingsStore {
   private settings: TerminalSettings = {
     defaultShell: { type: 'windows' },
+    autoScrollOnOutput: false,
   };
 
   private subscribers: Subscriber[] = [];
@@ -25,6 +28,16 @@ class TerminalSettingsStore {
 
   setDefaultShell(shell: ShellType): void {
     this.settings.defaultShell = shell;
+    this.saveToStorage();
+    this.notify();
+  }
+
+  getAutoScrollOnOutput(): boolean {
+    return this.settings.autoScrollOnOutput;
+  }
+
+  setAutoScrollOnOutput(enabled: boolean): void {
+    this.settings.autoScrollOnOutput = enabled;
     this.saveToStorage();
     this.notify();
   }
@@ -52,6 +65,9 @@ class TerminalSettingsStore {
           return;
         }
         this.settings.defaultShell = data.defaultShell;
+      }
+      if (typeof data.autoScrollOnOutput === 'boolean') {
+        this.settings.autoScrollOnOutput = data.autoScrollOnOutput;
       }
     } catch {
       // Corrupt data — use defaults

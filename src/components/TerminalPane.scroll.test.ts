@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { keybindingStore } from '../state/keybinding-store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 
 /**
  * Tests for scrollback handling in TerminalPane.
@@ -20,12 +21,14 @@ class ScrollSimulator {
   scrollbackOffset = 0;
   totalScrollback = 0;
   gridRows = 24;
+  isUserScrolled = false;
 
   /** Mirror of TerminalPane.handleScroll */
   handleScroll(deltaLines: number) {
     const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
+    this.isUserScrolled = newOffset > 0;
     mockSetScrollback(newOffset);
     mockFetchSnapshot();
   }
@@ -34,14 +37,26 @@ class ScrollSimulator {
   snapToBottom() {
     if (this.scrollbackOffset === 0) return;
     this.scrollbackOffset = 0;
+    this.isUserScrolled = false;
     mockSetScrollback(0);
     mockFetchSnapshot();
   }
 
   /** Simulate snapshot update (as fetchAndRenderSnapshot does) */
   applySnapshot(offset: number, total: number) {
-    this.scrollbackOffset = offset;
+    if (!this.isUserScrolled) {
+      this.scrollbackOffset = offset;
+    }
     this.totalScrollback = total;
+  }
+
+  /** Simulate terminal output arriving */
+  onTerminalOutput() {
+    if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+      this.snapToBottom();
+      return;
+    }
+    mockFetchSnapshot();
   }
 }
 
@@ -73,6 +88,7 @@ describe('TerminalPane scroll handling', () => {
 
   afterEach(() => {
     keybindingStore.resetAll();
+    terminalSettingsStore.setAutoScrollOnOutput(false);
   });
 
   describe('keyboard shortcut routing', () => {
@@ -204,6 +220,97 @@ describe('TerminalPane scroll handling', () => {
       sim.applySnapshot(42, 1000);
       sim.handleScroll(10); // scroll up 10 more
       expect(mockSetScrollback).toHaveBeenCalledWith(52);
+    });
+  });
+
+  describe('scroll position preservation (race condition fix)', () => {
+    it('sets isUserScrolled when scrolling up', () => {
+      sim.handleScroll(10);
+      expect(sim.isUserScrolled).toBe(true);
+    });
+
+    it('clears isUserScrolled when snapping to bottom', () => {
+      sim.handleScroll(10);
+      sim.snapToBottom();
+      expect(sim.isUserScrolled).toBe(false);
+    });
+
+    it('clears isUserScrolled when scrolling back to offset 0', () => {
+      sim.scrollbackOffset = 3;
+      sim.isUserScrolled = true;
+      sim.handleScroll(-3);
+      expect(sim.isUserScrolled).toBe(false);
+    });
+
+    it('preserves scroll position when snapshot arrives during user scroll', () => {
+      // User scrolls up to offset 50
+      sim.handleScroll(50);
+      expect(sim.scrollbackOffset).toBe(50);
+      expect(sim.isUserScrolled).toBe(true);
+
+      // Daemon returns a snapshot with offset 0 (race: setScrollback not yet processed)
+      sim.applySnapshot(0, 1000);
+
+      // Scroll position should NOT be overwritten
+      expect(sim.scrollbackOffset).toBe(50);
+      // totalScrollback SHOULD still update
+      expect(sim.totalScrollback).toBe(1000);
+    });
+
+    it('allows snapshot to update offset when not user-scrolled', () => {
+      // Not scrolled up — daemon snapshot should update offset normally
+      sim.applySnapshot(0, 500);
+      expect(sim.scrollbackOffset).toBe(0);
+      expect(sim.totalScrollback).toBe(500);
+    });
+
+    it('allows snapshot to update offset after snap-to-bottom', () => {
+      sim.handleScroll(30);
+      sim.snapToBottom();
+
+      // Now a snapshot arrives — should update normally
+      sim.applySnapshot(0, 800);
+      expect(sim.scrollbackOffset).toBe(0);
+    });
+  });
+
+  describe('auto-scroll on output setting', () => {
+    it('does not snap to bottom on output when disabled (default)', () => {
+      sim.handleScroll(50);
+      mockSetScrollback.mockClear();
+      mockFetchSnapshot.mockClear();
+
+      sim.onTerminalOutput();
+
+      // Should NOT have called snapToBottom (no setScrollback(0))
+      expect(mockSetScrollback).not.toHaveBeenCalled();
+      // Should still fetch snapshot
+      expect(mockFetchSnapshot).toHaveBeenCalled();
+    });
+
+    it('snaps to bottom on output when enabled and user is scrolled up', () => {
+      terminalSettingsStore.setAutoScrollOnOutput(true);
+      sim.handleScroll(50);
+      mockSetScrollback.mockClear();
+      mockFetchSnapshot.mockClear();
+
+      sim.onTerminalOutput();
+
+      expect(mockSetScrollback).toHaveBeenCalledWith(0);
+      expect(sim.scrollbackOffset).toBe(0);
+      expect(sim.isUserScrolled).toBe(false);
+    });
+
+    it('does not snap when enabled but already at bottom', () => {
+      terminalSettingsStore.setAutoScrollOnOutput(true);
+      mockSetScrollback.mockClear();
+      mockFetchSnapshot.mockClear();
+
+      sim.onTerminalOutput();
+
+      // Already at bottom, no snap needed — just fetch snapshot
+      expect(mockSetScrollback).not.toHaveBeenCalled();
+      expect(mockFetchSnapshot).toHaveBeenCalled();
     });
   });
 
