@@ -94,12 +94,12 @@ mod windows_tests {
 
     /// Send a request and read the response from the pipe.
     fn send_request(pipe: &mut std::fs::File, request: &Request) -> Response {
-        godly_protocol::write_message(pipe, request).expect("Failed to write request");
+        godly_protocol::write_request(pipe, request).expect("Failed to write request");
 
         // Read response — may need to skip Event messages
         loop {
             let msg: DaemonMessage =
-                godly_protocol::read_message(pipe)
+                godly_protocol::read_daemon_message(pipe)
                     .expect("Failed to read message")
                     .expect("Unexpected EOF reading response");
 
@@ -141,7 +141,7 @@ mod windows_tests {
 
             // Read and discard
             let msg: Option<DaemonMessage> =
-                godly_protocol::read_message(&mut &*pipe).ok().flatten();
+                godly_protocol::read_daemon_message(&mut &*pipe).ok().flatten();
             if msg.is_none() {
                 break;
             }
