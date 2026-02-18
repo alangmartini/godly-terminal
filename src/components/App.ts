@@ -437,6 +437,39 @@ export class App {
           }
           break;
         }
+
+        case 'tabs.quickClaude': {
+          e.preventDefault();
+          if (!state.activeWorkspaceId) break;
+
+          const { showQuickClaudeDialog } = await import('./dialogs');
+          const input = await showQuickClaudeDialog();
+          if (!input) break;
+
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const result = await invoke<{ terminal_id: string; worktree_branch: string | null }>(
+              'quick_claude',
+              {
+                workspaceId: state.activeWorkspaceId,
+                prompt: input.prompt,
+                branchName: input.branchName ?? null,
+                skipFetch: true,
+              }
+            );
+
+            store.addTerminal({
+              id: result.terminal_id,
+              workspaceId: state.activeWorkspaceId,
+              name: result.worktree_branch ?? 'Quick Claude',
+              processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
+              order: 0,
+            });
+          } catch (error) {
+            console.error('[App] Quick Claude failed:', error);
+          }
+          break;
+        }
       }
     });
   }
@@ -1027,6 +1060,12 @@ export class App {
           order: 0,
         });
       }
+    });
+
+    // Quick Claude: session ready, prompt delivered
+    await listen<{ terminal_id: string; display_name: string }>('quick-claude-ready', (event) => {
+      const { terminal_id, display_name } = event.payload;
+      this.toastContainer.show('Claude Ready', `${display_name} — prompt delivered`, terminal_id);
     });
 
     // MCP: terminal closed by MCP handler
