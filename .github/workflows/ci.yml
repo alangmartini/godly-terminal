@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+  GODLY_NO_DETACH: "1"
+
+jobs:
+  check-and-lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: cd src-tauri && cargo check --workspace
+
+  rust-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - run: cd src-tauri && cargo test -p godly-protocol
+      - run: cd src-tauri && cargo test -p godly-vt
+      - run: cd src-tauri && cargo test -p godly-daemon
+      - run: cd src-tauri && cargo test -p godly-terminal
+
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+      - run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
+      - run: npm run build
