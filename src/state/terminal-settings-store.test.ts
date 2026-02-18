@@ -83,4 +83,38 @@ describe('TerminalSettingsStore', () => {
     store.setDefaultShell({ type: 'cmd' });
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it('defaults autoScrollOnOutput to false', async () => {
+    const store = await createStore();
+    expect(store.getAutoScrollOnOutput()).toBe(false);
+  });
+
+  it('persists autoScrollOnOutput setting', async () => {
+    const store = await createStore();
+    store.setAutoScrollOnOutput(true);
+
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'godly-terminal-settings',
+      expect.stringContaining('"autoScrollOnOutput":true'),
+    );
+  });
+
+  it('loads persisted autoScrollOnOutput from localStorage', async () => {
+    localStorageMock.setItem(
+      'godly-terminal-settings',
+      JSON.stringify({ defaultShell: { type: 'windows' }, autoScrollOnOutput: true }),
+    );
+
+    const store = await createStore();
+    expect(store.getAutoScrollOnOutput()).toBe(true);
+  });
+
+  it('notifies subscribers when autoScrollOnOutput changes', async () => {
+    const store = await createStore();
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.setAutoScrollOnOutput(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
 });
