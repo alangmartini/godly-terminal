@@ -42,6 +42,13 @@ export class TerminalPane {
   // null until first full snapshot is received.
   private cachedSnapshot: RichGridData | null = null;
 
+  // Hidden textarea for keyboard input (handles dead keys, IME composition).
+  // Canvas elements don't support text composition, so dead keys (e.g. quote
+  // on ABNT2 keyboards) produce event.key="Dead" and the composed character
+  // is lost. A textarea receives proper composition/input events from the OS.
+  private inputTextarea!: HTMLTextAreaElement;
+  private isComposing = false;
+
   constructor(terminalId: string) {
     this.terminalId = terminalId;
 
@@ -80,28 +87,46 @@ export class TerminalPane {
     }
     this.resizeObserver.observe(this.container);
 
-    // Click-to-focus: always focus the canvas when clicking in the terminal
+    // ---- Hidden textarea for keyboard input ----
+    // Canvas elements don't participate in OS text composition, so dead keys
+    // (e.g. ' and " on ABNT2 keyboards) fire event.key="Dead" and the
+    // composed character is lost.  A hidden <textarea> receives proper
+    // composition and input events from the OS input method.
+    this.inputTextarea = document.createElement('textarea');
+    this.inputTextarea.className = 'terminal-input-hidden';
+    this.inputTextarea.setAttribute('autocomplete', 'off');
+    this.inputTextarea.setAttribute('autocapitalize', 'off');
+    this.inputTextarea.setAttribute('autocorrect', 'off');
+    this.inputTextarea.setAttribute('spellcheck', 'false');
+    this.inputTextarea.tabIndex = 0;
+    this.inputTextarea.style.cssText =
+      'position:absolute;left:-9999px;top:0;width:1px;height:1px;' +
+      'opacity:0;overflow:hidden;resize:none;border:none;padding:0;' +
+      'white-space:pre;z-index:-1;';
+    this.container.appendChild(this.inputTextarea);
+
+    // Remove canvas from tab order — the textarea is now the keyboard target.
+    this.renderer.getElement().tabIndex = -1;
+
+    // Click-to-focus: always focus the textarea when clicking in the terminal
     // area. In split mode, also set this terminal as the active one.
-    // Previously this only ran in split mode, which meant single-pane mode
-    // relied solely on the browser's default focus behavior. If anything
-    // stole focus (tab bar click, dialog, WebView2 native frame), the canvas
-    // lost keyboard input with no recovery mechanism.
     this.container.addEventListener('mousedown', () => {
       if (this.container.classList.contains('split-visible')) {
         store.setActiveTerminal(this.terminalId);
       }
-      // Always focus the canvas — this is the primary keyboard recovery mechanism.
+      // Always focus the textarea — this is the primary keyboard recovery mechanism.
       // requestAnimationFrame ensures the mousedown default behavior completes first.
-      requestAnimationFrame(() => this.renderer.focus());
+      requestAnimationFrame(() => this.focusInput());
     });
 
-    // Handle keyboard input on the canvas.
-    // The canvas has tabIndex so it receives keyboard events.
-    const canvas = this.renderer.getElement();
-    canvas.addEventListener('keydown', (event) => {
+    // Handle keyboard input on the hidden textarea.
+    // Special keys (arrows, Enter, Ctrl combos, etc.) are handled in keydown.
+    // Printable characters and dead-key compositions flow through the textarea's
+    // input event instead, which correctly resolves dead keys and IME sequences.
+    this.inputTextarea.addEventListener('keydown', (event) => {
       this.handleKeyEvent(event);
     });
-    canvas.addEventListener('keyup', (event) => {
+    this.inputTextarea.addEventListener('keyup', (event) => {
       // Prevent WebView2 from intercepting terminal control keys on keyup
       if (isTerminalControlKey({
         ctrlKey: event.ctrlKey,
@@ -114,15 +139,41 @@ export class TerminalPane {
       }
     });
 
-    // Focus diagnostics: detect when the canvas loses focus while this pane
-    // is active. This helps diagnose keyboard input freezes — if the canvas
+    // Composed text input: captures dead key results and IME output.
+    this.inputTextarea.addEventListener('input', () => {
+      if (this.isComposing) return;
+      const text = this.inputTextarea.value;
+      if (text) {
+        perfTracer.mark('write_ipc_start');
+        terminalService.writeToTerminal(this.terminalId, text).then(() => {
+          perfTracer.measure('write_to_terminal_ipc', 'write_ipc_start');
+        });
+        this.inputTextarea.value = '';
+      }
+    });
+
+    // IME composition tracking — don't send intermediate text.
+    this.inputTextarea.addEventListener('compositionstart', () => {
+      this.isComposing = true;
+    });
+    this.inputTextarea.addEventListener('compositionend', () => {
+      this.isComposing = false;
+      const text = this.inputTextarea.value;
+      if (text) {
+        terminalService.writeToTerminal(this.terminalId, text);
+      }
+      this.inputTextarea.value = '';
+    });
+
+    // Focus diagnostics: detect when the textarea loses focus while this pane
+    // is active. This helps diagnose keyboard input freezes — if the textarea
     // loses focus, keydown events stop reaching handleKeyEvent entirely.
-    canvas.addEventListener('blur', () => {
+    this.inputTextarea.addEventListener('blur', () => {
       if (this.container.classList.contains('active') ||
           this.container.classList.contains('split-focused')) {
         const thief = document.activeElement;
         console.warn(
-          `[TerminalPane] Canvas lost focus while active (terminal=${this.terminalId}, ` +
+          `[TerminalPane] Input lost focus while active (terminal=${this.terminalId}, ` +
           `now focused: ${thief?.tagName}${thief?.className ? '.' + thief.className : ''})`
         );
       }
@@ -242,7 +293,8 @@ export class TerminalPane {
 
   /**
    * Convert a keyboard event into the string that should be sent to the PTY.
-   * Handles control characters, special keys, and printable input.
+   * Handles control characters and special keys only. Printable characters
+   * (including dead-key compositions) are handled by the textarea's input event.
    */
   private keyToTerminalData(event: KeyboardEvent): string | null {
     // Control key combinations -> control characters
@@ -294,11 +346,9 @@ export class TerminalPane {
       case 'F12': return '\x1b[24~';
     }
 
-    // Printable characters
-    if (event.key.length === 1 && !event.ctrlKey && !event.altKey) {
-      return event.key;
-    }
-
+    // Printable characters are NOT handled here — they flow through the
+    // hidden textarea's input event, which correctly resolves dead keys
+    // (e.g. ' and " on ABNT2 keyboards) and IME compositions.
     return null;
   }
 
@@ -508,7 +558,7 @@ export class TerminalPane {
       requestAnimationFrame(() => {
         this.fit();
         this.renderer.scrollToBottom();
-        this.renderer.focus();
+        this.focusInput();
         this.fetchAndRenderSnapshot();
       });
       // Double-tap focus: some WebView2 focus changes race with RAF.
@@ -517,7 +567,7 @@ export class TerminalPane {
       // dialog dismissal, or WebView2 native frame focus events.
       setTimeout(() => {
         if (this.container.classList.contains('active')) {
-          this.renderer.focus();
+          this.focusInput();
         }
       }, 50);
     }
@@ -534,7 +584,7 @@ export class TerminalPane {
         this.fit();
         this.renderer.scrollToBottom();
         if (focused) {
-          this.renderer.focus();
+          this.focusInput();
         }
         this.fetchAndRenderSnapshot();
       });
@@ -542,7 +592,12 @@ export class TerminalPane {
   }
 
   focus() {
-    this.renderer.focus();
+    this.focusInput();
+  }
+
+  /** Focus the hidden textarea for keyboard input. */
+  private focusInput() {
+    this.inputTextarea.focus();
   }
 
   // ---- Lifecycle ----
