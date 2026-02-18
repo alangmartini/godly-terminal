@@ -9,17 +9,10 @@ name = "godly-mcp"
 path = "src/main.rs"
 
 [dependencies]
-godly-protocol = { path = "../protocol" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1", features = ["v4"] }
+godly-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = [
-    "handleapi",
-    "namedpipeapi",
-    "fileapi",
-    "errhandlingapi",
-    "winnt",
-    "winbase",
-] }
+winapi.workspace = true
