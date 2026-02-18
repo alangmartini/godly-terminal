@@ -79,20 +79,34 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 
 ## Verification Requirements
 
-**IMPORTANT**: After making any code changes, always verify the project builds and tests pass before considering work complete. Loop until all checks pass:
+**IMPORTANT**: CI runs full builds and tests on every PR. Locally, run only lightweight checks:
 
-1. **Run all tests**:
+### Local checks (required before considering work complete):
+
+1. **Cargo check** (type-check, no codegen):
    ```bash
-   cd src-tauri && cargo test -p godly-protocol && cargo test -p godly-daemon && cargo test -p godly-terminal
+   cd src-tauri && cargo check --workspace
+   ```
+
+2. **Run tests for changed crates only**:
+   ```bash
+   cd src-tauri && cargo test -p <crate-you-modified>
+   ```
+
+3. **Frontend tests**:
+   ```bash
    npm test
    ```
 
-2. **Verify production build**:
-   ```bash
-   npm run build
-   ```
+4. If any step fails, fix and repeat.
 
-3. If any step fails, fix the issues and repeat until everything passes.
+### CI checks (GitHub Actions, runs automatically on PR):
+- Full `cargo test` for all workspace crates
+- `tsc --noEmit` (TypeScript strict check)
+- `npm run build` (production Vite build)
+- Full release build of daemon/mcp/notify binaries
+
+Do NOT run `npm run build` or `cargo test --workspace` locally unless debugging a CI failure.
 
 ## Architecture Overview
 
