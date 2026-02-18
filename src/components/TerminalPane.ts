@@ -42,6 +42,11 @@ export class TerminalPane {
   // position due to a race with the async setScrollback IPC.
   private isUserScrolled = false;
 
+  // Monotonic counter to discard stale scroll responses.
+  // Incremented on every user-initiated scroll; async fetches that
+  // complete with a stale seq are discarded to prevent rollbacks.
+  private scrollSeq = 0;
+
   // Scrollback save interval (every 5 minutes)
   private scrollbackSaveInterval: number | null = null;
 
@@ -77,6 +82,11 @@ export class TerminalPane {
     // Handle wheel scroll events from the renderer
     this.renderer.setOnScroll((deltaLines) => {
       this.handleScroll(deltaLines);
+    });
+
+    // Handle absolute scroll-to events from scrollbar drag
+    this.renderer.setOnScrollTo((absoluteOffset) => {
+      this.handleScrollTo(absoluteOffset);
     });
 
     this.container = document.createElement('div');
@@ -235,23 +245,25 @@ export class TerminalPane {
     perfTracer.mark('keydown');
     const action = keybindingStore.matchAction(event);
 
-    // Scroll shortcuts: handle locally without sending to PTY
-    if (action === 'scroll.pageUp') {
+    // Scroll shortcuts: handle locally without sending to PTY.
+    // On alternate screen (vim, less, htop), pass these keys through to the app.
+    const onAlternateScreen = this.cachedSnapshot?.alternate_screen ?? false;
+    if (!onAlternateScreen && action === 'scroll.pageUp') {
       event.preventDefault();
       this.handleScroll(this.renderer.getGridSize().rows);
       return;
     }
-    if (action === 'scroll.pageDown') {
+    if (!onAlternateScreen && action === 'scroll.pageDown') {
       event.preventDefault();
       this.handleScroll(-this.renderer.getGridSize().rows);
       return;
     }
-    if (action === 'scroll.toTop') {
+    if (!onAlternateScreen && action === 'scroll.toTop') {
       event.preventDefault();
       this.handleScroll(this.totalScrollback);
       return;
     }
-    if (action === 'scroll.toBottom') {
+    if (!onAlternateScreen && action === 'scroll.toBottom') {
       event.preventDefault();
       this.handleScroll(-this.scrollbackOffset);
       return;
@@ -411,10 +423,30 @@ export class TerminalPane {
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
     this.isUserScrolled = newOffset > 0;
+    const seq = ++this.scrollSeq;
     // Scroll changes the viewport — invalidate cache and do a full snapshot
     this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, newOffset).then(() => {
-      this.fetchFullSnapshot();
+      if (seq === this.scrollSeq) {
+        this.fetchFullSnapshot();
+      }
+    });
+  }
+
+  /**
+   * Handle an absolute scroll-to request (e.g. from scrollbar drag).
+   * Sets the viewport to the given offset directly.
+   */
+  private handleScrollTo(absoluteOffset: number) {
+    const newOffset = Math.max(0, Math.round(absoluteOffset));
+    if (newOffset === this.scrollbackOffset) return;
+    this.scrollbackOffset = newOffset;
+    const seq = ++this.scrollSeq;
+    this.cachedSnapshot = null;
+    terminalService.setScrollback(this.terminalId, newOffset).then(() => {
+      if (seq === this.scrollSeq) {
+        this.fetchFullSnapshot();
+      }
     });
   }
 
@@ -423,9 +455,12 @@ export class TerminalPane {
     if (this.scrollbackOffset === 0) return;
     this.scrollbackOffset = 0;
     this.isUserScrolled = false;
+    const seq = ++this.scrollSeq;
     this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, 0).then(() => {
-      this.fetchFullSnapshot();
+      if (seq === this.scrollSeq) {
+        this.fetchFullSnapshot();
+      }
     });
   }
 
@@ -454,6 +489,7 @@ export class TerminalPane {
   private useDiffSnapshots = true;
 
   private async fetchAndRenderSnapshot() {
+    const seqBefore = this.scrollSeq;
     try {
       // Use diff snapshots when we have a cached full snapshot and diff is supported.
       if (this.cachedSnapshot && this.useDiffSnapshots) {
@@ -461,6 +497,9 @@ export class TerminalPane {
           const diff = await invoke<RichGridDiff>('get_grid_snapshot_diff', {
             terminalId: this.terminalId,
           });
+
+          // Discard stale response if the user scrolled while we were fetching
+          if (seqBefore !== this.scrollSeq) return;
 
           // Merge dirty rows into the cached snapshot
           if (diff.full_repaint) {
@@ -515,18 +554,24 @@ export class TerminalPane {
         }
       }
       // Full snapshot path (initial render, after scroll, or diff not supported)
-      await this.fetchFullSnapshot();
+      await this.fetchFullSnapshot(seqBefore);
     } catch (error) {
       console.debug('Grid snapshot fetch failed:', error);
     }
   }
 
-  /** Fetch a full grid snapshot (used for initial render and after scroll). */
-  private async fetchFullSnapshot() {
+  /**
+   * Fetch a full grid snapshot (used for initial render and after scroll).
+   * If scrollSeqAtStart is provided, the result is discarded when the user
+   * has scrolled again since the fetch started (prevents rollbacks).
+   */
+  private async fetchFullSnapshot(scrollSeqAtStart?: number) {
     try {
       const snapshot = await invoke<RichGridData>('get_grid_snapshot', {
         terminalId: this.terminalId,
       });
+      // Discard stale response if the user scrolled while we were fetching
+      if (scrollSeqAtStart !== undefined && scrollSeqAtStart !== this.scrollSeq) return;
       this.cachedSnapshot = snapshot;
       if (!this.isUserScrolled) {
         this.scrollbackOffset = snapshot.scrollback_offset;
