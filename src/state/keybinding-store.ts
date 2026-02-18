@@ -12,6 +12,7 @@ export type ActionId =
   | 'terminal.suspend'
   | 'terminal.literalNext'
   | 'clipboard.copy'
+  | 'clipboard.copyClean'
   | 'clipboard.paste'
   | 'tabs.newTerminal'
   | 'tabs.closeTerminal'
@@ -70,6 +71,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Clipboard',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'c' },
+  },
+  {
+    id: 'clipboard.copyClean',
+    label: 'Copy (Clean)',
+    category: 'Clipboard',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: true, key: 'c' },
   },
   {
     id: 'clipboard.paste',

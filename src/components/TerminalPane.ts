@@ -4,6 +4,7 @@ import { store } from '../state/store';
 import { isAppShortcut, isTerminalControlKey } from './keyboard';
 import { keybindingStore } from '../state/keybinding-store';
 import { TerminalRenderer, RichGridData, RichGridDiff } from './TerminalRenderer';
+import { showCopyDialog } from './CopyDialog';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 
@@ -190,6 +191,21 @@ export class TerminalPane {
         this.renderer.getSelectedText(this.terminalId).then((text) => {
           if (text) {
             navigator.clipboard.writeText(text);
+          }
+        });
+      }
+      return;
+    }
+
+    // Copy (Clean): open dialog with cleaned text
+    if (action === 'clipboard.copyClean') {
+      event.preventDefault();
+      if (this.renderer.hasSelection()) {
+        this.renderer.getSelectedText(this.terminalId).then((text) => {
+          if (text) {
+            showCopyDialog(text).then(() => {
+              this.renderer.focus();
+            });
           }
         });
       }
