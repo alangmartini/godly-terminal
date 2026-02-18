@@ -279,6 +279,7 @@ export class TerminalRenderer {
 
     if (!this.renderScheduled) {
       this.renderScheduled = true;
+      perfTracer.mark('render_start');
       requestAnimationFrame(() => {
         this.renderScheduled = false;
         if (this.pendingSnapshot) {
@@ -286,6 +287,8 @@ export class TerminalRenderer {
           this.pendingSnapshot = null;
           perfTracer.measure('raf_wait', 'render_start');
           this.paint();
+          perfTracer.measure('paint_duration', 'paint_start');
+          perfTracer.measure('keydown_to_paint', 'keydown');
           perfTracer.tick();
         }
       });

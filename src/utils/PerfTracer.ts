@@ -1,32 +1,80 @@
 /**
  * Performance tracer for the terminal render pipeline.
  *
- * Measures wall-clock time at each stage of the keystroke-to-paint path:
- *   keydown -> write_to_terminal IPC -> terminal-output event ->
- *   scheduleSnapshotFetch -> get_grid_snapshot IPC -> CellDataEncoder.encode ->
- *   WebGL paint
+ * Always-on profiling with negligible overhead (~1-2μs per mark/measure).
+ * Collects rolling-window samples per span for P50/P95/P99 percentiles.
  *
- * Enabled via the PERF_TRACE flag. When disabled, every method is a no-op
- * so there is zero overhead in production.
- *
- * Uses performance.mark() / performance.measure() for DevTools integration
- * and logs a summary table every `LOG_INTERVAL` frames.
+ * Uses performance.mark() / performance.measure() for DevTools integration.
+ * Data is consumed by the PerfOverlay HUD (Ctrl+Shift+P).
  */
 
-const PERF_TRACE = (globalThis as Record<string, unknown>).__PERF_TRACE === true;
-const LOG_INTERVAL = 100; // frames between summary logs
+const WINDOW_SIZE = 200; // samples per span for percentile calculation
 
-interface SpanRecord {
-  total: number;
-  count: number;
+export interface SpanStats {
+  avg: number;
   min: number;
   max: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  count: number;
+}
+
+class RollingWindow {
+  private samples: Float64Array;
+  private head = 0;
+  private size = 0;
+
+  constructor(capacity: number) {
+    this.samples = new Float64Array(capacity);
+  }
+
+  push(value: number): void {
+    this.samples[this.head] = value;
+    this.head = (this.head + 1) % this.samples.length;
+    if (this.size < this.samples.length) this.size++;
+  }
+
+  getStats(): SpanStats | null {
+    if (this.size === 0) return null;
+
+    // Copy active samples and sort for percentile calculation
+    const active = new Float64Array(this.size);
+    if (this.size < this.samples.length) {
+      active.set(this.samples.subarray(0, this.size));
+    } else {
+      // Buffer is full — copy in order from oldest to newest
+      const tail = this.samples.length - this.head;
+      active.set(this.samples.subarray(this.head, this.head + tail), 0);
+      active.set(this.samples.subarray(0, this.head), tail);
+    }
+
+    active.sort();
+
+    let total = 0;
+    for (let i = 0; i < active.length; i++) total += active[i];
+
+    return {
+      avg: total / active.length,
+      min: active[0],
+      max: active[active.length - 1],
+      p50: active[Math.floor(active.length * 0.5)],
+      p95: active[Math.floor(active.length * 0.95)],
+      p99: active[Math.min(active.length - 1, Math.floor(active.length * 0.99))],
+      count: this.size,
+    };
+  }
+
+  clear(): void {
+    this.head = 0;
+    this.size = 0;
+  }
 }
 
 class PerfTracerImpl {
-  private spans: Map<string, SpanRecord> = new Map();
-  private frameCount = 0;
+  private windows: Map<string, RollingWindow> = new Map();
   private marks: Map<string, number> = new Map();
+  private frameCount = 0;
 
   /** Place a named mark at the current instant. */
   mark(name: string): void {
@@ -54,73 +102,73 @@ class PerfTracerImpl {
       // ignore
     }
 
-    let rec = this.spans.get(spanName);
-    if (!rec) {
-      rec = { total: 0, count: 0, min: Infinity, max: -Infinity };
-      this.spans.set(spanName, rec);
-    }
-    rec.total += dur;
-    rec.count += 1;
-    if (dur < rec.min) rec.min = dur;
-    if (dur > rec.max) rec.max = dur;
-
+    this.getOrCreateWindow(spanName).push(dur);
     return dur;
   }
 
   /** Record a pre-computed duration for a span name. */
   record(spanName: string, durationMs: number): void {
-    let rec = this.spans.get(spanName);
-    if (!rec) {
-      rec = { total: 0, count: 0, min: Infinity, max: -Infinity };
-      this.spans.set(spanName, rec);
-    }
-    rec.total += durationMs;
-    rec.count += 1;
-    if (durationMs < rec.min) rec.min = durationMs;
-    if (durationMs > rec.max) rec.max = durationMs;
+    this.getOrCreateWindow(spanName).push(durationMs);
   }
 
-  /** Call once per rendered frame to trigger periodic logging. */
+  /** Call once per rendered frame to count frames. */
   tick(): void {
-    this.frameCount += 1;
-    if (this.frameCount >= LOG_INTERVAL) {
-      this.logSummary();
-      this.frameCount = 0;
-    }
+    this.frameCount++;
   }
 
-  /** Log summary table and reset accumulators. */
-  logSummary(): void {
-    if (this.spans.size === 0) return;
+  /** Get the current frame count (for FPS calculation). */
+  getFrameCount(): number {
+    return this.frameCount;
+  }
 
-    const rows: Record<string, { avg: string; min: string; max: string; count: number }> = {};
-    for (const [name, rec] of this.spans) {
-      rows[name] = {
-        avg: (rec.total / rec.count).toFixed(2) + 'ms',
-        min: rec.min.toFixed(2) + 'ms',
-        max: rec.max.toFixed(2) + 'ms',
-        count: rec.count,
-      };
+  /** Get rolling-window stats for all spans without clearing. */
+  getStats(): Map<string, SpanStats> {
+    const result = new Map<string, SpanStats>();
+    for (const [name, window] of this.windows) {
+      const stats = window.getStats();
+      if (stats) result.set(name, stats);
     }
-    console.table(rows);
-    this.spans.clear();
+    return result;
+  }
+
+  /** Get stats and reset all windows + frame counter. */
+  getAndReset(): Map<string, SpanStats> {
+    const result = this.getStats();
+    for (const window of this.windows.values()) {
+      window.clear();
+    }
+    this.frameCount = 0;
+    return result;
+  }
+
+  /** Export Chrome Trace Event Format JSON for all recorded performance measures. */
+  exportChromeTrace(): string {
+    const entries = performance.getEntriesByType('measure');
+    const events = entries
+      .filter((e) => e.name.startsWith('perf:'))
+      .map((e) => ({
+        name: e.name.replace('perf:', ''),
+        cat: 'perf',
+        ph: 'X',
+        ts: Math.round(e.startTime * 1000), // μs
+        dur: Math.round(e.duration * 1000), // μs
+        pid: 1,
+        tid: 1,
+      }));
+    return JSON.stringify({ traceEvents: events });
+  }
+
+  private getOrCreateWindow(name: string): RollingWindow {
+    let w = this.windows.get(name);
+    if (!w) {
+      w = new RollingWindow(WINDOW_SIZE);
+      this.windows.set(name, w);
+    }
+    return w;
   }
 }
 
-/** No-op implementation with identical API surface. */
-const noopTracer = {
-  mark(_name: string): void {},
-  measure(_spanName: string, _startMark: string): number { return -1; },
-  record(_spanName: string, _durationMs: number): void {},
-  tick(): void {},
-  logSummary(): void {},
-};
-
 export type PerfTracer = PerfTracerImpl;
 
-/**
- * Singleton perf tracer. Returns real implementation when
- * `globalThis.__PERF_TRACE = true` is set before module load,
- * otherwise returns a zero-cost no-op object.
- */
-export const perfTracer: PerfTracer = PERF_TRACE ? new PerfTracerImpl() : noopTracer as unknown as PerfTracer;
+/** Singleton perf tracer — always on with negligible overhead. */
+export const perfTracer: PerfTracer = new PerfTracerImpl();
