@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock @tauri-apps/api modules
+const mockInvoke = vi.fn(() => Promise.resolve());
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(() => Promise.resolve()),
+  invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
 // Capture listen callbacks so we can simulate events
@@ -40,8 +41,8 @@ describe('TerminalService', () => {
         },
       ],
       terminals: [
-        { id: 't1', workspaceId: 'ws-1', name: 'Terminal 1', shellType: { type: 'windows' }, order: 0 },
-        { id: 't2', workspaceId: 'ws-1', name: 'Terminal 2', shellType: { type: 'windows' }, order: 1 },
+        { id: 't1', workspaceId: 'ws-1', name: 'Terminal 1', processName: 'powershell', order: 0 },
+        { id: 't2', workspaceId: 'ws-1', name: 'Terminal 2', processName: 'powershell', order: 1 },
       ],
       activeWorkspaceId: 'ws-1',
       activeTerminalId: 't1',
@@ -56,22 +57,34 @@ describe('TerminalService', () => {
   });
 
   describe('terminal-closed event handling', () => {
-    // Bug A2: When a PTY exits, the daemon sends SessionClosed which the bridge
-    // translates to a 'terminal-closed' Tauri event. The service should handle
-    // this by removing the terminal from the store.
+    // When a PTY exits, the daemon sends SessionClosed which the bridge
+    // translates to a 'terminal-closed' Tauri event. The service should
+    // mark the terminal as exited (not remove it) so the tab stays visible.
 
-    it('should remove terminal from store when terminal-closed event fires', () => {
+    it('should mark terminal as exited instead of removing it', () => {
       const closedCallback = listenCallbacks.get('terminal-closed');
       expect(closedCallback).toBeDefined();
 
-      // Verify terminal exists before event
-      expect(store.getState().terminals.find(t => t.id === 't1')).toBeDefined();
+      // Verify terminal exists and is not exited before event
+      const before = store.getState().terminals.find(t => t.id === 't1');
+      expect(before).toBeDefined();
+      expect(before!.exited).toBeFalsy();
 
       // Simulate terminal-closed event from the bridge
       closedCallback!({ payload: { terminal_id: 't1' } });
 
-      // Terminal should be removed from the store
-      expect(store.getState().terminals.find(t => t.id === 't1')).toBeUndefined();
+      // Terminal should still exist but be marked as exited
+      const after = store.getState().terminals.find(t => t.id === 't1');
+      expect(after).toBeDefined();
+      expect(after!.exited).toBe(true);
+    });
+
+    it('should call close_terminal invoke to free daemon resources', () => {
+      const closedCallback = listenCallbacks.get('terminal-closed');
+      closedCallback!({ payload: { terminal_id: 't1' } });
+
+      // close_terminal should be called fire-and-forget to release daemon memory
+      expect(mockInvoke).toHaveBeenCalledWith('close_terminal', { terminalId: 't1' });
     });
 
     it('should clean up output listener when terminal-closed event fires', () => {
@@ -90,17 +103,25 @@ describe('TerminalService', () => {
       expect(outputCallback).not.toHaveBeenCalled();
     });
 
-    it('should switch active terminal when the active terminal is closed', () => {
-      // Make t1 active
-      store.setActiveTerminal('t1');
-      expect(store.getState().activeTerminalId).toBe('t1');
-
-      // Close t1 via terminal-closed event
+    it('should keep terminal in the terminals array (tab remains visible)', () => {
       const closedCallback = listenCallbacks.get('terminal-closed');
       closedCallback!({ payload: { terminal_id: 't1' } });
 
-      // Active terminal should switch to t2 (the remaining terminal in the same workspace)
-      expect(store.getState().activeTerminalId).toBe('t2');
+      // Both terminals should still be in the array
+      const terminalIds = store.getState().terminals.map(t => t.id);
+      expect(terminalIds).toContain('t1');
+      expect(terminalIds).toContain('t2');
+    });
+
+    it('should not change active terminal when a terminal exits', () => {
+      store.setActiveTerminal('t1');
+      expect(store.getState().activeTerminalId).toBe('t1');
+
+      const closedCallback = listenCallbacks.get('terminal-closed');
+      closedCallback!({ payload: { terminal_id: 't1' } });
+
+      // Active terminal should remain t1 (tab stays visible with overlay)
+      expect(store.getState().activeTerminalId).toBe('t1');
     });
 
     it('should handle terminal-closed for unknown terminal gracefully', () => {
@@ -110,15 +131,6 @@ describe('TerminalService', () => {
       expect(() => {
         closedCallback!({ payload: { terminal_id: 'nonexistent' } });
       }).not.toThrow();
-    });
-
-    it('should remove terminal from the terminals array', () => {
-      const closedCallback = listenCallbacks.get('terminal-closed');
-      closedCallback!({ payload: { terminal_id: 't1' } });
-
-      // Only t2 should remain
-      const terminalIds = store.getState().terminals.map(t => t.id);
-      expect(terminalIds).toEqual(['t2']);
     });
   });
 
