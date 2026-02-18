@@ -76,6 +76,16 @@ pub enum McpRequest {
         timeout_ms: u64,
     },
 
+    // Quick Claude (fire-and-forget idea capture)
+    QuickClaude {
+        workspace_id: String,
+        prompt: String,
+        #[serde(default)]
+        branch_name: Option<String>,
+        #[serde(default)]
+        skip_fetch: Option<bool>,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,

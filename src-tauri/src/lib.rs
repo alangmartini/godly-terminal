@@ -98,6 +98,7 @@ pub fn run() {
             commands::reconnect_sessions,
             commands::attach_session,
             commands::sync_active_terminal,
+            commands::quick_claude,
             commands::detach_all_sessions,
             commands::create_workspace,
             commands::delete_workspace,

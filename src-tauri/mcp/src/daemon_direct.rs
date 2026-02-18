@@ -460,6 +460,7 @@ impl Backend for DaemonDirectBackend {
             McpRequest::GetNotificationStatus { .. } => {
                 Ok(Self::app_only_error("get_notification_status"))
             }
+            McpRequest::QuickClaude { .. } => Ok(Self::app_only_error("quick_claude")),
         }
     }
 
