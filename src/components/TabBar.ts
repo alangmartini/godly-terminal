@@ -10,7 +10,10 @@ import {
 
 export function getDisplayName(terminal: Terminal): string {
   if (terminal.userRenamed) return terminal.name;
-  return terminal.oscTitle || terminal.name || terminal.processName || 'Terminal';
+  // Skip the generic default 'Terminal' so processName can show through.
+  // Worktree branch names and other intentional names still take priority.
+  const name = terminal.name === 'Terminal' ? '' : terminal.name;
+  return terminal.oscTitle || name || terminal.processName || 'Terminal';
 }
 
 const DRAG_THRESHOLD = 5; // px of movement before drag starts
