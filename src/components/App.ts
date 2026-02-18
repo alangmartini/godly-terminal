@@ -6,11 +6,13 @@ import { keybindingStore, formatChord } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound } from '../services/notification-sound';
 import { quotePath } from '../utils/quote-path';
+import { perfTracer } from '../utils/PerfTracer';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
 import { TabBar, getDisplayName } from './TabBar';
 import { TerminalPane } from './TerminalPane';
 import { FigmaPane } from './FigmaPane';
 import { ToastContainer } from './ToastContainer';
+import { PerfOverlay } from './PerfOverlay';
 import { onDragMove, onDragDrop } from '../state/drag-state';
 
 type BackendShellType =
@@ -76,6 +78,7 @@ export class App {
   private splitDropOverlay: HTMLElement | null = null;
   private pendingNotificationTerminalId: string | null = null;
   private pendingNotificationTimestamp: number = 0;
+  private perfOverlay: PerfOverlay | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -328,9 +331,22 @@ export class App {
       if (!action) return;
 
       switch (action) {
+        case 'debug.togglePerfOverlay': {
+          e.preventDefault();
+          if (this.perfOverlay) {
+            this.perfOverlay.destroy();
+            this.perfOverlay = null;
+          } else {
+            this.perfOverlay = new PerfOverlay();
+            this.perfOverlay.mount(document.body);
+          }
+          break;
+        }
+
         case 'tabs.newTerminal': {
           e.preventDefault();
           if (state.activeWorkspaceId) {
+            perfTracer.mark('create_terminal_start');
             const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
             let worktreeName: string | undefined;
 
@@ -352,6 +368,7 @@ export class App {
               processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
               order: 0,
             });
+            perfTracer.measure('create_terminal', 'create_terminal_start');
 
             if (workspace?.claudeCodeMode) {
               setTimeout(() => {
@@ -376,6 +393,7 @@ export class App {
 
         case 'tabs.nextTab': {
           e.preventDefault();
+          perfTracer.mark('tab_switch_start');
           const terminals = store.getWorkspaceTerminals(
             state.activeWorkspaceId || ''
           );
@@ -385,12 +403,14 @@ export class App {
             );
             const nextIndex = (currentIndex + 1) % terminals.length;
             store.setActiveTerminal(terminals[nextIndex].id);
+            perfTracer.measure('tab_switch', 'tab_switch_start');
           }
           break;
         }
 
         case 'tabs.previousTab': {
           e.preventDefault();
+          perfTracer.mark('tab_switch_start');
           const terminals = store.getWorkspaceTerminals(
             state.activeWorkspaceId || ''
           );
@@ -400,6 +420,7 @@ export class App {
             );
             const nextIndex = (currentIndex - 1 + terminals.length) % terminals.length;
             store.setActiveTerminal(terminals[nextIndex].id);
+            perfTracer.measure('tab_switch', 'tab_switch_start');
           }
           break;
         }
@@ -496,6 +517,7 @@ export class App {
   }
 
   async init() {
+    perfTracer.mark('app_init_start');
     // Initialize terminal service
     await terminalService.init();
 
@@ -707,6 +729,7 @@ export class App {
         (window as any).__app_init_error2 = String(e2);
       }
     }
+    perfTracer.measure('app_startup', 'app_init_start');
   }
 
   private async createDefaultWorkspace() {
