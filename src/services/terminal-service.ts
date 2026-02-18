@@ -81,7 +81,9 @@ class TerminalService {
       (event) => {
         const { terminal_id } = event.payload;
         this.outputListeners.delete(terminal_id);
-        store.removeTerminal(terminal_id);
+        store.updateTerminal(terminal_id, { exited: true });
+        // Free daemon session resources (fire-and-forget)
+        invoke('close_terminal', { terminalId: terminal_id }).catch(() => {});
       }
     );
 
