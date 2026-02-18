@@ -100,14 +100,16 @@ class TerminalService {
       nameOverride?: string;
     }
   ): Promise<CreateTerminalResult> {
-    // Apply global default shell when no explicit override is provided
-    const shellOverride = options?.shellTypeOverride
-      ?? terminalSettingsStore.getDefaultShell();
+    // Only send shellTypeOverride when the caller explicitly provides one.
+    // When null, the backend uses the workspace's configured shell type.
+    const shellTypeOverride = options?.shellTypeOverride
+      ? toBackendShellType(options.shellTypeOverride)
+      : null;
 
     const result = await invoke<CreateTerminalResult>('create_terminal', {
       workspaceId,
       cwdOverride: options?.cwdOverride ?? null,
-      shellTypeOverride: toBackendShellType(shellOverride),
+      shellTypeOverride,
       idOverride: options?.idOverride ?? null,
       worktreeName: options?.worktreeName ?? null,
       nameOverride: options?.nameOverride ?? null,
