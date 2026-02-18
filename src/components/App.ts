@@ -220,6 +220,16 @@ export class App {
       });
     }
 
+    // Show exited overlay on dead terminals
+    for (const terminal of state.terminals) {
+      if (terminal.exited) {
+        const pane = this.terminalPanes.get(terminal.id);
+        if (pane instanceof TerminalPane) {
+          pane.showExitedOverlay();
+        }
+      }
+    }
+
     // Clear notification badge for the now-active terminal
     if (state.activeTerminalId) {
       notificationStore.clearBadge(state.activeTerminalId);
