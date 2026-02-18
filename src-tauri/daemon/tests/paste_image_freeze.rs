@@ -191,7 +191,7 @@ impl DuplexClient {
                     continue;
                 }
 
-                match godly_protocol::read_message::<_, DaemonMessage>(&mut reader) {
+                match godly_protocol::read_daemon_message(&mut reader) {
                     Ok(Some(DaemonMessage::Response(resp))) => {
                         // Forward responses to the test thread
                         if response_tx.send(resp).is_err() {
@@ -223,7 +223,7 @@ impl DuplexClient {
 
     /// Send a request and wait for the next Response with a deadline.
     fn send_request(&mut self, request: &Request, deadline: Duration) -> Result<Response, String> {
-        godly_protocol::write_message(&mut self.write_pipe, request)
+        godly_protocol::write_request(&mut self.write_pipe, request)
             .map_err(|e| format!("Failed to write request: {}", e))?;
 
         self.response_rx
@@ -233,7 +233,7 @@ impl DuplexClient {
 
     /// Send a request without waiting for a response.
     fn send_fire_and_forget(&mut self, request: &Request) {
-        godly_protocol::write_message(&mut self.write_pipe, request)
+        godly_protocol::write_request(&mut self.write_pipe, request)
             .expect("Failed to write request");
     }
 

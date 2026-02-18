@@ -92,7 +92,7 @@ fn send_request_with_deadline(
     request: &Request,
     deadline: Duration,
 ) -> Result<(Response, Duration, u32), String> {
-    godly_protocol::write_message(pipe, request)
+    godly_protocol::write_request(pipe, request)
         .map_err(|e| format!("Failed to write request: {}", e))?;
 
     let start = Instant::now();
@@ -111,7 +111,7 @@ fn send_request_with_deadline(
             continue;
         }
 
-        let msg: DaemonMessage = godly_protocol::read_message(pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(pipe)
             .map_err(|e| format!("Read error: {}", e))?
             .ok_or_else(|| "Unexpected EOF".to_string())?;
 
@@ -128,9 +128,9 @@ fn send_request_with_deadline(
 }
 
 fn send_request(pipe: &mut std::fs::File, request: &Request) -> Response {
-    godly_protocol::write_message(pipe, request).expect("Failed to write request");
+    godly_protocol::write_request(pipe, request).expect("Failed to write request");
     loop {
-        let msg: DaemonMessage = godly_protocol::read_message(pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(pipe)
             .expect("Failed to read message")
             .expect("Unexpected EOF");
         match msg {
@@ -144,7 +144,7 @@ fn send_request(pipe: &mut std::fs::File, request: &Request) -> Response {
 fn drain_events(pipe: &mut std::fs::File) -> u32 {
     let mut drained = 0u32;
     while pipe_has_data(pipe) {
-        let msg: DaemonMessage = godly_protocol::read_message(pipe)
+        let msg: DaemonMessage = godly_protocol::read_daemon_message(pipe)
             .expect("drain read error")
             .expect("drain EOF");
         match msg {
