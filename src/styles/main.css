@@ -1481,3 +1481,51 @@ body.dragging-active * {
 .theme-import-btn {
   margin-top: 8px;
 }
+
+/* Copy dialog */
+.copy-dialog {
+  min-width: 600px;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+
+.copy-dialog-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.copy-dialog-textarea {
+  flex: 1;
+  min-height: 200px;
+  max-height: 50vh;
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  tab-size: 2;
+  margin-bottom: 12px;
+}
+
+.copy-dialog-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.copy-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.copy-dialog-line-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
