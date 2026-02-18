@@ -49,11 +49,25 @@ Never add "Generated with Claude Code" or any similar attribution message to com
 
 ## Issue Investigation Tracking
 
-For every issue you work on, create or update `docs/<issue-slug>.md` to track attempts and outcomes. Check `docs/` first to avoid repeating failed approaches from previous sessions.
+Track all bugs and investigations as **GitHub Issues**, not local docs.
 
-### Regression check
+### When starting a bug investigation:
+1. Search existing issues: `gh issue list --search "<keywords>" --state all --limit 10`
+2. If a matching closed issue exists, read it (`gh issue view N`) — the bug may have regressed
+3. Create a new issue or reopen the existing one with appropriate labels (`bug`, `performance`, `daemon`, `frontend`, `mcp`, `ux`)
+4. Comment on the issue with each approach tried, including what failed and why
 
-Before investigating a bug, scan `docs/INDEX.md` (if it exists) for resolved issues with similar symptoms. A resolved bug may have regressed — check the "Regression Risk" column. If the current bug matches a previously resolved issue, start from that doc's root cause analysis instead of investigating from scratch.
+### During investigation:
+- Add a comment for each significant attempt (what you tried, result, why it failed/succeeded)
+- Include relevant code snippets, test commands, and root cause analysis in comments
+- Use the issue body for the canonical summary (symptom, root cause, fix)
+
+### When resolved:
+- Reference the issue in the PR description with `fixes #N` (GitHub auto-closes on merge)
+- Add a final comment with regression risk assessment and relevant test commands
+
+### Reference docs
+Architecture docs, design specs, and testing guides stay in `docs/` — only investigation/bug tracking uses GitHub Issues.
 
 ## Project-Specific Workflow Notes
 
