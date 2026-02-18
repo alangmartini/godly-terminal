@@ -327,6 +327,178 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::QuickClaude {
+            workspace_id: _original_workspace_id,
+            prompt,
+            branch_name,
+            skip_fetch,
+        } => {
+            use std::collections::HashMap;
+            use uuid::Uuid;
+
+            // MCP terminals always go into the Agent workspace (separate window)
+            let workspace_id = &ensure_mcp_window(app_state, app_handle);
+
+            let terminal_id = Uuid::new_v4().to_string();
+
+            // Determine working dir via worktree (always create worktree for Quick Claude)
+            let mut worktree_path_result: Option<String> = None;
+            let mut worktree_branch_result: Option<String> = None;
+
+            let working_dir = {
+                let ws = match app_state.get_workspace(workspace_id) {
+                    Some(ws) => ws,
+                    None => {
+                        return McpResponse::Error {
+                            message: format!("Workspace {} not found", workspace_id),
+                        };
+                    }
+                };
+
+                let wsl = crate::worktree::WslConfig::from_path(&ws.folder_path);
+                match crate::worktree::get_repo_root(&ws.folder_path, wsl.as_ref()) {
+                    Ok(repo_root) => {
+                        let should_skip = skip_fetch.unwrap_or(true);
+                        match crate::worktree::create_worktree_with_options(
+                            &repo_root,
+                            &terminal_id,
+                            branch_name.as_deref(),
+                            wsl.as_ref(),
+                            should_skip,
+                        ) {
+                            Ok(wt_result) => {
+                                eprintln!(
+                                    "[mcp] Quick Claude worktree: {} (branch: {})",
+                                    wt_result.path, wt_result.branch
+                                );
+                                worktree_path_result = Some(wt_result.path.clone());
+                                worktree_branch_result = Some(wt_result.branch);
+                                Some(wt_result.path)
+                            }
+                            Err(e) => {
+                                return McpResponse::Error {
+                                    message: format!("Failed to create worktree: {}", e),
+                                };
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Not a git repo — fall back to workspace directory
+                        Some(ws.folder_path.clone())
+                    }
+                }
+            };
+
+            // Determine shell type
+            let shell = app_state
+                .get_workspace(workspace_id)
+                .map(|ws| to_protocol_shell_type(&ws.shell_type))
+                .unwrap_or(godly_protocol::ShellType::Windows);
+
+            let process_name = shell.display_name();
+
+            // Build env vars
+            let mut env_vars = HashMap::new();
+            env_vars.insert("GODLY_SESSION_ID".to_string(), terminal_id.clone());
+            env_vars.insert("GODLY_WORKSPACE_ID".to_string(), workspace_id.clone());
+
+            let request = godly_protocol::Request::CreateSession {
+                id: terminal_id.clone(),
+                shell_type: shell.clone(),
+                cwd: working_dir.clone(),
+                rows: 24,
+                cols: 80,
+                env: Some(env_vars),
+            };
+
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::SessionCreated { .. }) => {}
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error { message };
+                }
+                Ok(other) => {
+                    return McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    };
+                }
+                Err(e) => return McpResponse::Error { message: e },
+            }
+
+            // Attach
+            let attach_req = godly_protocol::Request::Attach {
+                session_id: terminal_id.clone(),
+            };
+            match daemon.send_request(&attach_req) {
+                Ok(godly_protocol::Response::Ok | godly_protocol::Response::Buffer { .. }) => {}
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error {
+                        message: format!("Failed to attach: {}", message),
+                    };
+                }
+                _ => {}
+            }
+
+            // Store metadata
+            let app_shell = from_protocol_shell_type(&shell);
+            app_state.add_session_metadata(
+                terminal_id.clone(),
+                crate::state::SessionMetadata {
+                    shell_type: app_shell,
+                    cwd: working_dir,
+                    worktree_path: worktree_path_result.clone(),
+                    worktree_branch: worktree_branch_result.clone(),
+                },
+            );
+
+            let terminal_name = worktree_branch_result
+                .clone()
+                .unwrap_or_else(|| "Quick Claude".to_string());
+
+            app_state.add_terminal(crate::state::Terminal {
+                id: terminal_id.clone(),
+                workspace_id: workspace_id.clone(),
+                name: terminal_name.clone(),
+                process_name,
+            });
+
+            auto_save.mark_dirty();
+
+            // Notify frontend
+            #[derive(serde::Serialize, Clone)]
+            struct McpTerminalCreatedPayload {
+                terminal_id: String,
+                workspace_id: String,
+            }
+            let _ = app_handle.emit(
+                "mcp-terminal-created",
+                McpTerminalCreatedPayload {
+                    terminal_id: terminal_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                },
+            );
+
+            // Spawn background thread: start dclaude → wait → write prompt
+            let daemon_bg = daemon.clone();
+            let app_handle_bg = app_handle.clone();
+            let terminal_id_bg = terminal_id.clone();
+            let prompt_bg = prompt.clone();
+            std::thread::spawn(move || {
+                crate::commands::terminal::quick_claude_background(
+                    daemon_bg,
+                    app_handle_bg,
+                    terminal_id_bg,
+                    prompt_bg,
+                    terminal_name,
+                );
+            });
+
+            McpResponse::Created {
+                id: terminal_id,
+                worktree_path: worktree_path_result,
+                worktree_branch: worktree_branch_result,
+            }
+        }
+
         McpRequest::CloseTerminal { terminal_id } => {
             // Validate terminal exists
             if !app_state.terminals.read().contains_key(terminal_id) {

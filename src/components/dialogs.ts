@@ -157,3 +157,94 @@ export function showFigmaUrlPrompt(): Promise<string | null> {
     input.focus();
   });
 }
+
+/**
+ * Quick Claude dialog: capture an idea to dispatch to a new Claude Code session.
+ * Returns { prompt, branchName? } or null if cancelled.
+ */
+export interface QuickClaudeInput {
+  prompt: string;
+  branchName?: string;
+}
+
+export function showQuickClaudeDialog(): Promise<QuickClaudeInput | null> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+
+    const title = document.createElement('div');
+    title.className = 'dialog-title';
+    title.textContent = 'Quick Claude';
+    dialog.appendChild(title);
+
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;';
+    hint.textContent = 'Ctrl+Enter to launch \u00b7 Escape to cancel';
+    dialog.appendChild(hint);
+
+    const promptArea = document.createElement('textarea');
+    promptArea.className = 'dialog-input';
+    promptArea.placeholder = 'Describe your idea...';
+    promptArea.rows = 4;
+    promptArea.style.cssText = 'resize: vertical; min-height: 80px; font-family: inherit; font-size: 13px;';
+    dialog.appendChild(promptArea);
+
+    const branchInput = document.createElement('input');
+    branchInput.type = 'text';
+    branchInput.className = 'dialog-input';
+    branchInput.placeholder = 'Branch name (optional, auto-generated if empty)';
+    branchInput.style.marginTop = '8px';
+    dialog.appendChild(branchInput);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'dialog-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dialog-btn dialog-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    buttons.appendChild(cancelBtn);
+
+    const okBtn = document.createElement('button');
+    okBtn.className = 'dialog-btn dialog-btn-primary';
+    okBtn.textContent = 'Launch';
+    buttons.appendChild(okBtn);
+
+    dialog.appendChild(buttons);
+    overlay.appendChild(dialog);
+
+    const close = () => overlay.remove();
+
+    const submit = () => {
+      const prompt = promptArea.value.trim();
+      if (!prompt) return;
+      close();
+      resolve({
+        prompt,
+        branchName: branchInput.value.trim() || undefined,
+      });
+    };
+
+    cancelBtn.onclick = () => { close(); resolve(null); };
+    okBtn.onclick = submit;
+
+    promptArea.onkeydown = (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') { close(); resolve(null); }
+    };
+
+    branchInput.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') { close(); resolve(null); }
+    };
+
+    overlay.onclick = (e) => {
+      if (e.target === overlay) { close(); resolve(null); }
+    };
+
+    document.body.appendChild(overlay);
+    promptArea.focus();
+  });
+}
