@@ -41,6 +41,30 @@ function createMockKeyboardEvent(
 }
 
 /**
+ * Mirrors keyToTerminalData from TerminalPane.ts.
+ * Returns non-null when the keydown handler would send data to the PTY.
+ */
+function keyToTerminalData(event: { key: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }): string | null {
+  if (event.ctrlKey && !event.altKey && !event.shiftKey) {
+    const key = event.key.toLowerCase();
+    if (key.length === 1 && key >= 'a' && key <= 'z') {
+      return String.fromCharCode(key.charCodeAt(0) - 96);
+    }
+  }
+  if (event.ctrlKey && event.altKey && !event.shiftKey) {
+    const key = event.key.toLowerCase();
+    if (key.length === 1 && key >= 'a' && key <= 'z') {
+      return '\x1b' + String.fromCharCode(key.charCodeAt(0) - 96);
+    }
+  }
+  if (event.altKey && !event.ctrlKey && event.key.length === 1) {
+    return '\x1b' + event.key;
+  }
+  // Special keys, function keys, etc. omitted — not needed for these tests
+  return null;
+}
+
+/**
  * Reproduces the custom key event handler logic from TerminalPane.ts.
  * This mirrors the exact decision logic so we can test it without a full
  * Canvas2D renderer + Tauri environment. Keep in sync with the source.
@@ -106,6 +130,16 @@ function simulateCustomKeyHandler(event: ReturnType<typeof createMockKeyboardEve
     type: 'keydown',
   })) {
     event.preventDefault();
+  }
+
+  // Mirror of keyToTerminalData: if it returns data, preventDefault is called.
+  // This mirrors TerminalPane.ts lines 311-318. Only runs for keydown events
+  // (handleKeyEvent is attached to the keydown listener only).
+  if (event.type === 'keydown') {
+    const data = keyToTerminalData(event);
+    if (data) {
+      event.preventDefault();
+    }
   }
 
   return {
@@ -266,6 +300,21 @@ describe('TerminalPane custom key event handler bugs', () => {
 
       expect(result.handlerReturn).toBe(true);
       expect(result.preventDefaultCalled).toBe(false);
+    });
+
+    it('Ctrl+Alt+C must not leak bare "c" to the textarea input event', () => {
+      // Bug: Ctrl+Alt+C falls through all handlers in keyToTerminalData,
+      // so event.preventDefault is never called and the textarea receives "c".
+      // The handler must return true with preventDefault called.
+      const event = createMockKeyboardEvent('c', {
+        ctrlKey: true,
+        altKey: true,
+      });
+      const result = simulateCustomKeyHandler(event);
+
+      expect(result.handlerReturn).toBe(true);
+      // Must preventDefault so the textarea doesn't fire an input event with "c"
+      expect(result.preventDefaultCalled).toBe(true);
     });
   });
 });
