@@ -44,6 +44,13 @@ function keyToTerminalData(event: {
     if (key === ' ' || event.code === 'Space') return '\x00';
   }
 
+  if (event.ctrlKey && event.altKey && !event.shiftKey) {
+    const key = event.key.toLowerCase();
+    if (key.length === 1 && key >= 'a' && key <= 'z') {
+      return '\x1b' + String.fromCharCode(key.charCodeAt(0) - 96);
+    }
+  }
+
   if (event.altKey && !event.ctrlKey && event.key.length === 1) {
     return '\x1b' + event.key;
   }
@@ -189,6 +196,45 @@ describe('Dead key support (ABNT2 keyboard quote fix)', () => {
     it('Alt+a sends ESC+a', () => {
       expect(keyToTerminalData({ key: 'a', ctrlKey: false, altKey: true, shiftKey: false }))
         .toBe('\x1ba');
+    });
+  });
+
+  describe('Bug: Ctrl+Alt+letter sends raw character instead of ESC+control char', () => {
+    // Bug: Pressing Ctrl+Alt+C types "c" because keyToTerminalData returns null
+    // for Ctrl+Alt combos. The Ctrl branch requires !altKey and the Alt branch
+    // requires !ctrlKey, so Ctrl+Alt falls through both. Since no handler calls
+    // preventDefault(), the textarea input event fires with the bare character.
+    //
+    // Standard terminal behavior: Ctrl+Alt+letter → ESC + control character
+    // e.g. Ctrl+Alt+C → \x1b\x03 (ESC + ETX)
+
+    it('Ctrl+Alt+C sends ESC + ETX (\\x1b\\x03)', () => {
+      expect(keyToTerminalData({ key: 'c', ctrlKey: true, altKey: true, shiftKey: false }))
+        .toBe('\x1b\x03');
+    });
+
+    it('Ctrl+Alt+D sends ESC + EOT (\\x1b\\x04)', () => {
+      expect(keyToTerminalData({ key: 'd', ctrlKey: true, altKey: true, shiftKey: false }))
+        .toBe('\x1b\x04');
+    });
+
+    it('Ctrl+Alt+A sends ESC + SOH (\\x1b\\x01)', () => {
+      expect(keyToTerminalData({ key: 'a', ctrlKey: true, altKey: true, shiftKey: false }))
+        .toBe('\x1b\x01');
+    });
+
+    it('Ctrl+Alt+Z sends ESC + SUB (\\x1b\\x1a)', () => {
+      expect(keyToTerminalData({ key: 'z', ctrlKey: true, altKey: true, shiftKey: false }))
+        .toBe('\x1b\x1a');
+    });
+
+    it('Ctrl+Alt+letter is handled in keydown, not textarea input', () => {
+      const result = simulateTextareaInput(
+        { key: 'c', ctrlKey: true, altKey: true, shiftKey: false },
+        null,
+      );
+      expect(result.sentToPty).toBe('\x1b\x03');
+      expect(result.source).toBe('keydown');
     });
   });
 
