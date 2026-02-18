@@ -148,9 +148,15 @@ export class TerminalRenderer {
   private hoveredUrlStartCol = -1;
   private hoveredUrlEndCol = -1;
 
+  // Scrollbar drag state
+  private isDraggingScrollbar = false;
+  private onDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
+  private onDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
+
   // Callbacks
   private onTitleChange?: (title: string) => void;
   private onScrollCallback?: (deltaLines: number) => void;
+  private onScrollToCallback?: (absoluteOffset: number) => void;
 
   constructor(theme?: Partial<TerminalTheme>) {
     this.theme = theme ? { ...themeStore.getTerminalTheme(), ...theme } : themeStore.getTerminalTheme();
@@ -252,6 +258,11 @@ export class TerminalRenderer {
   /** Set scroll callback. deltaLines > 0 = scroll up (into history), < 0 = scroll down (toward live). */
   setOnScroll(cb: (deltaLines: number) => void) {
     this.onScrollCallback = cb;
+  }
+
+  /** Set absolute scroll-to callback (used by scrollbar drag). */
+  setOnScrollTo(cb: (absoluteOffset: number) => void) {
+    this.onScrollToCallback = cb;
   }
 
   /**
@@ -366,6 +377,14 @@ export class TerminalRenderer {
     if (this.cursorBlinkInterval) {
       clearInterval(this.cursorBlinkInterval);
       this.cursorBlinkInterval = null;
+    }
+    if (this.onDocumentMouseMove) {
+      document.removeEventListener('mousemove', this.onDocumentMouseMove);
+      this.onDocumentMouseMove = null;
+    }
+    if (this.onDocumentMouseUp) {
+      document.removeEventListener('mouseup', this.onDocumentMouseUp);
+      this.onDocumentMouseUp = null;
     }
     if (this.webglRenderer) {
       this.webglRenderer.dispose();
@@ -619,6 +638,14 @@ export class TerminalRenderer {
   private setupMouseHandlers() {
     this.canvas.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return; // left button only
+
+      // Check if click is in the scrollbar hit area (right N CSS px)
+      if (this.isInScrollbarHitArea(e.clientX)) {
+        e.preventDefault();
+        this.startScrollbarDrag(e);
+        return;
+      }
+
       const { row, col } = this.pixelToGrid(e.clientX, e.clientY);
       this.selection = {
         startRow: row,
@@ -631,6 +658,9 @@ export class TerminalRenderer {
     });
 
     this.canvas.addEventListener('mousemove', (e) => {
+      // Scrollbar drag is handled by document-level listeners
+      if (this.isDraggingScrollbar) return;
+
       const { row, col } = this.pixelToGrid(e.clientX, e.clientY);
 
       if (this.isSelecting) {
@@ -647,9 +677,11 @@ export class TerminalRenderer {
       // URL hover detection
       this.detectUrlHover(row, col, e.ctrlKey);
 
-      // Update cursor style for URLs
+      // Update cursor style for URLs or scrollbar
       if (e.ctrlKey && this.hoveredUrl) {
         this.canvas.style.cursor = 'pointer';
+      } else if (this.isInScrollbarHitArea(e.clientX) && this.currentSnapshot && this.currentSnapshot.total_scrollback > 0) {
+        this.canvas.style.cursor = 'default';
       } else {
         this.canvas.style.cursor = 'default';
       }
@@ -670,6 +702,52 @@ export class TerminalRenderer {
         });
       }
     });
+  }
+
+  /** Check if a clientX coordinate is within the scrollbar hit area. */
+  private isInScrollbarHitArea(clientX: number): boolean {
+    const snap = this.currentSnapshot;
+    if (!snap || snap.total_scrollback <= 0) return false;
+    const rect = this.canvas.getBoundingClientRect();
+    const cssX = clientX - rect.left;
+    return cssX >= rect.width - TerminalRenderer.SCROLLBAR_HIT_WIDTH_CSS;
+  }
+
+  /** Start a scrollbar drag from a mousedown event. */
+  private startScrollbarDrag(e: MouseEvent) {
+    this.isDraggingScrollbar = true;
+    // Immediately jump to the clicked position
+    this.handleScrollbarDragAt(e.clientY);
+
+    this.onDocumentMouseMove = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
+      this.handleScrollbarDragAt(moveEvent.clientY);
+    };
+    this.onDocumentMouseUp = () => {
+      this.isDraggingScrollbar = false;
+      if (this.onDocumentMouseMove) {
+        document.removeEventListener('mousemove', this.onDocumentMouseMove);
+        this.onDocumentMouseMove = null;
+      }
+      if (this.onDocumentMouseUp) {
+        document.removeEventListener('mouseup', this.onDocumentMouseUp);
+        this.onDocumentMouseUp = null;
+      }
+    };
+
+    document.addEventListener('mousemove', this.onDocumentMouseMove);
+    document.addEventListener('mouseup', this.onDocumentMouseUp);
+  }
+
+  /** Convert a clientY to a scroll offset and fire the callback. */
+  private handleScrollbarDragAt(clientY: number) {
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = this.devicePixelRatio;
+    const canvasY = (clientY - rect.top) * dpr;
+    const offset = this.yToScrollOffset(canvasY);
+    if (this.onScrollToCallback) {
+      this.onScrollToCallback(offset);
+    }
   }
 
   // ---- Private: URL detection ----
@@ -736,7 +814,64 @@ export class TerminalRenderer {
     }, { passive: false });
   }
 
-  // ---- Private: Scrollbar indicator ----
+  // ---- Private: Scrollbar geometry + painting ----
+
+  /** Scrollbar hit area width in CSS pixels. */
+  private static readonly SCROLLBAR_HIT_WIDTH_CSS = 20;
+
+  /**
+   * Compute scrollbar geometry for hit testing and painting.
+   * Returns null if there is no scrollable content.
+   */
+  private getScrollbarGeometry(): {
+    trackX: number;
+    trackWidth: number;
+    trackPadding: number;
+    thumbY: number;
+    thumbHeight: number;
+    canvasHeight: number;
+    canvasWidth: number;
+    totalRange: number;
+  } | null {
+    const snap = this.currentSnapshot;
+    if (!snap || snap.total_scrollback <= 0) return null;
+
+    const dpr = this.devicePixelRatio;
+    const canvasHeight = this.canvas.height;
+    const canvasWidth = this.canvas.width;
+    const trackWidth = 6 * dpr;
+    const trackX = canvasWidth - trackWidth;
+    const trackPadding = 2 * dpr;
+
+    const totalRange = snap.total_scrollback;
+    const visibleRows = snap.dimensions.rows;
+    const totalContent = totalRange + visibleRows;
+    const thumbHeight = Math.max(20 * dpr, (visibleRows / totalContent) * (canvasHeight - trackPadding * 2));
+
+    const scrollFraction = snap.scrollback_offset / totalRange;
+    const trackHeight = canvasHeight - trackPadding * 2 - thumbHeight;
+    const thumbY = trackPadding + trackHeight * (1 - scrollFraction);
+
+    return { trackX, trackWidth, trackPadding, thumbY, thumbHeight, canvasHeight, canvasWidth, totalRange };
+  }
+
+  /**
+   * Convert a canvas-relative Y coordinate to an absolute scroll offset
+   * using the same geometry as the scrollbar.
+   */
+  private yToScrollOffset(canvasY: number): number {
+    const geo = this.getScrollbarGeometry();
+    if (!geo) return 0;
+
+    const { trackPadding, thumbHeight, canvasHeight, totalRange } = geo;
+    const trackHeight = canvasHeight - trackPadding * 2 - thumbHeight;
+    if (trackHeight <= 0) return 0;
+
+    // Clamp Y to the center of the thumb range
+    const thumbCenter = canvasY - trackPadding - thumbHeight / 2;
+    const fraction = 1 - Math.max(0, Math.min(1, thumbCenter / trackHeight));
+    return Math.round(fraction * totalRange);
+  }
 
   private paintScrollbar(snap: RichGridData) {
     if (snap.scrollback_offset <= 0 || snap.total_scrollback <= 0) return;
