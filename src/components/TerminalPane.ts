@@ -338,6 +338,16 @@ export class TerminalPane {
       if (key === ' ' || event.code === 'Space') return '\x00';
     }
 
+    // Ctrl+Alt combinations -> ESC + control character
+    // Standard terminal behavior: Ctrl+Alt+letter sends ESC followed by the
+    // control character for that letter (e.g. Ctrl+Alt+C → ESC + \x03).
+    if (event.ctrlKey && event.altKey && !event.shiftKey) {
+      const key = event.key.toLowerCase();
+      if (key.length === 1 && key >= 'a' && key <= 'z') {
+        return '\x1b' + String.fromCharCode(key.charCodeAt(0) - 96);
+      }
+    }
+
     // Alt combinations -> ESC + key
     if (event.altKey && !event.ctrlKey && event.key.length === 1) {
       return '\x1b' + event.key;
