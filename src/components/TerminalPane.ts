@@ -50,6 +50,10 @@ export class TerminalPane {
   private inputTextarea!: HTMLTextAreaElement;
   private isComposing = false;
 
+  // Exited overlay element (hidden until showExitedOverlay() is called)
+  private exitedOverlay: HTMLElement | null = null;
+  private isExited = false;
+
   constructor(terminalId: string) {
     this.terminalId = terminalId;
 
@@ -210,6 +214,13 @@ export class TerminalPane {
   // ---- Keyboard handling ----
 
   private handleKeyEvent(event: KeyboardEvent) {
+    // Block keyboard input to dead terminals (allow app shortcuts to bubble)
+    if (this.isExited) {
+      if (isAppShortcut(event)) return; // let close shortcut etc. bubble
+      event.preventDefault();
+      return;
+    }
+
     perfTracer.mark('keydown');
     const action = keybindingStore.matchAction(event);
 
@@ -635,6 +646,16 @@ export class TerminalPane {
     this.unsubscribeTheme?.();
     this.renderer.dispose();
     this.container.remove();
+  }
+
+  showExitedOverlay() {
+    if (this.isExited) return;
+    this.isExited = true;
+
+    this.exitedOverlay = document.createElement('div');
+    this.exitedOverlay.className = 'terminal-exited-overlay';
+    this.exitedOverlay.textContent = 'Process exited';
+    this.container.appendChild(this.exitedOverlay);
   }
 
   getElement(): HTMLElement {

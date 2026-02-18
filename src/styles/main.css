@@ -844,10 +844,35 @@ body.dragging-active * {
   background: var(--bg-primary);
 }
 
+/* Dead tab indicator */
+.tab.dead {
+  opacity: 0.5;
+}
+
+.tab.dead .tab-title {
+  text-decoration: line-through;
+}
+
 /* Figma tab indicator */
 .tab.figma-tab .tab-title::before {
   content: '\25C6 ';
   color: var(--accent);
+}
+
+/* Process exited overlay */
+.terminal-exited-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 /* WebGL overlay canvas for scrollbar and URL hover */

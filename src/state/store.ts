@@ -12,6 +12,7 @@ export interface Terminal {
   userRenamed?: boolean;
   paneType?: PaneType;
   figmaUrl?: string;
+  exited?: boolean;
 }
 
 export type ShellType =

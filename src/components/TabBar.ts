@@ -231,6 +231,9 @@ export class TabBar {
       tab.classList.toggle('active', isActive);
     }
 
+    // Dead tab indicator
+    tab.classList.toggle('dead', !!terminal.exited);
+
     // Split indicator: highlight tabs that are part of a split
     const state = store.getState();
     const split = state.activeWorkspaceId
@@ -280,6 +283,9 @@ export class TabBar {
     tab.className = `tab${isActive ? ' active' : ''}`;
     if (terminal.paneType === 'figma') {
       tab.classList.add('figma-tab');
+    }
+    if (terminal.exited) {
+      tab.classList.add('dead');
     }
     tab.dataset.terminalId = terminal.id;
 
