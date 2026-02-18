@@ -230,9 +230,21 @@ fn fetch_latest(repo_root: &str, wsl: Option<&WslConfig>) -> Option<String> {
 /// Fetches latest from origin before creating the worktree so it branches from the latest state.
 /// Returns a `WorktreeResult` with the path and branch name.
 pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&str>, wsl: Option<&WslConfig>) -> Result<WorktreeResult, String> {
-    // Fetch latest from origin and get the remote tracking ref to branch from.
-    // This is much faster than `git pull` because it skips the merge step entirely.
-    let start_point = fetch_latest(repo_root, wsl);
+    create_worktree_with_options(repo_root, terminal_id, custom_name, wsl, false)
+}
+
+/// Create a new worktree with configurable fetch behavior.
+/// When `skip_fetch` is true, branches from local HEAD instead of fetching from origin first.
+/// This saves 100-500ms of network latency, useful for rapid-fire workflows like Quick Claude.
+pub fn create_worktree_with_options(repo_root: &str, terminal_id: &str, custom_name: Option<&str>, wsl: Option<&WslConfig>, skip_fetch: bool) -> Result<WorktreeResult, String> {
+    let start_point = if skip_fetch {
+        eprintln!("[worktree] Skipping fetch (skip_fetch=true), branching from local HEAD");
+        None
+    } else {
+        // Fetch latest from origin and get the remote tracking ref to branch from.
+        // This is much faster than `git pull` because it skips the merge step entirely.
+        fetch_latest(repo_root, wsl)
+    };
 
     let branch_name = wt_name_from(custom_name, terminal_id);
 
