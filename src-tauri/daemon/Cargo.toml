@@ -13,43 +13,20 @@ leak-check = ["dhat"]
 
 [dependencies]
 dhat = { version = "0.3", optional = true }
-godly-protocol = { path = "../protocol" }
+godly-protocol.workspace = true
 godly-vt = { path = "../godly-vt" }
 portable-pty = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.0", features = ["v4"] }
-parking_lot = "0.12"
-tokio = { version = "1.0", features = ["full"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync", "time", "macros"] }
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = [
-    "processthreadsapi",
-    "handleapi",
-    "psapi",
-    "tlhelp32",
-    "winbase",
-    "wincon",
-    "namedpipeapi",
-    "fileapi",
-    "errhandlingapi",
-    "synchapi",
-    "timeapi",
-    "winerror",
-    "winnt",
-] }
+winapi.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
-winapi = { version = "0.3", features = [
-    "processthreadsapi",
-    "handleapi",
-    "namedpipeapi",
-    "fileapi",
-    "errhandlingapi",
-    "synchapi",
-    "winnt",
-    "jobapi2",
-] }
+winapi.workspace = true
 
 [dev-dependencies]
-godly-protocol = { path = "../protocol" }
+godly-protocol.workspace = true
