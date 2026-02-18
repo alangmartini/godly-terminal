@@ -7,6 +7,7 @@ import { TerminalRenderer, RichGridData, RichGridDiff } from './TerminalRenderer
 import { showCopyDialog } from './CopyDialog';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 
 /**
  * Terminal pane backed by the godly-vt Canvas2D renderer.
@@ -35,6 +36,11 @@ export class TerminalPane {
   // Scrollback state: tracked from the latest snapshot
   private scrollbackOffset = 0;
   private totalScrollback = 0;
+
+  // True when the user has explicitly scrolled up into history.
+  // Prevents output-triggered snapshot fetches from overwriting the scroll
+  // position due to a race with the async setScrollback IPC.
+  private isUserScrolled = false;
 
   // Scrollback save interval (every 5 minutes)
   private scrollbackSaveInterval: number | null = null;
@@ -186,11 +192,16 @@ export class TerminalPane {
 
     // Listen for terminal output events.
     // When new PTY output arrives, schedule a grid snapshot fetch.
+    // If the user has scrolled up and auto-scroll is enabled, snap back first.
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
       () => {
         perfTracer.mark('terminal_output_event');
         perfTracer.measure('keydown_to_output', 'keydown');
+        if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+          this.snapToBottom();
+          return;
+        }
         this.scheduleSnapshotFetch();
       }
     );
@@ -399,6 +410,7 @@ export class TerminalPane {
     const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
+    this.isUserScrolled = newOffset > 0;
     // Scroll changes the viewport — invalidate cache and do a full snapshot
     this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, newOffset).then(() => {
@@ -410,6 +422,7 @@ export class TerminalPane {
   private snapToBottom() {
     if (this.scrollbackOffset === 0) return;
     this.scrollbackOffset = 0;
+    this.isUserScrolled = false;
     this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, 0).then(() => {
       this.fetchFullSnapshot();
@@ -485,7 +498,13 @@ export class TerminalPane {
             }
           }
 
-          this.scrollbackOffset = diff.scrollback_offset;
+          // Only sync scroll offset from daemon when the user hasn't explicitly
+          // scrolled up. This prevents a race where output-triggered snapshot
+          // fetches return a stale offset (0) before the setScrollback IPC
+          // completes, snapping the view to bottom.
+          if (!this.isUserScrolled) {
+            this.scrollbackOffset = diff.scrollback_offset;
+          }
           this.totalScrollback = diff.total_scrollback;
           this.renderer.render(this.cachedSnapshot);
           return;
@@ -509,7 +528,9 @@ export class TerminalPane {
         terminalId: this.terminalId,
       });
       this.cachedSnapshot = snapshot;
-      this.scrollbackOffset = snapshot.scrollback_offset;
+      if (!this.isUserScrolled) {
+        this.scrollbackOffset = snapshot.scrollback_offset;
+      }
       this.totalScrollback = snapshot.total_scrollback;
       this.renderer.render(snapshot);
     } catch (error) {
