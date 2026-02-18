@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use tokio::sync::mpsc;
 
-use godly_protocol::{DaemonMessage, Event, Request, Response};
+use godly_protocol::{DaemonMessage, Event, Request, Response, read_request, write_daemon_message};
 
 use crate::debug_log::daemon_log;
 use crate::session::DaemonSession;
@@ -475,7 +475,7 @@ fn io_thread(
             PeekResult::Data => {
                 // Read the request from the pipe
                 let read_start = Instant::now();
-                match godly_protocol::read_message::<_, Request>(&mut pipe) {
+                match read_request(&mut pipe) {
                     Ok(Some(request)) => {
                         total_reads += 1;
                         let elapsed = read_start.elapsed();
@@ -506,7 +506,7 @@ fn io_thread(
                                     }
                                 };
                                 let msg = DaemonMessage::Response(response);
-                                if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                                if write_daemon_message(&mut pipe, &msg).is_err() {
                                     daemon_log!("Write error on direct Resize response, stopping");
                                     io_running.store(false, Ordering::Relaxed);
                                     break;
@@ -558,7 +558,7 @@ fn io_thread(
             match resp_rx.try_recv() {
                 Ok(msg) => {
                     let write_start = Instant::now();
-                    if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                    if write_daemon_message(&mut pipe, &msg).is_err() {
                         eprintln!("[daemon-io] Write error on response, stopping");
                         daemon_log!("Write error on response, stopping");
                         io_running.store(false, Ordering::Relaxed);
@@ -610,7 +610,7 @@ fn io_thread(
                         DaemonMessage::Response(_) => "Response", // shouldn't happen
                     };
 
-                    if godly_protocol::write_message(&mut pipe, &msg).is_err() {
+                    if write_daemon_message(&mut pipe, &msg).is_err() {
                         eprintln!("[daemon-io] Write error, stopping");
                         daemon_log!("Write error on {}, stopping", msg_kind);
                         io_running.store(false, Ordering::Relaxed);
@@ -840,7 +840,7 @@ mod tests {
         // Read from the client side — the FIRST message should be the Response
         let mut reader = std::io::BufReader::new(&client_file);
         let first_msg: DaemonMessage =
-            godly_protocol::read_message(&mut reader).unwrap().unwrap();
+            godly_protocol::read_daemon_message(&mut reader).unwrap().unwrap();
 
         // The response MUST come first, before any of the 100 events
         assert!(
