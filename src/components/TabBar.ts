@@ -244,17 +244,22 @@ export class TabBar {
     tab.classList.toggle('in-split', !!isInSplit);
 
     let titleEl = tab.querySelector('.tab-title') as HTMLElement | null;
-    // If a rename input is still in the DOM, replace it back with a span
-    if (titleEl && titleEl.tagName === 'INPUT') {
-      const span = document.createElement('span');
-      span.className = 'tab-title';
-      titleEl.replaceWith(span);
-      titleEl = span;
-    }
-    if (titleEl) {
-      const displayName = getDisplayName(terminal);
-      if (titleEl.textContent !== displayName) {
-        titleEl.textContent = displayName;
+    // If the user is actively renaming this tab, leave the input alone
+    if (titleEl && titleEl.tagName === 'INPUT' && titleEl.classList.contains('editing')) {
+      // Skip title update — user is actively renaming
+    } else {
+      // If a rename input is still in the DOM (stale), replace it back with a span
+      if (titleEl && titleEl.tagName === 'INPUT') {
+        const span = document.createElement('span');
+        span.className = 'tab-title';
+        titleEl.replaceWith(span);
+        titleEl = span;
+      }
+      if (titleEl) {
+        const displayName = getDisplayName(terminal);
+        if (titleEl.textContent !== displayName) {
+          titleEl.textContent = displayName;
+        }
       }
     }
 
@@ -311,9 +316,10 @@ export class TabBar {
     };
     tab.appendChild(closeBtn);
 
-    // Click to activate (suppress if drag just ended)
-    tab.onclick = () => {
+    // Click to activate (suppress if drag just ended or rename in progress)
+    tab.onclick = (e) => {
       if (Date.now() - this._lastDragEndTime < 100) return;
+      if ((e.target as HTMLElement).classList.contains('editing')) return;
       store.setActiveTerminal(terminal.id);
     };
 
@@ -416,6 +422,7 @@ export class TabBar {
     const finishRename = async () => {
       if (finished) return;
       finished = true;
+      input.classList.remove('editing');
       const newName = input.value.trim();
       if (newName) {
         await terminalService.renameTerminal(terminal.id, newName);
@@ -431,6 +438,7 @@ export class TabBar {
         input.blur();
       } else if (e.key === 'Escape') {
         finished = true;
+        input.classList.remove('editing');
         this.render();
       }
     };
