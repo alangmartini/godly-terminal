@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter};
 
-use godly_protocol::{DaemonMessage, Event, Request, Response};
+use godly_protocol::{DaemonMessage, Event, Request, Response, read_daemon_message, write_request};
 
 // ── Non-blocking event emitter ──────────────────────────────────────────
 
@@ -478,7 +478,7 @@ impl DaemonBridge {
                             // Read the message
                             update_phase(&health, PHASE_READ);
                             let read_start = Instant::now();
-                            match godly_protocol::read_message::<_, DaemonMessage>(&mut reader) {
+                            match read_daemon_message(&mut reader) {
                                 Ok(Some(DaemonMessage::Event(event))) => {
                                     total_events += 1;
                                     events_this_iteration += 1;
@@ -553,7 +553,7 @@ impl DaemonBridge {
                         update_phase(&health, PHASE_WRITE);
                         let write_start = Instant::now();
                         // Write the request to the pipe
-                        match godly_protocol::write_message(&mut writer, &bridge_req.request) {
+                        match write_request(&mut writer, &bridge_req.request) {
                             Ok(()) => {
                                 total_requests_sent += 1;
                                 did_work = true;
