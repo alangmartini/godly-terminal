@@ -69,6 +69,15 @@ function simulateCustomKeyHandler(event: ReturnType<typeof createMockKeyboardEve
     };
   }
 
+  if (action === 'clipboard.copyClean') {
+    event.preventDefault();
+    return {
+      handlerReturn: false,
+      preventDefaultCalled: event.preventDefaultCalled,
+      pasteTriggered: false,
+    };
+  }
+
   if (action === 'clipboard.paste') {
     event.preventDefault();
     pasteTriggered = true;
@@ -187,6 +196,36 @@ describe('TerminalPane custom key event handler bugs', () => {
 
       expect(result.handlerReturn).toBe(true);
       expect(result.preventDefaultCalled).toBe(true);
+    });
+  });
+
+  describe('clipboard.copyClean (Ctrl+Shift+Alt+C)', () => {
+    it('must call preventDefault and return false', () => {
+      const event = createMockKeyboardEvent('C', {
+        ctrlKey: true,
+        shiftKey: true,
+        altKey: true,
+      });
+      const result = simulateCustomKeyHandler(event);
+
+      expect(result.handlerReturn).toBe(false);
+      expect(result.preventDefaultCalled).toBe(true);
+      expect(result.pasteTriggered).toBe(false);
+    });
+
+    it('does not conflict with clipboard.copy (Ctrl+Shift+C)', () => {
+      const copyEvent = createMockKeyboardEvent('C', {
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      const copyCleanEvent = createMockKeyboardEvent('C', {
+        ctrlKey: true,
+        shiftKey: true,
+        altKey: true,
+      });
+
+      expect(keybindingStore.matchAction(copyEvent)).toBe('clipboard.copy');
+      expect(keybindingStore.matchAction(copyCleanEvent)).toBe('clipboard.copyClean');
     });
   });
 
