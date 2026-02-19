@@ -165,9 +165,17 @@ export function showFigmaUrlPrompt(): Promise<string | null> {
 export interface QuickClaudeInput {
   prompt: string;
   branchName?: string;
+  workspaceId: string;
 }
 
-export function showQuickClaudeDialog(): Promise<QuickClaudeInput | null> {
+export interface QuickClaudeOptions {
+  workspaces: { id: string; name: string }[];
+  activeWorkspaceId: string;
+}
+
+const QUICK_CLAUDE_WORKSPACE_KEY = 'quick-claude-last-workspace';
+
+export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<QuickClaudeInput | null> {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'dialog-overlay';
@@ -184,6 +192,20 @@ export function showQuickClaudeDialog(): Promise<QuickClaudeInput | null> {
     hint.style.cssText = 'font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;';
     hint.textContent = 'Ctrl+Enter to launch \u00b7 Escape to cancel';
     dialog.appendChild(hint);
+
+    const workspaceSelect = document.createElement('select');
+    workspaceSelect.className = 'dialog-input';
+    workspaceSelect.style.marginBottom = '8px';
+    for (const ws of options.workspaces) {
+      const opt = document.createElement('option');
+      opt.value = ws.id;
+      opt.textContent = ws.name;
+      workspaceSelect.appendChild(opt);
+    }
+    const savedId = localStorage.getItem(QUICK_CLAUDE_WORKSPACE_KEY);
+    const validSaved = savedId && options.workspaces.some(ws => ws.id === savedId);
+    workspaceSelect.value = validSaved ? savedId : options.activeWorkspaceId;
+    dialog.appendChild(workspaceSelect);
 
     const promptArea = document.createElement('textarea');
     promptArea.className = 'dialog-input';
@@ -220,10 +242,12 @@ export function showQuickClaudeDialog(): Promise<QuickClaudeInput | null> {
     const submit = () => {
       const prompt = promptArea.value.trim();
       if (!prompt) return;
+      localStorage.setItem(QUICK_CLAUDE_WORKSPACE_KEY, workspaceSelect.value);
       close();
       resolve({
         prompt,
         branchName: branchInput.value.trim() || undefined,
+        workspaceId: workspaceSelect.value,
       });
     };
 
