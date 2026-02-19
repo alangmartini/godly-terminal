@@ -20,6 +20,9 @@ pub enum EmitPayload {
     /// via IPC instead. Omitting data avoids serializing potentially 65KB+
     /// binary payloads as JSON arrays on every chunk.
     TerminalOutput { terminal_id: String },
+    /// Pushed grid diff from the daemon — frontend can apply directly without
+    /// an IPC round-trip. Suppresses TerminalOutput for the same terminal.
+    TerminalGridDiff { terminal_id: String, diff: godly_protocol::types::RichGridDiff },
     TerminalClosed { terminal_id: String },
     ProcessChanged { terminal_id: String, process_name: String },
 }
@@ -49,19 +52,29 @@ impl EventEmitter {
             .spawn(move || {
                 while let Ok(first) = rx.recv() {
                     // Drain all immediately-available events and coalesce
-                    // TerminalOutput notifications per terminal. Non-output
-                    // events (closed, process-changed) are emitted in order.
+                    // per terminal. GridDiff events supersede TerminalOutput
+                    // for the same terminal (the diff carries the data directly).
+                    use std::collections::HashMap;
                     let mut output_terminals: HashSet<String> = HashSet::new();
+                    let mut diff_terminals: HashMap<String, godly_protocol::types::RichGridDiff> = HashMap::new();
                     let mut other_events: Vec<EmitPayload> = Vec::new();
 
-                    Self::classify_payload(first, &mut output_terminals, &mut other_events);
+                    Self::classify_payload(first, &mut output_terminals, &mut diff_terminals, &mut other_events);
 
                     // Drain any pending events without blocking
                     while let Ok(payload) = rx.try_recv() {
-                        Self::classify_payload(payload, &mut output_terminals, &mut other_events);
+                        Self::classify_payload(payload, &mut output_terminals, &mut diff_terminals, &mut other_events);
                     }
 
-                    // Emit one notification per terminal that had output
+                    // Emit GridDiff for terminals that have one (suppresses TerminalOutput)
+                    for (terminal_id, diff) in diff_terminals.drain() {
+                        output_terminals.remove(&terminal_id);
+                        Self::do_emit(
+                            &app_handle,
+                            EmitPayload::TerminalGridDiff { terminal_id, diff },
+                        );
+                    }
+                    // Emit TerminalOutput for terminals without a diff (fallback pull path)
                     for terminal_id in output_terminals {
                         Self::do_emit(
                             &app_handle,
@@ -80,16 +93,25 @@ impl EventEmitter {
         Self { tx, dropped }
     }
 
-    /// Classify a payload as either a terminal output (coalesced by terminal_id)
-    /// or a non-output event (preserved in order).
+    /// Classify a payload: terminal output (coalesced), grid diff (merged),
+    /// or non-output event (preserved in order).
     fn classify_payload(
         payload: EmitPayload,
         output_terminals: &mut HashSet<String>,
+        diff_terminals: &mut std::collections::HashMap<String, godly_protocol::types::RichGridDiff>,
         other_events: &mut Vec<EmitPayload>,
     ) {
         match payload {
             EmitPayload::TerminalOutput { terminal_id } => {
                 output_terminals.insert(terminal_id);
+            }
+            EmitPayload::TerminalGridDiff { terminal_id, diff } => {
+                match diff_terminals.entry(terminal_id) {
+                    std::collections::hash_map::Entry::Vacant(e) => { e.insert(diff); }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        merge_diffs(e.get_mut(), diff);
+                    }
+                }
             }
             other => other_events.push(other),
         }
@@ -124,6 +146,15 @@ impl EventEmitter {
                     "terminal-output",
                     serde_json::json!({
                         "terminal_id": terminal_id,
+                    }),
+                );
+            }
+            EmitPayload::TerminalGridDiff { terminal_id, diff } => {
+                let _ = app_handle.emit(
+                    "terminal-grid-diff",
+                    serde_json::json!({
+                        "terminal_id": terminal_id,
+                        "diff": diff,
                     }),
                 );
             }
@@ -718,11 +749,61 @@ fn peek_pipe(_handle: isize) -> PeekResult {
     PeekResult::Empty
 }
 
+/// Merge a newer diff into an existing one for the same terminal.
+/// Takes the newer diff's metadata (cursor, dimensions, etc.) and unions dirty rows.
+fn merge_diffs(existing: &mut godly_protocol::types::RichGridDiff, newer: godly_protocol::types::RichGridDiff) {
+    if newer.full_repaint {
+        *existing = newer;
+        return;
+    }
+    if existing.full_repaint {
+        // Keep existing rows but update metadata and merge newer rows
+        existing.cursor = newer.cursor;
+        existing.dimensions = newer.dimensions;
+        existing.alternate_screen = newer.alternate_screen;
+        existing.cursor_hidden = newer.cursor_hidden;
+        existing.scrollback_offset = newer.scrollback_offset;
+        existing.total_scrollback = newer.total_scrollback;
+        if !newer.title.is_empty() {
+            existing.title = newer.title;
+        }
+        for (idx, row) in newer.dirty_rows {
+            if let Some(pos) = existing.dirty_rows.iter().position(|(i, _)| *i == idx) {
+                existing.dirty_rows[pos] = (idx, row);
+            } else {
+                existing.dirty_rows.push((idx, row));
+            }
+        }
+        return;
+    }
+    // Both partial: merge dirty rows and take newer metadata
+    for (idx, row) in newer.dirty_rows {
+        if let Some(pos) = existing.dirty_rows.iter().position(|(i, _)| *i == idx) {
+            existing.dirty_rows[pos] = (idx, row);
+        } else {
+            existing.dirty_rows.push((idx, row));
+        }
+    }
+    existing.cursor = newer.cursor;
+    existing.dimensions = newer.dimensions;
+    existing.alternate_screen = newer.alternate_screen;
+    existing.cursor_hidden = newer.cursor_hidden;
+    existing.scrollback_offset = newer.scrollback_offset;
+    existing.total_scrollback = newer.total_scrollback;
+    if !newer.title.is_empty() {
+        existing.title = newer.title;
+    }
+}
+
 /// Convert a protocol Event into an EmitPayload for the non-blocking emitter channel.
 fn event_to_payload(event: Event) -> EmitPayload {
     match event {
         Event::Output { session_id, .. } => EmitPayload::TerminalOutput {
             terminal_id: session_id,
+        },
+        Event::GridDiff { session_id, diff } => EmitPayload::TerminalGridDiff {
+            terminal_id: session_id,
+            diff,
         },
         Event::SessionClosed { session_id } => EmitPayload::TerminalClosed {
             terminal_id: session_id,
