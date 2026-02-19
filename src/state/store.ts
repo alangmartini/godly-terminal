@@ -168,17 +168,23 @@ class Store {
   }
 
   // Terminal operations
-  addTerminal(terminal: Terminal) {
+  addTerminal(terminal: Terminal, opts?: { background?: boolean }) {
     const workspaceTerminals = this.state.terminals.filter(
       t => t.workspaceId === terminal.workspaceId
     );
     const order = workspaceTerminals.length;
 
-    this.lastActiveTerminalByWorkspace.set(terminal.workspaceId, terminal.id);
-    this.setState({
-      terminals: [...this.state.terminals, { ...terminal, order }],
-      activeTerminalId: terminal.id,
-    });
+    if (opts?.background) {
+      this.setState({
+        terminals: [...this.state.terminals, { ...terminal, order }],
+      });
+    } else {
+      this.lastActiveTerminalByWorkspace.set(terminal.workspaceId, terminal.id);
+      this.setState({
+        terminals: [...this.state.terminals, { ...terminal, order }],
+        activeTerminalId: terminal.id,
+      });
+    }
   }
 
   updateTerminal(id: string, updates: Partial<Terminal>) {
