@@ -5,7 +5,7 @@
 import { rename, unlink } from 'fs/promises';
 import { join } from 'path';
 
-const BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe'];
+const BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe', 'godly-terminal.exe'];
 const TARGET_DIR = join(import.meta.dirname, '..', 'src-tauri', 'target');
 // Only unlock the requested profile. Default to 'debug' to avoid destroying
 // release binaries that Tauri's build.rs needs for resource path validation.
