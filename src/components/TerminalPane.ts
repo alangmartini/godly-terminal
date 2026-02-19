@@ -89,6 +89,11 @@ export class TerminalPane {
       this.handleScrollTo(absoluteOffset);
     });
 
+    // When the user finishes a drag selection, catch up with any missed output
+    this.renderer.setOnSelectionEnd(() => {
+      this.fetchAndRenderSnapshot();
+    });
+
     this.container = document.createElement('div');
     this.container.className = 'terminal-pane';
     this.container.dataset.terminalId = terminalId;
@@ -208,6 +213,9 @@ export class TerminalPane {
       () => {
         perfTracer.mark('terminal_output_event');
         perfTracer.measure('keydown_to_output', 'keydown');
+        // Freeze display while the user is dragging to select text.
+        // Output is still received by the daemon; we catch up on mouseup.
+        if (this.renderer.isActivelySelecting()) return;
         if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
           this.snapToBottom();
           return;
@@ -322,6 +330,12 @@ export class TerminalPane {
     if (event.shiftKey && !event.ctrlKey && event.key === 'Enter') {
       event.preventDefault();
       terminalService.writeToTerminal(this.terminalId, '\x1b[13;2u');
+      return;
+    }
+
+    // Ignore modifier-only keypresses — they aren't terminal input and must not
+    // trigger snap-to-bottom (e.g. pressing Ctrl before Ctrl+C to copy).
+    if (event.key === 'Control' || event.key === 'Shift' || event.key === 'Alt' || event.key === 'Meta') {
       return;
     }
 
