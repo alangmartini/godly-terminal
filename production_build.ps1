@@ -12,17 +12,6 @@ function Assert-ExitCode {
     }
 }
 
-# ── Kill running daemon so binaries aren't locked ────────────────────────
-
-Write-Step "Stopping running godly-daemon instances..."
-$daemon = Get-Process -Name "godly-daemon" -ErrorAction SilentlyContinue
-if ($daemon) {
-    $daemon | Stop-Process -Force
-    Write-Ok "Killed $($daemon.Count) daemon process(es)"
-} else {
-    Write-Ok "No running daemon found"
-}
-
 # ── Switch to master and pull latest ─────────────────────────────────────
 
 Write-Step "Switching to master..."
