@@ -1,0 +1,10 @@
+# Tauri dev watcher exclusions
+# Without this file, the Tauri CLI's built-in ignore patterns (target/,
+# node_modules/, gen/, etc.) are NOT loaded — causing the watcher to detect
+# cargo build artifacts in target/ and trigger an infinite rebuild loop.
+
+target/
+node_modules/
+gen/
+Cargo.lock
+*.pdb
