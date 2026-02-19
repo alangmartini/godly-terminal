@@ -131,12 +131,19 @@ impl ProcessMonitor {
 
 #[cfg(windows)]
 fn get_foreground_process(parent_pid: u32) -> Option<String> {
-    let child_pid = find_deepest_child(parent_pid)?;
+    let child_pid = find_direct_child(parent_pid)?;
     get_process_name(child_pid)
 }
 
+/// Find the direct child of the given process. Returns the first child PID,
+/// or the parent PID itself if it has no children.
+///
+/// Previous implementation (`find_deepest_child`) recursed to the deepest leaf
+/// in the process tree, which caused it to pick up background helper processes
+/// (e.g. MCP servers spawned by Claude Code) instead of the interactive process
+/// the user actually launched.
 #[cfg(windows)]
-fn find_deepest_child(parent_pid: u32) -> Option<u32> {
+fn find_direct_child(parent_pid: u32) -> Option<u32> {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot.is_null() {
@@ -146,12 +153,13 @@ fn find_deepest_child(parent_pid: u32) -> Option<u32> {
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as DWORD;
 
-        let mut children: Vec<u32> = Vec::new();
+        let mut child: Option<u32> = None;
 
         if Process32FirstW(snapshot, &mut entry) != FALSE {
             loop {
                 if entry.th32ParentProcessID == parent_pid {
-                    children.push(entry.th32ProcessID);
+                    child = Some(entry.th32ProcessID);
+                    break;
                 }
                 if Process32NextW(snapshot, &mut entry) == FALSE {
                     break;
@@ -161,14 +169,7 @@ fn find_deepest_child(parent_pid: u32) -> Option<u32> {
 
         CloseHandle(snapshot);
 
-        if children.is_empty() {
-            Some(parent_pid)
-        } else {
-            children
-                .into_iter()
-                .filter_map(|pid| find_deepest_child(pid))
-                .next()
-        }
+        Some(child.unwrap_or(parent_pid))
     }
 }
 
