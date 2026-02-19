@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { store, ShellType } from '../state/store';
 import { perfTracer } from '../utils/PerfTracer';
+import type { RichGridDiff } from '../components/TerminalRenderer';
 
 
 // Backend shell type format - matches Rust serde externally tagged enum
@@ -30,6 +31,11 @@ export interface ProcessChangedPayload {
   process_name: string;
 }
 
+export interface TerminalGridDiffPayload {
+  terminal_id: string;
+  diff: RichGridDiff;
+}
+
 export interface TerminalClosedPayload {
   terminal_id: string;
 }
@@ -55,6 +61,7 @@ export interface SessionInfo {
 
 class TerminalService {
   private outputListeners: Map<string, () => void> = new Map();
+  private gridDiffListeners: Map<string, (diff: RichGridDiff) => void> = new Map();
   private unlistenFns: UnlistenFn[] = [];
 
   async init() {
@@ -65,6 +72,17 @@ class TerminalService {
         const listener = this.outputListeners.get(terminal_id);
         if (listener) {
           listener();
+        }
+      }
+    );
+
+    const unlistenGridDiff = await listen<TerminalGridDiffPayload>(
+      'terminal-grid-diff',
+      (event) => {
+        const { terminal_id, diff } = event.payload;
+        const listener = this.gridDiffListeners.get(terminal_id);
+        if (listener) {
+          listener(diff);
         }
       }
     );
@@ -88,7 +106,7 @@ class TerminalService {
       }
     );
 
-    this.unlistenFns.push(unlistenOutput, unlistenProcess, unlistenClosed);
+    this.unlistenFns.push(unlistenOutput, unlistenGridDiff, unlistenProcess, unlistenClosed);
   }
 
   async createTerminal(
@@ -184,9 +202,15 @@ class TerminalService {
     return () => this.outputListeners.delete(terminalId);
   }
 
+  onTerminalGridDiff(terminalId: string, callback: (diff: RichGridDiff) => void) {
+    this.gridDiffListeners.set(terminalId, callback);
+    return () => this.gridDiffListeners.delete(terminalId);
+  }
+
   destroy() {
     this.unlistenFns.forEach(fn => fn());
     this.outputListeners.clear();
+    this.gridDiffListeners.clear();
   }
 }
 

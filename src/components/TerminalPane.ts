@@ -23,6 +23,7 @@ export class TerminalPane {
   private resizeObserver: ResizeObserver;
   private resizeRAF: number | null = null;
   private unsubscribeOutput: (() => void) | null = null;
+  private unsubscribeGridDiff: (() => void) | null = null;
   private unsubscribeTheme: (() => void) | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
@@ -53,6 +54,9 @@ export class TerminalPane {
   // Cached full snapshot for differential updates.
   // null until first full snapshot is received.
   private cachedSnapshot: RichGridData | null = null;
+
+  // Pending render scheduled via requestAnimationFrame (for pushed diffs).
+  private renderRAF: number | null = null;
 
   // Hidden textarea for keyboard input (handles dead keys, IME composition).
   // Canvas elements don't support text composition, so dead keys (e.g. quote
@@ -205,8 +209,25 @@ export class TerminalPane {
       }
     });
 
-    // Listen for terminal output events.
-    // When new PTY output arrives, schedule a grid snapshot fetch.
+    // Listen for pushed grid diffs from the daemon.
+    // When a diff arrives, apply it directly to the cached snapshot and render
+    // without an IPC round-trip. Falls back to pull path if no cache exists.
+    this.unsubscribeGridDiff = terminalService.onTerminalGridDiff(
+      this.terminalId,
+      (diff) => {
+        perfTracer.mark('terminal_grid_diff_event');
+        perfTracer.measure('keydown_to_diff', 'keydown');
+        if (this.renderer.isActivelySelecting()) return;
+        if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+          this.snapToBottom();
+          return;
+        }
+        this.applyPushedDiff(diff);
+      }
+    );
+
+    // Listen for terminal output events (fallback pull path).
+    // When new PTY output arrives without a pushed diff, schedule a grid snapshot fetch.
     // If the user has scrolled up and auto-scroll is enabled, snap back first.
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
@@ -617,6 +638,73 @@ export class TerminalPane {
     }
   }
 
+  /**
+   * Apply a pushed grid diff directly to the cached snapshot and schedule render.
+   * If no cached snapshot exists yet, falls back to the pull path (full fetch).
+   */
+  private applyPushedDiff(diff: RichGridDiff) {
+    if (!this.cachedSnapshot) {
+      this.scheduleSnapshotFetch();
+      return;
+    }
+
+    if (diff.full_repaint) {
+      const rows: RichGridData['rows'] = this.cachedSnapshot.rows;
+      while (rows.length < diff.dimensions.rows) {
+        rows.push({ cells: [], wrapped: false });
+      }
+      rows.length = diff.dimensions.rows;
+      for (const [rowIdx, rowData] of diff.dirty_rows) {
+        rows[rowIdx] = rowData;
+      }
+      this.cachedSnapshot = {
+        rows,
+        cursor: diff.cursor,
+        dimensions: diff.dimensions,
+        alternate_screen: diff.alternate_screen,
+        cursor_hidden: diff.cursor_hidden,
+        title: diff.title,
+        scrollback_offset: diff.scrollback_offset,
+        total_scrollback: diff.total_scrollback,
+      };
+    } else {
+      for (const [rowIdx, rowData] of diff.dirty_rows) {
+        if (rowIdx < this.cachedSnapshot.rows.length) {
+          this.cachedSnapshot.rows[rowIdx] = rowData;
+        }
+      }
+      this.cachedSnapshot.cursor = diff.cursor;
+      this.cachedSnapshot.cursor_hidden = diff.cursor_hidden;
+      this.cachedSnapshot.scrollback_offset = diff.scrollback_offset;
+      this.cachedSnapshot.total_scrollback = diff.total_scrollback;
+      this.cachedSnapshot.alternate_screen = diff.alternate_screen;
+      if (diff.title) {
+        this.cachedSnapshot.title = diff.title;
+      }
+    }
+
+    if (!this.isUserScrolled) {
+      this.scrollbackOffset = diff.scrollback_offset;
+    }
+    this.totalScrollback = diff.total_scrollback;
+
+    this.scheduleRender();
+  }
+
+  /**
+   * Schedule a render via requestAnimationFrame. Multiple calls within the
+   * same frame collapse into a single render.
+   */
+  private scheduleRender() {
+    if (this.renderRAF !== null) return;
+    this.renderRAF = requestAnimationFrame(() => {
+      this.renderRAF = null;
+      if (this.cachedSnapshot) {
+        this.renderer.render(this.cachedSnapshot);
+      }
+    });
+  }
+
   // ---- Scrollback ----
 
   private startScrollbackSaveInterval() {
@@ -749,9 +837,16 @@ export class TerminalPane {
     if (this.scrollbackSaveInterval) {
       clearInterval(this.scrollbackSaveInterval);
     }
+    if (this.renderRAF !== null) {
+      cancelAnimationFrame(this.renderRAF);
+      this.renderRAF = null;
+    }
     this.resizeObserver.disconnect();
     if (this.unsubscribeOutput) {
       this.unsubscribeOutput();
+    }
+    if (this.unsubscribeGridDiff) {
+      this.unsubscribeGridDiff();
     }
     this.unsubscribeTheme?.();
     this.renderer.dispose();
