@@ -376,34 +376,52 @@ export class TerminalPane {
       return '\x1b' + event.key;
     }
 
+    // CSI modifier parameter for special keys:
+    // 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (ctrl ? 4 : 0)
+    // mod=1 means no modifiers; mod>1 triggers the extended CSI format.
+    const mod = 1
+      + (event.shiftKey ? 1 : 0)
+      + (event.altKey ? 2 : 0)
+      + (event.ctrlKey ? 4 : 0);
+
     // Special keys
     switch (event.key) {
       case 'Enter': return '\r';
       case 'Backspace': return '\x7f';
       case 'Tab': return '\t';
       case 'Escape': return '\x1b';
-      case 'Delete': return '\x1b[3~';
-      case 'ArrowUp': return '\x1b[A';
-      case 'ArrowDown': return '\x1b[B';
-      case 'ArrowRight': return '\x1b[C';
-      case 'ArrowLeft': return '\x1b[D';
-      case 'Home': return '\x1b[H';
-      case 'End': return '\x1b[F';
-      case 'PageUp': return '\x1b[5~';
-      case 'PageDown': return '\x1b[6~';
-      case 'Insert': return '\x1b[2~';
-      case 'F1': return '\x1bOP';
-      case 'F2': return '\x1bOQ';
-      case 'F3': return '\x1bOR';
-      case 'F4': return '\x1bOS';
-      case 'F5': return '\x1b[15~';
-      case 'F6': return '\x1b[17~';
-      case 'F7': return '\x1b[18~';
-      case 'F8': return '\x1b[19~';
-      case 'F9': return '\x1b[20~';
-      case 'F10': return '\x1b[21~';
-      case 'F11': return '\x1b[23~';
-      case 'F12': return '\x1b[24~';
+
+      // Arrow keys: \x1b[X or \x1b[1;{mod}X
+      case 'ArrowUp':    return mod > 1 ? `\x1b[1;${mod}A` : '\x1b[A';
+      case 'ArrowDown':  return mod > 1 ? `\x1b[1;${mod}B` : '\x1b[B';
+      case 'ArrowRight': return mod > 1 ? `\x1b[1;${mod}C` : '\x1b[C';
+      case 'ArrowLeft':  return mod > 1 ? `\x1b[1;${mod}D` : '\x1b[D';
+
+      // Home/End: \x1b[H/F or \x1b[1;{mod}H/F
+      case 'Home': return mod > 1 ? `\x1b[1;${mod}H` : '\x1b[H';
+      case 'End':  return mod > 1 ? `\x1b[1;${mod}F` : '\x1b[F';
+
+      // Tilde keys: \x1b[{num}~ or \x1b[{num};{mod}~
+      case 'Delete':   return mod > 1 ? `\x1b[3;${mod}~` : '\x1b[3~';
+      case 'PageUp':   return mod > 1 ? `\x1b[5;${mod}~` : '\x1b[5~';
+      case 'PageDown': return mod > 1 ? `\x1b[6;${mod}~` : '\x1b[6~';
+      case 'Insert':   return mod > 1 ? `\x1b[2;${mod}~` : '\x1b[2~';
+
+      // F1-F4: SS3 without modifiers, CSI with modifiers
+      case 'F1': return mod > 1 ? `\x1b[1;${mod}P` : '\x1bOP';
+      case 'F2': return mod > 1 ? `\x1b[1;${mod}Q` : '\x1bOQ';
+      case 'F3': return mod > 1 ? `\x1b[1;${mod}R` : '\x1bOR';
+      case 'F4': return mod > 1 ? `\x1b[1;${mod}S` : '\x1bOS';
+
+      // F5-F12: \x1b[{num}~ or \x1b[{num};{mod}~
+      case 'F5':  return mod > 1 ? `\x1b[15;${mod}~` : '\x1b[15~';
+      case 'F6':  return mod > 1 ? `\x1b[17;${mod}~` : '\x1b[17~';
+      case 'F7':  return mod > 1 ? `\x1b[18;${mod}~` : '\x1b[18~';
+      case 'F8':  return mod > 1 ? `\x1b[19;${mod}~` : '\x1b[19~';
+      case 'F9':  return mod > 1 ? `\x1b[20;${mod}~` : '\x1b[20~';
+      case 'F10': return mod > 1 ? `\x1b[21;${mod}~` : '\x1b[21~';
+      case 'F11': return mod > 1 ? `\x1b[23;${mod}~` : '\x1b[23~';
+      case 'F12': return mod > 1 ? `\x1b[24;${mod}~` : '\x1b[24~';
     }
 
     // Printable characters are NOT handled here — they flow through the
