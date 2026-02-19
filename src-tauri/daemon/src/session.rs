@@ -14,6 +14,13 @@ use crate::debug_log::daemon_log;
 
 const RING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB ring buffer
 
+/// Output from the PTY reader thread to the forwarding task.
+/// RawBytes is the PTY output data; GridDiff is a pushed diff for the frontend.
+pub enum SessionOutput {
+    RawBytes(Vec<u8>),
+    GridDiff(godly_protocol::types::RichGridDiff),
+}
+
 /// A daemon-managed PTY session that survives app disconnections.
 pub struct DaemonSession {
     pub id: String,
@@ -30,7 +37,7 @@ pub struct DaemonSession {
     /// Ring buffer accumulates output when no client is attached
     ring_buffer: Arc<Mutex<VecDeque<u8>>>,
     /// Channel sender for live output to an attached client
-    output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>>,
+    output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
     /// Lock-free attachment flag — readable without locking output_tx.
     /// Updated in attach()/detach()/close() and by the reader thread on send failure.
     is_attached_flag: Arc<AtomicBool>,
@@ -146,7 +153,7 @@ impl DaemonSession {
         let running = Arc::new(AtomicBool::new(true));
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
         let output_history = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
-        let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>> =
+        let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>> =
             Arc::new(Mutex::new(None));
         let is_attached_flag = Arc::new(AtomicBool::new(false));
 
@@ -237,11 +244,18 @@ impl DaemonSession {
                             append_to_ring(&mut history, &buf[..n]);
                         }
 
-                        // Feed PTY output into godly-vt parser for grid state
-                        {
+                        // Feed PTY output into godly-vt parser for grid state.
+                        // If a client is attached and rows are dirty, extract a diff
+                        // to push alongside the raw bytes (avoids IPC round-trip).
+                        let maybe_diff = {
                             let mut vt = reader_vt.lock();
                             vt.process(&buf[..n]);
-                        }
+                            if reader_attached.load(Ordering::Relaxed) && vt.screen().has_dirty_rows() {
+                                Some(extract_diff(&mut vt))
+                            } else {
+                                None
+                            }
+                        };
 
                         let data = buf[..n].to_vec();
                         let lock_start = Instant::now();
@@ -258,13 +272,18 @@ impl DaemonSession {
 
                         if let Some(tx) = tx_guard.as_ref() {
                             // Client attached: try to send live output (bounded channel applies backpressure)
-                            match tx.try_send(data) {
+                            match tx.try_send(SessionOutput::RawBytes(data)) {
                                 Ok(()) => {
+                                    // Send pushed grid diff (best-effort — skip if channel full).
+                                    // Dirty flags accumulate for next read if skipped.
+                                    if let Some(diff) = maybe_diff {
+                                        let _ = tx.try_send(SessionOutput::GridDiff(diff));
+                                    }
                                     drop(tx_guard);
                                     // Yield to let handler threads acquire output_tx if waiting
                                     thread::yield_now();
                                 }
-                                Err(tokio::sync::mpsc::error::TrySendError::Full(data)) => {
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(msg)) => {
                                     // Bug A1 fix: block until channel has capacity instead of
                                     // falling back to ring buffer. Previously, data written to
                                     // the ring buffer during transient fullness was never
@@ -274,7 +293,7 @@ impl DaemonSession {
                                     let tx_clone = tx.clone();
                                     drop(tx_guard);
                                     let bp_start = Instant::now();
-                                    match tx_clone.blocking_send(data) {
+                                    match tx_clone.blocking_send(msg) {
                                         Ok(()) => {
                                             let bp_elapsed = bp_start.elapsed();
                                             if bp_elapsed.as_millis() > 50 {
@@ -283,6 +302,10 @@ impl DaemonSession {
                                                     session_id,
                                                     bp_elapsed.as_secs_f64() * 1000.0
                                                 );
+                                            }
+                                            // Send pushed grid diff after backpressure resolves (best-effort)
+                                            if let Some(diff) = maybe_diff {
+                                                let _ = tx_clone.try_send(SessionOutput::GridDiff(diff));
                                             }
                                             thread::yield_now();
                                         }
@@ -297,7 +320,9 @@ impl DaemonSession {
                                             reader_attached.store(false, Ordering::Relaxed);
                                             *reader_tx.lock() = None;
                                             let mut ring = reader_ring.lock();
-                                            append_to_ring(&mut ring, &send_err.0);
+                                            if let SessionOutput::RawBytes(data) = send_err.0 {
+                                                append_to_ring(&mut ring, &data);
+                                            }
                                         }
                                     }
                                 }
@@ -440,7 +465,7 @@ impl DaemonSession {
     ///
     /// Uses `try_lock_for` with timeouts to avoid blocking the handler indefinitely
     /// when the reader thread holds ring_buffer or output_tx under heavy output.
-    pub fn attach(&self) -> (Vec<u8>, tokio::sync::mpsc::Receiver<Vec<u8>>) {
+    pub fn attach(&self) -> (Vec<u8>, tokio::sync::mpsc::Receiver<SessionOutput>) {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
 
         // Drain ring buffer as initial replay — timeout to avoid blocking handler
@@ -820,6 +845,81 @@ impl DaemonSession {
     #[allow(dead_code)]
     pub fn get_shell_type(&self) -> &ShellType {
         &self.shell_type
+    }
+}
+
+/// Extract a RichGridDiff from the current godly-vt parser state.
+/// Called from the PTY reader thread while holding the vt lock.
+fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDiff {
+    let screen = vt.screen_mut();
+    let (num_rows, cols) = screen.size();
+    let (cursor_row, cursor_col) = screen.cursor_position();
+
+    let dirty_flags = screen.take_dirty_rows();
+    let dirty_count = dirty_flags.iter().filter(|&&d| d).count();
+    let total_rows = usize::from(num_rows);
+    let full_repaint = dirty_count * 2 >= total_rows;
+
+    let screen = vt.screen();
+    let mut dirty_rows = Vec::with_capacity(if full_repaint { total_rows } else { dirty_count });
+
+    for row_idx in 0..num_rows {
+        if full_repaint || dirty_flags.get(usize::from(row_idx)).copied().unwrap_or(false) {
+            let mut cells = Vec::with_capacity(usize::from(cols));
+            for col_idx in 0..cols {
+                let cell = screen.cell(row_idx, col_idx);
+                match cell {
+                    Some(c) => {
+                        cells.push(godly_protocol::types::RichGridCell {
+                            content: c.contents().to_string(),
+                            fg: color_to_hex(c.fgcolor()),
+                            bg: color_to_hex(c.bgcolor()),
+                            bold: c.bold(),
+                            dim: c.dim(),
+                            italic: c.italic(),
+                            underline: c.underline(),
+                            inverse: c.inverse(),
+                            wide: c.is_wide(),
+                            wide_continuation: c.is_wide_continuation(),
+                        });
+                    }
+                    None => {
+                        cells.push(godly_protocol::types::RichGridCell {
+                            content: String::new(),
+                            fg: "default".to_string(),
+                            bg: "default".to_string(),
+                            bold: false,
+                            dim: false,
+                            italic: false,
+                            underline: false,
+                            inverse: false,
+                            wide: false,
+                            wide_continuation: false,
+                        });
+                    }
+                }
+            }
+            let wrapped = screen.row_wrapped(row_idx);
+            dirty_rows.push((row_idx, godly_protocol::types::RichGridRow { cells, wrapped }));
+        }
+    }
+
+    godly_protocol::types::RichGridDiff {
+        dirty_rows,
+        cursor: godly_protocol::types::CursorState {
+            row: cursor_row,
+            col: cursor_col,
+        },
+        dimensions: godly_protocol::types::GridDimensions {
+            rows: num_rows,
+            cols,
+        },
+        alternate_screen: screen.alternate_screen(),
+        cursor_hidden: screen.hide_cursor(),
+        title: String::new(),
+        scrollback_offset: screen.scrollback(),
+        total_scrollback: screen.scrollback_count(),
+        full_repaint,
     }
 }
 
