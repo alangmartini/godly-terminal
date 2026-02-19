@@ -142,6 +142,9 @@ export class TerminalRenderer {
   };
   private isSelecting = false;
 
+  // Callback fired when a mouse drag selection ends (mouseup after selecting)
+  private onSelectionEndCallback?: () => void;
+
   // URL hover
   private hoveredUrl: string | null = null;
   private hoveredUrlRow = -1;
@@ -263,6 +266,16 @@ export class TerminalRenderer {
   /** Set absolute scroll-to callback (used by scrollbar drag). */
   setOnScrollTo(cb: (absoluteOffset: number) => void) {
     this.onScrollToCallback = cb;
+  }
+
+  /** Set callback for when a drag selection ends (mouseup after drag). */
+  setOnSelectionEnd(cb: () => void) {
+    this.onSelectionEndCallback = cb;
+  }
+
+  /** Returns true while the user is actively dragging to select text. */
+  isActivelySelecting(): boolean {
+    return this.isSelecting;
   }
 
   /**
@@ -691,7 +704,11 @@ export class TerminalRenderer {
     });
 
     this.canvas.addEventListener('mouseup', () => {
+      const wasSelecting = this.isSelecting;
       this.isSelecting = false;
+      if (wasSelecting && this.selection.active && this.onSelectionEndCallback) {
+        this.onSelectionEndCallback();
+      }
     });
 
     // Ctrl+click to open URLs
