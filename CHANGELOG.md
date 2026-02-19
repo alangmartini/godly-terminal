@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-19
+
+### Fixed
+- **Text selection freeze** — terminal display now freezes while dragging to select text, preventing output from breaking the selection; catches up on mouseup (#176)
+- **Ctrl key snapping to bottom** — modifier-only keypresses (Ctrl, Shift, Alt) no longer trigger snap-to-bottom, so Ctrl+C copy works while scrolled up (#176)
+- Remote HTTP API uses correct axum 0.7 `:id` path param syntax (#175)
+
 ## [0.2.0] - 2026-02-19
 
 ### Added
