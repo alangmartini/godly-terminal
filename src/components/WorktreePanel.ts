@@ -231,7 +231,7 @@ export class WorktreePanel {
 
     if (workspace.claudeCodeMode) {
       setTimeout(() => {
-        terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
+        terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
       }, 500);
     }
   }
