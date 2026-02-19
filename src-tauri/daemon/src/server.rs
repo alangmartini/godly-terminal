@@ -607,6 +607,7 @@ fn io_thread(
                         DaemonMessage::Event(Event::Output { .. }) => "Output",
                         DaemonMessage::Event(Event::SessionClosed { .. }) => "SessionClosed",
                         DaemonMessage::Event(Event::ProcessChanged { .. }) => "ProcessChanged",
+                        DaemonMessage::Event(Event::GridDiff { .. }) => "GridDiff",
                         DaemonMessage::Response(_) => "Response", // shouldn't happen
                     };
 
@@ -623,8 +624,11 @@ fn io_thread(
                     did_work = true;
 
                     // Track bytes written for diagnostics
-                    if let DaemonMessage::Event(Event::Output { ref data, .. }) = msg {
-                        total_bytes_written += data.len() as u64;
+                    match &msg {
+                        DaemonMessage::Event(Event::Output { ref data, .. }) => {
+                            total_bytes_written += data.len() as u64;
+                        }
+                        _ => {}
                     }
 
                     // Log slow writes (indicates pipe buffer full / client not reading)
@@ -869,7 +873,8 @@ mod forwarding_tests {
     /// task should send a SessionClosed event.
     #[tokio::test]
     async fn test_forwarding_sends_session_closed_on_pty_exit() {
-        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
+        use crate::session::SessionOutput;
+        let (tx, mut rx) = mpsc::channel::<SessionOutput>(64);
         let (event_tx, mut event_rx) = mpsc::channel::<DaemonMessage>(16);
         let running_flag = Arc::new(AtomicBool::new(true));
         let sid = "test-fwd-closed".to_string();
@@ -878,11 +883,17 @@ mod forwarding_tests {
         let handle = tokio::spawn({
             let sid = sid.clone();
             async move {
-                while let Some(data) = rx.recv().await {
-                    let event = DaemonMessage::Event(Event::Output {
-                        session_id: sid.clone(),
-                        data,
-                    });
+                while let Some(output) = rx.recv().await {
+                    let event = match output {
+                        SessionOutput::RawBytes(data) => DaemonMessage::Event(Event::Output {
+                            session_id: sid.clone(),
+                            data,
+                        }),
+                        SessionOutput::GridDiff(diff) => DaemonMessage::Event(Event::GridDiff {
+                            session_id: sid.clone(),
+                            diff,
+                        }),
+                    };
                     if event_tx.send(event).await.is_err() {
                         break;
                     }
@@ -898,7 +909,7 @@ mod forwarding_tests {
         });
 
         // Send some output, then simulate PTY exit
-        tx.send(b"hello".to_vec()).await.unwrap();
+        tx.send(SessionOutput::RawBytes(b"hello".to_vec())).await.unwrap();
         running_flag.store(false, Ordering::Relaxed);
         drop(tx); // close the channel
 
@@ -924,7 +935,8 @@ mod forwarding_tests {
     /// forwarding task should NOT send SessionClosed.
     #[tokio::test]
     async fn test_forwarding_no_session_closed_on_detach() {
-        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
+        use crate::session::SessionOutput;
+        let (tx, mut rx) = mpsc::channel::<SessionOutput>(64);
         let (event_tx, mut event_rx) = mpsc::channel::<DaemonMessage>(16);
         let running_flag = Arc::new(AtomicBool::new(true));
         let sid = "test-fwd-detach".to_string();
@@ -933,11 +945,17 @@ mod forwarding_tests {
         let handle = tokio::spawn({
             let sid = sid.clone();
             async move {
-                while let Some(data) = rx.recv().await {
-                    let event = DaemonMessage::Event(Event::Output {
-                        session_id: sid.clone(),
-                        data,
-                    });
+                while let Some(output) = rx.recv().await {
+                    let event = match output {
+                        SessionOutput::RawBytes(data) => DaemonMessage::Event(Event::Output {
+                            session_id: sid.clone(),
+                            data,
+                        }),
+                        SessionOutput::GridDiff(diff) => DaemonMessage::Event(Event::GridDiff {
+                            session_id: sid.clone(),
+                            diff,
+                        }),
+                    };
                     if event_tx.send(event).await.is_err() {
                         break;
                     }
@@ -953,7 +971,7 @@ mod forwarding_tests {
         });
 
         // Send some output, then simulate detach (running stays true)
-        tx.send(b"hello".to_vec()).await.unwrap();
+        tx.send(SessionOutput::RawBytes(b"hello".to_vec())).await.unwrap();
         // running_flag stays true — this is a detach, not a PTY exit
         drop(tx);
 
@@ -977,7 +995,8 @@ mod forwarding_tests {
     /// SessionClosed immediately, not block forever on rx.recv().
     #[tokio::test]
     async fn test_attach_to_dead_session_sends_session_closed() {
-        let (_tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
+        use crate::session::SessionOutput;
+        let (_tx, mut rx) = mpsc::channel::<SessionOutput>(64);
         let (event_tx, mut event_rx) = mpsc::channel::<DaemonMessage>(16);
         let running_flag = Arc::new(AtomicBool::new(false));
         let sid = "test-attach-dead".to_string();
@@ -995,11 +1014,17 @@ mod forwarding_tests {
                         .await;
                     return;
                 }
-                while let Some(data) = rx.recv().await {
-                    let event = DaemonMessage::Event(Event::Output {
-                        session_id: sid.clone(),
-                        data,
-                    });
+                while let Some(output) = rx.recv().await {
+                    let event = match output {
+                        SessionOutput::RawBytes(data) => DaemonMessage::Event(Event::Output {
+                            session_id: sid.clone(),
+                            data,
+                        }),
+                        SessionOutput::GridDiff(diff) => DaemonMessage::Event(Event::GridDiff {
+                            session_id: sid.clone(),
+                            diff,
+                        }),
+                    };
                     if event_tx.send(event).await.is_err() {
                         break;
                     }
@@ -1102,11 +1127,21 @@ async fn handle_request(
                             return;
                         }
 
-                        while let Some(data) = rx.recv().await {
-                            let event = DaemonMessage::Event(Event::Output {
-                                session_id: sid.clone(),
-                                data,
-                            });
+                        while let Some(output) = rx.recv().await {
+                            let event = match output {
+                                crate::session::SessionOutput::RawBytes(data) => {
+                                    DaemonMessage::Event(Event::Output {
+                                        session_id: sid.clone(),
+                                        data,
+                                    })
+                                }
+                                crate::session::SessionOutput::GridDiff(diff) => {
+                                    DaemonMessage::Event(Event::GridDiff {
+                                        session_id: sid.clone(),
+                                        diff,
+                                    })
+                                }
+                            };
                             if tx.send(event).await.is_err() {
                                 break;
                             }
