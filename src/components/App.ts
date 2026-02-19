@@ -372,7 +372,7 @@ export class App {
 
             if (workspace?.claudeCodeMode) {
               setTimeout(() => {
-                terminalService.writeToTerminal(result.id, 'claude -dangerously-skip-permissions\r');
+                terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
               }, 500);
             }
           }
@@ -485,7 +485,10 @@ export class App {
           if (!state.activeWorkspaceId) break;
 
           const { showQuickClaudeDialog } = await import('./dialogs');
-          const input = await showQuickClaudeDialog();
+          const input = await showQuickClaudeDialog({
+            workspaces: state.workspaces.map(w => ({ id: w.id, name: w.name })),
+            activeWorkspaceId: state.activeWorkspaceId,
+          });
           if (!input) break;
 
           try {
@@ -493,7 +496,7 @@ export class App {
             const result = await invoke<{ terminal_id: string; worktree_branch: string | null }>(
               'quick_claude',
               {
-                workspaceId: state.activeWorkspaceId,
+                workspaceId: input.workspaceId,
                 prompt: input.prompt,
                 branchName: input.branchName ?? null,
                 skipFetch: true,
@@ -502,7 +505,7 @@ export class App {
 
             store.addTerminal({
               id: result.terminal_id,
-              workspaceId: state.activeWorkspaceId,
+              workspaceId: input.workspaceId,
               name: result.worktree_branch ?? 'Quick Claude',
               processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
               order: 0,
