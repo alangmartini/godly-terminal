@@ -73,7 +73,7 @@ class TerminalService {
       'process-changed',
       (event) => {
         const { terminal_id, process_name } = event.payload;
-        store.updateTerminal(terminal_id, { processName: process_name, oscTitle: undefined });
+        store.updateTerminal(terminal_id, { processName: process_name });
       }
     );
 
