@@ -111,7 +111,7 @@ describe('Claude Code Mode', () => {
     expect(countAfter).toBe(countBefore + 1);
 
     // Wait for the auto-execute: the 500ms delay + shell init time
-    // The command 'claude -dangerously-skip-permissions' should appear
+    // The command 'claude --dangerously-skip-permissions' should appear
     // in the terminal buffer (either as the command itself or its output/error)
     await waitForTerminalText('claude', 30000);
   });
@@ -152,8 +152,8 @@ describe('Claude Code Mode', () => {
       } catch { done(''); }
     });
 
-    // The 'claude -dangerously-skip-permissions' command should NOT be present
-    expect(text).not.toContain('claude -dangerously-skip-permissions');
+    // The 'claude --dangerously-skip-permissions' command should NOT be present
+    expect(text).not.toContain('claude --dangerously-skip-permissions');
   });
 
   it('should persist Claude Code mode via toggle_claude_code_mode IPC', async () => {
