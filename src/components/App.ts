@@ -509,7 +509,7 @@ export class App {
               name: result.worktree_branch ?? 'Quick Claude',
               processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
               order: 0,
-            });
+            }, { background: true });
           } catch (error) {
             console.error('[App] Quick Claude failed:', error);
           }
