@@ -106,6 +106,7 @@ pub enum Event {
     Output { session_id: String, data: Vec<u8> },
     SessionClosed { session_id: String },
     ProcessChanged { session_id: String, process_name: String },
+    GridDiff { session_id: String, diff: crate::types::RichGridDiff },
 }
 
 /// Top-level message from daemon to client (can be a response or async event)
