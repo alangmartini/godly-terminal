@@ -523,7 +523,7 @@ pub(crate) fn quick_claude_background(
     // Step 2: Write claude command
     let claude_cmd = Request::Write {
         session_id: terminal_id.clone(),
-        data: "claude -dangerously-skip-permissions\r".as_bytes().to_vec(),
+        data: "claude --dangerously-skip-permissions\r".as_bytes().to_vec(),
     };
     if let Err(e) = daemon.send_request(&claude_cmd) {
         eprintln!("[quick_claude] Failed to write claude command: {}", e);
