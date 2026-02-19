@@ -33,7 +33,7 @@ Added `create_worktree_with_options(..., skip_fetch: bool)` to `worktree.rs`. Wh
 ## Background Task Flow
 
 1. Wait for shell to be idle (500ms idle threshold, 5s timeout)
-2. Write `claude -dangerously-skip-permissions\r`
+2. Write `claude --dangerously-skip-permissions\r`
 3. Wait for Claude to be idle (2000ms idle threshold, 60s timeout)
 4. Write the user's prompt
 5. Emit `quick-claude-ready` Tauri event (triggers toast notification)
