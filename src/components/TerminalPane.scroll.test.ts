@@ -23,6 +23,9 @@ class ScrollSimulator {
   gridRows = 24;
   isUserScrolled = false;
 
+  // Simulates renderer.isActivelySelecting() — true while user is dragging
+  rendererIsSelecting = false;
+
   // scrollSeq counter mirrors TerminalPane for race-condition testing
   scrollSeq = 0;
 
@@ -78,8 +81,10 @@ class ScrollSimulator {
     this.totalScrollback = total;
   }
 
-  /** Simulate terminal output arriving */
+  /** Simulate terminal output arriving (mirrors output handler) */
   onTerminalOutput() {
+    // Freeze display while the user is dragging to select text
+    if (this.rendererIsSelecting) return;
     if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
       this.snapToBottom();
       return;
@@ -440,6 +445,62 @@ describe('TerminalPane scroll handling', () => {
       expect(
         keybindingStore.isTerminalControlKey(keydown('PageUp'))
       ).toBe(false);
+    });
+  });
+
+  describe('display freeze during text selection', () => {
+    it('skips rendering when user is actively selecting text', () => {
+      sim.rendererIsSelecting = true;
+      sim.onTerminalOutput();
+      expect(mockFetchSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('resumes rendering after selection ends (mouseup)', () => {
+      sim.rendererIsSelecting = true;
+      sim.onTerminalOutput();
+      expect(mockFetchSnapshot).not.toHaveBeenCalled();
+
+      sim.rendererIsSelecting = false;
+      sim.onTerminalOutput();
+      expect(mockFetchSnapshot).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips auto-scroll snap-to-bottom while selecting', () => {
+      terminalSettingsStore.setAutoScrollOnOutput(true);
+      sim.handleScroll(50);
+      mockSetScrollback.mockClear();
+      mockFetchSnapshot.mockClear();
+
+      sim.rendererIsSelecting = true;
+      sim.onTerminalOutput();
+
+      expect(mockSetScrollback).not.toHaveBeenCalled();
+      expect(sim.scrollbackOffset).toBe(50);
+      expect(sim.isUserScrolled).toBe(true);
+    });
+
+    it('multiple output events during selection are all suppressed', () => {
+      sim.rendererIsSelecting = true;
+      sim.onTerminalOutput();
+      sim.onTerminalOutput();
+      sim.onTerminalOutput();
+      expect(mockFetchSnapshot).not.toHaveBeenCalled();
+      expect(mockSetScrollback).not.toHaveBeenCalled();
+    });
+
+    it('catches up after selection with auto-scroll enabled', () => {
+      terminalSettingsStore.setAutoScrollOnOutput(true);
+      sim.handleScroll(50);
+      mockSetScrollback.mockClear();
+      mockFetchSnapshot.mockClear();
+
+      sim.rendererIsSelecting = true;
+      sim.onTerminalOutput();
+      expect(mockSetScrollback).not.toHaveBeenCalled();
+
+      sim.rendererIsSelecting = false;
+      sim.onTerminalOutput();
+      expect(mockSetScrollback).toHaveBeenCalledWith(0);
     });
   });
 });
