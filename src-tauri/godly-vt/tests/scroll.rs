@@ -283,6 +283,80 @@ fn zero_scrollback_capacity_stores_nothing() {
     assert_eq!(parser.screen().scrollback(), 0);
 }
 
+#[test]
+fn scrollback_preserved_across_alternate_screen() {
+    // Bug #202: entering/exiting alternate screen should not destroy
+    // the user's scrollback offset. ConPTY may briefly enter/exit alternate
+    // screen during command execution.
+    let mut parser = godly_vt::Parser::new(3, 20, 10);
+
+    parser.process(b"aaa\r\nbbb\r\nccc\r\nddd\r\neee");
+    // Scrollback: aaa, bbb. Viewport: ccc, ddd, eee
+
+    parser.screen_mut().set_scrollback(2);
+    assert_eq!(parser.screen().scrollback(), 2);
+    assert_eq!(parser.screen().cell(0, 0).unwrap().contents(), "a");
+
+    // Enter alternate screen (CSI ? 1049 h) — used by vim, less, etc.
+    parser.process(b"\x1b[?1049h");
+    assert!(parser.screen().alternate_screen());
+
+    // Exit alternate screen (CSI ? 1049 l)
+    parser.process(b"\x1b[?1049l");
+    assert!(!parser.screen().alternate_screen());
+
+    // Bug #202: scrollback offset must be restored after exiting alternate screen
+    assert_eq!(
+        parser.screen().scrollback(), 2,
+        "Bug #202: scrollback offset should be restored after alternate screen exit"
+    );
+    assert_eq!(
+        parser.screen().cell(0, 0).unwrap().contents(), "a",
+        "Bug #202: viewport content should be the same as before alternate screen"
+    );
+}
+
+#[test]
+fn scrollback_preserved_across_alternate_screen_mode47() {
+    // Same as above but using mode 47 (CSI ? 47 h/l)
+    let mut parser = godly_vt::Parser::new(3, 20, 10);
+
+    parser.process(b"aaa\r\nbbb\r\nccc\r\nddd\r\neee");
+    parser.screen_mut().set_scrollback(2);
+    assert_eq!(parser.screen().scrollback(), 2);
+
+    parser.process(b"\x1b[?47h");
+    parser.process(b"\x1b[?47l");
+
+    assert_eq!(
+        parser.screen().scrollback(), 2,
+        "Bug #202: scrollback offset should be restored after mode 47 alternate screen"
+    );
+}
+
+#[test]
+fn scrollback_adjusts_during_alternate_screen() {
+    // When new output arrives between enter/exit alternate screen,
+    // the scrollback offset in the main grid might grow. After exit,
+    // the offset should be at least what it was before enter.
+    let mut parser = godly_vt::Parser::new(3, 20, 10);
+
+    parser.process(b"aaa\r\nbbb\r\nccc\r\nddd\r\neee");
+    parser.screen_mut().set_scrollback(2);
+
+    parser.process(b"\x1b[?1049h");
+    // Output on alternate screen doesn't affect main grid scrollback
+    parser.process(b"alt1\r\nalt2\r\nalt3\r\nalt4");
+    parser.process(b"\x1b[?1049l");
+
+    // Offset should be restored to at least 2
+    assert!(
+        parser.screen().scrollback() >= 2,
+        "Bug #202: scrollback offset {} should be >= 2 after alternate screen with output",
+        parser.screen().scrollback()
+    );
+}
+
 #[cfg(test)]
 fn gen_nums(range: RangeInclusive<u8>, join: &str) -> String {
     range
