@@ -1,3 +1,5 @@
+import { llmGetStatus, llmGenerateBranchName, isModelReady } from '../plugins/smollm2/llm-service';
+
 /**
  * Show a prompt dialog for entering a custom worktree branch name.
  * Returns the user's input (empty string = auto-generate), or null if cancelled.
@@ -15,11 +17,60 @@ export function showWorktreeNamePrompt(): Promise<string | null> {
     title.textContent = 'New Worktree Branch';
     dialog.appendChild(title);
 
+    // Description input for AI suggestion
+    const descInput = document.createElement('input');
+    descInput.type = 'text';
+    descInput.className = 'dialog-input';
+    descInput.placeholder = 'Describe the task (for AI branch name)';
+    descInput.style.marginBottom = '4px';
+
+    const inputRow = document.createElement('div');
+    inputRow.style.display = 'flex';
+    inputRow.style.gap = '8px';
+    inputRow.style.alignItems = 'center';
+
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'dialog-input';
     input.placeholder = 'Branch name (Enter for auto-generated)';
-    dialog.appendChild(input);
+    input.style.flex = '1';
+    inputRow.appendChild(input);
+
+    const aiBtn = document.createElement('button');
+    aiBtn.className = 'dialog-btn dialog-btn-secondary';
+    aiBtn.textContent = 'AI Suggest';
+    aiBtn.style.cssText = 'font-size: 11px; padding: 4px 10px; white-space: nowrap; display: none;';
+    aiBtn.onclick = async () => {
+      const desc = descInput.value.trim();
+      if (!desc) {
+        descInput.focus();
+        return;
+      }
+      aiBtn.disabled = true;
+      aiBtn.textContent = 'Thinking...';
+      try {
+        const name = await llmGenerateBranchName(desc);
+        input.value = name;
+      } catch (e) {
+        console.warn('[Dialogs] AI suggest failed:', e);
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.textContent = 'AI Suggest';
+      }
+    };
+    inputRow.appendChild(aiBtn);
+
+    // Check if model is ready and show AI features
+    llmGetStatus().then(status => {
+      if (isModelReady(status)) {
+        descInput.style.display = '';
+        aiBtn.style.display = '';
+      }
+    }).catch(() => {});
+
+    descInput.style.display = 'none';
+    dialog.appendChild(descInput);
+    dialog.appendChild(inputRow);
 
     const buttons = document.createElement('div');
     buttons.className = 'dialog-buttons';
@@ -53,6 +104,17 @@ export function showWorktreeNamePrompt(): Promise<string | null> {
       if (e.key === 'Enter') {
         close();
         resolve(input.value.trim());
+      }
+      if (e.key === 'Escape') {
+        close();
+        resolve(null);
+      }
+    };
+
+    descInput.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        aiBtn.click();
       }
       if (e.key === 'Escape') {
         close();
@@ -214,12 +276,48 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     promptArea.style.cssText = 'resize: vertical; min-height: 80px; font-family: inherit; font-size: 13px;';
     dialog.appendChild(promptArea);
 
+    const branchRow = document.createElement('div');
+    branchRow.style.cssText = 'display: flex; gap: 8px; align-items: center; margin-top: 8px;';
+
     const branchInput = document.createElement('input');
     branchInput.type = 'text';
     branchInput.className = 'dialog-input';
     branchInput.placeholder = 'Branch name (optional, auto-generated if empty)';
-    branchInput.style.marginTop = '8px';
-    dialog.appendChild(branchInput);
+    branchInput.style.flex = '1';
+    branchRow.appendChild(branchInput);
+
+    const branchAiBtn = document.createElement('button');
+    branchAiBtn.className = 'dialog-btn dialog-btn-secondary';
+    branchAiBtn.textContent = 'AI Suggest';
+    branchAiBtn.style.cssText = 'font-size: 11px; padding: 4px 10px; white-space: nowrap; display: none;';
+    branchAiBtn.onclick = async () => {
+      const desc = promptArea.value.trim();
+      if (!desc) {
+        promptArea.focus();
+        return;
+      }
+      branchAiBtn.disabled = true;
+      branchAiBtn.textContent = 'Thinking...';
+      try {
+        const name = await llmGenerateBranchName(desc);
+        branchInput.value = name;
+      } catch (e) {
+        console.warn('[Dialogs] AI suggest failed:', e);
+      } finally {
+        branchAiBtn.disabled = false;
+        branchAiBtn.textContent = 'AI Suggest';
+      }
+    };
+    branchRow.appendChild(branchAiBtn);
+
+    // Show AI button if model is ready
+    llmGetStatus().then(status => {
+      if (isModelReady(status)) {
+        branchAiBtn.style.display = '';
+      }
+    }).catch(() => {});
+
+    dialog.appendChild(branchRow);
 
     const buttons = document.createElement('div');
     buttons.className = 'dialog-buttons';
