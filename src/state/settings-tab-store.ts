@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'godly-settings-tab-order';
 
-const DEFAULT_ORDER: string[] = ['themes', 'terminal', 'notifications', 'shortcuts'];
+const DEFAULT_ORDER: string[] = ['themes', 'terminal', 'notifications', 'plugins', 'shortcuts'];
 
 type Subscriber = () => void;
 
