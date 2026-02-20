@@ -5,7 +5,10 @@
   "author": "Godly Terminal",
   "version": "1.0.0",
   "sounds": {
+    "ready": ["work_complete.mp3"],
     "complete": ["work_complete.mp3"],
+    "error": ["work_complete.mp3"],
+    "permission": ["work_complete.mp3"],
     "notification": ["work_complete.mp3"]
   }
 }
