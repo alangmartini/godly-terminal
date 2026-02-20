@@ -71,6 +71,12 @@ pub struct Screen {
     window_title: String,
     window_icon_name: String,
 
+    /// Saved scrollback offset before entering alternate screen, so it can
+    /// be restored on exit. Without this, ConPTY briefly entering/exiting
+    /// alternate screen during command execution would destroy the user's
+    /// scroll position (Bug #202).
+    saved_scrollback_offset: usize,
+
     pub(crate) bell_pending: bool,
 }
 
@@ -94,6 +100,8 @@ impl Screen {
 
             window_title: String::new(),
             window_icon_name: String::new(),
+
+            saved_scrollback_offset: 0,
 
             bell_pending: false,
         }
@@ -711,6 +719,7 @@ impl Screen {
     }
 
     fn enter_alternate_grid(&mut self) {
+        self.saved_scrollback_offset = self.grid.scrollback();
         self.grid_mut().set_scrollback(0);
         self.set_mode(MODE_ALTERNATE_SCREEN);
         self.alternate_grid.allocate_rows();
@@ -718,6 +727,11 @@ impl Screen {
 
     fn exit_alternate_grid(&mut self) {
         self.clear_mode(MODE_ALTERNATE_SCREEN);
+        // Restore the scrollback offset that was saved before entering
+        // alternate screen. This prevents ConPTY briefly entering/exiting
+        // alternate screen from destroying the user's scroll position.
+        let saved = self.saved_scrollback_offset;
+        self.grid_mut().set_scrollback(saved);
     }
 
     fn save_cursor(&mut self) {
