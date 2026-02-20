@@ -530,8 +530,16 @@ pub(crate) fn quick_claude_background(
         return;
     }
 
-    // Step 3: Wait for Claude to be ready (idle for 2000ms after startup burst, timeout 60s)
-    let claude_ready = poll_idle(&daemon, &terminal_id, 2_000, 60_000);
+    // Step 3: Wait for Claude to be ready.
+    // First, give Claude Code time to start and produce its initial output (logo,
+    // version, config loading). Without this, poll_idle would see stale output
+    // timestamps from the shell echo and return immediately.
+    std::thread::sleep(std::time::Duration::from_millis(5_000));
+
+    // Now poll for idle. Claude Code's ink TUI blinks the cursor every ~500ms,
+    // producing output that resets the idle timer. Use a 400ms threshold to detect
+    // the gap between blinks. Timeout after 25s (30s total with the 5s above).
+    let claude_ready = poll_idle(&daemon, &terminal_id, 400, 25_000);
     if !claude_ready {
         eprintln!("[quick_claude] Claude did not become idle within timeout, writing prompt anyway");
     }
@@ -539,14 +547,31 @@ pub(crate) fn quick_claude_background(
     // Step 4: Small delay to ensure Claude is fully accepting input
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    // Step 5: Write the prompt (convert \n → \r for PTY)
-    let prompt_data = format!("{}\r", prompt.replace("\r\n", "\r").replace('\n', "\r"));
-    let prompt_req = Request::Write {
+    // Step 5: Write the prompt text (convert \n → \r for PTY line breaks).
+    // IMPORTANT: Write the text and the submit key (\r) as SEPARATE writes with a
+    // delay between them. Claude Code's ink TUI detects multi-character input as
+    // "paste" and treats \r as a literal newline. Sending \r in its own write makes
+    // ink interpret it as a keypress (Enter), triggering prompt submission.
+    let prompt_text = prompt.replace("\r\n", "\r").replace('\n', "\r");
+    let text_req = Request::Write {
         session_id: terminal_id.clone(),
-        data: prompt_data.into_bytes(),
+        data: prompt_text.into_bytes(),
     };
-    if let Err(e) = daemon.send_request(&prompt_req) {
-        eprintln!("[quick_claude] Failed to write prompt: {}", e);
+    if let Err(e) = daemon.send_request(&text_req) {
+        eprintln!("[quick_claude] Failed to write prompt text: {}", e);
+        return;
+    }
+
+    // Step 5b: Small delay so ink processes the text as "paste", then send Enter
+    // separately so it's recognized as a keypress, not part of the paste.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    let submit_req = Request::Write {
+        session_id: terminal_id.clone(),
+        data: b"\r".to_vec(),
+    };
+    if let Err(e) = daemon.send_request(&submit_req) {
+        eprintln!("[quick_claude] Failed to send submit key: {}", e);
         return;
     }
 
