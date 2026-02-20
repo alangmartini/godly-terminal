@@ -217,6 +217,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[ntest::timeout(180_000)] // 3min — creates/destroys many sessions + measures RSS
     fn test_session_create_destroy_no_leak() {
         let daemon = DaemonFixture::spawn("create-destroy");
         let mut pipe = daemon.connect();
@@ -374,6 +375,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[ntest::timeout(180_000)]
     fn test_attach_detach_no_leak() {
         let daemon = DaemonFixture::spawn("attach-detach");
         let mut pipe = daemon.connect();
@@ -500,6 +502,7 @@ mod windows_tests {
     }
 
     #[test]
+    #[ntest::timeout(180_000)]
     fn test_heavy_output_no_leak() {
         let daemon = DaemonFixture::spawn("heavy-output");
         let mut pipe = daemon.connect();
@@ -622,6 +625,7 @@ mod windows_tests {
 #[cfg(not(windows))]
 mod non_windows {
     #[test]
+    #[ntest::timeout(10_000)]
     fn test_memory_stress_not_supported() {
         eprintln!("Memory stress tests are only supported on Windows (named pipes)");
     }

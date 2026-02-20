@@ -238,6 +238,7 @@ fn wait_for_grid_text(
 /// ReadGrid on a freshly created session returns a grid of the correct size
 /// with an empty screen and cursor at (0, 0).
 #[test]
+#[ntest::timeout(60_000)] // 1min — daemon spawn + IPC
 fn test_read_grid_initial_state() {
     let daemon = DaemonFixture::spawn("grid-initial");
     let mut pipe = daemon.connect();
@@ -290,6 +291,7 @@ fn test_read_grid_initial_state() {
 
 /// ReadGrid for a non-existent session returns an error.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_read_grid_session_not_found() {
     let daemon = DaemonFixture::spawn("grid-notfound");
     let mut pipe = daemon.connect();
@@ -311,6 +313,7 @@ fn test_read_grid_session_not_found() {
 /// After writing a command to the shell, ReadGrid should reflect the output
 /// in the parsed grid rows (plain text, no ANSI escapes).
 #[test]
+#[ntest::timeout(60_000)]
 fn test_read_grid_captures_output() {
     let daemon = DaemonFixture::spawn("grid-output");
     let mut pipe = daemon.connect();
@@ -382,6 +385,7 @@ fn test_read_grid_captures_output() {
 /// After a Resize, ReadGrid should return a grid with the new dimensions.
 /// This verifies that session.resize() also updates the vt parser size.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_read_grid_after_resize() {
     let daemon = DaemonFixture::spawn("grid-resize");
     let mut pipe = daemon.connect();
@@ -466,6 +470,7 @@ fn test_read_grid_after_resize() {
 /// ReadGrid works without attaching — the vt parser processes output from the
 /// reader thread regardless of whether a client is attached.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_read_grid_without_attach() {
     let daemon = DaemonFixture::spawn("grid-noattach");
     let mut pipe = daemon.connect();
@@ -562,6 +567,7 @@ fn wait_for_rich_grid_text(
 /// After enough output, RichGridData reports total_scrollback > 0
 /// and scrollback_offset = 0 (live view).
 #[test]
+#[ntest::timeout(60_000)]
 fn test_scrollback_fields_in_rich_grid() {
     let daemon = DaemonFixture::spawn("scroll-fields");
     let mut pipe = daemon.connect();
@@ -603,6 +609,7 @@ fn test_scrollback_fields_in_rich_grid() {
 
 /// SetScrollback changes the viewport offset visible via ReadRichGrid.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_set_scrollback_changes_viewport() {
     let daemon = DaemonFixture::spawn("scroll-viewport");
     let mut pipe = daemon.connect();
@@ -666,6 +673,7 @@ fn test_set_scrollback_changes_viewport() {
 
 /// SetScrollback with offset > total clamps to available scrollback.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_scrollback_offset_clamped() {
     let daemon = DaemonFixture::spawn("scroll-clamp");
     let mut pipe = daemon.connect();

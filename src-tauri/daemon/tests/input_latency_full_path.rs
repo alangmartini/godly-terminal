@@ -278,6 +278,7 @@ fn bridge_request(
 ///
 /// Total time = sum of all waits. THIS is the number users feel.
 #[test]
+#[ntest::timeout(60_000)]
 fn full_path_keystroke_latency_idle_terminal() {
     let daemon = DaemonFixture::spawn("full-path-idle");
     let pipe = daemon.connect();
@@ -400,6 +401,7 @@ fn full_path_keystroke_latency_idle_terminal() {
 /// requests. Under sustained output, the request can wait multiple loop
 /// iterations in the channel, adding 10-50ms per iteration.
 #[test]
+#[ntest::timeout(120_000)]
 fn full_path_keystroke_latency_during_heavy_output() {
     let daemon = DaemonFixture::spawn("full-path-heavy");
     let pipe = daemon.connect();
