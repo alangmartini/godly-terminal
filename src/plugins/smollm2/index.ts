@@ -165,18 +165,33 @@ export class SmolLM2Plugin implements GodlyPlugin {
         actionBtnContainer.appendChild(spinner);
       } else if (this.status.status === 'Error') {
         const retryBtn = document.createElement('button');
-        retryBtn.className = 'dialog-btn dialog-btn-secondary';
-        retryBtn.textContent = 'Retry';
+        retryBtn.className = 'dialog-btn dialog-btn-primary';
+        retryBtn.textContent = 'Retry Download';
         retryBtn.onclick = async () => {
+          retryBtn.disabled = true;
+          retryBtn.textContent = 'Downloading...';
+          progressBar.style.display = 'block';
+
+          const unlisten = await listen<number>('llm-download-progress', (event) => {
+            const progress = event.payload;
+            progressFill.style.width = `${Math.round(progress * 100)}%`;
+          });
+
           try {
+            await llmDownloadModel();
             this.status = await llmGetStatus();
             statusValue.textContent = getStatusLabel(this.status);
-          } catch {
-            // ignore
+          } catch (e) {
+            this.status = { status: 'Error', detail: `${e}` };
+            statusValue.textContent = `Error: ${e}`;
+          } finally {
+            unlisten();
+            progressBar.style.display = 'none';
+            updateButtons();
           }
-          updateButtons();
         };
         actionBtnContainer.appendChild(retryBtn);
+        actionBtnContainer.appendChild(progressBar);
       }
     };
 
