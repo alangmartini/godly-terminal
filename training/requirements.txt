@@ -1,0 +1,18 @@
+# Phase 1: Data generation
+anthropic>=0.40.0
+
+# Phase 2: Teacher fine-tuning
+torch>=2.2.0
+transformers>=4.44.0
+peft>=0.13.0
+trl>=0.12.0
+datasets>=3.0.0
+accelerate>=1.0.0
+bitsandbytes>=0.44.0
+
+# Phase 3: Distillation
+# (uses same deps as Phase 2)
+
+# Phase 4: Export & benchmark
+sentencepiece>=0.2.0
+protobuf>=5.28.0
