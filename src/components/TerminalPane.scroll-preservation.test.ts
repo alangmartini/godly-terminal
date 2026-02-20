@@ -58,7 +58,8 @@ class ScrollPreservationSimulator {
     const newOffset = Math.max(0, Math.round(absoluteOffset));
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
-    // BUG #202: handleScrollTo does NOT set isUserScrolled
+    // Bug #202: mirrors the real code — isUserScrolled was missing here
+    this.isUserScrolled = newOffset > 0;
     const seq = ++this.scrollSeq;
     this.cachedSnapshot = null;
     mockSetScrollback(newOffset);

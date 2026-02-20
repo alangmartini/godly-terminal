@@ -253,14 +253,30 @@ fn test_scrollback_preserved_during_new_output() {
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
     std::thread::sleep(Duration::from_secs(2));
 
-    // Phase 1: Generate enough output to have scrollback (30 numbered lines in a 10-row terminal)
-    let marker1 = "PHASE1_DONE_202";
-    let cmd1 = format!("for /L %i in (1,1,30) do @echo LINE_%i\r\necho {}\r\n", marker1);
+    // Phase 1: Generate enough output to have scrollback.
+    // Uses PowerShell syntax since ShellType::Windows spawns powershell.exe.
+    // Send the loop command first, then a separate marker command.
+    // This avoids the marker appearing in the typed command text before execution.
+    let cmd1 = "1..200 | ForEach-Object { Write-Host \"LINE_$_\" }\r\n".to_string();
     send_request(
         &mut pipe,
         &Request::Write { session_id: session_id.clone(), data: cmd1.into_bytes() },
     );
-    wait_for_rich_grid_text(&mut pipe, &session_id, marker1, Duration::from_secs(10));
+    // Wait for the last loop output line (only appears after actual execution, not in command text)
+    wait_for_rich_grid_text(&mut pipe, &session_id, "LINE_200", Duration::from_secs(15));
+
+    // Small delay to let ConPTY finish processing and for prompt to redraw
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Check how much scrollback actually accumulated
+    let pre_scroll_grid = read_rich_grid(&mut pipe, &session_id);
+    let actual_scrollback = pre_scroll_grid.total_scrollback;
+    assert!(
+        actual_scrollback >= 10,
+        "Bug #202 prerequisite: Expected at least 10 lines of scrollback after 200 lines of output \
+         in a 10-row terminal, but only got {}. Grid text:\n{}",
+        actual_scrollback, grid_text(&pre_scroll_grid)
+    );
 
     // Phase 2: Scroll up by 10 rows
     let resp = send_request(
@@ -273,21 +289,19 @@ fn test_scrollback_preserved_during_new_output() {
     let scrolled_grid = read_rich_grid(&mut pipe, &session_id);
     assert!(
         scrolled_grid.scrollback_offset >= 10,
-        "Bug #202: Expected scrollback_offset >= 10 after SetScrollback(10), got {}",
-        scrolled_grid.scrollback_offset
+        "Bug #202: Expected scrollback_offset >= 10 after SetScrollback(10), got {}. \
+         total_scrollback={}, grid text:\n{}",
+        scrolled_grid.scrollback_offset, scrolled_grid.total_scrollback,
+        grid_text(&scrolled_grid)
     );
     // Phase 3: Write MORE output while scrolled up (simulates new shell output)
-    let marker2 = "PHASE2_DONE_202";
-    let cmd2 = format!("for /L %i in (31,1,40) do @echo NEWLINE_%i\r\necho {}\r\n", marker2);
+    let cmd2 = "1..50 | ForEach-Object { Write-Host \"NEWLINE_$_\" }\r\n".to_string();
     send_request(
         &mut pipe,
         &Request::Write { session_id: session_id.clone(), data: cmd2.into_bytes() },
     );
 
-    // Wait for the new output to be processed by polling grid text at offset 0 (live view).
-    // We set scrollback to 0 on a SEPARATE connection to avoid disturbing the scrolled viewport.
-    // Actually, we just need to wait for the output to arrive — we'll poll ReadRichGrid and check
-    // if the new lines increased total_scrollback.
+    // Wait for the new output to be processed by polling total_scrollback growth.
     let start = Instant::now();
     loop {
         let grid = read_rich_grid(&mut pipe, &session_id);
@@ -318,11 +332,11 @@ fn test_scrollback_preserved_during_new_output() {
     );
 
     // Additionally verify the viewport content is NOT the latest output.
-    // If the viewport stayed scrolled, it should NOT contain NEWLINE_40.
+    // If the viewport stayed scrolled, it should NOT contain NEWLINE_50.
     let after_text = grid_text(&after_output);
     assert!(
-        !after_text.contains("NEWLINE_40"),
-        "Bug #202: Viewport shows latest output (NEWLINE_40) while user is scrolled up. \
+        !after_text.contains("NEWLINE_50"),
+        "Bug #202: Viewport shows latest output (NEWLINE_50) while user is scrolled up. \
          The daemon should show older scrollback content.\nViewport:\n{}",
         after_text
     );
@@ -359,14 +373,14 @@ fn test_scrollback_stable_under_concurrent_output() {
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
     std::thread::sleep(Duration::from_secs(2));
 
-    // Generate initial scrollback
-    let marker = "INIT_DONE_CONC";
-    let cmd = format!("for /L %i in (1,1,50) do @echo LINE_%i\r\necho {}\r\n", marker);
+    // Generate initial scrollback (PowerShell syntax)
+    let cmd = "1..200 | ForEach-Object { Write-Host \"LINE_$_\" }\r\n".to_string();
     send_request(
         &mut pipe,
         &Request::Write { session_id: session_id.clone(), data: cmd.into_bytes() },
     );
-    wait_for_rich_grid_text(&mut pipe, &session_id, marker, Duration::from_secs(10));
+    wait_for_rich_grid_text(&mut pipe, &session_id, "LINE_200", Duration::from_secs(15));
+    std::thread::sleep(Duration::from_millis(500));
 
     // Scroll up
     let resp = send_request(
@@ -375,9 +389,8 @@ fn test_scrollback_stable_under_concurrent_output() {
     );
     assert!(matches!(resp, Response::Ok));
 
-    // Immediately start generating more output while scrolled up
-    let marker2 = "BURST_DONE_CONC";
-    let cmd2 = format!("for /L %i in (1,1,20) do @echo BURST_%i\r\necho {}\r\n", marker2);
+    // Immediately start generating more output while scrolled up (PowerShell syntax)
+    let cmd2 = "1..50 | ForEach-Object { Write-Host \"BURST_$_\" }\r\n".to_string();
     send_request(
         &mut pipe,
         &Request::Write { session_id: session_id.clone(), data: cmd2.into_bytes() },
@@ -458,14 +471,14 @@ fn test_viewport_content_stable_while_scrolled() {
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
     std::thread::sleep(Duration::from_secs(2));
 
-    // Generate numbered output to create identifiable scrollback content
-    let marker = "CONTENT_INIT_DONE";
-    let cmd = format!("for /L %i in (1,1,40) do @echo CONTENT_LINE_%i\r\necho {}\r\n", marker);
+    // Generate numbered output to create identifiable scrollback content (PowerShell syntax)
+    let cmd = "1..200 | ForEach-Object { Write-Host \"CONTENT_LINE_$_\" }\r\n".to_string();
     send_request(
         &mut pipe,
         &Request::Write { session_id: session_id.clone(), data: cmd.into_bytes() },
     );
-    wait_for_rich_grid_text(&mut pipe, &session_id, marker, Duration::from_secs(10));
+    wait_for_rich_grid_text(&mut pipe, &session_id, "CONTENT_LINE_200", Duration::from_secs(15));
+    std::thread::sleep(Duration::from_millis(500));
 
     // Scroll up by 15 rows
     let resp = send_request(
@@ -477,9 +490,8 @@ fn test_viewport_content_stable_while_scrolled() {
     // Record what the viewport looks like while scrolled up
     let scrolled_grid = read_rich_grid(&mut pipe, &session_id);
 
-    // Now generate new output while scrolled up
-    let marker2 = "CONTENT_NEW_DONE";
-    let cmd2 = format!("for /L %i in (1,1,15) do @echo FRESH_OUTPUT_%i\r\necho {}\r\n", marker2);
+    // Now generate new output while scrolled up (PowerShell syntax)
+    let cmd2 = "1..50 | ForEach-Object { Write-Host \"FRESH_OUTPUT_$_\" }\r\n".to_string();
     send_request(
         &mut pipe,
         &Request::Write { session_id: session_id.clone(), data: cmd2.into_bytes() },
@@ -506,8 +518,8 @@ fn test_viewport_content_stable_while_scrolled() {
     let after_text = grid_text(&after_grid);
 
     assert!(
-        !after_text.contains("FRESH_OUTPUT_15"),
-        "Bug #202: Viewport shows fresh output (FRESH_OUTPUT_15) while user is scrolled 15 rows up. \
+        !after_text.contains("FRESH_OUTPUT_50"),
+        "Bug #202: Viewport shows fresh output (FRESH_OUTPUT_50) while user is scrolled 15 rows up. \
          The daemon should show older content from scrollback.\nViewport:\n{}",
         after_text
     );
