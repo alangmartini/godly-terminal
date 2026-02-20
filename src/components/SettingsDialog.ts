@@ -18,6 +18,8 @@ import type { ThemeDefinition } from '../themes/types';
 import { createThemePreview } from './ThemePreview';
 import type { ShellType } from '../state/store';
 import { showFileEditorDialog } from './FileEditorDialog';
+import { getPluginRegistry } from '../plugins/index';
+import { pluginStore } from '../plugins/plugin-store';
 
 function formatCustomSoundName(filename: string): string {
   // Strip extension
@@ -62,6 +64,7 @@ export function showSettingsDialog(): Promise<void> {
       { id: 'themes', label: 'Themes' },
       { id: 'terminal', label: 'Terminal' },
       { id: 'notifications', label: 'Notifications' },
+      { id: 'plugins', label: 'Plugins' },
       { id: 'shortcuts', label: 'Shortcuts' },
     ];
 
@@ -711,6 +714,76 @@ export function showSettingsDialog(): Promise<void> {
 
     notifContent.appendChild(notifSection);
     dialog.appendChild(notifContent);
+
+    // ── Plugins tab content ─────────────────────────────────────
+    const pluginsContent = document.createElement('div');
+    pluginsContent.className = 'settings-tab-content';
+    tabContents['plugins'] = pluginsContent;
+
+    function renderPluginsTab() {
+      pluginsContent.textContent = '';
+
+      const registry = getPluginRegistry();
+      if (!registry) {
+        const msg = document.createElement('div');
+        msg.className = 'settings-description';
+        msg.textContent = 'Plugin system not initialized.';
+        pluginsContent.appendChild(msg);
+        return;
+      }
+
+      const plugins = registry.getAll();
+      if (plugins.length === 0) {
+        const msg = document.createElement('div');
+        msg.className = 'settings-description';
+        msg.textContent = 'No plugins installed.';
+        pluginsContent.appendChild(msg);
+        return;
+      }
+
+      for (const plugin of plugins) {
+        const section = document.createElement('div');
+        section.className = 'settings-section';
+
+        // Plugin header with enable/disable toggle
+        const headerRow = document.createElement('div');
+        headerRow.className = 'shortcut-row';
+
+        const nameLabel = document.createElement('span');
+        nameLabel.className = 'shortcut-label';
+        nameLabel.style.fontWeight = '600';
+        nameLabel.textContent = `${plugin.name} v${plugin.version}`;
+        headerRow.appendChild(nameLabel);
+
+        const enableCheckbox = document.createElement('input');
+        enableCheckbox.type = 'checkbox';
+        enableCheckbox.className = 'notification-checkbox';
+        enableCheckbox.checked = pluginStore.isEnabled(plugin.id);
+        enableCheckbox.onchange = () => {
+          registry.setEnabled(plugin.id, enableCheckbox.checked);
+          renderPluginsTab();
+        };
+        headerRow.appendChild(enableCheckbox);
+        section.appendChild(headerRow);
+
+        // Description
+        const desc = document.createElement('div');
+        desc.className = 'settings-description';
+        desc.textContent = plugin.description;
+        section.appendChild(desc);
+
+        // Plugin-specific settings (only when enabled)
+        if (pluginStore.isEnabled(plugin.id) && plugin.renderSettings) {
+          const settingsEl = plugin.renderSettings();
+          section.appendChild(settingsEl);
+        }
+
+        pluginsContent.appendChild(section);
+      }
+    }
+
+    renderPluginsTab();
+    dialog.appendChild(pluginsContent);
 
     // ── Shortcuts tab content ───────────────────────────────────
     const shortcutsContent = document.createElement('div');

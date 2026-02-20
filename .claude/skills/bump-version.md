@@ -14,7 +14,9 @@ Bump the project version across all crates and config files, then build to verif
 2. Verify the output shows all files updated successfully.
 3. Run `npm run build` to confirm the frontend builds with the new version constant.
 4. Run `cd src-tauri && cargo check --workspace` to confirm all Rust crates compile.
-5. Commit directly to the current branch with message `chore: bump version to X.Y.Z` and push.
+5. Commit directly to the current branch with message `chore: bump version to X.Y.Z`.
+6. Create an annotated git tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
+7. Do NOT push. Report old version, new version, and tag name.
 
 ## Files Updated
 
