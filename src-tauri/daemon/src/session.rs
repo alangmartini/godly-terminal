@@ -214,6 +214,12 @@ impl DaemonSession {
             let mut total_reads: u64 = 0;
             let mut channel_send_failures: u64 = 0;
             let mut last_stats = Instant::now();
+            // Throttle GridDiff generation to ~60fps (16ms). Dirty flags accumulate
+            // in godly-vt between diffs, so no changes are lost — the next diff
+            // just captures more rows. This prevents pipe flooding during heavy
+            // output (e.g., 200K lines) where JSON-serialized diffs are large.
+            let mut last_diff_time = Instant::now();
+            const DIFF_INTERVAL: Duration = Duration::from_millis(16);
 
             while reader_running.load(Ordering::Relaxed) {
                 match reader.read(&mut buf) {
@@ -245,12 +251,19 @@ impl DaemonSession {
                         }
 
                         // Feed PTY output into godly-vt parser for grid state.
-                        // If a client is attached and rows are dirty, extract a diff
-                        // to push alongside the raw bytes (avoids IPC round-trip).
+                        // If a client is attached and rows are dirty AND enough time
+                        // has passed, extract a diff to push alongside the raw bytes.
+                        // Throttled to ~60fps to avoid flooding the pipe with large
+                        // JSON-serialized diffs during heavy output.
                         let maybe_diff = {
                             let mut vt = reader_vt.lock();
                             vt.process(&buf[..n]);
-                            if reader_attached.load(Ordering::Relaxed) && vt.screen().has_dirty_rows() {
+                            let now = Instant::now();
+                            if reader_attached.load(Ordering::Relaxed)
+                                && vt.screen().has_dirty_rows()
+                                && now.duration_since(last_diff_time) >= DIFF_INTERVAL
+                            {
+                                last_diff_time = now;
                                 Some(extract_diff(&mut vt))
                             } else {
                                 None
