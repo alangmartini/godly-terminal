@@ -111,8 +111,11 @@ class ScrollRegressionSimulator {
     this.cachedSnapshot.scrollback_offset = this.daemonOffset;
     this.cachedSnapshot.total_scrollback = newTotal;
 
-    // Bug #202: only sync offset when not user-scrolled (line 687-689)
+    // Fix #202: sync offset from daemon. When user-scrolled, accept upward
+    // drift (new output) but reject stale lower offsets (race condition).
     if (!this.isUserScrolled) {
+      this.scrollbackOffset = this.daemonOffset;
+    } else if (this.daemonOffset > this.scrollbackOffset) {
       this.scrollbackOffset = this.daemonOffset;
     }
     this.totalScrollback = newTotal;
@@ -127,17 +130,19 @@ class ScrollRegressionSimulator {
     };
     if (!this.isUserScrolled) {
       this.scrollbackOffset = offset;
+    } else if (offset > this.scrollbackOffset) {
+      this.scrollbackOffset = offset;
     }
     this.totalScrollback = total;
     this.daemonOffset = offset;
   }
 
   /**
-   * Mirror of renderer.scrollToBottom() (TerminalRenderer.ts:414-420)
-   * → calls handleScroll(-currentOffset).
-   * Called during pane activation (setActive line 786, setSplitVisible line 811).
+   * Mirror of pane activation (setActive/setSplitVisible).
+   * Fix #202: only scroll to bottom when user hasn't scrolled up.
    */
   rendererScrollToBottom() {
+    if (this.isUserScrolled) return;
     const currentOffset = this.cachedSnapshot?.scrollback_offset ?? 0;
     if (currentOffset > 0) {
       this.handleScroll(-currentOffset);
@@ -145,13 +150,12 @@ class ScrollRegressionSimulator {
   }
 
   /**
-   * Mirror of handleKeyEvent snap-to-bottom logic (TerminalPane.ts:364-366).
-   * Any non-modifier keystroke while scrolled up triggers snapToBottom.
+   * Mirror of handleKeyEvent (TerminalPane.ts).
+   * Fix #202: keyboard input no longer snaps to bottom unconditionally.
    */
   onKeyboardInput() {
-    if (this.scrollbackOffset > 0) {
-      this.snapToBottom();
-    }
+    // Fixed: removed unconditional snapToBottom on keystroke.
+    // User can type while viewing scrollback.
   }
 
   /** Get the jump magnitude that would result from a scroll delta */
@@ -286,16 +290,16 @@ describe('Bug #202 regression: scroll-to-bottom during sustained output', () => 
       sim.handleScroll(20);
       sim.applySnapshot(20, 300);
 
-      // Output arrives, doesn't snap (correct — autoScroll is off)
+      // Output arrives — offset tracks daemon's drift (20 + 10 = 30)
+      // but user is still viewing the same content
       sim.onNewOutputDiff(10);
-      expect(sim.scrollbackOffset).toBe(20);
+      expect(sim.scrollbackOffset).toBe(30);
 
-      // But typing DOES snap — inconsistent with autoScrollOnOutput=false
+      // Typing should NOT snap to bottom
       sim.onKeyboardInput();
 
-      // Bug: if autoScrollOnOutput is disabled, keyboard input should
-      // also not snap to bottom
-      expect(sim.scrollbackOffset).toBe(20);
+      // Fix: keyboard input preserves scroll position
+      expect(sim.scrollbackOffset).toBe(30);
     });
   });
 
