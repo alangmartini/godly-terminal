@@ -30,3 +30,4 @@ winapi.workspace = true
 
 [dev-dependencies]
 godly-protocol.workspace = true
+ntest = "0.9"

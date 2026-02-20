@@ -157,6 +157,7 @@ fn wait_for_pipe_gone(pipe_name: &str, timeout: Duration) {
 /// Bug fix verification: previously, is_daemon_running() checked the pipe,
 /// which has a TOCTOU race. The named mutex is atomic and race-free.
 #[test]
+#[ntest::timeout(60_000)] // 1min — spawns multiple daemons + mutex contention
 fn test_named_mutex_blocks_second_daemon() {
     // Fix: DaemonLock (named mutex) prevents multiple daemon instances
     let pipe_name = format!(
@@ -204,6 +205,7 @@ fn test_named_mutex_blocks_second_daemon() {
 /// Bug fix verification: with the old pipe-based check, concurrent launches
 /// could all pass the TOCTOU window and coexist. The named mutex is atomic.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_concurrent_launch_single_instance() {
     // Fix: named mutex ensures exactly 1 daemon from concurrent launches
     let pipe_name = format!(
@@ -251,6 +253,7 @@ fn test_concurrent_launch_single_instance() {
 /// crash), so there are no stale locks. A new daemon should be able to acquire
 /// the lock and become the singleton.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_new_daemon_starts_after_lock_holder_exits() {
     // Fix: mutex is auto-released on exit, no stale locks
     let pipe_name = format!(
@@ -320,6 +323,7 @@ fn test_new_daemon_starts_after_lock_holder_exits() {
 /// connections go to the same daemon. Sessions created by one client are
 /// always visible to subsequent connections.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_sessions_visible_across_reconnect_with_single_daemon() {
     // Fix: single daemon means no session isolation
     let pipe_name = format!(
