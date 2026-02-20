@@ -494,6 +494,7 @@ export class TerminalPane {
     const newOffset = Math.max(0, Math.round(absoluteOffset));
     if (newOffset === this.scrollbackOffset) return;
     this.scrollbackOffset = newOffset;
+    this.isUserScrolled = newOffset > 0;
     const seq = ++this.scrollSeq;
     this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, newOffset).then(() => {
