@@ -135,14 +135,24 @@ describe('TerminalPane scroll handling', () => {
       expect(action).toBe('scroll.pageDown');
     });
 
-    it('bare Home matches scroll.toTop action', () => {
-      const action = keybindingStore.matchAction(keydown('Home'));
+    it('Ctrl+Shift+Home matches scroll.toTop action', () => {
+      const action = keybindingStore.matchAction(keydown('Home', { ctrlKey: true, shiftKey: true }));
       expect(action).toBe('scroll.toTop');
     });
 
-    it('bare End matches scroll.toBottom action', () => {
-      const action = keybindingStore.matchAction(keydown('End'));
+    it('Ctrl+Shift+End matches scroll.toBottom action', () => {
+      const action = keybindingStore.matchAction(keydown('End', { ctrlKey: true, shiftKey: true }));
       expect(action).toBe('scroll.toBottom');
+    });
+
+    it('bare Home does NOT match scroll action (sends to PTY instead)', () => {
+      const action = keybindingStore.matchAction(keydown('Home'));
+      expect(action).toBeNull();
+    });
+
+    it('bare End does NOT match scroll action (sends to PTY instead)', () => {
+      const action = keybindingStore.matchAction(keydown('End'));
+      expect(action).toBeNull();
     });
 
     it('Shift+PageUp does NOT match scroll action (keys changed to bare)', () => {
@@ -166,8 +176,8 @@ describe('TerminalPane scroll handling', () => {
       expect(keybindingStore.matchAction(keydown('PageUp'))).toBe('scroll.pageUp');
     });
 
-    it('scroll.toTop action still matches bare Home', () => {
-      expect(keybindingStore.matchAction(keydown('Home'))).toBe('scroll.toTop');
+    it('scroll.toTop action matches Ctrl+Shift+Home (guard is in TerminalPane)', () => {
+      expect(keybindingStore.matchAction(keydown('Home', { ctrlKey: true, shiftKey: true }))).toBe('scroll.toTop');
     });
   });
 

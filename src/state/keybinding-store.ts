@@ -163,14 +163,14 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     label: 'Scroll to Top',
     category: 'Scroll',
     type: 'app',
-    defaultChord: { ctrlKey: false, shiftKey: false, altKey: false, key: 'home' },
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'home' },
   },
   {
     id: 'scroll.toBottom',
     label: 'Scroll to Bottom',
     category: 'Scroll',
     type: 'app',
-    defaultChord: { ctrlKey: false, shiftKey: false, altKey: false, key: 'end' },
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'end' },
   },
   {
     id: 'tabs.renameTerminal',
