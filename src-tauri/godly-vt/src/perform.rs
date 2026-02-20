@@ -60,7 +60,10 @@ impl<CB: crate::callbacks::Callbacks> crate::state_machine::Perform for WrappedS
 
     fn execute(&mut self, b: u8) {
         match b {
-            7 => self.callbacks.audible_bell(&mut self.screen),
+            7 => {
+                self.screen.bell_pending = true;
+                self.callbacks.audible_bell(&mut self.screen);
+            }
             8 => self.screen.bs(),
             9 => self.screen.tab(),
             10 => self.screen.lf(),

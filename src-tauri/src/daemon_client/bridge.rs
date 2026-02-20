@@ -25,6 +25,7 @@ pub enum EmitPayload {
     TerminalGridDiff { terminal_id: String, diff: godly_protocol::types::RichGridDiff },
     TerminalClosed { terminal_id: String, exit_code: Option<i64> },
     ProcessChanged { terminal_id: String, process_name: String },
+    TerminalBell { terminal_id: String },
 }
 
 /// Cloneable handle that enqueues Tauri emit calls into a bounded channel.
@@ -173,6 +174,14 @@ impl EventEmitter {
                     serde_json::json!({
                         "terminal_id": terminal_id,
                         "process_name": process_name,
+                    }),
+                );
+            }
+            EmitPayload::TerminalBell { terminal_id } => {
+                let _ = app_handle.emit(
+                    "terminal-bell",
+                    serde_json::json!({
+                        "terminal_id": terminal_id,
                     }),
                 );
             }
@@ -816,6 +825,9 @@ fn event_to_payload(event: Event) -> EmitPayload {
         } => EmitPayload::ProcessChanged {
             terminal_id: session_id,
             process_name,
+        },
+        Event::Bell { session_id } => EmitPayload::TerminalBell {
+            terminal_id: session_id,
         },
     }
 }

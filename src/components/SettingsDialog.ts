@@ -777,6 +777,23 @@ export function showSettingsDialog(): Promise<void> {
     folderRow.appendChild(openFolderBtn);
     notifSection.appendChild(folderRow);
 
+    // Idle activity notifications toggle
+    const idleRow = document.createElement('div');
+    idleRow.className = 'shortcut-row';
+    const idleLabel = document.createElement('span');
+    idleLabel.className = 'shortcut-label';
+    idleLabel.textContent = 'Idle activity notifications';
+    idleRow.appendChild(idleLabel);
+    const idleCheckbox = document.createElement('input');
+    idleCheckbox.type = 'checkbox';
+    idleCheckbox.className = 'notification-checkbox';
+    idleCheckbox.checked = notificationStore.getSettings().idleNotifyEnabled;
+    idleCheckbox.onchange = () => {
+      notificationStore.setIdleNotifyEnabled(idleCheckbox.checked);
+    };
+    idleRow.appendChild(idleCheckbox);
+    notifSection.appendChild(idleRow);
+
     notifContent.appendChild(notifSection);
     dialog.appendChild(notifContent);
 

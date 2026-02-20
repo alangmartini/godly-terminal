@@ -70,6 +70,8 @@ pub struct Screen {
 
     window_title: String,
     window_icon_name: String,
+
+    pub(crate) bell_pending: bool,
 }
 
 impl Screen {
@@ -92,6 +94,8 @@ impl Screen {
 
             window_title: String::new(),
             window_icon_name: String::new(),
+
+            bell_pending: false,
         }
     }
 
@@ -680,6 +684,14 @@ impl Screen {
     /// Check if any row is dirty (without consuming).
     pub fn has_dirty_rows(&self) -> bool {
         self.grid().has_dirty_rows()
+    }
+
+    /// Returns true if a bell (BEL, 0x07) was received since the last call,
+    /// and resets the flag.
+    pub fn take_bell_pending(&mut self) -> bool {
+        let was = self.bell_pending;
+        self.bell_pending = false;
+        was
     }
 
     pub(crate) fn grid(&self) -> &crate::grid::Grid {

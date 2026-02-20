@@ -58,6 +58,60 @@ fn vb() {
 }
 
 #[test]
+fn bell_pending_set_on_bel_char() {
+    // BEL (0x07) should set the bell_pending flag
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+
+    // Initially no bell pending
+    assert!(!parser.take_bell_pending());
+
+    // Process BEL character
+    parser.process(b"\x07");
+    assert!(parser.take_bell_pending());
+
+    // take_bell_pending clears the flag
+    assert!(!parser.take_bell_pending());
+}
+
+#[test]
+fn bell_pending_cleared_after_take() {
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+
+    // Multiple BELs in one process call — flag should still be set once
+    parser.process(b"\x07\x07\x07");
+    assert!(parser.take_bell_pending());
+    // After taking, should be cleared
+    assert!(!parser.take_bell_pending());
+}
+
+#[test]
+fn bell_pending_survives_mixed_output() {
+    // BEL mixed with normal text output
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+
+    parser.process(b"hello\x07world");
+    assert!(parser.take_bell_pending());
+    assert_eq!(parser.screen().contents(), "helloworld");
+}
+
+#[test]
+fn bell_pending_not_set_by_normal_text() {
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+
+    parser.process(b"just normal text");
+    assert!(!parser.take_bell_pending());
+}
+
+#[test]
+fn bell_pending_not_set_by_visual_bell() {
+    // Visual bell (ESC g) should NOT set bell_pending — only audible BEL (0x07) does
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+
+    parser.process(b"\x1bg");
+    assert!(!parser.take_bell_pending());
+}
+
+#[test]
 fn decsc() {
     helpers::fixture("decsc");
 }
