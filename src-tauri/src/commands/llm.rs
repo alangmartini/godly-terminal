@@ -40,7 +40,7 @@ pub async fn llm_download_model(
                 Ok(())
             }
             Err(e) => {
-                let msg = format!("Download failed: {}", e);
+                let msg = format!("Download failed: {:#}", e);
                 *status_ref.status.write() = LlmStatus::Error(msg.clone());
                 Err(msg)
             }

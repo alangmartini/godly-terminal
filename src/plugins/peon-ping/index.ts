@@ -108,9 +108,28 @@ export class PeonPingPlugin implements GodlyPlugin {
 
     const packSelect = document.createElement('select');
     packSelect.className = 'notification-preset';
+    packSelect.style.minWidth = '140px';
+
+    // Show placeholder while loading
+    const loadingOpt = document.createElement('option');
+    loadingOpt.value = '';
+    loadingOpt.textContent = 'Loading...';
+    loadingOpt.disabled = true;
+    loadingOpt.selected = true;
+    packSelect.appendChild(loadingOpt);
 
     // Load packs asynchronously
     this.ctx.listSoundPacks().then(packs => {
+      packSelect.removeChild(loadingOpt);
+      if (packs.length === 0) {
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = 'No packs found';
+        emptyOpt.disabled = true;
+        emptyOpt.selected = true;
+        packSelect.appendChild(emptyOpt);
+        return;
+      }
       const activePack = this.ctx.getSetting('activePack', 'default');
       for (const pack of packs) {
         const opt = document.createElement('option');
@@ -120,6 +139,7 @@ export class PeonPingPlugin implements GodlyPlugin {
         packSelect.appendChild(opt);
       }
     }).catch(() => {
+      packSelect.removeChild(loadingOpt);
       const opt = document.createElement('option');
       opt.value = 'default';
       opt.textContent = 'Default';
