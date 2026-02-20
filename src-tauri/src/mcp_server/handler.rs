@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter};
 
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
@@ -8,22 +8,21 @@ use crate::state::AppState;
 
 use godly_protocol::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 
-/// Ensure the MCP "Agent" workspace and window exist, creating them on first call.
+/// Ensure the MCP "Agent" workspace exists, creating it on first call.
 /// Returns the Agent workspace ID.
-fn ensure_mcp_window(
+///
+/// MCP terminals are displayed in the main window's Agent workspace.
+/// No second WebView window is created — this avoids the broadcast event
+/// storm that caused WebView2 crashes under heavy output (issue #204).
+fn ensure_mcp_workspace(
     app_state: &Arc<AppState>,
-    app_handle: &AppHandle,
 ) -> String {
     // Fast path: workspace already created
     if let Some(id) = app_state.mcp_workspace_id.read().clone() {
-        // Ensure the window still exists (user may have closed it)
-        if app_handle.get_webview_window("mcp").is_none() {
-            let _ = create_mcp_window(app_handle);
-        }
         return id;
     }
 
-    // Slow path: create workspace + window
+    // Slow path: create workspace
     let workspace_id = uuid::Uuid::new_v4().to_string();
 
     // Use the first workspace's folder_path as a fallback, or home dir
@@ -50,36 +49,7 @@ fn ensure_mcp_window(
     app_state.add_workspace(workspace);
     *app_state.mcp_workspace_id.write() = Some(workspace_id.clone());
 
-    // Create the MCP window
-    let _ = create_mcp_window(app_handle);
-
     workspace_id
-}
-
-/// Create the secondary MCP window.
-fn create_mcp_window(app_handle: &AppHandle) -> Result<(), String> {
-    if app_handle.get_webview_window("mcp").is_some() {
-        return Ok(()); // Already exists
-    }
-
-    let url = WebviewUrl::App("index.html?mode=mcp".into());
-    match WebviewWindowBuilder::new(app_handle, "mcp", url)
-        .title("Godly Terminal - Agent")
-        .inner_size(1200.0, 800.0)
-        .resizable(true)
-        .decorations(true)
-        .focused(false)
-        .build()
-    {
-        Ok(_) => {
-            eprintln!("[mcp] Created MCP agent window");
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("[mcp] Failed to create MCP window: {}", e);
-            Err(format!("Failed to create MCP window: {}", e))
-        }
-    }
 }
 
 /// Handle an MCP request by delegating to AppState and DaemonClient.
@@ -153,7 +123,7 @@ pub fn handle_mcp_request(
             use uuid::Uuid;
 
             // MCP terminals always go into the Agent workspace (separate window)
-            let workspace_id = &ensure_mcp_window(app_state, app_handle);
+            let workspace_id = &ensure_mcp_workspace(app_state);
 
             let want_worktree = worktree.unwrap_or(false) || worktree_name.is_some();
 
@@ -337,7 +307,7 @@ pub fn handle_mcp_request(
             use uuid::Uuid;
 
             // MCP terminals always go into the Agent workspace (separate window)
-            let workspace_id = &ensure_mcp_window(app_state, app_handle);
+            let workspace_id = &ensure_mcp_workspace(app_state);
 
             let terminal_id = Uuid::new_v4().to_string();
 
