@@ -67,6 +67,9 @@ pub struct Screen {
     modes: u8,
     mouse_protocol_mode: MouseProtocolMode,
     mouse_protocol_encoding: MouseProtocolEncoding,
+
+    window_title: String,
+    window_icon_name: String,
 }
 
 impl Screen {
@@ -86,6 +89,9 @@ impl Screen {
             modes: 0,
             mouse_protocol_mode: MouseProtocolMode::default(),
             mouse_protocol_encoding: MouseProtocolEncoding::default(),
+
+            window_title: String::new(),
+            window_icon_name: String::new(),
         }
     }
 
@@ -594,6 +600,28 @@ impl Screen {
     #[must_use]
     pub fn mouse_protocol_encoding(&self) -> MouseProtocolEncoding {
         self.mouse_protocol_encoding
+    }
+
+    /// Returns the current OSC window title, if set via OSC 0 or OSC 2.
+    #[must_use]
+    pub fn window_title(&self) -> &str {
+        &self.window_title
+    }
+
+    /// Returns the current OSC window icon name, if set via OSC 0 or OSC 1.
+    #[must_use]
+    pub fn window_icon_name(&self) -> &str {
+        &self.window_icon_name
+    }
+
+    /// Set the window title (called from OSC 0 / OSC 2 dispatch).
+    pub(crate) fn set_window_title(&mut self, title: &[u8]) {
+        self.window_title = String::from_utf8_lossy(title).into_owned();
+    }
+
+    /// Set the window icon name (called from OSC 0 / OSC 1 dispatch).
+    pub(crate) fn set_window_icon_name(&mut self, icon_name: &[u8]) {
+        self.window_icon_name = String::from_utf8_lossy(icon_name).into_owned();
     }
 
     /// Returns the currently active foreground color.
