@@ -81,7 +81,19 @@ function updateJsonFile(filePath, field, newVersion) {
   writeFileSync(fullPath, JSON.stringify(json, null, 2) + "\n", "utf-8");
 }
 
-function updateCargoToml(filePath, oldVersion, newVersion) {
+function readCargoVersion(filePath) {
+  const fullPath = join(root, filePath);
+  const content = readFileSync(fullPath, "utf-8");
+  const packageRe = /\[package\][\s\S]*?version\s*=\s*"([^"]+)"/;
+  const match = content.match(packageRe);
+  if (!match) {
+    console.error(`Error: Could not find version in [package] section of ${filePath}`);
+    process.exit(1);
+  }
+  return match[1];
+}
+
+function updateCargoToml(filePath, newVersion) {
   const fullPath = join(root, filePath);
   let content = readFileSync(fullPath, "utf-8");
 
@@ -91,13 +103,6 @@ function updateCargoToml(filePath, oldVersion, newVersion) {
 
   if (!match) {
     console.error(`Error: Could not find version in [package] section of ${filePath}`);
-    process.exit(1);
-  }
-
-  if (match[2] !== oldVersion) {
-    console.error(
-      `Error: Version mismatch in ${filePath}: expected "${oldVersion}", found "${match[2]}"`
-    );
     process.exit(1);
   }
 
@@ -127,10 +132,13 @@ console.log(`Bumping version: ${oldVersion} -> ${newVersion}\n`);
 for (const file of VERSION_FILES) {
   if (file.type === "json") {
     updateJsonFile(file.path, file.field, newVersion);
+    console.log(`  Updated ${file.path} -> ${newVersion}`);
   } else {
-    updateCargoToml(file.path, oldVersion, newVersion);
+    const crateOld = readCargoVersion(file.path);
+    const crateNew = bumpVersion(crateOld, bump);
+    updateCargoToml(file.path, crateNew);
+    console.log(`  Updated ${file.path}: ${crateOld} -> ${crateNew}`);
   }
-  console.log(`  Updated ${file.path}`);
 }
 
 console.log(`\nAll ${VERSION_FILES.length} files updated to ${newVersion}.`);
