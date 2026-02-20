@@ -68,21 +68,17 @@ fn validate_filename(filename: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Embedded default sound pack for first-run bootstrap.
+// In production builds, the resource dir has these files, but in dev mode
+// resource_dir() points to target/debug/ which doesn't have them.
+// Embedding the mp3 (~15KB) guarantees the default pack always exists.
+const DEFAULT_MANIFEST: &str = include_str!("../../soundpacks/default/manifest.json");
+const DEFAULT_SOUND: &[u8] = include_bytes!("../../soundpacks/default/work_complete.mp3");
+
 /// Copy bundled sound packs from the resource dir into the user's soundpacks dir.
-/// Preserves existing packs and their contents.
+/// Preserves existing packs and their contents. Falls back to embedded defaults
+/// when the resource directory is unavailable (dev mode).
 pub fn install_bundled_sound_packs(app_handle: &AppHandle) {
-    let resource_dir = match app_handle.path().resource_dir() {
-        Ok(d) => d.join(SOUNDPACKS_DIR),
-        Err(e) => {
-            eprintln!("[soundpacks] Failed to get resource dir: {}", e);
-            return;
-        }
-    };
-
-    if !resource_dir.exists() {
-        return;
-    }
-
     let target_dir = match get_soundpacks_dir_path(app_handle) {
         Ok(d) => d,
         Err(e) => {
@@ -91,51 +87,92 @@ pub fn install_bundled_sound_packs(app_handle: &AppHandle) {
         }
     };
 
-    let entries = match fs::read_dir(&resource_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("[soundpacks] Failed to read bundled soundpacks: {}", e);
+    // Try copying from the resource directory first (production builds)
+    let mut copied_from_resources = false;
+    if let Ok(res) = app_handle.path().resource_dir() {
+        let resource_dir = res.join(SOUNDPACKS_DIR);
+        if resource_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&resource_dir) {
+                for entry in entries.flatten() {
+                    if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                        continue;
+                    }
+
+                    let pack_name = entry.file_name().to_string_lossy().to_string();
+                    let dest_pack = target_dir.join(&pack_name);
+
+                    if !dest_pack.exists() {
+                        if let Err(e) = fs::create_dir_all(&dest_pack) {
+                            eprintln!(
+                                "[soundpacks] Failed to create pack dir {}: {}",
+                                pack_name, e
+                            );
+                            continue;
+                        }
+                    }
+
+                    let pack_entries = match fs::read_dir(entry.path()) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+
+                    for file_entry in pack_entries.flatten() {
+                        if !file_entry
+                            .file_type()
+                            .map(|ft| ft.is_file())
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        let file_name = file_entry.file_name().to_string_lossy().to_string();
+                        let dest_file = dest_pack.join(&file_name);
+                        if dest_file.exists() {
+                            continue;
+                        }
+                        if let Err(e) = fs::copy(file_entry.path(), &dest_file) {
+                            eprintln!(
+                                "[soundpacks] Failed to copy {}/{}: {}",
+                                pack_name, file_name, e
+                            );
+                        } else {
+                            eprintln!("[soundpacks] Installed: {}/{}", pack_name, file_name);
+                            copied_from_resources = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: ensure the default pack exists using embedded data.
+    // This covers dev mode where resource_dir doesn't have soundpacks.
+    let default_pack_dir = target_dir.join("default");
+    let manifest_path = default_pack_dir.join("manifest.json");
+    let sound_path = default_pack_dir.join("work_complete.mp3");
+
+    if !manifest_path.exists() || !sound_path.exists() {
+        if !copied_from_resources {
+            eprintln!("[soundpacks] Resource dir missing soundpacks, using embedded defaults");
+        }
+
+        if let Err(e) = fs::create_dir_all(&default_pack_dir) {
+            eprintln!("[soundpacks] Failed to create default pack dir: {}", e);
             return;
         }
-    };
 
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-            continue;
-        }
-
-        let pack_name = entry.file_name().to_string_lossy().to_string();
-        let dest_pack = target_dir.join(&pack_name);
-
-        if !dest_pack.exists() {
-            if let Err(e) = fs::create_dir_all(&dest_pack) {
-                eprintln!("[soundpacks] Failed to create pack dir {}: {}", pack_name, e);
-                continue;
-            }
-        }
-
-        // Copy all files in the pack dir that don't already exist
-        let pack_entries = match fs::read_dir(entry.path()) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        for file_entry in pack_entries.flatten() {
-            if !file_entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                continue;
-            }
-            let file_name = file_entry.file_name().to_string_lossy().to_string();
-            let dest_file = dest_pack.join(&file_name);
-            if dest_file.exists() {
-                continue;
-            }
-            if let Err(e) = fs::copy(file_entry.path(), &dest_file) {
-                eprintln!(
-                    "[soundpacks] Failed to copy {}/{}: {}",
-                    pack_name, file_name, e
-                );
+        if !manifest_path.exists() {
+            if let Err(e) = fs::write(&manifest_path, DEFAULT_MANIFEST) {
+                eprintln!("[soundpacks] Failed to write default manifest: {}", e);
             } else {
-                eprintln!("[soundpacks] Installed: {}/{}", pack_name, file_name);
+                eprintln!("[soundpacks] Installed embedded: default/manifest.json");
+            }
+        }
+
+        if !sound_path.exists() {
+            if let Err(e) = fs::write(&sound_path, DEFAULT_SOUND) {
+                eprintln!("[soundpacks] Failed to write default sound: {}", e);
+            } else {
+                eprintln!("[soundpacks] Installed embedded: default/work_complete.mp3");
             }
         }
     }
