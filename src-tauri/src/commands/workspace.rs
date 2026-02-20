@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
-use crate::state::{AppState, ShellType, SplitView, Terminal, Workspace};
+use crate::state::{AppState, ShellType, SplitView, Workspace};
 
 #[tauri::command]
 pub fn create_workspace(
@@ -123,30 +123,3 @@ pub fn clear_split_view(
     Ok(())
 }
 
-/// Returns the Agent workspace and its terminals for the MCP window to bootstrap
-/// its state on load. This handles the race condition where the MCP window is
-/// created but hasn't set up event listeners before `mcp-terminal-created` fires.
-#[derive(serde::Serialize)]
-pub struct McpState {
-    pub workspace: Option<Workspace>,
-    pub terminals: Vec<Terminal>,
-}
-
-#[tauri::command]
-pub fn get_mcp_state(state: State<Arc<AppState>>) -> McpState {
-    let workspace_id = state.mcp_workspace_id.read().clone();
-    match workspace_id {
-        Some(id) => {
-            let workspace = state.get_workspace(&id);
-            let terminals = state.get_workspace_terminals(&id);
-            McpState {
-                workspace,
-                terminals,
-            }
-        }
-        None => McpState {
-            workspace: None,
-            terminals: Vec::new(),
-        },
-    }
-}

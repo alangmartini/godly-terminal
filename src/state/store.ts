@@ -48,21 +48,9 @@ export interface AppState {
   splitViews: Record<string, SplitView>;  // keyed by workspaceId
 }
 
-export type WindowMode = 'main' | 'mcp';
-
 type Listener = () => void;
 
-function detectWindowMode(): WindowMode {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('mode') === 'mcp' ? 'mcp' : 'main';
-  } catch {
-    return 'main';
-  }
-}
-
 class Store {
-  readonly windowMode: WindowMode = detectWindowMode();
 
   private state: AppState = {
     workspaces: [],
@@ -376,10 +364,7 @@ class Store {
   }
 
   getVisibleWorkspaces(): Workspace[] {
-    if (this.windowMode === 'mcp') {
-      return this.state.workspaces.filter(w => w.name === 'Agent');
-    }
-    return this.state.workspaces.filter(w => w.name !== 'Agent');
+    return this.state.workspaces;
   }
 }
 
