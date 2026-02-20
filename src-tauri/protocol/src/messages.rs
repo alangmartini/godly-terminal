@@ -104,7 +104,13 @@ pub enum Response {
 #[serde(tag = "type")]
 pub enum Event {
     Output { session_id: String, data: Vec<u8> },
-    SessionClosed { session_id: String },
+    SessionClosed {
+        session_id: String,
+        /// Process exit code (e.g., 0 for success, non-zero for failure).
+        /// None when exit status is unavailable (e.g., session killed externally).
+        #[serde(default)]
+        exit_code: Option<i64>,
+    },
     ProcessChanged { session_id: String, process_name: String },
     GridDiff { session_id: String, diff: crate::types::RichGridDiff },
 }

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -52,6 +52,9 @@ pub struct DaemonSession {
     /// in-memory grid. Used by ReadGrid to provide clean, parsed terminal content
     /// without ANSI escape stripping.
     vt_parser: Arc<Mutex<godly_vt::Parser>>,
+    /// Exit code from the child process. Set by the child monitor thread when
+    /// the process exits. i64::MIN means "not yet exited" (sentinel).
+    exit_code: Arc<AtomicI64>,
 }
 
 impl DaemonSession {
@@ -169,6 +172,7 @@ impl DaemonSession {
         let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
 
         let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 10_000)));
+        let exit_code = Arc::new(AtomicI64::new(i64::MIN));
 
         // Spawn reader thread that routes output to either the attached client or ring buffer
         let reader_master = master.clone();
@@ -414,6 +418,7 @@ impl DaemonSession {
         let monitor_attached = is_attached_flag.clone();
         let monitor_tx = output_tx.clone();
         let monitor_session_id = id.clone();
+        let monitor_exit_code = exit_code.clone();
         thread::spawn(move || {
             let mut child = child;
             // wait() blocks until the child process exits
@@ -424,6 +429,13 @@ impl DaemonSession {
                         monitor_session_id,
                         status
                     );
+                    // Extract exit code from portable-pty's ExitStatus.
+                    // On Windows, this is the DWORD exit code (e.g. 0, 1, 0xC000013A).
+                    // The Debug output is "ExitStatus { code: N, signal: None }".
+                    // portable-pty exposes success() but not the raw code directly,
+                    // so we parse it from the Debug representation.
+                    let code = parse_exit_code_from_status(&format!("{:?}", status));
+                    monitor_exit_code.store(code, Ordering::Relaxed);
                 }
                 Err(e) => {
                     daemon_log!(
@@ -470,6 +482,7 @@ impl DaemonSession {
             output_history,
             last_output_epoch_ms,
             vt_parser,
+            exit_code,
         })
     }
 
@@ -605,6 +618,20 @@ impl DaemonSession {
     /// Check if the session is still running
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
+    }
+
+    /// Get the exit code of the child process, if it has exited.
+    /// Returns None if the process hasn't exited yet or exit code is unavailable.
+    pub fn exit_code(&self) -> Option<i64> {
+        let code = self.exit_code.load(Ordering::Relaxed);
+        if code == i64::MIN { None } else { Some(code) }
+    }
+
+    /// Get a clone of the exit_code Arc for use in async forwarding tasks.
+    /// The task reads this after the channel closes to include the exit code
+    /// in the SessionClosed event.
+    pub fn exit_code_arc(&self) -> Arc<AtomicI64> {
+        self.exit_code.clone()
     }
 
     /// Get the running flag for external monitoring (e.g., forwarding task).
@@ -1057,6 +1084,21 @@ fn terminate_child_processes(shell_pid: u32) -> Result<u32, String> {
     Ok(terminated)
 }
 
+/// Parse the numeric exit code from portable-pty's ExitStatus Debug output.
+/// Format: "ExitStatus { code: 3221225786, signal: None }"
+/// Returns i64::MIN if parsing fails (sentinel for "unknown").
+fn parse_exit_code_from_status(debug_str: &str) -> i64 {
+    // Look for "code: <number>"
+    if let Some(start) = debug_str.find("code: ") {
+        let after = &debug_str[start + 6..];
+        let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+        if let Ok(code) = after[..end].parse::<u32>() {
+            return code as i64;
+        }
+    }
+    i64::MIN
+}
+
 /// Append data to ring buffer, evicting oldest data if necessary
 fn append_to_ring(ring: &mut VecDeque<u8>, data: &[u8]) {
     // If data alone exceeds buffer, only keep the tail
@@ -1131,6 +1173,39 @@ mod tests {
         // Last 3 bytes should be "new"
         let tail: Vec<u8> = ring.iter().rev().take(3).rev().copied().collect();
         assert_eq!(tail, b"new");
+    }
+
+    #[test]
+    fn test_parse_exit_code_success() {
+        assert_eq!(
+            parse_exit_code_from_status("ExitStatus { code: 0, signal: None }"),
+            0
+        );
+    }
+
+    #[test]
+    fn test_parse_exit_code_nonzero() {
+        assert_eq!(
+            parse_exit_code_from_status("ExitStatus { code: 1, signal: None }"),
+            1
+        );
+    }
+
+    #[test]
+    fn test_parse_exit_code_windows_crash() {
+        // 0xC000013A = 3221225786 = STATUS_CONTROL_C_EXIT
+        assert_eq!(
+            parse_exit_code_from_status("ExitStatus { code: 3221225786, signal: None }"),
+            3221225786
+        );
+    }
+
+    #[test]
+    fn test_parse_exit_code_unknown_format() {
+        assert_eq!(
+            parse_exit_code_from_status("SomeOtherFormat"),
+            i64::MIN
+        );
     }
 
     #[test]

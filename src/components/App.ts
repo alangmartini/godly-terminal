@@ -240,7 +240,7 @@ export class App {
       if (terminal.exited) {
         const pane = this.terminalPanes.get(terminal.id);
         if (pane instanceof TerminalPane) {
-          pane.showExitedOverlay();
+          pane.showExitedOverlay(terminal.exitCode);
         }
       }
     }
