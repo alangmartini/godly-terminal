@@ -737,6 +737,18 @@ export function showSettingsDialog(): Promise<void> {
 
     shortcutsContent.appendChild(kbHeader);
 
+    // Search input for filtering shortcuts
+    let shortcutSearchQuery = '';
+    const shortcutSearchInput = document.createElement('input');
+    shortcutSearchInput.type = 'text';
+    shortcutSearchInput.className = 'notification-preset shortcut-search';
+    shortcutSearchInput.placeholder = 'Filter shortcuts...';
+    shortcutSearchInput.oninput = () => {
+      shortcutSearchQuery = shortcutSearchInput.value.toLowerCase();
+      renderShortcuts();
+    };
+    shortcutsContent.appendChild(shortcutSearchInput);
+
     // Shortcuts container
     const shortcutsContainer = document.createElement('div');
     shortcutsContainer.className = 'settings-shortcuts';
@@ -825,7 +837,13 @@ export function showSettingsDialog(): Promise<void> {
       const categories: ShortcutCategory[] = ['Terminal', 'Clipboard', 'Tabs', 'Split', 'Workspace', 'Scroll', 'Debug'];
 
       for (const category of categories) {
-        const defs = DEFAULT_SHORTCUTS.filter((d) => d.category === category);
+        const defs = DEFAULT_SHORTCUTS.filter((d) => {
+          if (d.category !== category) return false;
+          if (!shortcutSearchQuery) return true;
+          const chord = formatChord(keybindingStore.getBinding(d.id));
+          return d.label.toLowerCase().includes(shortcutSearchQuery)
+            || chord.toLowerCase().includes(shortcutSearchQuery);
+        });
         if (defs.length === 0) continue;
 
         const section = document.createElement('div');
