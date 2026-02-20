@@ -199,7 +199,7 @@ fn wait_for_session_closed(
             .ok_or_else(|| "Unexpected EOF".to_string())?;
 
         match msg {
-            DaemonMessage::Event(Event::SessionClosed { session_id: sid }) if sid == session_id => {
+            DaemonMessage::Event(Event::SessionClosed { session_id: sid, .. }) if sid == session_id => {
                 return Ok(());
             }
             _ => continue, // Skip other events

@@ -17,7 +17,7 @@ enum WsServerMessage {
     #[serde(rename = "grid")]
     Grid { rows: Vec<String>, cursor_row: u16, cursor_col: u16 },
     #[serde(rename = "session_closed")]
-    SessionClosed { session_id: String },
+    SessionClosed { session_id: String, exit_code: Option<i64> },
     #[serde(rename = "error")]
     Error { message: String },
 }
@@ -78,6 +78,7 @@ async fn handle_ws(state: AppState, session_id: String, socket: WebSocket) {
                     if message.contains("not found") {
                         WsServerMessage::SessionClosed {
                             session_id: sid.clone(),
+                            exit_code: None,
                         }
                     } else {
                         WsServerMessage::Error { message }

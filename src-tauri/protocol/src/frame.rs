@@ -378,6 +378,7 @@ mod tests {
             &mut buf,
             &DaemonMessage::Event(Event::SessionClosed {
                 session_id: "s3".into(),
+                exit_code: Some(1),
             }),
         )
         .unwrap();
@@ -403,7 +404,7 @@ mod tests {
         let m4 = read_daemon_message(&mut cursor).unwrap().unwrap();
         assert!(matches!(
             m4,
-            DaemonMessage::Event(Event::SessionClosed { ref session_id }) if session_id == "s3"
+            DaemonMessage::Event(Event::SessionClosed { ref session_id, exit_code: Some(1) }) if session_id == "s3"
         ));
 
         assert!(read_daemon_message(&mut cursor).unwrap().is_none());

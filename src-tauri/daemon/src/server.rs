@@ -902,6 +902,7 @@ mod forwarding_tests {
                     let _ = event_tx
                         .send(DaemonMessage::Event(Event::SessionClosed {
                             session_id: sid,
+                            exit_code: None,
                         }))
                         .await;
                 }
@@ -924,7 +925,7 @@ mod forwarding_tests {
 
         let msg2 = event_rx.recv().await.unwrap();
         match msg2 {
-            DaemonMessage::Event(Event::SessionClosed { session_id }) => {
+            DaemonMessage::Event(Event::SessionClosed { session_id, .. }) => {
                 assert_eq!(session_id, sid);
             }
             other => panic!("expected SessionClosed, got {:?}", std::mem::discriminant(&other)),
@@ -964,6 +965,7 @@ mod forwarding_tests {
                     let _ = event_tx
                         .send(DaemonMessage::Event(Event::SessionClosed {
                             session_id: sid,
+                            exit_code: None,
                         }))
                         .await;
                 }
@@ -1010,6 +1012,7 @@ mod forwarding_tests {
                     let _ = event_tx
                         .send(DaemonMessage::Event(Event::SessionClosed {
                             session_id: sid,
+                            exit_code: None,
                         }))
                         .await;
                     return;
@@ -1033,6 +1036,7 @@ mod forwarding_tests {
                     let _ = event_tx
                         .send(DaemonMessage::Event(Event::SessionClosed {
                             session_id: sid,
+                            exit_code: None,
                         }))
                         .await;
                 }
@@ -1043,7 +1047,7 @@ mod forwarding_tests {
 
         let msg = event_rx.recv().await.unwrap();
         match msg {
-            DaemonMessage::Event(Event::SessionClosed { session_id }) => {
+            DaemonMessage::Event(Event::SessionClosed { session_id, .. }) => {
                 assert_eq!(session_id, "test-attach-dead");
             }
             other => panic!(
@@ -1109,6 +1113,8 @@ async fn handle_request(
                     let tx = msg_tx.clone();
                     let sid = session_id.clone();
                     let running_flag = session.running_flag();
+                    let session_exit_code = session.exit_code();
+                    let exit_code_arc = session.exit_code_arc();
                     tokio::spawn(async move {
                         // Bug A2 fix: if the session is already dead when we attach,
                         // send SessionClosed immediately. The reader thread and child
@@ -1116,12 +1122,14 @@ async fn handle_request(
                         // close on its own — rx.recv() would block forever.
                         if is_already_dead {
                             daemon_log!(
-                                "Session {} already dead at attach time, sending SessionClosed",
-                                sid
+                                "Session {} already dead at attach time, sending SessionClosed (exit_code={:?})",
+                                sid,
+                                session_exit_code
                             );
                             let _ = tx
                                 .send(DaemonMessage::Event(Event::SessionClosed {
                                     session_id: sid,
+                                    exit_code: session_exit_code,
                                 }))
                                 .await;
                             return;
@@ -1150,10 +1158,15 @@ async fn handle_request(
                         // - running == false → PTY exited → notify client
                         // - running == true  → client detached → session still alive, don't notify
                         if !running_flag.load(Ordering::Relaxed) {
-                            daemon_log!("Session {} PTY exited, sending SessionClosed", sid);
+                            let code = {
+                                let raw = exit_code_arc.load(Ordering::Relaxed);
+                                if raw == i64::MIN { None } else { Some(raw) }
+                            };
+                            daemon_log!("Session {} PTY exited, sending SessionClosed (exit_code={:?})", sid, code);
                             let _ = tx
                                 .send(DaemonMessage::Event(Event::SessionClosed {
                                     session_id: sid,
+                                    exit_code: code,
                                 }))
                                 .await;
                         }

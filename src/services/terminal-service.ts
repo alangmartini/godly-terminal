@@ -38,6 +38,7 @@ export interface TerminalGridDiffPayload {
 
 export interface TerminalClosedPayload {
   terminal_id: string;
+  exit_code: number | null;
 }
 
 /** Result of create_terminal IPC call */
@@ -98,9 +99,15 @@ class TerminalService {
     const unlistenClosed = await listen<TerminalClosedPayload>(
       'terminal-closed',
       (event) => {
-        const { terminal_id } = event.payload;
+        const { terminal_id, exit_code } = event.payload;
         this.outputListeners.delete(terminal_id);
-        store.updateTerminal(terminal_id, { exited: true });
+        store.updateTerminal(terminal_id, {
+          exited: true,
+          exitCode: exit_code ?? undefined,
+        });
+        console.info(
+          `[TerminalService] Session closed: terminal=${terminal_id}, exit_code=${exit_code}`
+        );
         // Free daemon session resources (fire-and-forget)
         invoke('close_terminal', { terminalId: terminal_id }).catch(() => {});
       }

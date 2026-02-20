@@ -13,6 +13,7 @@ export interface Terminal {
   paneType?: PaneType;
   figmaUrl?: string;
   exited?: boolean;
+  exitCode?: number;
 }
 
 export type ShellType =

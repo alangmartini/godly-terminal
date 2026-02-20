@@ -853,13 +853,22 @@ export class TerminalPane {
     this.container.remove();
   }
 
-  showExitedOverlay() {
+  showExitedOverlay(exitCode?: number) {
     if (this.isExited) return;
     this.isExited = true;
 
+    let message: string;
+    if (exitCode === undefined || exitCode === null) {
+      message = 'Process exited';
+    } else if (exitCode === 0) {
+      message = 'Process exited';
+    } else {
+      message = `Process exited (code ${exitCode})`;
+    }
+
     this.exitedOverlay = document.createElement('div');
     this.exitedOverlay.className = 'terminal-exited-overlay';
-    this.exitedOverlay.textContent = 'Process exited';
+    this.exitedOverlay.textContent = message;
     this.container.appendChild(this.exitedOverlay);
   }
 
