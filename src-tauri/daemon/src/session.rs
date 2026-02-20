@@ -735,7 +735,7 @@ impl DaemonSession {
             },
             alternate_screen: screen.alternate_screen(),
             cursor_hidden: screen.hide_cursor(),
-            title: String::new(), // OSC title is tracked at the Tauri app level
+            title: screen.window_title().to_string(),
             scrollback_offset: screen.scrollback(),
             total_scrollback: screen.scrollback_count(),
         }
@@ -811,7 +811,7 @@ impl DaemonSession {
             },
             alternate_screen: screen.alternate_screen(),
             cursor_hidden: screen.hide_cursor(),
-            title: String::new(),
+            title: screen.window_title().to_string(),
             scrollback_offset: screen.scrollback(),
             total_scrollback: screen.scrollback_count(),
             full_repaint,
@@ -929,7 +929,7 @@ fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDif
         },
         alternate_screen: screen.alternate_screen(),
         cursor_hidden: screen.hide_cursor(),
-        title: String::new(),
+        title: screen.window_title().to_string(),
         scrollback_offset: screen.scrollback(),
         total_scrollback: screen.scrollback_count(),
         full_repaint,
