@@ -17,10 +17,17 @@ describe('IdleNotificationService', () => {
     vi.useRealTimers();
   });
 
-  function createService(opts?: { idleThresholdMs?: number; checkIntervalMs?: number }) {
+  function createService(opts?: {
+    idleThresholdMs?: number;
+    checkIntervalMs?: number;
+    startupGraceMs?: number;
+    notifyCooldownMs?: number;
+  }) {
     service = new IdleNotificationService({
       idleThresholdMs: opts?.idleThresholdMs ?? 1000,
       checkIntervalMs: opts?.checkIntervalMs ?? 500,
+      startupGraceMs: opts?.startupGraceMs,
+      notifyCooldownMs: opts?.notifyCooldownMs,
       getActiveTerminalId: () => activeTerminalId,
       onNotify,
     });
@@ -156,7 +163,8 @@ describe('IdleNotificationService', () => {
     it('should NOT notify for all terminals when bulk output arrives during startup (simulating reconnection replay)', () => {
       // Bug #209: On startup, ring buffer replay calls recordOutput() for all
       // terminals near-simultaneously. After idle threshold, all fire notifications.
-      createService({ idleThresholdMs: 1000, checkIntervalMs: 500 });
+      // Fix: startupGraceMs suppresses output recorded during the grace window.
+      createService({ idleThresholdMs: 1000, checkIntervalMs: 500, startupGraceMs: 10000 });
 
       // Simulate startup: 5 terminals all receive output at the same time
       // (ring buffer replay during reattach)
@@ -172,16 +180,14 @@ describe('IdleNotificationService', () => {
       // Wait past idle threshold
       vi.advanceTimersByTime(1500);
 
-      // BUG: Currently fires 4 notifications (all except active terminal).
-      // EXPECTED: Should fire 0 notifications during startup grace period.
-      // Reconnection replay output should not be treated as new activity.
+      // FIXED: 0 notifications — startup grace suppresses replay output.
       expect(onNotify).not.toHaveBeenCalled();
     });
 
     it('should suppress notifications during a startup grace period even if only one background terminal replays', () => {
       // Bug #209: Even a single background terminal receiving replay output
       // should not trigger a notification during the startup window.
-      createService({ idleThresholdMs: 1000, checkIntervalMs: 500 });
+      createService({ idleThresholdMs: 1000, checkIntervalMs: 500, startupGraceMs: 10000 });
 
       // Simulate: one background terminal gets replay output immediately after creation
       service.recordOutput('term-bg');
@@ -190,20 +196,19 @@ describe('IdleNotificationService', () => {
       // Wait past idle threshold
       vi.advanceTimersByTime(1500);
 
-      // BUG: Currently fires 1 notification for term-bg.
-      // EXPECTED: No notification during startup grace period.
+      // FIXED: No notification during startup grace period.
       expect(onNotify).not.toHaveBeenCalled();
     });
 
     it('should still notify for GENUINE output that arrives well after startup', () => {
       // After the startup grace period, normal idle detection should work.
-      createService({ idleThresholdMs: 1000, checkIntervalMs: 500 });
+      createService({ idleThresholdMs: 1000, checkIntervalMs: 500, startupGraceMs: 10000 });
 
-      // Simulate startup replay
+      // Simulate startup replay (suppressed by grace)
       service.recordOutput('term-1');
       activeTerminalId = 'term-active';
 
-      // Wait well past any startup grace period (e.g., 30 seconds)
+      // Wait well past startup grace period (30s >> 10s grace)
       vi.advanceTimersByTime(30000);
 
       // Reset notification mock
@@ -223,7 +228,7 @@ describe('IdleNotificationService', () => {
     it('should not fire a notification storm for 10 background terminals on startup', () => {
       // Bug #209: Realistic scenario — user has 10 tabs open across workspaces,
       // restarts the app, and gets bombarded with 9 notifications.
-      createService({ idleThresholdMs: 1000, checkIntervalMs: 500 });
+      createService({ idleThresholdMs: 1000, checkIntervalMs: 500, startupGraceMs: 10000 });
 
       // Simulate startup: all 10 terminals get replay output
       for (let i = 0; i < 10; i++) {
@@ -236,8 +241,7 @@ describe('IdleNotificationService', () => {
       // Wait past idle threshold
       vi.advanceTimersByTime(2000);
 
-      // BUG: Currently fires 9 notifications (one for each non-active terminal).
-      // EXPECTED: Zero notifications during startup.
+      // FIXED: Zero notifications during startup grace.
       expect(onNotify).toHaveBeenCalledTimes(0);
     });
   });
@@ -257,8 +261,15 @@ describe('IdleNotificationService', () => {
       // Bug #209: Background terminal produces tiny bursts of output
       // (e.g., cursor repositioning) with gaps just over the idle threshold.
       // Each gap triggers another notification.
-      createService({ idleThresholdMs: 1000, checkIntervalMs: 500 });
+      // Fix: notifyCooldownMs prevents re-notification within the cooldown period.
+      createService({
+        idleThresholdMs: 1000, checkIntervalMs: 500,
+        startupGraceMs: 5000, notifyCooldownMs: 30000,
+      });
       activeTerminalId = 'term-active';
+
+      // Advance past startup grace so output is tracked normally
+      vi.advanceTimersByTime(6000);
 
       // First burst — triggers initial notification (acceptable)
       service.recordOutput('term-bg');
@@ -276,9 +287,7 @@ describe('IdleNotificationService', () => {
       service.recordOutput('term-bg');
       vi.advanceTimersByTime(1500);
 
-      // BUG: Currently fires 4 notifications (one per idle cycle).
-      // EXPECTED: At most 1 notification — repeated short bursts from the
-      // same terminal should be suppressed to avoid notification fatigue.
+      // FIXED: Only 1 notification — cooldown suppresses subsequent re-notifications.
       expect(onNotify).toHaveBeenCalledTimes(1);
     });
 
@@ -286,14 +295,14 @@ describe('IdleNotificationService', () => {
       // Bug #209: Terminals don't all reattach at exactly the same instant.
       // Some finish reconnection a few seconds after others. All should be
       // suppressed during the startup window.
-      createService({ idleThresholdMs: 1000, checkIntervalMs: 500 });
+      createService({ idleThresholdMs: 1000, checkIntervalMs: 500, startupGraceMs: 10000 });
       activeTerminalId = 'term-active';
 
       // First batch of terminals reconnect immediately
       service.recordOutput('term-1');
       service.recordOutput('term-2');
 
-      // 3 seconds later, more terminals finish reconnecting
+      // 3 seconds later, more terminals finish reconnecting (still within grace)
       vi.advanceTimersByTime(3000);
       service.recordOutput('term-3');
       service.recordOutput('term-4');
@@ -301,8 +310,7 @@ describe('IdleNotificationService', () => {
       // Wait for all idle thresholds to pass
       vi.advanceTimersByTime(2000);
 
-      // BUG: Currently fires notifications for term-1, term-2, term-3, term-4.
-      // EXPECTED: Zero notifications — all arrived during the startup window.
+      // FIXED: Zero notifications — all arrived during the startup grace window.
       expect(onNotify).not.toHaveBeenCalled();
     });
   });
