@@ -7,6 +7,7 @@ export interface NotificationSettings {
   globalEnabled: boolean;
   volume: number;       // 0–1
   soundPreset: SoundPreset;
+  idleNotifyEnabled: boolean;
 }
 
 type Subscriber = () => void;
@@ -16,6 +17,7 @@ class NotificationStore {
     globalEnabled: true,
     volume: 0.5,
     soundPreset: 'chime',
+    idleNotifyEnabled: true,
   };
 
   /** Terminal IDs that have unread notification badges */
@@ -99,6 +101,12 @@ class NotificationStore {
     this.notify();
   }
 
+  setIdleNotifyEnabled(enabled: boolean): void {
+    this.settings.idleNotifyEnabled = enabled;
+    this.saveToStorage();
+    this.notify();
+  }
+
   // ── Subscriptions ────────────────────────────────────────────────
 
   subscribe(fn: Subscriber): () => void {
@@ -125,6 +133,7 @@ class NotificationStore {
       if (data.soundPreset && (isBuiltinPreset(data.soundPreset) || isCustomPreset(data.soundPreset))) {
         this.settings.soundPreset = data.soundPreset;
       }
+      if (typeof data.idleNotifyEnabled === 'boolean') this.settings.idleNotifyEnabled = data.idleNotifyEnabled;
     } catch {
       // Corrupt data — use defaults
     }

@@ -113,6 +113,7 @@ pub enum Event {
     },
     ProcessChanged { session_id: String, process_name: String },
     GridDiff { session_id: String, diff: crate::types::RichGridDiff },
+    Bell { session_id: String },
 }
 
 /// Top-level message from daemon to client (can be a response or async event)
