@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use crate::daemon_client::DaemonClient;
+use crate::llm_state::LlmState;
 use crate::persistence::AutoSaveManager;
 use crate::state::AppState;
 
@@ -19,9 +20,10 @@ pub fn start_mcp_server(
     app_state: Arc<AppState>,
     daemon: Arc<DaemonClient>,
     auto_save: Arc<AutoSaveManager>,
+    llm_state: Arc<LlmState>,
 ) {
     std::thread::spawn(move || {
-        run_mcp_server(app_handle, app_state, daemon, auto_save);
+        run_mcp_server(app_handle, app_state, daemon, auto_save, llm_state);
     });
 }
 
@@ -30,6 +32,7 @@ fn run_mcp_server(
     app_state: Arc<AppState>,
     daemon: Arc<DaemonClient>,
     auto_save: Arc<AutoSaveManager>,
+    llm_state: Arc<LlmState>,
 ) {
     let running = Arc::new(AtomicBool::new(true));
 
@@ -47,9 +50,10 @@ fn run_mcp_server(
                 let daemon = daemon.clone();
                 let auto_save = auto_save.clone();
                 let handle = app_handle.clone();
+                let llm = llm_state.clone();
 
                 std::thread::spawn(move || {
-                    handle_mcp_client(pipe, state, daemon, auto_save, handle);
+                    handle_mcp_client(pipe, state, daemon, auto_save, handle, llm);
                 });
             }
             Err(e) => {
@@ -129,6 +133,7 @@ fn handle_mcp_client(
     daemon: Arc<DaemonClient>,
     auto_save: Arc<AutoSaveManager>,
     app_handle: AppHandle,
+    llm_state: Arc<LlmState>,
 ) {
     use godly_protocol::McpRequest;
 
@@ -139,7 +144,7 @@ fn handle_mcp_client(
                 eprintln!("[mcp-server] Received: {:?}", request);
 
                 let response =
-                    handle_mcp_request(&request, &app_state, &daemon, &auto_save, &app_handle);
+                    handle_mcp_request(&request, &app_state, &daemon, &auto_save, &app_handle, &llm_state);
 
                 if godly_protocol::write_message(&mut pipe, &response).is_err() {
                     eprintln!("[mcp-server] Write error, client disconnected");
