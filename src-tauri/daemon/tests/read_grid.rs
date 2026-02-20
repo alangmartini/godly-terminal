@@ -733,6 +733,7 @@ fn read_rich_grid_diff(pipe: &mut std::fs::File, session_id: &str) -> godly_prot
 /// (which ConPTY translates to OSC 0), the title should appear in the
 /// RichGridData.title field.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_osc_title_in_rich_grid() {
     let daemon = DaemonFixture::spawn("osc-title");
     let mut pipe = daemon.connect();
@@ -800,6 +801,7 @@ fn test_osc_title_in_rich_grid() {
 ///
 /// The extract_diff() function has the same hardcoded title: String::new().
 #[test]
+#[ntest::timeout(60_000)]
 fn test_osc_title_in_rich_grid_diff() {
     let daemon = DaemonFixture::spawn("osc-title-diff");
     let mut pipe = daemon.connect();
