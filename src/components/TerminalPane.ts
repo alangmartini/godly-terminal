@@ -820,8 +820,11 @@ export class TerminalPane {
     this.focusInput();
   }
 
-  /** Focus the hidden textarea for keyboard input. */
+  /** Focus the hidden textarea for keyboard input.
+   *  Skips focus when a dialog overlay is open to prevent stealing
+   *  focus from dialog inputs (Bug #197). */
   private focusInput() {
+    if (document.querySelector('.dialog-overlay')) return;
     this.inputTextarea.focus();
   }
 
