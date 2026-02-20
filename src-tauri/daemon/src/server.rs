@@ -608,6 +608,7 @@ fn io_thread(
                         DaemonMessage::Event(Event::SessionClosed { .. }) => "SessionClosed",
                         DaemonMessage::Event(Event::ProcessChanged { .. }) => "ProcessChanged",
                         DaemonMessage::Event(Event::GridDiff { .. }) => "GridDiff",
+                        DaemonMessage::Event(Event::Bell { .. }) => "Bell",
                         DaemonMessage::Response(_) => "Response", // shouldn't happen
                     };
 
@@ -893,6 +894,9 @@ mod forwarding_tests {
                             session_id: sid.clone(),
                             diff,
                         }),
+                        SessionOutput::Bell => DaemonMessage::Event(Event::Bell {
+                            session_id: sid.clone(),
+                        }),
                     };
                     if event_tx.send(event).await.is_err() {
                         break;
@@ -955,6 +959,9 @@ mod forwarding_tests {
                         SessionOutput::GridDiff(diff) => DaemonMessage::Event(Event::GridDiff {
                             session_id: sid.clone(),
                             diff,
+                        }),
+                        SessionOutput::Bell => DaemonMessage::Event(Event::Bell {
+                            session_id: sid.clone(),
                         }),
                     };
                     if event_tx.send(event).await.is_err() {
@@ -1026,6 +1033,9 @@ mod forwarding_tests {
                         SessionOutput::GridDiff(diff) => DaemonMessage::Event(Event::GridDiff {
                             session_id: sid.clone(),
                             diff,
+                        }),
+                        SessionOutput::Bell => DaemonMessage::Event(Event::Bell {
+                            session_id: sid.clone(),
                         }),
                     };
                     if event_tx.send(event).await.is_err() {
@@ -1147,6 +1157,11 @@ async fn handle_request(
                                     DaemonMessage::Event(Event::GridDiff {
                                         session_id: sid.clone(),
                                         diff,
+                                    })
+                                }
+                                crate::session::SessionOutput::Bell => {
+                                    DaemonMessage::Event(Event::Bell {
+                                        session_id: sid.clone(),
                                     })
                                 }
                             };
