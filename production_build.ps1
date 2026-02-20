@@ -1,9 +1,14 @@
+param(
+    [switch]$Test  # Pass -Test to run full test suite before building
+)
+
 $ErrorActionPreference = "Stop"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "   $msg" -ForegroundColor Green }
+function Write-Skip($msg) { Write-Host "   $msg" -ForegroundColor DarkGray }
 
 function Assert-ExitCode {
     if ($LASTEXITCODE -ne 0) {
@@ -34,23 +39,27 @@ Write-Step "Unlocking release binaries..."
 npm run unlock -- --release
 Assert-ExitCode
 
-# ── Run tests ────────────────────────────────────────────────────────────
+# ── Run tests (only with -Test flag; CI covers this on every push) ───────
 
-Write-Step "Running frontend tests..."
-npm test
-Assert-ExitCode
+if ($Test) {
+    Write-Step "Running frontend tests..."
+    npm test
+    Assert-ExitCode
 
-Write-Step "Running Rust tests..."
-Push-Location src-tauri
-cargo test -p godly-protocol
-Assert-ExitCode
-cargo test -p godly-vt
-Assert-ExitCode
-# Daemon tests must run single-threaded: integration tests spawn daemon + PTY
-# processes, and parallel spawning triggers Windows 0xc0000142 (DLL init failure)
-cargo test -p godly-daemon -- --test-threads=1
-Assert-ExitCode
-Pop-Location
+    Write-Step "Running Rust tests..."
+    Push-Location src-tauri
+    cargo test -p godly-protocol
+    Assert-ExitCode
+    cargo test -p godly-vt
+    Assert-ExitCode
+    # Daemon tests must run single-threaded: integration tests spawn daemon + PTY
+    # processes, and parallel spawning triggers Windows 0xc0000142 (DLL init failure)
+    cargo test -p godly-daemon -- --test-threads=1
+    Assert-ExitCode
+    Pop-Location
+} else {
+    Write-Step "Skipping tests (CI runs them on push). Use -Test to run locally."
+}
 
 # ── Build Tauri app (daemon + MCP + notify + frontend + bundle) ──────────
 
