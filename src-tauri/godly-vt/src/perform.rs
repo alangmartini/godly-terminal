@@ -217,13 +217,17 @@ impl<CB: crate::callbacks::Callbacks> crate::state_machine::Perform for WrappedS
     fn osc_dispatch(&mut self, params: &[&[u8]], _bel_terminated: bool) {
         match params {
             [b"0", s] => {
+                self.screen.set_window_icon_name(s);
+                self.screen.set_window_title(s);
                 self.callbacks.set_window_icon_name(&mut self.screen, s);
                 self.callbacks.set_window_title(&mut self.screen, s);
             }
             [b"1", s] => {
+                self.screen.set_window_icon_name(s);
                 self.callbacks.set_window_icon_name(&mut self.screen, s);
             }
             [b"2", s] => {
+                self.screen.set_window_title(s);
                 self.callbacks.set_window_title(&mut self.screen, s);
             }
             [b"52", ty, data] => {

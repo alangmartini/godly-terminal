@@ -708,3 +708,153 @@ fn test_scrollback_offset_clamped() {
 
     send_request(&mut pipe, &Request::CloseSession { session_id: session_id.clone() });
 }
+
+// ---------------------------------------------------------------------------
+// OSC title integration tests — Bug #182
+// ---------------------------------------------------------------------------
+
+/// Helper: read a RichGridDiff from the daemon.
+fn read_rich_grid_diff(pipe: &mut std::fs::File, session_id: &str) -> godly_protocol::types::RichGridDiff {
+    let resp = send_request(
+        pipe,
+        &Request::ReadRichGridDiff {
+            session_id: session_id.to_string(),
+        },
+    );
+    match resp {
+        Response::RichGridDiff { diff } => diff,
+        other => panic!("Expected RichGridDiff, got: {:?}", other),
+    }
+}
+
+/// Bug #182: OSC title set via PowerShell is not returned in ReadRichGrid.
+///
+/// When a process sets the terminal title via $Host.UI.RawUI.WindowTitle
+/// (which ConPTY translates to OSC 0), the title should appear in the
+/// RichGridData.title field.
+#[test]
+fn test_osc_title_in_rich_grid() {
+    let daemon = DaemonFixture::spawn("osc-title");
+    let mut pipe = daemon.connect();
+
+    let session_id = "osc-title".to_string();
+    let resp = send_request(
+        &mut pipe,
+        &Request::CreateSession {
+            id: session_id.clone(),
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 24,
+            cols: 80,
+            env: None,
+        },
+    );
+    assert!(matches!(resp, Response::SessionCreated { .. }));
+
+    let resp = send_request(
+        &mut pipe,
+        &Request::Attach { session_id: session_id.clone() },
+    );
+    assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Set the terminal title via PowerShell. ConPTY translates this Win32
+    // SetConsoleTitle call into an OSC 0 escape sequence in the PTY output.
+    let title = "GODLY_TITLE_TEST_182";
+    let marker = "TITLE_MARKER_DONE_182";
+    let cmd = format!(
+        "$Host.UI.RawUI.WindowTitle = '{}'; echo '{}'\r\n",
+        title, marker
+    );
+    send_request(
+        &mut pipe,
+        &Request::Write {
+            session_id: session_id.clone(),
+            data: cmd.into_bytes(),
+        },
+    );
+
+    // Wait for the marker to confirm the command completed
+    wait_for_rich_grid_text(&mut pipe, &session_id, marker, Duration::from_secs(15));
+
+    // Give the vt parser time to process the OSC sequence after the echo
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Bug #182: RichGridData.title should contain the OSC title
+    let grid = read_rich_grid(&mut pipe, &session_id);
+    assert!(
+        !grid.title.is_empty(),
+        "Bug #182: RichGridData.title should not be empty after setting \
+         terminal title via PowerShell. The daemon discards OSC title sequences."
+    );
+    assert!(
+        grid.title.contains(title),
+        "Bug #182: RichGridData.title should contain '{}', got '{}'",
+        title, grid.title
+    );
+
+    send_request(&mut pipe, &Request::CloseSession { session_id: session_id.clone() });
+}
+
+/// Bug #182: OSC title is also missing from ReadRichGridDiff responses.
+///
+/// The extract_diff() function has the same hardcoded title: String::new().
+#[test]
+fn test_osc_title_in_rich_grid_diff() {
+    let daemon = DaemonFixture::spawn("osc-title-diff");
+    let mut pipe = daemon.connect();
+
+    let session_id = "osc-diff".to_string();
+    let resp = send_request(
+        &mut pipe,
+        &Request::CreateSession {
+            id: session_id.clone(),
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 24,
+            cols: 80,
+            env: None,
+        },
+    );
+    assert!(matches!(resp, Response::SessionCreated { .. }));
+
+    let resp = send_request(
+        &mut pipe,
+        &Request::Attach { session_id: session_id.clone() },
+    );
+    assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
+    std::thread::sleep(Duration::from_secs(2));
+
+    let title = "GODLY_DIFF_TITLE_182";
+    let marker = "DIFF_TITLE_MARKER_182";
+    let cmd = format!(
+        "$Host.UI.RawUI.WindowTitle = '{}'; echo '{}'\r\n",
+        title, marker
+    );
+    send_request(
+        &mut pipe,
+        &Request::Write {
+            session_id: session_id.clone(),
+            data: cmd.into_bytes(),
+        },
+    );
+
+    // Wait for the marker text to appear in the grid
+    wait_for_rich_grid_text(&mut pipe, &session_id, marker, Duration::from_secs(15));
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Bug #182: RichGridDiff.title should contain the OSC title
+    let diff = read_rich_grid_diff(&mut pipe, &session_id);
+    assert!(
+        !diff.title.is_empty(),
+        "Bug #182: RichGridDiff.title should not be empty after setting \
+         terminal title via PowerShell. extract_diff() hardcodes String::new()."
+    );
+    assert!(
+        diff.title.contains(title),
+        "Bug #182: RichGridDiff.title should contain '{}', got '{}'",
+        title, diff.title
+    );
+
+    send_request(&mut pipe, &Request::CloseSession { session_id: session_id.clone() });
+}

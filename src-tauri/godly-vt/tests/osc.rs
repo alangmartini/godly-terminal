@@ -78,6 +78,40 @@ fn clipboard() {
     assert_eq!(&parser.callbacks().pasted, &[b"c"]);
 }
 
+/// Verify that OSC title/icon_name are stored on Screen (not just callbacks).
+/// This is the fix for Bug #182: the daemon uses Parser::new() (no callbacks),
+/// so titles must be accessible via screen.window_title().
+#[test]
+fn title_stored_on_screen() {
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+
+    assert_eq!(parser.screen().window_title(), "");
+    assert_eq!(parser.screen().window_icon_name(), "");
+
+    // OSC 2 sets window title
+    parser.process(b"\x1b]2;my title\x07");
+    assert_eq!(parser.screen().window_title(), "my title");
+    assert_eq!(parser.screen().window_icon_name(), "");
+
+    // OSC 1 sets icon name
+    parser.process(b"\x1b]1;my icon\x07");
+    assert_eq!(parser.screen().window_title(), "my title");
+    assert_eq!(parser.screen().window_icon_name(), "my icon");
+
+    // OSC 0 sets both
+    parser.process(b"\x1b]0;both values\x07");
+    assert_eq!(parser.screen().window_title(), "both values");
+    assert_eq!(parser.screen().window_icon_name(), "both values");
+
+    // Title with ST terminator (ESC \)
+    parser.process(b"\x1b]2;st title\x1b\\");
+    assert_eq!(parser.screen().window_title(), "st title");
+
+    // Empty title clears
+    parser.process(b"\x1b]2;\x07");
+    assert_eq!(parser.screen().window_title(), "");
+}
+
 #[test]
 fn unknown_osc() {
     helpers::fixture("unknown_osc");
