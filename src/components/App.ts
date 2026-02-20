@@ -115,9 +115,7 @@ export class App {
     this.toastContainer = new ToastContainer();
 
     // Mount components
-    if (store.windowMode === 'main') {
-      this.sidebar.mount(this.container);
-    }
+    this.sidebar.mount(this.container);
     this.tabBar.mount(mainContent);
     mainContent.appendChild(this.terminalContainer);
     this.container.appendChild(mainContent);
@@ -527,63 +525,13 @@ export class App {
     await terminalService.init();
 
     // Listen for scrollback save requests from backend (on window close)
-    // (only main window handles scrollback saves)
-    if (store.windowMode === 'main') {
-      await this.setupScrollbackSaveListener();
-    }
+    await this.setupScrollbackSaveListener();
 
     // Listen for file drag-drop events (paste full file paths into terminal)
     await this.setupDragDropListener();
 
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
-
-    // MCP window: bootstrap state from backend (handles race with mcp-terminal-created event)
-    if (store.windowMode === 'mcp') {
-      console.log('[App] MCP mode — loading existing agent terminals');
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const mcpState = await invoke<{
-          workspace: { id: string; name: string; folder_path: string; tab_order: string[]; shell_type?: BackendShellType; worktree_mode?: boolean; claude_code_mode?: boolean } | null;
-          terminals: Array<{ id: string; workspace_id: string; name: string; process_name: string }>;
-        }>('get_mcp_state');
-
-        if (mcpState.workspace) {
-          const ws = mcpState.workspace;
-          const existing = store.getState().workspaces.find(w => w.id === ws.id);
-          if (!existing) {
-            store.addWorkspace({
-              id: ws.id,
-              name: ws.name,
-              folderPath: ws.folder_path,
-              tabOrder: ws.tab_order,
-              shellType: convertShellType(ws.shell_type),
-              worktreeMode: ws.worktree_mode ?? false,
-              claudeCodeMode: ws.claude_code_mode ?? false,
-            });
-          }
-          store.setActiveWorkspace(ws.id);
-
-          for (const t of mcpState.terminals) {
-            if (!store.getState().terminals.find(term => term.id === t.id)) {
-              store.addTerminal({
-                id: t.id,
-                workspaceId: t.workspace_id,
-                name: t.name,
-                processName: t.process_name,
-                order: 0,
-              });
-            }
-          }
-          console.log('[App] MCP mode — loaded', mcpState.terminals.length, 'terminals');
-        } else {
-          console.log('[App] MCP mode — no agent workspace yet, waiting for events');
-        }
-      } catch (error) {
-        console.error('[App] MCP mode — failed to load state:', error);
-      }
-      return;
-    }
 
     // Load persisted state
     try {
@@ -1075,37 +1023,15 @@ export class App {
       store.updateTerminal(terminal_id, { name });
     });
 
-    // MCP: terminal created by MCP handler
+    // MCP: terminal created by MCP handler — add to main window's Agent workspace
     await listen<{ terminal_id: string; workspace_id: string }>('mcp-terminal-created', async (event) => {
       const { terminal_id: terminalId, workspace_id: workspaceId } = event.payload;
       console.log('[App] MCP terminal created:', terminalId, 'in workspace:', workspaceId);
 
-      // In main window: ignore Agent workspace terminals (they belong to the MCP window)
-      // In MCP window: only handle Agent workspace terminals
-      if (store.windowMode === 'main') {
-        // Ensure the Agent workspace exists in main window store (hidden from sidebar)
-        const state = store.getState();
-        if (!state.workspaces.find(w => w.id === workspaceId)) {
-          // Add the Agent workspace to the store (sidebar will filter it out)
-          store.addWorkspace({
-            id: workspaceId,
-            name: 'Agent',
-            folderPath: '',
-            tabOrder: [],
-            shellType: { type: 'windows' },
-            worktreeMode: false,
-            claudeCodeMode: false,
-          });
-        }
-        // Don't add the terminal to the main window — MCP window handles it
-        return;
-      }
-
-      // MCP window: add the terminal
       const state = store.getState();
       const existing = state.terminals.find((t) => t.id === terminalId);
       if (!existing) {
-        // Ensure workspace exists in MCP window store
+        // Ensure Agent workspace exists in store
         if (!state.workspaces.find(w => w.id === workspaceId)) {
           store.addWorkspace({
             id: workspaceId,
@@ -1116,7 +1042,6 @@ export class App {
             worktreeMode: false,
             claudeCodeMode: false,
           });
-          store.setActiveWorkspace(workspaceId);
         }
         store.addTerminal({
           id: terminalId,
