@@ -6,6 +6,7 @@ import { keybindingStore, formatChord } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound } from '../services/notification-sound';
 import { getPluginRegistry } from '../plugins/index';
+import { IdleNotificationService } from '../services/idle-notification-service';
 import { quotePath } from '../utils/quote-path';
 import { perfTracer } from '../utils/PerfTracer';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
@@ -1217,6 +1218,104 @@ export class App {
       if (isActive) {
         notificationStore.clearBadge(terminal_id);
       }
+    });
+
+    // Terminal bell (BEL character, 0x07) — triggers notification pipeline
+    await listen<{ terminal_id: string }>('terminal-bell', async (event) => {
+      const { terminal_id } = event.payload;
+      const settings = notificationStore.getSettings();
+      if (!settings.globalEnabled) return;
+
+      const state = store.getState();
+      const isActive = state.activeTerminalId === terminal_id;
+
+      const played = notificationStore.recordNotify(terminal_id);
+      if (played) {
+        playNotificationSound(settings.soundPreset, settings.volume);
+
+        const toastTitle = buildNotificationTitle(terminal_id);
+        this.toastContainer.show(toastTitle, 'Terminal bell', terminal_id);
+
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        getCurrentWindow().requestUserAttention(2);
+
+        if (!document.hasFocus()) {
+          try {
+            const { isPermissionGranted, requestPermission, sendNotification } =
+              await import('@tauri-apps/plugin-notification');
+            let permitted = await isPermissionGranted();
+            if (!permitted) {
+              const result = await requestPermission();
+              permitted = result === 'granted';
+            }
+            if (permitted) {
+              const title = buildNotificationTitle(terminal_id);
+              sendNotification({ title, body: 'Terminal bell' });
+              this.pendingNotificationTerminalId = terminal_id;
+              this.pendingNotificationTimestamp = Date.now();
+            }
+          } catch (e) {
+            console.warn('[App] Failed to send native notification:', e);
+          }
+        }
+      }
+
+      if (isActive) {
+        notificationStore.clearBadge(terminal_id);
+      }
+    });
+
+    // Idle-after-activity detection: monitors terminals for output→silence transitions
+    const idleService = new IdleNotificationService({
+      idleThresholdMs: 15000,
+      checkIntervalMs: 5000,
+      getActiveTerminalId: () => store.getState().activeTerminalId ?? undefined,
+      onNotify: async (terminalId: string) => {
+        const settings = notificationStore.getSettings();
+        if (!settings.globalEnabled || !settings.idleNotifyEnabled) return;
+
+        const played = notificationStore.recordNotify(terminalId);
+        if (played) {
+          playNotificationSound(settings.soundPreset, settings.volume);
+
+          const toastTitle = buildNotificationTitle(terminalId);
+          this.toastContainer.show(toastTitle, 'Waiting for input', terminalId);
+
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          getCurrentWindow().requestUserAttention(2);
+
+          if (!document.hasFocus()) {
+            try {
+              const { isPermissionGranted, requestPermission, sendNotification } =
+                await import('@tauri-apps/plugin-notification');
+              let permitted = await isPermissionGranted();
+              if (!permitted) {
+                const result = await requestPermission();
+                permitted = result === 'granted';
+              }
+              if (permitted) {
+                const title = buildNotificationTitle(terminalId);
+                sendNotification({ title, body: 'Waiting for input' });
+                this.pendingNotificationTerminalId = terminalId;
+                this.pendingNotificationTimestamp = Date.now();
+              }
+            } catch (e) {
+              console.warn('[App] Failed to send native notification:', e);
+            }
+          }
+        }
+      },
+    });
+
+    // Wire terminal output/grid-diff events to idle tracker
+    await listen<{ terminal_id: string }>('terminal-output', (event) => {
+      idleService.recordOutput(event.payload.terminal_id);
+    });
+    await listen<{ terminal_id: string }>('terminal-grid-diff', (event) => {
+      idleService.recordOutput(event.payload.terminal_id);
+    });
+    await listen<{ terminal_id: string }>('terminal-closed', (event) => {
+      idleService.recordTerminalClosed(event.payload.terminal_id);
     });
   }
 }

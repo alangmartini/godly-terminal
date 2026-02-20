@@ -19,6 +19,7 @@ const RING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB ring buffer
 pub enum SessionOutput {
     RawBytes(Vec<u8>),
     GridDiff(godly_protocol::types::RichGridDiff),
+    Bell,
 }
 
 /// A daemon-managed PTY session that survives app disconnections.
@@ -259,11 +260,12 @@ impl DaemonSession {
                         // has passed, extract a diff to push alongside the raw bytes.
                         // Throttled to ~60fps to avoid flooding the pipe with large
                         // JSON-serialized diffs during heavy output.
-                        let maybe_diff = {
+                        let (maybe_diff, bell_fired) = {
                             let mut vt = reader_vt.lock();
                             vt.process(&buf[..n]);
+                            let bell = vt.take_bell_pending();
                             let now = Instant::now();
-                            if reader_attached.load(Ordering::Relaxed)
+                            let diff = if reader_attached.load(Ordering::Relaxed)
                                 && vt.screen().has_dirty_rows()
                                 && now.duration_since(last_diff_time) >= DIFF_INTERVAL
                             {
@@ -271,7 +273,8 @@ impl DaemonSession {
                                 Some(extract_diff(&mut vt))
                             } else {
                                 None
-                            }
+                            };
+                            (diff, bell)
                         };
 
                         let data = buf[..n].to_vec();
@@ -295,6 +298,10 @@ impl DaemonSession {
                                     // Dirty flags accumulate for next read if skipped.
                                     if let Some(diff) = maybe_diff {
                                         let _ = tx.try_send(SessionOutput::GridDiff(diff));
+                                    }
+                                    // Send bell notification (best-effort)
+                                    if bell_fired {
+                                        let _ = tx.try_send(SessionOutput::Bell);
                                     }
                                     drop(tx_guard);
                                     // Yield to let handler threads acquire output_tx if waiting
@@ -323,6 +330,10 @@ impl DaemonSession {
                                             // Send pushed grid diff after backpressure resolves (best-effort)
                                             if let Some(diff) = maybe_diff {
                                                 let _ = tx_clone.try_send(SessionOutput::GridDiff(diff));
+                                            }
+                                            // Send bell notification (best-effort)
+                                            if bell_fired {
+                                                let _ = tx_clone.try_send(SessionOutput::Bell);
                                             }
                                             thread::yield_now();
                                         }

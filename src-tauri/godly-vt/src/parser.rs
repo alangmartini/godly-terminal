@@ -80,6 +80,12 @@ impl<CB: crate::callbacks::Callbacks> Parser<CB> {
     pub fn callbacks_mut(&mut self) -> &mut CB {
         &mut self.screen.callbacks
     }
+
+    /// Returns true if a bell (BEL, 0x07) was received since the last call,
+    /// and resets the flag.
+    pub fn take_bell_pending(&mut self) -> bool {
+        self.screen.screen.take_bell_pending()
+    }
 }
 
 impl Default for Parser {
