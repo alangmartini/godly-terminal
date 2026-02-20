@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "protocol", "daemon", "mcp", "notify", "godly-vt", "remote"]
+members = [".", "protocol", "daemon", "mcp", "notify", "godly-vt", "remote", "llm"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -55,6 +55,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 base64 = "0.22"
 godly-protocol.workspace = true
+godly-llm = { path = "llm" }
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true

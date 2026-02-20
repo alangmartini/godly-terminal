@@ -1,5 +1,6 @@
 mod commands;
 mod daemon_client;
+mod llm_state;
 mod mcp_server;
 mod persistence;
 mod pty;
@@ -13,6 +14,7 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
 use crate::daemon_client::DaemonClient;
+use crate::llm_state::LlmState;
 use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
@@ -73,6 +75,7 @@ pub fn run() {
     let app_state = Arc::new(AppState::new());
     let auto_save = Arc::new(AutoSaveManager::new());
     let process_monitor = ProcessMonitor::new();
+    let llm_state = Arc::new(LlmState::new());
 
     // Connect to daemon (or launch one)
     let daemon_client = Arc::new(
@@ -89,6 +92,7 @@ pub fn run() {
         .manage(app_state.clone())
         .manage(auto_save.clone())
         .manage(daemon_client.clone())
+        .manage(llm_state.clone())
         .invoke_handler(tauri::generate_handler![
             commands::create_terminal,
             commands::close_terminal,
@@ -137,6 +141,12 @@ pub fn run() {
             commands::write_frontend_log,
             commands::get_log_dir,
             commands::read_frontend_log,
+            commands::llm_get_status,
+            commands::llm_download_model,
+            commands::llm_load_model,
+            commands::llm_unload_model,
+            commands::llm_generate,
+            commands::llm_generate_branch_name,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,
@@ -180,6 +190,11 @@ pub fn run() {
 
             // Copy bundled sound packs (first run)
             commands::install_bundled_sound_packs(&app_handle);
+
+            // Initialize LLM state (check if model is already downloaded)
+            if let Ok(app_data) = app_handle.path().app_data_dir() {
+                llm_state.init(app_data);
+            }
 
             // Start MCP pipe server for Claude Code integration
             mcp_server::start_mcp_server(

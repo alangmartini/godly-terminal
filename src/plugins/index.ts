@@ -1,6 +1,7 @@
 import { PluginEventBus } from './event-bus';
 import { PluginRegistry } from './plugin-registry';
 import { PeonPingPlugin } from './peon-ping/index';
+import { SmolLM2Plugin } from './smollm2/index';
 
 let registry: PluginRegistry | null = null;
 
@@ -12,6 +13,8 @@ export function initPlugins(): PluginRegistry {
   const peonPing = new PeonPingPlugin();
   peonPing.setBus(bus);
   registry.register(peonPing);
+
+  registry.register(new SmolLM2Plugin());
 
   // Init all registered plugins (async, non-blocking)
   registry.initAll().catch(e => {
