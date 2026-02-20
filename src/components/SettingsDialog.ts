@@ -10,6 +10,7 @@ import {
 } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
+import { settingsTabStore } from '../state/settings-tab-store';
 import { workspaceService } from '../services/workspace-service';
 import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
 import { getRendererBackend } from './TerminalRenderer';
@@ -55,32 +56,96 @@ export function showSettingsDialog(): Promise<void> {
     dialog.appendChild(header);
 
     // ── Tab bar ──────────────────────────────────────────────────
-    let activeTab = 'themes';
+    const allTabs: Record<string, string> = {
+      themes: 'Themes',
+      terminal: 'Terminal',
+      notifications: 'Notifications',
+      plugins: 'Plugins',
+      shortcuts: 'Shortcuts',
+    };
+
+    let tabOrder = settingsTabStore.getTabOrder();
+    let activeTab = tabOrder[0];
 
     const tabBar = document.createElement('div');
     tabBar.className = 'settings-tabs';
 
-    const tabs: { id: string; label: string }[] = [
-      { id: 'themes', label: 'Themes' },
-      { id: 'terminal', label: 'Terminal' },
-      { id: 'notifications', label: 'Notifications' },
-      { id: 'plugins', label: 'Plugins' },
-      { id: 'shortcuts', label: 'Shortcuts' },
-    ];
-
     const tabButtons: Record<string, HTMLButtonElement> = {};
     const tabContents: Record<string, HTMLDivElement> = {};
 
-    for (const tab of tabs) {
-      const btn = document.createElement('button');
-      btn.className = 'settings-tab' + (tab.id === activeTab ? ' active' : '');
-      btn.textContent = tab.label;
-      btn.onclick = () => switchTab(tab.id);
-      tabBar.appendChild(btn);
-      tabButtons[tab.id] = btn;
+    function buildTabBar() {
+      tabBar.textContent = '';
+      for (const id of tabOrder) {
+        let btn = tabButtons[id];
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.dataset.tabId = id;
+          tabButtons[id] = btn;
+        }
+        btn.className = 'settings-tab' + (id === activeTab ? ' active' : '');
+        btn.textContent = allTabs[id];
+        btn.onclick = () => switchTab(id);
+        tabBar.appendChild(btn);
+      }
     }
 
+    buildTabBar();
     dialog.appendChild(tabBar);
+
+    // ── Drag-and-drop reorder ──────────────────────────────────
+    {
+      let dragTabId: string | null = null;
+      let startX = 0;
+      let dragging = false;
+      const THRESHOLD = 5;
+
+      tabBar.addEventListener('pointerdown', (e: PointerEvent) => {
+        const target = (e.target as HTMLElement).closest('.settings-tab') as HTMLButtonElement | null;
+        if (!target || !target.dataset.tabId) return;
+        dragTabId = target.dataset.tabId;
+        startX = e.clientX;
+        dragging = false;
+
+        const onMove = (ev: PointerEvent) => {
+          if (!dragging && Math.abs(ev.clientX - startX) >= THRESHOLD) {
+            dragging = true;
+            tabButtons[dragTabId!]?.classList.add('dragging');
+          }
+          if (!dragging) return;
+
+          // Determine which tab the pointer is over
+          for (const id of tabOrder) {
+            const btn = tabButtons[id];
+            if (!btn || id === dragTabId) continue;
+            const rect = btn.getBoundingClientRect();
+            if (ev.clientX >= rect.left && ev.clientX <= rect.right) {
+              const fromIdx = tabOrder.indexOf(dragTabId!);
+              const toIdx = tabOrder.indexOf(id);
+              if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
+                tabOrder.splice(fromIdx, 1);
+                tabOrder.splice(toIdx, 0, dragTabId!);
+                buildTabBar();
+              }
+              break;
+            }
+          }
+        };
+
+        const onUp = () => {
+          document.removeEventListener('pointermove', onMove);
+          document.removeEventListener('pointerup', onUp);
+          if (dragging && dragTabId) {
+            tabButtons[dragTabId]?.classList.remove('dragging');
+            settingsTabStore.setTabOrder(tabOrder);
+          }
+          dragTabId = null;
+          dragging = false;
+        };
+
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+      });
+    }
 
     function switchTab(tabId: string) {
       activeTab = tabId;
