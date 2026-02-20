@@ -1,5 +1,5 @@
 //! Guardrail test: scan all daemon integration tests for patterns that could
-//! kill or interfere with the production daemon.
+//! kill or interfere with the production daemon, or hang CI indefinitely.
 //!
 //! Incident: `taskkill /F /IM godly-daemon.exe` in a test killed the production
 //! daemon, freezing 8 live terminal sessions. Tests that used the production
@@ -11,6 +11,7 @@
 //! 1. `taskkill /IM` — kills ALL processes by name (must use `/PID` or `child.kill()`)
 //! 2. `use godly_protocol::PIPE_NAME` — imports production pipe name (must use isolated pipes)
 //! 3. `PIPE_NAME` used as a value — references production pipe constant directly
+//! 4. `#[test]` without `#[ntest::timeout(...)]` — tests must have timeouts to prevent CI hangs
 //!
 //! Run with:
 //!   cd src-tauri && cargo test -p godly-daemon --test test_isolation_guardrail
@@ -64,7 +65,48 @@ fn check_daemon_spawn_isolation(filename: &str, content: &str) -> Vec<String> {
     violations
 }
 
+/// Check that every `#[test]` function has an `#[ntest::timeout(...)]` annotation.
+/// Tests without timeouts can hang CI indefinitely.
+fn check_timeout_annotations(filename: &str, content: &str) -> Vec<String> {
+    let mut violations = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Found a #[test] attribute
+        if trimmed == "#[test]" {
+            // Look backwards and forwards (up to 3 lines) for ntest::timeout
+            let search_start = i.saturating_sub(3);
+            let search_end = (i + 4).min(lines.len());
+            let nearby = &lines[search_start..search_end];
+
+            let has_timeout = nearby
+                .iter()
+                .any(|l| l.contains("ntest::timeout"));
+
+            if !has_timeout {
+                // Find the function name on the next non-attribute, non-empty line
+                let fn_name = lines[i + 1..]
+                    .iter()
+                    .find(|l| l.trim().starts_with("fn "))
+                    .map(|l| l.trim())
+                    .unwrap_or("unknown");
+                violations.push(format!(
+                    "{}: `{}` has #[test] without #[ntest::timeout(...)]. \
+                     All daemon tests must have a timeout to prevent CI hangs. \
+                     Add e.g. #[ntest::timeout(60_000)] for a 1-minute timeout.",
+                    filename, fn_name
+                ));
+            }
+        }
+    }
+
+    violations
+}
+
 #[test]
+#[ntest::timeout(30_000)] // 30s — file scanning only, no daemon
 fn no_forbidden_patterns_in_daemon_tests() {
     let tests_dir = daemon_tests_dir();
     let mut violations = Vec::new();
@@ -99,12 +141,15 @@ fn no_forbidden_patterns_in_daemon_tests() {
 
         // Check daemon spawn isolation
         violations.extend(check_daemon_spawn_isolation(&filename, &content));
+
+        // Check timeout annotations
+        violations.extend(check_timeout_annotations(&filename, &content));
     }
 
     if !violations.is_empty() {
         panic!(
-            "\n\nDANGEROUS TEST ISOLATION VIOLATIONS FOUND:\n\n{}\n\n\
-             These patterns can kill the production daemon and freeze all live terminals.\n\
+            "\n\nDAEMON TEST GUARDRAIL VIOLATIONS FOUND:\n\n{}\n\n\
+             These patterns can kill the production daemon, freeze live terminals, or hang CI.\n\
              See CLAUDE.md \"Daemon Test Isolation\" section for the correct patterns.\n",
             violations.join("\n\n")
         );

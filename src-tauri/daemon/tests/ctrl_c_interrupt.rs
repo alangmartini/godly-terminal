@@ -253,6 +253,7 @@ fn kill_daemon(child: &mut Child) {
 /// If the test fails, \x03 is not generating CTRL_C_EVENT through the ConPTY,
 /// which means processes cannot be interrupted from the terminal.
 #[test]
+#[ntest::timeout(60_000)] // 1min — spawns daemon + PTY + waits for process interrupt
 fn test_ctrl_c_interrupts_running_process() {
     eprintln!("\n=== test: Ctrl+C (\\x03) must interrupt running PTY process ===");
     let pipe_name = test_pipe_name("ctrl-c");
@@ -436,6 +437,7 @@ fn test_ctrl_c_interrupts_running_process() {
 ///
 /// Uses `ping -t localhost` through cmd.exe and verifies \x03 interrupts it.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_ctrl_c_interrupts_cmd_process() {
     eprintln!("\n=== test: Ctrl+C (\\x03) must interrupt cmd.exe process ===");
     let pipe_name = test_pipe_name("ctrl-c-cmd");
@@ -576,6 +578,7 @@ fn test_ctrl_c_interrupts_cmd_process() {
 /// If the control character is stripped or corrupted during JSON serialization
 /// between the Tauri app and the daemon, Ctrl+C would never reach the PTY.
 #[test]
+#[ntest::timeout(10_000)] // 10s — pure serialization, no daemon
 fn test_ctrl_c_byte_survives_protocol_serialization() {
     use std::io::Cursor;
 
@@ -613,6 +616,7 @@ fn test_ctrl_c_byte_survives_protocol_serialization() {
 /// Verify that ALL common terminal control characters survive serialization.
 /// Tests \x03 (Ctrl+C), \x04 (Ctrl+D), \x16 (Ctrl+V), \x1a (Ctrl+Z).
 #[test]
+#[ntest::timeout(10_000)]
 fn test_all_control_characters_survive_serialization() {
     use std::io::Cursor;
 
@@ -657,6 +661,7 @@ fn test_all_control_characters_survive_serialization() {
 /// also survives serialization — mimics a scenario where Ctrl+C is sent
 /// while other characters are buffered.
 #[test]
+#[ntest::timeout(10_000)]
 fn test_ctrl_c_in_mixed_payload_survives_serialization() {
     use std::io::Cursor;
 
