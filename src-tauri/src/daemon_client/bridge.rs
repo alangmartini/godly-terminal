@@ -23,7 +23,7 @@ pub enum EmitPayload {
     /// Pushed grid diff from the daemon — frontend can apply directly without
     /// an IPC round-trip. Suppresses TerminalOutput for the same terminal.
     TerminalGridDiff { terminal_id: String, diff: godly_protocol::types::RichGridDiff },
-    TerminalClosed { terminal_id: String },
+    TerminalClosed { terminal_id: String, exit_code: Option<i64> },
     ProcessChanged { terminal_id: String, process_name: String },
 }
 
@@ -158,11 +158,12 @@ impl EventEmitter {
                     }),
                 );
             }
-            EmitPayload::TerminalClosed { terminal_id } => {
+            EmitPayload::TerminalClosed { terminal_id, exit_code } => {
                 let _ = app_handle.emit(
                     "terminal-closed",
                     serde_json::json!({
                         "terminal_id": terminal_id,
+                        "exit_code": exit_code,
                     }),
                 );
             }
@@ -805,8 +806,9 @@ fn event_to_payload(event: Event) -> EmitPayload {
             terminal_id: session_id,
             diff,
         },
-        Event::SessionClosed { session_id } => EmitPayload::TerminalClosed {
+        Event::SessionClosed { session_id, exit_code } => EmitPayload::TerminalClosed {
             terminal_id: session_id,
+            exit_code,
         },
         Event::ProcessChanged {
             session_id,
