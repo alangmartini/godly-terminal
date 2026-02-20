@@ -125,6 +125,10 @@ pub fn run() {
             commands::get_sounds_dir,
             commands::list_custom_sounds,
             commands::read_sound_file,
+            commands::list_sound_packs,
+            commands::list_sound_pack_files,
+            commands::read_sound_pack_file,
+            commands::get_sound_packs_dir,
             commands::get_grid_snapshot,
             commands::get_grid_snapshot_diff,
             commands::get_grid_dimensions,
@@ -173,6 +177,9 @@ pub fn run() {
 
             // Copy bundled sounds to user's sounds directory (first run)
             commands::install_bundled_sounds(&app_handle);
+
+            // Copy bundled sound packs (first run)
+            commands::install_bundled_sound_packs(&app_handle);
 
             // Start MCP pipe server for Claude Code integration
             mcp_server::start_mcp_server(

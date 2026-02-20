@@ -5,6 +5,7 @@ import { workspaceService } from '../services/workspace-service';
 import { keybindingStore, formatChord } from '../state/keybinding-store';
 import { notificationStore } from '../state/notification-store';
 import { playNotificationSound } from '../services/notification-sound';
+import { getPluginRegistry } from '../plugins/index';
 import { quotePath } from '../utils/quote-path';
 import { perfTracer } from '../utils/PerfTracer';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
@@ -1130,6 +1131,17 @@ export class App {
     await listen<{ terminal_id: string; display_name: string }>('quick-claude-ready', (event) => {
       const { terminal_id, display_name } = event.payload;
       this.toastContainer.show('Claude Ready', `${display_name} — prompt delivered`, terminal_id);
+
+      // Emit plugin event
+      const registry = getPluginRegistry();
+      if (registry) {
+        registry.getBus().emit({
+          type: 'agent:ready',
+          terminalId: terminal_id,
+          message: `${display_name} — prompt delivered`,
+          timestamp: Date.now(),
+        });
+      }
     });
 
     // MCP: terminal closed by MCP handler
@@ -1157,7 +1169,16 @@ export class App {
 
       const played = notificationStore.recordNotify(terminal_id);
       if (played) {
-        playNotificationSound(settings.soundPreset, settings.volume);
+        // Emit plugin event; if a plugin handled the sound, skip the default
+        const registry = getPluginRegistry();
+        let pluginHandledSound = false;
+        if (registry) {
+          const result = registry.getBus().emitMcpNotify(terminal_id, message);
+          pluginHandledSound = result.soundHandled;
+        }
+        if (!pluginHandledSound) {
+          playNotificationSound(settings.soundPreset, settings.volume);
+        }
 
         // Show in-app toast (always, regardless of focus)
         const toastTitle = buildNotificationTitle(terminal_id);
