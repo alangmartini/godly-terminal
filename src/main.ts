@@ -1,5 +1,6 @@
 import { App } from './components/App';
 import { initLogger } from './utils/Logger';
+import { initPlugins } from './plugins/index';
 
 initLogger();
 
@@ -9,4 +10,6 @@ if (!container) {
 }
 
 const app = new App(container);
-app.init().catch(console.error);
+app.init().then(() => {
+  initPlugins();
+}).catch(console.error);

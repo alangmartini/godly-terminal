@@ -44,7 +44,8 @@
       "target/release/godly-daemon.exe": "./",
       "target/release/godly-mcp.exe": "./",
       "target/release/godly-notify.exe": "./",
-      "sounds/*": "sounds/"
+      "sounds/*": "sounds/",
+      "soundpacks/**/*": "soundpacks/"
     }
   },
   "plugins": {}
