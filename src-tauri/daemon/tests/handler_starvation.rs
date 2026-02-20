@@ -226,6 +226,7 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(15);
 /// must receive a response within REQUEST_DEADLINE. Without the fix, the handler
 /// blocks forever on output_tx.lock() and no response is ever produced.
 #[test]
+#[ntest::timeout(120_000)] // 2min — spawns daemon + heavy PTY output + IPC round-trips
 fn test_requests_complete_during_heavy_output() {
     let daemon = DaemonFixture::spawn("handler-starvation");
     let mut pipe = daemon.connect();

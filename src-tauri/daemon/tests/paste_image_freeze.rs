@@ -318,6 +318,7 @@ const RESPONSE_DEADLINE: Duration = Duration::from_secs(5);
 /// Without fix: deadlock — Ping never arrives.
 /// With fix: write should be non-blocking/async so the I/O thread stays responsive.
 #[test]
+#[ntest::timeout(120_000)] // 2min — deadlock detection with heavy I/O
 #[ignore = "Known bug: write_all() deadlock not yet fixed (see issue #151)"]
 fn test_write_during_heavy_output_deadlocks() {
     let daemon = DaemonFixture::spawn("paste-freeze-output");
@@ -426,6 +427,7 @@ fn test_write_during_heavy_output_deadlocks() {
 ///
 /// User-visible: paste image in tab 1, and tabs 2/3/4 all freeze too.
 #[test]
+#[ntest::timeout(120_000)]
 #[ignore = "Known bug: write_all() deadlock not yet fixed (see issue #151)"]
 fn test_deadlock_affects_all_sessions() {
     let daemon = DaemonFixture::spawn("paste-freeze-cross");
@@ -522,6 +524,7 @@ fn test_deadlock_affects_all_sessions() {
 /// contains ESC bytes and control characters that cause the shell to
 /// produce particularly verbose error output, amplifying the backpressure.
 #[test]
+#[ntest::timeout(120_000)]
 #[ignore = "Known bug: write_all() deadlock not yet fixed (see issue #151)"]
 fn test_binary_paste_during_output_deadlocks() {
     let daemon = DaemonFixture::spawn("paste-freeze-binout");

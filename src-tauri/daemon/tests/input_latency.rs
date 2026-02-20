@@ -218,6 +218,7 @@ impl Drop for DaemonFixture {
 ///
 /// Expected: <50ms per request (typically <5ms on modern hardware).
 #[test]
+#[ntest::timeout(60_000)] // 1min — daemon spawn + IPC round-trips
 fn baseline_grid_snapshot_latency_no_output() {
     let daemon = DaemonFixture::spawn("latency-baseline");
     let mut pipe = daemon.connect();
@@ -311,6 +312,7 @@ fn baseline_grid_snapshot_latency_no_output() {
 /// active output. It asserts that even under load, snapshot latency stays
 /// within bounds (which may require architectural fixes to pass).
 #[test]
+#[ntest::timeout(120_000)] // 2min — heavy output + concurrent IPC
 fn grid_snapshot_latency_during_heavy_output() {
     let daemon = DaemonFixture::spawn("latency-heavy");
     let mut pipe = daemon.connect();
@@ -436,6 +438,7 @@ fn grid_snapshot_latency_during_heavy_output() {
 /// Diff snapshots send only dirty rows, so they should be faster than full
 /// grid snapshots — both in serialization cost and Mutex hold time.
 #[test]
+#[ntest::timeout(120_000)]
 fn diff_snapshot_latency_during_output() {
     let daemon = DaemonFixture::spawn("latency-diff");
     let mut pipe = daemon.connect();
@@ -556,6 +559,7 @@ fn diff_snapshot_latency_during_output() {
 /// Here we measure them as back-to-back pipe requests to isolate the daemon-side
 /// cost from the bridge threading overhead.
 #[test]
+#[ntest::timeout(60_000)]
 fn keystroke_echo_round_trip() {
     let daemon = DaemonFixture::spawn("latency-keystroke");
     let mut pipe = daemon.connect();

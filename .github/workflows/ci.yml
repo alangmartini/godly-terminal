@@ -13,6 +13,7 @@ env:
 jobs:
   check-and-lint:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -22,30 +23,50 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
-      - run: npx tsc --noEmit
-      - run: npm test
+      - name: Install dependencies
+        run: npm install
+        timeout-minutes: 3
+      - name: TypeScript check
+        run: npx tsc --noEmit
+        timeout-minutes: 3
+      - name: Frontend tests
+        run: npm test
+        timeout-minutes: 3
       # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
-      - run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon
+      - name: Cargo check
+        run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon
+        timeout-minutes: 8
 
   rust-tests:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
-      - run: cd src-tauri && cargo test -p godly-protocol
-      - run: cd src-tauri && cargo test -p godly-vt
-      - run: cd src-tauri && cargo test -p godly-daemon
+      - name: Protocol tests
+        run: cd src-tauri && cargo test -p godly-protocol
+        timeout-minutes: 5
+      - name: VT engine tests
+        run: cd src-tauri && cargo test -p godly-vt
+        timeout-minutes: 5
+      - name: Daemon tests
+        run: cd src-tauri && cargo test -p godly-daemon
+        timeout-minutes: 10
       # Build release binaries first — Tauri's build.rs validates resource paths at compile time
-      - run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
+      - name: Build release binaries
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
+        timeout-minutes: 10
       # Skip worktree cleanup test — requires git remote which CI temp repos lack
-      - run: cd src-tauri && cargo test -p godly-terminal -- --skip test_cleanup_all_worktrees_with_progress
+      - name: App crate tests
+        run: cd src-tauri && cargo test -p godly-terminal -- --skip test_cleanup_all_worktrees_with_progress
+        timeout-minutes: 10
 
   build:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -55,6 +76,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
-      - run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
-      - run: npm run build
+      - name: Install dependencies
+        run: npm install
+        timeout-minutes: 3
+      - name: Build release binaries
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
+        timeout-minutes: 10
+      - name: Production build
+        run: npm run build
+        timeout-minutes: 8

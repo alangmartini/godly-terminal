@@ -265,6 +265,7 @@ fn create_job_object(limit_flags: u32) -> HANDLE {
 ///
 /// This should PASS — it proves the basic daemon reconnection works.
 #[test]
+#[ntest::timeout(90_000)] // 90s — daemon spawn + session lifecycle + reconnect
 fn test_01_sessions_persist_across_client_reconnect() {
     eprintln!("\n=== test_01: basic session persistence across reconnect ===");
     let pipe_name = test_pipe_name("persist-01");
@@ -349,6 +350,7 @@ fn test_01_sessions_persist_across_client_reconnect() {
 /// Verification is by SESSION EXISTENCE — if the original session survives,
 /// daemon A is still running and B correctly detected it.
 #[test]
+#[ntest::timeout(90_000)]
 fn test_03_second_daemon_detects_first() {
     let iterations = 5;
     let mut session_lost_count = 0;
@@ -459,6 +461,7 @@ fn test_03_second_daemon_detects_first() {
 ///
 /// This should PASS — proving WMI launch is the correct escape mechanism.
 #[test]
+#[ntest::timeout(90_000)]
 fn test_04_wmi_launch_escapes_job_object() {
     let iterations = 3;
     let mut killed_count = 0;

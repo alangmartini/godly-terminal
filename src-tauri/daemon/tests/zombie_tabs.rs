@@ -280,6 +280,7 @@ impl Drop for DaemonFixture {
 /// 4. Wait for session to become dead (via ListSessions)
 /// 5. Verify SessionClosed event arrives within a deadline
 #[test]
+#[ntest::timeout(60_000)] // 1min — daemon spawn + PTY exit detection
 fn test_session_closed_on_pty_exit_while_attached() {
     let daemon = DaemonFixture::spawn("zombie-attached");
     let mut pipe = daemon.connect();
@@ -351,6 +352,7 @@ fn test_session_closed_on_pty_exit_while_attached() {
 /// 5. Connect a new client and re-attach to the same session
 /// 6. Verify SessionClosed arrives again for the new client
 #[test]
+#[ntest::timeout(60_000)]
 fn test_session_closed_on_attach_to_dead_session() {
     let daemon = DaemonFixture::spawn("zombie-dead-attach");
     let mut pipe1 = daemon.connect();
@@ -425,6 +427,7 @@ fn test_session_closed_on_attach_to_dead_session() {
 /// Diagnostic: Verify that cmd.exe actually exits and the reader thread detects it.
 /// If this fails, cmd.exe isn't exiting from "exit\r\n" via ConPTY.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_cmd_exit_is_detected_by_daemon() {
     let daemon = DaemonFixture::spawn("zombie-diag");
     let mut pipe = daemon.connect();
@@ -474,6 +477,7 @@ fn test_cmd_exit_is_detected_by_daemon() {
 /// has exited, allowing the frontend to know the session is dead even without
 /// the SessionClosed event.
 #[test]
+#[ntest::timeout(60_000)]
 fn test_list_sessions_shows_dead_session() {
     let daemon = DaemonFixture::spawn("zombie-list");
     let mut pipe = daemon.connect();
