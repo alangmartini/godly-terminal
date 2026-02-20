@@ -1,0 +1,11 @@
+{
+  "id": "default",
+  "name": "Default",
+  "description": "Built-in notification sounds using the bundled work_complete.mp3. Add your own sound packs by creating folders in the soundpacks directory.",
+  "author": "Godly Terminal",
+  "version": "1.0.0",
+  "sounds": {
+    "complete": ["work_complete.mp3"],
+    "notification": ["work_complete.mp3"]
+  }
+}

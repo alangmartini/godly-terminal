@@ -12,6 +12,23 @@ function getAudioContext(): AudioContext {
   return audioContext;
 }
 
+/** Shared AudioContext for plugins */
+export function getSharedAudioContext(): AudioContext {
+  return getAudioContext();
+}
+
+/** Play an AudioBuffer at the given volume (for plugin reuse) */
+export function playBuffer(buffer: AudioBuffer, volume: number): void {
+  const ctx = getAudioContext();
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = Math.max(0, Math.min(1, volume));
+  source.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  source.start();
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export type BuiltinSoundPreset =
