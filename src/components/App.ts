@@ -1206,6 +1206,8 @@ export class App {
     const idleService = new IdleNotificationService({
       idleThresholdMs: 15000,
       checkIntervalMs: 5000,
+      startupGraceMs: 20000,
+      notifyCooldownMs: 60000,
       getActiveTerminalId: () => store.getState().activeTerminalId ?? undefined,
       onNotify: async (terminalId: string) => {
         const settings = notificationStore.getSettings();
