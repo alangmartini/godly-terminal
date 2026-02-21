@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -9,6 +9,84 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{DaemonMessage, Event, Request, Response, read_daemon_message, write_request};
+
+// ── Per-session output stream registry ──────────────────────────────────
+//
+// Stores raw PTY output bytes per terminal session. The bridge I/O thread
+// pushes bytes here on every Event::Output, and the Tauri custom protocol
+// handler drains them when the frontend fetches via stream:// URL.
+// This bypasses the Tauri event JSON serialization on the output hot path.
+
+/// Maximum buffer size per session (4MB). If the frontend is slow to consume,
+/// oldest data is dropped to prevent unbounded memory growth.
+const MAX_STREAM_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
+/// Registry of per-session raw output byte buffers.
+///
+/// Thread-safe: the bridge I/O thread pushes data, and the Tauri custom
+/// protocol handler (running on the Tauri thread pool) drains data.
+/// Critical sections are short (push a slice, swap a Vec), so contention
+/// is negligible.
+pub struct OutputStreamRegistry {
+    buffers: parking_lot::Mutex<HashMap<String, Vec<u8>>>,
+}
+
+impl OutputStreamRegistry {
+    pub fn new() -> Self {
+        Self {
+            buffers: parking_lot::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Append raw PTY output bytes for a session.
+    ///
+    /// If the buffer exceeds MAX_STREAM_BUFFER_SIZE, oldest data is dropped
+    /// to make room. This prevents unbounded memory growth when the frontend
+    /// is slow to consume (e.g. heavy output + slow fetch cycle).
+    pub fn push(&self, session_id: &str, data: &[u8]) {
+        if data.is_empty() {
+            return;
+        }
+        let mut buffers = self.buffers.lock();
+        let buf = buffers.entry(session_id.to_string()).or_default();
+        if buf.len() + data.len() > MAX_STREAM_BUFFER_SIZE {
+            // Drop oldest data to make room
+            let overflow = (buf.len() + data.len()).saturating_sub(MAX_STREAM_BUFFER_SIZE);
+            if overflow >= buf.len() {
+                buf.clear();
+                // If new data alone exceeds the cap, only keep the tail
+                if data.len() > MAX_STREAM_BUFFER_SIZE {
+                    buf.extend_from_slice(&data[data.len() - MAX_STREAM_BUFFER_SIZE..]);
+                    return;
+                }
+            } else {
+                buf.drain(..overflow);
+            }
+        }
+        buf.extend_from_slice(data);
+    }
+
+    /// Drain all accumulated bytes for a session, returning them.
+    /// The buffer is cleared after draining.
+    pub fn drain(&self, session_id: &str) -> Vec<u8> {
+        let mut buffers = self.buffers.lock();
+        match buffers.get_mut(session_id) {
+            Some(buf) => std::mem::take(buf),
+            None => Vec::new(),
+        }
+    }
+
+    /// Remove a session's buffer entirely (on session close).
+    pub fn remove(&self, session_id: &str) {
+        self.buffers.lock().remove(session_id);
+    }
+
+    /// Number of sessions with active buffers (for diagnostics).
+    #[cfg(test)]
+    pub fn session_count(&self) -> usize {
+        self.buffers.lock().len()
+    }
+}
 
 // ── Non-blocking event emitter ──────────────────────────────────────────
 
@@ -447,6 +525,9 @@ impl DaemonBridge {
     /// The `wake_event` is signaled by `send_fire_and_forget` and `try_send_request`
     /// to wake the I/O thread immediately when a new request arrives, instead of
     /// waiting for the sleep timeout.
+    ///
+    /// If `output_registry` is provided, raw PTY bytes from Event::Output are
+    /// pushed into the registry for the Tauri custom protocol stream handler.
     pub fn start(
         &self,
         mut reader: Box<dyn Read + Send>,
@@ -455,6 +536,7 @@ impl DaemonBridge {
         emitter: EventEmitter,
         health: Arc<BridgeHealth>,
         wake_event: Arc<WakeEvent>,
+        output_registry: Option<Arc<OutputStreamRegistry>>,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
@@ -524,6 +606,21 @@ impl DaemonBridge {
                                     total_events += 1;
                                     events_this_iteration += 1;
                                     did_work = true;
+
+                                    // Push raw output bytes to the stream registry
+                                    // (before event_to_payload consumes the event).
+                                    // Also clean up on session close.
+                                    if let Some(ref registry) = output_registry {
+                                        match &event {
+                                            Event::Output { session_id, data } => {
+                                                registry.push(session_id, data);
+                                            }
+                                            Event::SessionClosed { session_id, .. } => {
+                                                registry.remove(session_id);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
 
                                     update_phase(&health, PHASE_EMIT);
                                     let payload = event_to_payload(event);
@@ -883,6 +980,121 @@ mod tests {
             elapsed < Duration::from_millis(50),
             "Timeout should complete quickly, took {:?}",
             elapsed
+        );
+    }
+
+    // ── OutputStreamRegistry tests ──────────────────────────────────
+
+    #[test]
+    fn registry_push_and_drain() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"hello");
+        reg.push("s1", b" world");
+        let data = reg.drain("s1");
+        assert_eq!(data, b"hello world");
+    }
+
+    #[test]
+    fn registry_drain_clears_buffer() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"data");
+        let _ = reg.drain("s1");
+        let data = reg.drain("s1");
+        assert!(data.is_empty(), "Buffer should be empty after drain");
+    }
+
+    #[test]
+    fn registry_drain_unknown_session() {
+        let reg = OutputStreamRegistry::new();
+        let data = reg.drain("nonexistent");
+        assert!(data.is_empty());
+    }
+
+    #[test]
+    fn registry_push_empty_data_is_noop() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"");
+        assert_eq!(reg.session_count(), 0, "Empty push should not create entry");
+    }
+
+    #[test]
+    fn registry_remove_clears_session() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"data");
+        reg.remove("s1");
+        let data = reg.drain("s1");
+        assert!(data.is_empty());
+        assert_eq!(reg.session_count(), 0);
+    }
+
+    #[test]
+    fn registry_multiple_sessions_isolated() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"one");
+        reg.push("s2", b"two");
+        assert_eq!(reg.drain("s1"), b"one");
+        assert_eq!(reg.drain("s2"), b"two");
+    }
+
+    #[test]
+    fn registry_overflow_drops_oldest() {
+        let reg = OutputStreamRegistry::new();
+        // Push data up to the limit
+        let chunk = vec![0xAB; MAX_STREAM_BUFFER_SIZE];
+        reg.push("s1", &chunk);
+        // Push more data — should drop oldest to make room
+        reg.push("s1", b"new");
+        let data = reg.drain("s1");
+        assert_eq!(data.len(), MAX_STREAM_BUFFER_SIZE);
+        // The last 3 bytes should be "new"
+        assert_eq!(&data[data.len() - 3..], b"new");
+    }
+
+    #[test]
+    fn registry_overflow_single_oversized_push() {
+        let reg = OutputStreamRegistry::new();
+        // Push data larger than the max in a single call
+        let oversized = vec![0xCD; MAX_STREAM_BUFFER_SIZE + 1000];
+        reg.push("s1", &oversized);
+        let data = reg.drain("s1");
+        assert_eq!(data.len(), MAX_STREAM_BUFFER_SIZE);
+        // Should keep the tail of the oversized data
+        assert_eq!(data, &oversized[1000..]);
+    }
+
+    #[test]
+    fn registry_concurrent_push_and_drain() {
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let reg_push = Arc::clone(&reg);
+        let reg_drain = Arc::clone(&reg);
+
+        // Writer thread: push data in a tight loop
+        let writer = std::thread::spawn(move || {
+            for i in 0..1000u32 {
+                reg_push.push("s1", &i.to_le_bytes());
+            }
+        });
+
+        // Reader thread: drain periodically
+        let reader = std::thread::spawn(move || {
+            let mut total_bytes = 0;
+            for _ in 0..100 {
+                total_bytes += reg_drain.drain("s1").len();
+                std::thread::yield_now();
+            }
+            total_bytes
+        });
+
+        writer.join().unwrap();
+        // Drain any remaining
+        let remaining = reg.drain("s1").len();
+        let drained = reader.join().unwrap();
+
+        // Total should equal 1000 * 4 bytes per u32
+        assert_eq!(
+            drained + remaining,
+            4000,
+            "All pushed bytes should be accounted for"
         );
     }
 }
