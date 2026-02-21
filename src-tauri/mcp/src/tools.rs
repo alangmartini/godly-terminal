@@ -163,7 +163,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "write_to_terminal",
-                "description": "Send text input to another terminal",
+                "description": "Send raw text input to a terminal. Does NOT append a newline — include \\n in the data to press Enter.\n\nBest practices:\n- For running commands and reading output, prefer `execute_command` (single tool call instead of 3).\n- For special keys (Ctrl+C, arrows), use `send_keys` instead.\n- Use this tool for interactive input, partial typing, or streaming text that doesn't need output capture.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -173,7 +173,7 @@ pub fn list_tools() -> Value {
                         },
                         "data": {
                             "type": "string",
-                            "description": "Text to send to the terminal"
+                            "description": "Text to send to the terminal. Newlines (\\n) are converted to Enter (CR)."
                         }
                     },
                     "required": ["terminal_id", "data"]
@@ -181,7 +181,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "read_terminal",
-                "description": "Returns all console output from a terminal's rolling 1MB buffer",
+                "description": "Read raw output from a terminal's rolling 1MB buffer.\n\nBest practices:\n- For running a command and reading its output, prefer `execute_command` (single tool call).\n- Use `read_terminal` when you need historical output, not just the result of the last command.\n- Default mode is 'tail' (last 100 lines). Use strip_ansi=true for clean text.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -336,7 +336,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "wait_for_idle",
-                "description": "Wait for a terminal to stop producing output (idle detection). Returns when no output has been produced for `idle_ms` milliseconds, or when the timeout is reached.",
+                "description": "Wait for a terminal to stop producing output (idle detection).\n\nBest practices:\n- For running a command and reading output, prefer `execute_command` (handles wait + read automatically).\n- Use `wait_for_idle` for advanced scenarios: waiting between multiple writes, monitoring long-running processes, or when you need custom idle thresholds.\n- Returns when no output for `idle_ms` milliseconds, or when timeout is reached.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -360,7 +360,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "read_grid",
-                "description": "Read the current visible terminal screen as parsed plain text. Uses the godly-vt terminal state engine to return clean rows without ANSI escapes. Unlike read_terminal (which returns raw scrollback history), read_grid returns exactly what the user sees on screen right now, with cursor position.",
+                "description": "Read the current visible terminal screen as parsed plain text with cursor position.\n\nBest practices:\n- Use this to check what the user sees right now (e.g., prompts, TUI apps, interactive programs).\n- For command output, prefer `execute_command` or `read_terminal` — they capture full output, not just the visible screen.\n- Returns clean text without ANSI escapes, plus cursor coordinates and screen dimensions.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -374,7 +374,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "wait_for_text",
-                "description": "Wait for specific text to appear in terminal output. ANSI codes are stripped before matching. Searches the terminal's rolling 1MB output buffer.",
+                "description": "Wait for specific text to appear in terminal output.\n\nBest practices:\n- Use this for waiting on specific prompts or markers (e.g., 'Build succeeded', '$ ', 'error:').\n- ANSI codes are stripped before matching. Searches the terminal's rolling 1MB output buffer.\n- Combine with `read_terminal` afterwards if you need the full output context.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -393,6 +393,72 @@ pub fn list_tools() -> Value {
                         }
                     },
                     "required": ["terminal_id", "text"]
+                }
+            },
+            {
+                "name": "send_keys",
+                "description": "Send special key sequences to a terminal. Use this for control keys, navigation, and signals that can't be expressed as plain text.\n\nSupported keys:\n- Control: ctrl+a through ctrl+z (ctrl+c = interrupt, ctrl+d = EOF, ctrl+z = suspend, ctrl+l = clear)\n- Navigation: up, down, left, right, home, end, pageup, pagedown\n- Editing: enter, tab, escape, backspace, delete, insert, space\n- Function: f1 through f12\n\nBest practices:\n- Send ctrl+c to interrupt a running command.\n- Send up/down to navigate shell history.\n- Send tab for shell auto-completion.\n- Multiple keys are sent in sequence (e.g., [\"up\", \"up\", \"enter\"] replays a history command).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to send keys to"
+                        },
+                        "keys": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Array of key names to send in sequence. Examples: [\"ctrl+c\"], [\"up\", \"enter\"], [\"tab\"]"
+                        }
+                    },
+                    "required": ["terminal_id", "keys"]
+                }
+            },
+            {
+                "name": "erase_content",
+                "description": "Erase characters from the current terminal input line by sending backspace bytes. Useful for correcting typos or clearing partial input before sending the right command.\n\nBest practices:\n- Use before `write_to_terminal` to fix a mistake without pressing Enter.\n- Only erases from the cursor position backwards — it won't erase output that has already been committed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to erase content in"
+                        },
+                        "count": {
+                            "type": "number",
+                            "default": 1,
+                            "description": "Number of characters to erase (backspaces to send). Default: 1."
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
+                "name": "execute_command",
+                "description": "Run a command in a terminal and return its output. This is the PRIMARY tool for running commands — it combines write + wait_for_idle + read into a single call, saving 2 round-trips.\n\nHow it works:\n1. Snapshots the current buffer length\n2. Writes the command + Enter\n3. Waits until the terminal is idle (no output for `idle_ms`)\n4. Reads only the NEW output (since step 1), strips ANSI codes and command echo\n5. Returns clean text output with completion status\n\nBest practices:\n- Use this for any command where you need the output (build, test, git, ls, etc.).\n- Use `write_to_terminal` instead for interactive programs that don't have a clear end (e.g., vim, top).\n- If the command produces output for longer than `timeout_ms`, you'll get partial output with completed=false.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to execute in"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "The command to run (Enter is appended automatically)"
+                        },
+                        "idle_ms": {
+                            "type": "number",
+                            "default": 2000,
+                            "description": "Milliseconds of silence before considering the command done (default: 2000)"
+                        },
+                        "timeout_ms": {
+                            "type": "number",
+                            "default": 30000,
+                            "description": "Maximum time to wait in milliseconds (default: 30000)"
+                        }
+                    },
+                    "required": ["terminal_id", "command"]
                 }
             },
             {
@@ -723,6 +789,66 @@ pub fn call_tool(
             }
         }
 
+        "send_keys" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let keys: Vec<String> = args
+                .get("keys")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing keys array")?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            if keys.is_empty() {
+                return Err("keys array must not be empty".to_string());
+            }
+            McpRequest::SendKeys { terminal_id, keys }
+        }
+
+        "erase_content" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let count = args
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize)
+                .unwrap_or(1);
+            McpRequest::EraseContent { terminal_id, count }
+        }
+
+        "execute_command" => {
+            let terminal_id = args
+                .get("terminal_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing terminal_id")?
+                .to_string();
+            let command = args
+                .get("command")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing command")?
+                .to_string();
+            let idle_ms = args
+                .get("idle_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(2000);
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30000);
+            McpRequest::ExecuteCommand {
+                terminal_id,
+                command,
+                idle_ms,
+                timeout_ms,
+            }
+        }
+
         "quick_claude" => {
             let workspace_id = args
                 .get("workspace_id")
@@ -848,5 +974,16 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
                 "alternate_screen": alternate_screen,
             }))
         }
+        McpResponse::CommandOutput {
+            output,
+            completed,
+            last_output_ago_ms,
+            running,
+        } => Ok(json!({
+            "output": output,
+            "completed": completed,
+            "last_output_ago_ms": last_output_ago_ms,
+            "running": running,
+        })),
     }
 }

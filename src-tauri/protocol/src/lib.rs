@@ -1,5 +1,6 @@
 pub mod ansi;
 pub mod frame;
+pub mod keys;
 pub mod mcp_messages;
 pub mod messages;
 pub mod types;

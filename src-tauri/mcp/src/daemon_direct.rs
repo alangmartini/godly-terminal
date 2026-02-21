@@ -441,6 +441,143 @@ impl Backend for DaemonDirectBackend {
                 }
             }
 
+            McpRequest::SendKeys { terminal_id, keys } => {
+                // Convert each key name to bytes and concatenate
+                let mut all_bytes = Vec::new();
+                for key in keys {
+                    match godly_protocol::keys::key_to_bytes(key) {
+                        Ok(bytes) => all_bytes.extend(bytes),
+                        Err(e) => return Ok(McpResponse::Error { message: e }),
+                    }
+                }
+                let resp = self.daemon_request(&Request::Write {
+                    session_id: terminal_id.clone(),
+                    data: all_bytes,
+                })?;
+                match resp {
+                    Response::Ok => Ok(McpResponse::Ok),
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
+            McpRequest::EraseContent { terminal_id, count } => {
+                let backspaces = vec![0x08u8; *count];
+                let resp = self.daemon_request(&Request::Write {
+                    session_id: terminal_id.clone(),
+                    data: backspaces,
+                })?;
+                match resp {
+                    Response::Ok => Ok(McpResponse::Ok),
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
+            McpRequest::ExecuteCommand {
+                terminal_id,
+                command,
+                idle_ms,
+                timeout_ms,
+            } => {
+                // 1. Snapshot buffer length before command
+                let before_len = match self.daemon_request(&Request::ReadBuffer {
+                    session_id: terminal_id.clone(),
+                })? {
+                    Response::Buffer { data, .. } => data.len(),
+                    Response::Error { message } => return Ok(McpResponse::Error { message }),
+                    _ => 0,
+                };
+
+                // 2. Write command + Enter
+                let resp = self.daemon_request(&Request::Write {
+                    session_id: terminal_id.clone(),
+                    data: format!("{}\r", command).into_bytes(),
+                })?;
+                if let Response::Error { message } = resp {
+                    return Ok(McpResponse::Error { message });
+                }
+
+                // 3. Wait for idle
+                let deadline =
+                    std::time::Instant::now() + std::time::Duration::from_millis(*timeout_ms);
+                let poll_ms = (*idle_ms / 4).min(500).max(50);
+                let mut completed = false;
+                #[allow(unused_assignments)]
+                let mut last_ago = 0u64;
+                #[allow(unused_assignments)]
+                let mut running = true;
+
+                loop {
+                    let resp = self.daemon_request(&Request::GetLastOutputTime {
+                        session_id: terminal_id.clone(),
+                    })?;
+
+                    match resp {
+                        Response::LastOutputTime {
+                            epoch_ms,
+                            running: is_running,
+                        } => {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            last_ago = now_ms.saturating_sub(epoch_ms);
+                            running = is_running;
+
+                            if last_ago >= *idle_ms || !running {
+                                completed = true;
+                                break;
+                            }
+
+                            if std::time::Instant::now() >= deadline {
+                                break;
+                            }
+                        }
+                        Response::Error { message } => {
+                            return Ok(McpResponse::Error { message });
+                        }
+                        _ => {
+                            return Ok(McpResponse::Error {
+                                message: "Unexpected daemon response".to_string(),
+                            });
+                        }
+                    }
+
+                    std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+                }
+
+                // 4. Read new output (delta since before_len)
+                let output = match self.daemon_request(&Request::ReadBuffer {
+                    session_id: terminal_id.clone(),
+                })? {
+                    Response::Buffer { data, .. } => {
+                        let new_data = if data.len() > before_len {
+                            &data[before_len..]
+                        } else {
+                            &data[..]
+                        };
+                        let text = String::from_utf8_lossy(new_data).into_owned();
+                        let stripped = strip_ansi(&text);
+                        // Strip command echo: if the first line ends with the command, remove it
+                        strip_command_echo(&stripped, command)
+                    }
+                    Response::Error { message } => return Ok(McpResponse::Error { message }),
+                    _ => String::new(),
+                };
+
+                Ok(McpResponse::CommandOutput {
+                    output,
+                    completed,
+                    last_output_ago_ms: last_ago,
+                    running,
+                })
+            }
+
             // App-only tools that require Tauri
             McpRequest::ListWorkspaces => Ok(Self::app_only_error("list_workspaces")),
             McpRequest::CreateWorkspace { .. } => Ok(Self::app_only_error("create_workspace")),
@@ -468,4 +605,31 @@ impl Backend for DaemonDirectBackend {
     fn label(&self) -> &'static str {
         "daemon-direct"
     }
+}
+
+/// Strip the command echo from terminal output.
+///
+/// Terminals echo the command back before showing output. If the first line
+/// of the output ends with the command text, remove that line. Falls back to
+/// returning the full text if no match is found.
+fn strip_command_echo(text: &str, command: &str) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    // The first line often contains the prompt + command echo.
+    // Check if it ends with the command text (or a trimmed version).
+    let first = lines[0].trim_end();
+    let cmd_trimmed = command.trim();
+    if first.ends_with(cmd_trimmed) || first == cmd_trimmed {
+        lines.remove(0);
+    }
+
+    // Trim trailing empty lines
+    while lines.last().map_or(false, |l| l.trim().is_empty()) {
+        lines.pop();
+    }
+
+    lines.join("\n")
 }
