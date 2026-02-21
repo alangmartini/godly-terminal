@@ -573,10 +573,11 @@ fn arrow_up_history_latency_through_bridge() {
     // Cleanup bridge
     stop.store(true, Ordering::Relaxed);
     drop(req_tx);
-    let _ = bridge_thread.join();
+    // Don't join bridge thread — it may be blocked reading from the pipe.
+    // The DaemonFixture drop will kill the daemon, which closes the pipe.
 
-    // Cleanup session
-    let _ = send_request_blocking(
+    // Cleanup session: fire-and-forget, don't block waiting for response
+    let _ = godly_protocol::write_request(
         &mut setup_pipe,
         &Request::CloseSession {
             session_id: session_id.clone(),
@@ -766,8 +767,10 @@ fn arrow_up_daemon_only_latency() {
         avg_ms, p50_ms, p95_ms, max_ms
     );
 
-    // Cleanup
-    let _ = send_request_blocking(
+    // Cleanup: fire-and-forget CloseSession. Don't wait for response because
+    // the pipe may be full of queued events, causing send_request_blocking to block.
+    // The DaemonFixture drop will kill the daemon process anyway.
+    let _ = godly_protocol::write_request(
         &mut pipe,
         &Request::CloseSession {
             session_id: session_id.clone(),
@@ -915,15 +918,15 @@ fn arrow_up_during_multi_session_contention() {
     std::thread::sleep(Duration::from_secs(1));
 
     // Start heavy CONTINUOUS output on Session A AFTER history is built.
-    // Uses PowerShell's while loop to produce output indefinitely until the
-    // session is closed. Each iteration outputs ~100 bytes and sleeps briefly
-    // to produce a sustained stream (not a burst that finishes quickly).
-    // The 1..10000000 range ensures output runs for the entire test duration.
+    // Uses a PowerShell for-loop (NOT pipeline) to produce output immediately.
+    // IMPORTANT: `1..N | ForEach-Object` creates the entire N-element array in
+    // memory before piping, causing a long delay before any output on CI VMs.
+    // A for-loop avoids this and outputs from the very first iteration.
     let (resp, _) = bridge_request(
         &req_tx,
         Request::Write {
             session_id: session_a.clone(),
-            data: b"1..10000000 | ForEach-Object { Write-Output (\"Line $_ \" + ('A' * 80)) }\r\n"
+            data: b"for ($i=0; $i -lt 10000000; $i++) { \"Line $i \" + ('A' * 80) }\r\n"
                 .to_vec(),
         },
         Duration::from_secs(10),
@@ -934,8 +937,8 @@ fn arrow_up_during_multi_session_contention() {
     // Wait for output events to start flowing through the shim pipeline.
     // With the pty-shim layer, output goes: shell → ConPTY → shim PTY reader →
     // shim main loop → daemon pipe → daemon reader → event forwarding.
-    // This takes longer than direct ConPTY, especially on CI.
-    std::thread::sleep(Duration::from_secs(5));
+    // On CI VMs, PowerShell startup + for-loop first iteration can take 8-10s.
+    std::thread::sleep(Duration::from_secs(10));
     let events_before = event_counter.load(Ordering::Relaxed);
     eprintln!(
         "[contention] Events from Session A before typing: {}",
@@ -943,15 +946,15 @@ fn arrow_up_during_multi_session_contention() {
     );
     assert!(
         events_before > 0,
-        "Session A output events should be flowing through the pipe"
+        "Session A output events should be flowing through the pipe (waited 10s)"
     );
 
     // Verify output is STILL flowing (not a burst that already finished).
-    // Use a longer check window (3s) to reduce flakiness on slow CI VMs.
+    // Use a longer check window (5s) to reduce flakiness on slow CI VMs.
     let check_start = event_counter.load(Ordering::Relaxed);
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(Duration::from_secs(5));
     let check_end = event_counter.load(Ordering::Relaxed);
-    let events_per_sec = (check_end - check_start) / 3;
+    let events_per_sec = (check_end - check_start) / 5;
     eprintln!(
         "[contention] Session A output rate: {} events/sec",
         events_per_sec
