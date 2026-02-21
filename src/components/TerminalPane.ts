@@ -360,11 +360,6 @@ export class TerminalPane {
       return;
     }
 
-    // Snap to bottom on any input when scrolled up
-    if (this.scrollbackOffset > 0) {
-      this.snapToBottom();
-    }
-
     // Convert keyboard events to terminal input data
     const data = this.keyToTerminalData(event);
     if (data) {
@@ -591,11 +586,13 @@ export class TerminalPane {
             }
           }
 
-          // Only sync scroll offset from daemon when the user hasn't explicitly
-          // scrolled up. This prevents a race where output-triggered snapshot
-          // fetches return a stale offset (0) before the setScrollback IPC
-          // completes, snapping the view to bottom.
+          // Sync scroll offset from daemon. When the user has scrolled up,
+          // only accept upward drift (new output incrementing the offset to
+          // keep the same content visible). Reject lower offsets that are
+          // stale (race with the async setScrollback IPC).
           if (!this.isUserScrolled) {
+            this.scrollbackOffset = diff.scrollback_offset;
+          } else if (diff.scrollback_offset > this.scrollbackOffset) {
             this.scrollbackOffset = diff.scrollback_offset;
           }
           this.totalScrollback = diff.total_scrollback;
@@ -630,6 +627,8 @@ export class TerminalPane {
       if (scrollSeqAtStart !== undefined && scrollSeqAtStart !== this.scrollSeq) return;
       this.cachedSnapshot = snapshot;
       if (!this.isUserScrolled) {
+        this.scrollbackOffset = snapshot.scrollback_offset;
+      } else if (snapshot.scrollback_offset > this.scrollbackOffset) {
         this.scrollbackOffset = snapshot.scrollback_offset;
       }
       this.totalScrollback = snapshot.total_scrollback;
@@ -685,6 +684,8 @@ export class TerminalPane {
     }
 
     if (!this.isUserScrolled) {
+      this.scrollbackOffset = diff.scrollback_offset;
+    } else if (diff.scrollback_offset > this.scrollbackOffset) {
       this.scrollbackOffset = diff.scrollback_offset;
     }
     this.totalScrollback = diff.total_scrollback;
@@ -783,7 +784,9 @@ export class TerminalPane {
       this.renderer.updateSize();
       requestAnimationFrame(() => {
         this.fit();
-        this.renderer.scrollToBottom();
+        if (!this.isUserScrolled) {
+          this.renderer.scrollToBottom();
+        }
         this.focusInput();
         this.fetchAndRenderSnapshot();
       });
@@ -808,7 +811,9 @@ export class TerminalPane {
       this.renderer.updateSize();
       requestAnimationFrame(() => {
         this.fit();
-        this.renderer.scrollToBottom();
+        if (!this.isUserScrolled) {
+          this.renderer.scrollToBottom();
+        }
         if (focused) {
           this.focusInput();
         }
