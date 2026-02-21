@@ -1,3 +1,5 @@
+import type { InstalledPluginMeta } from './types';
+
 const STORAGE_KEY = 'godly-plugin-settings';
 
 type Subscriber = () => void;
@@ -5,12 +7,14 @@ type Subscriber = () => void;
 interface PluginStoreData {
   enabledPlugins: Record<string, boolean>;
   pluginSettings: Record<string, Record<string, unknown>>;
+  installedPlugins: Record<string, InstalledPluginMeta>;
 }
 
 class PluginStore {
   private data: PluginStoreData = {
     enabledPlugins: {},
     pluginSettings: {},
+    installedPlugins: {},
   };
 
   private subscribers: Subscriber[] = [];
@@ -44,6 +48,26 @@ class PluginStore {
     this.notify();
   }
 
+  getInstalledPlugins(): Record<string, InstalledPluginMeta> {
+    return { ...this.data.installedPlugins };
+  }
+
+  getInstalledPlugin(pluginId: string): InstalledPluginMeta | undefined {
+    return this.data.installedPlugins[pluginId];
+  }
+
+  setInstalled(pluginId: string, meta: InstalledPluginMeta): void {
+    this.data.installedPlugins[pluginId] = meta;
+    this.saveToStorage();
+    this.notify();
+  }
+
+  removeInstalled(pluginId: string): void {
+    delete this.data.installedPlugins[pluginId];
+    this.saveToStorage();
+    this.notify();
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -66,6 +90,9 @@ class PluginStore {
       }
       if (parsed.pluginSettings && typeof parsed.pluginSettings === 'object') {
         this.data.pluginSettings = parsed.pluginSettings;
+      }
+      if (parsed.installedPlugins && typeof parsed.installedPlugins === 'object') {
+        this.data.installedPlugins = parsed.installedPlugins;
       }
     } catch {
       // Corrupt data — use defaults

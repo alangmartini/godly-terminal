@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "peon-ping",
+      "repo": "alangmartini/godly-plugin-peon-ping",
+      "description": "Warcraft 'Work Complete' sound notifications for Claude Code tasks",
+      "author": "Godly Terminal",
+      "tags": ["sound", "notification"],
+      "featured": true
+    },
+    {
+      "id": "smollm2",
+      "repo": "alangmartini/godly-plugin-smollm2",
+      "description": "Local AI branch name generation using SmolLM2 model",
+      "author": "Godly Terminal",
+      "tags": ["ai", "branch-naming"],
+      "featured": true
+    }
+  ]
+}

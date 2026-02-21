@@ -21,6 +21,10 @@ import type { ShellType } from '../state/store';
 import { showFileEditorDialog } from './FileEditorDialog';
 import { getPluginRegistry } from '../plugins/index';
 import { pluginStore } from '../plugins/plugin-store';
+import { pluginInstaller } from '../plugins/plugin-installer';
+import { createPluginCard } from './PluginCard';
+import type { RegistryEntry, PluginRegistryData } from '../plugins/types';
+import registryData from '../plugins/registry.json';
 
 function formatCustomSoundName(filename: string): string {
   // Strip extension
@@ -898,6 +902,8 @@ export function showSettingsDialog(): Promise<void> {
     pluginsContent.className = 'settings-tab-content';
     tabContents['plugins'] = pluginsContent;
 
+    const installingPlugins = new Set<string>();
+
     function renderPluginsTab() {
       pluginsContent.textContent = '';
 
@@ -910,53 +916,91 @@ export function showSettingsDialog(): Promise<void> {
         return;
       }
 
-      const plugins = registry.getAll();
-      if (plugins.length === 0) {
+      // ── Installed section ──
+      const installedTitle = document.createElement('div');
+      installedTitle.className = 'plugin-section-title';
+      installedTitle.textContent = 'Installed';
+      pluginsContent.appendChild(installedTitle);
+
+      const registeredPlugins = registry.getAllWithMeta();
+      if (registeredPlugins.length === 0) {
         const msg = document.createElement('div');
         msg.className = 'settings-description';
         msg.textContent = 'No plugins installed.';
         pluginsContent.appendChild(msg);
-        return;
+      } else {
+        const installedGrid = document.createElement('div');
+        installedGrid.className = 'plugin-browse-grid';
+        for (const entry of registeredPlugins) {
+          const card = createPluginCard({
+            plugin: entry.plugin,
+            manifest: entry.manifest,
+            isBuiltin: entry.builtin,
+            isEnabled: pluginStore.isEnabled(entry.plugin.id),
+            isInstalled: true,
+            onToggle: (enabled) => {
+              registry.setEnabled(entry.plugin.id, enabled);
+              renderPluginsTab();
+            },
+            onUninstall: async () => {
+              try {
+                await pluginInstaller.uninstallPlugin(entry.plugin.id);
+                renderPluginsTab();
+              } catch (e) {
+                console.error('[Plugins] Uninstall failed:', e);
+              }
+            },
+          });
+          installedGrid.appendChild(card);
+        }
+        pluginsContent.appendChild(installedGrid);
       }
 
-      for (const plugin of plugins) {
-        const section = document.createElement('div');
-        section.className = 'settings-section';
+      // ── Browse section ──
+      const browseTitle = document.createElement('div');
+      browseTitle.className = 'plugin-section-title';
+      browseTitle.style.marginTop = '16px';
+      browseTitle.textContent = 'Browse';
+      pluginsContent.appendChild(browseTitle);
 
-        // Plugin header with enable/disable toggle
-        const headerRow = document.createElement('div');
-        headerRow.className = 'shortcut-row';
+      const installedIds = new Set(registeredPlugins.map(e => e.plugin.id));
+      const browseEntries = (registryData as PluginRegistryData).plugins.filter(
+        (entry: RegistryEntry) => !installedIds.has(entry.id)
+      );
 
-        const nameLabel = document.createElement('span');
-        nameLabel.className = 'shortcut-label';
-        nameLabel.style.fontWeight = '600';
-        nameLabel.textContent = `${plugin.name} v${plugin.version}`;
-        headerRow.appendChild(nameLabel);
-
-        const enableCheckbox = document.createElement('input');
-        enableCheckbox.type = 'checkbox';
-        enableCheckbox.className = 'notification-checkbox';
-        enableCheckbox.checked = pluginStore.isEnabled(plugin.id);
-        enableCheckbox.onchange = () => {
-          registry.setEnabled(plugin.id, enableCheckbox.checked);
-          renderPluginsTab();
-        };
-        headerRow.appendChild(enableCheckbox);
-        section.appendChild(headerRow);
-
-        // Description
-        const desc = document.createElement('div');
-        desc.className = 'settings-description';
-        desc.textContent = plugin.description;
-        section.appendChild(desc);
-
-        // Plugin-specific settings (only when enabled)
-        if (pluginStore.isEnabled(plugin.id) && plugin.renderSettings) {
-          const settingsEl = plugin.renderSettings();
-          section.appendChild(settingsEl);
+      if (browseEntries.length === 0) {
+        const msg = document.createElement('div');
+        msg.className = 'settings-description';
+        msg.textContent = 'All registry plugins are installed.';
+        pluginsContent.appendChild(msg);
+      } else {
+        const browseGrid = document.createElement('div');
+        browseGrid.className = 'plugin-browse-grid';
+        for (const entry of browseEntries) {
+          const card = createPluginCard({
+            registryEntry: entry,
+            isBuiltin: false,
+            isEnabled: false,
+            isInstalled: false,
+            installing: installingPlugins.has(entry.id),
+            onInstall: async () => {
+              const [owner, repo] = entry.repo.split('/');
+              if (!owner || !repo) return;
+              installingPlugins.add(entry.id);
+              renderPluginsTab();
+              try {
+                await pluginInstaller.installPlugin(owner, repo);
+              } catch (e) {
+                console.error('[Plugins] Install failed:', e);
+              } finally {
+                installingPlugins.delete(entry.id);
+                renderPluginsTab();
+              }
+            },
+          });
+          browseGrid.appendChild(card);
         }
-
-        pluginsContent.appendChild(section);
+        pluginsContent.appendChild(browseGrid);
       }
     }
 
