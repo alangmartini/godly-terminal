@@ -472,7 +472,7 @@ fn arrow_up_history_latency_through_bridge() {
     let event_counter = Arc::new(AtomicU64::new(0));
     let event_counter_clone = event_counter.clone();
 
-    let bridge_thread = std::thread::Builder::new()
+    let _bridge_thread = std::thread::Builder::new()
         .name("test-bridge".into())
         .spawn(move || bridge_io_loop(bridge_pipe, req_rx, stop_clone, event_counter_clone))
         .expect("spawn bridge");
@@ -918,16 +918,18 @@ fn arrow_up_during_multi_session_contention() {
     std::thread::sleep(Duration::from_secs(1));
 
     // Start heavy CONTINUOUS output on Session A AFTER history is built.
-    // Uses a PowerShell for-loop (NOT pipeline) to produce output immediately.
-    // IMPORTANT: `1..N | ForEach-Object` creates the entire N-element array in
-    // memory before piping, causing a long delay before any output on CI VMs.
-    // A for-loop avoids this and outputs from the very first iteration.
+    // Uses the simplest possible PowerShell loop: `while($true){'A'*100}`
+    // - No string interpolation, no concatenation, no pipeline
+    // - Implicit output (no Write-Host/Write-Output overhead)
+    // - Starts producing output on the very first iteration
+    // Previous attempts with `1..N | ForEach-Object` (buffers entire array)
+    // and `for` loops with string concatenation failed on CI VMs due to
+    // PowerShell startup/compilation overhead.
     let (resp, _) = bridge_request(
         &req_tx,
         Request::Write {
             session_id: session_a.clone(),
-            data: b"for ($i=0; $i -lt 10000000; $i++) { \"Line $i \" + ('A' * 80) }\r\n"
-                .to_vec(),
+            data: b"while($true){'A'*100}\r\n".to_vec(),
         },
         Duration::from_secs(10),
     )
