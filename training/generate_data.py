@@ -392,7 +392,7 @@ def augment_seed_variants(seeds: list[dict], count: int = 100) -> list[dict]:
 # Stage 3: Claude API generation
 # ---------------------------------------------------------------------------
 
-CLAUDE_SYSTEM_PROMPT = """You are a training data generator for a git branch name model.
+LLM_SYSTEM_PROMPT = """You are a training data generator for a git branch name model.
 
 Given a category, generate 20 diverse (description, branch_name) pairs.
 
@@ -474,15 +474,16 @@ CATEGORIES = [
 ]
 
 
-def generate_with_claude(api_key: str, target_count: int = 1200) -> list[dict]:
-    """Generate examples using Claude API."""
+def generate_with_openai(api_key: str, target_count: int = 1200) -> list[dict]:
+    """Generate examples using OpenAI API."""
     try:
-        import anthropic
+        from openai import OpenAI
     except ImportError:
-        print("[claude] anthropic package not installed, skipping API generation")
+        print("[openai] openai package not installed, skipping API generation")
+        print("  Install with: pip install openai")
         return []
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = OpenAI(api_key=api_key)
     examples = []
     seen_outputs = set()
     batches_needed = (target_count // 20) + 1
@@ -495,22 +496,21 @@ def generate_with_claude(api_key: str, target_count: int = 1200) -> list[dict]:
         category = CATEGORIES[i % len(CATEGORIES)]
 
         try:
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
                 max_tokens=2000,
-                system=CLAUDE_SYSTEM_PROMPT,
-                messages=[{
-                    "role": "user",
-                    "content": f"Generate 20 (description, branch_name) pairs for: {category}"
-                }],
+                messages=[
+                    {"role": "system", "content": LLM_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Generate 20 (description, branch_name) pairs for: {category}"},
+                ],
             )
 
-            text = response.content[0].text
+            text = response.choices[0].message.content
 
             # Parse JSON from response (handle markdown code blocks)
             json_match = re.search(r"\[[\s\S]*\]", text)
             if not json_match:
-                print(f"  [claude] Batch {i+1}: No JSON found, skipping")
+                print(f"  [openai] Batch {i+1}: No JSON found, skipping")
                 continue
 
             batch = json.loads(json_match.group())
@@ -533,13 +533,13 @@ def generate_with_claude(api_key: str, target_count: int = 1200) -> list[dict]:
                 examples.append({"input": inp, "output": out})
                 added += 1
 
-            print(f"  [claude] Batch {i+1}/{batches_needed}: +{added} examples ({len(examples)} total)")
+            print(f"  [openai] Batch {i+1}/{batches_needed}: +{added} examples ({len(examples)} total)")
 
         except Exception as e:
-            print(f"  [claude] Batch {i+1} failed: {e}")
+            print(f"  [openai] Batch {i+1} failed: {e}")
             continue
 
-    print(f"[claude] Generated {len(examples)} examples via API")
+    print(f"[openai] Generated {len(examples)} examples via API")
     return examples
 
 
@@ -596,10 +596,10 @@ def main():
     parser = argparse.ArgumentParser(description="Generate branch name training data")
     parser.add_argument("--seeds", default="seeds.jsonl", help="Path to seeds file")
     parser.add_argument("--output-dir", default="data", help="Output directory")
-    parser.add_argument("--api-key", default=None, help="Anthropic API key (or set ANTHROPIC_API_KEY)")
-    parser.add_argument("--skip-claude", action="store_true", help="Skip Claude API generation")
+    parser.add_argument("--api-key", default=None, help="OpenAI API key (or set OPENAI_API_KEY)")
+    parser.add_argument("--skip-api", action="store_true", help="Skip OpenAI API generation")
     parser.add_argument("--augment-count", type=int, default=500, help="Template augmentation count")
-    parser.add_argument("--claude-count", type=int, default=1200, help="Claude API generation count")
+    parser.add_argument("--api-count", type=int, default=1200, help="OpenAI API generation count")
     args = parser.parse_args()
 
     script_dir = Path(__file__).parent
@@ -614,18 +614,18 @@ def main():
     augmented = augment_from_templates(args.augment_count)
     seed_variants = augment_seed_variants(seeds, count=100)
 
-    # Stage 3: Claude API
-    claude_examples = []
-    if not args.skip_claude:
+    # Stage 3: OpenAI API
+    api_examples = []
+    if not args.skip_api:
         import os
-        api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
         if api_key:
-            claude_examples = generate_with_claude(api_key, args.claude_count)
+            api_examples = generate_with_openai(api_key, args.api_count)
         else:
-            print("[claude] No API key provided, skipping. Use --api-key or ANTHROPIC_API_KEY env var")
+            print("[openai] No API key provided, skipping. Use --api-key or OPENAI_API_KEY env var")
 
     # Combine and dedup
-    all_examples = seeds + seed_variants + augmented + claude_examples
+    all_examples = seeds + seed_variants + augmented + api_examples
     all_examples = dedup_examples(all_examples)
 
     # Validate all examples
@@ -655,7 +655,7 @@ def main():
     print(f"  Seeds: {len(seeds)}")
     print(f"  Seed variants: {len(seed_variants)}")
     print(f"  Template augmented: {len(augmented)}")
-    print(f"  Claude API: {len(claude_examples)}")
+    print(f"  OpenAI API: {len(api_examples)}")
     print(f"Splits: train={len(train)}, val={len(val)}, test={len(test)}")
     print(f"Output: {output_dir}")
 
