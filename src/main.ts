@@ -10,6 +10,6 @@ if (!container) {
 }
 
 const app = new App(container);
-app.init().then(() => {
-  initPlugins();
+app.init().then(async () => {
+  await initPlugins();
 }).catch(console.error);
