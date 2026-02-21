@@ -1,28 +1,46 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { GodlyPlugin, PluginContext, PluginEventType, SoundPackManifest } from './types';
+import type { GodlyPlugin, PluginContext, PluginEventType, SoundPackManifest, ExternalPluginManifest } from './types';
 import { pluginStore } from './plugin-store';
 import { PluginEventBus } from './event-bus';
 import { getSharedAudioContext, playBuffer } from '../services/notification-sound';
 
+export interface RegisteredPlugin {
+  plugin: GodlyPlugin;
+  builtin: boolean;
+  manifest?: ExternalPluginManifest;
+}
+
+// Whitelisted Tauri commands that external plugins may invoke
+const EXTERNAL_PLUGIN_ALLOWED_COMMANDS = new Set([
+  'list_sound_packs',
+  'list_sound_pack_files',
+  'read_sound_pack_file',
+  'get_sound_packs_dir',
+]);
+
 export class PluginRegistry {
-  private plugins = new Map<string, GodlyPlugin>();
+  private plugins = new Map<string, RegisteredPlugin>();
   private bus: PluginEventBus;
 
   constructor(bus: PluginEventBus) {
     this.bus = bus;
   }
 
-  register(plugin: GodlyPlugin): void {
-    this.plugins.set(plugin.id, plugin);
+  register(plugin: GodlyPlugin, options?: { builtin?: boolean; manifest?: ExternalPluginManifest }): void {
+    this.plugins.set(plugin.id, {
+      plugin,
+      builtin: options?.builtin ?? true,
+      manifest: options?.manifest,
+    });
   }
 
   async initAll(): Promise<void> {
-    for (const [id, plugin] of this.plugins) {
-      const ctx = this.createContext(id);
+    for (const [id, entry] of this.plugins) {
+      const ctx = this.createContext(id, entry.builtin);
       try {
-        await plugin.init(ctx);
+        await entry.plugin.init(ctx);
         if (pluginStore.isEnabled(id)) {
-          plugin.enable?.();
+          entry.plugin.enable?.();
         }
       } catch (e) {
         console.warn(`[PluginRegistry] Failed to init plugin "${id}":`, e);
@@ -32,12 +50,12 @@ export class PluginRegistry {
 
   setEnabled(pluginId: string, enabled: boolean): void {
     pluginStore.setEnabled(pluginId, enabled);
-    const plugin = this.plugins.get(pluginId);
-    if (!plugin) return;
+    const entry = this.plugins.get(pluginId);
+    if (!entry) return;
     if (enabled) {
-      plugin.enable?.();
+      entry.plugin.enable?.();
     } else {
-      plugin.disable?.();
+      entry.plugin.disable?.();
     }
   }
 
@@ -45,20 +63,32 @@ export class PluginRegistry {
     return pluginStore.isEnabled(pluginId);
   }
 
+  isBuiltin(pluginId: string): boolean {
+    return this.plugins.get(pluginId)?.builtin ?? false;
+  }
+
   getAll(): GodlyPlugin[] {
+    return Array.from(this.plugins.values()).map(e => e.plugin);
+  }
+
+  getAllWithMeta(): RegisteredPlugin[] {
     return Array.from(this.plugins.values());
   }
 
   getPlugin(id: string): GodlyPlugin | undefined {
+    return this.plugins.get(id)?.plugin;
+  }
+
+  getRegisteredPlugin(id: string): RegisteredPlugin | undefined {
     return this.plugins.get(id);
   }
 
   destroyAll(): void {
-    for (const plugin of this.plugins.values()) {
+    for (const entry of this.plugins.values()) {
       try {
-        plugin.destroy?.();
+        entry.plugin.destroy?.();
       } catch (e) {
-        console.warn(`[PluginRegistry] Failed to destroy plugin "${plugin.id}":`, e);
+        console.warn(`[PluginRegistry] Failed to destroy plugin "${entry.plugin.id}":`, e);
       }
     }
     this.plugins.clear();
@@ -69,7 +99,7 @@ export class PluginRegistry {
     return this.bus;
   }
 
-  private createContext(pluginId: string): PluginContext {
+  private createContext(pluginId: string, isBuiltin: boolean): PluginContext {
     const bus = this.bus;
     return {
       on(type: PluginEventType, handler: (event: import('./types').PluginEvent) => void): () => void {
@@ -102,6 +132,20 @@ export class PluginRegistry {
 
       playSound(buffer: AudioBuffer, volume: number): void {
         playBuffer(buffer, volume);
+      },
+
+      async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+        if (!isBuiltin && !EXTERNAL_PLUGIN_ALLOWED_COMMANDS.has(command)) {
+          throw new Error(`Plugin "${pluginId}" is not allowed to invoke "${command}"`);
+        }
+        return invoke<T>(command, args);
+      },
+
+      showToast(message: string, type?: 'info' | 'error' | 'success'): void {
+        // Dispatch a custom event that the UI can listen for
+        window.dispatchEvent(new CustomEvent('plugin-toast', {
+          detail: { pluginId, message, type: type || 'info' },
+        }));
       },
     };
   }

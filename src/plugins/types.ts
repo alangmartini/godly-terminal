@@ -51,6 +51,46 @@ export interface PluginContext {
   setSetting<T>(key: string, value: T): void;
   /** Play an AudioBuffer at the given volume */
   playSound(buffer: AudioBuffer, volume: number): void;
+  /** Invoke a Tauri command (gated for external plugins) */
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  /** Show a toast notification in the UI */
+  showToast(message: string, type?: 'info' | 'error' | 'success'): void;
+}
+
+export interface ExternalPluginManifest {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  version: string;
+  icon?: string;
+  main?: string;
+  minAppVersion?: string;
+  permissions?: string[];
+  tags?: string[];
+  homepage?: string;
+  license?: string;
+}
+
+export interface RegistryEntry {
+  id: string;
+  repo: string;
+  description: string;
+  author: string;
+  tags?: string[];
+  featured?: boolean;
+}
+
+export interface PluginRegistryData {
+  version: number;
+  plugins: RegistryEntry[];
+}
+
+export interface InstalledPluginMeta {
+  id: string;
+  version: string;
+  repo: string;
+  installedAt: number;
 }
 
 export interface GodlyPlugin {
