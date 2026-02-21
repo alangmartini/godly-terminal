@@ -4,6 +4,7 @@ use tauri::{Emitter, State};
 use uuid::Uuid;
 
 use crate::daemon_client::DaemonClient;
+use crate::llm_state::LlmState;
 use crate::persistence::AutoSaveManager;
 use crate::state::{AppState, SessionMetadata, ShellType, Terminal};
 
@@ -370,6 +371,7 @@ pub fn quick_claude(
     state: State<Arc<AppState>>,
     daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
+    llm: State<Arc<LlmState>>,
     app_handle: tauri::AppHandle,
 ) -> Result<QuickClaudeResult, String> {
     let terminal_id = Uuid::new_v4().to_string();
@@ -377,6 +379,11 @@ pub fn quick_claude(
     let workspace = state
         .get_workspace(&workspace_id)
         .ok_or("Workspace not found")?;
+
+    // Auto-generate branch name from prompt if not provided
+    let branch_name = branch_name.or_else(|| {
+        llm.try_generate_branch_name(&prompt)
+    });
 
     // Determine working directory (worktree or fallback to workspace folder)
     let mut worktree_path_result: Option<String> = None;
