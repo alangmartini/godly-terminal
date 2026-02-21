@@ -365,6 +365,14 @@ export class WorkspaceSidebar {
       nameContainer.appendChild(wslBadge);
     }
 
+    const isMutedWs = !notificationStore.isWorkspaceNotificationEnabled(workspace.id, workspace.name);
+    if (isMutedWs) {
+      const muteBadge = document.createElement('span');
+      muteBadge.className = 'workspace-mute-badge';
+      muteBadge.title = 'Notifications muted';
+      nameContainer.appendChild(muteBadge);
+    }
+
     const wtToggle = document.createElement('button');
     wtToggle.className = `worktree-toggle${workspace.worktreeMode ? ' active' : ''}`;
     wtToggle.textContent = 'WT';
@@ -544,6 +552,22 @@ export class WorkspaceSidebar {
       await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
     };
     menu.appendChild(claudeCodeItem);
+
+    const isMuted = !notificationStore.isWorkspaceNotificationEnabled(workspace.id, workspace.name);
+    const notifItem = document.createElement('div');
+    notifItem.className = 'context-menu-item';
+    notifItem.textContent = isMuted ? 'Unmute Notifications' : 'Mute Notifications';
+    notifItem.onclick = () => {
+      menu.remove();
+      if (isMuted) {
+        // Unmuting: set override to enabled (clear if no pattern matches, else explicit enable)
+        notificationStore.setWorkspaceOverride(workspace.id, true);
+      } else {
+        // Muting: set override to disabled
+        notificationStore.setWorkspaceOverride(workspace.id, false);
+      }
+    };
+    menu.appendChild(notifItem);
 
     const separator = document.createElement('div');
     separator.className = 'context-menu-separator';
