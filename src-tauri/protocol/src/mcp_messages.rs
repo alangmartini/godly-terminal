@@ -2,6 +2,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::ShellType;
 
+fn default_erase_count() -> usize {
+    1
+}
+
+fn default_idle_ms() -> u64 {
+    2000
+}
+
+fn default_timeout_ms() -> u64 {
+    30000
+}
+
 /// Requests sent from godly-mcp binary to the Tauri app via MCP pipe
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -86,6 +98,25 @@ pub enum McpRequest {
         skip_fetch: Option<bool>,
     },
 
+    // Advanced terminal I/O
+    SendKeys {
+        terminal_id: String,
+        keys: Vec<String>,
+    },
+    EraseContent {
+        terminal_id: String,
+        #[serde(default = "default_erase_count")]
+        count: usize,
+    },
+    ExecuteCommand {
+        terminal_id: String,
+        command: String,
+        #[serde(default = "default_idle_ms")]
+        idle_ms: u64,
+        #[serde(default = "default_timeout_ms")]
+        timeout_ms: u64,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,
@@ -160,5 +191,11 @@ pub enum McpResponse {
         cols: u16,
         num_rows: u16,
         alternate_screen: bool,
+    },
+    CommandOutput {
+        output: String,
+        completed: bool,
+        last_output_ago_ms: u64,
+        running: bool,
     },
 }
