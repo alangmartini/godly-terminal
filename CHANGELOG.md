@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-20
+
+### Added
+- **Ultrafast I/O pipeline** — Tauri custom protocol for streaming terminal output bytes + frontend stream consumer for direct byte passthrough (#215, #220)
+- **MCP multi-agent orchestration tools** — `send_keys`, `erase_content`, `execute_command` for coordinating parallel agents (#221)
+- **Per-workspace notification muting** with glob pattern matching in Settings (#219)
+- **Tiny branch name generator** — training pipeline + engine integration into quick_claude flow (#214)
+- **Terminal input notification system** with bell detection and idle monitoring (#195)
+- **Plugin system** with Peon-Ping sound pack plugin (#192)
+- **SmolLM2-135M local LLM plugin** for AI branch name generation (#194)
+- **Push grid diffs** from daemon instead of pull snapshots (#177)
+- **Terminal exit code propagation** to frontend UI (#191)
+- Drag-and-drop reordering for settings dialog tabs (#188)
+- Search bar for keyboard shortcuts settings (#186)
+- UI refinements for minimal aesthetic (#193)
+
+### Fixed
+- **Scroll auto-snap during sustained output** — terminal no longer jumps to bottom while user is scrolled up (#211)
+- **MCP WebView crash** — removed second WebView window that caused crash under heavy output (#206)
+- **Scroll position preservation** during output and alternate screen transitions (#205)
+- **SmolLM2 download** — hf-hub URL parsing fix + retry button + root cause visibility (#203, #208)
+- Terminal stealing focus when dialog overlays are open (#198)
+- Plugins tab missing from settings dialog default tab order (#196)
+- Quick Claude prompt not submitting to Claude Code (#185)
+- OSC title propagation from daemon to frontend (#184)
+- Home/End keys now move cursor instead of scrolling (#183)
+- Infinite dev build loop from .taurignore and release binary stubs (#178, #179)
+
+### Changed
+- CI hang detection with timeouts and guardrail enforcement (#180)
+
 ## [0.3.0] - 2026-02-19
 
 ### Fixed
