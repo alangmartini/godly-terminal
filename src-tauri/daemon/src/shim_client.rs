@@ -57,8 +57,11 @@ pub fn spawn_shim(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // CREATE_BREAKAWAY_FROM_JOB (0x01000000) | CREATE_NEW_PROCESS_GROUP (0x00000200) | CREATE_NO_WINDOW (0x08000000)
-        cmd.creation_flags(0x01000000 | 0x00000200 | 0x08000000);
+        // CREATE_NEW_PROCESS_GROUP (0x00000200) | CREATE_NO_WINDOW (0x08000000)
+        // Note: CREATE_BREAKAWAY_FROM_JOB (0x01000000) is NOT used because it requires
+        // the parent to be in a job that allows breakaway, which fails under test harnesses
+        // and modern Windows implicit job objects with "Access Denied" (OS error 5).
+        cmd.creation_flags(0x00000200 | 0x08000000);
     }
 
     let child = cmd
