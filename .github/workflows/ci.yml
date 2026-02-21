@@ -34,7 +34,7 @@ jobs:
         timeout-minutes: 3
       # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
       - name: Cargo check
-        run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon
+        run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon -p godly-pty-shim
         timeout-minutes: 8
 
   rust-tests:
@@ -52,12 +52,15 @@ jobs:
       - name: VT engine tests
         run: cd src-tauri && cargo test -p godly-vt
         timeout-minutes: 5
+      - name: PTY shim tests
+        run: cd src-tauri && cargo test -p godly-pty-shim
+        timeout-minutes: 5
       - name: Daemon tests
-        run: cd src-tauri && cargo test -p godly-daemon
-        timeout-minutes: 10
+        run: cd src-tauri && cargo test -p godly-daemon -- --test-threads=1
+        timeout-minutes: 15
       # Build release binaries first — Tauri's build.rs validates resource paths at compile time
       - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release
         timeout-minutes: 10
       # Skip worktree cleanup test — requires git remote which CI temp repos lack
       - name: App crate tests
@@ -80,7 +83,7 @@ jobs:
         run: npm install
         timeout-minutes: 3
       - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release
         timeout-minutes: 10
       - name: Production build
         run: npm run build
