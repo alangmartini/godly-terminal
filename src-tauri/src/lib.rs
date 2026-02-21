@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
+use crate::daemon_client::bridge::OutputStreamRegistry;
 use crate::daemon_client::DaemonClient;
 use crate::llm_state::LlmState;
 use crate::persistence::{save_on_exit, AutoSaveManager};
@@ -84,11 +85,49 @@ pub fn run() {
     );
     eprintln!("[lib] Connected to daemon");
 
+    // Create per-session output stream registry for the custom protocol.
+    // Raw PTY bytes flow: daemon → bridge I/O thread → registry → stream:// fetch.
+    // This bypasses app_handle.emit() JSON serialization on the output hot path.
+    let output_registry = Arc::new(OutputStreamRegistry::new());
+    daemon_client.set_output_registry(output_registry.clone());
+
+    // Clone for the custom protocol closure (captured by move)
+    let registry_for_protocol = output_registry.clone();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        // Register custom protocol for streaming terminal output as raw bytes.
+        // Frontend fetches: http://stream.localhost/terminal-output/{session_id}
+        // Returns accumulated raw PTY bytes since last fetch (application/octet-stream).
+        .register_uri_scheme_protocol("stream", move |_ctx, request| {
+            let path = request.uri().path();
+            // Expected path: /terminal-output/{session_id}
+            if let Some(session_id) = path.strip_prefix("/terminal-output/") {
+                if session_id.is_empty() {
+                    return tauri::http::Response::builder()
+                        .status(400)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(b"Missing session_id".to_vec())
+                        .unwrap();
+                }
+                let bytes = registry_for_protocol.drain(session_id);
+                tauri::http::Response::builder()
+                    .status(200)
+                    .header("Content-Type", "application/octet-stream")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(bytes)
+                    .unwrap()
+            } else {
+                tauri::http::Response::builder()
+                    .status(404)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(b"Not found. Use /terminal-output/{session_id}".to_vec())
+                    .unwrap()
+            }
+        })
         .manage(app_state.clone())
         .manage(auto_save.clone())
         .manage(daemon_client.clone())
