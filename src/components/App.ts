@@ -355,37 +355,7 @@ export class App {
 
         case 'tabs.newTerminal': {
           e.preventDefault();
-          if (state.activeWorkspaceId) {
-            perfTracer.mark('create_terminal_start');
-            const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
-            let worktreeName: string | undefined;
-
-            if (workspace?.worktreeMode) {
-              const { showWorktreeNamePrompt } = await import('./dialogs');
-              const name = await showWorktreeNamePrompt();
-              if (name === null) return;
-              worktreeName = name || undefined;
-            }
-
-            const result = await terminalService.createTerminal(
-              state.activeWorkspaceId,
-              { worktreeName }
-            );
-            store.addTerminal({
-              id: result.id,
-              workspaceId: state.activeWorkspaceId,
-              name: result.worktree_branch ?? 'Terminal',
-              processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
-              order: 0,
-            });
-            perfTracer.measure('create_terminal', 'create_terminal_start');
-
-            if (workspace?.claudeCodeMode) {
-              setTimeout(() => {
-                terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
-              }, 500);
-            }
-          }
+          await this.createNewTerminal();
           break;
         }
 
@@ -452,6 +422,18 @@ export class App {
               store.setActiveTerminal(otherId);
             }
           }
+          break;
+        }
+
+        case 'split.splitRight': {
+          e.preventDefault();
+          await this.createSplitTerminal('horizontal');
+          break;
+        }
+
+        case 'split.splitDown': {
+          e.preventDefault();
+          await this.createSplitTerminal('vertical');
           break;
         }
 
@@ -912,6 +894,60 @@ export class App {
     } catch (error) {
       console.error('[App] Failed to sync split view to backend:', error);
     }
+  }
+
+  /**
+   * Create a new terminal in the active workspace. Returns the new terminal ID,
+   * or null if creation was cancelled (e.g. worktree prompt dismissed).
+   */
+  private async createNewTerminal(): Promise<string | null> {
+    const state = store.getState();
+    if (!state.activeWorkspaceId) return null;
+
+    perfTracer.mark('create_terminal_start');
+    const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+    let worktreeName: string | undefined;
+
+    if (workspace?.worktreeMode) {
+      const { showWorktreeNamePrompt } = await import('./dialogs');
+      const name = await showWorktreeNamePrompt();
+      if (name === null) return null;
+      worktreeName = name || undefined;
+    }
+
+    const result = await terminalService.createTerminal(
+      state.activeWorkspaceId,
+      { worktreeName }
+    );
+    store.addTerminal({
+      id: result.id,
+      workspaceId: state.activeWorkspaceId,
+      name: result.worktree_branch ?? 'Terminal',
+      processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
+      order: 0,
+    });
+    perfTracer.measure('create_terminal', 'create_terminal_start');
+
+    if (workspace?.claudeCodeMode) {
+      setTimeout(() => {
+        terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
+      }, 500);
+    }
+
+    return result.id;
+  }
+
+  private async createSplitTerminal(direction: 'horizontal' | 'vertical') {
+    const state = store.getState();
+    if (!state.activeWorkspaceId || !state.activeTerminalId) return;
+
+    const currentActiveId = state.activeTerminalId;
+    const newId = await this.createNewTerminal();
+    if (!newId) return;
+
+    store.setSplitView(state.activeWorkspaceId, currentActiveId, newId, direction);
+    const split = store.getSplitView(state.activeWorkspaceId)!;
+    await this.syncSplitToBackend(state.activeWorkspaceId, split);
   }
 
   private async handleSplitRequest(terminalId: string, direction: 'horizontal' | 'vertical') {
