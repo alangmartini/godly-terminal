@@ -120,6 +120,21 @@ html, body {
   flex-shrink: 0;
 }
 
+.workspace-mute-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.workspace-mute-badge::before {
+  content: '\1F507';
+  font-size: 10px;
+}
+
 .workspace-badge {
   background: var(--bg-tertiary);
   color: var(--text-secondary);

@@ -66,6 +66,16 @@ export function buildNotificationTitle(terminalId: string): string {
   return workspace ? `${workspace.name} › ${terminalName}` : terminalName;
 }
 
+/** Check if notifications for a terminal's workspace are suppressed. */
+function isWorkspaceNotificationSuppressed(terminalId: string): boolean {
+  const state = store.getState();
+  const terminal = state.terminals.find(t => t.id === terminalId);
+  if (!terminal) return false;
+  const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
+  if (!workspace) return false;
+  return !notificationStore.isWorkspaceNotificationEnabled(workspace.id, workspace.name);
+}
+
 export class App {
   private container: HTMLElement;
   private sidebar: WorkspaceSidebar;
@@ -1089,6 +1099,7 @@ export class App {
       const { terminal_id, message } = event.payload;
       const settings = notificationStore.getSettings();
       if (!settings.globalEnabled) return;
+      if (isWorkspaceNotificationSuppressed(terminal_id)) return;
 
       const state = store.getState();
       const isActive = state.activeTerminalId === terminal_id;
@@ -1150,6 +1161,7 @@ export class App {
       const { terminal_id } = event.payload;
       const settings = notificationStore.getSettings();
       if (!settings.globalEnabled) return;
+      if (isWorkspaceNotificationSuppressed(terminal_id)) return;
 
       const state = store.getState();
       const isActive = state.activeTerminalId === terminal_id;
@@ -1198,6 +1210,7 @@ export class App {
       onNotify: async (terminalId: string) => {
         const settings = notificationStore.getSettings();
         if (!settings.globalEnabled || !settings.idleNotifyEnabled) return;
+        if (isWorkspaceNotificationSuppressed(terminalId)) return;
 
         const played = notificationStore.recordNotify(terminalId);
         if (played) {
