@@ -502,7 +502,7 @@ pub struct DaemonBridge {
 
 /// Maximum number of events to read before checking for pending outgoing requests.
 /// This prevents high-throughput output from starving user input writes.
-const MAX_EVENTS_BEFORE_REQUEST_CHECK: usize = 8;
+const MAX_EVENTS_BEFORE_REQUEST_CHECK: usize = 2;
 
 /// Number of idle loop iterations to spin (yield_now) before falling back to sleep.
 /// During active I/O this keeps latency near-zero; when truly idle, the sleep
@@ -582,9 +582,139 @@ impl DaemonBridge {
                 let mut did_work = false;
                 update_phase(&health, PHASE_IDLE);
 
-                // Step 1: Read incoming messages from daemon, but limit batch size.
-                // After reading MAX_EVENTS_BEFORE_REQUEST_CHECK events, check for
-                // pending requests to avoid starving user input during heavy output.
+                // Step 1: Service ALL pending requests (high priority).
+                // Requests (user input, grid snapshots) must be sent before
+                // reading events to avoid head-of-line blocking when other
+                // sessions produce heavy output.
+                loop {
+                    update_phase(&health, PHASE_RECV_REQ);
+                    match request_rx.try_recv() {
+                        Ok(bridge_req) => {
+                            update_phase(&health, PHASE_WRITE);
+                            let write_start = Instant::now();
+                            match write_request(&mut writer, &bridge_req.request) {
+                                Ok(()) => {
+                                    total_requests_sent += 1;
+                                    did_work = true;
+
+                                    match bridge_req.response_tx {
+                                        Some(tx) => pending_responses.push_back(tx),
+                                        None => orphan_responses += 1,
+                                    }
+
+                                    let elapsed = write_start.elapsed();
+                                    if elapsed > Duration::from_millis(50) {
+                                        slow_write_count += 1;
+                                        blog!(
+                                            "SLOW REQUEST WRITE: {:?} took {:.1}ms (slow #{})",
+                                            std::mem::discriminant(&bridge_req.request),
+                                            elapsed.as_secs_f64() * 1000.0,
+                                            slow_write_count
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[bridge] Write error: {}, stopping", e);
+                                    blog!("Write error: {}", e);
+                                    running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+
+                            // After writing a request, read the pipe immediately.
+                            // The daemon prioritizes responses (high-priority channel),
+                            // so the response will be the next message on the pipe.
+                            // Read it now before checking more requests.
+                            idle_count = 0;
+                            loop {
+                                update_phase(&health, PHASE_PEEK);
+                                match peek_pipe(raw_handle) {
+                                    PeekResult::Data => {
+                                        update_phase(&health, PHASE_READ);
+                                        let read_start = Instant::now();
+                                        match read_daemon_message(&mut reader) {
+                                            Ok(Some(DaemonMessage::Event(event))) => {
+                                                total_events += 1;
+                                                update_phase(&health, PHASE_EMIT);
+                                                let payload = event_to_payload(event);
+                                                if !emitter.try_send(payload) {
+                                                    dropped_events += 1;
+                                                    blog!("DROPPED EVENT (channel full, total dropped={})", dropped_events);
+                                                }
+                                                // Keep reading — response hasn't arrived yet
+                                                continue;
+                                            }
+                                            Ok(Some(DaemonMessage::Response(response))) => {
+                                                total_responses += 1;
+                                                if orphan_responses > 0 {
+                                                    orphan_responses -= 1;
+                                                } else if let Some(tx) = pending_responses.pop_front() {
+                                                    let _ = tx.send(response);
+                                                } else {
+                                                    eprintln!("[bridge] Got response but no pending request");
+                                                    blog!("WARNING: response with no pending request");
+                                                }
+                                                break;
+                                            }
+                                            Ok(None) => {
+                                                eprintln!("[bridge] Daemon connection closed");
+                                                blog!("Daemon connection closed (EOF)");
+                                                running.store(false, Ordering::Relaxed);
+                                                break;
+                                            }
+                                            Err(e) => {
+                                                if running.load(Ordering::Relaxed) {
+                                                    let elapsed = read_start.elapsed();
+                                                    eprintln!("[bridge] Read error: {}", e);
+                                                    blog!(
+                                                        "Read error after {:.1}ms: {}",
+                                                        elapsed.as_secs_f64() * 1000.0,
+                                                        e
+                                                    );
+                                                }
+                                                running.store(false, Ordering::Relaxed);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    PeekResult::Empty => {
+                                        // Response not yet available, yield and retry
+                                        thread::yield_now();
+                                        continue;
+                                    }
+                                    PeekResult::Error => {
+                                        eprintln!("[bridge] Pipe closed or broken, stopping");
+                                        blog!("Pipe peek error, stopping");
+                                        running.store(false, Ordering::Relaxed);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if !running.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            // Loop back to check for more queued requests
+                            continue;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            eprintln!("[bridge] Request channel disconnected, stopping");
+                            blog!("Request channel disconnected, stopping");
+                            running.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+
+                if !running.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // Step 2: Read up to MAX_EVENTS_BEFORE_REQUEST_CHECK events
+                // from the pipe. This prevents pipe buffer buildup from daemon
+                // events while keeping the batch small so we quickly loop back
+                // to check for new requests.
                 let mut events_this_iteration = 0;
                 loop {
                     if events_this_iteration >= MAX_EVENTS_BEFORE_REQUEST_CHECK {
@@ -598,7 +728,6 @@ impl DaemonBridge {
                     update_phase(&health, PHASE_PEEK);
                     match peek_pipe(raw_handle) {
                         PeekResult::Data => {
-                            // Read the message
                             update_phase(&health, PHASE_READ);
                             let read_start = Instant::now();
                             match read_daemon_message(&mut reader) {
@@ -632,7 +761,6 @@ impl DaemonBridge {
                                 Ok(Some(DaemonMessage::Response(response))) => {
                                     total_responses += 1;
                                     did_work = true;
-                                    // Skip orphan responses from fire-and-forget writes
                                     if orphan_responses > 0 {
                                         orphan_responses -= 1;
                                     } else if let Some(tx) = pending_responses.pop_front() {
@@ -643,8 +771,6 @@ impl DaemonBridge {
                                         );
                                         blog!("WARNING: response with no pending request");
                                     }
-                                    // Always break after a response to let the request
-                                    // sender proceed, which may trigger another request
                                     break;
                                 }
                                 Ok(None) => {
@@ -675,65 +801,8 @@ impl DaemonBridge {
                             break;
                         }
                         PeekResult::Empty => {
-                            break; // No more data to read
+                            break;
                         }
-                    }
-                }
-
-                if !running.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                // Step 2: Check if there are requests to send
-                update_phase(&health, PHASE_RECV_REQ);
-                match request_rx.try_recv() {
-                    Ok(bridge_req) => {
-                        update_phase(&health, PHASE_WRITE);
-                        let write_start = Instant::now();
-                        // Write the request to the pipe
-                        match write_request(&mut writer, &bridge_req.request) {
-                            Ok(()) => {
-                                total_requests_sent += 1;
-                                did_work = true;
-
-                                // Only track response channel for non-fire-and-forget requests
-                                match bridge_req.response_tx {
-                                    Some(tx) => pending_responses.push_back(tx),
-                                    None => orphan_responses += 1,
-                                }
-
-                                let elapsed = write_start.elapsed();
-                                if elapsed > Duration::from_millis(50) {
-                                    slow_write_count += 1;
-                                    blog!(
-                                        "SLOW REQUEST WRITE: {:?} took {:.1}ms (slow #{})",
-                                        std::mem::discriminant(&bridge_req.request),
-                                        elapsed.as_secs_f64() * 1000.0,
-                                        slow_write_count
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[bridge] Write error: {}, stopping", e);
-                                blog!("Write error: {}", e);
-                                // Don't send error response — breaking drops all
-                                // pending_responses, which signals callers via RecvError
-                                break;
-                            }
-                        }
-                        // After writing a request, loop back to read the response.
-                        // Reset idle_count so we spin instead of sleeping — the
-                        // daemon response/event will arrive within microseconds.
-                        idle_count = 0;
-                        continue;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        // Nothing to send
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        eprintln!("[bridge] Request channel disconnected, stopping");
-                        blog!("Request channel disconnected, stopping");
-                        break;
                     }
                 }
 
