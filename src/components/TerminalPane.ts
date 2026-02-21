@@ -48,6 +48,13 @@ export class TerminalPane {
   // complete with a stale seq are discarded to prevent rollbacks.
   private scrollSeq = 0;
 
+  // Monotonic counter to discard stale pulled snapshots after a pushed diff.
+  // Incremented when applyPushedDiff() renders fresher data; any in-flight
+  // snapshot fetch that started before the diff is stale and must be dropped.
+  // (Bug #218: prevents typing rollback where a pre-echo snapshot overwrites
+  // a post-echo diff.)
+  private diffSeq = 0;
+
   // Scrollback save interval (every 5 minutes)
   private scrollbackSaveInterval: number | null = null;
 
@@ -552,6 +559,7 @@ export class TerminalPane {
 
   private async fetchAndRenderSnapshot() {
     const seqBefore = this.scrollSeq;
+    const diffSeqBefore = this.diffSeq;
     try {
       // Use diff snapshots when we have a cached full snapshot and diff is supported.
       if (this.cachedSnapshot && this.useDiffSnapshots) {
@@ -562,6 +570,8 @@ export class TerminalPane {
 
           // Discard stale response if the user scrolled while we were fetching
           if (seqBefore !== this.scrollSeq) return;
+          // Bug #218: Discard stale response if a pushed diff arrived while we were fetching
+          if (diffSeqBefore !== this.diffSeq) return;
 
           // Merge dirty rows into the cached snapshot
           if (diff.full_repaint) {
@@ -618,7 +628,7 @@ export class TerminalPane {
         }
       }
       // Full snapshot path (initial render, after scroll, or diff not supported)
-      await this.fetchFullSnapshot(seqBefore);
+      await this.fetchFullSnapshot(seqBefore, diffSeqBefore);
     } catch (error) {
       console.debug('Grid snapshot fetch failed:', error);
     }
@@ -628,8 +638,12 @@ export class TerminalPane {
    * Fetch a full grid snapshot (used for initial render and after scroll).
    * If scrollSeqAtStart is provided, the result is discarded when the user
    * has scrolled again since the fetch started (prevents rollbacks).
+   * If diffSeqAtStart is provided, the result is discarded when a pushed diff
+   * arrived since the fetch started (Bug #218: prevents typing rollback).
+   * Scroll-triggered calls don't pass diffSeqAtStart since they null the cache
+   * and need the snapshot regardless.
    */
-  private async fetchFullSnapshot(scrollSeqAtStart?: number) {
+  private async fetchFullSnapshot(scrollSeqAtStart?: number, diffSeqAtStart?: number) {
     try {
       perfTracer.mark('snapshot_ipc_start');
       const snapshot = await invoke<RichGridData>('get_grid_snapshot', {
@@ -638,6 +652,8 @@ export class TerminalPane {
       perfTracer.measure('snapshot_ipc', 'snapshot_ipc_start');
       // Discard stale response if the user scrolled while we were fetching
       if (scrollSeqAtStart !== undefined && scrollSeqAtStart !== this.scrollSeq) return;
+      // Bug #218: Discard stale response if a pushed diff arrived while we were fetching
+      if (diffSeqAtStart !== undefined && diffSeqAtStart !== this.diffSeq) return;
       this.cachedSnapshot = snapshot;
       if (!this.isUserScrolled) {
         this.scrollbackOffset = snapshot.scrollback_offset;
@@ -656,6 +672,17 @@ export class TerminalPane {
    * If no cached snapshot exists yet, falls back to the pull path (full fetch).
    */
   private applyPushedDiff(diff: RichGridDiff) {
+    // Bug #218: A pushed diff contains fresher state than any in-flight
+    // pulled snapshot (which was requested before the echo arrived).
+    // Increment diffSeq so the stale snapshot is discarded on arrival,
+    // and cancel any queued (not-yet-fired) snapshot timer.
+    this.diffSeq++;
+    if (this.snapshotTimer !== null) {
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = null;
+      this.snapshotPending = false;
+    }
+
     if (!this.cachedSnapshot) {
       this.scheduleSnapshotFetch();
       return;
