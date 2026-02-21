@@ -201,6 +201,7 @@ pub fn run() {
                 state_clone.clone(),
                 daemon_client.clone(),
                 auto_save.clone(),
+                llm_state.clone(),
             );
 
             // Handle window close: detach sessions (don't kill them) and save layout

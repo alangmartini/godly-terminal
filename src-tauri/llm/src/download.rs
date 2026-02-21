@@ -7,6 +7,10 @@ const FILENAME_GGUF: &str = "SmolLM2-135M-Instruct-Q4_K_M.gguf";
 const REPO_TOKENIZER: &str = "HuggingFaceTB/SmolLM2-135M-Instruct";
 const FILENAME_TOKENIZER: &str = "tokenizer.json";
 
+// Tiny branch name generator model (~20M params)
+const BRANCH_NAME_GGUF: &str = "branch-name-generator.gguf";
+const BRANCH_NAME_TOKENIZER: &str = "tokenizer.json";
+
 /// Paths to model files in the app data directory.
 #[derive(Debug, Clone)]
 pub struct ModelPaths {
@@ -79,6 +83,32 @@ where
     Ok(paths)
 }
 
+/// Paths to the tiny branch name generator model files.
+#[derive(Debug, Clone)]
+pub struct BranchNameModelPaths {
+    pub model_dir: PathBuf,
+    pub gguf_path: PathBuf,
+    pub tokenizer_path: PathBuf,
+}
+
+impl BranchNameModelPaths {
+    pub fn new(app_data_dir: &Path) -> Self {
+        let model_dir = app_data_dir.join("models").join("branch-name-gen");
+        let gguf_path = model_dir.join(BRANCH_NAME_GGUF);
+        let tokenizer_path = model_dir.join(BRANCH_NAME_TOKENIZER);
+        Self {
+            model_dir,
+            gguf_path,
+            tokenizer_path,
+        }
+    }
+
+    /// Check if both model files exist.
+    pub fn is_downloaded(&self) -> bool {
+        self.gguf_path.exists() && self.tokenizer_path.exists()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +130,20 @@ mod tests {
     #[test]
     fn test_not_downloaded_when_missing() {
         let paths = ModelPaths::new(Path::new("/nonexistent/path"));
+        assert!(!paths.is_downloaded());
+    }
+
+    #[test]
+    fn test_branch_name_model_paths() {
+        let paths = BranchNameModelPaths::new(Path::new("/tmp/testapp"));
+        assert!(paths.model_dir.ends_with("models/branch-name-gen"));
+        assert!(paths.gguf_path.to_string_lossy().contains(BRANCH_NAME_GGUF));
+        assert!(paths.tokenizer_path.to_string_lossy().contains(BRANCH_NAME_TOKENIZER));
+    }
+
+    #[test]
+    fn test_branch_name_model_not_downloaded() {
+        let paths = BranchNameModelPaths::new(Path::new("/nonexistent/path"));
         assert!(!paths.is_downloaded());
     }
 }
