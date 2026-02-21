@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify --release && cd .. && npm run build:check",
+    "beforeBuildCommand": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release && cd .. && npm run build:check",
     "frontendDist": "../dist"
   },
   "app": {
@@ -44,6 +44,7 @@
       "target/release/godly-daemon.exe": "./",
       "target/release/godly-mcp.exe": "./",
       "target/release/godly-notify.exe": "./",
+      "target/release/godly-pty-shim.exe": "./",
       "sounds/*": "sounds/",
       "soundpacks/**/*": "soundpacks/"
     }
