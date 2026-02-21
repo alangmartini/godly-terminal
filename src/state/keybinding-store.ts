@@ -18,6 +18,8 @@ export type ActionId =
   | 'tabs.closeTerminal'
   | 'tabs.nextTab'
   | 'tabs.previousTab'
+  | 'split.splitRight'
+  | 'split.splitDown'
   | 'split.focusOtherPane'
   | 'split.unsplit'
   | 'workspace.toggleWorktreeMode'
@@ -115,6 +117,20 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Tabs',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'tab' },
+  },
+  {
+    id: 'split.splitRight',
+    label: 'Split Right',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: false, key: '\\' },
+  },
+  {
+    id: 'split.splitDown',
+    label: 'Split Down',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: true, key: '\\' },
   },
   {
     id: 'split.focusOtherPane',
