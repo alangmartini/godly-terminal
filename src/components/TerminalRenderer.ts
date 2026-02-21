@@ -156,6 +156,12 @@ export class TerminalRenderer {
   private onDocumentMouseMove: ((e: MouseEvent) => void) | null = null;
   private onDocumentMouseUp: ((e: MouseEvent) => void) | null = null;
 
+  // Selection auto-scroll
+  private autoScrollTimer: ReturnType<typeof setInterval> | null = null;
+  private autoScrollDelta = 0;
+  private onDocumentSelectionMouseMove: ((e: MouseEvent) => void) | null = null;
+  private onDocumentSelectionMouseUp: ((e: MouseEvent) => void) | null = null;
+
   // Callbacks
   private onTitleChange?: (title: string) => void;
   private onScrollCallback?: (deltaLines: number) => void;
@@ -390,6 +396,8 @@ export class TerminalRenderer {
 
   /** Clean up all resources. */
   dispose() {
+    this.stopSelectionAutoScroll();
+    this.removeDocumentSelectionListeners();
     if (this.cursorBlinkInterval) {
       clearInterval(this.cursorBlinkInterval);
       this.cursorBlinkInterval = null;
@@ -649,6 +657,19 @@ export class TerminalRenderer {
     return { row: Math.max(0, row), col: Math.max(0, col) };
   }
 
+  /** Unclamped variant of pixelToGrid — returns raw row/col for edge detection during selection. */
+  private pixelToGridRaw(clientX: number, clientY: number): { row: number; col: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = this.devicePixelRatio;
+    const cssX = clientX - rect.left;
+    const cssY = clientY - rect.top;
+    const canvasX = cssX * dpr;
+    const canvasY = cssY * dpr;
+    const col = Math.floor(canvasX / this.cellWidth);
+    const row = Math.floor(canvasY / this.cellHeight);
+    return { row, col };
+  }
+
   // ---- Private: Mouse handlers ----
 
   private setupMouseHandlers() {
@@ -671,24 +692,55 @@ export class TerminalRenderer {
         active: false,
       };
       this.isSelecting = true;
+
+      // Register document-level listeners so we receive events even when cursor leaves canvas
+      this.onDocumentSelectionMouseMove = (moveEvent: MouseEvent) => {
+        moveEvent.preventDefault();
+        const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+        const raw = this.pixelToGridRaw(moveEvent.clientX, moveEvent.clientY);
+        const clamped = this.pixelToGrid(moveEvent.clientX, moveEvent.clientY);
+
+        this.selection.endRow = Math.min(clamped.row, gridRows - 1);
+        this.selection.endCol = clamped.col;
+        if (this.selection.endRow !== this.selection.startRow || this.selection.endCol !== this.selection.startCol) {
+          this.selection.active = true;
+        }
+
+        // Edge detection for auto-scroll
+        if (raw.row < 0) {
+          // Mouse above viewport → scroll up into history
+          const linesPerTick = Math.min(10, Math.ceil(Math.abs(raw.row)));
+          this.startSelectionAutoScroll(linesPerTick);
+        } else if (raw.row >= gridRows) {
+          // Mouse below viewport → scroll down toward live
+          const linesPerTick = -Math.min(10, raw.row - gridRows + 1);
+          this.startSelectionAutoScroll(linesPerTick);
+        } else {
+          this.stopSelectionAutoScroll();
+        }
+
+        this.repaint();
+      };
+
+      this.onDocumentSelectionMouseUp = () => {
+        this.stopSelectionAutoScroll();
+        const wasSelecting = this.isSelecting;
+        this.isSelecting = false;
+        if (wasSelecting && this.selection.active && this.onSelectionEndCallback) {
+          this.onSelectionEndCallback();
+        }
+        this.removeDocumentSelectionListeners();
+      };
+
+      document.addEventListener('mousemove', this.onDocumentSelectionMouseMove);
+      document.addEventListener('mouseup', this.onDocumentSelectionMouseUp);
     });
 
     this.canvas.addEventListener('mousemove', (e) => {
-      // Scrollbar drag is handled by document-level listeners
-      if (this.isDraggingScrollbar) return;
+      // Scrollbar drag and selection drag are handled by document-level listeners
+      if (this.isDraggingScrollbar || this.onDocumentSelectionMouseMove) return;
 
       const { row, col } = this.pixelToGrid(e.clientX, e.clientY);
-
-      if (this.isSelecting) {
-        this.selection.endRow = row;
-        this.selection.endCol = col;
-        // Only mark as active once we've moved at least one cell
-        if (row !== this.selection.startRow || col !== this.selection.startCol) {
-          this.selection.active = true;
-        }
-        this.repaint();
-        return;
-      }
 
       // URL hover detection
       this.detectUrlHover(row, col, e.ctrlKey);
@@ -704,6 +756,9 @@ export class TerminalRenderer {
     });
 
     this.canvas.addEventListener('mouseup', () => {
+      // Selection mouseup is handled by document-level listener when active
+      if (this.onDocumentSelectionMouseMove) return;
+
       const wasSelecting = this.isSelecting;
       this.isSelecting = false;
       if (wasSelecting && this.selection.active && this.onSelectionEndCallback) {
@@ -722,6 +777,42 @@ export class TerminalRenderer {
         });
       }
     });
+  }
+
+  // ---- Private: Selection auto-scroll ----
+
+  private startSelectionAutoScroll(linesPerTick: number) {
+    this.autoScrollDelta = linesPerTick;
+    if (this.autoScrollTimer) return; // already running, just update delta
+    this.autoScrollTimer = setInterval(() => {
+      if (this.onScrollCallback) {
+        this.onScrollCallback(this.autoScrollDelta);
+        // Adjust selection anchor: scrolling shifts the viewport, so the anchor
+        // row moves in the opposite direction in viewport-relative coordinates.
+        const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+        this.selection.startRow = Math.max(0, Math.min(gridRows - 1,
+          this.selection.startRow + this.autoScrollDelta));
+      }
+    }, 50);
+  }
+
+  private stopSelectionAutoScroll() {
+    this.autoScrollDelta = 0;
+    if (this.autoScrollTimer) {
+      clearInterval(this.autoScrollTimer);
+      this.autoScrollTimer = null;
+    }
+  }
+
+  private removeDocumentSelectionListeners() {
+    if (this.onDocumentSelectionMouseMove) {
+      document.removeEventListener('mousemove', this.onDocumentSelectionMouseMove);
+      this.onDocumentSelectionMouseMove = null;
+    }
+    if (this.onDocumentSelectionMouseUp) {
+      document.removeEventListener('mouseup', this.onDocumentSelectionMouseUp);
+      this.onDocumentSelectionMouseUp = null;
+    }
   }
 
   /** Check if a clientX coordinate is within the scrollbar hit area. */
