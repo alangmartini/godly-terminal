@@ -885,6 +885,180 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::SendKeys { terminal_id, keys } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            // Convert each key name to bytes and concatenate
+            let mut all_bytes = Vec::new();
+            for key in keys {
+                match godly_protocol::keys::key_to_bytes(key) {
+                    Ok(bytes) => all_bytes.extend(bytes),
+                    Err(e) => return McpResponse::Error { message: e },
+                }
+            }
+            let request = godly_protocol::Request::Write {
+                session_id: terminal_id.clone(),
+                data: all_bytes,
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error { message: e },
+            }
+        }
+
+        McpRequest::EraseContent { terminal_id, count } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            let backspaces = vec![0x08u8; *count];
+            let request = godly_protocol::Request::Write {
+                session_id: terminal_id.clone(),
+                data: backspaces,
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error { message: e },
+            }
+        }
+
+        McpRequest::ExecuteCommand {
+            terminal_id,
+            command,
+            idle_ms,
+            timeout_ms,
+        } => {
+            // Validate terminal exists
+            if !app_state.terminals.read().contains_key(terminal_id) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found", terminal_id),
+                };
+            }
+
+            // 1. Snapshot buffer length before command
+            let before_len = match daemon.send_request(&godly_protocol::Request::ReadBuffer {
+                session_id: terminal_id.clone(),
+            }) {
+                Ok(godly_protocol::Response::Buffer { data, .. }) => data.len(),
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error { message };
+                }
+                Err(e) => return McpResponse::Error { message: e },
+                _ => 0,
+            };
+
+            // 2. Write command + Enter
+            let write_req = godly_protocol::Request::Write {
+                session_id: terminal_id.clone(),
+                data: format!("{}\r", command).into_bytes(),
+            };
+            match daemon.send_request(&write_req) {
+                Ok(godly_protocol::Response::Ok) => {}
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error { message };
+                }
+                Err(e) => return McpResponse::Error { message: e },
+                _ => {}
+            }
+
+            // 3. Wait for idle (reuses same pattern as WaitForIdle handler)
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(*timeout_ms);
+            let poll_ms = (*idle_ms / 4).min(500).max(50);
+            let mut completed = false;
+            let mut last_ago = 0u64;
+            let mut running = true;
+
+            loop {
+                let req = godly_protocol::Request::GetLastOutputTime {
+                    session_id: terminal_id.clone(),
+                };
+                match daemon.send_request(&req) {
+                    Ok(godly_protocol::Response::LastOutputTime {
+                        epoch_ms,
+                        running: is_running,
+                    }) => {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        last_ago = now_ms.saturating_sub(epoch_ms);
+                        running = is_running;
+
+                        if last_ago >= *idle_ms || !running {
+                            completed = true;
+                            break;
+                        }
+
+                        if std::time::Instant::now() >= deadline {
+                            break;
+                        }
+                    }
+                    Ok(godly_protocol::Response::Error { message }) => {
+                        return McpResponse::Error { message };
+                    }
+                    Err(e) => {
+                        return McpResponse::Error { message: e };
+                    }
+                    _ => {
+                        return McpResponse::Error {
+                            message: "Unexpected daemon response".to_string(),
+                        };
+                    }
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+            }
+
+            // 4. Read new output (delta since before_len)
+            let output = match daemon.send_request(&godly_protocol::Request::ReadBuffer {
+                session_id: terminal_id.clone(),
+            }) {
+                Ok(godly_protocol::Response::Buffer { data, .. }) => {
+                    let new_data = if data.len() > before_len {
+                        &data[before_len..]
+                    } else {
+                        &data[..]
+                    };
+                    let text = String::from_utf8_lossy(new_data).into_owned();
+                    let stripped = strip_ansi(&text);
+                    strip_command_echo(&stripped, command)
+                }
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error { message };
+                }
+                Err(e) => return McpResponse::Error { message: e },
+                _ => String::new(),
+            };
+
+            McpResponse::CommandOutput {
+                output,
+                completed,
+                last_output_ago_ms: last_ago,
+                running,
+            }
+        }
+
         McpRequest::WaitForIdle {
             terminal_id,
             idle_ms,
@@ -1073,6 +1247,29 @@ fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::She
 /// Re-export strip_ansi from the shared protocol crate.
 fn strip_ansi(input: &str) -> String {
     godly_protocol::ansi::strip_ansi(input)
+}
+
+/// Strip the command echo from terminal output.
+///
+/// Terminals echo the command back before showing output. If the first line
+/// of the output ends with the command text, remove that line.
+fn strip_command_echo(text: &str, command: &str) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let first = lines[0].trim_end();
+    let cmd_trimmed = command.trim();
+    if first.ends_with(cmd_trimmed) || first == cmd_trimmed {
+        lines.remove(0);
+    }
+
+    while lines.last().map_or(false, |l| l.trim().is_empty()) {
+        lines.pop();
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]
