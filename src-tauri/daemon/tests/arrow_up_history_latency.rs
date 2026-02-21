@@ -164,7 +164,7 @@ impl DaemonFixture {
         );
 
         let status = Command::new("cargo")
-            .args(["build", "-p", "godly-daemon"])
+            .args(["build", "-p", "godly-daemon", "-p", "godly-pty-shim"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .status()
             .expect("Failed to run cargo build");
@@ -442,7 +442,7 @@ fn arrow_up_history_latency_through_bridge() {
             env: None,
         },
     );
-    assert!(matches!(resp, Response::SessionCreated { .. }));
+    assert!(matches!(resp, Response::SessionCreated { .. }), "Expected SessionCreated, got: {:?}", resp);
 
     // Attach on the bridge pipe
     let mut bridge_pipe = pipe;
@@ -637,7 +637,7 @@ fn arrow_up_daemon_only_latency() {
             env: None,
         },
     );
-    assert!(matches!(resp, Response::SessionCreated { .. }));
+    assert!(matches!(resp, Response::SessionCreated { .. }), "Expected SessionCreated, got: {:?}", resp);
 
     let resp = send_request_blocking(
         &mut pipe,
@@ -826,7 +826,7 @@ fn arrow_up_during_multi_session_contention() {
             env: None,
         },
     );
-    assert!(matches!(resp, Response::SessionCreated { .. }));
+    assert!(matches!(resp, Response::SessionCreated { .. }), "Expected SessionCreated, got: {:?}", resp);
 
     // Create Session B: the user's active session (arrow-up testing)
     let session_b = "contention-active".to_string();
@@ -841,7 +841,7 @@ fn arrow_up_during_multi_session_contention() {
             env: None,
         },
     );
-    assert!(matches!(resp, Response::SessionCreated { .. }));
+    assert!(matches!(resp, Response::SessionCreated { .. }), "Expected SessionCreated for session B, got: {:?}", resp);
 
     // Bridge pipe: attach to BOTH sessions (real bridge attaches all terminals)
     let mut bridge_pipe = daemon.connect();
