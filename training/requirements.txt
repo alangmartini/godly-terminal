@@ -1,5 +1,5 @@
 # Phase 1: Data generation
-anthropic>=0.40.0
+openai>=1.0.0
 
 # Phase 2: Teacher fine-tuning
 torch>=2.2.0
