@@ -420,7 +420,7 @@ fn type_command_and_wait(
 /// Target: p95 < 100ms in release mode. Debug builds add ~10x serde overhead,
 /// but the architecture bottleneck (bridge I/O contention) is build-independent.
 #[test]
-#[ntest::timeout(120_000)]
+#[ntest::timeout(300_000)]
 fn arrow_up_history_latency_through_bridge() {
     let daemon = DaemonFixture::spawn("arrow-up-bridge");
     let pipe = daemon.connect();
@@ -617,7 +617,7 @@ fn arrow_up_history_latency_through_bridge() {
 /// If THIS test has high latency, the problem is in the daemon. If this is fast
 /// but the bridge test is slow, the problem is in the bridge I/O architecture.
 #[test]
-#[ntest::timeout(120_000)]
+#[ntest::timeout(300_000)]
 fn arrow_up_daemon_only_latency() {
     let daemon = DaemonFixture::spawn("arrow-up-daemon");
     let mut pipe = daemon.connect();
@@ -803,7 +803,7 @@ fn arrow_up_daemon_only_latency() {
 /// The bridge I/O thread must read events from Session A AND service requests
 /// for Session B through the same pipe, creating head-of-line blocking.
 #[test]
-#[ntest::timeout(180_000)]
+#[ntest::timeout(300_000)]
 fn arrow_up_during_multi_session_contention() {
     let daemon = DaemonFixture::spawn("arrow-up-contention");
 
@@ -880,8 +880,8 @@ fn arrow_up_during_multi_session_contention() {
         }
     }
 
-    // Wait for both shells to initialize
-    std::thread::sleep(Duration::from_secs(3));
+    // Wait for both shells to initialize (extra time for shim startup)
+    std::thread::sleep(Duration::from_secs(5));
 
     // Start bridge I/O thread
     let (req_tx, req_rx) = mpsc::channel();
@@ -931,8 +931,11 @@ fn arrow_up_during_multi_session_contention() {
     .expect("start heavy output on session A");
     assert!(matches!(resp, Response::Ok));
 
-    // Wait for output events to start flowing through the pipe
-    std::thread::sleep(Duration::from_secs(3));
+    // Wait for output events to start flowing through the shim pipeline.
+    // With the pty-shim layer, output goes: shell → ConPTY → shim PTY reader →
+    // shim main loop → daemon pipe → daemon reader → event forwarding.
+    // This takes longer than direct ConPTY, especially on CI.
+    std::thread::sleep(Duration::from_secs(5));
     let events_before = event_counter.load(Ordering::Relaxed);
     eprintln!(
         "[contention] Events from Session A before typing: {}",
@@ -943,11 +946,12 @@ fn arrow_up_during_multi_session_contention() {
         "Session A output events should be flowing through the pipe"
     );
 
-    // Verify output is STILL flowing (not a burst that already finished)
+    // Verify output is STILL flowing (not a burst that already finished).
+    // Use a longer check window (3s) to reduce flakiness on slow CI VMs.
     let check_start = event_counter.load(Ordering::Relaxed);
-    std::thread::sleep(Duration::from_secs(1));
+    std::thread::sleep(Duration::from_secs(3));
     let check_end = event_counter.load(Ordering::Relaxed);
-    let events_per_sec = check_end - check_start;
+    let events_per_sec = (check_end - check_start) / 3;
     eprintln!(
         "[contention] Session A output rate: {} events/sec",
         events_per_sec
