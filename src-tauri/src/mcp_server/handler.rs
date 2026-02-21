@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use crate::daemon_client::DaemonClient;
+use crate::llm_state::LlmState;
 use crate::persistence::AutoSaveManager;
 use crate::state::AppState;
 
@@ -59,6 +60,7 @@ pub fn handle_mcp_request(
     daemon: &Arc<DaemonClient>,
     auto_save: &Arc<AutoSaveManager>,
     app_handle: &AppHandle,
+    llm_state: &Arc<LlmState>,
 ) -> McpResponse {
     match request {
         McpRequest::Ping => McpResponse::Pong,
@@ -305,6 +307,11 @@ pub fn handle_mcp_request(
         } => {
             use std::collections::HashMap;
             use uuid::Uuid;
+
+            // Auto-generate branch name from prompt if not provided
+            let branch_name = branch_name.clone().or_else(|| {
+                llm_state.try_generate_branch_name(prompt)
+            });
 
             // MCP terminals always go into the Agent workspace (separate window)
             let workspace_id = &ensure_mcp_workspace(app_state);
