@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-21
+
+### Added
+- **Plugin system with external GitHub repos** — install, uninstall, and manage community plugins from a registry with plugin cards UI (#226)
+- **Split terminal keyboard shortcuts** — Ctrl+Shift+H/V/U for horizontal/vertical split and unsplit (#224)
+
+### Fixed
+- **Selection auto-scroll** — drag-selecting text beyond viewport edges now auto-scrolls in all directions (#228)
+
+### Changed
+- Training data generation switched from Anthropic to OpenAI API for branch name model
+
+## [0.4.1] - 2026-02-20
+
+### Fixed
+- **Typing rollback** — diffSeq staleness guard prevents input from being rolled back during concurrent output (#222)
+- **Notification storm on startup** — added startup grace period and per-terminal cooldown for idle notifications (#210)
+
 ## [0.4.0] - 2026-02-20
 
 ### Added

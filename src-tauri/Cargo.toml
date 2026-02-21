@@ -30,7 +30,7 @@ features = [
 
 [package]
 name = "godly-terminal"
-version = "0.4.1"
+version = "0.5.0"
 description = "A Windows terminal application with workspaces"
 authors = ["you"]
 edition = "2021"
