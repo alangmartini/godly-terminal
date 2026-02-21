@@ -64,8 +64,15 @@ def export_gguf(student_dir: Path, output_path: Path, script_dir: Path):
     )
 
     # Step 2: Quantize to Q4_K_M
-    quantize_bin = llama_dir / "build" / "bin" / "llama-quantize"
-    if not quantize_bin.exists():
+    # Check multiple possible locations (Linux vs Windows MSVC layout)
+    quantize_candidates = [
+        llama_dir / "build" / "bin" / "llama-quantize",
+        llama_dir / "build" / "bin" / "llama-quantize.exe",
+        llama_dir / "build" / "bin" / "Release" / "llama-quantize.exe",
+        llama_dir / "build" / "bin" / "Release" / "llama-quantize",
+    ]
+    quantize_bin = next((p for p in quantize_candidates if p.exists()), None)
+    if quantize_bin is None:
         # Try building
         print("\nBuilding llama.cpp quantize tool...")
         build_dir = llama_dir / "build"
@@ -75,8 +82,14 @@ def export_gguf(student_dir: Path, output_path: Path, script_dir: Path):
         subprocess.run(["cmake", "--build", ".", "--config", "Release", "-j"],
                        cwd=str(build_dir), check=True)
 
-    if quantize_bin.exists():
+    # Re-check after build
+    if quantize_bin is None:
+        quantize_bin = next((p for p in quantize_candidates if p.exists()), None)
+
+    if quantize_bin is not None:
         print(f"\nQuantizing to Q4_K_M: {output_path}")
+        if output_path.exists():
+            output_path.unlink()
         subprocess.run(
             [str(quantize_bin), str(f16_path), str(output_path), "Q4_K_M"],
             check=True,
@@ -88,7 +101,9 @@ def export_gguf(student_dir: Path, output_path: Path, script_dir: Path):
         print("\nWARNING: Cannot find llama-quantize binary. Keeping F16 GGUF.")
         print("To quantize manually:")
         print(f"  llama-quantize {f16_path} {output_path} Q4_K_M")
-        # Rename F16 as output
+        # Rename F16 as output (replace on Windows requires unlink first)
+        if output_path.exists():
+            output_path.unlink()
         f16_path.rename(output_path)
 
 

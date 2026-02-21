@@ -5,7 +5,7 @@ import {
   llmDownloadModel,
   llmLoadModel,
   llmUnloadModel,
-  llmGenerate,
+  llmGenerateBranchName,
   isModelReady,
   isModelDownloaded,
   getStatusLabel,
@@ -82,6 +82,16 @@ export class SmolLM2Plugin implements GodlyPlugin {
     actionLabel.className = 'shortcut-label';
     actionLabel.textContent = 'Model';
     actionRow.appendChild(actionLabel);
+
+    // Show which model files are loaded
+    const modelInfo = document.createElement('span');
+    modelInfo.style.cssText = 'font-size: 10px; color: var(--text-secondary); font-family: monospace; margin-left: 4px;';
+    if (isModelReady(this.status)) {
+      modelInfo.textContent = 'SmolLM2-135M-Q4_K_M + branch-name-gen';
+    } else if (isModelDownloaded(this.status)) {
+      modelInfo.textContent = 'Downloaded (not loaded)';
+    }
+    actionLabel.appendChild(modelInfo);
 
     const actionBtnContainer = document.createElement('div');
     actionBtnContainer.style.display = 'flex';
@@ -253,12 +263,8 @@ export class SmolLM2Plugin implements GodlyPlugin {
       testBtn.textContent = 'Thinking...';
       testResult.textContent = '';
       try {
-        const result = await llmGenerate(
-          `<|im_start|>system\nYou are a git branch name generator. Output ONLY a short kebab-case branch name with a conventional prefix (feat/, fix/, etc).<|im_end|>\n<|im_start|>user\n${desc}<|im_end|>\n<|im_start|>assistant\n`,
-          30,
-          0.3,
-        );
-        testResult.textContent = result.trim();
+        const result = await llmGenerateBranchName(desc);
+        testResult.textContent = result;
         testResult.style.color = 'var(--accent)';
       } catch (e) {
         testResult.textContent = `Error: ${e}`;
