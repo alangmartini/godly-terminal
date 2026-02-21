@@ -245,6 +245,19 @@ export class TerminalPane {
       }
     );
 
+    // Connect to the direct byte stream (custom protocol).
+    // This is the primary output notification channel — lower latency than
+    // Tauri events because it skips JSON serialization. The terminal-output
+    // event listener above remains as a fallback.
+    terminalService.connectOutputStream(this.terminalId, () => {
+      if (this.renderer.isActivelySelecting()) return;
+      if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+        this.snapToBottom();
+        return;
+      }
+      this.scheduleSnapshotFetch();
+    });
+
     // Start periodic scrollback saving (every 5 minutes)
     this.startScrollbackSaveInterval();
 
@@ -838,6 +851,9 @@ export class TerminalPane {
 
   async destroy() {
     await this.saveScrollback();
+
+    // Disconnect from the direct byte stream.
+    terminalService.disconnectOutputStream(this.terminalId);
 
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
