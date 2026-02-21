@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { store, Workspace, ShellType } from '../state/store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
+import { notificationStore } from '../state/notification-store';
 
 export interface WorkspaceData {
   id: string;
@@ -53,6 +54,11 @@ class WorkspaceService {
     };
     store.addWorkspace(workspace);
 
+    // Auto-mute if workspace name matches any glob pattern
+    if (!notificationStore.isWorkspaceNotificationEnabled(workspaceId, name)) {
+      notificationStore.setWorkspaceOverride(workspaceId, false);
+    }
+
     return workspaceId;
   }
 
@@ -67,6 +73,7 @@ class WorkspaceService {
   async deleteWorkspace(workspaceId: string): Promise<void> {
     await invoke('delete_workspace', { workspaceId });
     store.removeWorkspace(workspaceId);
+    notificationStore.cleanupWorkspaceOverride(workspaceId);
   }
 
   async moveTabToWorkspace(
