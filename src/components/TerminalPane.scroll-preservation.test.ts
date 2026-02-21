@@ -103,6 +103,8 @@ class ScrollPreservationSimulator {
 
     if (!this.isUserScrolled) {
       this.scrollbackOffset = offset;
+    } else if (offset > this.scrollbackOffset) {
+      this.scrollbackOffset = offset;
     }
     this.totalScrollback = total;
   }
@@ -129,6 +131,8 @@ class ScrollPreservationSimulator {
     this.cachedSnapshot.total_scrollback = total;
 
     if (!this.isUserScrolled) {
+      this.scrollbackOffset = offset;
+    } else if (offset > this.scrollbackOffset) {
       this.scrollbackOffset = offset;
     }
     this.totalScrollback = total;
@@ -228,8 +232,10 @@ describe('Bug #202: scroll position preservation during output', () => {
         sim.onPushedDiff(50 + i + 1, 1000 + i + 1);
       }
 
-      // Offset should remain at 50 (not synced from daemon's incrementing offset)
-      expect(sim.scrollbackOffset).toBe(50);
+      // Offset tracks daemon's upward drift (50 → 60) — the user is still
+      // viewing the same content, the offset just reflects its new position
+      // relative to the bottom after 10 new lines were added.
+      expect(sim.scrollbackOffset).toBe(60);
       expect(sim.isUserScrolled).toBe(true);
     });
 
@@ -261,15 +267,15 @@ describe('Bug #202: scroll position preservation during output', () => {
       sim.applySnapshot(40, 600);
       expect(sim.scrollbackOffset).toBe(40);
 
-      // Pushed diffs with daemon's incrementing offset
+      // Pushed diffs with daemon's incrementing offset — tracks upward drift
       sim.onPushedDiff(41, 601);
       sim.onPushedDiff(42, 602);
-      expect(sim.scrollbackOffset).toBe(40);
+      expect(sim.scrollbackOffset).toBe(42);
 
       // Terminal output events trigger fetch (pull path)
       sim.onTerminalOutput();
       sim.onTerminalOutput();
-      expect(sim.scrollbackOffset).toBe(40);
+      expect(sim.scrollbackOffset).toBe(42);
       expect(sim.isUserScrolled).toBe(true);
     });
   });
@@ -360,12 +366,12 @@ describe('Bug #202: scroll position preservation during output', () => {
       sim.handleScroll(50);
       sim.applySnapshot(50, 500); // populate cache
 
-      // Pushed diffs arrive
-      sim.onPushedDiff(0, 510); // stale offset
-      sim.onPushedDiff(51, 511);
-      sim.onPushedDiff(52, 512);
+      // Pushed diffs arrive — stale offset=0 rejected, upward drift accepted
+      sim.onPushedDiff(0, 510); // stale offset, rejected (0 < 50)
+      sim.onPushedDiff(51, 511); // drift accepted (51 > 50)
+      sim.onPushedDiff(52, 512); // drift accepted (52 > 51)
 
-      expect(sim.scrollbackOffset).toBe(50);
+      expect(sim.scrollbackOffset).toBe(52);
       expect(sim.isUserScrolled).toBe(true);
     });
   });
