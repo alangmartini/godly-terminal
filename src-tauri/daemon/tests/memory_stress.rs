@@ -159,7 +159,7 @@ mod windows_tests {
 
             // Build the daemon binary first (debug mode)
             let status = Command::new("cargo")
-                .args(["build", "-p", "godly-daemon"])
+                .args(["build", "-p", "godly-daemon", "-p", "godly-pty-shim"])
                 .current_dir(env!("CARGO_MANIFEST_DIR"))
                 .status()
                 .expect("Failed to run cargo build");

@@ -133,17 +133,19 @@ impl DaemonSession {
             .map_err(|e| format!("Failed to send Status request to shim: {}", e))?;
 
         // Read the status response. The shim may first send buffered data (TAG_SHIM_BUFFER_DATA)
-        // from a previous daemon connection, then the StatusInfo JSON.
+        // from a previous daemon connection, or early PTY output (shell prompt), then StatusInfo.
+        // We capture any early output so it isn't lost.
         let mut temp_reader = shim_client::duplicate_handle(&pipe_reader)
             .map_err(|e| format!("Failed to duplicate handle for status read: {}", e))?;
-        let shell_pid = Self::read_status_response(&mut temp_reader)?;
+        let (shell_pid, early_output) = Self::read_status_response(&mut temp_reader)?;
 
         daemon_log!(
-            "Session {} connected to shim: shim_pid={}, shell_pid={}, pipe={}",
+            "Session {} connected to shim: shim_pid={}, shell_pid={}, pipe={}, early_output={}B",
             id,
             meta.shim_pid,
             shell_pid,
-            meta.shim_pipe_name
+            meta.shim_pipe_name,
+            early_output.len()
         );
 
         // Write metadata file for daemon restart recovery
@@ -180,6 +182,14 @@ impl DaemonSession {
 
         let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 10_000)));
         let exit_code = Arc::new(AtomicI64::new(i64::MIN));
+
+        // Feed any early output (captured during status query) into ring buffer,
+        // output history, and VT parser so the initial shell prompt is preserved.
+        if !early_output.is_empty() {
+            append_to_ring(&mut ring_buffer.lock(), &early_output);
+            append_to_ring(&mut output_history.lock(), &early_output);
+            vt_parser.lock().process(&early_output);
+        }
 
         // Spawn reader thread that reads frames from the shim pipe
         Self::spawn_reader_thread(
@@ -416,34 +426,40 @@ impl DaemonSession {
 
     /// Read the StatusInfo response from the shim, handling any preceding
     /// buffer data or output frames that arrive first.
-    fn read_status_response(reader: &mut std::fs::File) -> Result<u32, String> {
+    /// Returns (shell_pid, early_output) — early_output contains any PTY output
+    /// that arrived before the StatusInfo response, which must be fed to the
+    /// ring buffer and VT parser to avoid losing the initial shell prompt.
+    fn read_status_response(reader: &mut std::fs::File) -> Result<(u32, Vec<u8>), String> {
+        let mut early_output = Vec::new();
         loop {
             match read_shim_frame(reader) {
                 Ok(Some(ShimFrame::Binary {
                     tag: TAG_SHIM_BUFFER_DATA,
-                    ..
+                    data,
                 })) => {
-                    // Buffer data from previous connection -- skip during initial connect
+                    // Buffer data from previous connection — save for replay
+                    early_output.extend_from_slice(&data);
                     continue;
                 }
                 Ok(Some(ShimFrame::Binary {
                     tag: TAG_SHIM_OUTPUT,
-                    ..
+                    data,
                 })) => {
-                    // Early output -- skip during initial connect
+                    // Early PTY output (shell prompt etc.) — save for replay
+                    early_output.extend_from_slice(&data);
                     continue;
                 }
                 Ok(Some(ShimFrame::Json(json_bytes))) => {
                     if let Ok(ShimResponse::StatusInfo { shell_pid, .. }) =
                         serde_json::from_slice::<ShimResponse>(&json_bytes)
                     {
-                        return Ok(shell_pid);
+                        return Ok((shell_pid, early_output));
                     }
                     if let Ok(ShimResponse::ShellExited { .. }) =
                         serde_json::from_slice::<ShimResponse>(&json_bytes)
                     {
                         // Shell already exited before we connected
-                        return Ok(0);
+                        return Ok((0, early_output));
                     }
                     // Unknown JSON, keep reading
                     continue;
@@ -756,6 +772,13 @@ impl DaemonSession {
     /// we detect `\x03` and terminate child processes of the shell, leaving the
     /// shell itself alive so the user gets a fresh prompt.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
+        daemon_log!(
+            "Session {} write: {} bytes (first={:?})",
+            self.id,
+            data.len(),
+            &data[..data.len().min(20)]
+        );
+
         #[cfg(windows)]
         if data.contains(&0x03) {
             match terminate_child_processes(self.pid) {

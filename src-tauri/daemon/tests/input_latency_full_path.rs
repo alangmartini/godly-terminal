@@ -114,7 +114,7 @@ impl DaemonFixture {
         let pipe_name = format!(r"\\.\pipe\godly-test-{}-{}", test_name, std::process::id());
 
         let status = Command::new("cargo")
-            .args(["build", "-p", "godly-daemon"])
+            .args(["build", "-p", "godly-daemon", "-p", "godly-pty-shim"])
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .status()
             .expect("cargo build");

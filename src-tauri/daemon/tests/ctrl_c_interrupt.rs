@@ -313,6 +313,37 @@ fn test_ctrl_c_interrupts_running_process() {
         output.len()
     );
 
+    // Diagnostic: test basic write→output pipeline with a simple echo command
+    let pre_echo_len = output.len();
+    let resp = send_request_collecting_output(
+        &mut pipe,
+        &Request::Write {
+            session_id: session_id.to_string(),
+            data: b"echo PIPELINE_TEST_OK\r\n".to_vec(),
+        },
+        session_id,
+        &mut output,
+    );
+    assert!(matches!(resp, Response::Ok), "Write echo failed: {:?}", resp);
+
+    let (echo_output, echo_ok) = collect_output_until(
+        &mut pipe,
+        session_id,
+        Duration::from_secs(10),
+        |o| o.contains("PIPELINE_TEST_OK"),
+    );
+    output.push_str(&echo_output);
+    eprintln!(
+        "  Echo test: {} (new bytes: {}B, total: {}B)",
+        echo_ok,
+        output.len() - pre_echo_len,
+        output.len()
+    );
+    if !echo_ok {
+        eprintln!("  DIAGNOSTIC: Write→output pipeline is broken! Echo output never arrived.");
+        eprintln!("  Full output so far:\n{}", output);
+    }
+
     // Send a long-running command: `ping -t localhost` runs until interrupted
     let resp = send_request_collecting_output(
         &mut pipe,
