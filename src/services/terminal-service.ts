@@ -60,10 +60,17 @@ export interface SessionInfo {
   running: boolean;
 }
 
+/** Default delay before first reconnect attempt (ms). */
+const STREAM_RECONNECT_BASE_MS = 1000;
+/** Maximum delay between reconnect attempts (ms). */
+const STREAM_RECONNECT_MAX_MS = 10_000;
+
 class TerminalService {
   private outputListeners: Map<string, () => void> = new Map();
   private gridDiffListeners: Map<string, (diff: RichGridDiff) => void> = new Map();
   private unlistenFns: UnlistenFn[] = [];
+  /** AbortControllers for active stream connections (keyed by session ID). */
+  private streamControllers: Map<string, AbortController> = new Map();
 
   async init() {
     const unlistenOutput = await listen<TerminalOutputPayload>(
@@ -214,7 +221,103 @@ class TerminalService {
     return () => this.gridDiffListeners.delete(terminalId);
   }
 
+  /**
+   * Connect to the terminal output stream via Tauri custom protocol.
+   * Bypasses the Tauri event JSON serialization path — raw bytes arrive
+   * as ReadableStream chunks. Each chunk triggers the onData callback,
+   * which the caller uses to schedule a grid snapshot fetch.
+   *
+   * Automatically reconnects with exponential backoff if the stream drops.
+   * The existing terminal-output event listener remains as a fallback.
+   */
+  connectOutputStream(sessionId: string, onData: () => void): void {
+    this.disconnectOutputStream(sessionId);
+
+    const controller = new AbortController();
+    this.streamControllers.set(sessionId, controller);
+
+    this._consumeStream(sessionId, controller.signal, onData);
+  }
+
+  /**
+   * Disconnect from the terminal output stream for a session.
+   * Safe to call even if no stream is connected.
+   */
+  disconnectOutputStream(sessionId: string): void {
+    const controller = this.streamControllers.get(sessionId);
+    if (controller) {
+      controller.abort();
+      this.streamControllers.delete(sessionId);
+    }
+  }
+
+  /** @internal — visible for testing. */
+  async _consumeStream(
+    sessionId: string,
+    signal: AbortSignal,
+    onData: () => void,
+  ): Promise<void> {
+    let delay = STREAM_RECONNECT_BASE_MS;
+
+    while (!signal.aborted) {
+      try {
+        const response = await fetch(
+          `stream://localhost/terminal-output/${sessionId}`,
+          { signal },
+        );
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Stream error: ${response.status}`);
+        }
+
+        // Successful connection — reset backoff.
+        delay = STREAM_RECONNECT_BASE_MS;
+
+        const reader = response.body.getReader();
+        // Cancel the reader when abort fires so reader.read() resolves
+        // instead of hanging forever on a long-lived stream.
+        const onAbort = () => reader.cancel();
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          while (!signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.length > 0) {
+              onData();
+            }
+          }
+        } finally {
+          signal.removeEventListener('abort', onAbort);
+          reader.releaseLock();
+        }
+      } catch (err: unknown) {
+        if (signal.aborted) break;
+
+        console.debug(
+          `[TerminalService] Output stream error for ${sessionId}, reconnecting in ${delay}ms`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+
+      // Always wait before reconnecting, whether stream ended cleanly or
+      // with an error. This prevents tight reconnect loops if the server
+      // is restarting or the session was closed.
+      if (signal.aborted) break;
+
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+
+      delay = Math.min(delay * 2, STREAM_RECONNECT_MAX_MS);
+    }
+  }
+
   destroy() {
+    // Disconnect all active streams.
+    for (const [sessionId] of this.streamControllers) {
+      this.disconnectOutputStream(sessionId);
+    }
     this.unlistenFns.forEach(fn => fn());
     this.outputListeners.clear();
     this.gridDiffListeners.clear();
