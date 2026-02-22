@@ -504,13 +504,6 @@ pub struct DaemonBridge {
 /// This prevents high-throughput output from starving user input writes.
 const MAX_EVENTS_BEFORE_REQUEST_CHECK: usize = 2;
 
-/// Number of idle loop iterations to spin (yield_now) before falling back to sleep.
-/// During active I/O this keeps latency near-zero; when truly idle, the sleep
-/// prevents burning CPU. On Windows, thread::sleep(1ms) can actually sleep ~15ms
-/// due to the default timer resolution (15.625ms), so avoiding sleep during
-/// active use is critical for input responsiveness.
-const SPIN_BEFORE_SLEEP: u32 = 100;
-
 impl DaemonBridge {
     pub fn new() -> Self {
         Self {
@@ -568,11 +561,6 @@ impl DaemonBridge {
             let mut slow_write_count: u64 = 0;
             let mut last_stats_time = Instant::now();
 
-            // Adaptive polling: spin (yield_now) for SPIN_BEFORE_SLEEP iterations
-            // before falling back to sleep(1ms). This avoids the Windows timer
-            // resolution penalty (~15ms) during active I/O while saving CPU when idle.
-            let mut idle_count: u32 = 0;
-
             // Count of fire-and-forget responses to skip (no pending_responses entry).
             // Fire-and-forget writes don't track a response channel, but the daemon
             // still sends Response::Ok. We skip these without routing.
@@ -625,7 +613,6 @@ impl DaemonBridge {
                             // The daemon prioritizes responses (high-priority channel),
                             // so the response will be the next message on the pipe.
                             // Read it now before checking more requests.
-                            idle_count = 0;
                             loop {
                                 update_phase(&health, PHASE_PEEK);
                                 match peek_pipe(raw_handle) {
@@ -807,19 +794,13 @@ impl DaemonBridge {
                 }
 
                 if !did_work {
-                    // Adaptive polling: spin briefly, then wait on the wake event.
+                    // Wait on the wake event with 1ms timeout.
                     // The wake event is signaled by send_fire_and_forget / try_send_request
                     // when a new request arrives, giving zero-latency wakeup for input.
                     // For incoming pipe data (daemon events), the 1ms timeout ensures we
                     // poll PeekNamedPipe frequently enough.
-                    idle_count += 1;
-                    if idle_count > SPIN_BEFORE_SLEEP {
-                        wake_event.wait_timeout(1);
-                    } else {
-                        thread::yield_now();
-                    }
-                } else {
-                    idle_count = 0;
+                    // Note: timeBeginPeriod(1) is set at app startup so sleep(1ms) is accurate.
+                    wake_event.wait_timeout(1);
                 }
 
                 // Periodic stats logging
