@@ -11,9 +11,12 @@ env:
   GODLY_NO_DETACH: "1"
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Lint, type-check, and frontend tests (~5 min)
+  # ---------------------------------------------------------------------------
   check-and-lint:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,54 +40,105 @@ jobs:
         run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon -p godly-pty-shim
         timeout-minutes: 8
 
-  rust-tests:
+  # ---------------------------------------------------------------------------
+  # Job 2: Unit tests for library crates (parallel matrix, ~5 min each)
+  # ---------------------------------------------------------------------------
+  unit-tests:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [godly-protocol, godly-vt, godly-pty-shim]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
-      - name: Protocol tests
-        run: cd src-tauri && cargo test -p godly-protocol
-        timeout-minutes: 5
-      - name: VT engine tests
-        run: cd src-tauri && cargo test -p godly-vt
-        timeout-minutes: 5
-      - name: PTY shim tests
-        run: cd src-tauri && cargo test -p godly-pty-shim
-        timeout-minutes: 5
-      - name: Daemon tests
-        run: cd src-tauri && cargo test -p godly-daemon -- --test-threads=1
-        timeout-minutes: 15
-      # Build release binaries first — Tauri's build.rs validates resource paths at compile time
-      - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release
-        timeout-minutes: 10
-      # Skip worktree cleanup test — requires git remote which CI temp repos lack
-      - name: App crate tests
-        run: cd src-tauri && cargo test -p godly-terminal -- --skip test_cleanup_all_worktrees_with_progress
+      - uses: taiki-e/install-action@nextest
+      - name: Test ${{ matrix.crate }}
+        run: cd src-tauri && cargo nextest run -p ${{ matrix.crate }} --profile ci
+        timeout-minutes: 8
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Daemon integration tests (3 partitions, ~5-8 min each)
+  # ---------------------------------------------------------------------------
+  daemon-tests:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: taiki-e/install-action@nextest
+      - name: Pre-build daemon and pty-shim
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-pty-shim
+        timeout-minutes: 8
+      - name: Daemon tests (partition ${{ matrix.partition }}/3)
+        run: cd src-tauri && cargo nextest run -p godly-daemon --profile ci --partition hash:${{ matrix.partition }}/3
         timeout-minutes: 10
 
-  build:
+  # ---------------------------------------------------------------------------
+  # Job 4: Build release binaries and upload as artifact (~10 min)
+  # ---------------------------------------------------------------------------
+  build-release-binaries:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+      - name: Build release binaries
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release
+        timeout-minutes: 12
+      - name: Upload release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            src-tauri/target/release/godly-daemon.exe
+            src-tauri/target/release/godly-mcp.exe
+            src-tauri/target/release/godly-notify.exe
+            src-tauri/target/release/godly-pty-shim.exe
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Job 5: App crate tests + production frontend build (~10 min)
+  # ---------------------------------------------------------------------------
+  build-and-app-tests:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    needs: build-release-binaries
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: taiki-e/install-action@nextest
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: src-tauri/target/release/
+      - name: App crate tests
+        run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci -E "not test(test_cleanup_all_worktrees_with_progress)"
+        timeout-minutes: 8
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install dependencies
         run: npm install
         timeout-minutes: 3
-      - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release
-        timeout-minutes: 10
       - name: Production build
         run: npm run build
         timeout-minutes: 8
