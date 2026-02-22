@@ -252,12 +252,14 @@ pub fn resize_terminal(
         rows,
         cols,
     };
-    let response = daemon.send_request(&request)?;
-    match response {
-        Response::Ok => Ok(()),
-        Response::Error { message } => Err(message),
-        other => Err(format!("Unexpected response: {:?}", other)),
-    }
+    // Fire-and-forget: don't block the Tauri thread pool waiting for the
+    // daemon's Ok response. Blocking here caused the terminal to freeze when
+    // maximizing with an active TUI (e.g. Claude Code) — each synchronous
+    // resize took 1-4s during heavy output because the client pipe was flooded
+    // with output events that had to be drained before the response arrived.
+    // With 10+ rapid resize events from the maximize animation, the thread pool
+    // was blocked for 10-30s. See #244.
+    daemon.send_fire_and_forget(&request)
 }
 
 #[tauri::command]
