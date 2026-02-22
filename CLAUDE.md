@@ -133,6 +133,19 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 
 Do NOT run `npm run build` or `cargo nextest run --workspace` locally unless debugging a CI failure.
 
+## Product Vision
+
+Godly Terminal is built for **AI-assisted development workflows**. The primary use case is running multiple workspaces, each containing 2+ Claude Code instances (or other AI tools) working in parallel. A typical session has 10-20 concurrent terminal sessions, with only 1-2 visible at any time.
+
+This means the critical performance axis is **not** single-terminal rendering speed — it's **multi-session efficiency**: low memory per session, fast workspace switching, intelligent resource allocation between visible and background terminals, and robust session persistence for long-running AI processes.
+
+### Design Priorities (in order)
+1. **Session persistence** — AI tool sessions are long-running and valuable; never lose them
+2. **Multi-session scalability** — 20+ concurrent sessions without degradation
+3. **Workspace switching speed** — instant context switch between groups of terminals
+4. **Background efficiency** — minimize resources for terminals the user isn't looking at
+5. **Visible terminal responsiveness** — low latency for the 1-2 terminals currently on screen
+
 ## Architecture Overview
 
 Godly Terminal is a Windows terminal application built with Tauri 2.0, featuring workspaces and tmux-style session persistence via a background daemon.
