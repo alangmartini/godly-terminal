@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        run: npm ci
+        run: npm install
         timeout-minutes: 3
       - name: TypeScript check
         run: npx tsc --noEmit
@@ -137,7 +137,7 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        run: npm ci
+        run: npm install
         timeout-minutes: 3
       - name: Production build
         run: npm run build
