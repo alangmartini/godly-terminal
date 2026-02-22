@@ -9,6 +9,8 @@ pub struct Config {
     pub auth: AuthConfig,
     #[serde(default)]
     pub monitor: MonitorConfig,
+    #[serde(default)]
+    pub phone: PhoneConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,6 +53,25 @@ impl Default for MonitorConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PhoneConfig {
+    /// Number of terminal text lines to return (default 50).
+    #[serde(default = "default_text_lines")]
+    pub text_lines: usize,
+}
+
+impl Default for PhoneConfig {
+    fn default() -> Self {
+        Self {
+            text_lines: default_text_lines(),
+        }
+    }
+}
+
+fn default_text_lines() -> usize {
+    50
+}
+
 fn default_server() -> ServerConfig {
     ServerConfig {
         host: default_host(),
@@ -84,6 +105,7 @@ impl Default for Config {
                 webhook_url: None,
                 scan_rows: default_scan_rows(),
             },
+            phone: PhoneConfig::default(),
         }
     }
 }
