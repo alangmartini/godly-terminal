@@ -806,10 +806,15 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::WriteToTerminal { terminal_id, data } => {
-            // Convert \n → \r for PTY: terminals expect CR (Enter), not LF.
-            // Normalize \r\n → \r first to avoid double CR.
-            // Only affects MCP path — frontend xterm.js already sends correct bytes.
-            let converted = data.replace("\r\n", "\r").replace('\n', "\r");
+            // Convert newlines → \r for PTY: terminals expect CR (Enter), not LF.
+            // Also handle literal escape sequences (\\n, \\r\\n) since LLMs often
+            // produce these as text instead of actual newline characters.
+            // Order matters: literal sequences first, then real chars.
+            let converted = data
+                .replace("\\r\\n", "\r")
+                .replace("\\n", "\r")
+                .replace("\r\n", "\r")
+                .replace('\n', "\r");
             let request = godly_protocol::Request::Write {
                 session_id: terminal_id.clone(),
                 data: converted.as_bytes().to_vec(),
