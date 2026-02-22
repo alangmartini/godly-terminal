@@ -65,6 +65,9 @@ impl DaemonServer {
         eprintln!("[daemon] Server starting on {}", pipe_name);
         daemon_log!("Server starting on {}", pipe_name);
 
+        // Reconnect to surviving shim processes from a previous daemon instance
+        self.reconnect_surviving_shims();
+
         // Start process monitor
         self.start_process_monitor();
 
@@ -248,6 +251,33 @@ impl DaemonServer {
         // since it needs access to the AppHandle to emit Tauri events.
         // The daemon just keeps sessions alive.
         let _ = (sessions, running);
+    }
+
+    /// Scan for surviving pty-shim processes and reconnect to them.
+    /// Called on daemon startup before accepting client connections.
+    fn reconnect_surviving_shims(&self) {
+        let survivors = crate::shim_metadata::discover_surviving_shims();
+
+        if survivors.is_empty() {
+            daemon_log!("No surviving shims found");
+            return;
+        }
+
+        daemon_log!("Reconnecting to {} surviving shim(s)", survivors.len());
+
+        for meta in survivors {
+            let session_id = meta.session_id.clone();
+            match DaemonSession::reconnect(meta) {
+                Ok(session) => {
+                    self.sessions.write().insert(session_id.clone(), session);
+                    daemon_log!("Reconnected session {}", session_id);
+                }
+                Err(e) => {
+                    daemon_log!("Failed to reconnect session {}: {}", session_id, e);
+                    crate::shim_metadata::remove_metadata(&session_id);
+                }
+            }
+        }
     }
 
     #[allow(dead_code)]

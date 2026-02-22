@@ -284,6 +284,19 @@ def main():
     student.save_pretrained(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
 
+    # Fix tokenizer_class if serialized incorrectly (tokenizers backend bug)
+    tok_config_path = output_dir / "tokenizer_config.json"
+    if tok_config_path.exists():
+        import json
+        tok_config = json.loads(tok_config_path.read_text())
+        if tok_config.get("tokenizer_class") not in (
+            "PreTrainedTokenizerFast", "GPT2TokenizerFast", "LlamaTokenizerFast",
+        ):
+            tok_config["tokenizer_class"] = "PreTrainedTokenizerFast"
+            tok_config.pop("backend", None)
+            tok_config_path.write_text(json.dumps(tok_config, indent=2) + "\n")
+            print(f"  Fixed tokenizer_class in {tok_config_path}")
+
     # Evaluate
     print("\nEvaluating student...")
     evaluate_model(student, tokenizer, data_dir / "test.jsonl", device)

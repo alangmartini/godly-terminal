@@ -27,9 +27,13 @@ pub struct BranchNameEngine {
 impl BranchNameEngine {
     /// Load the tiny branch name GGUF model and tokenizer from disk.
     pub fn load(gguf_path: &Path, tokenizer_path: &Path) -> Result<Self> {
+        let file_size = std::fs::metadata(gguf_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
         eprintln!(
-            "[branch-name-engine] Loading GGUF from {:?}",
-            gguf_path
+            "[branch-name-engine] Loading GGUF from {:?} ({:.1} MB)",
+            gguf_path,
+            file_size as f64 / 1e6
         );
 
         let mut file = std::fs::File::open(gguf_path)

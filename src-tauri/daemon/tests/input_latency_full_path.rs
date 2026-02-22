@@ -113,16 +113,13 @@ impl DaemonFixture {
     fn spawn(test_name: &str) -> Self {
         let pipe_name = format!(r"\\.\pipe\godly-test-{}-{}", test_name, std::process::id());
 
-        let status = Command::new("cargo")
-            .args(["build", "-p", "godly-daemon"])
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .status()
-            .expect("cargo build");
-        assert!(status.success());
-
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let daemon_exe = manifest_dir.parent().unwrap().join("target/debug/godly-daemon.exe");
-        assert!(daemon_exe.exists());
+        assert!(
+            daemon_exe.exists(),
+            "Daemon binary not found at {:?}. Run `cargo build -p godly-daemon` first.",
+            daemon_exe
+        );
 
         let child = Command::new(&daemon_exe)
             .env("GODLY_PIPE_NAME", &pipe_name)

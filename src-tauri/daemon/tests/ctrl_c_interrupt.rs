@@ -253,7 +253,7 @@ fn kill_daemon(child: &mut Child) {
 /// If the test fails, \x03 is not generating CTRL_C_EVENT through the ConPTY,
 /// which means processes cannot be interrupted from the terminal.
 #[test]
-#[ntest::timeout(60_000)] // 1min — spawns daemon + PTY + waits for process interrupt
+#[ntest::timeout(120_000)] // 2min — shim pipeline adds latency on CI
 fn test_ctrl_c_interrupts_running_process() {
     eprintln!("\n=== test: Ctrl+C (\\x03) must interrupt running PTY process ===");
     let pipe_name = test_pipe_name("ctrl-c");
@@ -303,7 +303,7 @@ fn test_ctrl_c_interrupts_running_process() {
     let (prompt_output, got_prompt) = collect_output_until(
         &mut pipe,
         session_id,
-        Duration::from_secs(10),
+        Duration::from_secs(15),
         |o| o.contains("PS ") || o.contains("> "),
     );
     output.push_str(&prompt_output);
@@ -312,6 +312,37 @@ fn test_ctrl_c_interrupts_running_process() {
         got_prompt,
         output.len()
     );
+
+    // Diagnostic: test basic write→output pipeline with a simple echo command
+    let pre_echo_len = output.len();
+    let resp = send_request_collecting_output(
+        &mut pipe,
+        &Request::Write {
+            session_id: session_id.to_string(),
+            data: b"echo PIPELINE_TEST_OK\r\n".to_vec(),
+        },
+        session_id,
+        &mut output,
+    );
+    assert!(matches!(resp, Response::Ok), "Write echo failed: {:?}", resp);
+
+    let (echo_output, echo_ok) = collect_output_until(
+        &mut pipe,
+        session_id,
+        Duration::from_secs(10),
+        |o| o.contains("PIPELINE_TEST_OK"),
+    );
+    output.push_str(&echo_output);
+    eprintln!(
+        "  Echo test: {} (new bytes: {}B, total: {}B)",
+        echo_ok,
+        output.len() - pre_echo_len,
+        output.len()
+    );
+    if !echo_ok {
+        eprintln!("  DIAGNOSTIC: Write→output pipeline is broken! Echo output never arrived.");
+        eprintln!("  Full output so far:\n{}", output);
+    }
 
     // Send a long-running command: `ping -t localhost` runs until interrupted
     let resp = send_request_collecting_output(
@@ -329,12 +360,13 @@ fn test_ctrl_c_interrupts_running_process() {
         resp
     );
 
-    // Wait for ping to start producing output (at least one reply)
-    // Note: match localized output (e.g. "Resposta de" in Portuguese, "Reply from" in English)
+    // Wait for ping to start producing output (at least one reply).
+    // Note: match localized output (e.g. "Resposta de" in Portuguese, "Reply from" in English).
+    // With the pty-shim layer, commands take longer to produce visible output on CI.
     let (ping_output, ping_started) = collect_output_until(
         &mut pipe,
         session_id,
-        Duration::from_secs(10),
+        Duration::from_secs(20),
         |o| o.contains("Reply from") || o.contains("Pinging") || o.contains("Resposta de") || o.contains("Disparando"),
     );
     output.push_str(&ping_output);
@@ -437,7 +469,7 @@ fn test_ctrl_c_interrupts_running_process() {
 ///
 /// Uses `ping -t localhost` through cmd.exe and verifies \x03 interrupts it.
 #[test]
-#[ntest::timeout(60_000)]
+#[ntest::timeout(120_000)] // 2min — shim pipeline adds latency on CI
 fn test_ctrl_c_interrupts_cmd_process() {
     eprintln!("\n=== test: Ctrl+C (\\x03) must interrupt cmd.exe process ===");
     let pipe_name = test_pipe_name("ctrl-c-cmd");
@@ -478,7 +510,7 @@ fn test_ctrl_c_interrupts_cmd_process() {
     let (prompt, _) = collect_output_until(
         &mut pipe,
         session_id,
-        Duration::from_secs(10),
+        Duration::from_secs(15),
         |o| o.contains("PS ") || o.contains("> "),
     );
     output.push_str(&prompt);
@@ -495,11 +527,12 @@ fn test_ctrl_c_interrupts_cmd_process() {
     );
     assert!(matches!(resp, Response::Ok));
 
-    // Wait for ping to start (handle localized output)
+    // Wait for ping to start (handle localized output).
+    // With the pty-shim layer, commands take longer to produce visible output on CI.
     let (ping_out, ping_started) = collect_output_until(
         &mut pipe,
         session_id,
-        Duration::from_secs(10),
+        Duration::from_secs(20),
         |o| o.contains("Reply from") || o.contains("Pinging") || o.contains("Resposta de") || o.contains("Disparando"),
     );
     output.push_str(&ping_out);

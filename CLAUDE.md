@@ -24,8 +24,14 @@ npx tsc --noEmit
 # Rust check only (all workspace members)
 cd src-tauri && cargo check --workspace
 
-# Run Rust tests (all workspace members)
-cd src-tauri && cargo test --workspace
+# Run Rust tests (all workspace members, requires cargo-nextest)
+cd src-tauri && cargo nextest run --workspace
+
+# Run Rust tests (fast profile — skip stress/perf tests)
+cd src-tauri && cargo nextest run --workspace --profile fast
+
+# Smart test runner (only affected crates based on git diff)
+npm run test:smart
 
 # Run TypeScript tests
 npm test
@@ -86,10 +92,10 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 
 ## Output Hygiene
 
-- **Run targeted tests first**: `cargo test -p godly-daemon` before the full suite.
+- **Run targeted tests first**: `cargo nextest run -p godly-daemon` before the full suite.
 - **Summarize failures**: State the root cause concisely, don't paste full stack traces.
 - **Avoid verbose flags**: No `--verbose` or `--nocapture` unless actively debugging a specific test.
-- **Incremental verification**: `cargo check` before `cargo test`. One crate before all crates.
+- **Incremental verification**: `cargo check` before `cargo nextest run`. One crate before all crates.
 
 ## Verification Requirements
 
@@ -102,9 +108,14 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
    cd src-tauri && cargo check --workspace
    ```
 
-2. **Run tests for changed crates only**:
+2. **Run tests for changed crates only** (requires `cargo-nextest`):
    ```bash
-   cd src-tauri && cargo test -p <crate-you-modified>
+   cd src-tauri && cargo nextest run -p <crate-you-modified>
+   ```
+
+   Or use the smart test runner to auto-detect affected crates:
+   ```bash
+   npm run test:smart
    ```
 
 3. **Frontend tests**:
@@ -115,12 +126,12 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 4. If any step fails, fix and repeat.
 
 ### CI checks (GitHub Actions, runs automatically on PR):
-- Full `cargo test` for all workspace crates
+- `cargo nextest run` for all workspace crates (parallel, 3 daemon partitions)
 - `tsc --noEmit` (TypeScript strict check)
 - `npm run build` (production Vite build)
 - Full release build of daemon/mcp/notify binaries
 
-Do NOT run `npm run build` or `cargo test --workspace` locally unless debugging a CI failure.
+Do NOT run `npm run build` or `cargo nextest run --workspace` locally unless debugging a CI failure.
 
 ## Architecture Overview
 

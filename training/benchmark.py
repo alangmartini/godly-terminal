@@ -90,15 +90,22 @@ def benchmark_torch(model_dir: Path, prompts: list[str]) -> dict:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     print(f"\n{'='*60}")
     print(f"Benchmarking Torch model: {model_dir}")
+    print(f"Device: {device}")
+    if device == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"{'='*60}")
 
     tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(str(model_dir), torch_dtype=torch.float32)
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(str(model_dir), dtype=dtype)
+    model.to(device)
     model.eval()
 
     param_count = sum(p.numel() for p in model.parameters())
@@ -113,8 +120,13 @@ def benchmark_torch(model_dir: Path, prompts: list[str]) -> dict:
             f"<|im_start|>assistant\n"
         )
         inputs = tokenizer(full_prompt, return_tensors="pt")
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
         with torch.no_grad():
-            model.generate(**inputs, max_new_tokens=20, do_sample=False,
+            model.generate(input_ids=input_ids, attention_mask=attention_mask,
+                           max_new_tokens=20, do_sample=False,
                            pad_token_id=tokenizer.eos_token_id)
 
     # Benchmark
@@ -130,15 +142,20 @@ def benchmark_torch(model_dir: Path, prompts: list[str]) -> dict:
             f"<|im_start|>assistant\n"
         )
         inputs = tokenizer(full_prompt, return_tensors="pt")
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
 
         start = time.perf_counter()
         with torch.no_grad():
-            output = model.generate(**inputs, max_new_tokens=20,
+            output = model.generate(input_ids=input_ids, attention_mask=attention_mask,
+                                    max_new_tokens=20,
                                     temperature=0.1, do_sample=True,
                                     pad_token_id=tokenizer.eos_token_id)
         elapsed = (time.perf_counter() - start) * 1000  # ms
 
-        generated = tokenizer.decode(output[0][inputs["input_ids"].shape[1]:],
+        generated = tokenizer.decode(output[0][input_ids.shape[1]:],
                                      skip_special_tokens=True)
         generated = generated.split("<|im_end|>")[0].strip()
         generated = sanitize(generated)

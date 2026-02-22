@@ -1,16 +1,22 @@
 use std::collections::{HashMap, VecDeque};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 use godly_protocol::types::ShellType;
+use godly_protocol::{
+    read_shim_frame, write_shim_binary, write_shim_json, ShimFrame, ShimMetadata, ShimRequest,
+    ShimResponse, TAG_SHIM_BUFFER_DATA, TAG_SHIM_OUTPUT, TAG_SHIM_WRITE,
+};
 
 use crate::debug_log::daemon_log;
+use crate::shim_client;
+use crate::shim_metadata;
 
 const RING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB ring buffer
 
@@ -22,7 +28,48 @@ pub enum SessionOutput {
     Bell,
 }
 
-/// A daemon-managed PTY session that survives app disconnections.
+/// Messages sent to the shim I/O thread for writing to the pipe.
+///
+/// CRITICAL: On Windows, DuplicateHandle creates handles that share the same
+/// kernel file object. Synchronous I/O is serialized per file object, so a
+/// blocking ReadFile on one handle prevents WriteFile on another duplicate.
+/// To avoid this deadlock, ALL pipe I/O (reads and writes) goes through a
+/// single I/O thread. External code sends write requests via this channel.
+enum ShimIoMessage {
+    /// Write input data to the PTY (sent as TAG_SHIM_WRITE binary frame)
+    Write(Vec<u8>),
+    /// Send a JSON control message (Resize, Shutdown, etc.)
+    Control(ShimRequest),
+}
+
+/// A Write wrapper that sends data through the shim I/O channel.
+/// Each write() call queues a TAG_SHIM_WRITE message for the I/O thread.
+struct ChannelWriter {
+    tx: std_mpsc::Sender<ShimIoMessage>,
+}
+
+impl Write for ChannelWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.tx
+            .send(ShimIoMessage::Write(buf.to_vec()))
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Shim I/O channel closed")
+            })?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A daemon-managed PTY session backed by a pty-shim process.
+///
+/// The shim holds the actual ConPTY handles and shell process. The daemon
+/// communicates with the shim via a named pipe, sending input and receiving
+/// PTY output. This architecture allows the terminal session to survive
+/// daemon crashes -- the shim keeps running and buffers output until a new
+/// daemon instance reconnects.
 pub struct DaemonSession {
     pub id: String,
     pub shell_type: ShellType,
@@ -32,29 +79,40 @@ pub struct DaemonSession {
     pub cols: u16,
     #[cfg(windows)]
     pub pid: u32,
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// PID of the pty-shim process
+    #[allow(dead_code)]
+    shim_pid: u32,
+    /// Named pipe name for shim communication
+    #[allow(dead_code)]
+    shim_pipe_name: String,
+    /// Writer to the shim pipe for user input (sends TAG_SHIM_WRITE binary frames).
+    /// Uses a channel-based writer that routes through the I/O thread to avoid
+    /// the DuplicateHandle deadlock (see ShimIoMessage doc comment).
+    shim_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Channel sender for JSON control messages (Resize, Shutdown).
+    /// Routes through the same I/O thread as shim_writer.
+    shim_io_tx: std_mpsc::Sender<ShimIoMessage>,
     running: Arc<AtomicBool>,
     /// Ring buffer accumulates output when no client is attached
     ring_buffer: Arc<Mutex<VecDeque<u8>>>,
     /// Channel sender for live output to an attached client
     output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
-    /// Lock-free attachment flag — readable without locking output_tx.
+    /// Lock-free attachment flag -- readable without locking output_tx.
     /// Updated in attach()/detach()/close() and by the reader thread on send failure.
     is_attached_flag: Arc<AtomicBool>,
-    /// Always-on output history buffer — captures all PTY output regardless of
+    /// Always-on output history buffer -- captures all PTY output regardless of
     /// attachment state. Used by the ReadBuffer command to let MCP clients read
     /// terminal output without attaching.
     output_history: Arc<Mutex<VecDeque<u8>>>,
     /// Epoch ms of the last PTY output. Used by WaitForIdle to detect when
     /// terminal output has stopped.
     last_output_epoch_ms: Arc<AtomicU64>,
-    /// godly-vt terminal state engine — parses all PTY output and maintains an
+    /// godly-vt terminal state engine -- parses all PTY output and maintains an
     /// in-memory grid. Used by ReadGrid to provide clean, parsed terminal content
     /// without ANSI escape stripping.
     vt_parser: Arc<Mutex<godly_vt::Parser>>,
-    /// Exit code from the child process. Set by the child monitor thread when
-    /// the process exits. i64::MIN means "not yet exited" (sentinel).
+    /// Exit code from the child process. Set by the reader thread when
+    /// ShellExited is received from the shim. i64::MIN means "not yet exited" (sentinel).
     exit_code: Arc<AtomicI64>,
 }
 
@@ -67,93 +125,60 @@ impl DaemonSession {
         cols: u16,
         env: Option<HashMap<String, String>>,
     ) -> Result<Self, String> {
-        let pty_system = native_pty_system();
-
-        let size = PtySize {
+        // Spawn a pty-shim process that holds the ConPTY and shell
+        let meta = shim_client::spawn_shim(
+            &id,
+            &shell_type,
+            cwd.as_deref(),
             rows,
             cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        };
+            env.as_ref(),
+        )?;
 
-        let pair = pty_system
-            .openpty(size)
-            .map_err(|e| format!("Failed to open pty: {}", e))?;
+        // Connect to the shim's named pipe.
+        // CRITICAL: We use a SINGLE pipe handle for all I/O. On Windows,
+        // DuplicateHandle creates handles that share the same kernel file object,
+        // and synchronous I/O is serialized per file object. A blocking ReadFile
+        // on one duplicate prevents WriteFile on another, causing deadlock.
+        // Instead, all reads and writes go through one I/O thread.
+        let mut shim_pipe = shim_client::connect_to_shim(&meta.shim_pipe_name)?;
 
-        let mut cmd = match &shell_type {
-            ShellType::Windows => {
-                let mut cmd = CommandBuilder::new("powershell.exe");
-                cmd.arg("-NoLogo");
-                if let Some(dir) = &cwd {
-                    cmd.cwd(dir);
-                }
-                cmd
-            }
-            ShellType::Pwsh => {
-                let mut cmd = CommandBuilder::new("pwsh.exe");
-                cmd.arg("-NoLogo");
-                if let Some(dir) = &cwd {
-                    cmd.cwd(dir);
-                }
-                cmd
-            }
-            ShellType::Cmd => {
-                let mut cmd = CommandBuilder::new("cmd.exe");
-                if let Some(dir) = &cwd {
-                    cmd.cwd(dir);
-                }
-                cmd
-            }
-            ShellType::Wsl { distribution } => {
-                let mut cmd = CommandBuilder::new("wsl.exe");
-                if let Some(distro) = distribution {
-                    cmd.args(["-d", distro]);
-                }
-                if let Some(dir) = &cwd {
-                    let wsl_path = windows_to_wsl_path(dir);
-                    cmd.args(["--cd", &wsl_path]);
-                }
-                cmd
-            }
-            ShellType::Custom { program, args } => {
-                if program.is_empty() {
-                    return Err("Custom shell program cannot be empty".to_string());
-                }
-                let mut cmd = CommandBuilder::new(program);
-                if let Some(arg_list) = args {
-                    for arg in arg_list {
-                        cmd.arg(arg);
-                    }
-                }
-                if let Some(dir) = &cwd {
-                    cmd.cwd(dir);
-                }
-                cmd
-            }
-        };
+        // Query status to get the shell PID. This happens before the I/O thread
+        // starts, so there's no concurrent access to the pipe.
+        write_shim_json(&mut shim_pipe, &ShimRequest::Status)
+            .map_err(|e| format!("Failed to send Status request to shim: {}", e))?;
 
-        // Inject environment variables into the PTY session
-        if let Some(env_vars) = &env {
-            for (key, value) in env_vars {
-                cmd.env(key, value);
-            }
+        // Read the status response. The shim may first send buffered data (TAG_SHIM_BUFFER_DATA)
+        // from a previous daemon connection, or early PTY output (shell prompt), then StatusInfo.
+        // We capture any early output so it isn't lost.
+        let (shell_pid, early_output) = Self::read_status_response(&mut shim_pipe)?;
+
+        daemon_log!(
+            "Session {} connected to shim: shim_pid={}, shell_pid={}, pipe={}, early_output={}B",
+            id,
+            meta.shim_pid,
+            shell_pid,
+            meta.shim_pipe_name,
+            early_output.len()
+        );
+
+        // Write metadata file for daemon restart recovery
+        let mut final_meta = meta.clone();
+        final_meta.shell_pid = shell_pid;
+        if let Err(e) = shim_metadata::write_metadata(&final_meta) {
+            daemon_log!(
+                "Warning: failed to write shim metadata for session {}: {}",
+                id,
+                e
+            );
         }
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| format!("Failed to spawn command: {}", e))?;
-
-        #[cfg(windows)]
-        let pid = child.process_id().unwrap_or(0);
-
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| format!("Failed to get writer: {}", e))?;
-
-        let master = Arc::new(Mutex::new(pair.master));
-        let writer = Arc::new(Mutex::new(writer));
+        // Create the I/O channel for writes and control messages
+        let (shim_io_tx, shim_io_rx) = std_mpsc::channel::<ShimIoMessage>();
+        let shim_writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(ChannelWriter {
+                tx: shim_io_tx.clone(),
+            })));
         let running = Arc::new(AtomicBool::new(true));
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
         let output_history = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
@@ -175,70 +200,379 @@ impl DaemonSession {
         let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 10_000)));
         let exit_code = Arc::new(AtomicI64::new(i64::MIN));
 
-        // Spawn reader thread that routes output to either the attached client or ring buffer
-        let reader_master = master.clone();
-        let reader_running = running.clone();
-        let reader_ring = ring_buffer.clone();
-        let reader_history = output_history.clone();
-        let reader_tx = output_tx.clone();
-        let session_id = id.clone();
-        let reader_attached = is_attached_flag.clone();
-        let reader_last_output = last_output_epoch_ms.clone();
-        let reader_vt = vt_parser.clone();
+        // Feed any early output (captured during status query) into ring buffer,
+        // output history, and VT parser so the initial shell prompt is preserved.
+        if !early_output.is_empty() {
+            append_to_ring(&mut ring_buffer.lock(), &early_output);
+            append_to_ring(&mut output_history.lock(), &early_output);
+            vt_parser.lock().process(&early_output);
+        }
 
-        thread::spawn(move || {
-            let mut reader = {
-                let master = reader_master.lock();
-                match master.try_clone_reader() {
-                    Ok(r) => r,
-                    Err(e) => {
-                        daemon_log!("Session {} reader: failed to clone reader: {}", session_id, e);
-                        return;
+        // Spawn I/O thread that handles all pipe reads AND writes.
+        // This avoids the DuplicateHandle deadlock by keeping all pipe I/O
+        // in a single thread with a single file object.
+        Self::spawn_io_thread(
+            id.clone(),
+            shim_pipe,
+            shim_io_rx,
+            running.clone(),
+            ring_buffer.clone(),
+            output_history.clone(),
+            output_tx.clone(),
+            is_attached_flag.clone(),
+            last_output_epoch_ms.clone(),
+            vt_parser.clone(),
+            exit_code.clone(),
+        );
+
+        Ok(Self {
+            id,
+            shell_type,
+            cwd,
+            created_at: now,
+            rows,
+            cols,
+            #[cfg(windows)]
+            pid: shell_pid,
+            shim_pid: meta.shim_pid,
+            shim_pipe_name: meta.shim_pipe_name,
+            shim_writer,
+            shim_io_tx,
+            running,
+            ring_buffer,
+            output_tx,
+            is_attached_flag,
+            output_history,
+            last_output_epoch_ms,
+            vt_parser,
+            exit_code,
+        })
+    }
+
+    /// Reconnect to a surviving pty-shim after daemon restart.
+    /// Connects to the shim pipe, drains buffered output, and sets up reader/writer.
+    pub fn reconnect(meta: ShimMetadata) -> Result<Self, String> {
+        daemon_log!(
+            "Reconnecting to shim for session {}: pipe={}",
+            meta.session_id,
+            meta.shim_pipe_name
+        );
+
+        // Connect to shim pipe (single handle, no DuplicateHandle)
+        let mut shim_pipe = shim_client::connect_to_shim(&meta.shim_pipe_name)?;
+
+        // Query status to verify the shim is alive and get current state
+        write_shim_json(&mut shim_pipe, &ShimRequest::Status)
+            .map_err(|e| format!("Failed to send Status request to shim: {}", e))?;
+
+        // Read all frames until we get the StatusInfo response.
+        // Buffer data frames go into the vt parser.
+        let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(
+            meta.rows, meta.cols, 10_000,
+        )));
+        let output_history = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
+
+        let mut shell_pid = meta.shell_pid;
+        #[allow(unused_assignments)]
+        let mut is_running = true;
+        let mut exit_code_val = i64::MIN;
+
+        // Read frames from the shim: it will first send any buffered output,
+        // then the StatusInfo response.
+        loop {
+            match read_shim_frame(&mut shim_pipe) {
+                Ok(Some(ShimFrame::Binary {
+                    tag: TAG_SHIM_BUFFER_DATA,
+                    data,
+                })) => {
+                    daemon_log!(
+                        "Session {} reconnect: received {} bytes of buffered data",
+                        meta.session_id,
+                        data.len()
+                    );
+                    // Feed buffered data into vt parser
+                    vt_parser.lock().process(&data);
+                    append_to_ring(&mut output_history.lock(), &data);
+                }
+                Ok(Some(ShimFrame::Binary {
+                    tag: TAG_SHIM_OUTPUT,
+                    data,
+                })) => {
+                    // Output that arrived between our connect and status query
+                    vt_parser.lock().process(&data);
+                    append_to_ring(&mut output_history.lock(), &data);
+                }
+                Ok(Some(ShimFrame::Json(json_bytes))) => {
+                    if let Ok(resp) = serde_json::from_slice::<ShimResponse>(&json_bytes) {
+                        match resp {
+                            ShimResponse::StatusInfo {
+                                shell_pid: pid,
+                                running,
+                                rows: _,
+                                cols: _,
+                            } => {
+                                shell_pid = pid;
+                                is_running = running;
+                                daemon_log!(
+                                    "Session {} reconnect: shell_pid={}, running={}",
+                                    meta.session_id,
+                                    shell_pid,
+                                    is_running
+                                );
+                                break;
+                            }
+                            ShimResponse::ShellExited { exit_code } => {
+                                is_running = false;
+                                if let Some(code) = exit_code {
+                                    exit_code_val = code;
+                                }
+                                daemon_log!(
+                                    "Session {} reconnect: shell already exited (exit_code={:?})",
+                                    meta.session_id,
+                                    exit_code
+                                );
+                                break;
+                            }
+                        }
+                    } else {
+                        daemon_log!(
+                            "Session {} reconnect: unrecognized JSON frame, skipping",
+                            meta.session_id
+                        );
                     }
                 }
-            };
+                Ok(Some(ShimFrame::Binary { tag, .. })) => {
+                    daemon_log!(
+                        "Session {} reconnect: unexpected binary tag 0x{:02X}, skipping",
+                        meta.session_id,
+                        tag
+                    );
+                }
+                Ok(None) => {
+                    return Err(format!(
+                        "Shim pipe EOF during reconnect for session {}",
+                        meta.session_id
+                    ));
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "Shim pipe read error during reconnect for session {}: {}",
+                        meta.session_id, e
+                    ));
+                }
+            }
+        }
 
-            // We hold reader_master (an Arc clone of the PTY master) only to call
-            // try_clone_reader() above. We must drop it so that when CloseSession
-            // destroys the DaemonSession, the master Arc reaches refcount 0 →
-            // ConPTY is destroyed → write-end pipe closes → reader gets EOF →
-            // thread exits → all Arcs (vt_parser, ring_buffer, etc.) freed.
-            //
-            // However, dropping immediately after try_clone_reader() causes a race
-            // on Windows: ConPTY's DuplicateHandle (used internally by try_clone_reader)
-            // needs the original handle to remain alive briefly for the cloned reader
-            // handle to properly receive EOF signals later. We defer the drop until
-            // after the first successful read, by which point ConPTY is fully
-            // operational and the cloned handle is stable.
-            let mut master_to_drop = Some(reader_master);
+        let (shim_io_tx, shim_io_rx) = std_mpsc::channel::<ShimIoMessage>();
+        let shim_writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(ChannelWriter {
+                tx: shim_io_tx.clone(),
+            })));
+        let running = Arc::new(AtomicBool::new(is_running));
+        let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
+        let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>> =
+            Arc::new(Mutex::new(None));
+        let is_attached_flag = Arc::new(AtomicBool::new(false));
 
-            daemon_log!("Session {} reader thread started", session_id);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
 
-            let mut buf = [0u8; 65536];
+        let exit_code = Arc::new(AtomicI64::new(exit_code_val));
+
+        // Spawn I/O thread for ongoing shim communication
+        if is_running {
+            Self::spawn_io_thread(
+                meta.session_id.clone(),
+                shim_pipe,
+                shim_io_rx,
+                running.clone(),
+                ring_buffer.clone(),
+                output_history.clone(),
+                output_tx.clone(),
+                is_attached_flag.clone(),
+                last_output_epoch_ms.clone(),
+                vt_parser.clone(),
+                exit_code.clone(),
+            );
+        }
+
+        // Update metadata file with current shell_pid
+        let mut updated_meta = meta.clone();
+        updated_meta.shell_pid = shell_pid;
+        if let Err(e) = shim_metadata::write_metadata(&updated_meta) {
+            daemon_log!(
+                "Warning: failed to update shim metadata for session {}: {}",
+                meta.session_id,
+                e
+            );
+        }
+
+        Ok(Self {
+            id: meta.session_id,
+            shell_type: meta.shell_type,
+            cwd: meta.cwd,
+            created_at: meta.created_at,
+            rows: meta.rows,
+            cols: meta.cols,
+            #[cfg(windows)]
+            pid: shell_pid,
+            shim_pid: meta.shim_pid,
+            shim_pipe_name: meta.shim_pipe_name,
+            shim_writer,
+            shim_io_tx,
+            running,
+            ring_buffer,
+            output_tx,
+            is_attached_flag,
+            output_history,
+            last_output_epoch_ms,
+            vt_parser,
+            exit_code,
+        })
+    }
+
+    /// Read the StatusInfo response from the shim, handling any preceding
+    /// buffer data or output frames that arrive first.
+    /// Returns (shell_pid, early_output) — early_output contains any PTY output
+    /// that arrived before the StatusInfo response, which must be fed to the
+    /// ring buffer and VT parser to avoid losing the initial shell prompt.
+    fn read_status_response(reader: &mut std::fs::File) -> Result<(u32, Vec<u8>), String> {
+        let mut early_output = Vec::new();
+        loop {
+            match read_shim_frame(reader) {
+                Ok(Some(ShimFrame::Binary {
+                    tag: TAG_SHIM_BUFFER_DATA,
+                    data,
+                })) => {
+                    // Buffer data from previous connection — save for replay
+                    early_output.extend_from_slice(&data);
+                    continue;
+                }
+                Ok(Some(ShimFrame::Binary {
+                    tag: TAG_SHIM_OUTPUT,
+                    data,
+                })) => {
+                    // Early PTY output (shell prompt etc.) — save for replay
+                    early_output.extend_from_slice(&data);
+                    continue;
+                }
+                Ok(Some(ShimFrame::Json(json_bytes))) => {
+                    if let Ok(ShimResponse::StatusInfo { shell_pid, .. }) =
+                        serde_json::from_slice::<ShimResponse>(&json_bytes)
+                    {
+                        return Ok((shell_pid, early_output));
+                    }
+                    if let Ok(ShimResponse::ShellExited { .. }) =
+                        serde_json::from_slice::<ShimResponse>(&json_bytes)
+                    {
+                        // Shell already exited before we connected
+                        return Ok((0, early_output));
+                    }
+                    // Unknown JSON, keep reading
+                    continue;
+                }
+                Ok(Some(ShimFrame::Binary { .. })) => continue,
+                Ok(None) => return Err("Shim pipe EOF while waiting for StatusInfo".to_string()),
+                Err(e) => {
+                    return Err(format!("Shim pipe error while waiting for StatusInfo: {}", e))
+                }
+            }
+        }
+    }
+
+    /// Spawn the I/O thread that handles ALL pipe communication with the shim.
+    ///
+    /// CRITICAL: All reads and writes go through this single thread to avoid the
+    /// DuplicateHandle deadlock. On Windows, synchronous I/O is serialized per
+    /// kernel file object, and DuplicateHandle shares the file object. A blocking
+    /// ReadFile on one duplicate prevents WriteFile on another. By using a single
+    /// thread with PeekNamedPipe for non-blocking reads and a channel for writes,
+    /// we eliminate concurrent access to the pipe file object entirely.
+    fn spawn_io_thread(
+        session_id: String,
+        mut pipe: std::fs::File,
+        shim_io_rx: std_mpsc::Receiver<ShimIoMessage>,
+        reader_running: Arc<AtomicBool>,
+        reader_ring: Arc<Mutex<VecDeque<u8>>>,
+        reader_history: Arc<Mutex<VecDeque<u8>>>,
+        reader_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
+        reader_attached: Arc<AtomicBool>,
+        reader_last_output: Arc<AtomicU64>,
+        reader_vt: Arc<Mutex<godly_vt::Parser>>,
+        reader_exit_code: Arc<AtomicI64>,
+    ) {
+        thread::spawn(move || {
+            daemon_log!("Session {} shim I/O thread started", session_id);
+
             let mut total_bytes: u64 = 0;
             let mut total_reads: u64 = 0;
             let mut channel_send_failures: u64 = 0;
             let mut last_stats = Instant::now();
-            // Throttle GridDiff generation to ~60fps (16ms). Dirty flags accumulate
-            // in godly-vt between diffs, so no changes are lost — the next diff
-            // just captures more rows. This prevents pipe flooding during heavy
-            // output (e.g., 200K lines) where JSON-serialized diffs are large.
             let mut last_diff_time = Instant::now();
             const DIFF_INTERVAL: Duration = Duration::from_millis(16);
 
             while reader_running.load(Ordering::Relaxed) {
-                match reader.read(&mut buf) {
-                    Ok(0) => {
-                        daemon_log!("Session {} reader: EOF (process exited)", session_id);
-                        break;
-                    }
-                    Ok(n) => {
-                        // Drop master Arc after first read — ConPTY is now operational
-                        // and the cloned reader handle is stable. See comment above.
-                        if let Some(m) = master_to_drop.take() {
-                            drop(m);
-                        }
+                let mut did_work = false;
 
+                // Step 1: Process pending writes from the channel
+                loop {
+                    match shim_io_rx.try_recv() {
+                        Ok(ShimIoMessage::Write(data)) => {
+                            if let Err(e) =
+                                write_shim_binary(&mut pipe, TAG_SHIM_WRITE, &data)
+                            {
+                                daemon_log!(
+                                    "Session {} I/O: write error: {}",
+                                    session_id,
+                                    e
+                                );
+                                reader_running.store(false, Ordering::Relaxed);
+                                break;
+                            }
+                            did_work = true;
+                        }
+                        Ok(ShimIoMessage::Control(req)) => {
+                            if let Err(e) = write_shim_json(&mut pipe, &req) {
+                                daemon_log!(
+                                    "Session {} I/O: control write error: {}",
+                                    session_id,
+                                    e
+                                );
+                                reader_running.store(false, Ordering::Relaxed);
+                                break;
+                            }
+                            did_work = true;
+                        }
+                        Err(std_mpsc::TryRecvError::Empty) => break,
+                        Err(std_mpsc::TryRecvError::Disconnected) => {
+                            // Session dropped, stop
+                            reader_running.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+
+                if !reader_running.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // Step 2: Non-blocking check for incoming data from shim
+                if !shim_pipe_has_data(&pipe) {
+                    if !did_work {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    continue;
+                }
+
+                match read_shim_frame(&mut pipe) {
+                    Ok(Some(ShimFrame::Binary {
+                        tag: TAG_SHIM_OUTPUT,
+                        data,
+                    })) => {
+                        let n = data.len();
                         total_bytes += n as u64;
                         total_reads += 1;
 
@@ -252,17 +586,13 @@ impl DaemonSession {
                         // Always append to output_history for ReadBuffer access
                         {
                             let mut history = reader_history.lock();
-                            append_to_ring(&mut history, &buf[..n]);
+                            append_to_ring(&mut history, &data);
                         }
 
                         // Feed PTY output into godly-vt parser for grid state.
-                        // If a client is attached and rows are dirty AND enough time
-                        // has passed, extract a diff to push alongside the raw bytes.
-                        // Throttled to ~60fps to avoid flooding the pipe with large
-                        // JSON-serialized diffs during heavy output.
                         let (maybe_diff, bell_fired) = {
                             let mut vt = reader_vt.lock();
-                            vt.process(&buf[..n]);
+                            vt.process(&data);
                             let bell = vt.take_bell_pending();
                             let now = Instant::now();
                             let diff = if reader_attached.load(Ordering::Relaxed)
@@ -277,7 +607,6 @@ impl DaemonSession {
                             (diff, bell)
                         };
 
-                        let data = buf[..n].to_vec();
                         let lock_start = Instant::now();
                         let tx_guard = reader_tx.lock();
                         let lock_elapsed = lock_start.elapsed();
@@ -291,29 +620,19 @@ impl DaemonSession {
                         }
 
                         if let Some(tx) = tx_guard.as_ref() {
-                            // Client attached: try to send live output (bounded channel applies backpressure)
-                            match tx.try_send(SessionOutput::RawBytes(data)) {
+                            // Client attached: try to send live output
+                            match tx.try_send(SessionOutput::RawBytes(data.clone())) {
                                 Ok(()) => {
-                                    // Send pushed grid diff (best-effort — skip if channel full).
-                                    // Dirty flags accumulate for next read if skipped.
                                     if let Some(diff) = maybe_diff {
                                         let _ = tx.try_send(SessionOutput::GridDiff(diff));
                                     }
-                                    // Send bell notification (best-effort)
                                     if bell_fired {
                                         let _ = tx.try_send(SessionOutput::Bell);
                                     }
                                     drop(tx_guard);
-                                    // Yield to let handler threads acquire output_tx if waiting
                                     thread::yield_now();
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Full(msg)) => {
-                                    // Bug A1 fix: block until channel has capacity instead of
-                                    // falling back to ring buffer. Previously, data written to
-                                    // the ring buffer during transient fullness was never
-                                    // replayed to the attached client, causing missing output.
-                                    // blocking_send provides true backpressure — the PTY read
-                                    // pauses naturally because this thread is blocked.
                                     let tx_clone = tx.clone();
                                     drop(tx_guard);
                                     let bp_start = Instant::now();
@@ -327,18 +646,16 @@ impl DaemonSession {
                                                     bp_elapsed.as_secs_f64() * 1000.0
                                                 );
                                             }
-                                            // Send pushed grid diff after backpressure resolves (best-effort)
                                             if let Some(diff) = maybe_diff {
-                                                let _ = tx_clone.try_send(SessionOutput::GridDiff(diff));
+                                                let _ =
+                                                    tx_clone.try_send(SessionOutput::GridDiff(diff));
                                             }
-                                            // Send bell notification (best-effort)
                                             if bell_fired {
                                                 let _ = tx_clone.try_send(SessionOutput::Bell);
                                             }
                                             thread::yield_now();
                                         }
                                         Err(send_err) => {
-                                            // Channel closed during backpressure — client disconnected
                                             channel_send_failures += 1;
                                             daemon_log!(
                                                 "Session {} reader: channel closed during backpressure (disconnect #{})",
@@ -355,7 +672,6 @@ impl DaemonSession {
                                     }
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                    // Client disconnected, switch to ring buffer
                                     channel_send_failures += 1;
                                     daemon_log!(
                                         "Session {} reader: channel send failed (client disconnect #{})",
@@ -365,16 +681,15 @@ impl DaemonSession {
                                     drop(tx_guard);
                                     reader_attached.store(false, Ordering::Relaxed);
                                     *reader_tx.lock() = None;
-                                    // Store this chunk in ring buffer
                                     let mut ring = reader_ring.lock();
-                                    append_to_ring(&mut ring, &buf[..n]);
+                                    append_to_ring(&mut ring, &data);
                                 }
                             }
                         } else {
                             // No client attached: buffer output
                             drop(tx_guard);
                             let mut ring = reader_ring.lock();
-                            append_to_ring(&mut ring, &buf[..n]);
+                            append_to_ring(&mut ring, &data);
                         }
 
                         // Periodic stats
@@ -393,108 +708,83 @@ impl DaemonSession {
                             last_stats = Instant::now();
                         }
                     }
+                    Ok(Some(ShimFrame::Binary {
+                        tag: TAG_SHIM_BUFFER_DATA,
+                        data,
+                    })) => {
+                        // Buffer data from shim (replayed on reconnect).
+                        // Feed into vt parser and output history.
+                        daemon_log!(
+                            "Session {} reader: received {} bytes of buffer replay data",
+                            session_id,
+                            data.len()
+                        );
+                        {
+                            let mut vt = reader_vt.lock();
+                            vt.process(&data);
+                        }
+                        {
+                            let mut history = reader_history.lock();
+                            append_to_ring(&mut history, &data);
+                        }
+                    }
+                    Ok(Some(ShimFrame::Json(json_bytes))) => {
+                        // Try to parse as ShimResponse
+                        if let Ok(resp) = serde_json::from_slice::<ShimResponse>(&json_bytes) {
+                            match resp {
+                                ShimResponse::ShellExited { exit_code } => {
+                                    daemon_log!(
+                                        "Session {} reader: ShellExited (exit_code={:?})",
+                                        session_id,
+                                        exit_code
+                                    );
+                                    if let Some(code) = exit_code {
+                                        reader_exit_code.store(code, Ordering::Relaxed);
+                                    }
+                                    reader_running.store(false, Ordering::Relaxed);
+                                    reader_attached.store(false, Ordering::Relaxed);
+                                    *reader_tx.lock() = None;
+                                    break;
+                                }
+                                ShimResponse::StatusInfo { .. } => {
+                                    // Ignore unsolicited status info
+                                }
+                            }
+                        }
+                    }
+                    Ok(Some(ShimFrame::Binary { tag, .. })) => {
+                        daemon_log!(
+                            "Session {} reader: unexpected shim binary tag: 0x{:02X}",
+                            session_id,
+                            tag
+                        );
+                    }
+                    Ok(None) => {
+                        // Shim pipe EOF -- shim process died
+                        daemon_log!("Session {} reader: shim pipe EOF", session_id);
+                        break;
+                    }
                     Err(e) => {
-                        daemon_log!("Session {} reader: read error: {}", session_id, e);
+                        daemon_log!("Session {} reader: shim read error: {}", session_id, e);
                         break;
                     }
                 }
             }
 
-            // PTY exited — mark session as dead and close output channel.
-        // Setting output_tx = None causes rx.recv() in the forwarding task to
-        // return None, which triggers sending SessionClosed to the client.
-        reader_running.store(false, Ordering::Relaxed);
-        reader_attached.store(false, Ordering::Relaxed);
-        *reader_tx.lock() = None;
+            // Shim disconnected or shell exited -- mark session as dead and close output channel
+            reader_running.store(false, Ordering::Relaxed);
+            reader_attached.store(false, Ordering::Relaxed);
+            *reader_tx.lock() = None;
 
             daemon_log!(
-                "Session {} reader thread exited: reads={}, bytes={}, send_failures={}",
+                "Session {} shim I/O thread exited: reads={}, bytes={}, send_failures={}",
                 session_id,
                 total_reads,
                 total_bytes,
                 channel_send_failures
             );
-            eprintln!("[daemon] Session {} reader thread exited", session_id);
+            eprintln!("[daemon] Session {} shim I/O thread exited", session_id);
         });
-
-        // Spawn child process monitor: waits for the shell process to exit and
-        // triggers cleanup. On Windows, ConPTY does NOT produce EOF on the PTY
-        // pipe when the child process exits — the reader thread's read() call
-        // blocks forever. This monitor thread detects process exit via wait()
-        // and sets running=false + drops the output channel, which causes the
-        // forwarding task to send SessionClosed to the client.
-        // Bug A2: without this, dead sessions stay "running" forever and the
-        // frontend never gets notified, creating zombie terminal tabs.
-        let monitor_running = running.clone();
-        let monitor_attached = is_attached_flag.clone();
-        let monitor_tx = output_tx.clone();
-        let monitor_session_id = id.clone();
-        let monitor_exit_code = exit_code.clone();
-        thread::spawn(move || {
-            let mut child = child;
-            // wait() blocks until the child process exits
-            match child.wait() {
-                Ok(status) => {
-                    daemon_log!(
-                        "Session {} child process exited with status: {:?}",
-                        monitor_session_id,
-                        status
-                    );
-                    // Extract exit code from portable-pty's ExitStatus.
-                    // On Windows, this is the DWORD exit code (e.g. 0, 1, 0xC000013A).
-                    // The Debug output is "ExitStatus { code: N, signal: None }".
-                    // portable-pty exposes success() but not the raw code directly,
-                    // so we parse it from the Debug representation.
-                    let code = parse_exit_code_from_status(&format!("{:?}", status));
-                    monitor_exit_code.store(code, Ordering::Relaxed);
-                }
-                Err(e) => {
-                    daemon_log!(
-                        "Session {} child process wait error: {}",
-                        monitor_session_id,
-                        e
-                    );
-                }
-            }
-
-            // Mark session as dead and close output channel (same cleanup
-            // as the reader thread EOF path). This is safe to call even if
-            // the reader thread already did this — storing false to an
-            // AtomicBool and setting an already-None Option to None are no-ops.
-            monitor_running.store(false, Ordering::Relaxed);
-            monitor_attached.store(false, Ordering::Relaxed);
-            *monitor_tx.lock() = None;
-
-            daemon_log!(
-                "Session {} child monitor: cleanup complete",
-                monitor_session_id
-            );
-            eprintln!(
-                "[daemon] Session {} child process exited",
-                monitor_session_id
-            );
-        });
-
-        Ok(Self {
-            id,
-            shell_type,
-            cwd,
-            created_at: now,
-            rows,
-            cols,
-            #[cfg(windows)]
-            pid,
-            master,
-            writer,
-            running,
-            ring_buffer,
-            output_tx,
-            is_attached_flag,
-            output_history,
-            last_output_epoch_ms,
-            vt_parser,
-            exit_code,
-        })
     }
 
     /// Attach a client to this session.
@@ -505,7 +795,7 @@ impl DaemonSession {
     pub fn attach(&self) -> (Vec<u8>, tokio::sync::mpsc::Receiver<SessionOutput>) {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
 
-        // Drain ring buffer as initial replay — timeout to avoid blocking handler
+        // Drain ring buffer as initial replay -- timeout to avoid blocking handler
         let buffered: Vec<u8> = match self.ring_buffer.try_lock_for(Duration::from_secs(2)) {
             Some(mut ring) => ring.drain(..).collect(),
             None => {
@@ -517,7 +807,7 @@ impl DaemonSession {
             }
         };
 
-        // Set the output sender for live streaming — timeout to avoid blocking handler
+        // Set the output sender for live streaming -- timeout to avoid blocking handler
         match self.output_tx.try_lock_for(Duration::from_secs(2)) {
             Some(mut guard) => *guard = Some(tx),
             None => {
@@ -540,25 +830,24 @@ impl DaemonSession {
     }
 
     /// Check if a client is currently attached (lock-free).
-    ///
-    /// Reads an AtomicBool instead of locking output_tx. This prevents the
-    /// handler from blocking on ListSessions/info() when the reader thread
-    /// holds output_tx in a tight loop under heavy output.
     pub fn is_attached(&self) -> bool {
         self.is_attached_flag.load(Ordering::Relaxed)
     }
 
-    /// Write data to the PTY.
+    /// Write data to the PTY via the shim pipe.
     ///
     /// On Windows, raw `\x03` (Ctrl+C) written to ConPTY's input pipe does NOT
-    /// generate `CTRL_C_EVENT` for child processes. ConPTY only generates console
-    /// control events from real keyboard input, not from pipe-written data.
-    /// `GenerateConsoleCtrlEvent` also doesn't work with pseudoconsoles.
-    ///
-    /// To interrupt a running process, we detect `\x03` and terminate child
-    /// processes of the shell, leaving the shell itself alive so the user gets
-    /// a fresh prompt.
+    /// generate `CTRL_C_EVENT` for child processes. To interrupt a running process,
+    /// we detect `\x03` and terminate child processes of the shell, leaving the
+    /// shell itself alive so the user gets a fresh prompt.
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
+        daemon_log!(
+            "Session {} write: {} bytes (first={:?})",
+            self.id,
+            data.len(),
+            &data[..data.len().min(20)]
+        );
+
         #[cfg(windows)]
         if data.contains(&0x03) {
             match terminate_child_processes(self.pid) {
@@ -566,7 +855,9 @@ impl DaemonSession {
                     if count > 0 {
                         daemon_log!(
                             "Session {} Ctrl+C: terminated {} child process(es) of shell pid {}",
-                            self.id, count, self.pid
+                            self.id,
+                            count,
+                            self.pid
                         );
                     }
                 }
@@ -574,43 +865,37 @@ impl DaemonSession {
                     daemon_log!("Session {} Ctrl+C failed: {}", self.id, e);
                 }
             }
-            // Also write \x03 to the PTY — while ConPTY won't generate
-            // CTRL_C_EVENT, some shells (like PSReadLine) may read it from
-            // the input buffer and cancel the current line.
-            let mut writer = self.writer.lock();
+            // Also write \x03 to the shim -- some shells (like PSReadLine) may
+            // read it from the input buffer and cancel the current line.
+            let mut writer = self.shim_writer.lock();
             writer
                 .write_all(data)
-                .map_err(|e| format!("Failed to write to pty: {}", e))?;
+                .map_err(|e| format!("Failed to write to shim: {}", e))?;
             writer
                 .flush()
-                .map_err(|e| format!("Failed to flush pty: {}", e))?;
+                .map_err(|e| format!("Failed to flush shim: {}", e))?;
             return Ok(());
         }
 
-        let mut writer = self.writer.lock();
+        let mut writer = self.shim_writer.lock();
         writer
             .write_all(data)
-            .map_err(|e| format!("Failed to write to pty: {}", e))?;
+            .map_err(|e| format!("Failed to write to shim: {}", e))?;
         writer
             .flush()
-            .map_err(|e| format!("Failed to flush pty: {}", e))?;
+            .map_err(|e| format!("Failed to flush shim: {}", e))?;
         Ok(())
     }
 
-    /// Resize the PTY and update the godly-vt parser dimensions.
+    /// Resize the PTY via a control message to the shim.
+    /// Also updates the godly-vt parser dimensions.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
-        let master = self.master.lock();
-        master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| format!("Failed to resize pty: {}", e))?;
+        // Send Resize request to the shim via the I/O channel
+        self.shim_io_tx
+            .send(ShimIoMessage::Control(ShimRequest::Resize { rows, cols }))
+            .map_err(|_| "Shim I/O channel closed".to_string())?;
 
-        // Keep the godly-vt parser in sync with the PTY size so that
-        // ReadGrid returns a grid matching the current terminal dimensions.
+        // Keep the godly-vt parser in sync with the PTY size
         {
             let mut vt = self.vt_parser.lock();
             vt.screen_mut().set_size(rows, cols);
@@ -635,12 +920,14 @@ impl DaemonSession {
     /// Returns None if the process hasn't exited yet or exit code is unavailable.
     pub fn exit_code(&self) -> Option<i64> {
         let code = self.exit_code.load(Ordering::Relaxed);
-        if code == i64::MIN { None } else { Some(code) }
+        if code == i64::MIN {
+            None
+        } else {
+            Some(code)
+        }
     }
 
     /// Get a clone of the exit_code Arc for use in async forwarding tasks.
-    /// The task reads this after the channel closes to include the exit code
-    /// in the SessionClosed event.
     pub fn exit_code_arc(&self) -> Arc<AtomicI64> {
         self.exit_code.clone()
     }
@@ -650,12 +937,20 @@ impl DaemonSession {
         self.running.clone()
     }
 
-    /// Close the session
+    /// Close the session. Sends shutdown to the shim and removes metadata.
     pub fn close(&self) {
         self.running.store(false, Ordering::Relaxed);
         self.is_attached_flag.store(false, Ordering::Relaxed);
         // Drop the output channel to notify attached clients
         *self.output_tx.lock() = None;
+
+        // Tell the shim to shut down gracefully via the I/O channel
+        let _ = self
+            .shim_io_tx
+            .send(ShimIoMessage::Control(ShimRequest::Shutdown));
+
+        // Remove metadata file
+        shim_metadata::remove_metadata(&self.id);
     }
 
     /// Get the session info for protocol messages
@@ -794,7 +1089,8 @@ impl DaemonSession {
 
         // Read the screen immutably now that we've taken dirty flags
         let screen = vt.screen();
-        let mut dirty_rows = Vec::with_capacity(if full_repaint { total_rows } else { dirty_count });
+        let mut dirty_rows =
+            Vec::with_capacity(if full_repaint { total_rows } else { dirty_count });
 
         for row_idx in 0..num_rows {
             if full_repaint || dirty_flags.get(usize::from(row_idx)).copied().unwrap_or(false) {
@@ -833,7 +1129,10 @@ impl DaemonSession {
                     }
                 }
                 let wrapped = screen.row_wrapped(row_idx);
-                dirty_rows.push((row_idx, godly_protocol::types::RichGridRow { cells, wrapped }));
+                dirty_rows.push((
+                    row_idx,
+                    godly_protocol::types::RichGridRow { cells, wrapped },
+                ));
             }
         }
 
@@ -872,7 +1171,12 @@ impl DaemonSession {
     /// Search the output history for a text string.
     /// Optionally strips ANSI escape sequences before matching.
     pub fn search_output_history(&self, text: &str, do_strip_ansi: bool) -> bool {
-        let data = self.output_history.lock().iter().copied().collect::<Vec<u8>>();
+        let data = self
+            .output_history
+            .lock()
+            .iter()
+            .copied()
+            .collect::<Vec<u8>>();
         let haystack = String::from_utf8_lossy(&data);
         if do_strip_ansi {
             godly_protocol::ansi::strip_ansi(&haystack).contains(text)
@@ -951,7 +1255,10 @@ fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDif
                 }
             }
             let wrapped = screen.row_wrapped(row_idx);
-            dirty_rows.push((row_idx, godly_protocol::types::RichGridRow { cells, wrapped }));
+            dirty_rows.push((
+                row_idx,
+                godly_protocol::types::RichGridRow { cells, wrapped },
+            ));
         }
     }
 
@@ -1095,19 +1402,31 @@ fn terminate_child_processes(shell_pid: u32) -> Result<u32, String> {
     Ok(terminated)
 }
 
-/// Parse the numeric exit code from portable-pty's ExitStatus Debug output.
-/// Format: "ExitStatus { code: 3221225786, signal: None }"
-/// Returns i64::MIN if parsing fails (sentinel for "unknown").
-fn parse_exit_code_from_status(debug_str: &str) -> i64 {
-    // Look for "code: <number>"
-    if let Some(start) = debug_str.find("code: ") {
-        let after = &debug_str[start + 6..];
-        let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
-        if let Ok(code) = after[..end].parse::<u32>() {
-            return code as i64;
-        }
-    }
-    i64::MIN
+/// Non-blocking check for available data on a pipe using PeekNamedPipe.
+/// Returns true if there are bytes ready to read.
+#[cfg(windows)]
+fn shim_pipe_has_data(pipe: &std::fs::File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use winapi::um::namedpipeapi::PeekNamedPipe;
+
+    let handle = pipe.as_raw_handle();
+    let mut bytes_available: u32 = 0;
+    let result = unsafe {
+        PeekNamedPipe(
+            handle as *mut _,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut bytes_available,
+            std::ptr::null_mut(),
+        )
+    };
+    result != 0 && bytes_available > 0
+}
+
+#[cfg(not(windows))]
+fn shim_pipe_has_data(_pipe: &std::fs::File) -> bool {
+    false
 }
 
 /// Append data to ring buffer, evicting oldest data if necessary
@@ -1128,22 +1447,25 @@ fn append_to_ring(ring: &mut VecDeque<u8>, data: &[u8]) {
 }
 
 /// Convert a Windows path to WSL path format (duplicated from utils for daemon independence)
+#[allow(dead_code)]
 fn windows_to_wsl_path(path: &str) -> String {
     let path = path.replace('\\', "/");
 
     // Handle WSL UNC paths: //wsl.localhost/<distro>/... or //wsl$/<distro>/...
-    // These must be converted to native Linux paths by stripping the prefix and distro name.
     if path.starts_with("//wsl.localhost/") || path.starts_with("//wsl$/") {
         let after_host = if path.starts_with("//wsl.localhost/") {
             &path["//wsl.localhost/".len()..]
         } else {
             &path["//wsl$/".len()..]
         };
-        // Skip the distro name (first path segment)
         return match after_host.find('/') {
             Some(idx) => {
                 let linux_path = &after_host[idx..];
-                if linux_path == "/" { "/".to_string() } else { linux_path.to_string() }
+                if linux_path == "/" {
+                    "/".to_string()
+                } else {
+                    linux_path.to_string()
+                }
             }
             None => "/".to_string(),
         };
@@ -1187,39 +1509,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_exit_code_success() {
-        assert_eq!(
-            parse_exit_code_from_status("ExitStatus { code: 0, signal: None }"),
-            0
-        );
-    }
-
-    #[test]
-    fn test_parse_exit_code_nonzero() {
-        assert_eq!(
-            parse_exit_code_from_status("ExitStatus { code: 1, signal: None }"),
-            1
-        );
-    }
-
-    #[test]
-    fn test_parse_exit_code_windows_crash() {
-        // 0xC000013A = 3221225786 = STATUS_CONTROL_C_EXIT
-        assert_eq!(
-            parse_exit_code_from_status("ExitStatus { code: 3221225786, signal: None }"),
-            3221225786
-        );
-    }
-
-    #[test]
-    fn test_parse_exit_code_unknown_format() {
-        assert_eq!(
-            parse_exit_code_from_status("SomeOtherFormat"),
-            i64::MIN
-        );
-    }
-
-    #[test]
     fn test_windows_to_wsl_path() {
         assert_eq!(
             windows_to_wsl_path("C:\\Users\\test"),
@@ -1228,12 +1517,8 @@ mod tests {
         assert_eq!(windows_to_wsl_path("/already/unix"), "/already/unix");
     }
 
-    // Bug: WSL UNC paths like \\wsl.localhost\Ubuntu\home\user\project are converted to
-    // //wsl.localhost/Ubuntu/home/user/project instead of /home/user/project, causing
-    // chdir() to fail with error 2 and the shell starts in / instead of the target dir.
     #[test]
     fn test_windows_to_wsl_path_wsl_localhost_unc() {
-        // \\wsl.localhost\<distro>\<path> should become /<path>
         assert_eq!(
             windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\project"),
             "/home/alanm/dev/project"
@@ -1242,7 +1527,6 @@ mod tests {
 
     #[test]
     fn test_windows_to_wsl_path_wsl_localhost_unc_forward_slashes() {
-        // Same path but with forward slashes (as it may arrive after partial normalization)
         assert_eq!(
             windows_to_wsl_path("//wsl.localhost/Ubuntu/home/alanm/dev/project"),
             "/home/alanm/dev/project"
@@ -1251,7 +1535,6 @@ mod tests {
 
     #[test]
     fn test_windows_to_wsl_path_wsl_dollar_unc() {
-        // Legacy \\wsl$\<distro>\<path> format should also be handled
         assert_eq!(
             windows_to_wsl_path("\\\\wsl$\\Ubuntu\\home\\alanm\\dev\\project"),
             "/home/alanm/dev/project"
@@ -1260,260 +1543,19 @@ mod tests {
 
     #[test]
     fn test_windows_to_wsl_path_wsl_localhost_root() {
-        // UNC path pointing to the distro root
-        assert_eq!(
-            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu"),
-            "/"
-        );
+        assert_eq!(windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu"), "/");
     }
 
     #[test]
     fn test_windows_to_wsl_path_wsl_localhost_root_trailing_slash() {
-        assert_eq!(
-            windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\"),
-            "/"
-        );
+        assert_eq!(windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\"), "/");
     }
 
     #[test]
     fn test_windows_to_wsl_path_wsl_localhost_deep_path() {
-        // Deep nesting with the exact path from the bug report
         assert_eq!(
             windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\terraform-tests\\terraform-provider-typesense"),
             "/home/alanm/dev/terraform-tests/terraform-provider-typesense"
         );
-    }
-
-    // --- Tests for is_attached_flag (mutex starvation fix) ---
-    //
-    // Bug: handler threads blocked on is_attached()/info() because they locked
-    // output_tx, which the reader thread held in a tight loop under heavy output.
-    // Fix: is_attached_flag (AtomicBool) provides lock-free attachment state.
-
-    #[cfg(windows)]
-    #[test]
-    fn test_attached_flag_lifecycle() {
-        let session = DaemonSession::new(
-            "test-lifecycle".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        assert!(!session.is_attached(), "new session should be detached");
-
-        let (_buf, _rx) = session.attach();
-        assert!(session.is_attached(), "should be attached after attach()");
-
-        session.detach();
-        assert!(!session.is_attached(), "should be detached after detach()");
-
-        let (_buf2, _rx2) = session.attach();
-        assert!(session.is_attached(), "should be attached after re-attach");
-
-        session.close();
-        assert!(!session.is_attached(), "should be detached after close()");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_info_reflects_attachment_state() {
-        let session = DaemonSession::new(
-            "test-info".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        assert!(!session.info().attached);
-
-        let (_buf, _rx) = session.attach();
-        assert!(session.info().attached);
-
-        session.detach();
-        assert!(!session.info().attached);
-    }
-
-    /// Bug A1: When the per-session output channel fills during heavy output,
-    /// data falls back to the ring buffer but is never replayed to the attached
-    /// client. The ring buffer should remain empty while a client is attached —
-    /// all data should flow through the channel.
-    #[cfg(windows)]
-    #[test]
-    fn test_no_data_stranded_in_ring_buffer_while_attached() {
-        let session = DaemonSession::new(
-            "test-bp".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        let (_buf, mut rx) = session.attach();
-
-        // Generate enough output to overflow the channel (capacity 64).
-        // PowerShell prints numbered lines; with small PTY reads, this produces
-        // many chunks that will fill the 64-message channel.
-        session
-            .write(b"for ($i = 1; $i -le 300; $i++) { Write-Output \"LINE$i\" }\r\n")
-            .unwrap();
-
-        // Wait for output to be produced — don't read from rx yet so the
-        // channel fills up and triggers the Full path.
-        thread::sleep(Duration::from_secs(3));
-
-        // Now drain the channel, giving the reader thread time to catch up
-        // after backpressure is relieved.
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut consecutive_empties = 0;
-        loop {
-            match rx.try_recv() {
-                Ok(_) => {
-                    consecutive_empties = 0;
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                    consecutive_empties += 1;
-                    if consecutive_empties > 200 || Instant::now() > deadline {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
-            }
-        }
-
-        // Bug A1: ring buffer should be empty — all data should have flowed
-        // through the channel, not fallen back to the ring buffer.
-        let ring_size = session.ring_buffer_len();
-        assert_eq!(
-            ring_size, 0,
-            "Bug A1: {} bytes stranded in ring buffer while client was attached \
-             — data lost during channel backpressure",
-            ring_size
-        );
-
-        session.close();
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_is_attached_does_not_block_on_output_tx() {
-        // Bug: is_attached() locked output_tx, causing handler starvation when the
-        // reader thread held that lock under heavy output. The fix uses AtomicBool
-        // so is_attached() never contends with the reader thread.
-        let session = DaemonSession::new(
-            "test-lockfree".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        let output_tx = session.output_tx.clone();
-
-        // Hold output_tx locked for 500ms on a background thread
-        let handle = thread::spawn(move || {
-            let _guard = output_tx.lock();
-            thread::sleep(Duration::from_millis(500));
-        });
-
-        // Give the background thread time to acquire the lock
-        thread::sleep(Duration::from_millis(50));
-
-        // is_attached() should return immediately (lock-free via AtomicBool)
-        let start = Instant::now();
-        let attached = session.is_attached();
-        let elapsed = start.elapsed();
-
-        assert!(!attached);
-        assert!(
-            elapsed.as_millis() < 50,
-            "is_attached() took {}ms — should be lock-free, not blocked on output_tx",
-            elapsed.as_millis()
-        );
-
-        handle.join().unwrap();
-    }
-
-    // --- Tests for running flag (SessionClosed on PTY exit) ---
-    //
-    // Bug: when a shell process exited, the daemon never notified anyone. The
-    // session stayed in the HashMap, the terminal tab looked frozen, and the
-    // user could type but nothing happened.
-    // Fix: reader thread sets running=false on EOF, enabling the forwarding
-    // task to detect PTY death and send SessionClosed.
-
-    #[cfg(windows)]
-    #[test]
-    fn test_close_sets_running_false() {
-        // Bug: PTY exit left session marked as running, so dead sessions were
-        // invisible to ListSessions and reattached on reconnect.
-        let session = DaemonSession::new(
-            "test-running".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        assert!(session.is_running(), "new session should be running");
-
-        session.close();
-        assert!(!session.is_running(), "session should not be running after close()");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_info_reflects_running_state() {
-        // Bug: SessionInfo had no `running` field, so clients couldn't
-        // distinguish dead sessions from live ones via ListSessions.
-        let session = DaemonSession::new(
-            "test-info-running".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        assert!(session.info().running, "new session info should show running=true");
-
-        session.close();
-        assert!(!session.info().running, "closed session info should show running=false");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_running_flag_is_shared() {
-        // The forwarding task needs to read the running flag after the channel
-        // closes. Verify running_flag() returns the same Arc as is_running().
-        let session = DaemonSession::new(
-            "test-flag-shared".into(),
-            ShellType::Windows,
-            None,
-            24,
-            80,
-            None,
-        )
-        .unwrap();
-
-        let flag = session.running_flag();
-        assert!(flag.load(Ordering::Relaxed));
-
-        session.close();
-        assert!(!flag.load(Ordering::Relaxed), "running_flag should reflect close()");
     }
 }
