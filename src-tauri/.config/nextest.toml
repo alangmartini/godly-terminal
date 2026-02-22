@@ -15,6 +15,12 @@ max-threads = 4
 [test-groups.stress-tests]
 max-threads = 2
 
+# CI-only: all daemon integration tests run serially.
+# CI runners are shared VMs — parallel daemons cause pipe timeouts.
+# Cross-job parallelism via 3-partition matrix provides the speedup instead.
+[test-groups.ci-serial]
+max-threads = 1
+
 # ===========================================================================
 # Profile: default (local dev, full suite)
 # ===========================================================================
@@ -95,18 +101,17 @@ status-level = "pass"
 final-status-level = "flaky"
 junit = { path = "junit.xml" }
 
-# --- Stress/perf tests: cap at 2 concurrent (timing-sensitive) ---
-
-[[profile.ci.overrides]]
-filter = "binary(memory_stress) | binary(arrow_up_history_latency) | binary(input_latency)"
-test-group = "stress-tests"
-
-# --- Daemon integration tests: cap at 4 concurrent ---
-# The stress tests already matched the stricter group above.
+# --- ALL daemon integration tests run serially on CI ---
+# CI runners are shared VMs with limited resources. Running multiple daemon
+# processes in parallel causes 5s pipe timeouts. The 3-partition matrix
+# already provides cross-job parallelism.
 
 [[profile.ci.overrides]]
 filter = """
-binary(handler_starvation)
+binary(memory_stress)
+| binary(arrow_up_history_latency)
+| binary(input_latency)
+| binary(handler_starvation)
 | binary(input_latency_full_path)
 | binary(read_grid)
 | binary(zombie_tabs)
@@ -117,4 +122,4 @@ binary(handler_starvation)
 | binary(session_persistence)
 | binary(single_instance)
 """
-test-group = "daemon-integration"
+test-group = "ci-serial"
