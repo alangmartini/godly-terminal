@@ -12,6 +12,14 @@ const TAG_EVENT_OUTPUT: u8 = 0x01;
 const TAG_REQUEST_WRITE: u8 = 0x02;
 const TAG_RESPONSE_BUFFER: u8 = 0x03;
 
+// ── Shim binary frame tags ──────────────────────────────────────────────
+// Used for daemon <-> pty-shim communication. Different tag range (0x1x)
+// from daemon <-> client tags (0x0x) to avoid confusion.
+
+pub const TAG_SHIM_WRITE: u8 = 0x10;       // daemon -> shim: input bytes
+pub const TAG_SHIM_BUFFER_DATA: u8 = 0x11; // shim -> daemon: ring buffer replay
+pub const TAG_SHIM_OUTPUT: u8 = 0x12;      // shim -> daemon: live PTY output
+
 /// Encode a binary frame: [tag][session_id_len][session_id bytes][data bytes]
 fn encode_binary_frame(tag: u8, session_id: &str, data: &[u8]) -> Vec<u8> {
     let sid_bytes = session_id.as_bytes();
@@ -214,6 +222,52 @@ pub fn read_request<R: io::Read>(reader: &mut R) -> io::Result<Option<Request>> 
                 format!("Unknown request binary frame tag: 0x{:02X}", tag),
             )),
         }
+    }
+}
+
+// ── Shim binary frame types and functions ────────────────────────────────
+
+/// A frame received from a shim pipe.
+#[derive(Debug)]
+pub enum ShimFrame {
+    /// Binary data frame with tag (0x10, 0x11, 0x12)
+    Binary { tag: u8, data: Vec<u8> },
+    /// JSON control message (raw bytes, needs deserialization by caller)
+    Json(Vec<u8>),
+}
+
+/// Write a binary data frame for shim communication: [tag][data]
+/// Used for Write (0x10), BufferData (0x11), Output (0x12) messages.
+pub fn write_shim_binary<W: io::Write>(writer: &mut W, tag: u8, data: &[u8]) -> io::Result<()> {
+    let mut payload = Vec::with_capacity(1 + data.len());
+    payload.push(tag);
+    payload.extend_from_slice(data);
+    write_length_prefixed(writer, &payload)
+}
+
+/// Write a shim JSON control message (ShimRequest or ShimResponse).
+pub fn write_shim_json<W: io::Write, T: Serialize>(writer: &mut W, msg: &T) -> io::Result<()> {
+    write_message(writer, msg)
+}
+
+/// Read a frame from a shim pipe and classify it.
+/// Returns None on EOF.
+pub fn read_shim_frame<R: io::Read>(reader: &mut R) -> io::Result<Option<ShimFrame>> {
+    let buf = match read_length_prefixed(reader)? {
+        Some(buf) => buf,
+        None => return Ok(None),
+    };
+    if buf.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty shim frame"));
+    }
+    if buf[0] == 0x7B {
+        // JSON control message — could be ShimRequest or ShimResponse
+        // Caller must try deserializing as the expected type
+        Ok(Some(ShimFrame::Json(buf)))
+    } else {
+        let tag = buf[0];
+        let data = buf[1..].to_vec();
+        Ok(Some(ShimFrame::Binary { tag, data }))
     }
 }
 
@@ -506,5 +560,227 @@ mod tests {
             binary_buf.len(),
             json_buf.len()
         );
+    }
+
+    // ── Shim binary frame roundtrip tests ────────────────────────────
+
+    #[test]
+    fn shim_binary_write_roundtrip() {
+        let input_data = b"hello from daemon";
+        let mut buf = Vec::new();
+        write_shim_binary(&mut buf, TAG_SHIM_WRITE, input_data).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_WRITE);
+                assert_eq!(data, input_data);
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_binary_buffer_data_roundtrip() {
+        let replay_data = vec![27, 91, 72, 27, 91, 50, 74]; // ESC[H ESC[2J
+        let mut buf = Vec::new();
+        write_shim_binary(&mut buf, TAG_SHIM_BUFFER_DATA, &replay_data).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_BUFFER_DATA);
+                assert_eq!(data, replay_data);
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_binary_output_roundtrip() {
+        let output_data = b"shell output bytes";
+        let mut buf = Vec::new();
+        write_shim_binary(&mut buf, TAG_SHIM_OUTPUT, output_data).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_OUTPUT);
+                assert_eq!(data, output_data.to_vec());
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_json_control_message_roundtrip() {
+        use crate::messages::ShimRequest;
+
+        let req = ShimRequest::Resize { rows: 24, cols: 80 };
+        let mut buf = Vec::new();
+        write_shim_json(&mut buf, &req).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Json(json_bytes) => {
+                let deserialized: ShimRequest = serde_json::from_slice(&json_bytes).unwrap();
+                match deserialized {
+                    ShimRequest::Resize { rows, cols } => {
+                        assert_eq!(rows, 24);
+                        assert_eq!(cols, 80);
+                    }
+                    other => panic!("Expected Resize, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Json frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_json_response_roundtrip() {
+        use crate::messages::ShimResponse;
+
+        let resp = ShimResponse::StatusInfo {
+            shell_pid: 999,
+            running: true,
+            rows: 30,
+            cols: 120,
+        };
+        let mut buf = Vec::new();
+        write_shim_json(&mut buf, &resp).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Json(json_bytes) => {
+                let deserialized: ShimResponse = serde_json::from_slice(&json_bytes).unwrap();
+                match deserialized {
+                    ShimResponse::StatusInfo { shell_pid, running, rows, cols } => {
+                        assert_eq!(shell_pid, 999);
+                        assert!(running);
+                        assert_eq!(rows, 30);
+                        assert_eq!(cols, 120);
+                    }
+                    other => panic!("Expected StatusInfo, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Json frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_binary_empty_data() {
+        let mut buf = Vec::new();
+        write_shim_binary(&mut buf, TAG_SHIM_OUTPUT, &[]).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_OUTPUT);
+                assert!(data.is_empty());
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_binary_large_data() {
+        let large_data = vec![0xCD; 500_000]; // 500KB
+        let mut buf = Vec::new();
+        write_shim_binary(&mut buf, TAG_SHIM_BUFFER_DATA, &large_data).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+        let frame = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match frame {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_BUFFER_DATA);
+                assert_eq!(data.len(), 500_000);
+                assert_eq!(data, large_data);
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_eof_returns_none() {
+        let mut cursor = Cursor::new(Vec::<u8>::new());
+        assert!(read_shim_frame(&mut cursor).unwrap().is_none());
+    }
+
+    #[test]
+    fn shim_mixed_binary_and_json_sequence() {
+        use crate::messages::{ShimRequest, ShimResponse};
+
+        let mut buf = Vec::new();
+
+        // Binary: daemon writes input to shim
+        write_shim_binary(&mut buf, TAG_SHIM_WRITE, b"ls\r\n").unwrap();
+        // JSON: daemon sends resize
+        write_shim_json(&mut buf, &ShimRequest::Resize { rows: 50, cols: 132 }).unwrap();
+        // Binary: shim sends output
+        write_shim_binary(&mut buf, TAG_SHIM_OUTPUT, b"file1.txt\nfile2.txt\n").unwrap();
+        // JSON: shim sends status
+        write_shim_json(&mut buf, &ShimResponse::StatusInfo {
+            shell_pid: 42,
+            running: true,
+            rows: 50,
+            cols: 132,
+        }).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+
+        // Frame 1: binary write
+        let f1 = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match f1 {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_WRITE);
+                assert_eq!(data, b"ls\r\n");
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+
+        // Frame 2: JSON resize
+        let f2 = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match f2 {
+            ShimFrame::Json(json_bytes) => {
+                let req: ShimRequest = serde_json::from_slice(&json_bytes).unwrap();
+                assert!(matches!(req, ShimRequest::Resize { rows: 50, cols: 132 }));
+            }
+            other => panic!("Expected Json frame, got {:?}", other),
+        }
+
+        // Frame 3: binary output
+        let f3 = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match f3 {
+            ShimFrame::Binary { tag, data } => {
+                assert_eq!(tag, TAG_SHIM_OUTPUT);
+                assert_eq!(data, b"file1.txt\nfile2.txt\n");
+            }
+            other => panic!("Expected Binary frame, got {:?}", other),
+        }
+
+        // Frame 4: JSON status
+        let f4 = read_shim_frame(&mut cursor).unwrap().unwrap();
+        match f4 {
+            ShimFrame::Json(json_bytes) => {
+                let resp: ShimResponse = serde_json::from_slice(&json_bytes).unwrap();
+                match resp {
+                    ShimResponse::StatusInfo { shell_pid, running, .. } => {
+                        assert_eq!(shell_pid, 42);
+                        assert!(running);
+                    }
+                    other => panic!("Expected StatusInfo, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Json frame, got {:?}", other),
+        }
+
+        // EOF
+        assert!(read_shim_frame(&mut cursor).unwrap().is_none());
     }
 }

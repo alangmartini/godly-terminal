@@ -173,6 +173,21 @@ pub struct RichGridDiff {
     pub full_repaint: bool,
 }
 
+/// Metadata about a running pty-shim process.
+/// Persisted as JSON in %APPDATA%/com.godly.terminal/shims/{session-id}.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShimMetadata {
+    pub session_id: String,
+    pub shim_pid: u32,
+    pub shim_pipe_name: String,
+    pub shell_pid: u32,
+    pub shell_type: ShellType,
+    pub cwd: Option<String>,
+    pub rows: u16,
+    pub cols: u16,
+    pub created_at: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +287,81 @@ mod tests {
             ShellType::Custom { program: "fish".to_string(), args: None }.display_name(),
             "fish"
         );
+    }
+
+    #[test]
+    fn test_shim_metadata_serialization_roundtrip() {
+        let meta = ShimMetadata {
+            session_id: "sess-abc-123".to_string(),
+            shim_pid: 12345,
+            shim_pipe_name: r"\\.\pipe\godly-shim-sess-abc-123".to_string(),
+            shell_pid: 67890,
+            shell_type: ShellType::Windows,
+            cwd: Some("C:\\Users\\test".to_string()),
+            rows: 24,
+            cols: 80,
+            created_at: 1700000000,
+        };
+
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: ShimMetadata = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.session_id, "sess-abc-123");
+        assert_eq!(deserialized.shim_pid, 12345);
+        assert_eq!(deserialized.shim_pipe_name, r"\\.\pipe\godly-shim-sess-abc-123");
+        assert_eq!(deserialized.shell_pid, 67890);
+        assert_eq!(deserialized.shell_type, ShellType::Windows);
+        assert_eq!(deserialized.cwd, Some("C:\\Users\\test".to_string()));
+        assert_eq!(deserialized.rows, 24);
+        assert_eq!(deserialized.cols, 80);
+        assert_eq!(deserialized.created_at, 1700000000);
+    }
+
+    #[test]
+    fn test_shim_metadata_with_wsl_shell() {
+        let meta = ShimMetadata {
+            session_id: "wsl-sess".to_string(),
+            shim_pid: 111,
+            shim_pipe_name: r"\\.\pipe\godly-shim-wsl-sess".to_string(),
+            shell_pid: 222,
+            shell_type: ShellType::Wsl { distribution: Some("Ubuntu".to_string()) },
+            cwd: None,
+            rows: 30,
+            cols: 120,
+            created_at: 1700000001,
+        };
+
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: ShimMetadata = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.shell_type, ShellType::Wsl { distribution: Some("Ubuntu".to_string()) });
+        assert_eq!(deserialized.cwd, None);
+    }
+
+    #[test]
+    fn test_shim_metadata_with_custom_shell() {
+        let meta = ShimMetadata {
+            session_id: "custom-sess".to_string(),
+            shim_pid: 333,
+            shim_pipe_name: r"\\.\pipe\godly-shim-custom-sess".to_string(),
+            shell_pid: 444,
+            shell_type: ShellType::Custom {
+                program: "nu.exe".to_string(),
+                args: Some(vec!["-l".to_string()]),
+            },
+            cwd: Some("/home/user".to_string()),
+            rows: 50,
+            cols: 200,
+            created_at: 1700000002,
+        };
+
+        let json = serde_json::to_string_pretty(&meta).unwrap();
+        let deserialized: ShimMetadata = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.session_id, "custom-sess");
+        assert_eq!(deserialized.shell_type, ShellType::Custom {
+            program: "nu.exe".to_string(),
+            args: Some(vec!["-l".to_string()]),
+        });
     }
 }

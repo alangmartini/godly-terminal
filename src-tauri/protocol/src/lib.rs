@@ -6,9 +6,15 @@ pub mod messages;
 pub mod types;
 
 pub use frame::{read_daemon_message, read_message, read_request, write_daemon_message, write_message, write_request};
+pub use frame::{
+    read_shim_frame, write_shim_binary, write_shim_json, ShimFrame,
+    TAG_SHIM_WRITE, TAG_SHIM_BUFFER_DATA, TAG_SHIM_OUTPUT,
+};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 pub use messages::{DaemonMessage, Event, Request, Response};
+pub use messages::{ShimRequest, ShimResponse};
 pub use types::{GridData, SessionInfo, ShellType};
+pub use types::ShimMetadata;
 
 /// Default named pipe path used by both daemon and client
 pub const PIPE_NAME: &str = r"\\.\pipe\godly-terminal-daemon";
@@ -38,6 +44,20 @@ pub fn pipe_name() -> String {
 pub fn mcp_pipe_name() -> String {
     std::env::var("GODLY_MCP_PIPE_NAME")
         .unwrap_or_else(|_| format!(r"\\.\pipe\godly-terminal-mcp{}", instance_suffix()))
+}
+
+/// Get the named pipe name for a pty-shim process.
+pub fn shim_pipe_name(session_id: &str) -> String {
+    format!(r"\\.\pipe\godly-shim-{}{}", session_id, instance_suffix())
+}
+
+/// Get the directory where shim metadata files are stored.
+pub fn shim_metadata_dir() -> std::path::PathBuf {
+    let base = std::env::var("APPDATA")
+        .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
+    std::path::PathBuf::from(base)
+        .join("com.godly.terminal")
+        .join("shims")
 }
 
 #[cfg(test)]
@@ -92,6 +112,11 @@ mod tests {
             "instance_suffix" => instance_suffix(),
             "pipe_name" => pipe_name(),
             "mcp_pipe_name" => mcp_pipe_name(),
+            "shim_pipe_name" => {
+                let session_id = std::env::var("__SUBPROCESS_SESSION_ID")
+                    .unwrap_or_else(|_| "test-sess".to_string());
+                shim_pipe_name(&session_id)
+            }
             _ => panic!("unknown check: {}", check),
         };
         std::fs::write(result_file, &result).expect("failed to write result file");
@@ -163,5 +188,49 @@ mod tests {
             "mcp_pipe_name",
         );
         assert_eq!(result, r"\\.\pipe\custom-mcp");
+    }
+
+    #[test]
+    fn shim_pipe_name_default_without_instance() {
+        let result = run_in_subprocess(
+            &[("__SUBPROCESS_SESSION_ID", "abc-123")],
+            "shim_pipe_name",
+        );
+        assert_eq!(result, r"\\.\pipe\godly-shim-abc-123");
+    }
+
+    #[test]
+    fn shim_pipe_name_with_instance_suffix() {
+        let result = run_in_subprocess(
+            &[
+                ("__SUBPROCESS_SESSION_ID", "abc-123"),
+                ("GODLY_INSTANCE", "test"),
+            ],
+            "shim_pipe_name",
+        );
+        assert_eq!(result, r"\\.\pipe\godly-shim-abc-123-test");
+    }
+
+    #[test]
+    fn shim_pipe_name_unique_per_session() {
+        let result1 = run_in_subprocess(
+            &[("__SUBPROCESS_SESSION_ID", "sess-1")],
+            "shim_pipe_name",
+        );
+        let result2 = run_in_subprocess(
+            &[("__SUBPROCESS_SESSION_ID", "sess-2")],
+            "shim_pipe_name",
+        );
+        assert_ne!(result1, result2);
+        assert_eq!(result1, r"\\.\pipe\godly-shim-sess-1");
+        assert_eq!(result2, r"\\.\pipe\godly-shim-sess-2");
+    }
+
+    #[test]
+    fn shim_metadata_dir_uses_appdata() {
+        // shim_metadata_dir reads APPDATA at runtime; just verify it returns
+        // a path ending in com.godly.terminal/shims
+        let dir = shim_metadata_dir();
+        assert!(dir.ends_with(std::path::Path::new("com.godly.terminal").join("shims")));
     }
 }
