@@ -57,6 +57,120 @@ fn cleanup_old_binaries(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Find the godly-mcp binary: resource dir (installed) > exe dir > target/debug (dev).
+fn find_mcp_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    // 1. Resource dir (Tauri bundle)
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let p = resource_dir.join("godly-mcp.exe");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    // 2. Same dir as current exe
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("godly-mcp.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    // 3. target/debug (dev builds)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("../godly-mcp.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
+/// Start the MCP HTTP server as a detached process if not already running.
+fn start_mcp_http_server(app_handle: &tauri::AppHandle) {
+    // Check if a server is already running via discovery file
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let discovery = std::path::PathBuf::from(&appdata)
+            .join("com.godly.terminal")
+            .join("mcp-http.json");
+
+        if discovery.exists() {
+            if let Ok(content) = std::fs::read_to_string(&discovery) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(pid) = json.get("pid").and_then(|v| v.as_u64()) {
+                        // Check if process is still alive
+                        #[cfg(windows)]
+                        {
+                            use winapi::um::handleapi::CloseHandle;
+                            use winapi::um::processthreadsapi::OpenProcess;
+                            use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
+
+                            let handle = unsafe {
+                                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32)
+                            };
+                            if !handle.is_null() {
+                                unsafe { CloseHandle(handle) };
+                                eprintln!(
+                                    "[lib] MCP HTTP server already running (PID {}), skipping spawn",
+                                    pid
+                                );
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            // Stale discovery file, remove it
+            let _ = std::fs::remove_file(&discovery);
+        }
+    }
+
+    let mcp_binary = match find_mcp_binary(app_handle) {
+        Some(p) => p,
+        None => {
+            eprintln!("[lib] godly-mcp binary not found, skipping HTTP server start");
+            return;
+        }
+    };
+
+    eprintln!(
+        "[lib] Starting MCP HTTP server: {}",
+        mcp_binary.display()
+    );
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+
+        match std::process::Command::new(&mcp_binary)
+            .arg("--http")
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                eprintln!("[lib] MCP HTTP server spawned (PID {})", child.id());
+            }
+            Err(e) => {
+                eprintln!("[lib] Failed to start MCP HTTP server: {}", e);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        eprintln!("[lib] MCP HTTP server auto-start is only supported on Windows");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(feature = "leak-check")]
@@ -251,6 +365,9 @@ pub fn run() {
                 auto_save.clone(),
                 llm_state.clone(),
             );
+
+            // Start MCP HTTP server for Streamable HTTP transport
+            start_mcp_http_server(&app_handle);
 
             // Handle window close: detach sessions (don't kill them) and save layout
             let main_window = app.get_webview_window("main").unwrap();

@@ -1,4 +1,5 @@
 use std::io;
+use std::sync::Mutex;
 
 use godly_protocol::{McpRequest, McpResponse};
 
@@ -6,7 +7,7 @@ use crate::log::mcp_log;
 
 /// Client that communicates with the Tauri app via the MCP named pipe.
 pub struct McpPipeClient {
-    pipe: std::fs::File,
+    pipe: Mutex<std::fs::File>,
 }
 
 impl McpPipeClient {
@@ -55,7 +56,9 @@ impl McpPipeClient {
         use std::os::windows::io::FromRawHandle;
         let pipe = unsafe { std::fs::File::from_raw_handle(handle as _) };
 
-        Ok(Self { pipe })
+        Ok(Self {
+            pipe: Mutex::new(pipe),
+        })
     }
 
     #[cfg(not(windows))]
@@ -64,17 +67,21 @@ impl McpPipeClient {
     }
 
     /// Send an MCP request and wait for the response.
-    pub fn send_request(&mut self, request: &McpRequest) -> Result<McpResponse, io::Error> {
+    pub fn send_request(&self, request: &McpRequest) -> Result<McpResponse, io::Error> {
         mcp_log!("pipe_client: sending request: {:?}", request);
 
-        godly_protocol::write_message(&mut self.pipe, request)?;
+        let mut pipe = self.pipe.lock().map_err(|e| {
+            io::Error::new(io::ErrorKind::Other, format!("Mutex poisoned: {}", e))
+        })?;
+
+        godly_protocol::write_message(&mut *pipe, request)?;
         // Flush to ensure the message is sent
         use std::io::Write;
-        self.pipe.flush().ok();
+        pipe.flush().ok();
 
         mcp_log!("pipe_client: request sent, waiting for response...");
 
-        match godly_protocol::read_message::<_, McpResponse>(&mut self.pipe)? {
+        match godly_protocol::read_message::<_, McpResponse>(&mut *pipe)? {
             Some(response) => {
                 mcp_log!("pipe_client: response received: {:?}", response);
                 Ok(response)

@@ -2,14 +2,15 @@ mod app_backend;
 mod backend;
 mod daemon_direct;
 mod handler;
+pub mod http_server;
 mod jsonrpc;
 mod log;
 mod pipe_client;
+pub mod session;
 mod sse;
 mod tools;
 
 use std::io::{self, BufReader};
-
 use jsonrpc::{read_message, write_message};
 use log::mcp_log;
 
@@ -24,7 +25,7 @@ fn main() {
         std::process::exit(run_cli(&args[1..]));
     }
 
-    // Otherwise, run in MCP server mode (stdin/stdout JSON-RPC).
+    // Default: run in stdio MCP server mode (backward compat).
     run_mcp_server();
 }
 
@@ -38,7 +39,9 @@ fn print_help() {
 godly-mcp — Godly Terminal MCP server & CLI
 
 USAGE:
-    godly-mcp                          Start MCP server (stdin/stdout JSON-RPC)
+    godly-mcp                          Start MCP server (stdio JSON-RPC, default)
+    godly-mcp --stdio                  Start MCP server (stdio JSON-RPC, explicit)
+    godly-mcp --http [PORT]            Start MCP server (Streamable HTTP, default port {})
     godly-mcp sse [OPTIONS]            Start MCP server (SSE/HTTP transport)
     godly-mcp notify [OPTIONS]         Send a notification to Godly Terminal
     godly-mcp --help                   Show this help
@@ -47,7 +50,8 @@ COMMANDS:
     sse       Start SSE transport server (HTTP, serves multiple sessions)
     notify    Send a sound notification and badge alert
 
-Run 'godly-mcp sse --help' or 'godly-mcp notify --help' for subcommand details."
+Run 'godly-mcp sse --help' or 'godly-mcp notify --help' for subcommand details.",
+        http_server::DEFAULT_PORT
     );
 }
 
@@ -76,38 +80,20 @@ EXAMPLES:
     );
 }
 
-fn print_sse_help() {
-    eprintln!(
-        "\
-Start the SSE transport server.
-
-Runs a persistent HTTP server that serves multiple Claude Code sessions
-over Server-Sent Events (SSE). One process, many clients.
-
-USAGE:
-    godly-mcp sse [OPTIONS]
-
-OPTIONS:
-    -p, --port <PORT>          Port to listen on (default: 8089)
-    -h, --help                 Show this help
-
-PROTOCOL:
-    1. Client opens GET /sse → receives SSE stream
-    2. Server sends event: endpoint with POST URL
-    3. Client sends JSON-RPC via POST /messages?sessionId=XXX
-    4. Server pushes response as event: message on the SSE stream
-
-EXAMPLES:
-    godly-mcp sse
-    godly-mcp sse --port 9090"
-    );
-}
-
 /// Run in CLI mode. Returns the process exit code.
 fn run_cli(args: &[String]) -> i32 {
     match args[0].as_str() {
         "--help" | "-h" => {
             print_help();
+            0
+        }
+        "--stdio" => {
+            run_mcp_server();
+            0
+        }
+        "--http" => {
+            let port = args.get(1).and_then(|s| s.parse::<u16>().ok());
+            run_http_server_blocking(port);
             0
         }
         "notify" => run_cli_notify(&args[1..]),
@@ -167,7 +153,7 @@ fn run_cli_notify(args: &[String]) -> i32 {
     };
 
     // Connect to pipe and send the request (CLI notify only uses app backend)
-    let mut client = match pipe_client::McpPipeClient::connect() {
+    let client = match pipe_client::McpPipeClient::connect() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -198,6 +184,33 @@ fn run_cli_notify(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+fn print_sse_help() {
+    eprintln!(
+        "\
+Start the SSE transport server.
+
+Runs a persistent HTTP server that serves multiple Claude Code sessions
+over Server-Sent Events (SSE). One process, many clients.
+
+USAGE:
+    godly-mcp sse [OPTIONS]
+
+OPTIONS:
+    -p, --port <PORT>          Port to listen on (default: 8089)
+    -h, --help                 Show this help
+
+PROTOCOL:
+    1. Client opens GET /sse → receives SSE stream
+    2. Server sends event: endpoint with POST URL
+    3. Client sends JSON-RPC via POST /messages?sessionId=XXX
+    4. Server pushes response as event: message on the SSE stream
+
+EXAMPLES:
+    godly-mcp sse
+    godly-mcp sse --port 9090"
+    );
 }
 
 /// Parse and execute `godly-mcp sse [OPTIONS]`.
@@ -244,13 +257,33 @@ fn run_cli_sse(args: &[String]) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// MCP server mode (stdio)
+// HTTP server mode
+// ---------------------------------------------------------------------------
+
+fn run_http_server_blocking(port: Option<u16>) {
+    log::init();
+
+    mcp_log!("=== godly-mcp starting (HTTP mode) === build={}", BUILD);
+    mcp_log!("PID: {}", std::process::id());
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        if let Err(e) = http_server::run_http_server(port).await {
+            mcp_log!("HTTP server error: {}", e);
+            eprintln!("[godly-mcp] HTTP server error: {}", e);
+            std::process::exit(1);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Stdio MCP server mode
 // ---------------------------------------------------------------------------
 
 fn run_mcp_server() {
     log::init();
 
-    mcp_log!("=== godly-mcp starting === build={}", BUILD);
+    mcp_log!("=== godly-mcp starting (stdio mode) === build={}", BUILD);
     mcp_log!("PID: {}", std::process::id());
     if let Ok(exe) = std::env::current_exe() {
         mcp_log!("exe: {}", exe.display());
@@ -324,6 +357,7 @@ fn run_mcp_server() {
             eprintln!("[godly-mcp] Write error: {}", e);
             break;
         }
+
 
         mcp_log!("Response sent successfully");
     }

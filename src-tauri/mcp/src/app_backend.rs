@@ -16,7 +16,7 @@ impl AppBackend {
 }
 
 impl Backend for AppBackend {
-    fn send_request(&mut self, request: &McpRequest) -> Result<McpResponse, String> {
+    fn send_request(&self, request: &McpRequest) -> Result<McpResponse, String> {
         self.client
             .send_request(request)
             .map_err(|e| format!("Pipe error: {}", e))
