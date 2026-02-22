@@ -14,7 +14,7 @@ use tower_http::cors::CorsLayer;
 use crate::jsonrpc::JsonRpcResponse;
 use crate::log::mcp_log;
 use crate::session::SessionRegistry;
-use crate::{connect_backend, handle_request};
+use crate::handler;
 
 const SESSION_HEADER: &str = "mcp-session-id";
 const SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60); // 5 minutes
@@ -172,7 +172,7 @@ async fn handle_post(
     let req_clone = request.clone();
 
     let response = tokio::task::spawn_blocking(move || {
-        handle_request(&req_clone, backend.as_ref(), &terminal_session_id)
+        handler::handle_request_ref(&req_clone, backend.as_ref(), &terminal_session_id)
     })
     .await
     .unwrap_or_else(|e| {
@@ -192,7 +192,7 @@ async fn handle_initialize(
     request: &crate::jsonrpc::JsonRpcRequest,
 ) -> Response {
     // Connect a new backend for this session (blocking I/O)
-    let backend = match tokio::task::spawn_blocking(connect_backend).await {
+    let backend = match tokio::task::spawn_blocking(handler::connect_backend_arc).await {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => {
             mcp_log!("http: failed to connect backend for new session: {}", e);
