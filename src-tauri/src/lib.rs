@@ -46,6 +46,7 @@ fn cleanup_old_binaries(app_handle: &tauri::AppHandle) {
         "godly-daemon.exe.old",
         "godly-mcp.exe.old",
         "godly-notify.exe.old",
+        "godly-remote.exe.old",
     ] {
         let path = resource_dir.join(name);
         if path.exists() {
@@ -168,6 +169,84 @@ fn start_mcp_http_server(app_handle: &tauri::AppHandle) {
     #[cfg(not(windows))]
     {
         eprintln!("[lib] MCP HTTP server auto-start is only supported on Windows");
+    }
+}
+
+/// Find the godly-remote binary: resource dir (installed) > exe dir > target/debug (dev).
+fn find_remote_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    // 1. Resource dir (Tauri bundle)
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let p = resource_dir.join("godly-remote.exe");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    // 2. Same dir as current exe
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("godly-remote.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    // 3. target/debug (dev builds)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("../godly-remote.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
+/// Start the Remote HTTP server as a detached process.
+/// godly-remote doesn't write a discovery file — if the port is already bound
+/// (from a previous app launch), the new process simply fails to bind and exits.
+fn start_remote_http_server(app_handle: &tauri::AppHandle) {
+    let remote_binary = match find_remote_binary(app_handle) {
+        Some(p) => p,
+        None => {
+            eprintln!("[lib] godly-remote binary not found, skipping HTTP server start");
+            return;
+        }
+    };
+
+    eprintln!(
+        "[lib] Starting Remote HTTP server: {}",
+        remote_binary.display()
+    );
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+
+        match std::process::Command::new(&remote_binary)
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                eprintln!("[lib] Remote HTTP server spawned (PID {})", child.id());
+            }
+            Err(e) => {
+                eprintln!("[lib] Failed to start Remote HTTP server: {}", e);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        eprintln!("[lib] Remote HTTP server auto-start is only supported on Windows");
     }
 }
 
@@ -368,6 +447,9 @@ pub fn run() {
 
             // Start MCP HTTP server for Streamable HTTP transport
             start_mcp_http_server(&app_handle);
+
+            // Start Remote HTTP server for phone remote control
+            start_remote_http_server(&app_handle);
 
             // Handle window close: detach sessions (don't kill them) and save layout
             let main_window = app.get_webview_window("main").unwrap();
