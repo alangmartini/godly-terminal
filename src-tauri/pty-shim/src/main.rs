@@ -305,6 +305,14 @@ fn main_loop(
             return Ok(());
         }
 
+        // Drain any pending output into the ring buffer while disconnected.
+        // Without this, the unbounded mpsc channel between the PTY reader thread
+        // and main_loop grows without limit when no daemon is connected,
+        // causing memory to balloon (observed 600MB-1GB per shim).
+        while let Ok(data) = output_rx.try_recv() {
+            ring_buffer.lock().unwrap().append(&data);
+        }
+
         // Create pipe and wait for daemon (short timeout to re-check flags)
         let handle = match pipe::create_pipe_and_wait(pipe_name, Duration::from_secs(1)) {
             Ok(Some(h)) => h,
