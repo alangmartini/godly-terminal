@@ -1,6 +1,9 @@
 mod auth;
 mod config;
 mod daemon_client;
+mod detection;
+mod event_pump;
+mod layout_reader;
 mod monitor;
 mod routes;
 mod ws;
@@ -9,9 +12,11 @@ use std::sync::Arc;
 
 use config::Config;
 use daemon_client::DaemonClient;
+use event_pump::EventPump;
+use layout_reader::LayoutReader;
 use monitor::MonitorRegistry;
 
-const BUILD: u32 = 1;
+const BUILD: u32 = 2;
 
 /// Shared application state, cloneable via Arc internals.
 #[derive(Clone)]
@@ -19,6 +24,8 @@ pub struct AppState {
     pub daemon: Arc<DaemonClient>,
     pub config: Arc<Config>,
     pub monitors: Arc<MonitorRegistry>,
+    pub layout_reader: Arc<LayoutReader>,
+    pub event_pump: Arc<EventPump>,
 }
 
 #[tokio::main]
@@ -52,11 +59,21 @@ async fn main() {
 
     let api_key = config.auth.api_key.clone();
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);
+    let scan_rows = config.monitor.scan_rows;
+
+    let daemon = Arc::new(daemon);
+    let event_pump = Arc::new(EventPump::new());
+
+    // Start the SSE event pump background task
+    event_pump.spawn(Arc::clone(&daemon), scan_rows);
+    tracing::info!("Event pump started (scan_rows={})", scan_rows);
 
     let state = AppState {
-        daemon: Arc::new(daemon),
+        daemon,
         config: Arc::new(config),
         monitors: Arc::new(MonitorRegistry::new()),
+        layout_reader: Arc::new(LayoutReader::new()),
+        event_pump,
     };
 
     let app = routes::build_router(state)
@@ -70,6 +87,7 @@ async fn main() {
         });
 
     tracing::info!("Listening on http://{}", bind_addr);
+    tracing::info!("Phone UI available at http://{}/phone", bind_addr);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
