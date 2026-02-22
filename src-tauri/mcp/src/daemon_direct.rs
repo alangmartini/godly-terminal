@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::Mutex;
 
 use godly_protocol::ansi::{strip_ansi, truncate_output};
 use godly_protocol::{
@@ -13,7 +14,7 @@ use crate::log::mcp_log;
 /// Backend that talks directly to the daemon, bypassing the Tauri app.
 /// Only supports daemon-routable tools; returns clear errors for app-only tools.
 pub struct DaemonDirectBackend {
-    pipe: std::fs::File,
+    pipe: Mutex<std::fs::File>,
 }
 
 impl DaemonDirectBackend {
@@ -59,7 +60,7 @@ impl DaemonDirectBackend {
         mcp_log!("daemon_direct: connected to daemon pipe");
         use std::os::windows::io::FromRawHandle;
         let pipe = unsafe { std::fs::File::from_raw_handle(handle as _) };
-        Ok(Self { pipe })
+        Ok(Self { pipe: Mutex::new(pipe) })
     }
 
     #[cfg(not(windows))]
@@ -68,14 +69,15 @@ impl DaemonDirectBackend {
     }
 
     /// Send a daemon Request and read the Response, discarding async Events.
-    fn daemon_request(&mut self, request: &Request) -> Result<Response, String> {
-        write_request(&mut self.pipe, request)
+    fn daemon_request(&self, request: &Request) -> Result<Response, String> {
+        let mut pipe = self.pipe.lock().map_err(|e| format!("Mutex poisoned: {}", e))?;
+        write_request(&mut *pipe, request)
             .map_err(|e| format!("Daemon write error: {}", e))?;
-        self.pipe.flush().ok();
+        pipe.flush().ok();
 
         // Read messages, discarding Events until we get a Response
         loop {
-            let msg: DaemonMessage = read_daemon_message(&mut self.pipe)
+            let msg: DaemonMessage = read_daemon_message(&mut *pipe)
                 .map_err(|e| format!("Daemon read error: {}", e))?
                 .ok_or_else(|| "Daemon pipe closed".to_string())?;
 
@@ -90,7 +92,7 @@ impl DaemonDirectBackend {
     }
 
     /// Look up a single session by ID via ListSessions.
-    fn get_session_by_id(&mut self, session_id: &str) -> Result<McpResponse, String> {
+    fn get_session_by_id(&self, session_id: &str) -> Result<McpResponse, String> {
         let resp = self.daemon_request(&Request::ListSessions)?;
         match resp {
             Response::SessionList { sessions } => {
@@ -127,7 +129,7 @@ impl DaemonDirectBackend {
 }
 
 impl Backend for DaemonDirectBackend {
-    fn send_request(&mut self, request: &McpRequest) -> Result<McpResponse, String> {
+    fn send_request(&self, request: &McpRequest) -> Result<McpResponse, String> {
         match request {
             McpRequest::Ping => {
                 let resp = self.daemon_request(&Request::Ping)?;

@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::log::mcp_log;
 
 /// JSON-RPC request (MCP uses JSON-RPC 2.0 over stdio with Content-Length framing)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct JsonRpcRequest {
     #[allow(dead_code)]
     pub jsonrpc: String,

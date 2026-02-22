@@ -493,7 +493,7 @@ pub fn list_tools() -> Value {
 
 /// Dispatch a tool call to the appropriate MCP request.
 pub fn call_tool(
-    client: &mut dyn Backend,
+    client: &dyn Backend,
     name: &str,
     args: &Value,
     session_id: &Option<String>,
