@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -267,6 +267,62 @@ pub async fn resize_session(
 
     match resp {
         Response::Ok => Ok(StatusCode::NO_CONTENT),
+        Response::Error { message } => Err((StatusCode::BAD_REQUEST, message)),
+        other => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unexpected response: {:?}", other),
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TextQuery {
+    #[serde(default = "default_text_lines")]
+    pub lines: usize,
+}
+
+fn default_text_lines() -> usize {
+    50
+}
+
+#[derive(Serialize)]
+pub struct TextResponse {
+    pub lines: Vec<String>,
+    pub total_rows: usize,
+}
+
+/// GET /api/sessions/:id/text?lines=50
+/// Returns last N lines of terminal output as plain text (strips empty trailing lines).
+pub async fn get_text(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<TextQuery>,
+) -> Result<Json<TextResponse>, (StatusCode, String)> {
+    let resp = async_request(
+        &state.daemon,
+        Request::ReadGrid {
+            session_id: id,
+        },
+    )
+    .await
+    .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+
+    match resp {
+        Response::Grid { grid } => {
+            let total_rows = grid.rows.len();
+
+            // Strip empty trailing lines
+            let mut rows = grid.rows;
+            while rows.last().is_some_and(|r| r.trim().is_empty()) {
+                rows.pop();
+            }
+
+            // Take last N lines
+            let n = query.lines.min(rows.len());
+            let lines: Vec<String> = rows[rows.len().saturating_sub(n)..].to_vec();
+
+            Ok(Json(TextResponse { lines, total_rows }))
+        }
         Response::Error { message } => Err((StatusCode::BAD_REQUEST, message)),
         other => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
