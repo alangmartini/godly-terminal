@@ -194,13 +194,6 @@ impl DaemonFixture {
             std::process::id()
         );
 
-        let status = Command::new("cargo")
-            .args(["build", "-p", "godly-daemon", "-p", "godly-pty-shim"])
-            .current_dir(env!("CARGO_MANIFEST_DIR"))
-            .status()
-            .expect("Failed to run cargo build");
-        assert!(status.success(), "cargo build failed");
-
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let target_dir = manifest_dir
             .parent()
@@ -210,7 +203,7 @@ impl DaemonFixture {
         let daemon_exe = target_dir.join("godly-daemon.exe");
         assert!(
             daemon_exe.exists(),
-            "Daemon binary not found at {:?}",
+            "Daemon binary not found at {:?}. Run `cargo build -p godly-daemon` first.",
             daemon_exe
         );
 
