@@ -56,6 +56,8 @@ binary(handler_starvation)
 | binary(ctrl_c_interrupt)
 | binary(session_persistence)
 | binary(single_instance)
+| binary(adaptive_batching)
+| binary(resize_during_output)
 """
 test-group = "daemon-integration"
 
@@ -86,6 +88,8 @@ binary(read_grid)
 | binary(ctrl_c_interrupt)
 | binary(session_persistence)
 | binary(single_instance)
+| binary(adaptive_batching)
+| binary(resize_during_output)
 """
 test-group = "daemon-integration"
 
@@ -121,5 +125,7 @@ binary(memory_stress)
 | binary(ctrl_c_interrupt)
 | binary(session_persistence)
 | binary(single_instance)
+| binary(adaptive_batching)
+| binary(resize_during_output)
 """
 test-group = "ci-serial"
