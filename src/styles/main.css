@@ -514,6 +514,47 @@ body.dragging-active * {
   background: var(--bg-active);
 }
 
+/* Skill autocomplete dropdown */
+.skill-dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  max-height: 192px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 100;
+  margin-top: 4px;
+}
+
+.skill-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.skill-item:hover,
+.skill-item-active {
+  background: var(--bg-active);
+}
+
+.skill-item-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.skill-item-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Shell type selection */
 .shell-type-options {
   margin-bottom: 16px;
