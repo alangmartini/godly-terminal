@@ -454,7 +454,6 @@ async fn handle_client(
 /// This prevents write-heavy scenarios from starving request reads.
 const MAX_WRITES_PER_ITERATION: usize = 128;
 
-/// Number of idle loop iterations to spin (yield_now) before falling back to sleep.
 /// Single I/O thread: performs all pipe reads and writes.
 /// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
 ///
@@ -680,7 +679,8 @@ fn io_thread(
         }
 
         if !did_work {
-            // Efficient idle sleep to avoid CPU burn.
+            // Sleep 1ms when idle. timeBeginPeriod(1) is set at daemon startup
+            // so this actually sleeps ~1ms (not ~15ms as with default timer resolution).
             std::thread::sleep(Duration::from_millis(1));
         }
 
