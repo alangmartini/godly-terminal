@@ -1,6 +1,10 @@
 {
   "mcpServers": {
     "godly-terminal": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:45557/mcp"
+    },
+    "godly-terminal-stdio": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/godly-mcp.exe"
     }
   }

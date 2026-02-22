@@ -1,12 +1,15 @@
 mod app_backend;
 mod backend;
 mod daemon_direct;
+pub mod http_server;
 mod jsonrpc;
 mod log;
 mod pipe_client;
+pub mod session;
 mod tools;
 
 use std::io::{self, BufReader};
+use std::sync::Arc;
 
 use serde_json::json;
 
@@ -18,7 +21,7 @@ use log::mcp_log;
 use pipe_client::McpPipeClient;
 
 /// Bump this on every godly-mcp code change so logs show which binary is running.
-const BUILD: u32 = 14;
+const BUILD: u32 = 15;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -28,7 +31,7 @@ fn main() {
         std::process::exit(run_cli(&args[1..]));
     }
 
-    // Otherwise, run in MCP server mode (stdin/stdout JSON-RPC).
+    // Default: run in stdio MCP server mode (backward compat).
     run_mcp_server();
 }
 
@@ -37,12 +40,12 @@ fn main() {
 // ---------------------------------------------------------------------------
 
 /// Try to connect a backend: MCP pipe (app) first, then daemon direct.
-fn connect_backend() -> Result<Box<dyn Backend>, String> {
+pub fn connect_backend() -> Result<Arc<dyn Backend>, String> {
     // Try MCP pipe first (Tauri app)
     match McpPipeClient::connect() {
         Ok(client) => {
             mcp_log!("Connected via MCP pipe (app backend)");
-            return Ok(Box::new(AppBackend::new(client)));
+            return Ok(Arc::new(AppBackend::new(client)));
         }
         Err(e) => {
             mcp_log!("MCP pipe unavailable: {} — trying daemon direct...", e);
@@ -53,7 +56,7 @@ fn connect_backend() -> Result<Box<dyn Backend>, String> {
     match DaemonDirectBackend::connect() {
         Ok(backend) => {
             mcp_log!("Connected via daemon pipe (daemon-direct fallback)");
-            Ok(Box::new(backend))
+            Ok(Arc::new(backend))
         }
         Err(e) => Err(format!(
             "Cannot connect to Godly Terminal. App pipe and daemon pipe both unavailable. Last error: {}",
@@ -64,30 +67,16 @@ fn connect_backend() -> Result<Box<dyn Backend>, String> {
 
 /// Try to reconnect: MCP pipe first, then daemon direct.
 /// Returns new backend on success, None on failure.
-fn try_reconnect() -> Option<Box<dyn Backend>> {
+fn try_reconnect() -> Option<Arc<dyn Backend>> {
     if let Ok(client) = McpPipeClient::connect() {
         mcp_log!("Reconnected via MCP pipe (app backend)");
-        return Some(Box::new(AppBackend::new(client)));
+        return Some(Arc::new(AppBackend::new(client)));
     }
     if let Ok(backend) = DaemonDirectBackend::connect() {
         mcp_log!("Reconnected via daemon pipe (daemon-direct fallback)");
-        return Some(Box::new(backend));
+        return Some(Arc::new(backend));
     }
     None
-}
-
-/// If currently in daemon-direct mode, cheaply probe the MCP pipe
-/// and upgrade to app backend if the Tauri app is back.
-fn maybe_upgrade_backend(backend: &mut Box<dyn Backend>) {
-    if backend.label() != "daemon-direct" {
-        return;
-    }
-
-    // Cheap probe: try opening the MCP pipe
-    if let Ok(client) = McpPipeClient::connect() {
-        mcp_log!("App pipe is back — upgrading from daemon-direct to app backend");
-        *backend = Box::new(AppBackend::new(client));
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -100,14 +89,17 @@ fn print_help() {
 godly-mcp — Godly Terminal MCP server & CLI
 
 USAGE:
-    godly-mcp                          Start MCP server (stdin/stdout JSON-RPC)
+    godly-mcp                          Start MCP server (stdio JSON-RPC, default)
+    godly-mcp --stdio                  Start MCP server (stdio JSON-RPC, explicit)
+    godly-mcp --http [PORT]            Start MCP server (HTTP, default port {})
     godly-mcp notify [OPTIONS]         Send a notification to Godly Terminal
     godly-mcp --help                   Show this help
 
 COMMANDS:
     notify    Send a sound notification and badge alert
 
-Run 'godly-mcp notify --help' for subcommand details."
+Run 'godly-mcp notify --help' for subcommand details.",
+        http_server::DEFAULT_PORT
     );
 }
 
@@ -141,6 +133,15 @@ fn run_cli(args: &[String]) -> i32 {
     match args[0].as_str() {
         "--help" | "-h" => {
             print_help();
+            0
+        }
+        "--stdio" => {
+            run_mcp_server();
+            0
+        }
+        "--http" => {
+            let port = args.get(1).and_then(|s| s.parse::<u16>().ok());
+            run_http_server_blocking(port);
             0
         }
         "notify" => run_cli_notify(&args[1..]),
@@ -199,7 +200,7 @@ fn run_cli_notify(args: &[String]) -> i32 {
     };
 
     // Connect to pipe and send the request (CLI notify only uses app backend)
-    let mut client = match McpPipeClient::connect() {
+    let client = match McpPipeClient::connect() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -233,13 +234,33 @@ fn run_cli_notify(args: &[String]) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// MCP server mode
+// HTTP server mode
+// ---------------------------------------------------------------------------
+
+fn run_http_server_blocking(port: Option<u16>) {
+    log::init();
+
+    mcp_log!("=== godly-mcp starting (HTTP mode) === build={}", BUILD);
+    mcp_log!("PID: {}", std::process::id());
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    rt.block_on(async {
+        if let Err(e) = http_server::run_http_server(port).await {
+            mcp_log!("HTTP server error: {}", e);
+            eprintln!("[godly-mcp] HTTP server error: {}", e);
+            std::process::exit(1);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Stdio MCP server mode
 // ---------------------------------------------------------------------------
 
 fn run_mcp_server() {
     log::init();
 
-    mcp_log!("=== godly-mcp starting === build={}", BUILD);
+    mcp_log!("=== godly-mcp starting (stdio mode) === build={}", BUILD);
     mcp_log!("PID: {}", std::process::id());
     if let Ok(exe) = std::env::current_exe() {
         mcp_log!("exe: {}", exe.display());
@@ -301,9 +322,14 @@ fn run_mcp_server() {
         }
 
         // If in fallback mode, try to upgrade to app backend
-        maybe_upgrade_backend(&mut backend);
+        if backend.label() == "daemon-direct" {
+            if let Ok(client) = McpPipeClient::connect() {
+                mcp_log!("App pipe is back — upgrading from daemon-direct to app backend");
+                backend = Arc::new(AppBackend::new(client));
+            }
+        }
 
-        let response = handle_request(&request, &mut backend, &session_id);
+        let response = handle_request(&request, backend.as_ref(), &session_id);
 
         let response_json = serde_json::to_string(&response).unwrap_or_default();
         mcp_log!("Sending response: {}", response_json);
@@ -314,15 +340,46 @@ fn run_mcp_server() {
             break;
         }
 
+        // If the response was an error from a pipe failure, try to reconnect
+        if is_pipe_error_response(&response) {
+            mcp_log!("Pipe error detected in response — attempting reconnect...");
+            if let Some(new_backend) = try_reconnect() {
+                mcp_log!("Reconnected via {}", new_backend.label());
+                backend = new_backend;
+            }
+        }
+
         mcp_log!("Response sent successfully");
     }
 
     mcp_log!("=== godly-mcp shutting down ===");
 }
 
-fn handle_request(
+/// Check if a response contains a pipe error that warrants reconnection.
+fn is_pipe_error_response(response: &JsonRpcResponse) -> bool {
+    if let Some(result) = &response.result {
+        if let Some(true) = result.get("isError").and_then(|v| v.as_bool()) {
+            if let Some(text) = result
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|t| t.as_str())
+            {
+                return text.contains("Pipe error")
+                    || text.contains("write error")
+                    || text.contains("read error")
+                    || text.contains("Pipe closed")
+                    || text.contains("Daemon pipe closed");
+            }
+        }
+    }
+    false
+}
+
+pub fn handle_request(
     request: &jsonrpc::JsonRpcRequest,
-    backend: &mut Box<dyn Backend>,
+    backend: &dyn Backend,
     session_id: &Option<String>,
 ) -> JsonRpcResponse {
     match request.method.as_str() {
@@ -366,7 +423,7 @@ fn handle_request(
                 backend.label()
             );
 
-            match tools::call_tool(backend.as_mut(), tool_name, &args, session_id) {
+            match tools::call_tool(backend, tool_name, &args, session_id) {
                 Ok(result) => {
                     mcp_log!("Tool call succeeded: {}", tool_name);
                     JsonRpcResponse::success(
@@ -382,56 +439,6 @@ fn handle_request(
                 }
                 Err(e) => {
                     mcp_log!("Tool call failed: {} — {}", tool_name, e);
-
-                    // If it looks like a pipe error, try to reconnect
-                    if e.contains("Pipe error")
-                        || e.contains("write error")
-                        || e.contains("read error")
-                        || e.contains("Pipe closed")
-                        || e.contains("Daemon pipe closed")
-                    {
-                        mcp_log!("Pipe error detected — attempting reconnect...");
-                        if let Some(new_backend) = try_reconnect() {
-                            mcp_log!("Reconnected via {}", new_backend.label());
-                            *backend = new_backend;
-
-                            // Retry the tool call once
-                            match tools::call_tool(
-                                backend.as_mut(),
-                                tool_name,
-                                &args,
-                                session_id,
-                            ) {
-                                Ok(result) => {
-                                    mcp_log!("Retry succeeded: {}", tool_name);
-                                    return JsonRpcResponse::success(
-                                        request.id.clone(),
-                                        json!({
-                                            "content": [{
-                                                "type": "text",
-                                                "text": serde_json::to_string_pretty(&result)
-                                                    .unwrap_or_else(|_| result.to_string())
-                                            }]
-                                        }),
-                                    );
-                                }
-                                Err(retry_err) => {
-                                    mcp_log!("Retry also failed: {}", retry_err);
-                                    return JsonRpcResponse::success(
-                                        request.id.clone(),
-                                        json!({
-                                            "content": [{
-                                                "type": "text",
-                                                "text": format!("Error: {}", retry_err)
-                                            }],
-                                            "isError": true
-                                        }),
-                                    );
-                                }
-                            }
-                        }
-                    }
-
                     JsonRpcResponse::success(
                         request.id.clone(),
                         json!({
