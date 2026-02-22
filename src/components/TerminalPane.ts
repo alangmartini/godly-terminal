@@ -504,8 +504,11 @@ export class TerminalPane {
   private handleScroll(deltaLines: number) {
     const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
     if (newOffset === this.scrollbackOffset) return;
+    const actualDelta = newOffset - this.scrollbackOffset;
     this.scrollbackOffset = newOffset;
     this.isUserScrolled = newOffset > 0;
+    // Bug #242: adjust selection so it stays anchored to the same content
+    this.renderer.adjustSelectionForScroll(actualDelta);
     const seq = ++this.scrollSeq;
     // Scroll changes the viewport — invalidate cache and do a full snapshot
     this.cachedSnapshot = null;
@@ -523,8 +526,11 @@ export class TerminalPane {
   private handleScrollTo(absoluteOffset: number) {
     const newOffset = Math.max(0, Math.round(absoluteOffset));
     if (newOffset === this.scrollbackOffset) return;
+    const actualDelta = newOffset - this.scrollbackOffset;
     this.scrollbackOffset = newOffset;
     this.isUserScrolled = newOffset > 0;
+    // Bug #242: adjust selection so it stays anchored to the same content
+    this.renderer.adjustSelectionForScroll(actualDelta);
     const seq = ++this.scrollSeq;
     this.cachedSnapshot = null;
     terminalService.setScrollback(this.terminalId, newOffset).then(() => {
@@ -537,6 +543,8 @@ export class TerminalPane {
   /** Snap viewport back to live view (offset 0). */
   private snapToBottom() {
     if (this.scrollbackOffset === 0) return;
+    // Bug #242: adjust selection before resetting offset
+    this.renderer.adjustSelectionForScroll(-this.scrollbackOffset);
     this.scrollbackOffset = 0;
     this.isUserScrolled = false;
     const seq = ++this.scrollSeq;
