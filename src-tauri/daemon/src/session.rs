@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,20 +28,37 @@ pub enum SessionOutput {
     Bell,
 }
 
-/// A Write wrapper that sends TAG_SHIM_WRITE frames to the shim pipe.
-/// Each write() call produces a complete length-prefixed binary frame.
-struct ShimPipeWriter {
-    inner: std::fs::File,
+/// Messages sent to the shim I/O thread for writing to the pipe.
+///
+/// CRITICAL: On Windows, DuplicateHandle creates handles that share the same
+/// kernel file object. Synchronous I/O is serialized per file object, so a
+/// blocking ReadFile on one handle prevents WriteFile on another duplicate.
+/// To avoid this deadlock, ALL pipe I/O (reads and writes) goes through a
+/// single I/O thread. External code sends write requests via this channel.
+enum ShimIoMessage {
+    /// Write input data to the PTY (sent as TAG_SHIM_WRITE binary frame)
+    Write(Vec<u8>),
+    /// Send a JSON control message (Resize, Shutdown, etc.)
+    Control(ShimRequest),
 }
 
-impl Write for ShimPipeWriter {
+/// A Write wrapper that sends data through the shim I/O channel.
+/// Each write() call queues a TAG_SHIM_WRITE message for the I/O thread.
+struct ChannelWriter {
+    tx: std_mpsc::Sender<ShimIoMessage>,
+}
+
+impl Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        write_shim_binary(&mut self.inner, TAG_SHIM_WRITE, buf)?;
+        self.tx
+            .send(ShimIoMessage::Write(buf.to_vec()))
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Shim I/O channel closed")
+            })?;
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        // Named pipes deliver data immediately; no explicit flush needed
         Ok(())
     }
 }
@@ -67,12 +85,13 @@ pub struct DaemonSession {
     /// Named pipe name for shim communication
     #[allow(dead_code)]
     shim_pipe_name: String,
-    /// Writer to the shim pipe for user input (sends TAG_SHIM_WRITE binary frames)
+    /// Writer to the shim pipe for user input (sends TAG_SHIM_WRITE binary frames).
+    /// Uses a channel-based writer that routes through the I/O thread to avoid
+    /// the DuplicateHandle deadlock (see ShimIoMessage doc comment).
     shim_writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    /// Raw pipe handle for sending JSON control messages (Resize, Shutdown, Status).
-    /// Separate from shim_writer because ShimPipeWriter wraps all data as binary
-    /// frames with TAG_SHIM_WRITE, but control messages must be sent as plain JSON.
-    shim_control: Arc<Mutex<std::fs::File>>,
+    /// Channel sender for JSON control messages (Resize, Shutdown).
+    /// Routes through the same I/O thread as shim_writer.
+    shim_io_tx: std_mpsc::Sender<ShimIoMessage>,
     running: Arc<AtomicBool>,
     /// Ring buffer accumulates output when no client is attached
     ring_buffer: Arc<Mutex<VecDeque<u8>>>,
@@ -116,28 +135,23 @@ impl DaemonSession {
             env.as_ref(),
         )?;
 
-        // Connect to the shim's named pipe
-        let shim_pipe = shim_client::connect_to_shim(&meta.shim_pipe_name)?;
+        // Connect to the shim's named pipe.
+        // CRITICAL: We use a SINGLE pipe handle for all I/O. On Windows,
+        // DuplicateHandle creates handles that share the same kernel file object,
+        // and synchronous I/O is serialized per file object. A blocking ReadFile
+        // on one duplicate prevents WriteFile on another, causing deadlock.
+        // Instead, all reads and writes go through one I/O thread.
+        let mut shim_pipe = shim_client::connect_to_shim(&meta.shim_pipe_name)?;
 
-        // Duplicate handles for separate reader, writer (binary input), and control (JSON)
-        let pipe_reader = shim_client::duplicate_handle(&shim_pipe)
-            .map_err(|e| format!("Failed to duplicate shim pipe handle for reader: {}", e))?;
-        let pipe_control = shim_client::duplicate_handle(&shim_pipe)
-            .map_err(|e| format!("Failed to duplicate shim pipe handle for control: {}", e))?;
-        let pipe_writer = shim_pipe; // Original handle goes to the binary writer
-
-        // Query status to get the shell PID (use control handle for JSON messages)
-        let mut status_control = shim_client::duplicate_handle(&pipe_control)
-            .map_err(|e| format!("Failed to duplicate handle for status query: {}", e))?;
-        write_shim_json(&mut status_control, &ShimRequest::Status)
+        // Query status to get the shell PID. This happens before the I/O thread
+        // starts, so there's no concurrent access to the pipe.
+        write_shim_json(&mut shim_pipe, &ShimRequest::Status)
             .map_err(|e| format!("Failed to send Status request to shim: {}", e))?;
 
         // Read the status response. The shim may first send buffered data (TAG_SHIM_BUFFER_DATA)
         // from a previous daemon connection, or early PTY output (shell prompt), then StatusInfo.
         // We capture any early output so it isn't lost.
-        let mut temp_reader = shim_client::duplicate_handle(&pipe_reader)
-            .map_err(|e| format!("Failed to duplicate handle for status read: {}", e))?;
-        let (shell_pid, early_output) = Self::read_status_response(&mut temp_reader)?;
+        let (shell_pid, early_output) = Self::read_status_response(&mut shim_pipe)?;
 
         daemon_log!(
             "Session {} connected to shim: shim_pid={}, shell_pid={}, pipe={}, early_output={}B",
@@ -159,9 +173,12 @@ impl DaemonSession {
             );
         }
 
+        // Create the I/O channel for writes and control messages
+        let (shim_io_tx, shim_io_rx) = std_mpsc::channel::<ShimIoMessage>();
         let shim_writer: Arc<Mutex<Box<dyn Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(ShimPipeWriter { inner: pipe_writer })));
-        let shim_control = Arc::new(Mutex::new(pipe_control));
+            Arc::new(Mutex::new(Box::new(ChannelWriter {
+                tx: shim_io_tx.clone(),
+            })));
         let running = Arc::new(AtomicBool::new(true));
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
         let output_history = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
@@ -191,10 +208,13 @@ impl DaemonSession {
             vt_parser.lock().process(&early_output);
         }
 
-        // Spawn reader thread that reads frames from the shim pipe
-        Self::spawn_reader_thread(
+        // Spawn I/O thread that handles all pipe reads AND writes.
+        // This avoids the DuplicateHandle deadlock by keeping all pipe I/O
+        // in a single thread with a single file object.
+        Self::spawn_io_thread(
             id.clone(),
-            pipe_reader,
+            shim_pipe,
+            shim_io_rx,
             running.clone(),
             ring_buffer.clone(),
             output_history.clone(),
@@ -217,7 +237,7 @@ impl DaemonSession {
             shim_pid: meta.shim_pid,
             shim_pipe_name: meta.shim_pipe_name,
             shim_writer,
-            shim_control,
+            shim_io_tx,
             running,
             ring_buffer,
             output_tx,
@@ -238,25 +258,12 @@ impl DaemonSession {
             meta.shim_pipe_name
         );
 
-        // Connect to shim pipe
-        let shim_pipe = shim_client::connect_to_shim(&meta.shim_pipe_name)?;
-
-        // Duplicate for reader, writer (binary input), and control (JSON)
-        let pipe_reader = shim_client::duplicate_handle(&shim_pipe)
-            .map_err(|e| format!("Failed to duplicate shim pipe handle for reader: {}", e))?;
-        let pipe_control = shim_client::duplicate_handle(&shim_pipe)
-            .map_err(|e| format!("Failed to duplicate shim pipe handle for control: {}", e))?;
-        let pipe_writer = shim_pipe;
+        // Connect to shim pipe (single handle, no DuplicateHandle)
+        let mut shim_pipe = shim_client::connect_to_shim(&meta.shim_pipe_name)?;
 
         // Query status to verify the shim is alive and get current state
-        let mut status_control = shim_client::duplicate_handle(&pipe_control)
-            .map_err(|e| format!("Failed to duplicate handle for status query: {}", e))?;
-        write_shim_json(&mut status_control, &ShimRequest::Status)
+        write_shim_json(&mut shim_pipe, &ShimRequest::Status)
             .map_err(|e| format!("Failed to send Status request to shim: {}", e))?;
-
-        // Read status response (may be preceded by buffered data)
-        let mut temp_reader = shim_client::duplicate_handle(&pipe_reader)
-            .map_err(|e| format!("Failed to duplicate handle for status read: {}", e))?;
 
         // Read all frames until we get the StatusInfo response.
         // Buffer data frames go into the vt parser.
@@ -273,7 +280,7 @@ impl DaemonSession {
         // Read frames from the shim: it will first send any buffered output,
         // then the StatusInfo response.
         loop {
-            match read_shim_frame(&mut temp_reader) {
+            match read_shim_frame(&mut shim_pipe) {
                 Ok(Some(ShimFrame::Binary {
                     tag: TAG_SHIM_BUFFER_DATA,
                     data,
@@ -356,9 +363,11 @@ impl DaemonSession {
             }
         }
 
+        let (shim_io_tx, shim_io_rx) = std_mpsc::channel::<ShimIoMessage>();
         let shim_writer: Arc<Mutex<Box<dyn Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(ShimPipeWriter { inner: pipe_writer })));
-        let shim_control = Arc::new(Mutex::new(pipe_control));
+            Arc::new(Mutex::new(Box::new(ChannelWriter {
+                tx: shim_io_tx.clone(),
+            })));
         let running = Arc::new(AtomicBool::new(is_running));
         let ring_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
         let output_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>> =
@@ -373,11 +382,12 @@ impl DaemonSession {
 
         let exit_code = Arc::new(AtomicI64::new(exit_code_val));
 
-        // Spawn reader thread for ongoing shim communication
+        // Spawn I/O thread for ongoing shim communication
         if is_running {
-            Self::spawn_reader_thread(
+            Self::spawn_io_thread(
                 meta.session_id.clone(),
-                pipe_reader,
+                shim_pipe,
+                shim_io_rx,
                 running.clone(),
                 ring_buffer.clone(),
                 output_history.clone(),
@@ -412,7 +422,7 @@ impl DaemonSession {
             shim_pid: meta.shim_pid,
             shim_pipe_name: meta.shim_pipe_name,
             shim_writer,
-            shim_control,
+            shim_io_tx,
             running,
             ring_buffer,
             output_tx,
@@ -473,11 +483,18 @@ impl DaemonSession {
         }
     }
 
-    /// Spawn the reader thread that reads frames from the shim pipe and
-    /// dispatches them (output to vt_parser/ring buffer/client, shell exit to cleanup).
-    fn spawn_reader_thread(
+    /// Spawn the I/O thread that handles ALL pipe communication with the shim.
+    ///
+    /// CRITICAL: All reads and writes go through this single thread to avoid the
+    /// DuplicateHandle deadlock. On Windows, synchronous I/O is serialized per
+    /// kernel file object, and DuplicateHandle shares the file object. A blocking
+    /// ReadFile on one duplicate prevents WriteFile on another. By using a single
+    /// thread with PeekNamedPipe for non-blocking reads and a channel for writes,
+    /// we eliminate concurrent access to the pipe file object entirely.
+    fn spawn_io_thread(
         session_id: String,
-        mut pipe_reader: std::fs::File,
+        mut pipe: std::fs::File,
+        shim_io_rx: std_mpsc::Receiver<ShimIoMessage>,
         reader_running: Arc<AtomicBool>,
         reader_ring: Arc<Mutex<VecDeque<u8>>>,
         reader_history: Arc<Mutex<VecDeque<u8>>>,
@@ -488,7 +505,7 @@ impl DaemonSession {
         reader_exit_code: Arc<AtomicI64>,
     ) {
         thread::spawn(move || {
-            daemon_log!("Session {} shim reader thread started", session_id);
+            daemon_log!("Session {} shim I/O thread started", session_id);
 
             let mut total_bytes: u64 = 0;
             let mut total_reads: u64 = 0;
@@ -498,7 +515,59 @@ impl DaemonSession {
             const DIFF_INTERVAL: Duration = Duration::from_millis(16);
 
             while reader_running.load(Ordering::Relaxed) {
-                match read_shim_frame(&mut pipe_reader) {
+                let mut did_work = false;
+
+                // Step 1: Process pending writes from the channel
+                loop {
+                    match shim_io_rx.try_recv() {
+                        Ok(ShimIoMessage::Write(data)) => {
+                            if let Err(e) =
+                                write_shim_binary(&mut pipe, TAG_SHIM_WRITE, &data)
+                            {
+                                daemon_log!(
+                                    "Session {} I/O: write error: {}",
+                                    session_id,
+                                    e
+                                );
+                                reader_running.store(false, Ordering::Relaxed);
+                                break;
+                            }
+                            did_work = true;
+                        }
+                        Ok(ShimIoMessage::Control(req)) => {
+                            if let Err(e) = write_shim_json(&mut pipe, &req) {
+                                daemon_log!(
+                                    "Session {} I/O: control write error: {}",
+                                    session_id,
+                                    e
+                                );
+                                reader_running.store(false, Ordering::Relaxed);
+                                break;
+                            }
+                            did_work = true;
+                        }
+                        Err(std_mpsc::TryRecvError::Empty) => break,
+                        Err(std_mpsc::TryRecvError::Disconnected) => {
+                            // Session dropped, stop
+                            reader_running.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+
+                if !reader_running.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // Step 2: Non-blocking check for incoming data from shim
+                if !shim_pipe_has_data(&pipe) {
+                    if !did_work {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    continue;
+                }
+
+                match read_shim_frame(&mut pipe) {
                     Ok(Some(ShimFrame::Binary {
                         tag: TAG_SHIM_OUTPUT,
                         data,
@@ -708,13 +777,13 @@ impl DaemonSession {
             *reader_tx.lock() = None;
 
             daemon_log!(
-                "Session {} shim reader thread exited: reads={}, bytes={}, send_failures={}",
+                "Session {} shim I/O thread exited: reads={}, bytes={}, send_failures={}",
                 session_id,
                 total_reads,
                 total_bytes,
                 channel_send_failures
             );
-            eprintln!("[daemon] Session {} shim reader thread exited", session_id);
+            eprintln!("[daemon] Session {} shim I/O thread exited", session_id);
         });
     }
 
@@ -821,11 +890,10 @@ impl DaemonSession {
     /// Resize the PTY via a control message to the shim.
     /// Also updates the godly-vt parser dimensions.
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
-        // Send Resize request to the shim via the control handle (JSON, not binary)
-        let mut control = self.shim_control.lock();
-        write_shim_json(&mut *control, &ShimRequest::Resize { rows, cols })
-            .map_err(|e| format!("Failed to send resize to shim: {}", e))?;
-        drop(control);
+        // Send Resize request to the shim via the I/O channel
+        self.shim_io_tx
+            .send(ShimIoMessage::Control(ShimRequest::Resize { rows, cols }))
+            .map_err(|_| "Shim I/O channel closed".to_string())?;
 
         // Keep the godly-vt parser in sync with the PTY size
         {
@@ -876,12 +944,10 @@ impl DaemonSession {
         // Drop the output channel to notify attached clients
         *self.output_tx.lock() = None;
 
-        // Tell the shim to shut down gracefully via the control handle
-        if let Ok(mut control) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.shim_control.lock()
-        })) {
-            let _ = write_shim_json(&mut *control, &ShimRequest::Shutdown);
-        }
+        // Tell the shim to shut down gracefully via the I/O channel
+        let _ = self
+            .shim_io_tx
+            .send(ShimIoMessage::Control(ShimRequest::Shutdown));
 
         // Remove metadata file
         shim_metadata::remove_metadata(&self.id);
@@ -1334,6 +1400,33 @@ fn terminate_child_processes(shell_pid: u32) -> Result<u32, String> {
     }
 
     Ok(terminated)
+}
+
+/// Non-blocking check for available data on a pipe using PeekNamedPipe.
+/// Returns true if there are bytes ready to read.
+#[cfg(windows)]
+fn shim_pipe_has_data(pipe: &std::fs::File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use winapi::um::namedpipeapi::PeekNamedPipe;
+
+    let handle = pipe.as_raw_handle();
+    let mut bytes_available: u32 = 0;
+    let result = unsafe {
+        PeekNamedPipe(
+            handle as *mut _,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut bytes_available,
+            std::ptr::null_mut(),
+        )
+    };
+    result != 0 && bytes_available > 0
+}
+
+#[cfg(not(windows))]
+fn shim_pipe_has_data(_pipe: &std::fs::File) -> bool {
+    false
 }
 
 /// Append data to ring buffer, evicting oldest data if necessary
