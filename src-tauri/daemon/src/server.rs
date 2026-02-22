@@ -160,6 +160,28 @@ impl DaemonServer {
 
         eprintln!("[daemon] Server shutting down");
         daemon_log!("Server shutting down");
+
+        // Close all sessions before exiting — sends Shutdown to each shim
+        // so they don't become orphan processes.
+        self.shutdown_all_sessions();
+    }
+
+    /// Close all active sessions, sending Shutdown to each shim process.
+    /// Called during daemon shutdown to prevent orphaned pty-shim processes.
+    fn shutdown_all_sessions(&self) {
+        let sessions = self.sessions.read();
+        let count = sessions.len();
+        if count == 0 {
+            return;
+        }
+        daemon_log!("Shutting down {} session(s)", count);
+        for (id, session) in sessions.iter() {
+            daemon_log!("Closing session {} on shutdown", id);
+            session.close();
+        }
+        drop(sessions);
+        self.sessions.write().clear();
+        daemon_log!("All sessions closed");
     }
 
     /// Accept a single named pipe connection (Windows implementation).
