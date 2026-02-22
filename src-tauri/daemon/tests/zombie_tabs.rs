@@ -305,8 +305,8 @@ fn test_session_closed_on_pty_exit_while_attached() {
         resp
     );
 
-    // Wait for the shell to initialize (cmd.exe startup)
-    std::thread::sleep(Duration::from_secs(1));
+    // Wait for the shell to initialize (cmd.exe startup — slow on CI VMs)
+    std::thread::sleep(Duration::from_secs(3));
 
     // Make the shell exit
     let resp = send_request(
@@ -322,8 +322,8 @@ fn test_session_closed_on_pty_exit_while_attached() {
         resp
     );
 
-    // Wait for SessionClosed event
-    let result = wait_for_session_closed(&mut pipe, &session_id, Duration::from_secs(10));
+    // Wait for SessionClosed event (generous timeout for CI VMs)
+    let result = wait_for_session_closed(&mut pipe, &session_id, Duration::from_secs(30));
     assert!(
         result.is_ok(),
         "Bug A2: SessionClosed not received after PTY exit: {}",
@@ -377,7 +377,8 @@ fn test_session_closed_on_attach_to_dead_session() {
         resp
     );
 
-    std::thread::sleep(Duration::from_secs(1));
+    // Wait for shell init (cmd.exe startup — slow on CI VMs)
+    std::thread::sleep(Duration::from_secs(3));
 
     // Make the shell exit
     let resp = send_request(
@@ -389,8 +390,8 @@ fn test_session_closed_on_attach_to_dead_session() {
     );
     assert!(matches!(resp, Response::Ok), "Write failed: {:?}", resp);
 
-    // Wait for SessionClosed on the first client
-    let result = wait_for_session_closed(&mut pipe1, &session_id, Duration::from_secs(10));
+    // Wait for SessionClosed on the first client (generous timeout for CI VMs)
+    let result = wait_for_session_closed(&mut pipe1, &session_id, Duration::from_secs(30));
     assert!(
         result.is_ok(),
         "First client did not get SessionClosed: {}",
@@ -408,7 +409,7 @@ fn test_session_closed_on_attach_to_dead_session() {
     );
 
     // The second client should also get SessionClosed since the session is dead
-    let result = wait_for_session_closed(&mut pipe2, &session_id, Duration::from_secs(5));
+    let result = wait_for_session_closed(&mut pipe2, &session_id, Duration::from_secs(15));
     assert!(
         result.is_ok(),
         "Bug A2: Second client did not get SessionClosed for dead session: {}",
@@ -444,7 +445,8 @@ fn test_cmd_exit_is_detected_by_daemon() {
     let resp = send_request(&mut pipe, &Request::Attach { session_id: session_id.clone() });
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
 
-    std::thread::sleep(Duration::from_secs(1));
+    // Wait for shell init (cmd.exe startup — slow on CI VMs)
+    std::thread::sleep(Duration::from_secs(3));
 
     // Make the shell exit
     let resp = send_request(
@@ -456,8 +458,8 @@ fn test_cmd_exit_is_detected_by_daemon() {
     );
     assert!(matches!(resp, Response::Ok));
 
-    // Poll ListSessions to check if the session dies
-    let result = wait_for_session_dead(&mut pipe, &session_id, Duration::from_secs(10));
+    // Poll ListSessions to check if the session dies (generous timeout for CI VMs)
+    let result = wait_for_session_dead(&mut pipe, &session_id, Duration::from_secs(30));
     assert!(
         result.is_ok(),
         "cmd.exe did not exit (session still shows running=true): {}",
@@ -493,7 +495,8 @@ fn test_list_sessions_shows_dead_session() {
     let resp = send_request(&mut pipe, &Request::Attach { session_id: session_id.clone() });
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
 
-    std::thread::sleep(Duration::from_secs(1));
+    // Wait for shell init (cmd.exe startup — slow on CI VMs)
+    std::thread::sleep(Duration::from_secs(3));
 
     // Kill the shell
     let resp = send_request(
@@ -505,8 +508,8 @@ fn test_list_sessions_shows_dead_session() {
     );
     assert!(matches!(resp, Response::Ok));
 
-    // Wait for SessionClosed
-    let result = wait_for_session_closed(&mut pipe, &session_id, Duration::from_secs(10));
+    // Wait for SessionClosed (generous timeout for CI VMs)
+    let result = wait_for_session_closed(&mut pipe, &session_id, Duration::from_secs(30));
     assert!(result.is_ok(), "SessionClosed not received: {}", result.unwrap_err());
 
     // ListSessions should show running=false

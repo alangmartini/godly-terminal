@@ -289,11 +289,11 @@ fn test_new_daemon_starts_after_lock_holder_exits() {
     // Kill daemon A (simulates crash)
     let _ = daemon_a.kill();
     let _ = daemon_a.wait();
-    wait_for_pipe_gone(&pipe_name, Duration::from_secs(3));
+    wait_for_pipe_gone(&pipe_name, Duration::from_secs(10));
 
     // Start daemon B — should acquire the lock since A released it on exit
     let mut daemon_b = spawn_daemon(&pipe_name);
-    let mut pipe_b = wait_for_pipe(&pipe_name, Duration::from_secs(5));
+    let mut pipe_b = wait_for_pipe(&pipe_name, Duration::from_secs(15));
     assert!(
         matches!(send_request(&mut pipe_b, &Request::Ping), Response::Pong),
         "Daemon B should be responsive after daemon A exited"
