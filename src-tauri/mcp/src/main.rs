@@ -15,7 +15,7 @@ use jsonrpc::{read_message, write_message};
 use log::mcp_log;
 
 /// Bump this on every godly-mcp code change so logs show which binary is running.
-const BUILD: u32 = 15;
+const BUILD: u32 = 16;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -41,7 +41,8 @@ godly-mcp — Godly Terminal MCP server & CLI
 USAGE:
     godly-mcp                          Start MCP server (stdio JSON-RPC, default)
     godly-mcp --stdio                  Start MCP server (stdio JSON-RPC, explicit)
-    godly-mcp --http [PORT]            Start MCP server (Streamable HTTP, default port {})
+    godly-mcp --http [PORT]            Start MCP server (Streamable HTTP, default port {port})
+    godly-mcp --ensure [PORT]          Ensure HTTP server is running, start if needed (default port {port})
     godly-mcp sse [OPTIONS]            Start MCP server (SSE/HTTP transport)
     godly-mcp notify [OPTIONS]         Send a notification to Godly Terminal
     godly-mcp --help                   Show this help
@@ -50,8 +51,13 @@ COMMANDS:
     sse       Start SSE transport server (HTTP, serves multiple sessions)
     notify    Send a sound notification and badge alert
 
+FLAGS:
+    --ensure  Check if the HTTP server is already running (via discovery file).
+              If running, exit 0. If not, spawn a detached HTTP server process
+              and wait until it's healthy before exiting 0. Exit 1 on failure.
+
 Run 'godly-mcp sse --help' or 'godly-mcp notify --help' for subcommand details.",
-        http_server::DEFAULT_PORT
+        port = http_server::DEFAULT_PORT
     );
 }
 
@@ -95,6 +101,10 @@ fn run_cli(args: &[String]) -> i32 {
             let port = args.get(1).and_then(|s| s.parse::<u16>().ok());
             run_http_server_blocking(port);
             0
+        }
+        "--ensure" => {
+            let port = args.get(1).and_then(|s| s.parse::<u16>().ok());
+            run_ensure(port)
         }
         "notify" => run_cli_notify(&args[1..]),
         "sse" => run_cli_sse(&args[1..]),
@@ -274,6 +284,161 @@ fn run_http_server_blocking(port: Option<u16>) {
             std::process::exit(1);
         }
     });
+}
+
+// ---------------------------------------------------------------------------
+// Ensure mode — check/start HTTP server
+// ---------------------------------------------------------------------------
+
+/// Ensure the HTTP server is running. If not, spawn it as a detached process
+/// and poll /health until it's ready.
+fn run_ensure(port: Option<u16>) -> i32 {
+    let port = port.unwrap_or(http_server::DEFAULT_PORT);
+
+    // 1. Check discovery file for an existing server
+    if let Some(pid) = read_discovery_pid() {
+        if is_process_alive(pid) {
+            if health_check(port) {
+                eprintln!("[godly-mcp] HTTP server already running (PID {}, port {})", pid, port);
+                return 0;
+            }
+            // PID alive but health check failed — stale process or wrong port, continue to spawn
+        }
+    }
+
+    // 2. Spawn detached HTTP server
+    eprintln!("[godly-mcp] Starting HTTP server on port {}...", port);
+
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[godly-mcp] Failed to get current exe path: {}", e);
+            return 1;
+        }
+    };
+
+    if let Err(e) = spawn_detached(&exe, port) {
+        eprintln!("[godly-mcp] Failed to spawn HTTP server: {}", e);
+        return 1;
+    }
+
+    // 3. Poll /health with exponential backoff (up to ~5 seconds)
+    let delays_ms = [100, 200, 400, 500, 500, 500, 500, 500, 500, 500, 500, 500];
+    for delay in delays_ms {
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+        if health_check(port) {
+            eprintln!("[godly-mcp] HTTP server is ready (port {})", port);
+            return 0;
+        }
+    }
+
+    eprintln!("[godly-mcp] HTTP server failed to start within timeout");
+    1
+}
+
+/// Read the PID from the discovery file, if it exists.
+fn read_discovery_pid() -> Option<u32> {
+    #[cfg(windows)]
+    {
+        let path = std::env::var("APPDATA").ok().map(|appdata| {
+            std::path::PathBuf::from(appdata)
+                .join("com.godly.terminal")
+                .join("mcp-http.json")
+        })?;
+
+        let content = std::fs::read_to_string(&path).ok()?;
+        let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+        json.get("pid")?.as_u64().map(|p| p as u32)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Check if a process with the given PID is still alive.
+fn is_process_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        use winapi::um::processthreadsapi::OpenProcess;
+        use winapi::um::handleapi::CloseHandle;
+        use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            CloseHandle(handle);
+            true
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+/// Hit GET /health on localhost and return true if we get a 200.
+fn health_check(port: u16) -> bool {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let addr = format!("127.0.0.1:{}", port);
+    let mut stream = match TcpStream::connect_timeout(
+        &addr.parse().unwrap(),
+        Duration::from_millis(500),
+    ) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1000)));
+
+    let request = format!(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+        port
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut buf = [0u8; 256];
+    match stream.read(&mut buf) {
+        Ok(n) if n > 0 => {
+            let response = String::from_utf8_lossy(&buf[..n]);
+            response.contains("200")
+        }
+        _ => false,
+    }
+}
+
+/// Spawn a detached godly-mcp --http process.
+fn spawn_detached(exe: &std::path::Path, port: u16) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS (0x8) | CREATE_NO_WINDOW (0x08000000)
+        const FLAGS: u32 = 0x00000008 | 0x08000000;
+
+        std::process::Command::new(exe)
+            .args(["--http", &port.to_string()])
+            .creation_flags(FLAGS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("spawn failed: {}", e))?;
+
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (exe, port);
+        Err("--ensure is only supported on Windows".to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
