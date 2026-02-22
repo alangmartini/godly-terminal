@@ -500,9 +500,10 @@ pub struct DaemonBridge {
     running: Arc<AtomicBool>,
 }
 
-/// Maximum number of events to read before checking for pending outgoing requests.
-/// This prevents high-throughput output from starving user input writes.
-const MAX_EVENTS_BEFORE_REQUEST_CHECK: usize = 2;
+/// Events per iteration in interactive mode — preserves input responsiveness.
+const BRIDGE_BATCH_INTERACTIVE: usize = 2;
+/// Events per iteration in bulk mode — reduces loop overhead during heavy output.
+const BRIDGE_BATCH_BULK: usize = 32;
 
 impl DaemonBridge {
     pub fn new() -> Self {
@@ -560,6 +561,11 @@ impl DaemonBridge {
             let mut dropped_events: u64 = 0;
             let mut slow_write_count: u64 = 0;
             let mut last_stats_time = Instant::now();
+
+            // Adaptive batch limit: if the previous iteration hit the limit,
+            // switch to bulk mode (more events/iter). If it read fewer, go
+            // back to interactive mode. One-iteration lag is fine at ~1ms.
+            let mut bridge_bulk_mode = false;
 
             // Count of fire-and-forget responses to skip (no pending_responses entry).
             // Fire-and-forget writes don't track a response channel, but the daemon
@@ -698,17 +704,18 @@ impl DaemonBridge {
                     break;
                 }
 
-                // Step 2: Read up to MAX_EVENTS_BEFORE_REQUEST_CHECK events
-                // from the pipe. This prevents pipe buffer buildup from daemon
-                // events while keeping the batch small so we quickly loop back
-                // to check for new requests.
+                // Step 2: Read events from the pipe. Adaptive batch limit:
+                // interactive mode reads few events per iteration (preserves
+                // input responsiveness), bulk mode reads many (reduces loop
+                // overhead during heavy output like `cat large-file`).
+                let batch_limit = if bridge_bulk_mode {
+                    BRIDGE_BATCH_BULK
+                } else {
+                    BRIDGE_BATCH_INTERACTIVE
+                };
                 let mut events_this_iteration = 0;
                 loop {
-                    if events_this_iteration >= MAX_EVENTS_BEFORE_REQUEST_CHECK {
-                        blog!(
-                            "Event batch limit hit ({}), checking for pending requests",
-                            events_this_iteration
-                        );
+                    if events_this_iteration >= batch_limit {
                         break;
                     }
 
@@ -793,6 +800,10 @@ impl DaemonBridge {
                     }
                 }
 
+                // Update adaptive batch mode: if we hit the limit, next
+                // iteration uses bulk mode; otherwise back to interactive.
+                bridge_bulk_mode = events_this_iteration >= batch_limit;
+
                 if !did_work {
                     // Wait on the wake event with 1ms timeout.
                     // The wake event is signaled by send_fire_and_forget / try_send_request
@@ -806,14 +817,15 @@ impl DaemonBridge {
                 // Periodic stats logging
                 if last_stats_time.elapsed() > Duration::from_secs(30) {
                     blog!(
-                        "bridge stats: events={}, requests={}, responses={}, dropped_events={}, slow_writes={}, pending={}, orphans={}",
+                        "bridge stats: events={}, requests={}, responses={}, dropped_events={}, slow_writes={}, pending={}, orphans={}, batch_mode={}",
                         total_events,
                         total_requests_sent,
                         total_responses,
                         dropped_events,
                         slow_write_count,
                         pending_responses.len(),
-                        orphan_responses
+                        orphan_responses,
+                        if bridge_bulk_mode { "bulk" } else { "interactive" }
                     );
                     last_stats_time = Instant::now();
                 }

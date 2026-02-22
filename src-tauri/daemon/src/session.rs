@@ -20,6 +20,124 @@ use crate::shim_metadata;
 
 const RING_BUFFER_SIZE: usize = 1024 * 1024; // 1MB ring buffer
 
+// ── Adaptive output batching constants ──────────────────────────────────
+//
+// The ModeDetector tracks whether PTY output looks "interactive" (small,
+// infrequent chunks — keystrokes, prompts) or "bulk" (rapid, large output
+// — `cat file`, `git log`). In bulk mode, the I/O thread coalesces
+// multiple small reads into fewer, larger SessionOutput::RawBytes messages,
+// reducing per-event overhead in every downstream stage (daemon server,
+// bridge, emitter, frontend).
+
+/// Max gap between consecutive outputs to count as "rapid" (ms).
+const BULK_ENTRY_INTERVAL_MS: u64 = 10;
+/// Min total bytes in the rapid window to trigger bulk mode.
+const BULK_ENTRY_BYTES: usize = 4096;
+/// Min rapid outputs to enter bulk mode.
+const BULK_ENTRY_COUNT: u32 = 3;
+/// Quiet gap (ms) to return to interactive mode.
+const BULK_EXIT_QUIET_MS: u64 = 50;
+/// Max time (ms) to accumulate data in bulk coalesce buffer before flushing.
+const BULK_COALESCE_MS: u64 = 4;
+/// Max coalesce buffer size (bytes) before forced flush.
+const BULK_COALESCE_MAX: usize = 16384;
+
+/// Output mode: interactive (send immediately) or bulk (coalesce).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputMode {
+    Interactive,
+    Bulk,
+}
+
+/// Detects whether PTY output is interactive or bulk and tracks transitions.
+///
+/// Heuristic:
+/// - Enter bulk: `BULK_ENTRY_COUNT` consecutive outputs within
+///   `BULK_ENTRY_INTERVAL_MS` AND total bytes > `BULK_ENTRY_BYTES`.
+/// - Exit bulk: no output for `BULK_EXIT_QUIET_MS`.
+struct ModeDetector {
+    mode: OutputMode,
+    /// Timestamps of recent rapid outputs (sliding window).
+    rapid_times: VecDeque<Instant>,
+    /// Total bytes in the current rapid window.
+    rapid_bytes: usize,
+    /// Last output time (for exit-bulk detection).
+    last_output: Instant,
+    // Stats
+    bulk_transitions: u64,
+    interactive_transitions: u64,
+}
+
+impl ModeDetector {
+    fn new() -> Self {
+        Self {
+            mode: OutputMode::Interactive,
+            rapid_times: VecDeque::with_capacity(BULK_ENTRY_COUNT as usize + 1),
+            rapid_bytes: 0,
+            last_output: Instant::now(),
+            bulk_transitions: 0,
+            interactive_transitions: 0,
+        }
+    }
+
+    /// Record an output event and return the current mode.
+    fn record_output(&mut self, bytes: usize) -> OutputMode {
+        let now = Instant::now();
+
+        match self.mode {
+            OutputMode::Interactive => {
+                // Track rapid outputs: discard entries older than the interval
+                let cutoff = Duration::from_millis(BULK_ENTRY_INTERVAL_MS);
+                while self
+                    .rapid_times
+                    .front()
+                    .map_or(false, |t| now.duration_since(*t) > cutoff)
+                {
+                    self.rapid_times.pop_front();
+                    // We can't subtract individual byte counts, so reset when pruning
+                    // This is conservative — we might stay interactive slightly longer
+                }
+                if self.rapid_times.is_empty() {
+                    self.rapid_bytes = 0;
+                }
+
+                self.rapid_times.push_back(now);
+                self.rapid_bytes += bytes;
+
+                if self.rapid_times.len() >= BULK_ENTRY_COUNT as usize
+                    && self.rapid_bytes >= BULK_ENTRY_BYTES
+                {
+                    self.mode = OutputMode::Bulk;
+                    self.bulk_transitions += 1;
+                    self.rapid_times.clear();
+                    self.rapid_bytes = 0;
+                }
+            }
+            OutputMode::Bulk => {
+                // Stay in bulk; exit check happens in check_quiet()
+            }
+        }
+
+        self.last_output = now;
+        self.mode
+    }
+
+    /// Check if we should exit bulk mode due to a quiet gap.
+    /// Called periodically from the I/O loop when there's no pipe data.
+    fn check_quiet(&mut self) -> OutputMode {
+        if self.mode == OutputMode::Bulk {
+            let quiet = self.last_output.elapsed();
+            if quiet >= Duration::from_millis(BULK_EXIT_QUIET_MS) {
+                self.mode = OutputMode::Interactive;
+                self.interactive_transitions += 1;
+                self.rapid_times.clear();
+                self.rapid_bytes = 0;
+            }
+        }
+        self.mode
+    }
+}
+
 /// Output from the PTY reader thread to the forwarding task.
 /// RawBytes is the PTY output data; GridDiff is a pushed diff for the frontend.
 pub enum SessionOutput {
@@ -510,9 +628,15 @@ impl DaemonSession {
             let mut total_bytes: u64 = 0;
             let mut total_reads: u64 = 0;
             let mut channel_send_failures: u64 = 0;
+            let mut coalesced_flushes: u64 = 0;
             let mut last_stats = Instant::now();
             let mut last_diff_time = Instant::now();
             const DIFF_INTERVAL: Duration = Duration::from_millis(16);
+
+            // Adaptive output batching state
+            let mut mode_detector = ModeDetector::new();
+            let mut coalesce_buf: Vec<u8> = Vec::new();
+            let mut coalesce_start: Option<Instant> = None;
 
             while reader_running.load(Ordering::Relaxed) {
                 let mut did_work = false;
@@ -561,6 +685,38 @@ impl DaemonSession {
 
                 // Step 2: Non-blocking check for incoming data from shim
                 if !shim_pipe_has_data(&pipe) {
+                    // Check if coalesce buffer needs flushing (time-based or quiet gap)
+                    let needs_coalesce_flush = if !coalesce_buf.is_empty() {
+                        let elapsed_ms = coalesce_start
+                            .map(|s| s.elapsed().as_millis() as u64)
+                            .unwrap_or(0);
+                        elapsed_ms >= BULK_COALESCE_MS
+                            || mode_detector.check_quiet() == OutputMode::Interactive
+                    } else {
+                        mode_detector.check_quiet();
+                        false
+                    };
+
+                    if needs_coalesce_flush {
+                        let data = std::mem::take(&mut coalesce_buf);
+                        coalesce_start = None;
+                        coalesced_flushes += 1;
+                        flush_output(
+                            &data,
+                            &session_id,
+                            &reader_tx,
+                            &reader_attached,
+                            &reader_ring,
+                            &reader_last_output,
+                            &reader_history,
+                            &reader_vt,
+                            &mut last_diff_time,
+                            DIFF_INTERVAL,
+                            &mut channel_send_failures,
+                        );
+                        did_work = true;
+                    }
+
                     if !did_work {
                         thread::sleep(Duration::from_millis(1));
                     }
@@ -583,113 +739,77 @@ impl DaemonSession {
                             .as_millis() as u64;
                         reader_last_output.store(now_ms, Ordering::Relaxed);
 
-                        // Always append to output_history for ReadBuffer access
-                        {
-                            let mut history = reader_history.lock();
-                            append_to_ring(&mut history, &data);
-                        }
+                        let mode = mode_detector.record_output(n);
 
-                        // Feed PTY output into godly-vt parser for grid state.
-                        let (maybe_diff, bell_fired) = {
-                            let mut vt = reader_vt.lock();
-                            vt.process(&data);
-                            let bell = vt.take_bell_pending();
-                            let now = Instant::now();
-                            let diff = if reader_attached.load(Ordering::Relaxed)
-                                && vt.screen().has_dirty_rows()
-                                && now.duration_since(last_diff_time) >= DIFF_INTERVAL
-                            {
-                                last_diff_time = now;
-                                Some(extract_diff(&mut vt))
-                            } else {
-                                None
-                            };
-                            (diff, bell)
-                        };
-
-                        let lock_start = Instant::now();
-                        let tx_guard = reader_tx.lock();
-                        let lock_elapsed = lock_start.elapsed();
-
-                        if lock_elapsed.as_millis() > 50 {
-                            daemon_log!(
-                                "Session {} reader: SLOW LOCK on output_tx: {:.1}ms",
-                                session_id,
-                                lock_elapsed.as_secs_f64() * 1000.0
-                            );
-                        }
-
-                        if let Some(tx) = tx_guard.as_ref() {
-                            // Client attached: try to send live output
-                            match tx.try_send(SessionOutput::RawBytes(data.clone())) {
-                                Ok(()) => {
-                                    if let Some(diff) = maybe_diff {
-                                        let _ = tx.try_send(SessionOutput::GridDiff(diff));
-                                    }
-                                    if bell_fired {
-                                        let _ = tx.try_send(SessionOutput::Bell);
-                                    }
-                                    drop(tx_guard);
-                                    thread::yield_now();
-                                }
-                                Err(tokio::sync::mpsc::error::TrySendError::Full(msg)) => {
-                                    let tx_clone = tx.clone();
-                                    drop(tx_guard);
-                                    let bp_start = Instant::now();
-                                    match tx_clone.blocking_send(msg) {
-                                        Ok(()) => {
-                                            let bp_elapsed = bp_start.elapsed();
-                                            if bp_elapsed.as_millis() > 50 {
-                                                daemon_log!(
-                                                    "Session {} reader: backpressure {:.1}ms (channel was full)",
-                                                    session_id,
-                                                    bp_elapsed.as_secs_f64() * 1000.0
-                                                );
-                                            }
-                                            if let Some(diff) = maybe_diff {
-                                                let _ =
-                                                    tx_clone.try_send(SessionOutput::GridDiff(diff));
-                                            }
-                                            if bell_fired {
-                                                let _ = tx_clone.try_send(SessionOutput::Bell);
-                                            }
-                                            thread::yield_now();
-                                        }
-                                        Err(send_err) => {
-                                            channel_send_failures += 1;
-                                            daemon_log!(
-                                                "Session {} reader: channel closed during backpressure (disconnect #{})",
-                                                session_id,
-                                                channel_send_failures
-                                            );
-                                            reader_attached.store(false, Ordering::Relaxed);
-                                            *reader_tx.lock() = None;
-                                            let mut ring = reader_ring.lock();
-                                            if let SessionOutput::RawBytes(data) = send_err.0 {
-                                                append_to_ring(&mut ring, &data);
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                    channel_send_failures += 1;
-                                    daemon_log!(
-                                        "Session {} reader: channel send failed (client disconnect #{})",
-                                        session_id,
-                                        channel_send_failures
+                        match mode {
+                            OutputMode::Interactive => {
+                                // Flush any pending coalesce buffer first
+                                if !coalesce_buf.is_empty() {
+                                    let pending = std::mem::take(&mut coalesce_buf);
+                                    coalesce_start = None;
+                                    coalesced_flushes += 1;
+                                    flush_output(
+                                        &pending,
+                                        &session_id,
+                                        &reader_tx,
+                                        &reader_attached,
+                                        &reader_ring,
+                                        &reader_last_output,
+                                        &reader_history,
+                                        &reader_vt,
+                                        &mut last_diff_time,
+                                        DIFF_INTERVAL,
+                                        &mut channel_send_failures,
                                     );
-                                    drop(tx_guard);
-                                    reader_attached.store(false, Ordering::Relaxed);
-                                    *reader_tx.lock() = None;
-                                    let mut ring = reader_ring.lock();
-                                    append_to_ring(&mut ring, &data);
+                                }
+
+                                // Send immediately (unchanged behavior)
+                                flush_output(
+                                    &data,
+                                    &session_id,
+                                    &reader_tx,
+                                    &reader_attached,
+                                    &reader_ring,
+                                    &reader_last_output,
+                                    &reader_history,
+                                    &reader_vt,
+                                    &mut last_diff_time,
+                                    DIFF_INTERVAL,
+                                    &mut channel_send_failures,
+                                );
+                            }
+                            OutputMode::Bulk => {
+                                // Accumulate into coalesce buffer
+                                if coalesce_start.is_none() {
+                                    coalesce_start = Some(Instant::now());
+                                }
+                                coalesce_buf.extend_from_slice(&data);
+
+                                // Flush if buffer is full or time exceeded
+                                let should_flush = coalesce_buf.len() >= BULK_COALESCE_MAX
+                                    || coalesce_start
+                                        .map(|s| s.elapsed().as_millis() as u64 >= BULK_COALESCE_MS)
+                                        .unwrap_or(false);
+
+                                if should_flush {
+                                    let flushed = std::mem::take(&mut coalesce_buf);
+                                    coalesce_start = None;
+                                    coalesced_flushes += 1;
+                                    flush_output(
+                                        &flushed,
+                                        &session_id,
+                                        &reader_tx,
+                                        &reader_attached,
+                                        &reader_ring,
+                                        &reader_last_output,
+                                        &reader_history,
+                                        &reader_vt,
+                                        &mut last_diff_time,
+                                        DIFF_INTERVAL,
+                                        &mut channel_send_failures,
+                                    );
                                 }
                             }
-                        } else {
-                            // No client attached: buffer output
-                            drop(tx_guard);
-                            let mut ring = reader_ring.lock();
-                            append_to_ring(&mut ring, &data);
                         }
 
                         // Periodic stats
@@ -697,13 +817,17 @@ impl DaemonSession {
                             let ring_size = reader_ring.lock().len();
                             let attached = reader_tx.lock().is_some();
                             daemon_log!(
-                                "Session {} reader stats: reads={}, bytes={}, send_failures={}, ring_buf={:.0}KB, attached={}",
+                                "Session {} reader stats: reads={}, bytes={}, send_failures={}, ring_buf={:.0}KB, attached={}, mode={:?}, coalesced_flushes={}, bulk_transitions={}, interactive_transitions={}",
                                 session_id,
                                 total_reads,
                                 total_bytes,
                                 channel_send_failures,
                                 ring_size as f64 / 1024.0,
-                                attached
+                                attached,
+                                mode_detector.mode,
+                                coalesced_flushes,
+                                mode_detector.bulk_transitions,
+                                mode_detector.interactive_transitions
                             );
                             last_stats = Instant::now();
                         }
@@ -771,17 +895,39 @@ impl DaemonSession {
                 }
             }
 
+            // Flush any remaining coalesce buffer before exiting
+            if !coalesce_buf.is_empty() {
+                let data = std::mem::take(&mut coalesce_buf);
+                coalesced_flushes += 1;
+                flush_output(
+                    &data,
+                    &session_id,
+                    &reader_tx,
+                    &reader_attached,
+                    &reader_ring,
+                    &reader_last_output,
+                    &reader_history,
+                    &reader_vt,
+                    &mut last_diff_time,
+                    DIFF_INTERVAL,
+                    &mut channel_send_failures,
+                );
+            }
+
             // Shim disconnected or shell exited -- mark session as dead and close output channel
             reader_running.store(false, Ordering::Relaxed);
             reader_attached.store(false, Ordering::Relaxed);
             *reader_tx.lock() = None;
 
             daemon_log!(
-                "Session {} shim I/O thread exited: reads={}, bytes={}, send_failures={}",
+                "Session {} shim I/O thread exited: reads={}, bytes={}, send_failures={}, coalesced_flushes={}, bulk_transitions={}, interactive_transitions={}",
                 session_id,
                 total_reads,
                 total_bytes,
-                channel_send_failures
+                channel_send_failures,
+                coalesced_flushes,
+                mode_detector.bulk_transitions,
+                mode_detector.interactive_transitions
             );
             eprintln!("[daemon] Session {} shim I/O thread exited", session_id);
         });
@@ -1216,6 +1362,143 @@ impl Drop for DaemonSession {
     }
 }
 
+/// Send output data through the session pipeline: history, vt parser, diff,
+/// and then to attached client or ring buffer. Extracted to avoid duplication
+/// between interactive-mode immediate sends and bulk-mode coalesce flushes.
+#[allow(clippy::too_many_arguments)]
+fn flush_output(
+    data: &[u8],
+    session_id: &str,
+    reader_tx: &Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
+    reader_attached: &Arc<AtomicBool>,
+    reader_ring: &Arc<Mutex<VecDeque<u8>>>,
+    reader_last_output: &Arc<AtomicU64>,
+    reader_history: &Arc<Mutex<VecDeque<u8>>>,
+    reader_vt: &Arc<Mutex<godly_vt::Parser>>,
+    last_diff_time: &mut Instant,
+    diff_interval: Duration,
+    channel_send_failures: &mut u64,
+) {
+    if data.is_empty() {
+        return;
+    }
+
+    // Update last output timestamp for idle detection
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    reader_last_output.store(now_ms, Ordering::Relaxed);
+
+    // Always append to output_history for ReadBuffer access
+    {
+        let mut history = reader_history.lock();
+        append_to_ring(&mut history, data);
+    }
+
+    // Feed PTY output into godly-vt parser for grid state.
+    let (maybe_diff, bell_fired) = {
+        let mut vt = reader_vt.lock();
+        vt.process(data);
+        let bell = vt.take_bell_pending();
+        let now = Instant::now();
+        let diff = if reader_attached.load(Ordering::Relaxed)
+            && vt.screen().has_dirty_rows()
+            && now.duration_since(*last_diff_time) >= diff_interval
+        {
+            *last_diff_time = now;
+            Some(extract_diff(&mut vt))
+        } else {
+            None
+        };
+        (diff, bell)
+    };
+
+    let lock_start = Instant::now();
+    let tx_guard = reader_tx.lock();
+    let lock_elapsed = lock_start.elapsed();
+
+    if lock_elapsed.as_millis() > 50 {
+        daemon_log!(
+            "Session {} reader: SLOW LOCK on output_tx: {:.1}ms",
+            session_id,
+            lock_elapsed.as_secs_f64() * 1000.0
+        );
+    }
+
+    if let Some(tx) = tx_guard.as_ref() {
+        // Client attached: try to send live output
+        match tx.try_send(SessionOutput::RawBytes(data.to_vec())) {
+            Ok(()) => {
+                if let Some(diff) = maybe_diff {
+                    let _ = tx.try_send(SessionOutput::GridDiff(diff));
+                }
+                if bell_fired {
+                    let _ = tx.try_send(SessionOutput::Bell);
+                }
+                drop(tx_guard);
+                thread::yield_now();
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(msg)) => {
+                let tx_clone = tx.clone();
+                drop(tx_guard);
+                let bp_start = Instant::now();
+                match tx_clone.blocking_send(msg) {
+                    Ok(()) => {
+                        let bp_elapsed = bp_start.elapsed();
+                        if bp_elapsed.as_millis() > 50 {
+                            daemon_log!(
+                                "Session {} reader: backpressure {:.1}ms (channel was full)",
+                                session_id,
+                                bp_elapsed.as_secs_f64() * 1000.0
+                            );
+                        }
+                        if let Some(diff) = maybe_diff {
+                            let _ = tx_clone.try_send(SessionOutput::GridDiff(diff));
+                        }
+                        if bell_fired {
+                            let _ = tx_clone.try_send(SessionOutput::Bell);
+                        }
+                        thread::yield_now();
+                    }
+                    Err(send_err) => {
+                        *channel_send_failures += 1;
+                        daemon_log!(
+                            "Session {} reader: channel closed during backpressure (disconnect #{})",
+                            session_id,
+                            channel_send_failures
+                        );
+                        reader_attached.store(false, Ordering::Relaxed);
+                        *reader_tx.lock() = None;
+                        let mut ring = reader_ring.lock();
+                        if let SessionOutput::RawBytes(data) = send_err.0 {
+                            append_to_ring(&mut ring, &data);
+                        }
+                    }
+                }
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                *channel_send_failures += 1;
+                daemon_log!(
+                    "Session {} reader: channel send failed (client disconnect #{})",
+                    session_id,
+                    channel_send_failures
+                );
+                drop(tx_guard);
+                reader_attached.store(false, Ordering::Relaxed);
+                *reader_tx.lock() = None;
+                let mut ring = reader_ring.lock();
+                append_to_ring(&mut ring, data);
+            }
+        }
+    } else {
+        // No client attached: buffer output
+        drop(tx_guard);
+        let mut ring = reader_ring.lock();
+        append_to_ring(&mut ring, data);
+    }
+}
+
 /// Extract a RichGridDiff from the current godly-vt parser state.
 /// Called from the PTY reader thread while holding the vt lock.
 fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDiff {
@@ -1570,5 +1853,114 @@ mod tests {
             windows_to_wsl_path("\\\\wsl.localhost\\Ubuntu\\home\\alanm\\dev\\terraform-tests\\terraform-provider-typesense"),
             "/home/alanm/dev/terraform-tests/terraform-provider-typesense"
         );
+    }
+
+    // ── ModeDetector unit tests ─────────────────────────────────────
+
+    #[test]
+    fn mode_detector_starts_interactive() {
+        let det = ModeDetector::new();
+        assert_eq!(det.mode, OutputMode::Interactive);
+    }
+
+    #[test]
+    fn mode_detector_stays_interactive_with_small_output() {
+        let mut det = ModeDetector::new();
+        // Small outputs don't trigger bulk even if rapid
+        for _ in 0..10 {
+            det.record_output(100); // 100B each, well under 4KB threshold
+        }
+        assert_eq!(det.mode, OutputMode::Interactive);
+    }
+
+    #[test]
+    fn mode_detector_enters_bulk_on_rapid_large_output() {
+        let mut det = ModeDetector::new();
+        // Simulate 3 rapid outputs totaling >4KB (within 10ms, no sleep)
+        det.record_output(2000);
+        det.record_output(2000);
+        let mode = det.record_output(2000); // 3rd output: 6KB total, 3 rapid
+        assert_eq!(mode, OutputMode::Bulk);
+        assert_eq!(det.bulk_transitions, 1);
+    }
+
+    #[test]
+    fn mode_detector_exits_bulk_after_quiet_gap() {
+        let mut det = ModeDetector::new();
+        // Enter bulk
+        det.record_output(2000);
+        det.record_output(2000);
+        det.record_output(2000);
+        assert_eq!(det.mode, OutputMode::Bulk);
+
+        // Simulate quiet gap by sleeping past the exit threshold
+        std::thread::sleep(Duration::from_millis(BULK_EXIT_QUIET_MS + 10));
+        let mode = det.check_quiet();
+        assert_eq!(mode, OutputMode::Interactive);
+        assert_eq!(det.interactive_transitions, 1);
+    }
+
+    #[test]
+    fn mode_detector_stays_bulk_during_continued_output() {
+        let mut det = ModeDetector::new();
+        // Enter bulk
+        det.record_output(2000);
+        det.record_output(2000);
+        det.record_output(2000);
+        assert_eq!(det.mode, OutputMode::Bulk);
+
+        // Continue outputting without gaps — should stay bulk
+        for _ in 0..10 {
+            let mode = det.record_output(1000);
+            assert_eq!(mode, OutputMode::Bulk);
+        }
+    }
+
+    #[test]
+    fn mode_detector_hysteresis_no_flapping() {
+        let mut det = ModeDetector::new();
+        // Enter bulk
+        det.record_output(2000);
+        det.record_output(2000);
+        det.record_output(2000);
+        assert_eq!(det.mode, OutputMode::Bulk);
+
+        // Short pause (well under the 50ms exit threshold) — should stay bulk
+        std::thread::sleep(Duration::from_millis(10));
+        det.check_quiet();
+        assert_eq!(det.mode, OutputMode::Bulk);
+        assert_eq!(det.interactive_transitions, 0);
+    }
+
+    #[test]
+    fn mode_detector_re_enters_bulk_after_interactive() {
+        let mut det = ModeDetector::new();
+        // Enter bulk
+        det.record_output(2000);
+        det.record_output(2000);
+        det.record_output(2000);
+        assert_eq!(det.bulk_transitions, 1);
+
+        // Exit bulk
+        std::thread::sleep(Duration::from_millis(BULK_EXIT_QUIET_MS + 10));
+        det.check_quiet();
+        assert_eq!(det.mode, OutputMode::Interactive);
+
+        // Re-enter bulk
+        det.record_output(2000);
+        det.record_output(2000);
+        det.record_output(2000);
+        assert_eq!(det.mode, OutputMode::Bulk);
+        assert_eq!(det.bulk_transitions, 2);
+    }
+
+    #[test]
+    fn mode_detector_check_quiet_noop_in_interactive() {
+        let mut det = ModeDetector::new();
+        // check_quiet should be a no-op when already interactive
+        std::thread::sleep(Duration::from_millis(BULK_EXIT_QUIET_MS + 10));
+        let mode = det.check_quiet();
+        assert_eq!(mode, OutputMode::Interactive);
+        assert_eq!(det.interactive_transitions, 0);
     }
 }
