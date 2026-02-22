@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Godly Terminal Remote</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --bg-input: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent-dim: #1f6feb;
+    --danger: #f85149;
+    --danger-dim: #da3633;
+    --success: #3fb950;
+    --warning: #d29922;
+    --radius: 12px;
+    --touch-min: 48px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* --- Nav --- */
+  .nav {
+    position: sticky; top: 0; z-index: 100;
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-title { font-size: 16px; font-weight: 600; flex: 1; }
+  .nav-back {
+    display: none; min-width: var(--touch-min); min-height: var(--touch-min);
+    background: none; border: none; color: var(--accent); font-size: 24px;
+    cursor: pointer; border-radius: 8px;
+  }
+  .nav-back:active { background: var(--bg-input); }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--danger); flex-shrink: 0;
+  }
+  .status-dot.connected { background: var(--success); }
+  .settings-btn {
+    min-width: var(--touch-min); min-height: var(--touch-min);
+    background: none; border: none; color: var(--text-dim); font-size: 20px;
+    cursor: pointer; border-radius: 8px;
+  }
+  .settings-btn:active { background: var(--bg-input); }
+
+  /* --- Views --- */
+  .view { display: none; padding: 16px; padding-bottom: 80px; }
+  .view.active { display: block; }
+
+  /* --- Dashboard --- */
+  .section-title {
+    font-size: 13px; font-weight: 600; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin: 16px 0 8px; padding: 0 4px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  .alert-card {
+    background: var(--bg-card); border: 1px solid var(--warning);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+  }
+  .alert-card .alert-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .alert-badge {
+    background: var(--warning); color: #000; font-size: 11px; font-weight: 700;
+    padding: 2px 8px; border-radius: 4px; text-transform: uppercase;
+  }
+  .alert-session { color: var(--text-dim); font-size: 13px; }
+  .alert-context {
+    font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 12px;
+    color: var(--text); background: var(--bg); border-radius: 6px;
+    padding: 8px; margin-bottom: 12px; white-space: pre-wrap;
+    max-height: 80px; overflow: auto; line-height: 1.4;
+  }
+  .alert-actions { display: flex; gap: 8px; }
+  .alert-actions button {
+    flex: 1; min-height: var(--touch-min); border: none; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .btn-approve { background: var(--success); color: #000; }
+  .btn-approve:active { opacity: 0.8; }
+  .btn-deny { background: var(--danger-dim); color: #fff; }
+  .btn-deny:active { opacity: 0.8; }
+
+  .no-alerts {
+    text-align: center; color: var(--text-dim); padding: 24px;
+    font-size: 14px;
+  }
+
+  .ws-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 12px; overflow: hidden;
+  }
+  .ws-header {
+    padding: 12px 16px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ws-name { font-weight: 600; font-size: 15px; flex: 1; }
+  .ws-shell { font-size: 12px; color: var(--text-dim); }
+  .term-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; min-height: var(--touch-min);
+    border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .term-row:last-child { border-bottom: none; }
+  .term-row:active { background: var(--bg-input); }
+  .term-status {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .term-status.alive { background: var(--success); }
+  .term-status.dead { background: var(--text-dim); }
+  .term-name { flex: 1; font-size: 14px; }
+  .term-cwd { font-size: 11px; color: var(--text-dim); }
+  .term-arrow { color: var(--text-dim); font-size: 16px; }
+
+  /* --- Session view --- */
+  .session-output {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px; line-height: 1.5;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px;
+    min-height: 200px; max-height: 60dvh; overflow: auto;
+    white-space: pre-wrap; word-break: break-all;
+    color: var(--text);
+  }
+  .input-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--bg-card); border-top: 1px solid var(--border);
+    padding: 8px 12px; display: none;
+  }
+  .input-bar.active { display: block; }
+  .input-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .input-field {
+    flex: 1; min-height: var(--touch-min);
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); padding: 0 12px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 14px;
+  }
+  .input-field:focus { outline: none; border-color: var(--accent); }
+  .send-btn {
+    min-width: var(--touch-min); min-height: var(--touch-min);
+    background: var(--accent-dim); color: #fff; border: none;
+    border-radius: 8px; font-size: 16px; cursor: pointer;
+  }
+  .send-btn:active { background: var(--accent); }
+  .quick-actions { display: flex; gap: 6px; }
+  .quick-btn {
+    min-height: 40px; padding: 0 16px;
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 13px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    cursor: pointer;
+  }
+  .quick-btn:active { background: var(--border); }
+
+  /* --- Settings --- */
+  .settings-group {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
+  }
+  .settings-label {
+    display: block; font-size: 13px; color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .settings-input {
+    width: 100%; min-height: var(--touch-min);
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); padding: 0 12px;
+    font-size: 14px;
+  }
+  .settings-input:focus { outline: none; border-color: var(--accent); }
+  .settings-note { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
+  .settings-save {
+    width: 100%; min-height: var(--touch-min);
+    background: var(--accent-dim); color: #fff; border: none;
+    border-radius: 8px; font-size: 15px; font-weight: 600;
+    cursor: pointer; margin-top: 8px;
+  }
+  .settings-save:active { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<div class="nav">
+  <button class="nav-back" id="navBack" onclick="goBack()">&#8592;</button>
+  <div class="nav-title" id="navTitle">Godly Remote</div>
+  <div class="status-dot" id="statusDot" title="Disconnected"></div>
+  <button class="settings-btn" id="settingsBtn" onclick="showView('settings')">&#9881;</button>
+</div>
+
+<!-- Dashboard -->
+<div class="view active" id="view-dashboard">
+  <div class="section-title">Prompts</div>
+  <div id="alertsContainer">
+    <div class="no-alerts">No active prompts</div>
+  </div>
+
+  <div class="section-title">Workspaces</div>
+  <div id="workspacesContainer"></div>
+</div>
+
+<!-- Session -->
+<div class="view" id="view-session">
+  <div class="session-output" id="sessionOutput">Loading...</div>
+</div>
+<div class="input-bar" id="inputBar">
+  <div class="input-row">
+    <input class="input-field" id="inputField" type="text" placeholder="Type command..."
+           autocapitalize="off" autocorrect="off" spellcheck="false">
+    <button class="send-btn" onclick="sendInput()">&#9166;</button>
+  </div>
+  <div class="quick-actions">
+    <button class="quick-btn" onclick="sendQuick('y')">y</button>
+    <button class="quick-btn" onclick="sendQuick('n')">n</button>
+    <button class="quick-btn" onclick="sendQuick('\r')">Enter</button>
+    <button class="quick-btn" onclick="sendCtrlC()">Ctrl+C</button>
+  </div>
+</div>
+
+<!-- Settings -->
+<div class="view" id="view-settings">
+  <div class="section-title">Connection</div>
+  <div class="settings-group">
+    <label class="settings-label">API Key</label>
+    <input class="settings-input" id="apiKeyInput" type="password" placeholder="Enter API key">
+    <div class="settings-note">Required if server has auth enabled. Stored in localStorage.</div>
+    <button class="settings-save" onclick="saveSettings()">Save</button>
+  </div>
+  <div class="settings-group">
+    <label class="settings-label">Server URL</label>
+    <input class="settings-input" id="serverUrlInput" type="url" placeholder="http://localhost:3377">
+    <div class="settings-note">Leave empty to use current origin.</div>
+    <button class="settings-save" onclick="saveSettings()">Save</button>
+  </div>
+  <div class="settings-group">
+    <label class="settings-label">Connection Status</label>
+    <div id="connStatus" style="padding:8px 0;font-size:14px;">Checking...</div>
+  </div>
+</div>
+
+<script>
+// --- State ---
+let currentView = 'dashboard';
+let currentSessionId = null;
+let apiKey = localStorage.getItem('godly_api_key') || '';
+let serverUrl = localStorage.getItem('godly_server_url') || '';
+let sseSource = null;
+let refreshTimer = null;
+let sessionRefreshTimer = null;
+let activePrompts = new Map(); // session_id -> prompt data
+
+// --- API ---
+function baseUrl() {
+  return serverUrl || window.location.origin;
+}
+
+function headers() {
+  const h = { 'Content-Type': 'application/json' };
+  if (apiKey) h['X-API-Key'] = apiKey;
+  return h;
+}
+
+async function api(path, opts = {}) {
+  const url = baseUrl() + path;
+  const resp = await fetch(url, { headers: headers(), ...opts });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
+async function apiPost(path, body) {
+  return api(path, { method: 'POST', body: JSON.stringify(body) });
+}
+
+// --- Views ---
+function showView(name, title) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  currentView = name;
+
+  const navBack = document.getElementById('navBack');
+  const navTitle = document.getElementById('navTitle');
+  const inputBar = document.getElementById('inputBar');
+
+  if (name === 'dashboard') {
+    navBack.style.display = 'none';
+    navTitle.textContent = 'Godly Remote';
+    inputBar.classList.remove('active');
+  } else {
+    navBack.style.display = 'block';
+    navTitle.textContent = title || name;
+    inputBar.classList.toggle('active', name === 'session');
+  }
+
+  if (name === 'session') startSessionRefresh();
+  else stopSessionRefresh();
+
+  if (name === 'settings') loadSettings();
+}
+
+function goBack() {
+  if (currentView === 'session' || currentView === 'settings') {
+    showView('dashboard');
+  }
+}
+
+// --- Dashboard ---
+async function refreshDashboard() {
+  try {
+    const [promptsData, wsData] = await Promise.all([
+      api('/api/prompts').catch(() => ({ prompts: [] })),
+      api('/api/workspaces').catch(() => ({ workspaces: [] })),
+    ]);
+    renderAlerts(promptsData.prompts);
+    renderWorkspaces(wsData.workspaces);
+    setConnected(true);
+  } catch (e) {
+    setConnected(false);
+  }
+}
+
+function renderAlerts(prompts) {
+  const container = document.getElementById('alertsContainer');
+  if (!prompts || prompts.length === 0) {
+    container.innerHTML = '<div class="no-alerts">No active prompts</div>';
+    return;
+  }
+
+  container.innerHTML = prompts.map(p => `
+    <div class="alert-card">
+      <div class="alert-header">
+        <span class="alert-badge">${escHtml(p.prompt_type)}</span>
+        <span class="alert-session">${escHtml(p.session_id.slice(0, 8))}...</span>
+      </div>
+      <div class="alert-context">${escHtml(truncate(p.context_text, 200))}</div>
+      <div class="alert-actions">
+        <button class="btn-approve" onclick="sendToSession('${escAttr(p.session_id)}', 'y\\r')">Approve</button>
+        <button class="btn-deny" onclick="sendToSession('${escAttr(p.session_id)}', 'n\\r')">Deny</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderWorkspaces(workspaces) {
+  const container = document.getElementById('workspacesContainer');
+  if (!workspaces || workspaces.length === 0) {
+    container.innerHTML = '<div class="no-alerts">No workspaces found</div>';
+    return;
+  }
+
+  container.innerHTML = workspaces.map(ws => `
+    <div class="ws-card">
+      <div class="ws-header">
+        <span class="ws-name">${escHtml(ws.name)}</span>
+        <span class="ws-shell">${escHtml(ws.shell_type)}</span>
+      </div>
+      ${ws.terminals.map(t => `
+        <div class="term-row" onclick="openSession('${escAttr(t.id)}', '${escAttr(t.name)}')">
+          <div class="term-status ${t.alive ? 'alive' : 'dead'}"></div>
+          <div>
+            <div class="term-name">${escHtml(t.name)}</div>
+            ${t.cwd ? `<div class="term-cwd">${escHtml(t.cwd)}</div>` : ''}
+          </div>
+          <span class="term-arrow">&#8250;</span>
+        </div>
+      `).join('')}
+      ${ws.terminals.length === 0 ? '<div class="term-row"><span class="term-name" style="color:var(--text-dim)">No terminals</span></div>' : ''}
+    </div>
+  `).join('');
+}
+
+// --- Session ---
+async function openSession(id, name) {
+  currentSessionId = id;
+  showView('session', name || id.slice(0, 8));
+  await refreshSession();
+}
+
+async function refreshSession() {
+  if (!currentSessionId) return;
+  try {
+    const url = `/api/sessions/${currentSessionId}/text?lines=50`;
+    const data = await api(url);
+    const output = document.getElementById('sessionOutput');
+    output.textContent = (data.lines || []).join('\n') || '(empty)';
+    output.scrollTop = output.scrollHeight;
+  } catch (e) {
+    document.getElementById('sessionOutput').textContent = 'Error: ' + e.message;
+  }
+}
+
+function startSessionRefresh() {
+  stopSessionRefresh();
+  sessionRefreshTimer = setInterval(refreshSession, 1000);
+}
+
+function stopSessionRefresh() {
+  if (sessionRefreshTimer) {
+    clearInterval(sessionRefreshTimer);
+    sessionRefreshTimer = null;
+  }
+}
+
+async function sendInput() {
+  const field = document.getElementById('inputField');
+  const text = field.value;
+  if (!text || !currentSessionId) return;
+  field.value = '';
+  await sendToSession(currentSessionId, text + '\r');
+}
+
+async function sendQuick(text) {
+  if (!currentSessionId) return;
+  await sendToSession(currentSessionId, text);
+}
+
+async function sendCtrlC() {
+  if (!currentSessionId) return;
+  await sendToSession(currentSessionId, '\x03');
+}
+
+async function sendToSession(sid, text) {
+  try {
+    await apiPost(`/api/sessions/${sid}/write`, { data: text });
+    // Refresh after short delay to see result
+    setTimeout(() => {
+      if (currentView === 'session') refreshSession();
+      else refreshDashboard();
+    }, 300);
+  } catch (e) {
+    console.error('Write failed:', e);
+  }
+}
+
+// --- SSE ---
+function connectSSE() {
+  if (sseSource) { sseSource.close(); sseSource = null; }
+
+  let url = baseUrl() + '/api/events';
+  if (apiKey) url += '?api_key=' + encodeURIComponent(apiKey);
+
+  try {
+    sseSource = new EventSource(url);
+
+    sseSource.addEventListener('prompt_detected', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        activePrompts.set(data.session_id, data);
+        if (currentView === 'dashboard') refreshDashboard();
+      } catch {}
+    });
+
+    sseSource.addEventListener('prompt_resolved', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        activePrompts.delete(data.session_id);
+        if (currentView === 'dashboard') refreshDashboard();
+      } catch {}
+    });
+
+    sseSource.addEventListener('heartbeat', () => {
+      setConnected(true);
+    });
+
+    sseSource.onopen = () => setConnected(true);
+    sseSource.onerror = () => {
+      setConnected(false);
+      // EventSource auto-reconnects
+    };
+  } catch (e) {
+    setConnected(false);
+  }
+}
+
+// --- Settings ---
+function loadSettings() {
+  document.getElementById('apiKeyInput').value = apiKey;
+  document.getElementById('serverUrlInput').value = serverUrl;
+  updateConnStatus();
+}
+
+function saveSettings() {
+  apiKey = document.getElementById('apiKeyInput').value.trim();
+  serverUrl = document.getElementById('serverUrlInput').value.trim();
+
+  if (apiKey) localStorage.setItem('godly_api_key', apiKey);
+  else localStorage.removeItem('godly_api_key');
+
+  if (serverUrl) localStorage.setItem('godly_server_url', serverUrl);
+  else localStorage.removeItem('godly_server_url');
+
+  connectSSE();
+  updateConnStatus();
+  refreshDashboard();
+}
+
+async function updateConnStatus() {
+  const el = document.getElementById('connStatus');
+  try {
+    const resp = await fetch(baseUrl() + '/health');
+    if (resp.ok) {
+      el.textContent = 'Connected to ' + baseUrl();
+      el.style.color = 'var(--success)';
+    } else {
+      el.textContent = 'Server returned ' + resp.status;
+      el.style.color = 'var(--danger)';
+    }
+  } catch (e) {
+    el.textContent = 'Cannot reach server';
+    el.style.color = 'var(--danger)';
+  }
+}
+
+// --- Helpers ---
+function setConnected(ok) {
+  document.getElementById('statusDot').className = 'status-dot' + (ok ? ' connected' : '');
+  document.getElementById('statusDot').title = ok ? 'Connected' : 'Disconnected';
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(s) {
+  return escHtml(s).replace(/'/g, '&#39;');
+}
+
+function truncate(s, max) {
+  if (!s || s.length <= max) return s;
+  return s.slice(0, max) + '...';
+}
+
+// --- Input handling ---
+document.getElementById('inputField').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); sendInput(); }
+});
+
+// --- Init ---
+(async function init() {
+  refreshDashboard();
+  refreshTimer = setInterval(() => {
+    if (currentView === 'dashboard') refreshDashboard();
+  }, 5000);
+  connectSSE();
+})();
+</script>
+</body>
+</html>

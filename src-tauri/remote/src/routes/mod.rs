@@ -1,8 +1,12 @@
+pub mod events;
 pub mod health;
 pub mod input;
 pub mod monitor;
+pub mod phone;
+pub mod prompts;
 pub mod quick_claude;
 pub mod sessions;
+pub mod workspaces;
 
 use axum::middleware;
 use axum::routing::{delete, get, post};
@@ -13,7 +17,9 @@ use crate::AppState;
 
 pub fn build_router(state: AppState) -> Router {
     // Public routes (no auth)
-    let public = Router::new().route("/health", get(health::health));
+    let public = Router::new()
+        .route("/health", get(health::health))
+        .route("/phone", get(phone::phone_ui));
 
     // Authenticated API routes
     let api = Router::new()
@@ -22,9 +28,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sessions/:id", get(sessions::get_session))
         .route("/api/sessions/:id", delete(sessions::delete_session))
         .route("/api/sessions/:id/grid", get(sessions::get_grid))
+        .route("/api/sessions/:id/text", get(sessions::get_text))
         .route("/api/sessions/:id/idle", get(sessions::get_idle))
         .route("/api/sessions/:id/write", post(input::write_to_session))
         .route("/api/sessions/:id/resize", post(sessions::resize_session))
+        .route("/api/sessions/:id/prompts", get(prompts::session_prompts))
+        .route("/api/workspaces", get(workspaces::list_workspaces))
+        .route("/api/prompts", get(prompts::list_prompts))
+        .route("/api/events", get(events::event_stream))
         .route("/api/quick-claude", post(quick_claude::quick_claude))
         .route("/api/monitor", get(monitor::list_monitors))
         .route("/api/monitor/:id", post(monitor::start_monitor))
