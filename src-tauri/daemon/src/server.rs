@@ -454,13 +454,6 @@ async fn handle_client(
 /// This prevents write-heavy scenarios from starving request reads.
 const MAX_WRITES_PER_ITERATION: usize = 128;
 
-/// Number of idle loop iterations to spin (yield_now) before falling back to sleep.
-/// During active I/O this keeps latency near-zero; when truly idle, the sleep
-/// prevents burning CPU. On Windows, thread::sleep(1ms) can actually sleep ~15ms
-/// due to the default timer resolution (15.625ms), so avoiding sleep during
-/// active use is critical for input responsiveness.
-const SPIN_BEFORE_SLEEP: u32 = 100;
-
 /// Single I/O thread: performs all pipe reads and writes.
 /// Uses PeekNamedPipe for non-blocking read checks to avoid deadlock.
 ///
@@ -488,11 +481,6 @@ fn io_thread(
     let mut total_bytes_written: u64 = 0;
     let mut write_stall_count: u64 = 0;
     let direct_writes: u64 = 0; // Always 0: writes now go through async handler (deadlock fix)
-
-    // Adaptive polling: spin (yield_now) before falling back to sleep.
-    // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to the
-    // default system timer resolution (15.625ms). Spinning avoids this.
-    let mut idle_count: u32 = 0;
 
     daemon_log!("io_thread started, handle={}", raw_handle);
 
@@ -691,19 +679,9 @@ fn io_thread(
         }
 
         if !did_work {
-            // Adaptive polling: spin for a while before sleeping.
-            // On Windows, thread::sleep(1ms) can actually sleep ~15ms due to
-            // the default system timer resolution (15.625ms). During active I/O,
-            // spinning avoids this penalty. When truly idle, we fall back to
-            // sleep to avoid burning CPU.
-            idle_count += 1;
-            if idle_count > SPIN_BEFORE_SLEEP {
-                std::thread::sleep(Duration::from_millis(1));
-            } else {
-                std::thread::yield_now();
-            }
-        } else {
-            idle_count = 0;
+            // Sleep 1ms when idle. timeBeginPeriod(1) is set at daemon startup
+            // so this actually sleeps ~1ms (not ~15ms as with default timer resolution).
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         // Periodic stats logging
