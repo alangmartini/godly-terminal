@@ -13,6 +13,10 @@ godly-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+async-stream = "0.3"
+futures-core = "0.3"
+axum = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 winapi.workspace = true

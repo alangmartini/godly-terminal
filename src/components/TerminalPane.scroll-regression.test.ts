@@ -150,12 +150,23 @@ class ScrollRegressionSimulator {
   }
 
   /**
-   * Mirror of handleKeyEvent (TerminalPane.ts).
-   * Fix #202: keyboard input no longer snaps to bottom unconditionally.
+   * Mirror of handleKeyEvent for data-producing input (TerminalPane.ts).
+   * Fix #238: data-producing input (writeToTerminal) snaps to bottom
+   * so the user sees the echo. Modifier-only keys still don't snap.
    */
   onKeyboardInput() {
-    // Fixed: removed unconditional snapToBottom on keystroke.
-    // User can type while viewing scrollback.
+    // Fix #238: snap to live view when sending data to PTY.
+    this.snapToBottom();
+  }
+
+  /**
+   * Mirror of handleKeyEvent for modifier-only keypresses (Ctrl, Shift, Alt, Meta).
+   * These never produce terminal data and must NOT trigger snap-to-bottom
+   * (e.g. pressing Ctrl before Ctrl+C to copy).
+   */
+  onModifierKeyPress() {
+    // Modifier-only keys are filtered out before writeToTerminal,
+    // so no snap occurs. This is a no-op.
   }
 
   /** Get the jump magnitude that would result from a scroll delta */
@@ -252,23 +263,37 @@ describe('Bug #202 regression: scroll-to-bottom during sustained output', () => 
   });
 
   // ── 2. Keyboard input snap-to-bottom ─────────────────────────────────
+  // Fix #238 supersedes: data-producing input DOES snap to bottom so the
+  // user can see the echo. Modifier-only keys still don't snap.
 
-  describe('keyboard input unconditionally snaps to bottom', () => {
-    it('Bug #202: typing while scrolled up destroys scroll position', () => {
+  describe('keyboard input snaps to bottom only for data-producing keys', () => {
+    it('Fix #238: data input while scrolled up snaps to live view', () => {
       sim.handleScroll(50);
       sim.applySnapshot(50, 1000);
       expect(sim.isUserScrolled).toBe(true);
 
-      // User types while viewing scrollback
+      // User types a data-producing key while viewing scrollback
       sim.onKeyboardInput();
 
-      // Bug: keyboard input should NOT snap to bottom when user is
-      // intentionally reviewing scrollback
-      expect(sim.scrollbackOffset).toBe(50);
+      // Fix #238: data input snaps to bottom so the echo is visible
+      expect(sim.scrollbackOffset).toBe(0);
+      expect(sim.isUserScrolled).toBe(false);
+    });
+
+    it('Fix #202: modifier-only keys do NOT snap to bottom', () => {
+      sim.handleScroll(30);
+      sim.applySnapshot(30, 500);
+      expect(sim.isUserScrolled).toBe(true);
+
+      // User presses Ctrl (modifier only, no data sent to PTY)
+      sim.onModifierKeyPress();
+
+      // Modifier-only keys must not snap — user may be preparing Ctrl+C
+      expect(sim.scrollbackOffset).toBe(30);
       expect(sim.isUserScrolled).toBe(true);
     });
 
-    it('Bug #202: every keystroke during sustained output triggers snap', () => {
+    it('Fix #238: data input after sustained output snaps to live view', () => {
       sim.handleScroll(30);
       sim.applySnapshot(30, 500);
 
@@ -280,26 +305,27 @@ describe('Bug #202 regression: scroll-to-bottom during sustained output', () => 
 
       sim.onKeyboardInput();
 
-      // Bug: viewport snaps to bottom, user loses their place
-      expect(sim.scrollbackOffset).toBeGreaterThan(0);
+      // Fix #238: snap to bottom so echo is visible
+      expect(sim.scrollbackOffset).toBe(0);
+      expect(sim.isUserScrolled).toBe(false);
     });
 
-    it('Bug #202: typing loses position even with autoScrollOnOutput disabled', () => {
+    it('Fix #238: data input snaps even with autoScrollOnOutput disabled', () => {
       expect(terminalSettingsStore.getAutoScrollOnOutput()).toBe(false);
 
       sim.handleScroll(20);
       sim.applySnapshot(20, 300);
 
       // Output arrives — offset tracks daemon's drift (20 + 10 = 30)
-      // but user is still viewing the same content
       sim.onNewOutputDiff(10);
       expect(sim.scrollbackOffset).toBe(30);
 
-      // Typing should NOT snap to bottom
+      // Data input should snap regardless of autoScrollOnOutput setting
       sim.onKeyboardInput();
 
-      // Fix: keyboard input preserves scroll position
-      expect(sim.scrollbackOffset).toBe(30);
+      // Fix #238: snap to live view so user sees typed echo
+      expect(sim.scrollbackOffset).toBe(0);
+      expect(sim.isUserScrolled).toBe(false);
     });
   });
 
@@ -340,7 +366,7 @@ describe('Bug #202 regression: scroll-to-bottom during sustained output', () => 
   // ── 4. Combined scenario (Claude Code usage pattern) ─────────────────
 
   describe('Claude Code usage pattern', () => {
-    it('Bug #202: full session — scroll up, output, type, lose position', () => {
+    it('Fix #238: typing in Claude Code prompt snaps to live view', () => {
       // 1. Claude Code produces initial output
       sim.applySnapshot(0, 100);
 
@@ -354,12 +380,12 @@ describe('Bug #202 regression: scroll-to-bottom during sustained output', () => 
         sim.onNewOutputDiff(1);
       }
 
-      // 4. User types a response — any keystroke snaps to bottom
-      const offsetBeforeType = sim.scrollbackOffset;
+      // 4. User types a response — snaps to live view to see echo
       sim.onKeyboardInput();
 
-      // Bug: typing should not destroy scroll position
-      expect(sim.scrollbackOffset).toBe(offsetBeforeType);
+      // Fix #238: typing snaps to bottom so the user sees their input
+      expect(sim.scrollbackOffset).toBe(0);
+      expect(sim.isUserScrolled).toBe(false);
     });
   });
 });
