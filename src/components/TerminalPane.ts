@@ -181,6 +181,9 @@ export class TerminalPane {
       if (this.isComposing) return;
       const text = this.inputTextarea.value;
       if (text) {
+        // Bug #238: Snap to live view when user sends input to PTY,
+        // so the echo is visible. No-op if already at bottom.
+        this.snapToBottom();
         perfTracer.mark('write_ipc_start');
         terminalService.writeToTerminal(this.terminalId, text).then(() => {
           perfTracer.measure('write_to_terminal_ipc', 'write_ipc_start');
@@ -197,6 +200,7 @@ export class TerminalPane {
       this.isComposing = false;
       const text = this.inputTextarea.value;
       if (text) {
+        this.snapToBottom();
         terminalService.writeToTerminal(this.terminalId, text);
       }
       this.inputTextarea.value = '';
@@ -349,6 +353,7 @@ export class TerminalPane {
     // Paste: paste from clipboard into terminal
     if (action === 'clipboard.paste') {
       event.preventDefault();
+      this.snapToBottom();
       navigator.clipboard.readText().then((text) => {
         if (text) {
           terminalService.writeToTerminal(this.terminalId, text);
@@ -370,6 +375,7 @@ export class TerminalPane {
     // Shift+Enter: send CSI 13;2u (kitty keyboard protocol)
     if (event.shiftKey && !event.ctrlKey && event.key === 'Enter') {
       event.preventDefault();
+      this.snapToBottom();
       terminalService.writeToTerminal(this.terminalId, '\x1b[13;2u');
       return;
     }
@@ -384,6 +390,7 @@ export class TerminalPane {
     const data = this.keyToTerminalData(event);
     if (data) {
       event.preventDefault();
+      this.snapToBottom();
       perfTracer.mark('write_ipc_start');
       terminalService.writeToTerminal(this.terminalId, data).then(() => {
         perfTracer.measure('write_to_terminal_ipc', 'write_ipc_start');
