@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "protocol", "daemon", "mcp", "notify", "godly-vt", "remote", "llm"]
+members = [".", "protocol", "daemon", "mcp", "notify", "godly-vt", "remote", "llm", "pty-shim"]
 resolver = "2"
 
 [workspace.dependencies]
