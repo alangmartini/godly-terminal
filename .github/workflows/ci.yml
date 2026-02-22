@@ -119,7 +119,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-and-app-tests:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     needs: build-release-binaries
     steps:
       - uses: actions/checkout@v4
@@ -133,9 +133,12 @@ jobs:
         with:
           name: release-binaries
           path: src-tauri/target/release/
-      - name: App crate tests
-        run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci -E "not test(test_cleanup_all_worktrees_with_progress)"
+      - name: Build app crate tests
+        run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci --no-run
         timeout-minutes: 12
+      - name: Run app crate tests
+        run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci -E "not test(test_cleanup_all_worktrees_with_progress)"
+        timeout-minutes: 5
       - uses: actions/setup-node@v4
         with:
           node-version: 20
