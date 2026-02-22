@@ -2,6 +2,8 @@ mod debug_log;
 mod pid;
 mod server;
 mod session;
+mod shim_client;
+mod shim_metadata;
 
 use crate::pid::{remove_pid_file, write_pid_file, DaemonLock};
 use crate::server::DaemonServer;

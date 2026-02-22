@@ -129,6 +129,8 @@ def main():
         warmup_ratio=0.1,
         weight_decay=0.01,
         fp16=device == "cuda",
+        bf16=False,
+        use_cpu=device == "cpu",
         logging_steps=10,
         eval_strategy="epoch",
         save_strategy="epoch",
@@ -136,7 +138,7 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        max_seq_length=args.max_seq_length,
+        max_length=args.max_seq_length,
         dataset_text_field="text",
         report_to="none",
     )

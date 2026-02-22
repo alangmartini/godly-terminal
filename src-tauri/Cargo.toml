@@ -26,6 +26,7 @@ features = [
     "winerror",
     "winnt",
     "jobapi2",
+    "processenv",
 ]
 
 [package]

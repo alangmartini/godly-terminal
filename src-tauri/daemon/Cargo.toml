@@ -15,7 +15,6 @@ leak-check = ["dhat"]
 dhat = { version = "0.3", optional = true }
 godly-protocol.workspace = true
 godly-vt = { path = "../godly-vt" }
-portable-pty = "0.8"
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

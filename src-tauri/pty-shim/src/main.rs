@@ -445,7 +445,7 @@ fn main_loop(
 mod pipe {
     use std::io::{self, Write};
     use std::time::Duration;
-    use winapi::shared::minwindef::{DWORD, FALSE, TRUE};
+    use winapi::shared::minwindef::DWORD;
     use winapi::shared::winerror;
     use winapi::um::errhandlingapi::GetLastError;
     use winapi::um::fileapi::{FlushFileBuffers, ReadFile, WriteFile};
@@ -453,10 +453,7 @@ mod pipe {
     use winapi::um::namedpipeapi::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PeekNamedPipe,
     };
-    use winapi::um::synchapi::WaitForSingleObject;
-    use winapi::um::winbase::{
-        PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
-    };
+    use winapi::um::winbase::{PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT};
     use winapi::um::winnt::HANDLE;
 
     /// A Windows named pipe handle with RAII disconnect/close.
@@ -495,6 +492,15 @@ mod pipe {
 
     /// Create a named pipe server and wait for a client to connect.
     /// Returns `Ok(Some(pipe))` on connection, `Ok(None)` on timeout, `Err` on failure.
+    ///
+    /// IMPORTANT: The pipe is created WITHOUT FILE_FLAG_OVERLAPPED. All subsequent
+    /// ReadFile/WriteFile calls use synchronous I/O. Mixing FILE_FLAG_OVERLAPPED
+    /// with NULL OVERLAPPED parameters in ReadFile/WriteFile causes undefined
+    /// behavior on Windows (MSDN: "the function can incorrectly report that the
+    /// write/read operation is complete"), which silently drops pipe data.
+    ///
+    /// For the connection timeout, we run blocking ConnectNamedPipe in a dedicated
+    /// thread and wait on a channel with timeout.
     pub fn create_pipe_and_wait(
         pipe_name: &str,
         timeout: Duration,
@@ -504,7 +510,7 @@ mod pipe {
         let handle = unsafe {
             CreateNamedPipeW(
                 wide_name.as_ptr(),
-                PIPE_ACCESS_DUPLEX | winapi::um::winbase::FILE_FLAG_OVERLAPPED,
+                PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 1,    // max instances
                 8192, // out buffer
@@ -519,86 +525,41 @@ mod pipe {
             return Err(format!("CreateNamedPipeW failed: error {}", err));
         }
 
-        // Use overlapped ConnectNamedPipe for timeout support
-        let event = unsafe {
-            winapi::um::synchapi::CreateEventW(
-                std::ptr::null_mut(),
-                TRUE,
-                FALSE,
-                std::ptr::null(),
-            )
-        };
-        if event.is_null() {
-            unsafe { CloseHandle(handle) };
-            return Err("CreateEventW failed".to_string());
-        }
+        // Run blocking ConnectNamedPipe in a thread so we can apply a timeout.
+        // The thread holds a raw handle pointer (safe: ConnectNamedPipe is a
+        // system call that returns cleanly when the handle is closed).
+        let handle_raw = handle as usize;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let h = handle_raw as HANDLE;
+            let result = unsafe { ConnectNamedPipe(h, std::ptr::null_mut()) };
+            let err = if result == 0 {
+                unsafe { GetLastError() }
+            } else {
+                0
+            };
+            let _ = tx.send((result, err));
+        });
 
-        let mut overlapped: winapi::um::minwinbase::OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.hEvent = event;
-
-        let connect_result = unsafe { ConnectNamedPipe(handle, &mut overlapped) };
-
-        if connect_result != 0 {
-            unsafe { CloseHandle(event) };
-            return Ok(Some(PipeHandle { handle }));
-        }
-
-        let err = unsafe { GetLastError() };
-        match err {
-            winerror::ERROR_IO_PENDING => {
-                let wait_result =
-                    unsafe { WaitForSingleObject(event, timeout.as_millis() as DWORD) };
-                unsafe { CloseHandle(event) };
-
-                match wait_result {
-                    winapi::um::winbase::WAIT_OBJECT_0 => {
-                        let mut bytes_transferred: DWORD = 0;
-                        let ok = unsafe {
-                            winapi::um::ioapiset::GetOverlappedResult(
-                                handle,
-                                &mut overlapped,
-                                &mut bytes_transferred,
-                                FALSE,
-                            )
-                        };
-                        if ok != 0 {
-                            Ok(Some(PipeHandle { handle }))
-                        } else {
-                            let err = unsafe { GetLastError() };
-                            unsafe {
-                                DisconnectNamedPipe(handle);
-                                CloseHandle(handle);
-                            }
-                            Err(format!("GetOverlappedResult failed: error {}", err))
-                        }
+        match rx.recv_timeout(timeout) {
+            Ok((result, err)) => {
+                if result != 0 || err == winerror::ERROR_PIPE_CONNECTED {
+                    Ok(Some(PipeHandle { handle }))
+                } else {
+                    unsafe {
+                        DisconnectNamedPipe(handle);
+                        CloseHandle(handle);
                     }
-                    winerror::WAIT_TIMEOUT => {
-                        unsafe {
-                            winapi::um::ioapiset::CancelIo(handle);
-                            DisconnectNamedPipe(handle);
-                            CloseHandle(handle);
-                        }
-                        Ok(None)
-                    }
-                    _ => {
-                        unsafe {
-                            DisconnectNamedPipe(handle);
-                            CloseHandle(handle);
-                        }
-                        Err(format!("WaitForSingleObject failed: {}", wait_result))
-                    }
+                    Err(format!("ConnectNamedPipe failed: error {}", err))
                 }
             }
-            winerror::ERROR_PIPE_CONNECTED => {
-                unsafe { CloseHandle(event) };
-                Ok(Some(PipeHandle { handle }))
-            }
-            _ => {
+            Err(_) => {
+                // Timeout: close the handle to unblock ConnectNamedPipe in the thread
                 unsafe {
-                    CloseHandle(event);
+                    DisconnectNamedPipe(handle);
                     CloseHandle(handle);
                 }
-                Err(format!("ConnectNamedPipe failed: error {}", err))
+                Ok(None)
             }
         }
     }

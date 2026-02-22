@@ -1,0 +1,125 @@
+[store]
+dir = "target/nextest"
+
+# ---------------------------------------------------------------------------
+# Test groups — concurrency limits for resource-heavy tests
+# ---------------------------------------------------------------------------
+
+# Daemon integration tests that spawn a real daemon + PTY.
+# Capped to avoid pipe/port exhaustion on dev machines.
+[test-groups.daemon-integration]
+max-threads = 4
+
+# Stress and performance tests — timing-sensitive, need low contention.
+# Subset of daemon-integration tests that are especially heavy.
+[test-groups.stress-tests]
+max-threads = 2
+
+# CI-only: all daemon integration tests run serially.
+# CI runners are shared VMs — parallel daemons cause pipe timeouts.
+# Cross-job parallelism via 3-partition matrix provides the speedup instead.
+[test-groups.ci-serial]
+max-threads = 1
+
+# ===========================================================================
+# Profile: default (local dev, full suite)
+# ===========================================================================
+
+[profile.default]
+retries = 0
+test-threads = "num-cpus"
+slow-timeout = { period = "60s", terminate-after = 2 }
+status-level = "pass"
+final-status-level = "flaky"
+
+# --- Stress/perf tests: cap at 2 concurrent (timing-sensitive) ---
+# These are listed BEFORE daemon-integration so they get the stricter limit.
+# (nextest uses first-match semantics for overrides.)
+
+[[profile.default.overrides]]
+filter = "binary(memory_stress) | binary(arrow_up_history_latency) | binary(input_latency)"
+test-group = "stress-tests"
+
+# --- Daemon integration tests: cap at 4 concurrent ---
+# The stress tests (memory_stress, arrow_up_history_latency, input_latency)
+# already matched the stricter group above and won't reach this override.
+
+[[profile.default.overrides]]
+filter = """
+binary(handler_starvation)
+| binary(input_latency_full_path)
+| binary(read_grid)
+| binary(zombie_tabs)
+| binary(typing_rollback)
+| binary(scroll_position_preservation)
+| binary(paste_image_freeze)
+| binary(ctrl_c_interrupt)
+| binary(session_persistence)
+| binary(single_instance)
+"""
+test-group = "daemon-integration"
+
+# ===========================================================================
+# Profile: fast (local dev, skip ~13 slow stress/perf tests)
+# ===========================================================================
+
+[profile.fast]
+default-filter = """
+not (
+    binary(memory_stress)
+    | binary(arrow_up_history_latency)
+    | binary(handler_starvation)
+    | binary(input_latency)
+    | binary(input_latency_full_path)
+)
+"""
+
+# The remaining daemon integration tests still get their concurrency cap.
+
+[[profile.fast.overrides]]
+filter = """
+binary(read_grid)
+| binary(zombie_tabs)
+| binary(typing_rollback)
+| binary(scroll_position_preservation)
+| binary(paste_image_freeze)
+| binary(ctrl_c_interrupt)
+| binary(session_persistence)
+| binary(single_instance)
+"""
+test-group = "daemon-integration"
+
+# ===========================================================================
+# Profile: ci (retries for flaky tests + JUnit output for CI reporting)
+# ===========================================================================
+
+[profile.ci]
+retries = 2
+test-threads = "num-cpus"
+slow-timeout = { period = "120s", terminate-after = 3 }
+status-level = "pass"
+final-status-level = "flaky"
+junit = { path = "junit.xml" }
+
+# --- ALL daemon integration tests run serially on CI ---
+# CI runners are shared VMs with limited resources. Running multiple daemon
+# processes in parallel causes 5s pipe timeouts. The 3-partition matrix
+# already provides cross-job parallelism.
+
+[[profile.ci.overrides]]
+filter = """
+binary(memory_stress)
+| binary(arrow_up_history_latency)
+| binary(input_latency)
+| binary(handler_starvation)
+| binary(input_latency_full_path)
+| binary(read_grid)
+| binary(zombie_tabs)
+| binary(typing_rollback)
+| binary(scroll_position_preservation)
+| binary(paste_image_freeze)
+| binary(ctrl_c_interrupt)
+| binary(session_persistence)
+| binary(single_instance)
+"""
+test-group = "ci-serial"
