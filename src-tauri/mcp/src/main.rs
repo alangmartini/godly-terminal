@@ -1,24 +1,20 @@
 mod app_backend;
 mod backend;
 mod daemon_direct;
+mod handler;
 mod jsonrpc;
 mod log;
 mod pipe_client;
+mod sse;
 mod tools;
 
 use std::io::{self, BufReader};
 
-use serde_json::json;
-
-use app_backend::AppBackend;
-use backend::Backend;
-use daemon_direct::DaemonDirectBackend;
-use jsonrpc::{JsonRpcResponse, read_message, write_message};
+use jsonrpc::{read_message, write_message};
 use log::mcp_log;
-use pipe_client::McpPipeClient;
 
 /// Bump this on every godly-mcp code change so logs show which binary is running.
-const BUILD: u32 = 14;
+const BUILD: u32 = 15;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -33,64 +29,6 @@ fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// Backend connection
-// ---------------------------------------------------------------------------
-
-/// Try to connect a backend: MCP pipe (app) first, then daemon direct.
-fn connect_backend() -> Result<Box<dyn Backend>, String> {
-    // Try MCP pipe first (Tauri app)
-    match McpPipeClient::connect() {
-        Ok(client) => {
-            mcp_log!("Connected via MCP pipe (app backend)");
-            return Ok(Box::new(AppBackend::new(client)));
-        }
-        Err(e) => {
-            mcp_log!("MCP pipe unavailable: {} — trying daemon direct...", e);
-        }
-    }
-
-    // Fall back to daemon direct
-    match DaemonDirectBackend::connect() {
-        Ok(backend) => {
-            mcp_log!("Connected via daemon pipe (daemon-direct fallback)");
-            Ok(Box::new(backend))
-        }
-        Err(e) => Err(format!(
-            "Cannot connect to Godly Terminal. App pipe and daemon pipe both unavailable. Last error: {}",
-            e
-        )),
-    }
-}
-
-/// Try to reconnect: MCP pipe first, then daemon direct.
-/// Returns new backend on success, None on failure.
-fn try_reconnect() -> Option<Box<dyn Backend>> {
-    if let Ok(client) = McpPipeClient::connect() {
-        mcp_log!("Reconnected via MCP pipe (app backend)");
-        return Some(Box::new(AppBackend::new(client)));
-    }
-    if let Ok(backend) = DaemonDirectBackend::connect() {
-        mcp_log!("Reconnected via daemon pipe (daemon-direct fallback)");
-        return Some(Box::new(backend));
-    }
-    None
-}
-
-/// If currently in daemon-direct mode, cheaply probe the MCP pipe
-/// and upgrade to app backend if the Tauri app is back.
-fn maybe_upgrade_backend(backend: &mut Box<dyn Backend>) {
-    if backend.label() != "daemon-direct" {
-        return;
-    }
-
-    // Cheap probe: try opening the MCP pipe
-    if let Ok(client) = McpPipeClient::connect() {
-        mcp_log!("App pipe is back — upgrading from daemon-direct to app backend");
-        *backend = Box::new(AppBackend::new(client));
-    }
-}
-
-// ---------------------------------------------------------------------------
 // CLI mode
 // ---------------------------------------------------------------------------
 
@@ -101,13 +39,15 @@ godly-mcp — Godly Terminal MCP server & CLI
 
 USAGE:
     godly-mcp                          Start MCP server (stdin/stdout JSON-RPC)
+    godly-mcp sse [OPTIONS]            Start MCP server (SSE/HTTP transport)
     godly-mcp notify [OPTIONS]         Send a notification to Godly Terminal
     godly-mcp --help                   Show this help
 
 COMMANDS:
+    sse       Start SSE transport server (HTTP, serves multiple sessions)
     notify    Send a sound notification and badge alert
 
-Run 'godly-mcp notify --help' for subcommand details."
+Run 'godly-mcp sse --help' or 'godly-mcp notify --help' for subcommand details."
     );
 }
 
@@ -136,6 +76,33 @@ EXAMPLES:
     );
 }
 
+fn print_sse_help() {
+    eprintln!(
+        "\
+Start the SSE transport server.
+
+Runs a persistent HTTP server that serves multiple Claude Code sessions
+over Server-Sent Events (SSE). One process, many clients.
+
+USAGE:
+    godly-mcp sse [OPTIONS]
+
+OPTIONS:
+    -p, --port <PORT>          Port to listen on (default: 8089)
+    -h, --help                 Show this help
+
+PROTOCOL:
+    1. Client opens GET /sse → receives SSE stream
+    2. Server sends event: endpoint with POST URL
+    3. Client sends JSON-RPC via POST /messages?sessionId=XXX
+    4. Server pushes response as event: message on the SSE stream
+
+EXAMPLES:
+    godly-mcp sse
+    godly-mcp sse --port 9090"
+    );
+}
+
 /// Run in CLI mode. Returns the process exit code.
 fn run_cli(args: &[String]) -> i32 {
     match args[0].as_str() {
@@ -144,6 +111,7 @@ fn run_cli(args: &[String]) -> i32 {
             0
         }
         "notify" => run_cli_notify(&args[1..]),
+        "sse" => run_cli_sse(&args[1..]),
         other => {
             eprintln!("Error: unknown command '{}'\n", other);
             print_help();
@@ -199,7 +167,7 @@ fn run_cli_notify(args: &[String]) -> i32 {
     };
 
     // Connect to pipe and send the request (CLI notify only uses app backend)
-    let mut client = match McpPipeClient::connect() {
+    let mut client = match pipe_client::McpPipeClient::connect() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -232,8 +200,51 @@ fn run_cli_notify(args: &[String]) -> i32 {
     }
 }
 
+/// Parse and execute `godly-mcp sse [OPTIONS]`.
+fn run_cli_sse(args: &[String]) -> i32 {
+    let mut port: u16 = 8089;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--help" | "-h" => {
+                print_sse_help();
+                return 0;
+            }
+            "-p" | "--port" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: --port requires a value");
+                    return 1;
+                }
+                port = match args[i].parse() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        eprintln!("Error: invalid port number '{}'", args[i]);
+                        return 1;
+                    }
+                };
+            }
+            other => {
+                eprintln!("Error: unknown option '{}'\n", other);
+                print_sse_help();
+                return 1;
+            }
+        }
+        i += 1;
+    }
+
+    log::init();
+    mcp_log!("=== godly-mcp SSE starting === build={}", BUILD);
+    mcp_log!("PID: {}", std::process::id());
+
+    // run_sse_server blocks forever
+    sse::run_sse_server(port);
+    0
+}
+
 // ---------------------------------------------------------------------------
-// MCP server mode
+// MCP server mode (stdio)
 // ---------------------------------------------------------------------------
 
 fn run_mcp_server() {
@@ -255,7 +266,7 @@ fn run_mcp_server() {
     mcp_log!("GODLY_MCP_PIPE_NAME: {:?}", pipe_name);
 
     mcp_log!("Connecting backend...");
-    let mut backend = match connect_backend() {
+    let mut backend = match handler::connect_backend() {
         Ok(b) => {
             mcp_log!("Backend connected: {}", b.label());
             b
@@ -301,9 +312,9 @@ fn run_mcp_server() {
         }
 
         // If in fallback mode, try to upgrade to app backend
-        maybe_upgrade_backend(&mut backend);
+        handler::maybe_upgrade_backend(&mut backend);
 
-        let response = handle_request(&request, &mut backend, &session_id);
+        let response = handler::handle_request(&request, &mut backend, &session_id);
 
         let response_json = serde_json::to_string(&response).unwrap_or_default();
         mcp_log!("Sending response: {}", response_json);
@@ -318,141 +329,4 @@ fn run_mcp_server() {
     }
 
     mcp_log!("=== godly-mcp shutting down ===");
-}
-
-fn handle_request(
-    request: &jsonrpc::JsonRpcRequest,
-    backend: &mut Box<dyn Backend>,
-    session_id: &Option<String>,
-) -> JsonRpcResponse {
-    match request.method.as_str() {
-        "initialize" => {
-            mcp_log!("Handling initialize");
-            JsonRpcResponse::success(
-                request.id.clone(),
-                json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "godly-terminal",
-                        "version": "0.1.0"
-                    }
-                }),
-            )
-        }
-
-        "tools/list" => {
-            mcp_log!("Handling tools/list");
-            JsonRpcResponse::success(request.id.clone(), tools::list_tools())
-        }
-
-        "tools/call" => {
-            let params = request.params.as_ref();
-            let tool_name = params
-                .and_then(|p| p.get("name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let args = params
-                .and_then(|p| p.get("arguments"))
-                .cloned()
-                .unwrap_or(json!({}));
-
-            mcp_log!(
-                "Handling tools/call: tool={}, args={}, backend={}",
-                tool_name,
-                args,
-                backend.label()
-            );
-
-            match tools::call_tool(backend.as_mut(), tool_name, &args, session_id) {
-                Ok(result) => {
-                    mcp_log!("Tool call succeeded: {}", tool_name);
-                    JsonRpcResponse::success(
-                        request.id.clone(),
-                        json!({
-                            "content": [{
-                                "type": "text",
-                                "text": serde_json::to_string_pretty(&result)
-                                    .unwrap_or_else(|_| result.to_string())
-                            }]
-                        }),
-                    )
-                }
-                Err(e) => {
-                    mcp_log!("Tool call failed: {} — {}", tool_name, e);
-
-                    // If it looks like a pipe error, try to reconnect
-                    if e.contains("Pipe error")
-                        || e.contains("write error")
-                        || e.contains("read error")
-                        || e.contains("Pipe closed")
-                        || e.contains("Daemon pipe closed")
-                    {
-                        mcp_log!("Pipe error detected — attempting reconnect...");
-                        if let Some(new_backend) = try_reconnect() {
-                            mcp_log!("Reconnected via {}", new_backend.label());
-                            *backend = new_backend;
-
-                            // Retry the tool call once
-                            match tools::call_tool(
-                                backend.as_mut(),
-                                tool_name,
-                                &args,
-                                session_id,
-                            ) {
-                                Ok(result) => {
-                                    mcp_log!("Retry succeeded: {}", tool_name);
-                                    return JsonRpcResponse::success(
-                                        request.id.clone(),
-                                        json!({
-                                            "content": [{
-                                                "type": "text",
-                                                "text": serde_json::to_string_pretty(&result)
-                                                    .unwrap_or_else(|_| result.to_string())
-                                            }]
-                                        }),
-                                    );
-                                }
-                                Err(retry_err) => {
-                                    mcp_log!("Retry also failed: {}", retry_err);
-                                    return JsonRpcResponse::success(
-                                        request.id.clone(),
-                                        json!({
-                                            "content": [{
-                                                "type": "text",
-                                                "text": format!("Error: {}", retry_err)
-                                            }],
-                                            "isError": true
-                                        }),
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    JsonRpcResponse::success(
-                        request.id.clone(),
-                        json!({
-                            "content": [{
-                                "type": "text",
-                                "text": format!("Error: {}", e)
-                            }],
-                            "isError": true
-                        }),
-                    )
-                }
-            }
-        }
-
-        _ => {
-            mcp_log!("Unknown method: {}", request.method);
-            JsonRpcResponse::error(
-                request.id.clone(),
-                -32601,
-                format!("Method not found: {}", request.method),
-            )
-        }
-    }
 }
