@@ -560,6 +560,17 @@ document.getElementById('inputField').addEventListener('keydown', (e) => {
 
 // --- Init ---
 (async function init() {
+  // Auto-configure API key from URL param (e.g. /phone?key=abc123)
+  const params = new URLSearchParams(window.location.search);
+  const urlKey = params.get('key');
+  if (urlKey) {
+    apiKey = urlKey;
+    localStorage.setItem('godly_api_key', apiKey);
+    params.delete('key');
+    const clean = window.location.pathname + (params.toString() ? '?' + params : '');
+    history.replaceState(null, '', clean);
+  }
+
   refreshDashboard();
   refreshTimer = setInterval(() => {
     if (currentView === 'dashboard') refreshDashboard();
