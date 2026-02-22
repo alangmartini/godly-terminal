@@ -1,23 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use regex::Regex;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
 use godly_protocol::{Request, Response};
 
 use crate::daemon_client::async_request;
+use crate::detection::PromptDetector;
 use crate::AppState;
-
-/// Default patterns that match common Claude Code permission prompts.
-const DEFAULT_PATTERNS: &[&str] = &[
-    r"Do you want to proceed\?",
-    r"Allow this action\?",
-    r"\(Y\)es.*\(N\)o",
-    r"Do you want to allow",
-    r"Press Enter to continue",
-];
 
 #[derive(Serialize, Clone)]
 pub struct WebhookPayload {
@@ -42,34 +33,6 @@ impl MonitorRegistry {
     }
 }
 
-/// Compiled set of patterns for matching.
-struct PatternSet {
-    patterns: Vec<(Regex, String)>,
-}
-
-impl PatternSet {
-    fn default_patterns() -> Self {
-        let patterns = DEFAULT_PATTERNS
-            .iter()
-            .filter_map(|p| {
-                Regex::new(p)
-                    .ok()
-                    .map(|r| (r, p.to_string()))
-            })
-            .collect();
-        Self { patterns }
-    }
-
-    fn matches(&self, text: &str) -> Option<String> {
-        for (regex, source) in &self.patterns {
-            if regex.is_match(text) {
-                return Some(source.clone());
-            }
-        }
-        None
-    }
-}
-
 /// Start monitoring a session for permission prompts.
 pub fn start_monitor(state: AppState, session_id: String) {
     let poll_ms = state.config.monitor.poll_interval_ms;
@@ -80,7 +43,7 @@ pub fn start_monitor(state: AppState, session_id: String) {
 
     let sid = session_id.clone();
     let handle = tokio::spawn(async move {
-        let patterns = PatternSet::default_patterns();
+        let detector = PromptDetector::new();
         let mut last_match_time: u64 = 0;
         let cooldown_ms: u64 = 30_000;
 
@@ -112,7 +75,7 @@ pub fn start_monitor(state: AppState, session_id: String) {
             let start = rows.len().saturating_sub(scan_rows);
             let bottom_text: String = rows[start..].join("\n");
 
-            if let Some(matched_pattern) = patterns.matches(&bottom_text) {
+            if let Some(detection) = detector.detect(&bottom_text) {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -127,14 +90,14 @@ pub fn start_monitor(state: AppState, session_id: String) {
                 tracing::info!(
                     "Permission prompt detected in session {}: {}",
                     sid,
-                    matched_pattern
+                    detection.matched_pattern
                 );
 
                 if let Some(ref url) = webhook_url {
                     let payload = WebhookPayload {
                         event_type: "permission_prompt".to_string(),
                         session_id: sid.clone(),
-                        matched_pattern,
+                        matched_pattern: detection.matched_pattern,
                         grid_text: bottom_text.clone(),
                         timestamp_ms: now_ms,
                     };
@@ -182,61 +145,4 @@ pub async fn list_monitors(state: &AppState) -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_patterns_compile() {
-        let set = PatternSet::default_patterns();
-        assert_eq!(set.patterns.len(), DEFAULT_PATTERNS.len());
-    }
-
-    #[test]
-    fn matches_yes_no_prompt() {
-        let set = PatternSet::default_patterns();
-        let text = "Some output\n  (Y)es  (N)o\n";
-        assert!(set.matches(text).is_some());
-    }
-
-    #[test]
-    fn matches_do_you_want_to_proceed() {
-        let set = PatternSet::default_patterns();
-        let text = "Do you want to proceed?";
-        assert!(set.matches(text).is_some());
-    }
-
-    #[test]
-    fn matches_allow_this_action() {
-        let set = PatternSet::default_patterns();
-        let text = "Allow this action?";
-        assert!(set.matches(text).is_some());
-    }
-
-    #[test]
-    fn matches_do_you_want_to_allow() {
-        let set = PatternSet::default_patterns();
-        let text = "Do you want to allow this tool call?";
-        assert!(set.matches(text).is_some());
-    }
-
-    #[test]
-    fn matches_press_enter() {
-        let set = PatternSet::default_patterns();
-        let text = "Press Enter to continue";
-        assert!(set.matches(text).is_some());
-    }
-
-    #[test]
-    fn no_match_on_normal_output() {
-        let set = PatternSet::default_patterns();
-        let text = "$ ls -la\ntotal 42\ndrwxr-xr-x  5 user user 4096 Feb 19 12:00 .";
-        assert!(set.matches(text).is_none());
-    }
-
-    #[test]
-    fn no_match_on_empty() {
-        let set = PatternSet::default_patterns();
-        assert!(set.matches("").is_none());
-    }
-}
+// Tests for prompt detection are in detection.rs

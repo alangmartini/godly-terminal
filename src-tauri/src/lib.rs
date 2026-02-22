@@ -161,6 +161,7 @@ pub fn run() {
             commands::list_worktrees,
             commands::remove_worktree,
             commands::cleanup_all_worktrees,
+            commands::list_skills,
             commands::read_file,
             commands::write_file,
             commands::get_user_claude_md_path,
