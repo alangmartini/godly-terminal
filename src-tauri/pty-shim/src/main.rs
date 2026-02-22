@@ -19,6 +19,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Grace period after shell exits before shim self-terminates.
 const SHELL_EXIT_GRACE_SECS: u64 = 30;
 
+/// Maximum time (seconds) the shim will wait for a daemon to connect/reconnect.
+/// After this period with no daemon connection, the shim self-terminates to
+/// prevent orphaned processes from accumulating indefinitely.
+const ORPHAN_TIMEOUT_SECS: u64 = 600; // 10 minutes
+
 struct Args {
     session_id: String,
     shell_type: String,
@@ -242,9 +247,23 @@ fn main_loop(
 ) -> Result<(), String> {
     use mpsc::TryRecvError;
 
+    // Track how long we've been without a daemon connection.
+    // Starts at process launch; reset each time a daemon connects.
+    let mut last_daemon_connected = std::time::Instant::now();
+
     loop {
         if shutdown_requested.load(Ordering::SeqCst) {
             eprintln!("godly-pty-shim: shutdown requested, exiting");
+            return Ok(());
+        }
+
+        // Orphan timeout: if no daemon has connected for ORPHAN_TIMEOUT_SECS,
+        // self-terminate to prevent indefinite resource consumption.
+        if last_daemon_connected.elapsed() > Duration::from_secs(ORPHAN_TIMEOUT_SECS) {
+            eprintln!(
+                "godly-pty-shim: no daemon connection for {}s, self-terminating",
+                ORPHAN_TIMEOUT_SECS
+            );
             return Ok(());
         }
 
@@ -298,6 +317,7 @@ fn main_loop(
         };
 
         eprintln!("godly-pty-shim: daemon connected on {}", pipe_name);
+        last_daemon_connected = std::time::Instant::now();
 
         // Send buffered data first
         {

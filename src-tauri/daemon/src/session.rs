@@ -1203,6 +1203,19 @@ impl DaemonSession {
     }
 }
 
+impl Drop for DaemonSession {
+    fn drop(&mut self) {
+        // Safety net: if the session is dropped without an explicit close(),
+        // send Shutdown to the shim so it doesn't become an orphan process.
+        if self.running.load(Ordering::Relaxed) {
+            let _ = self
+                .shim_io_tx
+                .send(ShimIoMessage::Control(ShimRequest::Shutdown));
+            shim_metadata::remove_metadata(&self.id);
+        }
+    }
+}
+
 /// Extract a RichGridDiff from the current godly-vt parser state.
 /// Called from the PTY reader thread while holding the vt lock.
 fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDiff {
