@@ -4,7 +4,6 @@
 //! The shim holds the ConPTY handles and survives daemon crashes. The daemon
 //! connects to the shim via a named pipe to exchange input/output/control data.
 
-use std::io;
 use std::process::Command;
 
 use godly_protocol::types::ShellType;
@@ -52,6 +51,13 @@ pub fn spawn_shim(
             cmd.env(key, value);
         }
     }
+
+    // The shim communicates via named pipes — it doesn't need inherited stdio.
+    // Explicitly null them out so spawn works even when the daemon was launched
+    // without a console (e.g., via WMI), where parent handles are invalid.
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
 
     // Spawn detached: the shim must outlive the daemon
     #[cfg(windows)]
@@ -149,41 +155,6 @@ pub fn connect_to_shim(_pipe_name: &str) -> Result<std::fs::File, String> {
     Err("Named pipes only supported on Windows".to_string())
 }
 
-/// Duplicate a file handle so we can have separate reader/writer handles.
-/// On Windows named pipes, a single handle can be used for both read and write,
-/// but using separate handles avoids serialization issues between the reader
-/// thread and writer calls.
-#[cfg(windows)]
-pub fn duplicate_handle(file: &std::fs::File) -> io::Result<std::fs::File> {
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    use winapi::um::handleapi::DuplicateHandle;
-    use winapi::um::processthreadsapi::GetCurrentProcess;
-
-    let mut new_handle = std::ptr::null_mut();
-    let result = unsafe {
-        DuplicateHandle(
-            GetCurrentProcess(),
-            file.as_raw_handle() as _,
-            GetCurrentProcess(),
-            &mut new_handle,
-            0,
-            0,
-            winapi::um::winnt::DUPLICATE_SAME_ACCESS,
-        )
-    };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(unsafe { std::fs::File::from_raw_handle(new_handle as _) })
-}
-
-#[cfg(not(windows))]
-pub fn duplicate_handle(_file: &std::fs::File) -> io::Result<std::fs::File> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "DuplicateHandle only available on Windows",
-    ))
-}
 
 /// Check if a process is still alive by its PID.
 #[cfg(windows)]
