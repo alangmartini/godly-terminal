@@ -65,6 +65,11 @@ export class TerminalPane {
   // Pending render scheduled via requestAnimationFrame (for pushed diffs).
   private renderRAF: number | null = null;
 
+  // When true, the pane is not visible (hidden tab, not in split view).
+  // All output processing is suspended to save CPU — the daemon's godly-vt
+  // parser keeps state current, so a single snapshot fetch on resume catches up.
+  private paused = false;
+
   // Hidden textarea for keyboard input (handles dead keys, IME composition).
   // Canvas elements don't support text composition, so dead keys (e.g. quote
   // on ABNT2 keyboards) produce event.key="Dead" and the composed character
@@ -222,6 +227,7 @@ export class TerminalPane {
     this.unsubscribeGridDiff = terminalService.onTerminalGridDiff(
       this.terminalId,
       (diff) => {
+        if (this.paused) return;
         perfTracer.mark('terminal_grid_diff_event');
         perfTracer.measure('keydown_to_diff', 'keydown');
         if (this.renderer.isActivelySelecting()) return;
@@ -239,6 +245,7 @@ export class TerminalPane {
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
       () => {
+        if (this.paused) return;
         perfTracer.mark('terminal_output_event');
         perfTracer.measure('keydown_to_output', 'keydown');
         // Freeze display while the user is dragging to select text.
@@ -257,6 +264,7 @@ export class TerminalPane {
     // Tauri events because it skips JSON serialization. The terminal-output
     // event listener above remains as a fallback.
     terminalService.connectOutputStream(this.terminalId, () => {
+      if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
@@ -536,6 +544,7 @@ export class TerminalPane {
   // ---- Grid snapshot fetching ----
 
   private scheduleSnapshotFetch() {
+    if (this.paused) return;
     if (this.snapshotPending) return;
     this.snapshotPending = true;
     perfTracer.mark('schedule_snapshot');
@@ -814,10 +823,59 @@ export class TerminalPane {
 
   // ---- Activation / Visibility ----
 
+  /**
+   * Pause output processing. Called when this pane becomes invisible
+   * (hidden tab, removed from split view). Disconnects the output stream,
+   * cancels pending timers, and makes event callbacks early-return.
+   * The daemon's godly-vt parser continues updating, so resume() can
+   * catch up with a single snapshot fetch.
+   */
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    terminalService.disconnectOutputStream(this.terminalId);
+    if (this.snapshotTimer !== null) {
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
+    this.snapshotPending = false;
+    if (this.renderRAF !== null) {
+      cancelAnimationFrame(this.renderRAF);
+      this.renderRAF = null;
+    }
+  }
+
+  /**
+   * Resume output processing. Called when this pane becomes visible again
+   * (tab activated, added to split view). Reconnects the output stream,
+   * invalidates the cached snapshot to force a full fetch, and immediately
+   * fetches the current grid state to catch up.
+   */
+  resume() {
+    if (!this.paused) return;
+    this.paused = false;
+    this.cachedSnapshot = null;
+    terminalService.connectOutputStream(this.terminalId, () => {
+      if (this.paused) return;
+      if (this.renderer.isActivelySelecting()) return;
+      if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+        this.snapToBottom();
+        return;
+      }
+      this.scheduleSnapshotFetch();
+    });
+    this.fetchAndRenderSnapshot();
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
   setActive(active: boolean) {
     this.container.classList.remove('split-visible', 'split-focused');
     this.container.classList.toggle('active', active);
     if (active) {
+      this.resume();
       // Sync canvas bitmap to container size immediately to prevent the browser
       // from stretching the stale bitmap (300×150 default) for one frame,
       // which causes a "zoomed in" flash on tab switch / reopen.
@@ -839,6 +897,8 @@ export class TerminalPane {
           this.focusInput();
         }
       }, 50);
+    } else {
+      this.pause();
     }
   }
 
@@ -847,6 +907,7 @@ export class TerminalPane {
     this.container.classList.toggle('split-visible', visible);
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
+      this.resume();
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
       this.renderer.updateSize();
       requestAnimationFrame(() => {
@@ -859,6 +920,8 @@ export class TerminalPane {
         }
         this.fetchAndRenderSnapshot();
       });
+    } else {
+      this.pause();
     }
   }
 
