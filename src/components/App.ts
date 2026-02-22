@@ -478,7 +478,7 @@ export class App {
 
           const { showQuickClaudeDialog } = await import('./dialogs');
           const input = await showQuickClaudeDialog({
-            workspaces: state.workspaces.map(w => ({ id: w.id, name: w.name })),
+            workspaces: state.workspaces.map(w => ({ id: w.id, name: w.name, folderPath: w.folderPath })),
             activeWorkspaceId: state.activeWorkspaceId,
           });
           if (!input) break;

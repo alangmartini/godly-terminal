@@ -231,7 +231,7 @@ export interface QuickClaudeInput {
 }
 
 export interface QuickClaudeOptions {
-  workspaces: { id: string; name: string }[];
+  workspaces: { id: string; name: string; folderPath: string }[];
   activeWorkspaceId: string;
 }
 
@@ -269,12 +269,124 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     workspaceSelect.value = validSaved ? savedId : options.activeWorkspaceId;
     dialog.appendChild(workspaceSelect);
 
+    // -- Prompt textarea with skill dropdown wrapper --
+    const promptWrapper = document.createElement('div');
+    promptWrapper.style.position = 'relative';
+
     const promptArea = document.createElement('textarea');
     promptArea.className = 'dialog-input';
-    promptArea.placeholder = 'Describe your idea...';
+    promptArea.placeholder = 'Describe your idea... (type / for skills)';
     promptArea.rows = 4;
     promptArea.style.cssText = 'resize: vertical; min-height: 80px; font-family: inherit; font-size: 13px;';
-    dialog.appendChild(promptArea);
+    promptWrapper.appendChild(promptArea);
+
+    const skillDropdown = document.createElement('div');
+    skillDropdown.className = 'skill-dropdown';
+    skillDropdown.style.display = 'none';
+    promptWrapper.appendChild(skillDropdown);
+
+    dialog.appendChild(promptWrapper);
+
+    // -- Skill autocomplete state --
+    interface SkillInfo { name: string; description: string; usage: string; source: string }
+    const skillCache = new Map<string, SkillInfo[]>();
+    let activeSkills: SkillInfo[] = [];
+    let activeIndex = -1;
+    let dropdownVisible = false;
+
+    async function fetchSkills(workspaceId: string): Promise<SkillInfo[]> {
+      if (skillCache.has(workspaceId)) return skillCache.get(workspaceId)!;
+      const ws = options.workspaces.find(w => w.id === workspaceId);
+      if (!ws) return [];
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const skills = await invoke<SkillInfo[]>('list_skills', { projectPath: ws.folderPath });
+        skillCache.set(workspaceId, skills);
+        return skills;
+      } catch {
+        return [];
+      }
+    }
+
+    function renderDropdown(skills: SkillInfo[], highlightIndex: number) {
+      skillDropdown.innerHTML = '';
+      if (skills.length === 0) {
+        hideDropdown();
+        return;
+      }
+      skills.forEach((skill, i) => {
+        const item = document.createElement('div');
+        item.className = 'skill-item' + (i === highlightIndex ? ' skill-item-active' : '');
+        const nameEl = document.createElement('div');
+        nameEl.className = 'skill-item-name';
+        nameEl.textContent = '/' + skill.name;
+        const descEl = document.createElement('div');
+        descEl.className = 'skill-item-desc';
+        descEl.textContent = skill.description;
+        item.appendChild(nameEl);
+        item.appendChild(descEl);
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          selectSkill(skill);
+        });
+        item.addEventListener('mouseenter', () => {
+          activeIndex = i;
+          updateHighlight();
+        });
+        skillDropdown.appendChild(item);
+      });
+      skillDropdown.style.display = '';
+      dropdownVisible = true;
+    }
+
+    function updateHighlight() {
+      const items = skillDropdown.querySelectorAll('.skill-item');
+      items.forEach((el, i) => {
+        el.classList.toggle('skill-item-active', i === activeIndex);
+        if (i === activeIndex) el.scrollIntoView({ block: 'nearest' });
+      });
+    }
+
+    function hideDropdown() {
+      skillDropdown.style.display = 'none';
+      dropdownVisible = false;
+      activeIndex = -1;
+      activeSkills = [];
+    }
+
+    function selectSkill(skill: SkillInfo) {
+      const val = promptArea.value;
+      const cursor = promptArea.selectionStart;
+      const before = val.slice(0, cursor);
+      const slashIdx = before.lastIndexOf('/');
+      if (slashIdx >= 0) {
+        const replacement = skill.usage || ('/' + skill.name);
+        promptArea.value = val.slice(0, slashIdx) + replacement + ' ' + val.slice(cursor);
+        const newPos = slashIdx + replacement.length + 1;
+        promptArea.setSelectionRange(newPos, newPos);
+      }
+      hideDropdown();
+      promptArea.focus();
+    }
+
+    promptArea.addEventListener('input', async () => {
+      const val = promptArea.value;
+      const cursor = promptArea.selectionStart;
+      const before = val.slice(0, cursor);
+      const match = before.match(/(^|[\s\n])\/([\w-]*)$/);
+      if (!match) {
+        hideDropdown();
+        return;
+      }
+      const query = match[2].toLowerCase();
+      const skills = await fetchSkills(workspaceSelect.value);
+      const filtered = query
+        ? skills.filter(s => s.name.toLowerCase().includes(query))
+        : skills;
+      activeSkills = filtered;
+      activeIndex = filtered.length > 0 ? 0 : -1;
+      renderDropdown(filtered, activeIndex);
+    });
 
     const branchRow = document.createElement('div');
     branchRow.style.cssText = 'display: flex; gap: 8px; align-items: center; margin-top: 8px;';
@@ -353,6 +465,39 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     okBtn.onclick = submit;
 
     promptArea.onkeydown = (e) => {
+      if (dropdownVisible) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          activeIndex = Math.min(activeIndex + 1, activeSkills.length - 1);
+          updateHighlight();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          activeIndex = Math.max(activeIndex - 1, 0);
+          updateHighlight();
+          return;
+        }
+        if (e.key === 'Enter' && !e.ctrlKey) {
+          if (activeIndex >= 0 && activeIndex < activeSkills.length) {
+            e.preventDefault();
+            selectSkill(activeSkills[activeIndex]);
+            return;
+          }
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideDropdown();
+          return;
+        }
+        if (e.key === 'Tab') {
+          if (activeIndex >= 0 && activeIndex < activeSkills.length) {
+            e.preventDefault();
+            selectSkill(activeSkills[activeIndex]);
+            return;
+          }
+        }
+      }
       if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); submit(); }
       if (e.key === 'Escape') { close(); resolve(null); }
     };

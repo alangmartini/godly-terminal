@@ -366,6 +366,24 @@ export class TerminalRenderer {
     return this.normalizeSelection(this.selection);
   }
 
+  /**
+   * Adjust selection coordinates when the viewport scrolls.
+   * Keeps the selection anchored to the same absolute content position.
+   * deltaLines > 0 = scrolled up (into history), rows shift down in viewport.
+   * deltaLines < 0 = scrolled down (toward live), rows shift up in viewport.
+   */
+  adjustSelectionForScroll(deltaLines: number) {
+    if (!this.selection.active) return;
+    this.selection.startRow += deltaLines;
+    this.selection.endRow += deltaLines;
+    // Clear if the entire selection is off-screen
+    const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+    const normalized = this.normalizeSelection(this.selection);
+    if (normalized.endRow < 0 || normalized.startRow >= gridRows) {
+      this.selection.active = false;
+    }
+  }
+
   /** Clear the current selection. */
   clearSelection() {
     this.selection.active = false;
