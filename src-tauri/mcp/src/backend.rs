@@ -4,7 +4,7 @@ use godly_protocol::{McpRequest, McpResponse};
 /// Two implementations:
 /// - `AppBackend`: talks to the Tauri app via MCP pipe (full functionality)
 /// - `DaemonDirectBackend`: talks directly to the daemon (subset of tools)
-pub trait Backend {
+pub trait Backend: Send {
     fn send_request(&mut self, request: &McpRequest) -> Result<McpResponse, String>;
 
     /// Human-readable label for logging (e.g. "app" or "daemon-direct").
