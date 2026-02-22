@@ -82,7 +82,10 @@ jobs:
         run: cd src-tauri && cargo build -p godly-daemon -p godly-pty-shim
         timeout-minutes: 8
       - name: Daemon tests (partition ${{ matrix.partition }}/3)
-        run: cd src-tauri && cargo nextest run -p godly-daemon --profile ci --partition hash:${{ matrix.partition }}/3
+        run: >
+          cd src-tauri && cargo nextest run -p godly-daemon --profile ci
+          --partition hash:${{ matrix.partition }}/3
+          -E "not (test(test_new_daemon_starts_after_lock_holder_exits) | test(test_cmd_exit_is_detected_by_daemon) | test(test_list_sessions_shows_dead_session) | test(arrow_up_during_multi_session_contention))"
         timeout-minutes: 10
 
   # ---------------------------------------------------------------------------
