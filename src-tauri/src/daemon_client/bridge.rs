@@ -794,11 +794,12 @@ impl DaemonBridge {
                 }
 
                 if !did_work {
-                    // Wait on the wake event for efficient idle sleep.
+                    // Wait on the wake event with 1ms timeout.
                     // The wake event is signaled by send_fire_and_forget / try_send_request
                     // when a new request arrives, giving zero-latency wakeup for input.
                     // For incoming pipe data (daemon events), the 1ms timeout ensures we
                     // poll PeekNamedPipe frequently enough.
+                    // Note: timeBeginPeriod(1) is set at app startup so sleep(1ms) is accurate.
                     wake_event.wait_timeout(1);
                 }
 
