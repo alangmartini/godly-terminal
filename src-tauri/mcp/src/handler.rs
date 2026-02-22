@@ -108,7 +108,7 @@ pub fn handle_request(
                 backend.label()
             );
 
-            match tools::call_tool(backend.as_mut(), tool_name, &args, session_id) {
+            match tools::call_tool(backend.as_ref(), tool_name, &args, session_id) {
                 Ok(result) => {
                     mcp_log!("Tool call succeeded: {}", tool_name);
                     JsonRpcResponse::success(
@@ -139,7 +139,7 @@ pub fn handle_request(
 
                             // Retry the tool call once
                             match tools::call_tool(
-                                backend.as_mut(),
+                                backend.as_ref(),
                                 tool_name,
                                 &args,
                                 session_id,
@@ -173,6 +173,109 @@ pub fn handle_request(
                             }
                         }
                     }
+
+                    JsonRpcResponse::success(
+                        request.id.clone(),
+                        json!({
+                            "content": [{
+                                "type": "text",
+                                "text": format!("Error: {}", e)
+                            }],
+                            "isError": true
+                        }),
+                    )
+                }
+            }
+        }
+
+        _ => {
+            mcp_log!("Unknown method: {}", request.method);
+            JsonRpcResponse::error(
+                request.id.clone(),
+                -32601,
+                format!("Method not found: {}", request.method),
+            )
+        }
+    }
+}
+
+
+
+/// Connect a backend and return as Arc (for HTTP server multi-session use).
+pub fn connect_backend_arc() -> Result<std::sync::Arc<dyn Backend>, String> {
+    connect_backend().map(|b| {
+        let arc: std::sync::Arc<dyn Backend> = std::sync::Arc::from(b);
+        arc
+    })
+}
+
+
+/// Handle a JSON-RPC request using a shared backend reference.
+/// Unlike handle_request, this does NOT attempt reconnection (caller manages that).
+pub fn handle_request_ref(
+    request: &JsonRpcRequest,
+    backend: &dyn Backend,
+    session_id: &Option<String>,
+) -> JsonRpcResponse {
+    match request.method.as_str() {
+        "initialize" => {
+            mcp_log!("Handling initialize");
+            JsonRpcResponse::success(
+                request.id.clone(),
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "godly-terminal",
+                        "version": "0.1.0"
+                    }
+                }),
+            )
+        }
+
+        "tools/list" => {
+            mcp_log!("Handling tools/list");
+            JsonRpcResponse::success(request.id.clone(), tools::list_tools())
+        }
+
+        "tools/call" => {
+            let params = request.params.as_ref();
+            let tool_name = params
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let args = params
+                .and_then(|p| p.get("arguments"))
+                .cloned()
+                .unwrap_or(json!({}));
+
+            mcp_log!(
+                "Handling tools/call: tool={}, args={}, backend={}",
+                tool_name,
+                args,
+                backend.label()
+            );
+
+            match tools::call_tool(backend, tool_name, &args, session_id) {
+                Ok(result) => {
+                    mcp_log!("Tool call succeeded: {}", tool_name);
+                    JsonRpcResponse::success(
+                        request.id.clone(),
+                        json!({
+                            "content": [{
+                                "type": "text",
+                                "text": serde_json::to_string_pretty(&result)
+                                    .unwrap_or_else(|_| result.to_string())
+                            }]
+                        }),
+                    )
+                }
+                Err(e) => {
+                    mcp_log!("Tool call failed: {} — {}", tool_name, e);
+
+
 
                     JsonRpcResponse::success(
                         request.id.clone(),
