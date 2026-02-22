@@ -21,7 +21,7 @@ export class TerminalPane {
   private container: HTMLElement;
   private terminalId: string;
   private resizeObserver: ResizeObserver;
-  private resizeRAF: number | null = null;
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribeOutput: (() => void) | null = null;
   private unsubscribeGridDiff: (() => void) | null = null;
   private unsubscribeTheme: (() => void) | null = null;
@@ -114,9 +114,12 @@ export class TerminalPane {
     this.container.className = 'terminal-pane';
     this.container.dataset.terminalId = terminalId;
 
+    // Debounce resize: during a maximize animation the OS fires many resize
+    // events across multiple frames. A 100ms debounce collapses them into a
+    // single fit() call, sending only the final size to the daemon. (#244)
     this.resizeObserver = new ResizeObserver(() => {
-      if (this.resizeRAF) cancelAnimationFrame(this.resizeRAF);
-      this.resizeRAF = requestAnimationFrame(() => this.fit());
+      if (this.resizeTimer) clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(() => this.fit(), 100);
     });
   }
 
@@ -970,6 +973,10 @@ export class TerminalPane {
     if (this.renderRAF !== null) {
       cancelAnimationFrame(this.renderRAF);
       this.renderRAF = null;
+    }
+    if (this.resizeTimer !== null) {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = null;
     }
     this.resizeObserver.disconnect();
     if (this.unsubscribeOutput) {
