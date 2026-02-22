@@ -164,6 +164,26 @@ describe('createPluginCard', () => {
     expect(settingsSection?.textContent).toContain('Settings content');
   });
 
+  // Bug: settings section was a sibling of body in the flex row, causing
+  // text overlap when the settings content crushed the body width
+  it('renders settings section inside body, not as a card sibling', () => {
+    const settingsEl = document.createElement('div');
+    settingsEl.textContent = 'Settings content';
+    const plugin = makePlugin({ renderSettings: () => settingsEl });
+
+    const card = createPluginCard({
+      plugin,
+      isBuiltin: true,
+      isEnabled: true,
+      isInstalled: true,
+    });
+
+    const body = card.querySelector('.plugin-card-body');
+    const settingsSection = body?.querySelector('.plugin-card-settings');
+    expect(settingsSection).not.toBeNull();
+    expect(settingsSection?.textContent).toContain('Settings content');
+  });
+
   it('does not render settings section when disabled', () => {
     const plugin = makePlugin({ renderSettings: () => document.createElement('div') });
 

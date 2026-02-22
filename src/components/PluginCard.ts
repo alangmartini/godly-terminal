@@ -150,7 +150,6 @@ export function createPluginCard(opts: PluginCardOptions): HTMLElement {
   }
 
   body.appendChild(actions);
-  card.appendChild(body);
 
   // Expandable settings (only when installed + enabled + has renderSettings)
   if (opts.isInstalled && opts.isEnabled && opts.plugin?.renderSettings) {
@@ -165,8 +164,10 @@ export function createPluginCard(opts: PluginCardOptions): HTMLElement {
       errEl.textContent = 'Failed to load plugin settings.';
       settingsSection.appendChild(errEl);
     }
-    card.appendChild(settingsSection);
+    body.appendChild(settingsSection);
   }
+
+  card.appendChild(body);
 
   return card;
 }
