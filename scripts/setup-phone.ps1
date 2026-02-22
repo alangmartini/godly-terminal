@@ -42,14 +42,16 @@ if (-not (Test-Path $remoteBin)) {
 # --- Generate API key ---
 $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
 
-# --- Check if godly-remote is already running on this port ---
+# --- Check if something is already listening on this port ---
 $remoteProc = $null
 $remoteAlreadyRunning = $false
 try {
-    $resp = Invoke-RestMethod -Uri "http://localhost:$Port/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $tcp.Connect("127.0.0.1", $Port)
+    $tcp.Close()
     $remoteAlreadyRunning = $true
 } catch {
-    # Not running, we'll start it
+    # Port not in use
 }
 
 if ($remoteAlreadyRunning) {
