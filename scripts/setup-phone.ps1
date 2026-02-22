@@ -42,18 +42,36 @@ if (-not (Test-Path $remoteBin)) {
 # --- Generate API key ---
 $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
 
-# --- Start godly-remote ---
-Write-Host ""
-Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
-$env:GODLY_REMOTE_PORT = $Port
-$env:GODLY_REMOTE_API_KEY = $ApiKey
-$remoteProc = Start-Process -FilePath $remoteBin -PassThru -NoNewWindow
-Start-Sleep -Seconds 1
+# --- Check if godly-remote is already running on this port ---
+$remoteProc = $null
+$remoteAlreadyRunning = $false
+try {
+    $resp = Invoke-RestMethod -Uri "http://localhost:$Port/health" -TimeoutSec 2 -ErrorAction SilentlyContinue
+    $remoteAlreadyRunning = $true
+} catch {
+    # Not running, we'll start it
+}
 
-if ($remoteProc.HasExited) {
-    Write-Host "godly-remote failed to start. Is the daemon running?" -ForegroundColor Red
-    Write-Host "Start Godly Terminal first, or run: src-tauri\target\release\godly-daemon.exe" -ForegroundColor Yellow
-    exit 1
+if ($remoteAlreadyRunning) {
+    Write-Host ""
+    Write-Host "godly-remote already running on port $Port, reusing it." -ForegroundColor Green
+    Write-Host "  Note: API key auth is managed by the existing instance." -ForegroundColor DarkGray
+    # Use whatever key the running instance has (or none)
+    $ApiKey = $null
+} else {
+    # --- Start godly-remote ---
+    Write-Host ""
+    Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
+    $env:GODLY_REMOTE_PORT = $Port
+    $env:GODLY_REMOTE_API_KEY = $ApiKey
+    $remoteProc = Start-Process -FilePath $remoteBin -PassThru -NoNewWindow
+    Start-Sleep -Seconds 1
+
+    if ($remoteProc.HasExited) {
+        Write-Host "godly-remote failed to start. Is the daemon running?" -ForegroundColor Red
+        Write-Host "Start Godly Terminal first, or run: src-tauri\target\release\godly-daemon.exe" -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 # --- Start ngrok ---
@@ -81,13 +99,17 @@ while (-not $publicUrl -and $attempts -lt $maxAttempts) {
 if (-not $publicUrl) {
     Write-Host "Failed to get ngrok tunnel URL after ${maxAttempts}s." -ForegroundColor Red
     Write-Host "Check ngrok auth: ngrok config add-authtoken <token>" -ForegroundColor Yellow
-    Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
+    if ($remoteProc) { Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue }
     Stop-Process -Id $ngrokProc.Id -Force -ErrorAction SilentlyContinue
     exit 1
 }
 
 # --- Build phone URL with embedded API key ---
-$phoneUrl = "$publicUrl/phone?key=$ApiKey"
+if ($ApiKey) {
+    $phoneUrl = "$publicUrl/phone?key=$ApiKey"
+} else {
+    $phoneUrl = "$publicUrl/phone"
+}
 
 # --- Display QR code ---
 Write-Host ""
@@ -111,7 +133,9 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  $phoneUrl" -ForegroundColor White
 Write-Host ""
-Write-Host "  API Key: $ApiKey" -ForegroundColor DarkGray
+if ($ApiKey) {
+    Write-Host "  API Key: $ApiKey" -ForegroundColor DarkGray
+}
 Write-Host "  Tunnel:  $publicUrl" -ForegroundColor DarkGray
 Write-Host "  Local:   http://localhost:$Port/phone" -ForegroundColor DarkGray
 Write-Host ""
@@ -123,7 +147,7 @@ try {
     while ($true) {
         Start-Sleep -Seconds 1
         # Check if processes are still alive
-        if ($remoteProc.HasExited) {
+        if ($remoteProc -and $remoteProc.HasExited) {
             Write-Host "godly-remote exited unexpectedly." -ForegroundColor Red
             break
         }
@@ -136,6 +160,8 @@ try {
     Write-Host ""
     Write-Host "Shutting down..." -ForegroundColor Yellow
     Stop-Process -Id $ngrokProc.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
+    if ($remoteProc) {
+        Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "Done." -ForegroundColor Green
 }
