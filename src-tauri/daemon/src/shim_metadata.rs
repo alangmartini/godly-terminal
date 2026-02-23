@@ -93,3 +93,65 @@ pub fn discover_surviving_shims() -> Vec<ShimMetadata> {
     daemon_log!("Discovered {} surviving shim(s)", survivors.len());
     survivors
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use godly_protocol::types::ShellType;
+    use godly_protocol::ShimMetadata;
+
+    fn test_metadata(session_id: &str, shim_pid: u32) -> ShimMetadata {
+        ShimMetadata {
+            session_id: session_id.to_string(),
+            shim_pid,
+            shim_pipe_name: format!(r"\\.\pipe\godly-shim-{}", session_id),
+            shell_pid: shim_pid + 1,
+            shell_type: ShellType::Windows,
+            cwd: None,
+            rows: 24,
+            cols: 80,
+            created_at: 0,
+        }
+    }
+
+    /// Stale metadata files (PID not alive) should be cleaned up by discover_surviving_shims.
+    #[test]
+    fn test_discover_cleans_stale_metadata() {
+        let session_id = format!("test-stale-{}", std::process::id());
+        // Use a bogus PID that is not alive
+        let meta = test_metadata(&session_id, 99999999);
+        write_metadata(&meta).unwrap();
+
+        // File should exist
+        let path = godly_protocol::shim_metadata_dir().join(format!("{}.json", session_id));
+        assert!(path.exists(), "Metadata file should exist before discovery");
+
+        // discover_surviving_shims should remove stale metadata
+        let survivors = discover_surviving_shims();
+        assert!(
+            !survivors.iter().any(|m| m.session_id == session_id),
+            "Dead process should not appear in survivors"
+        );
+        assert!(
+            !path.exists(),
+            "Stale metadata file should be removed after discovery"
+        );
+    }
+
+    /// Metadata for our own PID (alive) should be returned as a survivor.
+    #[test]
+    fn test_discover_finds_alive_shim() {
+        let session_id = format!("test-alive-{}", std::process::id());
+        let meta = test_metadata(&session_id, std::process::id());
+        write_metadata(&meta).unwrap();
+
+        let survivors = discover_surviving_shims();
+        assert!(
+            survivors.iter().any(|m| m.session_id == session_id),
+            "Our own process should appear as a survivor"
+        );
+
+        // Cleanup
+        remove_metadata(&session_id);
+    }
+}
