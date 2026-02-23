@@ -6,14 +6,21 @@ export interface TerminalSettings {
   defaultShell: ShellType;
   /** When true, new output snaps the view to bottom even when scrolled up. */
   autoScrollOnOutput: boolean;
+  /** Terminal font size in CSS pixels (clamped to 8–32). */
+  fontSize: number;
 }
 
 type Subscriber = () => void;
 
 class TerminalSettingsStore {
+  private static readonly DEFAULT_FONT_SIZE = 13;
+  private static readonly MIN_FONT_SIZE = 8;
+  private static readonly MAX_FONT_SIZE = 32;
+
   private settings: TerminalSettings = {
     defaultShell: { type: 'windows' },
     autoScrollOnOutput: false,
+    fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
   };
 
   private subscribers: Subscriber[] = [];
@@ -38,6 +45,21 @@ class TerminalSettingsStore {
 
   setAutoScrollOnOutput(enabled: boolean): void {
     this.settings.autoScrollOnOutput = enabled;
+    this.saveToStorage();
+    this.notify();
+  }
+
+  getFontSize(): number {
+    return this.settings.fontSize;
+  }
+
+  setFontSize(size: number): void {
+    const clamped = Math.max(
+      TerminalSettingsStore.MIN_FONT_SIZE,
+      Math.min(TerminalSettingsStore.MAX_FONT_SIZE, Math.round(size))
+    );
+    if (clamped === this.settings.fontSize) return;
+    this.settings.fontSize = clamped;
     this.saveToStorage();
     this.notify();
   }
@@ -68,6 +90,9 @@ class TerminalSettingsStore {
       }
       if (typeof data.autoScrollOnOutput === 'boolean') {
         this.settings.autoScrollOnOutput = data.autoScrollOnOutput;
+      }
+      if (typeof data.fontSize === 'number' && data.fontSize >= TerminalSettingsStore.MIN_FONT_SIZE && data.fontSize <= TerminalSettingsStore.MAX_FONT_SIZE) {
+        this.settings.fontSize = data.fontSize;
       }
     } catch {
       // Corrupt data — use defaults
