@@ -289,6 +289,7 @@ impl DaemonServer {
 
         for meta in survivors {
             let session_id = meta.session_id.clone();
+            let shim_pid = meta.shim_pid;
             match DaemonSession::reconnect(meta) {
                 Ok(session) => {
                     self.sessions.write().insert(session_id.clone(), session);
@@ -296,6 +297,15 @@ impl DaemonServer {
                 }
                 Err(e) => {
                     daemon_log!("Failed to reconnect session {}: {}", session_id, e);
+                    // Kill the orphaned shim — it's alive but we can't talk to it,
+                    // so it would sit around consuming memory until its orphan timeout.
+                    if crate::shim_client::kill_process(shim_pid) {
+                        daemon_log!(
+                            "Killed unreconnectable shim pid={} for session {}",
+                            shim_pid,
+                            session_id
+                        );
+                    }
                     crate::shim_metadata::remove_metadata(&session_id);
                 }
             }

@@ -6,8 +6,17 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use subtle::ConstantTimeEq;
 
 use crate::device_lock::DeviceLock;
+
+/// Constant-time string comparison to prevent timing attacks on API keys.
+fn secure_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.as_bytes().ct_eq(b.as_bytes()).into()
+}
 
 /// Middleware that checks `X-API-Key` header or `api_key` query param against the configured key.
 /// If no key is configured (dev mode), all requests are allowed.
@@ -40,7 +49,6 @@ pub async fn api_key_auth(
                             let mut parts = pair.splitn(2, '=');
                             match (parts.next(), parts.next()) {
                                 (Some("api_key"), Some(v)) => {
-                                    // URL-decode the value
                                     urlencoding_decode(v)
                                 }
                                 _ => None,
@@ -51,8 +59,8 @@ pub async fn api_key_auth(
             let provided = from_header.or(from_query);
 
             match provided {
-                Some(ref key) if key == &expected => next.run(req).await,
-                _ => (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response(),
+                Some(ref key) if secure_eq(key, &expected) => next.run(req).await,
+                _ => (StatusCode::UNAUTHORIZED, "Unauthorized").into_response(),
             }
         }
     }
@@ -104,27 +112,52 @@ pub async fn device_token_auth(
 
     match provided {
         Some(ref token) if device_lock.check(token) => next.run(req).await,
-        _ => (StatusCode::FORBIDDEN, "Device not authorized").into_response(),
+        _ => (StatusCode::FORBIDDEN, "Unauthorized").into_response(),
     }
 }
 
-/// Simple URL decode for query param values (handles %XX encoding).
+/// URL decode for query param values (handles %XX and + encoding).
 fn urlencoding_decode(input: &str) -> Option<String> {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.bytes();
-    while let Some(b) = chars.next() {
-        match b {
+    let mut result = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
             b'%' => {
-                let hi = chars.next()?;
-                let lo = chars.next()?;
-                let hex = [hi, lo];
-                let s = std::str::from_utf8(&hex).ok()?;
-                let byte = u8::from_str_radix(s, 16).ok()?;
-                result.push(byte as char);
+                if i + 2 >= bytes.len() {
+                    return None; // truncated escape
+                }
+                let hi = bytes[i + 1];
+                let lo = bytes[i + 2];
+                let byte = hex_byte(hi, lo)?;
+                result.push(byte);
+                i += 3;
             }
-            b'+' => result.push(' '),
-            _ => result.push(b as char),
+            b'+' => {
+                result.push(b' ');
+                i += 1;
+            }
+            b => {
+                result.push(b);
+                i += 1;
+            }
         }
     }
-    Some(result)
+    String::from_utf8(result).ok()
+}
+
+/// Convert two hex ASCII chars to a byte.
+fn hex_byte(hi: u8, lo: u8) -> Option<u8> {
+    let h = hex_digit(hi)?;
+    let l = hex_digit(lo)?;
+    Some((h << 4) | l)
+}
+
+fn hex_digit(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
 }
