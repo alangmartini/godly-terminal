@@ -208,13 +208,6 @@
   .login-form { width: 100%; max-width: 320px; }
   .login-form .settings-input { margin-bottom: 12px; text-align: center; font-size: 20px; letter-spacing: 4px; }
   .login-error { color: var(--danger); font-size: 13px; text-align: center; margin-bottom: 12px; min-height: 20px; }
-  .biometric-btn {
-    width: 100%; min-height: var(--touch-min); margin-top: 12px;
-    background: var(--bg-input); border: 1px solid var(--border);
-    border-radius: 8px; color: var(--text); font-size: 15px;
-    cursor: pointer; display: none;
-  }
-  .biometric-btn:active { background: var(--border); }
 </style>
 </head>
 <body>
@@ -238,7 +231,6 @@
       <input class="settings-input" id="loginPassword" type="password" placeholder="Password"
              autocomplete="off" inputmode="text">
       <button class="settings-save" id="loginBtn" onclick="submitLogin()">Connect</button>
-      <button class="biometric-btn" id="biometricBtn" onclick="biometricLogin()">Use Fingerprint</button>
     </div>
   </div>
 </div>
@@ -650,8 +642,6 @@ async function submitLogin() {
 
   try {
     await registerDevice(pw);
-    // Offer biometric setup if supported
-    await offerBiometricSetup();
     startApp();
   } catch (e) {
     deviceToken = '';
@@ -679,86 +669,32 @@ function startApp() {
   connectSSE();
 }
 
-// --- WebAuthn Biometric ---
-const WEBAUTHN_CRED_KEY = 'godly_webauthn_cred';
-
-function webAuthnSupported() {
-  return window.PublicKeyCredential &&
-    typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
-}
-
-async function hasPlatformAuthenticator() {
-  if (!webAuthnSupported()) return false;
-  try {
-    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-  } catch { return false; }
-}
-
-async function offerBiometricSetup() {
-  if (!await hasPlatformAuthenticator()) return;
-  if (localStorage.getItem(WEBAUTHN_CRED_KEY)) return; // already set up
-
-  try {
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const userId = new TextEncoder().encode('godly-remote-user');
-
-    const credential = await navigator.credentials.create({
-      publicKey: {
-        challenge,
-        rp: { name: 'Godly Remote' },
-        user: { id: userId, name: 'godly-user', displayName: 'Godly Remote' },
-        pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
-        authenticatorSelection: {
-          authenticatorAttachment: 'platform',
-          userVerification: 'required',
-          residentKey: 'discouraged'
-        },
-        timeout: 60000
-      }
-    });
-
-    if (credential) {
-      // Store credential ID for future verification
-      const credId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
-      localStorage.setItem(WEBAUTHN_CRED_KEY, credId);
-    }
-  } catch {
-    // User declined or error — no biometric, that's fine
-  }
-}
-
-async function biometricLogin() {
-  const credIdB64 = localStorage.getItem(WEBAUTHN_CRED_KEY);
-  if (!credIdB64) return false;
-
-  try {
-    const credId = Uint8Array.from(atob(credIdB64), c => c.charCodeAt(0));
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-
-    await navigator.credentials.get({
-      publicKey: {
-        challenge,
-        allowCredentials: [{ id: credId, type: 'public-key', transports: ['internal'] }],
-        userVerification: 'required',
-        timeout: 60000
-      }
-    });
-    // Biometric verified — proceed to app
-    startApp();
-    return true;
-  } catch {
-    showLoginError('Biometric verification failed');
-    return false;
-  }
-}
+// --- WebAuthn removed ---
+// Biometric auth was client-only (no server-side challenge verification),
+// providing false security. Removed in security hardening pass.
+// TODO: Implement proper server-side WebAuthn with challenge/response verification.
 
 // --- Init ---
 (async function init() {
-  // Auto-configure API key from URL param (e.g. /phone?key=abc123)
+  // Auto-configure API key from URL fragment (e.g. /phone#key=abc123)
+  // URL fragments are NOT sent to the server, NOT logged by proxies/ngrok,
+  // and NOT included in Referer headers — much safer than query params.
+  const hash = window.location.hash.slice(1); // remove #
+  if (hash) {
+    const fragParams = new URLSearchParams(hash);
+    const urlKey = fragParams.get('key');
+    if (urlKey) {
+      apiKey = urlKey;
+      localStorage.setItem('godly_api_key', apiKey);
+      // Clean the URL fragment to prevent leaking in browser history
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }
+  // Also support legacy query param for backwards compatibility
   const params = new URLSearchParams(window.location.search);
-  const urlKey = params.get('key');
-  if (urlKey) {
-    apiKey = urlKey;
+  const queryKey = params.get('key');
+  if (queryKey && !apiKey) {
+    apiKey = queryKey;
     localStorage.setItem('godly_api_key', apiKey);
     params.delete('key');
     const clean = window.location.pathname + (params.toString() ? '?' + params : '');
@@ -767,21 +703,7 @@ async function biometricLogin() {
 
   // Check if we already have a valid device token
   if (await tryExistingToken()) {
-    // Already registered — check for biometric re-auth
-    const hasBiometric = localStorage.getItem(WEBAUTHN_CRED_KEY);
-    if (hasBiometric && await hasPlatformAuthenticator()) {
-      // Show login view with biometric button
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-      document.getElementById('view-login').classList.add('active');
-      document.getElementById('loginPassword').style.display = 'none';
-      document.getElementById('loginBtn').style.display = 'none';
-      document.getElementById('biometricBtn').style.display = 'block';
-      document.querySelector('.login-subtitle').textContent = 'Verify your identity to continue';
-      // Auto-trigger biometric
-      biometricLogin();
-    } else {
-      startApp();
-    }
+    startApp();
     return;
   }
 
