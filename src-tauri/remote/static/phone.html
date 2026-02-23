@@ -196,6 +196,25 @@
     cursor: pointer; margin-top: 8px;
   }
   .settings-save:active { background: var(--accent); }
+
+  /* --- Login --- */
+  .login-container {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 70dvh; padding: 32px 16px;
+  }
+  .login-icon { font-size: 48px; margin-bottom: 16px; }
+  .login-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .login-subtitle { font-size: 14px; color: var(--text-dim); margin-bottom: 32px; text-align: center; }
+  .login-form { width: 100%; max-width: 320px; }
+  .login-form .settings-input { margin-bottom: 12px; text-align: center; font-size: 20px; letter-spacing: 4px; }
+  .login-error { color: var(--danger); font-size: 13px; text-align: center; margin-bottom: 12px; min-height: 20px; }
+  .biometric-btn {
+    width: 100%; min-height: var(--touch-min); margin-top: 12px;
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 15px;
+    cursor: pointer; display: none;
+  }
+  .biometric-btn:active { background: var(--border); }
 </style>
 </head>
 <body>
@@ -208,8 +227,24 @@
   <button class="settings-btn" id="settingsBtn" onclick="showView('settings')">&#9881;</button>
 </div>
 
+<!-- Login -->
+<div class="view" id="view-login">
+  <div class="login-container">
+    <div class="login-icon">&#128274;</div>
+    <div class="login-title">Godly Remote</div>
+    <div class="login-subtitle">Enter the password shown in your terminal</div>
+    <div class="login-form">
+      <div class="login-error" id="loginError"></div>
+      <input class="settings-input" id="loginPassword" type="password" placeholder="Password"
+             autocomplete="off" inputmode="text">
+      <button class="settings-save" id="loginBtn" onclick="submitLogin()">Connect</button>
+      <button class="biometric-btn" id="biometricBtn" onclick="biometricLogin()">Use Fingerprint</button>
+    </div>
+  </div>
+</div>
+
 <!-- Dashboard -->
-<div class="view active" id="view-dashboard">
+<div class="view" id="view-dashboard">
   <div class="section-title">Prompts</div>
   <div id="alertsContainer">
     <div class="no-alerts">No active prompts</div>
@@ -264,6 +299,7 @@ let currentView = 'dashboard';
 let currentSessionId = null;
 let apiKey = localStorage.getItem('godly_api_key') || '';
 let serverUrl = localStorage.getItem('godly_server_url') || '';
+let deviceToken = localStorage.getItem('godly_device_token') || '';
 let sseSource = null;
 let refreshTimer = null;
 let sessionRefreshTimer = null;
@@ -277,6 +313,7 @@ function baseUrl() {
 function headers() {
   const h = { 'Content-Type': 'application/json' };
   if (apiKey) h['X-API-Key'] = apiKey;
+  if (deviceToken) h['X-Device-Token'] = deviceToken;
   return h;
 }
 
@@ -459,7 +496,10 @@ function connectSSE() {
   if (sseSource) { sseSource.close(); sseSource = null; }
 
   let url = baseUrl() + '/api/events';
-  if (apiKey) url += '?api_key=' + encodeURIComponent(apiKey);
+  const sseParams = [];
+  if (apiKey) sseParams.push('api_key=' + encodeURIComponent(apiKey));
+  if (deviceToken) sseParams.push('device_token=' + encodeURIComponent(deviceToken));
+  if (sseParams.length) url += '?' + sseParams.join('&');
 
   try {
     sseSource = new EventSource(url);
@@ -558,6 +598,160 @@ document.getElementById('inputField').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); sendInput(); }
 });
 
+// --- Device Registration ---
+function generateDeviceToken() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function checkDeviceStatus() {
+  try {
+    const data = await api('/api/device-status');
+    return data;
+  } catch { return { locked: false, password_required: false }; }
+}
+
+async function tryExistingToken() {
+  if (!deviceToken) return false;
+  try {
+    await api('/api/prompts');
+    return true;
+  } catch (e) {
+    if (e.message.includes('403')) {
+      deviceToken = '';
+      localStorage.removeItem('godly_device_token');
+    }
+    return false;
+  }
+}
+
+async function registerDevice(password) {
+  deviceToken = generateDeviceToken();
+  const resp = await apiPost('/api/register-device', {
+    device_token: deviceToken,
+    password: password || undefined
+  });
+  localStorage.setItem('godly_device_token', deviceToken);
+  return resp;
+}
+
+function showLoginError(msg) {
+  document.getElementById('loginError').textContent = msg;
+}
+
+async function submitLogin() {
+  const pw = document.getElementById('loginPassword').value;
+  if (!pw) { showLoginError('Enter the password from your terminal'); return; }
+
+  document.getElementById('loginBtn').disabled = true;
+  document.getElementById('loginBtn').textContent = 'Connecting...';
+  showLoginError('');
+
+  try {
+    await registerDevice(pw);
+    // Offer biometric setup if supported
+    await offerBiometricSetup();
+    startApp();
+  } catch (e) {
+    deviceToken = '';
+    localStorage.removeItem('godly_device_token');
+    const msg = e.message.includes('already registered')
+      ? 'Another device is already registered. Restart the server.'
+      : e.message.includes('Too many') ? 'Too many attempts. Wait 5 minutes.'
+      : e.message.includes('Invalid password') ? 'Wrong password'
+      : 'Connection failed';
+    showLoginError(msg);
+  } finally {
+    document.getElementById('loginBtn').disabled = false;
+    document.getElementById('loginBtn').textContent = 'Connect';
+  }
+}
+
+function startApp() {
+  // Hide login, show dashboard
+  document.getElementById('view-login').classList.remove('active');
+  showView('dashboard');
+  refreshDashboard();
+  refreshTimer = setInterval(() => {
+    if (currentView === 'dashboard') refreshDashboard();
+  }, 5000);
+  connectSSE();
+}
+
+// --- WebAuthn Biometric ---
+const WEBAUTHN_CRED_KEY = 'godly_webauthn_cred';
+
+function webAuthnSupported() {
+  return window.PublicKeyCredential &&
+    typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function';
+}
+
+async function hasPlatformAuthenticator() {
+  if (!webAuthnSupported()) return false;
+  try {
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch { return false; }
+}
+
+async function offerBiometricSetup() {
+  if (!await hasPlatformAuthenticator()) return;
+  if (localStorage.getItem(WEBAUTHN_CRED_KEY)) return; // already set up
+
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = new TextEncoder().encode('godly-remote-user');
+
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'Godly Remote' },
+        user: { id: userId, name: 'godly-user', displayName: 'Godly Remote' },
+        pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          userVerification: 'required',
+          residentKey: 'discouraged'
+        },
+        timeout: 60000
+      }
+    });
+
+    if (credential) {
+      // Store credential ID for future verification
+      const credId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+      localStorage.setItem(WEBAUTHN_CRED_KEY, credId);
+    }
+  } catch {
+    // User declined or error — no biometric, that's fine
+  }
+}
+
+async function biometricLogin() {
+  const credIdB64 = localStorage.getItem(WEBAUTHN_CRED_KEY);
+  if (!credIdB64) return false;
+
+  try {
+    const credId = Uint8Array.from(atob(credIdB64), c => c.charCodeAt(0));
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+    await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        allowCredentials: [{ id: credId, type: 'public-key', transports: ['internal'] }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    });
+    // Biometric verified — proceed to app
+    startApp();
+    return true;
+  } catch {
+    showLoginError('Biometric verification failed');
+    return false;
+  }
+}
+
 // --- Init ---
 (async function init() {
   // Auto-configure API key from URL param (e.g. /phone?key=abc123)
@@ -571,11 +765,54 @@ document.getElementById('inputField').addEventListener('keydown', (e) => {
     history.replaceState(null, '', clean);
   }
 
-  refreshDashboard();
-  refreshTimer = setInterval(() => {
-    if (currentView === 'dashboard') refreshDashboard();
-  }, 5000);
-  connectSSE();
+  // Check if we already have a valid device token
+  if (await tryExistingToken()) {
+    // Already registered — check for biometric re-auth
+    const hasBiometric = localStorage.getItem(WEBAUTHN_CRED_KEY);
+    if (hasBiometric && await hasPlatformAuthenticator()) {
+      // Show login view with biometric button
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById('view-login').classList.add('active');
+      document.getElementById('loginPassword').style.display = 'none';
+      document.getElementById('loginBtn').style.display = 'none';
+      document.getElementById('biometricBtn').style.display = 'block';
+      document.querySelector('.login-subtitle').textContent = 'Verify your identity to continue';
+      // Auto-trigger biometric
+      biometricLogin();
+    } else {
+      startApp();
+    }
+    return;
+  }
+
+  // Check if password is required
+  const status = await checkDeviceStatus();
+  if (status.locked) {
+    // Another device registered
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-login').classList.add('active');
+    showLoginError('Another device is already registered. Restart the server.');
+    document.getElementById('loginPassword').style.display = 'none';
+    document.getElementById('loginBtn').style.display = 'none';
+    return;
+  }
+
+  if (status.password_required) {
+    // Show login screen
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-login').classList.add('active');
+    document.getElementById('loginPassword').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitLogin();
+    });
+  } else {
+    // No password — register directly
+    try {
+      await registerDevice();
+      startApp();
+    } catch {
+      showLoginError('Registration failed');
+    }
+  }
 })();
 </script>
 </body>
