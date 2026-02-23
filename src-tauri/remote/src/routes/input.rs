@@ -9,6 +9,9 @@ use godly_protocol::Response;
 use crate::daemon_client::async_request;
 use crate::AppState;
 
+/// Maximum write payload size (64 KB). Prevents memory exhaustion from oversized requests.
+const MAX_WRITE_BYTES: usize = 64 * 1024;
+
 #[derive(Deserialize)]
 pub struct WriteRequest {
     pub data: String,
@@ -19,6 +22,13 @@ pub async fn write_to_session(
     Path(id): Path<String>,
     Json(body): Json<WriteRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    if body.data.len() > MAX_WRITE_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("Write payload exceeds {} byte limit", MAX_WRITE_BYTES),
+        ));
+    }
+
     // Convert \n → \r for PTY (same as MCP handler)
     let converted = body.data.replace("\r\n", "\r").replace('\n', "\r");
 

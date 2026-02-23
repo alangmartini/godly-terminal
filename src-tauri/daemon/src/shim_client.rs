@@ -185,6 +185,30 @@ pub fn is_process_alive(_pid: u32) -> bool {
     false
 }
 
+/// Kill a process by PID. Used to clean up orphaned shim processes that
+/// the daemon cannot reconnect to. Uses TerminateProcess on Windows.
+#[cfg(windows)]
+pub fn kill_process(pid: u32) -> bool {
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::{OpenProcess, TerminateProcess};
+    use winapi::um::winnt::PROCESS_TERMINATE;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let result = TerminateProcess(handle, 1);
+        CloseHandle(handle);
+        result != 0
+    }
+}
+
+#[cfg(not(windows))]
+pub fn kill_process(_pid: u32) -> bool {
+    false
+}
+
 /// Find the pty-shim binary. Looks next to the daemon binary first,
 /// then falls back to common locations.
 fn find_shim_binary() -> Result<std::path::PathBuf, String> {
@@ -289,5 +313,62 @@ mod tests {
             }),
             "fish:-l --init"
         );
+    }
+
+    /// Verify is_process_alive returns true for our own PID.
+    #[test]
+    fn test_is_process_alive_self() {
+        let our_pid = std::process::id();
+        assert!(
+            is_process_alive(our_pid),
+            "Our own process (pid={}) should be alive",
+            our_pid
+        );
+    }
+
+    /// Verify is_process_alive returns false for a bogus PID.
+    #[test]
+    fn test_is_process_alive_dead() {
+        // PID 99999999 is extremely unlikely to exist
+        assert!(
+            !is_process_alive(99999999),
+            "Bogus PID should not be alive"
+        );
+    }
+
+    /// Verify kill_process can terminate a child process.
+    #[cfg(windows)]
+    #[test]
+    fn test_kill_process_terminates_child() {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+
+        // Spawn a long-running child process
+        let child = Command::new("cmd.exe")
+            .args(["/C", "ping -n 60 127.0.0.1"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn()
+            .expect("Failed to spawn child process");
+        let pid = child.id();
+
+        assert!(is_process_alive(pid), "Child should be alive immediately after spawn");
+
+        // Kill it
+        assert!(kill_process(pid), "kill_process should return true");
+
+        // Wait briefly for the process to actually terminate
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        assert!(
+            !is_process_alive(pid),
+            "Child (pid={}) should be dead after kill_process",
+            pid
+        );
+    }
+
+    /// Verify kill_process returns false for a non-existent PID.
+    #[test]
+    fn test_kill_process_nonexistent() {
+        assert!(!kill_process(99999999), "Killing a bogus PID should return false");
     }
 }
