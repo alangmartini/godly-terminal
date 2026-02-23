@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
+use subtle::ConstantTimeEq;
+
 const MAX_FAILED_ATTEMPTS: u32 = 5;
 const LOCKOUT_SECS: u64 = 300; // 5 minutes
 
@@ -12,6 +14,16 @@ pub struct DeviceLock {
     password: Option<String>,
     failed_attempts: Mutex<u32>,
     lockout_until: Mutex<Option<Instant>>,
+}
+
+/// Constant-time string comparison to prevent timing attacks.
+fn secure_eq(a: &str, b: &str) -> bool {
+    // Length comparison leaks length info, but that's acceptable —
+    // passwords are fixed-length and tokens are always 64 hex chars.
+    if a.len() != b.len() {
+        return false;
+    }
+    a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
 impl DeviceLock {
@@ -38,7 +50,7 @@ impl DeviceLock {
 
         match &self.password {
             None => Ok(()), // no password configured
-            Some(expected) if expected == provided => {
+            Some(expected) if secure_eq(expected, provided) => {
                 // Reset failed attempts on success
                 *self.failed_attempts.lock().unwrap() = 0;
                 *self.lockout_until.lock().unwrap() = None;
@@ -51,7 +63,11 @@ impl DeviceLock {
                 if *attempts >= MAX_FAILED_ATTEMPTS {
                     let mut lockout = self.lockout_until.lock().unwrap();
                     *lockout = Some(Instant::now() + std::time::Duration::from_secs(LOCKOUT_SECS));
-                    tracing::warn!("Device registration locked out for {}s after {} failed attempts", LOCKOUT_SECS, attempts);
+                    tracing::warn!(
+                        "Device registration locked out for {}s after {} failed attempts",
+                        LOCKOUT_SECS,
+                        attempts
+                    );
                 }
                 Err("Invalid password")
             }
@@ -67,7 +83,7 @@ impl DeviceLock {
             return Err("Device already registered");
         }
         *token = Some(candidate_token.to_string());
-        tracing::info!("Device locked to token: {}...", &candidate_token[..8.min(candidate_token.len())]);
+        tracing::info!("Device registered successfully");
         Ok(())
     }
 
@@ -76,7 +92,7 @@ impl DeviceLock {
         let token = self.token.lock().unwrap();
         match token.as_deref() {
             None => false,
-            Some(expected) => expected == provided,
+            Some(expected) => secure_eq(expected, provided),
         }
     }
 
@@ -180,5 +196,15 @@ mod tests {
         // Can fail again without immediate lockout
         assert!(lock.verify_password("wrong").is_err());
         assert!(lock.verify_password("secret").is_ok());
+    }
+
+    #[test]
+    fn timing_safe_comparison() {
+        // Verify secure_eq works correctly
+        assert!(secure_eq("hello", "hello"));
+        assert!(!secure_eq("hello", "world"));
+        assert!(!secure_eq("hello", "hell"));
+        assert!(!secure_eq("", "a"));
+        assert!(secure_eq("", ""));
     }
 }

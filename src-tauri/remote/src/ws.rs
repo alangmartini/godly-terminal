@@ -123,6 +123,10 @@ async fn handle_ws(state: AppState, session_id: String, socket: WebSocket) {
 
         match client_msg {
             WsClientMessage::Write { data } => {
+                // Limit write payload size to prevent memory exhaustion
+                if data.len() > 64 * 1024 {
+                    continue;
+                }
                 let converted = data.replace("\r\n", "\r").replace('\n', "\r");
                 let _ = async_request(
                     &daemon2,

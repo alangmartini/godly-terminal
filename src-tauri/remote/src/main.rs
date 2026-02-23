@@ -17,8 +17,9 @@ use device_lock::DeviceLock;
 use event_pump::EventPump;
 use layout_reader::LayoutReader;
 use monitor::MonitorRegistry;
+use tower_http::cors::{AllowHeaders, AllowMethods, CorsLayer};
 
-const BUILD: u32 = 3;
+const BUILD: u32 = 4;
 
 /// Shared application state, cloneable via Arc internals.
 #[derive(Clone)]
@@ -46,6 +47,13 @@ async fn main() {
 
     if config.auth.api_key.is_none() {
         tracing::warn!("No API key configured — running in dev mode (all requests allowed)");
+    }
+
+    // Warn if binding to all interfaces without auth
+    if config.server.host == "0.0.0.0" && config.auth.api_key.is_none() {
+        tracing::warn!(
+            "WARNING: Binding to 0.0.0.0 without API key — server is accessible to anyone on the network!"
+        );
     }
 
     // Connect to daemon
@@ -86,7 +94,15 @@ async fn main() {
         device_lock: Arc::clone(&device_lock),
     };
 
+    // CORS: only allow the same origin (ngrok tunnel or localhost).
+    // No wildcard — credentials must come from the served phone.html page.
+    let cors = CorsLayer::new()
+        .allow_methods(AllowMethods::mirror_request())
+        .allow_headers(AllowHeaders::mirror_request())
+        .allow_credentials(true);
+
     let app = routes::build_router(state)
+        .layer(cors)
         .layer(axum::Extension(device_lock))
         .layer(axum::Extension(api_key));
 
