@@ -369,7 +369,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       promptArea.focus();
     }
 
-    promptArea.addEventListener('input', async () => {
+    async function refreshSkillDropdown() {
       const val = promptArea.value;
       const cursor = promptArea.selectionStart;
       const before = val.slice(0, cursor);
@@ -386,6 +386,15 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       activeSkills = filtered;
       activeIndex = filtered.length > 0 ? 0 : -1;
       renderDropdown(filtered, activeIndex);
+    }
+
+    promptArea.addEventListener('input', refreshSkillDropdown);
+
+    workspaceSelect.addEventListener('change', () => {
+      const before = promptArea.value.slice(0, promptArea.selectionStart);
+      if (dropdownVisible || before.match(/(^|[\s\n])\/([\w-]*)$/)) {
+        refreshSkillDropdown();
+      }
     });
 
     const branchRow = document.createElement('div');
