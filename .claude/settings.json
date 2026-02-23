@@ -1,4 +1,17 @@
 {
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/post-implementation-reminder.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
   "skills": [
     {
       "name": "build",
@@ -24,6 +37,11 @@
       "name": "tidy-up-docs",
       "description": "Audit, organize, and distill the docs/ investigation folder",
       "path": "skills/tidy-up-docs.md"
+    },
+    {
+      "name": "manual-testing",
+      "description": "Manually test a feature via MCP tools, document findings, and create a GitHub issue with improvement points",
+      "path": "skills/manual-testing.md"
     }
   ]
 }
