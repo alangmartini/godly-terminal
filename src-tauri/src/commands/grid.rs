@@ -89,13 +89,17 @@ pub fn set_scrollback(
 }
 
 /// Get selected text from the terminal grid between two positions.
+/// Row coordinates are viewport-relative (can be negative for multi-screen
+/// selections extending above the viewport). scrollback_offset converts
+/// viewport-relative rows to absolute buffer positions.
 #[tauri::command]
 pub fn get_grid_text(
     terminal_id: String,
-    start_row: u16,
+    start_row: i32,
     start_col: u16,
-    end_row: u16,
+    end_row: i32,
     end_col: u16,
+    scrollback_offset: usize,
     daemon: State<Arc<DaemonClient>>,
 ) -> Result<String, String> {
     let request = Request::ReadGridText {
@@ -104,6 +108,7 @@ pub fn get_grid_text(
         start_col,
         end_row,
         end_col,
+        scrollback_offset,
     };
     let response = daemon.send_request(&request)?;
     match response {

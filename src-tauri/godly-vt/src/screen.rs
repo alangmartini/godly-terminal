@@ -245,6 +245,65 @@ impl Screen {
         }
     }
 
+    /// Returns the text contents between two absolute row positions in the
+    /// combined scrollback + active grid buffer. Row 0 is the oldest
+    /// scrollback row; row `scrollback_count + grid_rows - 1` is the last
+    /// active grid row.
+    ///
+    /// This is used for multi-screen selections where the selected range
+    /// spans more rows than fit in a single viewport.
+    #[must_use]
+    pub fn contents_between_absolute(
+        &self,
+        start_row: usize,
+        start_col: u16,
+        end_row: usize,
+        end_col: u16,
+    ) -> String {
+        if start_row > end_row {
+            return String::new();
+        }
+        let (_, cols) = self.size();
+        let mut contents = String::new();
+        for (i, row) in self
+            .grid()
+            .all_rows()
+            .enumerate()
+            .skip(start_row)
+            .take(end_row - start_row + 1)
+        {
+            if i == start_row && i == end_row {
+                // Single row selection
+                if start_col < end_col {
+                    row.write_contents(
+                        &mut contents,
+                        start_col,
+                        end_col - start_col,
+                        false,
+                    );
+                }
+            } else if i == start_row {
+                row.write_contents(
+                    &mut contents,
+                    start_col,
+                    cols - start_col,
+                    false,
+                );
+                if !row.wrapped() {
+                    contents.push('\n');
+                }
+            } else if i == end_row {
+                row.write_contents(&mut contents, 0, end_col, false);
+            } else {
+                row.write_contents(&mut contents, 0, cols, false);
+                if !row.wrapped() {
+                    contents.push('\n');
+                }
+            }
+        }
+        contents
+    }
+
     /// Return escape codes sufficient to reproduce the entire contents of the
     /// current terminal state. This is a convenience wrapper around
     /// [`contents_formatted`](Self::contents_formatted) and
