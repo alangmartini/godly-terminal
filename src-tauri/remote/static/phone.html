@@ -226,12 +226,15 @@
     <div class="login-icon">&#128274;</div>
     <div class="login-title">Godly Remote</div>
     <div class="login-subtitle">Enter the password shown in your terminal</div>
-    <div class="login-form">
+    <form class="login-form" id="godly-login" action="/api/register-device" method="POST" autocomplete="on"
+          onsubmit="event.preventDefault(); submitLogin();">
+      <input type="text" name="username" value="Godly Terminal" autocomplete="username" style="display:none">
       <div class="login-error" id="loginError"></div>
-      <input class="settings-input" id="loginPassword" type="password" placeholder="Password"
-             autocomplete="off" inputmode="text">
-      <button class="settings-save" id="loginBtn" onclick="submitLogin()">Connect</button>
-    </div>
+      <input class="settings-input" id="loginPassword" name="password" type="password" placeholder="Password"
+             autocomplete="current-password" inputmode="text"
+             passwordrules="minlength: 16; maxlength: 128; required: upper, lower, digit, special;">
+      <button class="settings-save" id="loginBtn" type="submit">Connect</button>
+    </form>
   </div>
 </div>
 
