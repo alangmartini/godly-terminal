@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod daemon_client;
 mod detection;
+mod device_lock;
 mod event_pump;
 mod layout_reader;
 mod monitor;
@@ -12,11 +13,12 @@ use std::sync::Arc;
 
 use config::Config;
 use daemon_client::DaemonClient;
+use device_lock::DeviceLock;
 use event_pump::EventPump;
 use layout_reader::LayoutReader;
 use monitor::MonitorRegistry;
 
-const BUILD: u32 = 2;
+const BUILD: u32 = 3;
 
 /// Shared application state, cloneable via Arc internals.
 #[derive(Clone)]
@@ -26,6 +28,7 @@ pub struct AppState {
     pub monitors: Arc<MonitorRegistry>,
     pub layout_reader: Arc<LayoutReader>,
     pub event_pump: Arc<EventPump>,
+    pub device_lock: Arc<DeviceLock>,
 }
 
 #[tokio::main]
@@ -68,15 +71,23 @@ async fn main() {
     event_pump.spawn(Arc::clone(&daemon), scan_rows);
     tracing::info!("Event pump started (scan_rows={})", scan_rows);
 
+    let auth_password = std::env::var("GODLY_REMOTE_PASSWORD").ok();
+    if auth_password.is_some() {
+        tracing::info!("Device registration requires password");
+    }
+    let device_lock = Arc::new(DeviceLock::new(auth_password));
+
     let state = AppState {
         daemon,
         config: Arc::new(config),
         monitors: Arc::new(MonitorRegistry::new()),
         layout_reader: Arc::new(LayoutReader::new()),
         event_pump,
+        device_lock: Arc::clone(&device_lock),
     };
 
     let app = routes::build_router(state)
+        .layer(axum::Extension(device_lock))
         .layer(axum::Extension(api_key));
 
     let listener = tokio::net::TcpListener::bind(&bind_addr)
