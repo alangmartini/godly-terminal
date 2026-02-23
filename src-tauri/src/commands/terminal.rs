@@ -612,7 +612,7 @@ fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: 
             session_id: session_id.to_string(),
         };
         match daemon.send_request(&req) {
-            Ok(Response::LastOutputTime { epoch_ms, running }) => {
+            Ok(Response::LastOutputTime { epoch_ms, running, .. }) => {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
