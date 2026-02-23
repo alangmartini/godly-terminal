@@ -512,6 +512,7 @@ export class App {
                 prompt: input.prompt,
                 branchName: input.branchName ?? null,
                 skipFetch: true,
+                noWorktree: input.noWorktree ?? false,
               }
             );
 

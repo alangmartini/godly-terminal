@@ -304,21 +304,27 @@ pub fn handle_mcp_request(
             prompt,
             branch_name,
             skip_fetch,
+            no_worktree,
         } => {
             use std::collections::HashMap;
             use uuid::Uuid;
 
+            let use_worktree = !no_worktree.unwrap_or(false);
+
             // Auto-generate branch name from prompt if not provided
-            let branch_name = branch_name.clone().or_else(|| {
-                llm_state.try_generate_branch_name(prompt)
-            });
+            let branch_name = if use_worktree {
+                branch_name.clone().or_else(|| {
+                    llm_state.try_generate_branch_name(prompt)
+                })
+            } else {
+                None
+            };
 
             // MCP terminals always go into the Agent workspace (separate window)
             let workspace_id = &ensure_mcp_workspace(app_state);
 
             let terminal_id = Uuid::new_v4().to_string();
 
-            // Determine working dir via worktree (always create worktree for Quick Claude)
             let mut worktree_path_result: Option<String> = None;
             let mut worktree_branch_result: Option<String> = None;
 
@@ -332,37 +338,42 @@ pub fn handle_mcp_request(
                     }
                 };
 
-                let wsl = crate::worktree::WslConfig::from_path(&ws.folder_path);
-                match crate::worktree::get_repo_root(&ws.folder_path, wsl.as_ref()) {
-                    Ok(repo_root) => {
-                        let should_skip = skip_fetch.unwrap_or(true);
-                        match crate::worktree::create_worktree_with_options(
-                            &repo_root,
-                            &terminal_id,
-                            branch_name.as_deref(),
-                            wsl.as_ref(),
-                            should_skip,
-                        ) {
-                            Ok(wt_result) => {
-                                eprintln!(
-                                    "[mcp] Quick Claude worktree: {} (branch: {})",
-                                    wt_result.path, wt_result.branch
-                                );
-                                worktree_path_result = Some(wt_result.path.clone());
-                                worktree_branch_result = Some(wt_result.branch);
-                                Some(wt_result.path)
-                            }
-                            Err(e) => {
-                                return McpResponse::Error {
-                                    message: format!("Failed to create worktree: {}", e),
-                                };
+                if use_worktree {
+                    let wsl = crate::worktree::WslConfig::from_path(&ws.folder_path);
+                    match crate::worktree::get_repo_root(&ws.folder_path, wsl.as_ref()) {
+                        Ok(repo_root) => {
+                            let should_skip = skip_fetch.unwrap_or(true);
+                            match crate::worktree::create_worktree_with_options(
+                                &repo_root,
+                                &terminal_id,
+                                branch_name.as_deref(),
+                                wsl.as_ref(),
+                                should_skip,
+                            ) {
+                                Ok(wt_result) => {
+                                    eprintln!(
+                                        "[mcp] Quick Claude worktree: {} (branch: {})",
+                                        wt_result.path, wt_result.branch
+                                    );
+                                    worktree_path_result = Some(wt_result.path.clone());
+                                    worktree_branch_result = Some(wt_result.branch);
+                                    Some(wt_result.path)
+                                }
+                                Err(e) => {
+                                    return McpResponse::Error {
+                                        message: format!("Failed to create worktree: {}", e),
+                                    };
+                                }
                             }
                         }
+                        Err(_) => {
+                            // Not a git repo — fall back to workspace directory
+                            Some(ws.folder_path.clone())
+                        }
                     }
-                    Err(_) => {
-                        // Not a git repo — fall back to workspace directory
-                        Some(ws.folder_path.clone())
-                    }
+                } else {
+                    // No worktree — open in workspace directory (main branch)
+                    Some(ws.folder_path.clone())
                 }
             };
 

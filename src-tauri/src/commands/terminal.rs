@@ -370,6 +370,7 @@ pub fn quick_claude(
     prompt: String,
     branch_name: Option<String>,
     skip_fetch: Option<bool>,
+    no_worktree: Option<bool>,
     state: State<Arc<AppState>>,
     daemon: State<Arc<DaemonClient>>,
     auto_save: State<Arc<AutoSaveManager>>,
@@ -382,17 +383,23 @@ pub fn quick_claude(
         .get_workspace(&workspace_id)
         .ok_or("Workspace not found")?;
 
+    let use_worktree = !no_worktree.unwrap_or(false);
+
     // Auto-generate branch name from prompt if not provided
-    let branch_name = branch_name.or_else(|| {
-        llm.try_generate_branch_name(&prompt)
-    });
+    let branch_name = if use_worktree {
+        branch_name.or_else(|| {
+            llm.try_generate_branch_name(&prompt)
+        })
+    } else {
+        None
+    };
 
     // Determine working directory (worktree or fallback to workspace folder)
     let mut worktree_path_result: Option<String> = None;
     let mut worktree_branch: Option<String> = None;
-    let should_skip_fetch = skip_fetch.unwrap_or(true);
 
-    let working_dir = {
+    let working_dir = if use_worktree {
+        let should_skip_fetch = skip_fetch.unwrap_or(true);
         let wsl = crate::worktree::WslConfig::from_path(&workspace.folder_path);
         match crate::worktree::get_repo_root(&workspace.folder_path, wsl.as_ref()) {
             Ok(repo_root) => {
@@ -423,6 +430,9 @@ pub fn quick_claude(
                 Some(workspace.folder_path.clone())
             }
         }
+    } else {
+        // No worktree — open in workspace directory (main branch)
+        Some(workspace.folder_path.clone())
     };
 
     // Shell type from workspace

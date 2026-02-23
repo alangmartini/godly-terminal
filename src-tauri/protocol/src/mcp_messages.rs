@@ -96,6 +96,8 @@ pub enum McpRequest {
         branch_name: Option<String>,
         #[serde(default)]
         skip_fetch: Option<bool>,
+        #[serde(default)]
+        no_worktree: Option<bool>,
     },
 
     // Advanced terminal I/O
