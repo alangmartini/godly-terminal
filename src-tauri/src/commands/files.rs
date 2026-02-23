@@ -113,6 +113,20 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn write_remote_config(config: serde_json::Value) -> Result<(), String> {
+    let appdata = std::env::var("APPDATA")
+        .map_err(|_| "APPDATA not set".to_string())?;
+    let dir = PathBuf::from(appdata).join("com.godly.terminal");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create config directory: {e}"))?;
+    let path = dir.join("remote-config.json");
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {e}"))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write remote config: {e}"))
+}
+
+#[tauri::command]
 pub fn get_user_claude_md_path() -> Result<String, String> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
