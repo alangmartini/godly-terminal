@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { WebGLRenderer } from './renderer/WebGLRenderer';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 import type { TerminalTheme } from '../themes/types';
 
 export type { TerminalTheme } from '../themes/types';
@@ -117,7 +118,7 @@ export class TerminalRenderer {
 
   // Font metrics
   private fontFamily = 'Cascadia Code, Consolas, monospace';
-  private fontSize = 13;
+  private fontSize = terminalSettingsStore.getFontSize();
   private cellWidth = 0;
   private cellHeight = 0;
   private baselineOffset = 0;
@@ -166,6 +167,7 @@ export class TerminalRenderer {
   private onTitleChange?: (title: string) => void;
   private onScrollCallback?: (deltaLines: number) => void;
   private onScrollToCallback?: (absoluteOffset: number) => void;
+  private onZoomCallback?: (delta: number) => void;
 
   constructor(theme?: Partial<TerminalTheme>) {
     this.theme = theme ? { ...themeStore.getTerminalTheme(), ...theme } : themeStore.getTerminalTheme();
@@ -246,6 +248,25 @@ export class TerminalRenderer {
   setTheme(theme: TerminalTheme): void {
     this.theme = theme;
     this.repaint();
+  }
+
+  /** Update font size and re-measure. Triggers repaint. */
+  setFontSize(size: number): void {
+    if (size === this.fontSize) return;
+    this.fontSize = size;
+    if (this.useWebGL && this.webglRenderer) {
+      const metrics = this.webglRenderer.setFontSize(size);
+      this.cellWidth = metrics.cellWidth;
+      this.cellHeight = metrics.cellHeight;
+    } else {
+      this.measureFont();
+    }
+    this.repaint();
+  }
+
+  /** Set zoom callback. delta > 0 = zoom in, < 0 = zoom out. */
+  setOnZoom(cb: (delta: number) => void) {
+    this.onZoomCallback = cb;
   }
 
   /** Get the current grid dimensions in rows/cols based on canvas size. */
@@ -376,11 +397,15 @@ export class TerminalRenderer {
     if (!this.selection.active) return;
     this.selection.startRow += deltaLines;
     this.selection.endRow += deltaLines;
-    // Clear if the entire selection is off-screen
-    const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
-    const normalized = this.normalizeSelection(this.selection);
-    if (normalized.endRow < 0 || normalized.startRow >= gridRows) {
-      this.selection.active = false;
+    // Bug #290: Only clear off-screen selection when not actively auto-scrolling.
+    // During auto-scroll, the selection extends beyond the viewport and the
+    // endRow is pinned to the viewport edge in the auto-scroll timer callback.
+    if (!this.autoScrollTimer) {
+      const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+      const normalized = this.normalizeSelection(this.selection);
+      if (normalized.endRow < 0 || normalized.startRow >= gridRows) {
+        this.selection.active = false;
+      }
     }
   }
 
@@ -390,10 +415,16 @@ export class TerminalRenderer {
     this.repaint();
   }
 
-  /** Get selected text by calling the backend. */
+  /**
+   * Get selected text by calling the backend.
+   * Passes the current scrollback offset so the backend can convert
+   * viewport-relative selection coordinates to absolute buffer positions,
+   * supporting multi-screen selections that span more rows than the viewport.
+   */
   async getSelectedText(terminalId: string): Promise<string> {
     const sel = this.getSelection();
     if (!sel) return '';
+    const scrollbackOffset = this.currentSnapshot?.scrollback_offset ?? 0;
     try {
       return await invoke<string>('get_grid_text', {
         terminalId,
@@ -401,6 +432,7 @@ export class TerminalRenderer {
         startCol: sel.startCol,
         endRow: sel.endRow,
         endCol: sel.endCol,
+        scrollbackOffset,
       });
     } catch {
       return '';
@@ -856,12 +888,24 @@ export class TerminalRenderer {
     if (this.autoScrollTimer) return; // already running, just update delta
     this.autoScrollTimer = setInterval(() => {
       if (this.onScrollCallback) {
+        // Bug #290: Only call onScrollCallback — it triggers handleScroll()
+        // which calls adjustSelectionForScroll() to shift both startRow and
+        // endRow. Previously, startRow was also adjusted HERE, causing a
+        // double-adjustment that made the anchor drift at 2x the scroll rate
+        // and get clamped to viewport bounds, breaking multi-screen selections.
         this.onScrollCallback(this.autoScrollDelta);
-        // Adjust selection anchor: scrolling shifts the viewport, so the anchor
-        // row moves in the opposite direction in viewport-relative coordinates.
-        const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
-        this.selection.startRow = Math.max(0, Math.min(gridRows - 1,
-          this.selection.startRow + this.autoScrollDelta));
+        // Bug #290: Pin endRow to the viewport edge so the selection extends
+        // into scrollback as new rows are revealed by auto-scroll.
+        // Without this, endRow drifts away from the viewport edge (shifted
+        // by adjustSelectionForScroll) and the selection doesn't grow.
+        if (this.selection.active) {
+          const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+          if (this.autoScrollDelta > 0) {
+            this.selection.endRow = 0; // Scrolling up: pin to top
+          } else {
+            this.selection.endRow = gridRows - 1; // Scrolling down: pin to bottom
+          }
+        }
       }
     }, 50);
   }
@@ -983,6 +1027,14 @@ export class TerminalRenderer {
   private setupWheelHandler() {
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+
+      // Ctrl+wheel: zoom in/out instead of scrolling
+      if (e.ctrlKey && this.onZoomCallback) {
+        const delta = e.deltaY < 0 ? 1 : -1;
+        this.onZoomCallback(delta);
+        return;
+      }
+
       if (!this.onScrollCallback) return;
 
       // Convert pixel delta to lines (3 lines per standard wheel tick of 100px)
