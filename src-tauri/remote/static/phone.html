@@ -162,7 +162,7 @@
     border-radius: 8px; font-size: 16px; cursor: pointer;
   }
   .send-btn:active { background: var(--accent); }
-  .quick-actions { display: flex; gap: 6px; }
+  .quick-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .quick-btn {
     min-height: 40px; padding: 0 16px;
     background: var(--bg-input); border: 1px solid var(--border);
@@ -171,6 +171,37 @@
     cursor: pointer;
   }
   .quick-btn:active { background: var(--border); }
+
+  /* --- Select Menu Cards --- */
+  .menu-card {
+    background: var(--bg-card); border: 1px solid var(--accent-dim);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+  }
+  .menu-card .alert-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .menu-card .menu-question {
+    font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 12px;
+  }
+  .menu-options { display: flex; flex-direction: column; gap: 6px; }
+  .menu-option-btn {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; min-height: var(--touch-min); padding: 10px 14px;
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 14px;
+    text-align: left; cursor: pointer; transition: border-color 0.15s;
+  }
+  .menu-option-btn:active { background: var(--border); }
+  .menu-option-btn.selected {
+    border-color: var(--accent); background: rgba(88, 166, 255, 0.08);
+  }
+  .menu-option-num {
+    min-width: 24px; height: 24px; border-radius: 6px;
+    background: var(--bg); display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: var(--text-dim); flex-shrink: 0;
+  }
+  .menu-option-btn.selected .menu-option-num {
+    background: var(--accent-dim); color: #fff;
+  }
+  .menu-option-label { flex: 1; line-height: 1.3; }
 
   /* --- Settings --- */
   .settings-group {
@@ -263,6 +294,10 @@
     <button class="quick-btn" onclick="sendQuick('y')">y</button>
     <button class="quick-btn" onclick="sendQuick('n')">n</button>
     <button class="quick-btn" onclick="sendQuick('\r')">Enter</button>
+    <button class="quick-btn" onclick="sendArrow('up')">&#9650;</button>
+    <button class="quick-btn" onclick="sendArrow('down')">&#9660;</button>
+    <button class="quick-btn" onclick="sendEsc()">Esc</button>
+    <button class="quick-btn" onclick="sendTab()">Tab</button>
     <button class="quick-btn" onclick="sendCtrlC()">Ctrl+C</button>
   </div>
 </div>
@@ -392,7 +427,16 @@ function renderAlerts(prompts) {
     return;
   }
 
-  container.innerHTML = prompts.map(p => `
+  container.innerHTML = prompts.map(p => {
+    if (p.prompt_type === 'select_menu' && p.menu_options && p.menu_options.length > 0) {
+      return renderMenuCard(p);
+    }
+    return renderStandardAlert(p);
+  }).join('');
+}
+
+function renderStandardAlert(p) {
+  return `
     <div class="alert-card">
       <div class="alert-header">
         <span class="alert-badge">${escHtml(p.prompt_type)}</span>
@@ -403,8 +447,40 @@ function renderAlerts(prompts) {
         <button class="btn-approve" onclick="sendToSession('${escAttr(p.session_id)}', 'y\\r')">Approve</button>
         <button class="btn-deny" onclick="sendToSession('${escAttr(p.session_id)}', 'n\\r')">Deny</button>
       </div>
-    </div>
+    </div>`;
+}
+
+function renderMenuCard(p) {
+  // Find the currently selected option index
+  const selectedIdx = p.menu_options.findIndex(o => o.selected);
+  const currentSel = selectedIdx >= 0 ? selectedIdx : 0;
+
+  // Extract question text from context (lines before the first option)
+  const lines = (p.context_text || '').split('\n');
+  let question = '';
+  for (const line of lines) {
+    if (/^\s*>?\s*\d+\./.test(line)) break;
+    const trimmed = line.trim();
+    if (trimmed) question = trimmed;
+  }
+
+  const optionButtons = p.menu_options.map((opt, idx) => `
+    <button class="menu-option-btn${opt.selected ? ' selected' : ''}"
+            onclick="selectMenuOption('${escAttr(p.session_id)}', ${idx}, ${currentSel})">
+      <span class="menu-option-num">${idx + 1}</span>
+      <span class="menu-option-label">${escHtml(opt.label)}</span>
+    </button>
   `).join('');
+
+  return `
+    <div class="menu-card">
+      <div class="alert-header">
+        <span class="alert-badge">Select</span>
+        <span class="alert-session">${escHtml(p.session_id.slice(0, 8))}...</span>
+      </div>
+      ${question ? `<div class="menu-question">${escHtml(question)}</div>` : ''}
+      <div class="menu-options">${optionButtons}</div>
+    </div>`;
 }
 
 function renderWorkspaces(workspaces) {
@@ -480,9 +556,42 @@ async function sendQuick(text) {
   await sendToSession(currentSessionId, text);
 }
 
+async function sendArrow(direction) {
+  if (!currentSessionId) return;
+  // ANSI escape sequences for arrow keys
+  const seq = direction === 'up' ? '\x1b[A' : '\x1b[B';
+  await sendToSession(currentSessionId, seq);
+}
+
+async function sendEsc() {
+  if (!currentSessionId) return;
+  await sendToSession(currentSessionId, '\x1b');
+}
+
+async function sendTab() {
+  if (!currentSessionId) return;
+  await sendToSession(currentSessionId, '\t');
+}
+
 async function sendCtrlC() {
   if (!currentSessionId) return;
   await sendToSession(currentSessionId, '\x03');
+}
+
+async function selectMenuOption(sessionId, targetIndex, currentSelectedIndex) {
+  // Calculate the arrow key sequence to reach the target option from the current selection
+  const delta = targetIndex - currentSelectedIndex;
+  let seq = '';
+  if (delta > 0) {
+    // Move down
+    for (let i = 0; i < delta; i++) seq += '\x1b[B';
+  } else if (delta < 0) {
+    // Move up
+    for (let i = 0; i < Math.abs(delta); i++) seq += '\x1b[A';
+  }
+  // Press Enter to confirm
+  seq += '\r';
+  await sendToSession(sessionId, seq);
 }
 
 async function sendToSession(sid, text) {

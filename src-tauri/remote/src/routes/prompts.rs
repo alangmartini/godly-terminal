@@ -6,7 +6,7 @@ use serde::Serialize;
 use godly_protocol::{Request, Response};
 
 use crate::daemon_client::async_request;
-use crate::detection::PromptDetector;
+use crate::detection::{PromptDetector, SelectMenuOption};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -15,6 +15,8 @@ pub struct PromptItem {
     pub matched_pattern: String,
     pub prompt_type: String,
     pub context_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub menu_options: Option<Vec<SelectMenuOption>>,
 }
 
 #[derive(Serialize)]
@@ -59,6 +61,7 @@ pub async fn list_prompts(
                 matched_pattern: det.matched_pattern,
                 prompt_type: det.prompt_type,
                 context_text: det.context_text,
+                menu_options: det.menu_options,
             });
         }
     }
@@ -99,6 +102,7 @@ pub async fn session_prompts(
             matched_pattern: det.matched_pattern,
             prompt_type: det.prompt_type,
             context_text: det.context_text,
+            menu_options: det.menu_options,
         }],
         None => Vec::new(),
     };

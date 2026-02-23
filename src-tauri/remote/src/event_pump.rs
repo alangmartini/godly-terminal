@@ -8,7 +8,7 @@ use tokio::sync::broadcast;
 use godly_protocol::{Request, Response};
 
 use crate::daemon_client::{async_request, DaemonClient};
-use crate::detection::PromptDetector;
+use crate::detection::{PromptDetector, SelectMenuOption};
 
 /// SSE event types.
 #[derive(Debug, Clone, Serialize)]
@@ -20,6 +20,8 @@ pub enum SseEvent {
         matched_pattern: String,
         prompt_type: String,
         context_text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        menu_options: Option<Vec<SelectMenuOption>>,
     },
     #[serde(rename = "prompt_resolved")]
     PromptResolved {
@@ -120,6 +122,7 @@ impl EventPump {
                                 matched_pattern: det.matched_pattern.clone(),
                                 prompt_type: det.prompt_type.clone(),
                                 context_text: det.context_text.clone(),
+                                menu_options: det.menu_options.clone(),
                             });
                         }
                         (None, Some(_)) => {
@@ -140,6 +143,7 @@ impl EventPump {
                                 matched_pattern: det.matched_pattern.clone(),
                                 prompt_type: det.prompt_type.clone(),
                                 context_text: det.context_text.clone(),
+                                menu_options: det.menu_options.clone(),
                             });
                         }
                         _ => {
