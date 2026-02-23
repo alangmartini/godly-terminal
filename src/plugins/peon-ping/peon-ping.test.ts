@@ -63,8 +63,8 @@ describe('PeonPingPlugin', () => {
     const ctx = createMockContext();
     await plugin.init(ctx);
 
-    // Should subscribe to 5 categories: ready, complete, error, permission, notification
-    expect(ctx.on).toHaveBeenCalledTimes(5);
+    // Should subscribe to 6 categories: ready, acknowledge, complete, error, permission, notification
+    expect(ctx.on).toHaveBeenCalledTimes(6);
   });
 
   it('enable/disable toggles the enabled state', async () => {
@@ -111,11 +111,11 @@ describe('PeonPingPlugin', () => {
     expect(sliders.length).toBe(1);
 
     const checkboxes = el.querySelectorAll('input[type="checkbox"]');
-    expect(checkboxes.length).toBe(5);
+    expect(checkboxes.length).toBe(6);
 
     const testBtns = el.querySelectorAll('button');
-    // 5 test buttons + 1 open folder button
-    expect(testBtns.length).toBe(6);
+    // 6 test buttons + 1 browse peonping button + 1 open folder button
+    expect(testBtns.length).toBe(8);
   });
 
   it('loads sound packs during init', async () => {

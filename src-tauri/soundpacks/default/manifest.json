@@ -1,14 +1,15 @@
 {
   "id": "default",
-  "name": "Default",
-  "description": "Built-in notification sounds using the bundled work_complete.mp3. Add your own sound packs by creating folders in the soundpacks directory.",
-  "author": "Godly Terminal",
-  "version": "1.0.0",
+  "name": "Orc Peon",
+  "description": "Warcraft III Orc Peon voice lines. 'Work, work.' Powered by PeonPing.",
+  "author": "PeonPing",
+  "version": "2.0.0",
   "sounds": {
-    "ready": ["work_complete.mp3"],
-    "complete": ["work_complete.mp3"],
-    "error": ["work_complete.mp3"],
-    "permission": ["work_complete.mp3"],
-    "notification": ["work_complete.mp3"]
+    "ready": ["PeonReady1.wav", "PeonYes3.wav", "PeonWhat1.wav", "PeonWhat3.wav"],
+    "acknowledge": ["PeonYes1.wav", "PeonYes2.wav", "PeonYes3.wav", "PeonYes4.wav", "PeonYesAttack1.wav", "PeonYesAttack2.wav", "PeonYesAttack3.wav"],
+    "complete": ["PeonReady1.wav", "PeonWhat4.wav", "PeonYes1.wav", "PeonYes3.wav", "PeonYesAttack1.wav"],
+    "error": ["PeonAngry4.wav", "PeonDeath.wav"],
+    "permission": ["PeonWhat1.wav", "PeonWhat2.wav", "PeonWhat3.wav", "PeonWhat4.wav"],
+    "notification": ["PeonAngry1.wav", "PeonAngry2.wav", "PeonAngry3.wav", "PeonWarcry1.wav"]
   }
 }

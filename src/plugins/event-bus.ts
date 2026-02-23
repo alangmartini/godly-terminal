@@ -13,6 +13,11 @@ const PERMISSION_KEYWORDS = [
   'authorize', 'consent', 'grant',
 ];
 
+const ACKNOWLEDGE_KEYWORDS = [
+  'working', 'starting', 'acknowledged', 'received',
+  'processing', 'on it', 'will do', 'got it', 'roger',
+];
+
 const COMPLETE_KEYWORDS = [
   'complete', 'done', 'finish', 'success', 'passed',
   'ready', 'built', 'compiled', 'deployed', 'merged',
@@ -25,6 +30,7 @@ function classifyMessage(message: string | null): PluginEventType {
   if (ERROR_KEYWORDS.some(kw => lower.includes(kw))) return 'agent:error';
   if (PERMISSION_KEYWORDS.some(kw => lower.includes(kw))) return 'agent:permission';
   if (COMPLETE_KEYWORDS.some(kw => lower.includes(kw))) return 'agent:task-complete';
+  if (ACKNOWLEDGE_KEYWORDS.some(kw => lower.includes(kw))) return 'agent:acknowledge';
   return 'notification';
 }
 
