@@ -163,6 +163,10 @@ export class TerminalRenderer {
   private onDocumentSelectionMouseMove: ((e: MouseEvent) => void) | null = null;
   private onDocumentSelectionMouseUp: ((e: MouseEvent) => void) | null = null;
 
+  // Touch scroll state
+  private touchStartY: number | null = null;
+  private touchAccumulated = 0;
+
   // Callbacks
   private onTitleChange?: (title: string) => void;
   private onScrollCallback?: (deltaLines: number) => void;
@@ -231,6 +235,7 @@ export class TerminalRenderer {
 
     this.setupMouseHandlers();
     this.setupWheelHandler();
+    this.setupTouchHandler();
     this.startCursorBlink();
   }
 
@@ -1045,6 +1050,45 @@ export class TerminalRenderer {
       // deltaY < 0 = scroll up in page terms = scroll into history (positive delta)
       this.onScrollCallback(-lines);
     }, { passive: false });
+  }
+
+  // ---- Private: Touch handler ----
+
+  private setupTouchHandler() {
+    this.canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        this.touchStartY = e.touches[0].clientY;
+        this.touchAccumulated = 0;
+      }
+    }, { passive: true });
+
+    this.canvas.addEventListener('touchmove', (e) => {
+      if (this.touchStartY === null || e.touches.length !== 1) return;
+      e.preventDefault();
+
+      if (!this.onScrollCallback) return;
+
+      const currentY = e.touches[0].clientY;
+      const deltaPixels = this.touchStartY - currentY;
+      this.touchStartY = currentY;
+
+      // Convert pixel delta to fractional lines, accumulate to avoid losing sub-line drags
+      const cellHeightCss = this.cellHeight / this.devicePixelRatio;
+      this.touchAccumulated += deltaPixels / cellHeightCss;
+
+      const lines = Math.trunc(this.touchAccumulated);
+      if (lines !== 0) {
+        this.touchAccumulated -= lines;
+        // Swipe up (deltaPixels > 0) = scroll into history (positive delta)
+        // Swipe down (deltaPixels < 0) = scroll toward live (negative delta)
+        this.onScrollCallback(lines);
+      }
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchend', () => {
+      this.touchStartY = null;
+      this.touchAccumulated = 0;
+    }, { passive: true });
   }
 
   // ---- Private: Scrollbar geometry + painting ----
