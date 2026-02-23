@@ -23,6 +23,8 @@ pub struct WorkspaceItem {
 pub struct WorkspaceTerminal {
     pub id: String,
     pub name: String,
+    /// OSC window title from the running program (e.g. "claude: fixing bug").
+    pub title: String,
     pub shell_type: String,
     /// Redacted to last 2 path components to prevent full filesystem path disclosure.
     pub cwd: Option<String>,
@@ -67,13 +69,14 @@ pub async fn list_workspaces(
 ) -> Result<Json<WorkspacesResponse>, (StatusCode, String)> {
     let layout = state.layout_reader.read();
 
-    // Get live session IDs from daemon
-    let live_session_ids: Vec<String> = match async_request(&state.daemon, Request::ListSessions).await {
-        Ok(Response::SessionList { sessions }) => {
-            sessions.into_iter().map(|s| s.id).collect()
-        }
-        _ => Vec::new(),
-    };
+    // Get live sessions from daemon (includes OSC title from VT parser)
+    let live_sessions: std::collections::HashMap<String, godly_protocol::SessionInfo> =
+        match async_request(&state.daemon, Request::ListSessions).await {
+            Ok(Response::SessionList { sessions }) => {
+                sessions.into_iter().map(|s| (s.id.clone(), s)).collect()
+            }
+            _ => std::collections::HashMap::new(),
+        };
 
     let workspaces = layout
         .workspaces
@@ -83,12 +86,16 @@ pub async fn list_workspaces(
                 .terminals
                 .iter()
                 .filter(|t| t.workspace_id == ws.id)
-                .map(|t| WorkspaceTerminal {
-                    id: t.id.clone(),
-                    name: t.name.clone(),
-                    shell_type: t.shell_type.display_name(),
-                    cwd: t.cwd.as_deref().map(redact_cwd),
-                    alive: live_session_ids.contains(&t.id),
+                .map(|t| {
+                    let session = live_sessions.get(&t.id);
+                    WorkspaceTerminal {
+                        id: t.id.clone(),
+                        name: t.name.clone(),
+                        title: session.map(|s| s.title.clone()).unwrap_or_default(),
+                        shell_type: t.shell_type.display_name(),
+                        cwd: t.cwd.as_deref().map(redact_cwd),
+                        alive: session.is_some(),
+                    }
                 })
                 .collect();
 
