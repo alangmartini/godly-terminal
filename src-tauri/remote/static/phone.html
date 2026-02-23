@@ -270,7 +270,7 @@
   <div class="settings-group">
     <label class="settings-label">API Key</label>
     <input class="settings-input" id="apiKeyInput" type="password" placeholder="Enter API key">
-    <div class="settings-note">Required if server has auth enabled. Stored in localStorage.</div>
+    <div class="settings-note">Required if server has auth enabled.</div>
     <button class="settings-save" onclick="saveSettings()">Save</button>
   </div>
   <div class="settings-group">
@@ -291,7 +291,9 @@ let currentView = 'dashboard';
 let currentSessionId = null;
 let apiKey = localStorage.getItem('godly_api_key') || '';
 let serverUrl = localStorage.getItem('godly_server_url') || '';
-let deviceToken = localStorage.getItem('godly_device_token') || '';
+// Device token is now stored in HttpOnly cookie (set by server).
+// Clean up any legacy localStorage token.
+localStorage.removeItem('godly_device_token');
 let sseSource = null;
 let refreshTimer = null;
 let sessionRefreshTimer = null;
@@ -305,13 +307,23 @@ function baseUrl() {
 function headers() {
   const h = { 'Content-Type': 'application/json' };
   if (apiKey) h['X-API-Key'] = apiKey;
-  if (deviceToken) h['X-Device-Token'] = deviceToken;
+  // Device token is sent automatically via HttpOnly cookie
   return h;
+}
+
+async function apiWithCreds(path, opts = {}) {
+  const url = baseUrl() + path;
+  const resp = await fetch(url, { credentials: 'include', headers: headers(), ...opts });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`${resp.status}: ${text}`);
+  }
+  return resp.json();
 }
 
 async function api(path, opts = {}) {
   const url = baseUrl() + path;
-  const resp = await fetch(url, { headers: headers(), ...opts });
+  const resp = await fetch(url, { credentials: 'include', headers: headers(), ...opts });
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`${resp.status}: ${text}`);
@@ -484,14 +496,23 @@ async function sendToSession(sid, text) {
 }
 
 // --- SSE ---
-function connectSSE() {
+async function connectSSE() {
   if (sseSource) { sseSource.close(); sseSource = null; }
 
-  let url = baseUrl() + '/api/events';
-  const sseParams = [];
-  if (apiKey) sseParams.push('api_key=' + encodeURIComponent(apiKey));
-  if (deviceToken) sseParams.push('device_token=' + encodeURIComponent(deviceToken));
-  if (sseParams.length) url += '?' + sseParams.join('&');
+  // Get a one-time ticket for SSE auth (avoids putting secrets in EventSource URL)
+  let ticketParam = '';
+  try {
+    const ticketResp = await api('/api/sse-ticket', { method: 'POST' });
+    ticketParam = '?ticket=' + encodeURIComponent(ticketResp.ticket);
+  } catch (e) {
+    console.warn('Failed to get SSE ticket, falling back to legacy auth', e);
+    // Legacy fallback: put api_key in URL (less secure, logged by proxies)
+    const sseParams = [];
+    if (apiKey) sseParams.push('api_key=' + encodeURIComponent(apiKey));
+    if (sseParams.length) ticketParam = '?' + sseParams.join('&');
+  }
+
+  let url = baseUrl() + '/api/events' + ticketParam;
 
   try {
     sseSource = new EventSource(url);
@@ -591,12 +612,6 @@ document.getElementById('inputField').addEventListener('keydown', (e) => {
 });
 
 // --- Device Registration ---
-function generateDeviceToken() {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-}
-
 async function checkDeviceStatus() {
   try {
     const data = await api('/api/device-status');
@@ -605,26 +620,20 @@ async function checkDeviceStatus() {
 }
 
 async function tryExistingToken() {
-  if (!deviceToken) return false;
+  // Device token is in HttpOnly cookie — just test if it works
   try {
     await api('/api/prompts');
     return true;
-  } catch (e) {
-    if (e.message.includes('403')) {
-      deviceToken = '';
-      localStorage.removeItem('godly_device_token');
-    }
+  } catch {
     return false;
   }
 }
 
 async function registerDevice(password) {
-  deviceToken = generateDeviceToken();
+  // Server generates the device token and returns it via Set-Cookie HttpOnly
   const resp = await apiPost('/api/register-device', {
-    device_token: deviceToken,
     password: password || undefined
   });
-  localStorage.setItem('godly_device_token', deviceToken);
   return resp;
 }
 
@@ -644,8 +653,6 @@ async function submitLogin() {
     await registerDevice(pw);
     startApp();
   } catch (e) {
-    deviceToken = '';
-    localStorage.removeItem('godly_device_token');
     const msg = e.message.includes('already registered')
       ? 'Another device is already registered. Restart the server.'
       : e.message.includes('Too many') ? 'Too many attempts. Wait 5 minutes.'

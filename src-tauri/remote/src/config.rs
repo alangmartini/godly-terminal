@@ -39,6 +39,8 @@ pub struct MonitorConfig {
     pub poll_interval_ms: u64,
     #[serde(default)]
     pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub webhook_secret: Option<String>,
     #[serde(default = "default_scan_rows")]
     pub scan_rows: usize,
 }
@@ -48,6 +50,7 @@ impl Default for MonitorConfig {
         Self {
             poll_interval_ms: default_poll_interval(),
             webhook_url: None,
+            webhook_secret: None,
             scan_rows: default_scan_rows(),
         }
     }
@@ -80,7 +83,7 @@ fn default_server() -> ServerConfig {
 }
 
 fn default_host() -> String {
-    "0.0.0.0".to_string()
+    "127.0.0.1".to_string()
 }
 
 fn default_port() -> u16 {
@@ -103,6 +106,7 @@ impl Default for Config {
             monitor: MonitorConfig {
                 poll_interval_ms: default_poll_interval(),
                 webhook_url: None,
+                webhook_secret: None,
                 scan_rows: default_scan_rows(),
             },
             phone: PhoneConfig::default(),
@@ -133,6 +137,9 @@ impl Config {
         }
         if let Ok(url) = std::env::var("GODLY_REMOTE_WEBHOOK_URL") {
             config.monitor.webhook_url = Some(url);
+        }
+        if let Ok(secret) = std::env::var("GODLY_REMOTE_WEBHOOK_SECRET") {
+            config.monitor.webhook_secret = Some(secret);
         }
 
         config
@@ -177,12 +184,13 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = Config::default();
-        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 3377);
         assert!(config.auth.api_key.is_none());
         assert_eq!(config.monitor.poll_interval_ms, 1000);
         assert_eq!(config.monitor.scan_rows, 10);
         assert!(config.monitor.webhook_url.is_none());
+        assert!(config.monitor.webhook_secret.is_none());
     }
 
     #[test]
@@ -219,7 +227,7 @@ scan_rows = 5
 port = 9000
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 9000);
         assert!(config.auth.api_key.is_none());
         assert_eq!(config.monitor.poll_interval_ms, 1000);
@@ -228,7 +236,7 @@ port = 9000
     #[test]
     fn parse_empty_toml() {
         let config: Config = toml::from_str("").unwrap();
-        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 3377);
     }
 }

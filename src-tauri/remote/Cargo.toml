@@ -17,6 +17,8 @@ uuid.workspace = true
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors"] }
+hmac = "0.12"
+sha2 = "0.10"
 reqwest = { version = "0.12", features = ["json"], default-features = false }
 regex = "1"
 toml = "0.8"

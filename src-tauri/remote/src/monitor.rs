@@ -33,11 +33,27 @@ impl MonitorRegistry {
     }
 }
 
+/// Compute HMAC-SHA256 signature for webhook payload.
+fn compute_webhook_signature(secret: &str, body: &[u8]) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC can take key of any size");
+    mac.update(body);
+    let result = mac.finalize();
+    let bytes = result.into_bytes();
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 /// Start monitoring a session for permission prompts.
 pub fn start_monitor(state: AppState, session_id: String) {
     let poll_ms = state.config.monitor.poll_interval_ms;
     let scan_rows = state.config.monitor.scan_rows;
     let webhook_url = state.config.monitor.webhook_url.clone();
+    let webhook_secret = state.config.monitor.webhook_secret.clone();
     let daemon = Arc::clone(&state.daemon);
     let monitors = Arc::clone(&state.monitors);
 
@@ -103,7 +119,17 @@ pub fn start_monitor(state: AppState, session_id: String) {
                     };
 
                     let client = reqwest::Client::new();
-                    if let Err(e) = client.post(url).json(&payload).send().await {
+                    let mut req = client.post(url).json(&payload);
+
+                    // Sign the webhook payload if a secret is configured
+                    if let Some(ref secret) = webhook_secret {
+                        if let Ok(body_json) = serde_json::to_vec(&payload) {
+                            let sig = compute_webhook_signature(secret, &body_json);
+                            req = req.header("X-Webhook-Signature", format!("sha256={}", sig));
+                        }
+                    }
+
+                    if let Err(e) = req.send().await {
                         tracing::error!("Failed to send webhook: {}", e);
                     }
                 }
@@ -146,3 +172,65 @@ pub async fn list_monitors(state: &AppState) -> Vec<String> {
 }
 
 // Tests for prompt detection are in detection.rs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webhook_signature_deterministic() {
+        let sig1 = compute_webhook_signature("secret", b"hello");
+        let sig2 = compute_webhook_signature("secret", b"hello");
+        assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn webhook_signature_differs_with_different_secret() {
+        let sig1 = compute_webhook_signature("secret1", b"hello");
+        let sig2 = compute_webhook_signature("secret2", b"hello");
+        assert_ne!(sig1, sig2);
+    }
+
+    #[test]
+    fn webhook_signature_differs_with_different_body() {
+        let sig1 = compute_webhook_signature("secret", b"hello");
+        let sig2 = compute_webhook_signature("secret", b"world");
+        assert_ne!(sig1, sig2);
+    }
+
+    #[test]
+    fn webhook_signature_is_hex() {
+        let sig = compute_webhook_signature("key", b"data");
+        assert!(sig.len() == 64); // SHA-256 = 32 bytes = 64 hex chars
+        assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn webhook_signature_known_vector() {
+        // Verify against known HMAC-SHA256 test vector
+        // HMAC-SHA256("key", "The quick brown fox jumps over the lazy dog")
+        // = f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+        let sig = compute_webhook_signature(
+            "key",
+            b"The quick brown fox jumps over the lazy dog",
+        );
+        assert_eq!(
+            sig,
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
+    }
+
+    #[test]
+    fn webhook_payload_serializes() {
+        let payload = WebhookPayload {
+            event_type: "permission_prompt".to_string(),
+            session_id: "test-123".to_string(),
+            matched_pattern: "Allow?".to_string(),
+            grid_text: "some text".to_string(),
+            timestamp_ms: 1234567890,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"type\":\"permission_prompt\""));
+        assert!(json.contains("\"session_id\":\"test-123\""));
+    }
+}
