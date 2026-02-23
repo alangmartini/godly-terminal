@@ -22,7 +22,15 @@ const SHELL_EXIT_GRACE_SECS: u64 = 30;
 /// Maximum time (seconds) the shim will wait for a daemon to connect/reconnect.
 /// After this period with no daemon connection, the shim self-terminates to
 /// prevent orphaned processes from accumulating indefinitely.
-const ORPHAN_TIMEOUT_SECS: u64 = 600; // 10 minutes
+const ORPHAN_TIMEOUT_SECS: u64 = 90; // 90 seconds
+
+/// Maximum number of pending output messages in the channel between the PTY
+/// reader thread and the main loop. At 8KB per message, 128 messages ≈ 1MB.
+/// When the channel is full, the PTY reader thread blocks on send(), applying
+/// natural backpressure. This prevents the unbounded memory growth (600MB-1GB)
+/// that was observed when the daemon was disconnected and output accumulated
+/// in an unbounded channel.
+const OUTPUT_CHANNEL_CAPACITY: usize = 128;
 
 struct Args {
     session_id: String,
@@ -144,7 +152,7 @@ fn run() -> Result<(), String> {
     let current_cols = Arc::new(AtomicU16::new(args.cols));
 
     // Channels
-    let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+    let (output_tx, output_rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CAPACITY);
     let (exit_tx, exit_rx) = mpsc::channel::<Option<i64>>();
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
     let (resize_tx, resize_rx) = mpsc::channel::<(u16, u16)>();
@@ -305,10 +313,11 @@ fn main_loop(
             return Ok(());
         }
 
-        // Drain any pending output into the ring buffer while disconnected.
-        // Without this, the unbounded mpsc channel between the PTY reader thread
-        // and main_loop grows without limit when no daemon is connected,
-        // causing memory to balloon (observed 600MB-1GB per shim).
+        // Drain pending output into the ring buffer while disconnected.
+        // The bounded sync_channel (OUTPUT_CHANNEL_CAPACITY) is the primary
+        // defense against memory bloat — when full, the PTY reader blocks.
+        // This drain keeps the channel from filling up, allowing the reader
+        // to continue without stalling the shell process unnecessarily.
         while let Ok(data) = output_rx.try_recv() {
             ring_buffer.lock().unwrap().append(&data);
         }
@@ -703,5 +712,124 @@ mod pipe {
             }
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that the output channel is bounded and applies backpressure.
+    /// Bug: previously used mpsc::channel() (unbounded), causing 600MB-1GB
+    /// memory bloat when the daemon was disconnected and PTY output accumulated.
+    /// Fix: mpsc::sync_channel(OUTPUT_CHANNEL_CAPACITY) caps memory at ~1MB.
+    #[test]
+    fn test_output_channel_is_bounded() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CAPACITY);
+
+        // Fill the channel to capacity
+        for i in 0..OUTPUT_CHANNEL_CAPACITY {
+            tx.send(vec![i as u8; 8192]).unwrap();
+        }
+
+        // The next send should block — verify with try_send
+        let result = tx.try_send(vec![0u8; 8192]);
+        assert!(
+            result.is_err(),
+            "Channel should be full after {} messages, but try_send succeeded",
+            OUTPUT_CHANNEL_CAPACITY
+        );
+
+        // Drain one message and verify we can send again
+        let _ = rx.try_recv().unwrap();
+        tx.try_send(vec![0u8; 8192]).unwrap();
+    }
+
+    /// Verify that maximum channel memory is bounded to ~1MB.
+    /// OUTPUT_CHANNEL_CAPACITY messages × 8KB each ≈ 1MB.
+    #[test]
+    fn test_output_channel_memory_bound() {
+        let max_bytes = OUTPUT_CHANNEL_CAPACITY * 8192;
+        // Should be ~1MB (1,048,576 bytes)
+        assert!(
+            max_bytes <= 2 * 1024 * 1024,
+            "Channel memory bound ({} bytes) exceeds 2MB",
+            max_bytes
+        );
+        assert!(
+            max_bytes >= 512 * 1024,
+            "Channel memory bound ({} bytes) is less than 512KB — too small",
+            max_bytes
+        );
+    }
+
+    /// Verify the orphan timeout is reasonable (not the old 10-minute value).
+    #[test]
+    fn test_orphan_timeout_is_short() {
+        assert!(
+            ORPHAN_TIMEOUT_SECS <= 120,
+            "Orphan timeout ({}s) is too long — should be ≤ 120s",
+            ORPHAN_TIMEOUT_SECS
+        );
+        assert!(
+            ORPHAN_TIMEOUT_SECS >= 30,
+            "Orphan timeout ({}s) is too short — should be ≥ 30s",
+            ORPHAN_TIMEOUT_SECS
+        );
+    }
+
+    /// Simulate the disconnected shim scenario: producer fills channel while
+    /// consumer drains to ring buffer on a slow cycle. Verify total memory
+    /// stays bounded (channel + ring buffer ≤ 2MB).
+    #[test]
+    fn test_bounded_channel_with_ring_buffer_drain() {
+        let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(OUTPUT_CHANNEL_CAPACITY);
+        let ring_buffer = Arc::new(Mutex::new(RingBuffer::new()));
+
+        // Producer: fill the channel
+        let tx_handle = std::thread::spawn(move || {
+            let mut sent = 0;
+            for _ in 0..OUTPUT_CHANNEL_CAPACITY * 4 {
+                // Will block when channel is full, until consumer drains
+                if tx.send(vec![0xAB; 8192]).is_err() {
+                    break;
+                }
+                sent += 1;
+            }
+            sent
+        });
+
+        // Consumer: drain to ring buffer in batches (simulates 1s drain cycle)
+        let rb = ring_buffer.clone();
+        let drain_handle = std::thread::spawn(move || {
+            let mut drained = 0;
+            for _ in 0..4 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                while let Ok(data) = rx.try_recv() {
+                    rb.lock().unwrap().append(&data);
+                    drained += 1;
+                }
+            }
+            // Final drain
+            while let Ok(data) = rx.try_recv() {
+                rb.lock().unwrap().append(&data);
+                drained += 1;
+            }
+            drained
+        });
+
+        let sent = tx_handle.join().unwrap();
+        let drained = drain_handle.join().unwrap();
+
+        // All sent messages should have been drained
+        assert_eq!(sent, drained, "Sent {} but drained {}", sent, drained);
+
+        // Ring buffer should be capped at 1MB regardless of total data volume
+        let rb_size = ring_buffer.lock().unwrap().len();
+        assert!(
+            rb_size <= 1024 * 1024,
+            "Ring buffer ({} bytes) exceeds 1MB cap",
+            rb_size
+        );
     }
 }
