@@ -51,7 +51,7 @@ if (-not (Test-Path $remoteBin)) {
 
 # --- Generate API key and password ---
 $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
-$Password = -join ((48..57) + (97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
+$Password = -join ((48..57) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
 
 # --- Kill any existing godly-remote so we start fresh with our API key + password ---
 $remoteProc = $null
@@ -110,9 +110,11 @@ if (-not $publicUrl) {
     exit 1
 }
 
-# --- Build phone URL with embedded API key ---
+# --- Build phone URL with API key in URL fragment (not query param) ---
+# URL fragments (#) are NOT sent to the server in HTTP requests, NOT logged
+# by proxies/ngrok, and NOT included in Referer headers.
 if ($ApiKey) {
-    $phoneUrl = "$publicUrl/phone?key=$ApiKey"
+    $phoneUrl = "$publicUrl/phone#key=$ApiKey"
 } else {
     $phoneUrl = "$publicUrl/phone"
 }
@@ -146,7 +148,7 @@ Write-Host "  Password: $Password" -ForegroundColor White
 Write-Host "  (enter this on your phone to connect)" -ForegroundColor DarkGray
 Write-Host ""
 if ($ApiKey) {
-    Write-Host "  API Key: $ApiKey" -ForegroundColor DarkGray
+    Write-Host "  API Key: (embedded in QR code)" -ForegroundColor DarkGray
 }
 Write-Host "  Tunnel:  $publicUrl" -ForegroundColor DarkGray
 Write-Host "  Local:   http://localhost:$Port/phone" -ForegroundColor DarkGray
