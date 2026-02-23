@@ -96,7 +96,12 @@ pub enum Response {
     Pong,
     /// Initial buffer replay when attaching to a session
     Buffer { session_id: String, data: Vec<u8> },
-    LastOutputTime { epoch_ms: u64, running: bool },
+    LastOutputTime {
+        epoch_ms: u64,
+        running: bool,
+        #[serde(default)]
+        exit_code: Option<i64>,
+    },
     SearchResult { found: bool, running: bool },
     /// Grid snapshot from the godly-vt terminal state engine.
     Grid { grid: crate::types::GridData },
@@ -248,6 +253,58 @@ mod tests {
                 assert_eq!(exit_code, Some(1));
             }
             other => panic!("Expected ShellExited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn last_output_time_with_exit_code_roundtrip() {
+        let resp = Response::LastOutputTime {
+            epoch_ms: 1700000000000,
+            running: false,
+            exit_code: Some(1),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"exit_code\":1"));
+        let deserialized: Response = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Response::LastOutputTime { epoch_ms, running, exit_code } => {
+                assert_eq!(epoch_ms, 1700000000000);
+                assert!(!running);
+                assert_eq!(exit_code, Some(1));
+            }
+            other => panic!("Expected LastOutputTime, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn last_output_time_without_exit_code_backward_compat() {
+        // Simulate an older daemon that doesn't send exit_code
+        let json = r#"{"type":"LastOutputTime","epoch_ms":1700000000000,"running":true}"#;
+        let deserialized: Response = serde_json::from_str(json).unwrap();
+        match deserialized {
+            Response::LastOutputTime { epoch_ms, running, exit_code } => {
+                assert_eq!(epoch_ms, 1700000000000);
+                assert!(running);
+                assert_eq!(exit_code, None);
+            }
+            other => panic!("Expected LastOutputTime, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn last_output_time_none_exit_code_roundtrip() {
+        let resp = Response::LastOutputTime {
+            epoch_ms: 1700000000000,
+            running: true,
+            exit_code: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: Response = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Response::LastOutputTime { exit_code, .. } => {
+                assert_eq!(exit_code, None);
+            }
+            other => panic!("Expected LastOutputTime, got {:?}", other),
         }
     }
 
