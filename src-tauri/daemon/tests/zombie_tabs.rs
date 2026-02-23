@@ -207,18 +207,38 @@ fn wait_for_session_closed(
     }
 }
 
+/// Generate a unique pipe name using nanosecond timestamp + PID to avoid
+/// collisions when nextest retries reuse PIDs on Windows.
+fn unique_pipe_name(test_name: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!(r"\\.\pipe\godly-test-{}-{}-{}", test_name, std::process::id(), nonce)
+}
+
+/// Return a deadline duration that's longer on CI (shared VMs have slower ConPTY).
+fn ci_deadline(local_secs: u64) -> Duration {
+    if std::env::var("CI").is_ok() {
+        Duration::from_secs(local_secs * 3)
+    } else {
+        Duration::from_secs(local_secs)
+    }
+}
+
 struct DaemonFixture {
     child: Child,
     pipe_name: String,
+    _job: *mut winapi::ctypes::c_void,
 }
+
+// Job handle can be sent across threads (it's a kernel handle).
+unsafe impl Send for DaemonFixture {}
 
 impl DaemonFixture {
     fn spawn(test_name: &str) -> Self {
-        let pipe_name = format!(
-            r"\\.\pipe\godly-test-{}-{}",
-            test_name,
-            std::process::id()
-        );
+        let pipe_name = unique_pipe_name(test_name);
 
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let target_dir = manifest_dir
@@ -233,16 +253,50 @@ impl DaemonFixture {
             daemon_exe
         );
 
+        // Create a Windows Job Object configured to kill all processes on close.
+        // This ensures the daemon AND any pty-shim child processes are terminated
+        // when the fixture is dropped — preventing orphaned shims from corrupting
+        // nextest retries. (Fix for GitHub issue #237)
+        let job = unsafe {
+            use winapi::um::jobapi2::{CreateJobObjectW, SetInformationJobObject};
+            use winapi::um::winnt::{
+                JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            };
+
+            let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            assert!(!job.is_null(), "CreateJobObjectW failed");
+
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ret = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as *mut _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            assert!(ret != 0, "SetInformationJobObject failed");
+            job
+        };
+
         let child = Command::new(&daemon_exe)
             .env("GODLY_PIPE_NAME", &pipe_name)
+            .env("GODLY_INSTANCE", pipe_name.trim_start_matches(r"\\.\pipe\"))
             .env("GODLY_NO_DETACH", "1")
             .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("Failed to spawn daemon");
 
+        // Assign daemon process to the job so it (and its shim children) are killed on drop.
+        unsafe {
+            use winapi::um::jobapi2::AssignProcessToJobObject;
+            let ret = AssignProcessToJobObject(job, child.as_raw_handle() as *mut _);
+            assert!(ret != 0, "AssignProcessToJobObject failed");
+        }
+
         std::thread::sleep(Duration::from_millis(500));
 
-        Self { child, pipe_name }
+        Self { child, pipe_name, _job: job }
     }
 
     fn connect(&self) -> std::fs::File {
@@ -252,7 +306,12 @@ impl DaemonFixture {
 
 impl Drop for DaemonFixture {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // Closing the job handle kills the daemon + all shim children
+        // (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE). Then we wait for the daemon
+        // process to fully exit.
+        unsafe {
+            winapi::um::handleapi::CloseHandle(self._job);
+        }
         let _ = self.child.wait();
     }
 }
@@ -306,7 +365,7 @@ fn test_session_closed_on_pty_exit_while_attached() {
     );
 
     // Wait for the shell to initialize (cmd.exe startup — slow on CI VMs)
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(ci_deadline(3));
 
     // Make the shell exit
     let resp = send_request(
@@ -323,7 +382,7 @@ fn test_session_closed_on_pty_exit_while_attached() {
     );
 
     // Wait for SessionClosed event (generous timeout for CI VMs)
-    let result = wait_for_session_closed(&mut pipe, &session_id, Duration::from_secs(30));
+    let result = wait_for_session_closed(&mut pipe, &session_id, ci_deadline(30));
     assert!(
         result.is_ok(),
         "Bug A2: SessionClosed not received after PTY exit: {}",
@@ -378,7 +437,7 @@ fn test_session_closed_on_attach_to_dead_session() {
     );
 
     // Wait for shell init (cmd.exe startup — slow on CI VMs)
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(ci_deadline(3));
 
     // Make the shell exit
     let resp = send_request(
@@ -391,7 +450,7 @@ fn test_session_closed_on_attach_to_dead_session() {
     assert!(matches!(resp, Response::Ok), "Write failed: {:?}", resp);
 
     // Wait for SessionClosed on the first client (generous timeout for CI VMs)
-    let result = wait_for_session_closed(&mut pipe1, &session_id, Duration::from_secs(30));
+    let result = wait_for_session_closed(&mut pipe1, &session_id, ci_deadline(30));
     assert!(
         result.is_ok(),
         "First client did not get SessionClosed: {}",
@@ -409,7 +468,7 @@ fn test_session_closed_on_attach_to_dead_session() {
     );
 
     // The second client should also get SessionClosed since the session is dead
-    let result = wait_for_session_closed(&mut pipe2, &session_id, Duration::from_secs(15));
+    let result = wait_for_session_closed(&mut pipe2, &session_id, ci_deadline(15));
     assert!(
         result.is_ok(),
         "Bug A2: Second client did not get SessionClosed for dead session: {}",
@@ -446,7 +505,7 @@ fn test_cmd_exit_is_detected_by_daemon() {
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
 
     // Wait for shell init (cmd.exe startup — slow on CI VMs)
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(ci_deadline(3));
 
     // Make the shell exit
     let resp = send_request(
@@ -459,7 +518,7 @@ fn test_cmd_exit_is_detected_by_daemon() {
     assert!(matches!(resp, Response::Ok));
 
     // Poll ListSessions to check if the session dies (generous timeout for CI VMs)
-    let result = wait_for_session_dead(&mut pipe, &session_id, Duration::from_secs(30));
+    let result = wait_for_session_dead(&mut pipe, &session_id, ci_deadline(30));
     assert!(
         result.is_ok(),
         "cmd.exe did not exit (session still shows running=true): {}",
@@ -496,7 +555,7 @@ fn test_list_sessions_shows_dead_session() {
     assert!(matches!(resp, Response::Ok | Response::Buffer { .. }));
 
     // Wait for shell init (cmd.exe startup — slow on CI VMs)
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(ci_deadline(3));
 
     // Kill the shell
     let resp = send_request(
@@ -509,7 +568,7 @@ fn test_list_sessions_shows_dead_session() {
     assert!(matches!(resp, Response::Ok));
 
     // Wait for SessionClosed (generous timeout for CI VMs)
-    let result = wait_for_session_closed(&mut pipe, &session_id, Duration::from_secs(30));
+    let result = wait_for_session_closed(&mut pipe, &session_id, ci_deadline(30));
     assert!(result.is_ok(), "SessionClosed not received: {}", result.unwrap_err());
 
     // ListSessions should show running=false
