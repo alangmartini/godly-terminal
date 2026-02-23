@@ -1,0 +1,79 @@
+1
+00:00:01,000 --> 00:00:05,000
+Act 1: Workspace Orchestration
+Creating isolated project workspaces
+
+2
+00:00:06,000 --> 00:00:10,000
+Switching between workspaces instantly
+No tab clutter — each workspace is its own context
+
+3
+00:00:12,000 --> 00:00:16,000
+Act 2: Terminal Power
+Spinning up named terminals with commands
+
+4
+00:00:17,000 --> 00:00:22,000
+Running commands, reading output — all programmatically
+Claude Code has full terminal access
+
+5
+00:00:25,000 --> 00:00:30,000
+Focus switching between terminals
+AI agents orchestrate real dev workflows
+
+6
+00:00:32,000 --> 00:00:37,000
+Act 3: Terminal I/O & Special Keys
+Interactive control — keystrokes, wait-for-text, read-grid
+
+7
+00:00:40,000 --> 00:00:45,000
+Act 4: Quick Claude — Parallel AI Agents
+Spawning multiple Claude Code instances instantly
+
+8
+00:00:46,000 --> 00:00:51,000
+Each agent gets its own git worktree
+Isolated branches, zero conflicts
+
+9
+00:00:55,000 --> 00:01:00,000
+Act 5: Cross-Terminal Orchestration
+Moving terminals between workspaces
+
+10
+00:01:03,000 --> 00:01:08,000
+Act 6: Git Worktree Integration
+Native worktree support for parallel development
+
+11
+00:01:12,000 --> 00:01:16,000
+Act 7: Session Persistence
+Terminals survive app restarts — tmux-level persistence
+
+12
+00:01:20,000 --> 00:01:25,000
+Act 8: Phone Remote Control
+Approve AI actions from your pocket
+
+13
+00:01:26,000 --> 00:01:31,000
+Login, browse sessions, tap quick actions
+Real-time SSE notifications on your phone
+
+14
+00:01:35,000 --> 00:01:40,000
+Act 9: Full Orchestra
+Multiple workspaces, parallel agents, phone control
+
+15
+00:01:41,000 --> 00:01:46,000
+5 Claude Code instances across 3 workspaces
+Monitor and approve from your phone
+
+16
+00:01:50,000 --> 00:01:55,000
+Act 10: Cleanup
+Closing demo terminals and workspaces
