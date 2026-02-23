@@ -389,6 +389,7 @@ pub fn run() {
             commands::llm_unload_model,
             commands::llm_generate,
             commands::llm_generate_branch_name,
+            commands::llm_check_model_files,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,

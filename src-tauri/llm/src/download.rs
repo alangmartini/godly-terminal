@@ -31,6 +31,31 @@ impl ModelPaths {
         }
     }
 
+    /// Create paths for a custom model subdirectory.
+    pub fn custom(app_data_dir: &Path, subdir: &str, gguf_filename: &str) -> Self {
+        let model_dir = app_data_dir.join("models").join(subdir);
+        let gguf_path = model_dir.join(gguf_filename);
+        let tokenizer_path = model_dir.join(FILENAME_TOKENIZER);
+        Self {
+            model_dir,
+            gguf_path,
+            tokenizer_path,
+        }
+    }
+
+    /// Create paths from explicit file paths (for custom GGUF files).
+    pub fn from_paths(gguf_path: PathBuf, tokenizer_path: PathBuf) -> Self {
+        let model_dir = gguf_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
+        Self {
+            model_dir,
+            gguf_path,
+            tokenizer_path,
+        }
+    }
+
     /// Check if both model files exist.
     pub fn is_downloaded(&self) -> bool {
         self.gguf_path.exists() && self.tokenizer_path.exists()
@@ -83,6 +108,58 @@ where
     Ok(paths)
 }
 
+/// Download a model from HuggingFace with custom repo/filename parameters.
+pub fn download_model_custom<F>(
+    app_data_dir: &Path,
+    hf_repo: &str,
+    hf_filename: &str,
+    tokenizer_repo: &str,
+    subdir: &str,
+    on_progress: F,
+) -> Result<ModelPaths>
+where
+    F: Fn(u64, u64),
+{
+    let paths = ModelPaths::custom(app_data_dir, subdir, hf_filename);
+    std::fs::create_dir_all(&paths.model_dir)
+        .with_context(|| format!("Failed to create model directory: {:?}", paths.model_dir))?;
+
+    let api =
+        hf_hub::api::sync::Api::new().context("Failed to initialize HuggingFace Hub API")?;
+
+    // Download GGUF model file
+    if !paths.gguf_path.exists() {
+        eprintln!(
+            "[llm] Downloading GGUF model from {}/{}",
+            hf_repo, hf_filename
+        );
+        let repo = api.model(hf_repo.to_string());
+        let downloaded = repo.get(hf_filename).context("Failed to download GGUF model")?;
+        std::fs::copy(&downloaded, &paths.gguf_path)
+            .context("Failed to copy GGUF to model directory")?;
+        if let Ok(meta) = std::fs::metadata(&paths.gguf_path) {
+            on_progress(meta.len(), meta.len());
+        }
+    }
+
+    // Download tokenizer
+    if !paths.tokenizer_path.exists() {
+        eprintln!(
+            "[llm] Downloading tokenizer from {}/{}",
+            tokenizer_repo, FILENAME_TOKENIZER
+        );
+        let repo = api.model(tokenizer_repo.to_string());
+        let downloaded = repo
+            .get(FILENAME_TOKENIZER)
+            .context("Failed to download tokenizer")?;
+        std::fs::copy(&downloaded, &paths.tokenizer_path)
+            .context("Failed to copy tokenizer to model directory")?;
+    }
+
+    eprintln!("[llm] Custom model download complete");
+    Ok(paths)
+}
+
 /// Paths to the tiny branch name generator model files.
 #[derive(Debug, Clone)]
 pub struct BranchNameModelPaths {
@@ -131,6 +208,25 @@ mod tests {
     fn test_not_downloaded_when_missing() {
         let paths = ModelPaths::new(Path::new("/nonexistent/path"));
         assert!(!paths.is_downloaded());
+    }
+
+    #[test]
+    fn test_custom_model_paths() {
+        let paths = ModelPaths::custom(Path::new("/tmp/testapp"), "tinyllama-1.1b", "model.gguf");
+        assert!(paths.model_dir.ends_with("models/tinyllama-1.1b"));
+        assert!(paths.gguf_path.to_string_lossy().contains("model.gguf"));
+        assert!(paths.tokenizer_path.to_string_lossy().contains("tokenizer.json"));
+    }
+
+    #[test]
+    fn test_from_paths() {
+        let paths = ModelPaths::from_paths(
+            PathBuf::from("/custom/dir/model.gguf"),
+            PathBuf::from("/custom/dir/tokenizer.json"),
+        );
+        assert_eq!(paths.gguf_path, PathBuf::from("/custom/dir/model.gguf"));
+        assert_eq!(paths.tokenizer_path, PathBuf::from("/custom/dir/tokenizer.json"));
+        assert_eq!(paths.model_dir, PathBuf::from("/custom/dir"));
     }
 
     #[test]

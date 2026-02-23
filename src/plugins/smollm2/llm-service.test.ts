@@ -14,6 +14,7 @@ import {
   llmUnloadModel,
   llmGenerate,
   llmGenerateBranchName,
+  llmCheckModelFiles,
   isModelReady,
   isModelDownloaded,
   getStatusLabel,
@@ -32,16 +33,48 @@ describe('llm-service', () => {
     expect(result.status).toBe('Ready');
   });
 
-  it('llmDownloadModel invokes correct command', async () => {
+  it('llmDownloadModel invokes correct command with default params', async () => {
     mockInvoke.mockResolvedValue(undefined);
     await llmDownloadModel();
-    expect(mockInvoke).toHaveBeenCalledWith('llm_download_model');
+    expect(mockInvoke).toHaveBeenCalledWith('llm_download_model', {
+      hfRepo: null,
+      hfFilename: null,
+      tokenizerRepo: null,
+      subdir: null,
+    });
   });
 
-  it('llmLoadModel invokes correct command', async () => {
+  it('llmDownloadModel passes custom params', async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await llmDownloadModel('repo/name', 'model.gguf', 'tok/repo', 'mymodel');
+    expect(mockInvoke).toHaveBeenCalledWith('llm_download_model', {
+      hfRepo: 'repo/name',
+      hfFilename: 'model.gguf',
+      tokenizerRepo: 'tok/repo',
+      subdir: 'mymodel',
+    });
+  });
+
+  it('llmLoadModel invokes correct command with default params', async () => {
     mockInvoke.mockResolvedValue(undefined);
     await llmLoadModel();
-    expect(mockInvoke).toHaveBeenCalledWith('llm_load_model');
+    expect(mockInvoke).toHaveBeenCalledWith('llm_load_model', {
+      ggufPath: null,
+      tokenizerPath: null,
+      subdir: null,
+      ggufFilename: null,
+    });
+  });
+
+  it('llmLoadModel passes custom paths', async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    await llmLoadModel({ ggufPath: '/path/model.gguf', tokenizerPath: '/path/tok.json' });
+    expect(mockInvoke).toHaveBeenCalledWith('llm_load_model', {
+      ggufPath: '/path/model.gguf',
+      tokenizerPath: '/path/tok.json',
+      subdir: null,
+      ggufFilename: null,
+    });
   });
 
   it('llmUnloadModel invokes correct command', async () => {
@@ -71,13 +104,35 @@ describe('llm-service', () => {
     });
   });
 
-  it('llmGenerateBranchName passes description', async () => {
+  it('llmGenerateBranchName passes description with default useTiny', async () => {
     mockInvoke.mockResolvedValue('feat/add-login');
     const result = await llmGenerateBranchName('Add login page');
     expect(mockInvoke).toHaveBeenCalledWith('llm_generate_branch_name', {
       description: 'Add login page',
+      useTiny: null,
     });
     expect(result).toBe('feat/add-login');
+  });
+
+  it('llmGenerateBranchName passes useTiny flag', async () => {
+    mockInvoke.mockResolvedValue('feat/add-login');
+    await llmGenerateBranchName('Add login page', true);
+    expect(mockInvoke).toHaveBeenCalledWith('llm_generate_branch_name', {
+      description: 'Add login page',
+      useTiny: true,
+    });
+  });
+
+  it('llmCheckModelFiles invokes with subdir and filename', async () => {
+    mockInvoke.mockResolvedValue(true);
+    const result = await llmCheckModelFiles({ subdir: 'smollm2-135m', ggufFilename: 'model.gguf' });
+    expect(mockInvoke).toHaveBeenCalledWith('llm_check_model_files', {
+      subdir: 'smollm2-135m',
+      ggufFilename: 'model.gguf',
+      ggufPath: null,
+      tokenizerPath: null,
+    });
+    expect(result).toBe(true);
   });
 
   describe('isModelReady', () => {
