@@ -25,6 +25,7 @@ export class TerminalPane {
   private unsubscribeOutput: (() => void) | null = null;
   private unsubscribeGridDiff: (() => void) | null = null;
   private unsubscribeTheme: (() => void) | null = null;
+  private unsubscribeFontSize: (() => void) | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
   // fetch via setTimeout(SNAPSHOT_MIN_INTERVAL_MS). Multiple output events
@@ -90,6 +91,13 @@ export class TerminalPane {
       this.renderer.setTheme(themeStore.getTerminalTheme());
     });
 
+    // Propagate font size changes to the renderer
+    this.unsubscribeFontSize = terminalSettingsStore.subscribe(() => {
+      const newSize = terminalSettingsStore.getFontSize();
+      this.renderer.setFontSize(newSize);
+      this.fit();
+    });
+
     // Forward OSC title changes to the store
     this.renderer.setOnTitleChange((title) => {
       store.updateTerminal(this.terminalId, { oscTitle: title || undefined });
@@ -108,6 +116,12 @@ export class TerminalPane {
     // When the user finishes a drag selection, catch up with any missed output
     this.renderer.setOnSelectionEnd(() => {
       this.fetchAndRenderSnapshot();
+    });
+
+    // Ctrl+wheel zoom: adjust font size
+    this.renderer.setOnZoom((delta) => {
+      const current = terminalSettingsStore.getFontSize();
+      terminalSettingsStore.setFontSize(current + delta);
     });
 
     this.container = document.createElement('div');
@@ -1026,6 +1040,7 @@ export class TerminalPane {
       this.unsubscribeGridDiff();
     }
     this.unsubscribeTheme?.();
+    this.unsubscribeFontSize?.();
     this.renderer.dispose();
     this.container.remove();
   }

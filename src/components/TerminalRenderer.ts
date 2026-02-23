@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { WebGLRenderer } from './renderer/WebGLRenderer';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
 import type { TerminalTheme } from '../themes/types';
 
 export type { TerminalTheme } from '../themes/types';
@@ -117,7 +118,7 @@ export class TerminalRenderer {
 
   // Font metrics
   private fontFamily = 'Cascadia Code, Consolas, monospace';
-  private fontSize = 13;
+  private fontSize = terminalSettingsStore.getFontSize();
   private cellWidth = 0;
   private cellHeight = 0;
   private baselineOffset = 0;
@@ -166,6 +167,7 @@ export class TerminalRenderer {
   private onTitleChange?: (title: string) => void;
   private onScrollCallback?: (deltaLines: number) => void;
   private onScrollToCallback?: (absoluteOffset: number) => void;
+  private onZoomCallback?: (delta: number) => void;
 
   constructor(theme?: Partial<TerminalTheme>) {
     this.theme = theme ? { ...themeStore.getTerminalTheme(), ...theme } : themeStore.getTerminalTheme();
@@ -246,6 +248,25 @@ export class TerminalRenderer {
   setTheme(theme: TerminalTheme): void {
     this.theme = theme;
     this.repaint();
+  }
+
+  /** Update font size and re-measure. Triggers repaint. */
+  setFontSize(size: number): void {
+    if (size === this.fontSize) return;
+    this.fontSize = size;
+    if (this.useWebGL && this.webglRenderer) {
+      const metrics = this.webglRenderer.setFontSize(size);
+      this.cellWidth = metrics.cellWidth;
+      this.cellHeight = metrics.cellHeight;
+    } else {
+      this.measureFont();
+    }
+    this.repaint();
+  }
+
+  /** Set zoom callback. delta > 0 = zoom in, < 0 = zoom out. */
+  setOnZoom(cb: (delta: number) => void) {
+    this.onZoomCallback = cb;
   }
 
   /** Get the current grid dimensions in rows/cols based on canvas size. */
@@ -983,6 +1004,14 @@ export class TerminalRenderer {
   private setupWheelHandler() {
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+
+      // Ctrl+wheel: zoom in/out instead of scrolling
+      if (e.ctrlKey && this.onZoomCallback) {
+        const delta = e.deltaY < 0 ? 1 : -1;
+        this.onZoomCallback(delta);
+        return;
+      }
+
       if (!this.onScrollCallback) return;
 
       // Convert pixel delta to lines (3 lines per standard wheel tick of 100px)
