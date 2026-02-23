@@ -8,6 +8,7 @@ export type PluginEventType =
   | 'agent:error'
   | 'agent:permission'
   | 'agent:ready'
+  | 'agent:acknowledge'
   | 'app:focus'
   | 'app:blur';
 
@@ -27,6 +28,7 @@ export interface SoundPackManifest {
   version: string;
   sounds: {
     ready?: string[];
+    acknowledge?: string[];
     complete?: string[];
     error?: string[];
     permission?: string[];

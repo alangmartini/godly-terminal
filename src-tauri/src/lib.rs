@@ -365,6 +365,8 @@ pub fn run() {
             commands::list_sound_pack_files,
             commands::read_sound_pack_file,
             commands::get_sound_packs_dir,
+            commands::install_sound_pack,
+            commands::delete_sound_pack,
             commands::get_plugins_dir,
             commands::list_installed_plugins,
             commands::read_plugin_js,
