@@ -126,12 +126,17 @@ export class IdleNotificationService {
         continue;
       }
 
-      // Bug #272: Clear stale hadRecentOutput when already notified. Output
-      // arrived but we're in notified state — acknowledge the output went idle
-      // without firing a new notification.
+      // Output arrived while in notified state and terminal is now idle.
+      // Check if cooldown has expired to decide whether to re-notify.
       if (tracker.hadRecentOutput && tracker.notified && idleMs >= this.idleThresholdMs) {
-        tracker.hadRecentOutput = false;
-        continue;
+        if (this.notifyCooldownMs > 0 && tracker.lastNotifiedTime > 0 &&
+            (now - tracker.lastNotifiedTime) < this.notifyCooldownMs) {
+          // Still in cooldown — preserve hadRecentOutput so we re-check next tick
+          continue;
+        }
+        // Cooldown expired (or no cooldown configured) — allow re-notification
+        tracker.notified = false;
+        // Fall through to notification logic below
       }
 
       // Skip if no recent output or already notified
