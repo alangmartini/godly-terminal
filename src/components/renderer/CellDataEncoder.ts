@@ -24,6 +24,11 @@ export interface Selection {
 export class CellDataEncoder {
   private buffer: Uint32Array = new Uint32Array(0);
 
+  /** Release the internal buffer to free memory (e.g., when terminal is hidden). */
+  release(): void {
+    this.buffer = new Uint32Array(0);
+  }
+
   /**
    * Encode a grid snapshot into a Uint32Array for GPU upload.
    * Returns a view into the internal buffer (reused across calls).
