@@ -71,9 +71,83 @@ fn validate_filename(filename: &str) -> Result<(), String> {
 // Embedded default sound pack for first-run bootstrap.
 // In production builds, the resource dir has these files, but in dev mode
 // resource_dir() points to target/debug/ which doesn't have them.
-// Embedding the mp3 (~15KB) guarantees the default pack always exists.
+// Embedding the full Orc Peon pack (~700KB) guarantees the default pack always exists.
 const DEFAULT_MANIFEST: &str = include_str!("../../soundpacks/default/manifest.json");
-const DEFAULT_SOUND: &[u8] = include_bytes!("../../soundpacks/default/work_complete.mp3");
+
+const EMBEDDED_SOUNDS: &[(&str, &[u8])] = &[
+    (
+        "PeonAngry1.wav",
+        include_bytes!("../../soundpacks/default/PeonAngry1.wav"),
+    ),
+    (
+        "PeonAngry2.wav",
+        include_bytes!("../../soundpacks/default/PeonAngry2.wav"),
+    ),
+    (
+        "PeonAngry3.wav",
+        include_bytes!("../../soundpacks/default/PeonAngry3.wav"),
+    ),
+    (
+        "PeonAngry4.wav",
+        include_bytes!("../../soundpacks/default/PeonAngry4.wav"),
+    ),
+    (
+        "PeonDeath.wav",
+        include_bytes!("../../soundpacks/default/PeonDeath.wav"),
+    ),
+    (
+        "PeonReady1.wav",
+        include_bytes!("../../soundpacks/default/PeonReady1.wav"),
+    ),
+    (
+        "PeonWarcry1.wav",
+        include_bytes!("../../soundpacks/default/PeonWarcry1.wav"),
+    ),
+    (
+        "PeonWhat1.wav",
+        include_bytes!("../../soundpacks/default/PeonWhat1.wav"),
+    ),
+    (
+        "PeonWhat2.wav",
+        include_bytes!("../../soundpacks/default/PeonWhat2.wav"),
+    ),
+    (
+        "PeonWhat3.wav",
+        include_bytes!("../../soundpacks/default/PeonWhat3.wav"),
+    ),
+    (
+        "PeonWhat4.wav",
+        include_bytes!("../../soundpacks/default/PeonWhat4.wav"),
+    ),
+    (
+        "PeonYes1.wav",
+        include_bytes!("../../soundpacks/default/PeonYes1.wav"),
+    ),
+    (
+        "PeonYes2.wav",
+        include_bytes!("../../soundpacks/default/PeonYes2.wav"),
+    ),
+    (
+        "PeonYes3.wav",
+        include_bytes!("../../soundpacks/default/PeonYes3.wav"),
+    ),
+    (
+        "PeonYes4.wav",
+        include_bytes!("../../soundpacks/default/PeonYes4.wav"),
+    ),
+    (
+        "PeonYesAttack1.wav",
+        include_bytes!("../../soundpacks/default/PeonYesAttack1.wav"),
+    ),
+    (
+        "PeonYesAttack2.wav",
+        include_bytes!("../../soundpacks/default/PeonYesAttack2.wav"),
+    ),
+    (
+        "PeonYesAttack3.wav",
+        include_bytes!("../../soundpacks/default/PeonYesAttack3.wav"),
+    ),
+];
 
 /// Copy bundled sound packs from the resource dir into the user's soundpacks dir.
 /// Preserves existing packs and their contents. Falls back to embedded defaults
@@ -144,36 +218,58 @@ pub fn install_bundled_sound_packs(app_handle: &AppHandle) {
         }
     }
 
-    // Fallback: ensure the default pack exists using embedded data.
-    // This covers dev mode where resource_dir doesn't have soundpacks.
+    // Ensure the default pack exists and is up-to-date using embedded data.
+    // This covers dev mode and upgrades from older versions.
     let default_pack_dir = target_dir.join("default");
     let manifest_path = default_pack_dir.join("manifest.json");
-    let sound_path = default_pack_dir.join("work_complete.mp3");
 
-    if !manifest_path.exists() || !sound_path.exists() {
-        if !copied_from_resources {
-            eprintln!("[soundpacks] Resource dir missing soundpacks, using embedded defaults");
+    // Check if installed version is outdated
+    let needs_install = if manifest_path.exists() {
+        match fs::read_to_string(&manifest_path) {
+            Ok(contents) => {
+                match serde_json::from_str::<SoundPackManifest>(&contents) {
+                    Ok(installed) => installed.version != "2.0.0", // Upgrade from old version
+                    Err(_) => true,
+                }
+            }
+            Err(_) => true,
         }
+    } else {
+        true
+    };
+
+    if needs_install && !copied_from_resources {
+        eprintln!("[soundpacks] Installing/upgrading default pack with embedded Orc Peon sounds");
 
         if let Err(e) = fs::create_dir_all(&default_pack_dir) {
             eprintln!("[soundpacks] Failed to create default pack dir: {}", e);
             return;
         }
 
-        if !manifest_path.exists() {
-            if let Err(e) = fs::write(&manifest_path, DEFAULT_MANIFEST) {
-                eprintln!("[soundpacks] Failed to write default manifest: {}", e);
-            } else {
-                eprintln!("[soundpacks] Installed embedded: default/manifest.json");
-            }
+        // Write manifest
+        if let Err(e) = fs::write(&manifest_path, DEFAULT_MANIFEST) {
+            eprintln!("[soundpacks] Failed to write default manifest: {}", e);
+        } else {
+            eprintln!("[soundpacks] Installed embedded: default/manifest.json");
         }
 
-        if !sound_path.exists() {
-            if let Err(e) = fs::write(&sound_path, DEFAULT_SOUND) {
-                eprintln!("[soundpacks] Failed to write default sound: {}", e);
-            } else {
-                eprintln!("[soundpacks] Installed embedded: default/work_complete.mp3");
+        // Write all embedded sound files
+        for (filename, data) in EMBEDDED_SOUNDS {
+            let sound_path = default_pack_dir.join(filename);
+            if let Err(e) = fs::write(&sound_path, data) {
+                eprintln!("[soundpacks] Failed to write {}: {}", filename, e);
             }
+        }
+        eprintln!(
+            "[soundpacks] Installed {} embedded sound files",
+            EMBEDDED_SOUNDS.len()
+        );
+
+        // Clean up old work_complete.mp3 from previous version
+        let old_sound = default_pack_dir.join("work_complete.mp3");
+        if old_sound.exists() {
+            let _ = fs::remove_file(&old_sound);
+            eprintln!("[soundpacks] Removed legacy work_complete.mp3");
         }
     }
 }
@@ -284,6 +380,83 @@ pub fn read_sound_pack_file(
 
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.encode(&data))
+}
+
+/// Install a sound pack from frontend-provided data (used by PeonPing registry download).
+/// Takes a manifest JSON string and a list of (filename, base64_data) sound files.
+#[tauri::command]
+pub fn install_sound_pack(
+    app_handle: AppHandle,
+    pack_id: String,
+    manifest_json: String,
+    files: Vec<(String, String)>,
+) -> Result<(), String> {
+    validate_pack_id(&pack_id)?;
+
+    // Verify manifest is valid JSON
+    let _: serde_json::Value =
+        serde_json::from_str(&manifest_json).map_err(|e| format!("Invalid manifest JSON: {}", e))?;
+
+    let dir = get_soundpacks_dir_path(&app_handle)?;
+    let pack_dir = dir.join(&pack_id);
+
+    fs::create_dir_all(&pack_dir)
+        .map_err(|e| format!("Failed to create pack directory: {}", e))?;
+
+    // Write manifest
+    fs::write(pack_dir.join("manifest.json"), &manifest_json)
+        .map_err(|e| format!("Failed to write manifest: {}", e))?;
+
+    // Write sound files
+    use base64::Engine;
+    for (filename, b64_data) in &files {
+        validate_filename(filename)?;
+
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(b64_data)
+            .map_err(|e| format!("Failed to decode {}: {}", filename, e))?;
+
+        if data.len() > MAX_SOUND_SIZE {
+            return Err(format!(
+                "Sound file {} too large ({}MB limit)",
+                filename,
+                MAX_SOUND_SIZE / 1024 / 1024
+            ));
+        }
+
+        fs::write(pack_dir.join(filename), &data)
+            .map_err(|e| format!("Failed to write {}: {}", filename, e))?;
+    }
+
+    eprintln!(
+        "[soundpacks] Installed pack '{}' with {} sound files",
+        pack_id,
+        files.len()
+    );
+    Ok(())
+}
+
+/// Delete an installed sound pack. Cannot delete the default pack.
+#[tauri::command]
+pub fn delete_sound_pack(app_handle: AppHandle, pack_id: String) -> Result<(), String> {
+    validate_pack_id(&pack_id)?;
+
+    if pack_id == "default" {
+        return Err("Cannot delete the default sound pack".to_string());
+    }
+
+    let dir = get_soundpacks_dir_path(&app_handle)?;
+    let pack_dir = dir.join(&pack_id);
+
+    if !pack_dir.exists() {
+        return Err(format!("Sound pack not found: {}", pack_id));
+    }
+
+    fs::remove_dir_all(&pack_dir)
+        .map_err(|e| format!("Failed to delete sound pack: {}", e))?;
+
+    eprintln!("[soundpacks] Deleted pack '{}'", pack_id);
+    Ok(())
 }
 
 #[tauri::command]
