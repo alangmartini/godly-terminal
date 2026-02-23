@@ -127,6 +127,33 @@ pub fn write_remote_config(config: serde_json::Value) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn save_clipboard_image(image_data: Vec<u8>, extension: String) -> Result<String, String> {
+    use std::time::SystemTime;
+
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|e| format!("Failed to get timestamp: {e}"))?
+        .as_millis();
+
+    // Sanitize extension to prevent path traversal
+    let ext = extension
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>();
+    let ext = if ext.is_empty() { "png".to_string() } else { ext };
+
+    let filename = format!("godly-clipboard-{timestamp}.{ext}");
+    let path = std::env::temp_dir().join(filename);
+
+    std::fs::write(&path, &image_data)
+        .map_err(|e| format!("Failed to write clipboard image: {e}"))?;
+
+    path.to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Invalid path encoding".to_string())
+}
+
+#[tauri::command]
 pub fn get_user_claude_md_path() -> Result<String, String> {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
