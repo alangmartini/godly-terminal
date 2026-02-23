@@ -228,6 +228,7 @@ export interface QuickClaudeInput {
   prompt: string;
   branchName?: string;
   workspaceId: string;
+  noWorktree?: boolean;
 }
 
 export interface QuickClaudeOptions {
@@ -440,6 +441,25 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
 
     dialog.appendChild(branchRow);
 
+    // -- No worktree checkbox --
+    const worktreeRow = document.createElement('label');
+    worktreeRow.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none;';
+
+    const noWorktreeCheckbox = document.createElement('input');
+    noWorktreeCheckbox.type = 'checkbox';
+    noWorktreeCheckbox.style.margin = '0';
+    worktreeRow.appendChild(noWorktreeCheckbox);
+    worktreeRow.append('Open in main branch (no worktree)');
+
+    noWorktreeCheckbox.addEventListener('change', () => {
+      const disabled = noWorktreeCheckbox.checked;
+      branchInput.disabled = disabled;
+      branchAiBtn.disabled = disabled;
+      branchInput.style.opacity = disabled ? '0.5' : '1';
+    });
+
+    dialog.appendChild(worktreeRow);
+
     const buttons = document.createElement('div');
     buttons.className = 'dialog-buttons';
 
@@ -465,8 +485,9 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       close();
       resolve({
         prompt,
-        branchName: branchInput.value.trim() || undefined,
+        branchName: noWorktreeCheckbox.checked ? undefined : (branchInput.value.trim() || undefined),
         workspaceId: workspaceSelect.value,
+        noWorktree: noWorktreeCheckbox.checked || undefined,
       });
     };
 
