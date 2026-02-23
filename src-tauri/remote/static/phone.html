@@ -507,10 +507,10 @@ function renderWorkspaces(workspaces) {
         <span class="ws-shell">${escHtml(ws.shell_type)}</span>
       </div>
       ${ws.terminals.map(t => `
-        <div class="term-row" onclick="openSession('${escAttr(t.id)}', '${escAttr(t.name)}')">
+        <div class="term-row" onclick="openSession('${escAttr(t.id)}', '${escAttr(t.title || t.name)}')">
           <div class="term-status ${t.alive ? 'alive' : 'dead'}"></div>
           <div>
-            <div class="term-name">${escHtml(t.name)}</div>
+            <div class="term-name">${escHtml(t.title || t.name)}</div>
             ${t.cwd ? `<div class="term-cwd">${escHtml(t.cwd)}</div>` : ''}
           </div>
           ${idleTerminals.has(t.id) ? '<div class="term-idle-badge"></div>' : ''}

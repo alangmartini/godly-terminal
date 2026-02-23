@@ -1144,6 +1144,7 @@ impl DaemonSession {
     /// Get the session info for protocol messages
     pub fn info(&self) -> godly_protocol::SessionInfo {
         let (scrollback_rows, scrollback_memory_bytes) = self.scrollback_stats();
+        let title = self.vt_parser.lock().screen().window_title().to_string();
         godly_protocol::SessionInfo {
             id: self.id.clone(),
             shell_type: self.shell_type.clone(),
@@ -1160,6 +1161,7 @@ impl DaemonSession {
             scrollback_rows,
             scrollback_memory_bytes,
             paused: self.is_paused(),
+            title,
         }
     }
 
