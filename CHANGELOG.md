@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-23
+
+### Added
+- **Phone remote access** — full mobile terminal control with godly-remote HTTP/WebSocket bridge, device lock, QR code setup, session death detection, and Remote settings tab (#240, #261, #270, #271, #282, #299)
+- **Multi-session scalability** — pause/resume for invisible sessions, global scrollback budget, and canvas/WebGL resource release for hidden terminals (#243, #285, #287)
+- **PTY shim crash isolation** — separate `godly-pty-shim` binary per session with bounded MPSC channels and orphan process cleanup (#231, #257, #268)
+- **MCP transport upgrade** — SSE and Streamable HTTP transports for godly-mcp (#251, #254)
+- **Terminal zoom** — keyboard (Ctrl+=/−) and Ctrl+scroll zoom in/out (#300)
+- **Clipboard image paste** — paste images from clipboard as temp file paths (#298)
+- **Mobile navigation buttons** with smart select menu detection (#291)
+- **Peon Ping full Orc Peon sounds** + PeonPing registry browser (#275)
+- **User-selectable models** for SmolLM2 plugin (#286)
+- **Skill autocomplete** in Quick Claude dialog with workspace-aware refresh (#253, #277, #302)
+- Integration tests for adaptive output batching (#264)
+- Automated phone setup script with QR code sharing (#270)
+
+### Fixed
+- **Shim metadata isolation** — scoped by `GODLY_INSTANCE` to prevent test daemons killing production shims (#304)
+- **Orphaned pty-shim process leak** — 200+ zombies and 10GB+ RAM prevented (#257)
+- **CPU-burning spin loops** removed from bridge and daemon (#247, #248)
+- **Resize freeze** — made resize fire-and-forget during maximize (#255)
+- **Selection scroll anchor** — anchored to content position when scrolling (#252)
+- **Viewport snap on typing** — scrolls to live view when typing while scrolled up (#241)
+- **Multi-screen selection copy** fixed (#301)
+- **Notification sound overlap** from multiple sources prevented (#296)
+- **Tab bar wheel scroll** — vertical scroll translated to horizontal (#293)
+- **Arrow up history latency** reduced (#229)
+- Security hardening for godly-remote (high + medium/low severity) (#274, #280)
+- Plugin card settings overlapping body content (#258)
+- Skill autocomplete scans `.claude/commands/` directory (#302)
+
+### Changed
+- Adopted cargo-nextest with restructured CI and smart test runner (#235)
+- Daemon test isolation now requires `GODLY_INSTANCE` env var for shim metadata directory scoping
+
 ## [0.5.0] - 2026-02-21
 
 ### Added
