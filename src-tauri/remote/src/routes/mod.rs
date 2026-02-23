@@ -1,3 +1,4 @@
+pub mod device;
 pub mod events;
 pub mod health;
 pub mod input;
@@ -12,7 +13,7 @@ use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
 
-use crate::auth::api_key_auth;
+use crate::auth::{api_key_auth, device_token_auth};
 use crate::AppState;
 
 pub fn build_router(state: AppState) -> Router {
@@ -21,7 +22,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health::health))
         .route("/phone", get(phone::phone_ui));
 
-    // Authenticated API routes
+    // Device registration (requires API key but not device token — this IS how you get the token)
+    let device_routes = Router::new()
+        .route("/api/register-device", post(device::register_device))
+        .route("/api/device-status", get(device::device_status))
+        .layer(middleware::from_fn(api_key_auth));
+
+    // Authenticated API routes (require both API key and device token)
     let api = Router::new()
         .route("/api/sessions", get(sessions::list_sessions))
         .route("/api/sessions", post(sessions::create_session))
@@ -40,15 +47,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/monitor", get(monitor::list_monitors))
         .route("/api/monitor/:id", post(monitor::start_monitor))
         .route("/api/monitor/:id", delete(monitor::stop_monitor))
+        .layer(middleware::from_fn(device_token_auth))
         .layer(middleware::from_fn(api_key_auth));
 
-    // WebSocket routes (auth checked via query param or header)
+    // WebSocket routes (require both API key and device token)
     let ws = Router::new()
         .route("/ws/session/:id", get(crate::ws::ws_upgrade))
+        .layer(middleware::from_fn(device_token_auth))
         .layer(middleware::from_fn(api_key_auth));
 
     Router::new()
         .merge(public)
+        .merge(device_routes)
         .merge(api)
         .merge(ws)
         .with_state(state)
