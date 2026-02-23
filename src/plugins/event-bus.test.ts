@@ -110,7 +110,8 @@ describe('PluginEventBus', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('emits both classified and notification events for classified messages', () => {
+  it('emits only the classified event (no redundant notification) for classified messages', () => {
+    // Bug #289: Previously emitted both classified AND notification, causing double sounds
     const errorHandler = vi.fn();
     const notifHandler = vi.fn();
     bus.on('agent:error', errorHandler);
@@ -119,8 +120,8 @@ describe('PluginEventBus', () => {
     bus.emitMcpNotify('t1', 'Build failed');
 
     expect(errorHandler).toHaveBeenCalledTimes(1);
-    // Also emits a generic notification
-    expect(notifHandler).toHaveBeenCalledTimes(1);
+    // Should NOT emit a redundant notification event
+    expect(notifHandler).not.toHaveBeenCalled();
   });
 
   it('removeAllHandlers clears all subscriptions', () => {

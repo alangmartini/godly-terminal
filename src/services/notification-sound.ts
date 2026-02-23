@@ -17,8 +17,24 @@ export function getSharedAudioContext(): AudioContext {
   return getAudioContext();
 }
 
+/**
+ * Bug #289: Minimum interval between sound plays to prevent overlapping audio.
+ * Acts as defense-in-depth alongside the notification store's global debounce.
+ */
+const MIN_PLAY_INTERVAL_MS = 500;
+let lastPlayTime = 0;
+
+/** For testing: reset the play throttle state */
+export function _resetPlayThrottle(): void {
+  lastPlayTime = 0;
+}
+
 /** Play an AudioBuffer at the given volume (for plugin reuse) */
 export function playBuffer(buffer: AudioBuffer, volume: number): void {
+  const now = Date.now();
+  if (now - lastPlayTime < MIN_PLAY_INTERVAL_MS) return;
+  lastPlayTime = now;
+
   const ctx = getAudioContext();
   const source = ctx.createBufferSource();
   source.buffer = buffer;
@@ -93,6 +109,11 @@ export async function playNotificationSound(
   preset: SoundPreset = 'chime',
   volume: number = 0.5,
 ): Promise<void> {
+  // Bug #289: Throttle at the audio layer as defense-in-depth
+  const now = Date.now();
+  if (now - lastPlayTime < MIN_PLAY_INTERVAL_MS) return;
+  lastPlayTime = now;
+
   if (isCustomPreset(preset)) {
     try {
       const filename = getCustomFilename(preset);

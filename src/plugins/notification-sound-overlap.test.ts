@@ -187,12 +187,11 @@ describe('Bug #289: Notification sound overlap', () => {
   });
 
   describe('Sub-bug 2: No global sound throttle across terminals', () => {
-    it('should coalesce sounds when multiple terminals notify within a short window', () => {
+    it('should coalesce sounds when multiple terminals notify within a short window', async () => {
       // Bug #289: When multiple terminals go idle simultaneously, each fires
       // its own notification. The store debounces per-terminal (2s) but there
       // is no global cross-terminal debounce.
 
-      // Re-import fresh store
       vi.resetModules();
       vi.stubGlobal('localStorage', {
         getItem: (key: string) => storage.get(key) ?? null,
@@ -201,25 +200,29 @@ describe('Bug #289: Notification sound overlap', () => {
         clear: () => storage.clear(),
       });
 
-      // Simulate the notification flow from App.ts where each recordNotify
-      // triggers a sound play
-      const soundPlayCount = { value: 0 };
+      vi.mock('../services/notification-sound', () => ({
+        isBuiltinPreset: (s: string) => ['chime', 'bell'].includes(s),
+        isCustomPreset: (s: string) => s.startsWith('custom:'),
+      }));
+
+      const { notificationStore } = await import('../state/notification-store');
 
       // Simulate 5 terminals going idle at the exact same time
       const terminals = ['term-1', 'term-2', 'term-3', 'term-4', 'term-5'];
+      let soundPlayCount = 0;
 
-      // Each terminal's recordNotify returns true (not debounced) because
-      // each has its own independent debounce timer
-      for (const _termId of terminals) {
-        // In real code: notificationStore.recordNotify(termId) returns true
-        // because it's per-terminal debounce. Then playNotificationSound is called.
-        // We simulate the effect:
-        soundPlayCount.value++;
+      for (const termId of terminals) {
+        const played = notificationStore.recordNotify(termId);
+        if (played) soundPlayCount++;
       }
 
-      // BUG: All 5 sounds play simultaneously. Expected: at most 1 sound
-      // (or sounds spaced out with minimum interval between them).
-      expect(soundPlayCount.value).toBeLessThanOrEqual(1);
+      // With global debounce: at most 1 sound plays
+      expect(soundPlayCount).toBeLessThanOrEqual(1);
+
+      // But all 5 terminals should still have badges
+      for (const termId of terminals) {
+        expect(notificationStore.hasBadge(termId)).toBe(true);
+      }
     });
 
     it('notificationStore.recordNotify should have a global debounce across all terminals', async () => {
@@ -257,40 +260,46 @@ describe('Bug #289: Notification sound overlap', () => {
   });
 
   describe('Sub-bug 3: playBuffer has no overlap prevention', () => {
-    it('should not allow multiple AudioBufferSourceNodes to start simultaneously', () => {
+    it('should throttle rapid calls to playBuffer', async () => {
       // Bug #289: playBuffer creates a new source and calls start() every time.
       // Concurrent calls produce overlapping audio with no rate-limiting.
 
-      const startCalls: number[] = [];
-      const mockCtx = {
-        currentTime: 0,
-        createBufferSource: vi.fn().mockImplementation(() => ({
-          connect: vi.fn(),
-          start: vi.fn().mockImplementation(() => startCalls.push(Date.now())),
-          buffer: null,
-        })),
-        createGain: vi.fn().mockReturnValue({
-          connect: vi.fn(),
-          gain: { value: 1, setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
-        }),
+      // Get the REAL module via importActual (bypasses the vi.mock at the top)
+      const real = await vi.importActual<typeof import('../services/notification-sound')>(
+        '../services/notification-sound'
+      );
+
+      // Mock the AudioContext globally so the real playBuffer can use it
+      const startSpy = vi.fn();
+      const mockSource = {
+        connect: vi.fn(),
+        start: startSpy,
+        buffer: null as AudioBuffer | null,
+      };
+      const mockGain = {
+        connect: vi.fn(),
+        gain: { value: 1 },
+      };
+      const mockAudioCtx = {
+        createBufferSource: vi.fn().mockReturnValue(mockSource),
+        createGain: vi.fn().mockReturnValue(mockGain),
         destination: {},
-        state: 'running',
+        state: 'running' as AudioContextState,
         resume: vi.fn(),
       };
+      vi.stubGlobal('AudioContext', vi.fn().mockImplementation(() => mockAudioCtx));
 
-      // Simulate what playBuffer does: create source → connect → start
-      // Call it 5 times in rapid succession (as happens with overlapping notifications)
+      real._resetPlayThrottle();
+
+      const mockBuffer = { duration: 1 } as AudioBuffer;
+
+      // Call playBuffer 5 times in rapid succession
       for (let i = 0; i < 5; i++) {
-        const source = mockCtx.createBufferSource();
-        const gain = mockCtx.createGain();
-        source.connect(gain);
-        gain.connect(mockCtx.destination);
-        source.start();
+        real.playBuffer(mockBuffer, 0.5);
       }
 
-      // BUG: All 5 sounds start simultaneously. Expected: only 1 should play,
-      // or sounds should be queued with minimum spacing.
-      expect(startCalls).toHaveLength(1);
+      // With throttle: only 1 should actually start
+      expect(startSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
