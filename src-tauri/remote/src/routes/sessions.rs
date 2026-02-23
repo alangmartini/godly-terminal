@@ -74,11 +74,39 @@ pub async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), (StatusCode, String)> {
-    let session_id = uuid::Uuid::new_v4().to_string();
+    // Validate rows/cols to prevent resource exhaustion
+    let rows = body.rows.clamp(1, 500);
+    let cols = body.cols.clamp(1, 500);
+
+    // Validate cwd if provided — must be an existing directory, no path traversal
+    let cwd = match &body.cwd {
+        Some(path) => {
+            let p = std::path::Path::new(path);
+            // Reject relative paths and path traversal
+            if !p.is_absolute() {
+                return Err((StatusCode::BAD_REQUEST, "cwd must be an absolute path".into()));
+            }
+            if path.contains("..") {
+                return Err((StatusCode::BAD_REQUEST, "cwd must not contain path traversal".into()));
+            }
+            if !p.is_dir() {
+                return Err((StatusCode::BAD_REQUEST, "cwd directory does not exist".into()));
+            }
+            Some(path.clone())
+        }
+        None => None,
+    };
+
+    // Validate shell_type
     let shell = match body.shell_type.as_deref() {
         Some("wsl") => ShellType::Wsl { distribution: None },
-        _ => ShellType::Windows,
+        Some("windows") | None => ShellType::Windows,
+        Some(other) => {
+            return Err((StatusCode::BAD_REQUEST, format!("Unknown shell_type: {}", other)));
+        }
     };
+
+    let session_id = uuid::Uuid::new_v4().to_string();
 
     let mut env_vars = HashMap::new();
     env_vars.insert("GODLY_SESSION_ID".to_string(), session_id.clone());
@@ -86,9 +114,9 @@ pub async fn create_session(
     let create_req = Request::CreateSession {
         id: session_id.clone(),
         shell_type: shell,
-        cwd: body.cwd,
-        rows: body.rows,
-        cols: body.cols,
+        cwd,
+        rows,
+        cols,
         env: Some(env_vars),
     };
 
@@ -254,12 +282,15 @@ pub async fn resize_session(
     Path(id): Path<String>,
     Json(body): Json<ResizeRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let rows = body.rows.clamp(1, 500);
+    let cols = body.cols.clamp(1, 500);
+
     let resp = async_request(
         &state.daemon,
         Request::Resize {
             session_id: id,
-            rows: body.rows,
-            cols: body.cols,
+            rows,
+            cols,
         },
     )
     .await
@@ -317,8 +348,8 @@ pub async fn get_text(
                 rows.pop();
             }
 
-            // Take last N lines
-            let n = query.lines.min(rows.len());
+            // Take last N lines (capped at 200 to limit data exposure)
+            let n = query.lines.min(200).min(rows.len());
             let lines: Vec<String> = rows[rows.len().saturating_sub(n)..].to_vec();
 
             Ok(Json(TextResponse { lines, total_rows }))
