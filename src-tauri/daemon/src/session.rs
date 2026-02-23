@@ -218,6 +218,7 @@ pub struct DaemonSession {
     /// Lock-free attachment flag -- readable without locking output_tx.
     /// Updated in attach()/detach()/close() and by the reader thread on send failure.
     is_attached_flag: Arc<AtomicBool>,
+    is_paused_flag: Arc<AtomicBool>,
     /// Always-on output history buffer -- captures all PTY output regardless of
     /// attachment state. Used by the ReadBuffer command to let MCP clients read
     /// terminal output without attaching.
@@ -326,6 +327,8 @@ impl DaemonSession {
             vt_parser.lock().process(&early_output);
         }
 
+        let is_paused_flag = Arc::new(AtomicBool::new(false));
+
         // Spawn I/O thread that handles all pipe reads AND writes.
         // This avoids the DuplicateHandle deadlock by keeping all pipe I/O
         // in a single thread with a single file object.
@@ -341,6 +344,7 @@ impl DaemonSession {
             last_output_epoch_ms.clone(),
             vt_parser.clone(),
             exit_code.clone(),
+            is_paused_flag.clone(),
         );
 
         Ok(Self {
@@ -360,6 +364,7 @@ impl DaemonSession {
             ring_buffer,
             output_tx,
             is_attached_flag,
+            is_paused_flag,
             output_history,
             last_output_epoch_ms,
             vt_parser,
@@ -499,6 +504,7 @@ impl DaemonSession {
         let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
 
         let exit_code = Arc::new(AtomicI64::new(exit_code_val));
+        let is_paused_flag = Arc::new(AtomicBool::new(false));
 
         // Spawn I/O thread for ongoing shim communication
         if is_running {
@@ -514,6 +520,7 @@ impl DaemonSession {
                 last_output_epoch_ms.clone(),
                 vt_parser.clone(),
                 exit_code.clone(),
+                is_paused_flag.clone(),
             );
         }
 
@@ -545,6 +552,7 @@ impl DaemonSession {
             ring_buffer,
             output_tx,
             is_attached_flag,
+            is_paused_flag,
             output_history,
             last_output_epoch_ms,
             vt_parser,
@@ -621,6 +629,7 @@ impl DaemonSession {
         reader_last_output: Arc<AtomicU64>,
         reader_vt: Arc<Mutex<godly_vt::Parser>>,
         reader_exit_code: Arc<AtomicI64>,
+        reader_paused: Arc<AtomicBool>,
     ) {
         thread::spawn(move || {
             daemon_log!("Session {} shim I/O thread started", session_id);
@@ -713,6 +722,7 @@ impl DaemonSession {
                             &mut last_diff_time,
                             DIFF_INTERVAL,
                             &mut channel_send_failures,
+                            &reader_paused,
                         );
                         did_work = true;
                     }
@@ -760,6 +770,7 @@ impl DaemonSession {
                                         &mut last_diff_time,
                                         DIFF_INTERVAL,
                                         &mut channel_send_failures,
+                                        &reader_paused,
                                     );
                                 }
 
@@ -776,6 +787,7 @@ impl DaemonSession {
                                     &mut last_diff_time,
                                     DIFF_INTERVAL,
                                     &mut channel_send_failures,
+                                    &reader_paused,
                                 );
                             }
                             OutputMode::Bulk => {
@@ -807,6 +819,7 @@ impl DaemonSession {
                                         &mut last_diff_time,
                                         DIFF_INTERVAL,
                                         &mut channel_send_failures,
+                                        &reader_paused,
                                     );
                                 }
                             }
@@ -911,6 +924,7 @@ impl DaemonSession {
                     &mut last_diff_time,
                     DIFF_INTERVAL,
                     &mut channel_send_failures,
+                    &reader_paused,
                 );
             }
 
@@ -978,6 +992,34 @@ impl DaemonSession {
     /// Check if a client is currently attached (lock-free).
     pub fn is_attached(&self) -> bool {
         self.is_attached_flag.load(Ordering::Relaxed)
+    }
+
+    pub fn pause(&self) {
+        self.is_paused_flag.store(true, Ordering::Relaxed);
+    }
+
+    pub fn resume(&self) {
+        self.is_paused_flag.store(false, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.is_paused_flag.load(Ordering::Relaxed)
+    }
+
+    pub fn set_scrollback_len(&self, len: usize) {
+        let mut vt = self.vt_parser.lock();
+        vt.screen_mut().set_scrollback_len(len);
+    }
+
+    pub fn scrollback_stats(&self) -> (usize, usize) {
+        let vt = self.vt_parser.lock();
+        let rows = vt.screen().scrollback_count();
+        let bytes = vt.screen().scrollback_memory_estimate();
+        (rows, bytes)
+    }
+
+    pub fn cols(&self) -> u16 {
+        self.cols
     }
 
     /// Write data to the PTY via the shim pipe.
@@ -1101,6 +1143,7 @@ impl DaemonSession {
 
     /// Get the session info for protocol messages
     pub fn info(&self) -> godly_protocol::SessionInfo {
+        let (scrollback_rows, scrollback_memory_bytes) = self.scrollback_stats();
         godly_protocol::SessionInfo {
             id: self.id.clone(),
             shell_type: self.shell_type.clone(),
@@ -1114,6 +1157,9 @@ impl DaemonSession {
             created_at: self.created_at,
             attached: self.is_attached(),
             running: self.is_running(),
+            scrollback_rows,
+            scrollback_memory_bytes,
+            paused: self.is_paused(),
         }
     }
 
@@ -1378,6 +1424,7 @@ fn flush_output(
     last_diff_time: &mut Instant,
     diff_interval: Duration,
     channel_send_failures: &mut u64,
+    reader_paused: &Arc<AtomicBool>,
 ) {
     if data.is_empty() {
         return;
@@ -1394,6 +1441,14 @@ fn flush_output(
     {
         let mut history = reader_history.lock();
         append_to_ring(&mut history, data);
+    }
+
+    // Always feed VT parser (grid state must stay current even when paused)
+    // but skip sending Output/GridDiff events to the client when paused.
+    if reader_paused.load(Ordering::Relaxed) {
+        let mut vt = reader_vt.lock();
+        vt.process(data);
+        return;
     }
 
     // Feed PTY output into godly-vt parser for grid state.

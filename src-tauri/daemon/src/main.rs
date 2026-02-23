@@ -1,5 +1,6 @@
 mod debug_log;
 mod pid;
+mod scrollback_budget;
 mod server;
 mod session;
 mod shim_client;
