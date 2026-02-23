@@ -157,6 +157,12 @@ impl Grid {
             )
     }
 
+    /// Returns all rows in order: scrollback (oldest first) then active grid.
+    /// Used for absolute-indexed text extraction across the full buffer.
+    pub fn all_rows(&self) -> impl Iterator<Item = &crate::row::Row> {
+        self.scrollback.iter().chain(self.rows.iter())
+    }
+
     pub fn drawing_rows(&self) -> impl Iterator<Item = &crate::row::Row> {
         self.rows.iter()
     }

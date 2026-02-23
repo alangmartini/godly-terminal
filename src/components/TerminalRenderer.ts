@@ -397,11 +397,15 @@ export class TerminalRenderer {
     if (!this.selection.active) return;
     this.selection.startRow += deltaLines;
     this.selection.endRow += deltaLines;
-    // Clear if the entire selection is off-screen
-    const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
-    const normalized = this.normalizeSelection(this.selection);
-    if (normalized.endRow < 0 || normalized.startRow >= gridRows) {
-      this.selection.active = false;
+    // Bug #290: Only clear off-screen selection when not actively auto-scrolling.
+    // During auto-scroll, the selection extends beyond the viewport and the
+    // endRow is pinned to the viewport edge in the auto-scroll timer callback.
+    if (!this.autoScrollTimer) {
+      const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+      const normalized = this.normalizeSelection(this.selection);
+      if (normalized.endRow < 0 || normalized.startRow >= gridRows) {
+        this.selection.active = false;
+      }
     }
   }
 
@@ -411,10 +415,16 @@ export class TerminalRenderer {
     this.repaint();
   }
 
-  /** Get selected text by calling the backend. */
+  /**
+   * Get selected text by calling the backend.
+   * Passes the current scrollback offset so the backend can convert
+   * viewport-relative selection coordinates to absolute buffer positions,
+   * supporting multi-screen selections that span more rows than the viewport.
+   */
   async getSelectedText(terminalId: string): Promise<string> {
     const sel = this.getSelection();
     if (!sel) return '';
+    const scrollbackOffset = this.currentSnapshot?.scrollback_offset ?? 0;
     try {
       return await invoke<string>('get_grid_text', {
         terminalId,
@@ -422,6 +432,7 @@ export class TerminalRenderer {
         startCol: sel.startCol,
         endRow: sel.endRow,
         endCol: sel.endCol,
+        scrollbackOffset,
       });
     } catch {
       return '';
@@ -877,12 +888,24 @@ export class TerminalRenderer {
     if (this.autoScrollTimer) return; // already running, just update delta
     this.autoScrollTimer = setInterval(() => {
       if (this.onScrollCallback) {
+        // Bug #290: Only call onScrollCallback — it triggers handleScroll()
+        // which calls adjustSelectionForScroll() to shift both startRow and
+        // endRow. Previously, startRow was also adjusted HERE, causing a
+        // double-adjustment that made the anchor drift at 2x the scroll rate
+        // and get clamped to viewport bounds, breaking multi-screen selections.
         this.onScrollCallback(this.autoScrollDelta);
-        // Adjust selection anchor: scrolling shifts the viewport, so the anchor
-        // row moves in the opposite direction in viewport-relative coordinates.
-        const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
-        this.selection.startRow = Math.max(0, Math.min(gridRows - 1,
-          this.selection.startRow + this.autoScrollDelta));
+        // Bug #290: Pin endRow to the viewport edge so the selection extends
+        // into scrollback as new rows are revealed by auto-scroll.
+        // Without this, endRow drifts away from the viewport edge (shifted
+        // by adjustSelectionForScroll) and the selection doesn't grow.
+        if (this.selection.active) {
+          const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
+          if (this.autoScrollDelta > 0) {
+            this.selection.endRow = 0; // Scrolling up: pin to top
+          } else {
+            this.selection.endRow = gridRows - 1; // Scrolling down: pin to bottom
+          }
+        }
       }
     }, 50);
   }
