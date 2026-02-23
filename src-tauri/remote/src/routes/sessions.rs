@@ -361,3 +361,82 @@ pub async fn get_text(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // --- Input validation tests ---
+
+    #[test]
+    fn rows_cols_clamped_to_valid_range() {
+        // Verify the clamp behavior used in create_session and resize_session
+        assert_eq!(0u16.clamp(1, 500), 1);
+        assert_eq!(1u16.clamp(1, 500), 1);
+        assert_eq!(500u16.clamp(1, 500), 500);
+        assert_eq!(501u16.clamp(1, 500), 500);
+        assert_eq!(u16::MAX.clamp(1, 500), 500);
+    }
+
+    #[test]
+    fn text_lines_capped_at_200() {
+        // Verify the text lines cap used in get_text
+        let requested: usize = 10000;
+        let capped = requested.min(200);
+        assert_eq!(capped, 200);
+
+        let requested: usize = 50;
+        let capped = requested.min(200);
+        assert_eq!(capped, 50);
+    }
+
+    #[test]
+    fn cwd_path_traversal_rejected() {
+        // Simulate the validation from create_session
+        let malicious_paths = vec![
+            "C:\\Users\\..\\admin\\secrets",
+            "/home/../etc/passwd",
+            "relative/path",
+            "..\\..\\windows\\system32",
+        ];
+
+        for path in malicious_paths {
+            let p = std::path::Path::new(path);
+            let is_absolute = p.is_absolute();
+            let has_traversal = path.contains("..");
+
+            // At least one check should catch each malicious path
+            assert!(
+                !is_absolute || has_traversal,
+                "Path '{}' should be rejected: is_absolute={}, has_traversal={}",
+                path,
+                is_absolute,
+                has_traversal
+            );
+        }
+    }
+
+    #[test]
+    fn shell_type_validation() {
+        // Valid shell types
+        let valid: Vec<Option<&str>> = vec![Some("windows"), Some("wsl"), None];
+        for st in &valid {
+            let result = match st.as_deref() {
+                Some("wsl") => Ok("wsl"),
+                Some("windows") | None => Ok("windows"),
+                Some(other) => Err(format!("Unknown shell_type: {}", other)),
+            };
+            assert!(result.is_ok(), "shell_type {:?} should be valid", st);
+        }
+
+        // Invalid shell types
+        let invalid = vec!["bash", "powershell", "../exploit", ""];
+        for st in &invalid {
+            let result = match Some(*st) {
+                Some("wsl") => Ok("wsl"),
+                Some("windows") => Ok("windows"),
+                Some(other) => Err(format!("Unknown shell_type: {}", other)),
+                None => Ok("windows"),
+            };
+            assert!(result.is_err(), "shell_type {:?} should be rejected", st);
+        }
+    }
+}

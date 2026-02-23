@@ -7,6 +7,7 @@ mod event_pump;
 mod layout_reader;
 mod monitor;
 mod routes;
+mod sse_ticket;
 mod ws;
 
 use std::sync::Arc;
@@ -17,9 +18,10 @@ use device_lock::DeviceLock;
 use event_pump::EventPump;
 use layout_reader::LayoutReader;
 use monitor::MonitorRegistry;
+use sse_ticket::SseTicketStore;
 use tower_http::cors::{AllowHeaders, AllowMethods, CorsLayer};
 
-const BUILD: u32 = 4;
+const BUILD: u32 = 5;
 
 /// Shared application state, cloneable via Arc internals.
 #[derive(Clone)]
@@ -30,6 +32,7 @@ pub struct AppState {
     pub layout_reader: Arc<LayoutReader>,
     pub event_pump: Arc<EventPump>,
     pub device_lock: Arc<DeviceLock>,
+    pub sse_tickets: Arc<SseTicketStore>,
 }
 
 #[tokio::main]
@@ -92,6 +95,7 @@ async fn main() {
         layout_reader: Arc::new(LayoutReader::new()),
         event_pump,
         device_lock: Arc::clone(&device_lock),
+        sse_tickets: Arc::new(SseTicketStore::new()),
     };
 
     // CORS: only allow the same origin (ngrok tunnel or localhost).
@@ -102,6 +106,7 @@ async fn main() {
         .allow_credentials(true);
 
     let app = routes::build_router(state)
+        .layer(axum::middleware::from_fn(auth::rate_limit))
         .layer(cors)
         .layer(axum::Extension(device_lock))
         .layer(axum::Extension(api_key));

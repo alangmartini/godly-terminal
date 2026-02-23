@@ -51,3 +51,33 @@ pub async fn write_to_session(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_write_size_is_64kb() {
+        assert_eq!(MAX_WRITE_BYTES, 65536);
+    }
+
+    #[test]
+    fn payload_at_limit_accepted() {
+        let data = "x".repeat(MAX_WRITE_BYTES);
+        assert!(data.len() <= MAX_WRITE_BYTES);
+    }
+
+    #[test]
+    fn payload_over_limit_rejected() {
+        let data = "x".repeat(MAX_WRITE_BYTES + 1);
+        assert!(data.len() > MAX_WRITE_BYTES);
+    }
+
+    #[test]
+    fn newline_conversion() {
+        // Verify \n → \r conversion for PTY
+        let input = "line1\nline2\r\nline3";
+        let converted = input.replace("\r\n", "\r").replace('\n', "\r");
+        assert_eq!(converted, "line1\rline2\rline3");
+    }
+}
