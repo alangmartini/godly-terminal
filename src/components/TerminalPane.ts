@@ -361,15 +361,11 @@ export class TerminalPane {
       return;
     }
 
-    // Paste: paste from clipboard into terminal
+    // Paste: paste from clipboard into terminal (supports images)
     if (action === 'clipboard.paste') {
       event.preventDefault();
       this.snapToBottom();
-      navigator.clipboard.readText().then((text) => {
-        if (text) {
-          terminalService.writeToTerminal(this.terminalId, text);
-        }
-      });
+      this.handleClipboardPaste();
       return;
     }
 
@@ -544,6 +540,42 @@ export class TerminalPane {
   }
 
   /** Snap viewport back to live view (offset 0). */
+  private async handleClipboardPaste() {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const buffer = await blob.arrayBuffer();
+          const bytes = Array.from(new Uint8Array(buffer));
+          const ext = imageType.split('/')[1] || 'png';
+          const path = await invoke<string>('save_clipboard_image', {
+            imageData: bytes,
+            extension: ext,
+          });
+          terminalService.writeToTerminal(this.terminalId, path);
+          return;
+        }
+      }
+      // No image found — fall back to text paste
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        terminalService.writeToTerminal(this.terminalId, text);
+      }
+    } catch {
+      // clipboard.read() may not be available — fall back to text
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          terminalService.writeToTerminal(this.terminalId, text);
+        }
+      } catch {
+        // Clipboard not available at all
+      }
+    }
+  }
+
   private snapToBottom() {
     if (this.scrollbackOffset === 0) return;
     // Bug #242: adjust selection before resetting offset
