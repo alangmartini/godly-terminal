@@ -53,39 +53,31 @@ if (-not (Test-Path $remoteBin)) {
 $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
 $Password = -join ((48..57) + (97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
 
-# --- Check if something is already listening on this port ---
+# --- Kill any existing godly-remote so we start fresh with our API key + password ---
 $remoteProc = $null
-$remoteAlreadyRunning = $false
-try {
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    $tcp.Connect("127.0.0.1", $Port)
-    $tcp.Close()
-    $remoteAlreadyRunning = $true
-} catch {
-    # Port not in use
+$existingPids = Get-Process -Name "godly-remote" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
+if ($existingPids) {
+    Write-Host ""
+    Write-Host "Stopping existing godly-remote (PID: $($existingPids -join ', '))..." -ForegroundColor Yellow
+    foreach ($pid in $existingPids) {
+        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
 }
 
-if ($remoteAlreadyRunning) {
-    Write-Host ""
-    Write-Host "godly-remote already running on port $Port, reusing it." -ForegroundColor Green
-    Write-Host "  Note: API key auth is managed by the existing instance." -ForegroundColor DarkGray
-    # Use whatever key the running instance has (or none)
-    $ApiKey = $null
-} else {
-    # --- Start godly-remote ---
-    Write-Host ""
-    Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
-    $env:GODLY_REMOTE_PORT = $Port
-    $env:GODLY_REMOTE_API_KEY = $ApiKey
-    $env:GODLY_REMOTE_PASSWORD = $Password
-    $remoteProc = Start-Process -FilePath $remoteBin -PassThru -NoNewWindow
-    Start-Sleep -Seconds 1
+# --- Start godly-remote ---
+Write-Host ""
+Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
+$env:GODLY_REMOTE_PORT = $Port
+$env:GODLY_REMOTE_API_KEY = $ApiKey
+$env:GODLY_REMOTE_PASSWORD = $Password
+$remoteProc = Start-Process -FilePath $remoteBin -PassThru -NoNewWindow
+Start-Sleep -Seconds 1
 
-    if ($remoteProc.HasExited) {
-        Write-Host "godly-remote failed to start. Is the daemon running?" -ForegroundColor Red
-        Write-Host "Start Godly Terminal first, or run: src-tauri\target\release\godly-daemon.exe" -ForegroundColor Yellow
-        exit 1
-    }
+if ($remoteProc.HasExited) {
+    Write-Host "godly-remote failed to start. Is the daemon running?" -ForegroundColor Red
+    Write-Host "Start Godly Terminal first, or run: src-tauri\target\release\godly-daemon.exe" -ForegroundColor Yellow
+    exit 1
 }
 
 # --- Start ngrok ---
@@ -150,11 +142,9 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  $phoneUrl" -ForegroundColor White
 Write-Host ""
-if (-not $remoteAlreadyRunning) {
-    Write-Host "  Password: $Password" -ForegroundColor White
-    Write-Host "  (enter this on your phone to connect)" -ForegroundColor DarkGray
-    Write-Host ""
-}
+Write-Host "  Password: $Password" -ForegroundColor White
+Write-Host "  (enter this on your phone to connect)" -ForegroundColor DarkGray
+Write-Host ""
 if ($ApiKey) {
     Write-Host "  API Key: $ApiKey" -ForegroundColor DarkGray
 }
@@ -169,7 +159,7 @@ try {
     while ($true) {
         Start-Sleep -Seconds 1
         # Check if processes are still alive
-        if ($remoteProc -and $remoteProc.HasExited) {
+        if ($remoteProc.HasExited) {
             Write-Host "godly-remote exited unexpectedly." -ForegroundColor Red
             break
         }
@@ -182,8 +172,6 @@ try {
     Write-Host ""
     Write-Host "Shutting down..." -ForegroundColor Yellow
     Stop-Process -Id $ngrokProc.Id -Force -ErrorAction SilentlyContinue
-    if ($remoteProc) {
-        Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
-    }
+    Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
     Write-Host "Done." -ForegroundColor Green
 }
