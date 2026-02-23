@@ -203,6 +203,16 @@ export class WebGLRenderer {
     }
   }
 
+  setFontSize(size: number): { cellWidth: number; cellHeight: number } {
+    this.fontSize = size;
+    this.atlas.invalidate(this.dpr, size);
+    this.atlas.populateAscii();
+    const metrics = this.measureFont();
+    this.cellWidth = metrics.cellWidth;
+    this.cellHeight = metrics.cellHeight;
+    return metrics;
+  }
+
   measureFont(): { cellWidth: number; cellHeight: number } {
     const scaledSize = Math.round(this.fontSize * this.dpr);
     const canvas = new OffscreenCanvas(64, 64);
