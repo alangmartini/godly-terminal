@@ -7,6 +7,7 @@ pub mod phone;
 pub mod prompts;
 pub mod quick_claude;
 pub mod sessions;
+pub mod sse_ticket;
 pub mod workspaces;
 
 use axum::middleware;
@@ -28,6 +29,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/device-status", get(device::device_status))
         .layer(middleware::from_fn(api_key_auth));
 
+    // SSE events — auth is done inline via one-time ticket (no middleware needed).
+    // EventSource can't set custom headers, so we use a ticket acquired via /api/sse-ticket.
+    let sse_routes = Router::new()
+        .route("/api/events", get(events::event_stream));
+
     // Authenticated API routes (require both API key and device token)
     let api = Router::new()
         .route("/api/sessions", get(sessions::list_sessions))
@@ -42,7 +48,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sessions/:id/prompts", get(prompts::session_prompts))
         .route("/api/workspaces", get(workspaces::list_workspaces))
         .route("/api/prompts", get(prompts::list_prompts))
-        .route("/api/events", get(events::event_stream))
+        .route("/api/sse-ticket", post(sse_ticket::create_sse_ticket))
         .route("/api/quick-claude", post(quick_claude::quick_claude))
         .route("/api/monitor", get(monitor::list_monitors))
         .route("/api/monitor/:id", post(monitor::start_monitor))
@@ -59,6 +65,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(public)
         .merge(device_routes)
+        .merge(sse_routes)
         .merge(api)
         .merge(ws)
         .with_state(state)

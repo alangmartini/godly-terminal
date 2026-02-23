@@ -68,6 +68,7 @@ if ($existingPids) {
 # --- Start godly-remote ---
 Write-Host ""
 Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
+$env:GODLY_REMOTE_HOST = "0.0.0.0"  # Default changed to 127.0.0.1 — ngrok needs external access
 $env:GODLY_REMOTE_PORT = $Port
 $env:GODLY_REMOTE_API_KEY = $ApiKey
 $env:GODLY_REMOTE_PASSWORD = $Password
