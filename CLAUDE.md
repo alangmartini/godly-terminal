@@ -21,8 +21,8 @@ npm run tauri build
 # TypeScript check only
 npx tsc --noEmit
 
-# Rust check only (all workspace members)
-cd src-tauri && cargo check --workspace
+# Rust check only (changed crate — NOT --workspace)
+cd src-tauri && cargo check -p <crate-you-modified>
 
 # Run Rust tests (all workspace members, requires cargo-nextest)
 cd src-tauri && cargo nextest run --workspace
@@ -103,9 +103,9 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 
 ### Local checks (required before considering work complete):
 
-1. **Cargo check** (type-check, no codegen):
+1. **Cargo check** (changed crate only — NOT `--workspace`):
    ```bash
-   cd src-tauri && cargo check --workspace
+   cd src-tauri && cargo check -p <crate-you-modified>
    ```
 
 2. **Run tests for changed crates only** (requires `cargo-nextest`):
@@ -118,20 +118,21 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
    npm run test:smart
    ```
 
-3. **Frontend tests**:
+3. **Frontend tests** (only if you touched TS/JS):
    ```bash
    npm test
    ```
 
 4. If any step fails, fix and repeat.
 
-### CI checks (GitHub Actions, runs automatically on PR):
-- `cargo nextest run` for all workspace crates (parallel, 3 daemon partitions)
+### What CI handles (so you don't have to):
+- `cargo check --workspace` (cross-crate type checking)
+- `cargo nextest run --workspace` (full test suite, 3 daemon partitions)
 - `tsc --noEmit` (TypeScript strict check)
 - `npm run build` (production Vite build)
 - Full release build of daemon/mcp/notify binaries
 
-Do NOT run `npm run build` or `cargo nextest run --workspace` locally unless debugging a CI failure.
+Do NOT run `cargo check --workspace`, `npm run build`, or `cargo nextest run --workspace` locally unless debugging a CI failure. Let CI catch cross-crate breakage — local checks are for fast feedback only.
 
 ## Product Vision
 
