@@ -397,6 +397,7 @@ pub fn run() {
             persistence::save_scrollback,
             persistence::load_scrollback,
             persistence::delete_scrollback,
+            commands::save_clipboard_image,
             commands::write_remote_config,
             scrollback_save_complete,
         ])

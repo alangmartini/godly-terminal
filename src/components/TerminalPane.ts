@@ -25,6 +25,7 @@ export class TerminalPane {
   private unsubscribeOutput: (() => void) | null = null;
   private unsubscribeGridDiff: (() => void) | null = null;
   private unsubscribeTheme: (() => void) | null = null;
+  private unsubscribeFontSize: (() => void) | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
   // fetch via setTimeout(SNAPSHOT_MIN_INTERVAL_MS). Multiple output events
@@ -90,6 +91,13 @@ export class TerminalPane {
       this.renderer.setTheme(themeStore.getTerminalTheme());
     });
 
+    // Propagate font size changes to the renderer
+    this.unsubscribeFontSize = terminalSettingsStore.subscribe(() => {
+      const newSize = terminalSettingsStore.getFontSize();
+      this.renderer.setFontSize(newSize);
+      this.fit();
+    });
+
     // Forward OSC title changes to the store
     this.renderer.setOnTitleChange((title) => {
       store.updateTerminal(this.terminalId, { oscTitle: title || undefined });
@@ -108,6 +116,12 @@ export class TerminalPane {
     // When the user finishes a drag selection, catch up with any missed output
     this.renderer.setOnSelectionEnd(() => {
       this.fetchAndRenderSnapshot();
+    });
+
+    // Ctrl+wheel zoom: adjust font size
+    this.renderer.setOnZoom((delta) => {
+      const current = terminalSettingsStore.getFontSize();
+      terminalSettingsStore.setFontSize(current + delta);
     });
 
     this.container = document.createElement('div');
@@ -361,15 +375,11 @@ export class TerminalPane {
       return;
     }
 
-    // Paste: paste from clipboard into terminal
+    // Paste: paste from clipboard into terminal (supports images)
     if (action === 'clipboard.paste') {
       event.preventDefault();
       this.snapToBottom();
-      navigator.clipboard.readText().then((text) => {
-        if (text) {
-          terminalService.writeToTerminal(this.terminalId, text);
-        }
-      });
+      this.handleClipboardPaste();
       return;
     }
 
@@ -544,6 +554,42 @@ export class TerminalPane {
   }
 
   /** Snap viewport back to live view (offset 0). */
+  private async handleClipboardPaste() {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const buffer = await blob.arrayBuffer();
+          const bytes = Array.from(new Uint8Array(buffer));
+          const ext = imageType.split('/')[1] || 'png';
+          const path = await invoke<string>('save_clipboard_image', {
+            imageData: bytes,
+            extension: ext,
+          });
+          terminalService.writeToTerminal(this.terminalId, path);
+          return;
+        }
+      }
+      // No image found — fall back to text paste
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        terminalService.writeToTerminal(this.terminalId, text);
+      }
+    } catch {
+      // clipboard.read() may not be available — fall back to text
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          terminalService.writeToTerminal(this.terminalId, text);
+        }
+      } catch {
+        // Clipboard not available at all
+      }
+    }
+  }
+
   private snapToBottom() {
     if (this.scrollbackOffset === 0) return;
     // Bug #242: adjust selection before resetting offset
@@ -994,6 +1040,7 @@ export class TerminalPane {
       this.unsubscribeGridDiff();
     }
     this.unsubscribeTheme?.();
+    this.unsubscribeFontSize?.();
     this.renderer.dispose();
     this.container.remove();
   }

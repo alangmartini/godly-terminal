@@ -472,6 +472,26 @@ export class App {
           break;
         }
 
+        case 'zoom.in': {
+          e.preventDefault();
+          const current = terminalSettingsStore.getFontSize();
+          terminalSettingsStore.setFontSize(current + 1);
+          break;
+        }
+
+        case 'zoom.out': {
+          e.preventDefault();
+          const current = terminalSettingsStore.getFontSize();
+          terminalSettingsStore.setFontSize(current - 1);
+          break;
+        }
+
+        case 'zoom.reset': {
+          e.preventDefault();
+          terminalSettingsStore.setFontSize(13);
+          break;
+        }
+
         case 'tabs.quickClaude': {
           e.preventDefault();
           if (!state.activeWorkspaceId) break;

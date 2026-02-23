@@ -96,9 +96,10 @@ export class GlyphAtlas {
     }
   }
 
-  /** Invalidate entire atlas (e.g., on DPR change). Clears everything. */
-  invalidate(newDpr: number): void {
+  /** Invalidate entire atlas (e.g., on DPR or font size change). Clears everything. */
+  invalidate(newDpr: number, newFontSize?: number): void {
     this.dpr = newDpr;
+    if (newFontSize !== undefined) this.fontSize = newFontSize;
     this.glyphs.clear();
     this.shelfX = 0;
     this.shelfY = 0;
