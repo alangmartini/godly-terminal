@@ -264,6 +264,7 @@ let currentView = 'dashboard';
 let currentSessionId = null;
 let apiKey = localStorage.getItem('godly_api_key') || '';
 let serverUrl = localStorage.getItem('godly_server_url') || '';
+let deviceToken = localStorage.getItem('godly_device_token') || '';
 let sseSource = null;
 let refreshTimer = null;
 let sessionRefreshTimer = null;
@@ -277,6 +278,7 @@ function baseUrl() {
 function headers() {
   const h = { 'Content-Type': 'application/json' };
   if (apiKey) h['X-API-Key'] = apiKey;
+  if (deviceToken) h['X-Device-Token'] = deviceToken;
   return h;
 }
 
@@ -459,7 +461,10 @@ function connectSSE() {
   if (sseSource) { sseSource.close(); sseSource = null; }
 
   let url = baseUrl() + '/api/events';
-  if (apiKey) url += '?api_key=' + encodeURIComponent(apiKey);
+  const sseParams = [];
+  if (apiKey) sseParams.push('api_key=' + encodeURIComponent(apiKey));
+  if (deviceToken) sseParams.push('device_token=' + encodeURIComponent(deviceToken));
+  if (sseParams.length) url += '?' + sseParams.join('&');
 
   try {
     sseSource = new EventSource(url);
@@ -558,6 +563,49 @@ document.getElementById('inputField').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); sendInput(); }
 });
 
+// --- Device Registration ---
+function generateDeviceToken() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function ensureDeviceRegistered() {
+  // Already have a token — verify it still works
+  if (deviceToken) {
+    try {
+      await api('/api/prompts');
+      return true; // token accepted
+    } catch (e) {
+      if (e.message.includes('403')) {
+        // Token rejected — device lock reset on server, clear local token
+        deviceToken = '';
+        localStorage.removeItem('godly_device_token');
+      } else {
+        return true; // other error (network, etc.), keep token
+      }
+    }
+  }
+
+  // No token — try to register as the first device
+  deviceToken = generateDeviceToken();
+  try {
+    await apiPost('/api/register-device', { device_token: deviceToken });
+    localStorage.setItem('godly_device_token', deviceToken);
+    return true;
+  } catch (e) {
+    // Registration failed — another device already registered
+    deviceToken = '';
+    document.getElementById('view-dashboard').innerHTML =
+      '<div class="no-alerts" style="margin-top:40px;color:var(--danger)">' +
+      'Another device is already registered.<br>' +
+      'Restart the server to allow a new device.' +
+      '</div>';
+    setConnected(false);
+    return false;
+  }
+}
+
 // --- Init ---
 (async function init() {
   // Auto-configure API key from URL param (e.g. /phone?key=abc123)
@@ -570,6 +618,10 @@ document.getElementById('inputField').addEventListener('keydown', (e) => {
     const clean = window.location.pathname + (params.toString() ? '?' + params : '');
     history.replaceState(null, '', clean);
   }
+
+  // Register this device (first-scan-locks)
+  const registered = await ensureDeviceRegistered();
+  if (!registered) return;
 
   refreshDashboard();
   refreshTimer = setInterval(() => {
