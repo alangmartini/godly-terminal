@@ -26,6 +26,7 @@ use godly_protocol::frame;
 use godly_protocol::types::ShellType;
 use godly_protocol::{DaemonMessage, Request, Response};
 
+use std::os::windows::io::AsRawHandle;
 use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
@@ -33,6 +34,17 @@ use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Generate a unique pipe name using nanosecond timestamp + PID to avoid
+/// collisions when nextest retries reuse PIDs on Windows.
+fn unique_pipe_name(suffix: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!(r"\\.\pipe\godly-test-{}-{}-{}", suffix, std::process::id(), nonce)
+}
 
 /// Find the daemon binary next to the test binary.
 fn daemon_binary_path() -> std::path::PathBuf {
@@ -48,16 +60,75 @@ fn daemon_binary_path() -> std::path::PathBuf {
     path
 }
 
+/// A Windows Job Object that kills all assigned processes when dropped.
+/// Ensures daemon + pty-shim children are cleaned up on test exit/failure.
+struct JobGuard {
+    handle: *mut winapi::ctypes::c_void,
+}
+
+unsafe impl Send for JobGuard {}
+
+impl JobGuard {
+    fn new() -> Self {
+        let handle = unsafe {
+            use winapi::um::jobapi2::{CreateJobObjectW, SetInformationJobObject};
+            use winapi::um::winnt::{
+                JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            };
+
+            let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            assert!(!job.is_null(), "CreateJobObjectW failed");
+
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ret = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as *mut _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            assert!(ret != 0, "SetInformationJobObject failed");
+            job
+        };
+        Self { handle }
+    }
+
+    fn assign(&self, child: &Child) {
+        unsafe {
+            use winapi::um::jobapi2::AssignProcessToJobObject;
+            let ret = AssignProcessToJobObject(self.handle, child.as_raw_handle() as *mut _);
+            assert!(ret != 0, "AssignProcessToJobObject failed");
+        }
+    }
+}
+
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        unsafe {
+            winapi::um::handleapi::CloseHandle(self.handle);
+        }
+    }
+}
+
 /// Spawn a daemon process targeting a specific pipe name.
 fn spawn_daemon(pipe_name: &str) -> Child {
     let daemon_path = daemon_binary_path();
     Command::new(&daemon_path)
         .env("GODLY_PIPE_NAME", pipe_name)
+        .env("GODLY_INSTANCE", pipe_name.trim_start_matches(r"\\.\pipe\"))
         .env("GODLY_NO_DETACH", "1")
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .spawn()
         .expect("Failed to spawn daemon")
+}
+
+/// Spawn a daemon and assign it to a job object for reliable cleanup.
+fn spawn_daemon_in_job(pipe_name: &str, job: &JobGuard) -> Child {
+    let child = spawn_daemon(pipe_name);
+    job.assign(&child);
+    child
 }
 
 /// Try to open a client connection to a named pipe.
@@ -160,13 +231,11 @@ fn wait_for_pipe_gone(pipe_name: &str, timeout: Duration) {
 #[ntest::timeout(60_000)] // 1min — spawns multiple daemons + mutex contention
 fn test_named_mutex_blocks_second_daemon() {
     // Fix: DaemonLock (named mutex) prevents multiple daemon instances
-    let pipe_name = format!(
-        r"\\.\pipe\godly-test-mutex-block-{}",
-        std::process::id()
-    );
+    let pipe_name = unique_pipe_name("mutex-block");
+    let job = JobGuard::new();
 
     // Start daemon A and verify it's running
-    let mut daemon_a = spawn_daemon(&pipe_name);
+    let mut daemon_a = spawn_daemon_in_job(&pipe_name, &job);
     let mut pipe = wait_for_pipe(&pipe_name, Duration::from_secs(5));
     assert!(
         matches!(send_request(&mut pipe, &Request::Ping), Response::Pong),
@@ -175,7 +244,7 @@ fn test_named_mutex_blocks_second_daemon() {
     drop(pipe);
 
     // Start daemon B on the same pipe — it should detect the mutex and exit
-    let mut daemon_b = spawn_daemon(&pipe_name);
+    let mut daemon_b = spawn_daemon_in_job(&pipe_name, &job);
     thread::sleep(Duration::from_secs(3));
 
     let b_exited = daemon_b
@@ -183,7 +252,7 @@ fn test_named_mutex_blocks_second_daemon() {
         .ok()
         .map_or(false, |status| status.is_some());
 
-    // Cleanup
+    // Cleanup (job handle closes in JobGuard::drop, killing all processes)
     let _ = daemon_b.kill();
     let _ = daemon_b.wait();
     let _ = daemon_a.kill();
@@ -208,18 +277,17 @@ fn test_named_mutex_blocks_second_daemon() {
 #[ntest::timeout(60_000)]
 fn test_concurrent_launch_single_instance() {
     // Fix: named mutex ensures exactly 1 daemon from concurrent launches
-    let pipe_name = format!(
-        r"\\.\pipe\godly-test-concurrent-{}",
-        std::process::id()
-    );
-
     let n = 10;
     let iterations = 3;
     let mut max_running: usize = 0;
 
     for _ in 0..iterations {
+        // Unique pipe per iteration to avoid stale handles from previous round
+        let pipe_name = unique_pipe_name("concurrent");
+        let job = JobGuard::new();
+
         // Launch N daemons at nearly the same instant
-        let mut children: Vec<Child> = (0..n).map(|_| spawn_daemon(&pipe_name)).collect();
+        let mut children: Vec<Child> = (0..n).map(|_| spawn_daemon_in_job(&pipe_name, &job)).collect();
         thread::sleep(Duration::from_secs(4));
 
         let mut running_count: usize = 0;
@@ -236,6 +304,7 @@ fn test_concurrent_launch_single_instance() {
         }
 
         kill_children(&mut children);
+        // Job handle dropped here — kills any lingering processes
         wait_for_pipe_gone(&pipe_name, Duration::from_secs(3));
     }
 
@@ -256,13 +325,11 @@ fn test_concurrent_launch_single_instance() {
 #[ntest::timeout(60_000)]
 fn test_new_daemon_starts_after_lock_holder_exits() {
     // Fix: mutex is auto-released on exit, no stale locks
-    let pipe_name = format!(
-        r"\\.\pipe\godly-test-reacquire-{}",
-        std::process::id()
-    );
+    let pipe_name = unique_pipe_name("reacquire");
 
-    // Start daemon A
-    let mut daemon_a = spawn_daemon(&pipe_name);
+    // Job A: isolates daemon A + its shims so they're reliably killed
+    let job_a = JobGuard::new();
+    let mut daemon_a = spawn_daemon_in_job(&pipe_name, &job_a);
     let mut pipe = wait_for_pipe(&pipe_name, Duration::from_secs(5));
     assert!(matches!(send_request(&mut pipe, &Request::Ping), Response::Pong));
 
@@ -286,13 +353,15 @@ fn test_new_daemon_starts_after_lock_holder_exits() {
     );
     drop(pipe);
 
-    // Kill daemon A (simulates crash)
+    // Kill daemon A + all its shims by dropping the job
     let _ = daemon_a.kill();
     let _ = daemon_a.wait();
+    drop(job_a); // Ensures shim children are also killed
     wait_for_pipe_gone(&pipe_name, Duration::from_secs(10));
 
-    // Start daemon B — should acquire the lock since A released it on exit
-    let mut daemon_b = spawn_daemon(&pipe_name);
+    // Job B: isolates daemon B
+    let job_b = JobGuard::new();
+    let mut daemon_b = spawn_daemon_in_job(&pipe_name, &job_b);
     let mut pipe_b = wait_for_pipe(&pipe_name, Duration::from_secs(15));
     assert!(
         matches!(send_request(&mut pipe_b, &Request::Ping), Response::Pong),
@@ -311,7 +380,7 @@ fn test_new_daemon_starts_after_lock_holder_exits() {
         other => panic!("Expected SessionList, got {:?}", other),
     }
 
-    // Cleanup
+    // Cleanup (job_b drops here, killing daemon B + shims)
     drop(pipe_b);
     let _ = daemon_b.kill();
     let _ = daemon_b.wait();
@@ -326,12 +395,10 @@ fn test_new_daemon_starts_after_lock_holder_exits() {
 #[ntest::timeout(60_000)]
 fn test_sessions_visible_across_reconnect_with_single_daemon() {
     // Fix: single daemon means no session isolation
-    let pipe_name = format!(
-        r"\\.\pipe\godly-test-reconnect-{}",
-        std::process::id()
-    );
+    let pipe_name = unique_pipe_name("reconnect");
+    let job = JobGuard::new();
 
-    let mut daemon = spawn_daemon(&pipe_name);
+    let mut daemon = spawn_daemon_in_job(&pipe_name, &job);
     let session_id = format!("reconnect-test-{}", std::process::id());
 
     // Create session via first connection

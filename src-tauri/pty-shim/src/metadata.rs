@@ -16,13 +16,19 @@ pub struct ShimMetadata {
 }
 
 /// Returns the directory where shim metadata files are stored.
-/// On Windows: `%APPDATA%/com.godly.terminal/shims/`
+/// Scoped by `GODLY_INSTANCE` env var so different daemon instances (e.g. tests)
+/// get isolated metadata directories and can't interfere with each other.
+/// On Windows: `%APPDATA%/com.godly.terminal[-instance]/shims/`
 pub fn shim_metadata_dir() -> PathBuf {
     let base = std::env::var("APPDATA")
         .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-    PathBuf::from(base)
-        .join("com.godly.terminal")
-        .join("shims")
+    let suffix = std::env::var("GODLY_INSTANCE")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("-{}", name))
+        .unwrap_or_default();
+    let dir_name = format!("com.godly.terminal{}", suffix);
+    PathBuf::from(base).join(dir_name).join("shims")
 }
 
 /// Write metadata for a shim session to disk.

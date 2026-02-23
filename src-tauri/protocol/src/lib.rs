@@ -52,12 +52,13 @@ pub fn shim_pipe_name(session_id: &str) -> String {
 }
 
 /// Get the directory where shim metadata files are stored.
+/// Scoped by `instance_suffix()` so different daemon instances (e.g. tests)
+/// get isolated metadata directories and can't interfere with each other.
 pub fn shim_metadata_dir() -> std::path::PathBuf {
     let base = std::env::var("APPDATA")
         .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-    std::path::PathBuf::from(base)
-        .join("com.godly.terminal")
-        .join("shims")
+    let dir_name = format!("com.godly.terminal{}", instance_suffix());
+    std::path::PathBuf::from(base).join(dir_name).join("shims")
 }
 
 #[cfg(test)]
