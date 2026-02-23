@@ -59,8 +59,8 @@ $existingPids = Get-Process -Name "godly-remote" -ErrorAction SilentlyContinue |
 if ($existingPids) {
     Write-Host ""
     Write-Host "Stopping existing godly-remote (PID: $($existingPids -join ', '))..." -ForegroundColor Yellow
-    foreach ($pid in $existingPids) {
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+    foreach ($p in $existingPids) {
+        Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
     }
     Start-Sleep -Milliseconds 500
 }
