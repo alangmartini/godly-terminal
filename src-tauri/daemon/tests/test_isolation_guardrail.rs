@@ -41,7 +41,8 @@ const FORBIDDEN_PATTERNS: &[(&str, &str)] = &[
 ];
 
 /// Additional check: if a file spawns a daemon (Command::new with "godly-daemon"),
-/// it must set GODLY_PIPE_NAME or use --instance for isolation.
+/// it must set GODLY_PIPE_NAME or use --instance for pipe isolation, AND
+/// GODLY_INSTANCE for metadata directory isolation.
 fn check_daemon_spawn_isolation(filename: &str, content: &str) -> Vec<String> {
     let mut violations = Vec::new();
 
@@ -52,11 +53,26 @@ fn check_daemon_spawn_isolation(filename: &str, content: &str) -> Vec<String> {
     if spawns_daemon {
         let has_pipe_env = content.contains("GODLY_PIPE_NAME");
         let has_instance_arg = content.contains("--instance");
+        let has_instance_env = content.contains("GODLY_INSTANCE");
 
         if !has_pipe_env && !has_instance_arg {
             violations.push(format!(
                 "{}: spawns godly-daemon without GODLY_PIPE_NAME env var or --instance arg. \
                  The test will connect to the production daemon instead of an isolated one.",
+                filename
+            ));
+        }
+
+        // Bug #303: GODLY_PIPE_NAME isolates the daemon pipe, but shim metadata
+        // is stored in a directory scoped by GODLY_INSTANCE. Without it, the test
+        // daemon reads the production metadata dir and kills live shim processes.
+        if !has_instance_env && !has_instance_arg {
+            violations.push(format!(
+                "{}: spawns godly-daemon without GODLY_INSTANCE env var. \
+                 The test daemon will share the production shim metadata directory \
+                 and may kill live terminal sessions on startup. \
+                 Add .env(\"GODLY_INSTANCE\", pipe_name.trim_start_matches(r\"\\\\.\
+                 \\pipe\\\")) after .env(\"GODLY_PIPE_NAME\", ...).",
                 filename
             ));
         }

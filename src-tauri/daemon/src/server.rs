@@ -322,6 +322,21 @@ impl DaemonServer {
         for meta in survivors {
             let session_id = meta.session_id.clone();
             let shim_pid = meta.shim_pid;
+
+            // Defensive check: only reconnect shims that belong to this instance.
+            // The shim pipe name includes the instance suffix, so if it doesn't match
+            // what this daemon would generate, the shim belongs to a different instance.
+            let expected_pipe = godly_protocol::shim_pipe_name(&session_id);
+            if meta.shim_pipe_name != expected_pipe {
+                daemon_log!(
+                    "Skipping foreign shim: session={} pipe={} (expected {})",
+                    session_id,
+                    meta.shim_pipe_name,
+                    expected_pipe
+                );
+                continue;
+            }
+
             match DaemonSession::reconnect(meta) {
                 Ok(session) => {
                     self.sessions.write().insert(session_id.clone(), session);
