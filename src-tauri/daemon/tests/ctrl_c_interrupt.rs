@@ -220,6 +220,7 @@ fn launch_daemon(pipe_name: &str) -> Child {
     let daemon_path = daemon_binary_path();
     Command::new(&daemon_path)
         .env("GODLY_PIPE_NAME", pipe_name)
+        .env("GODLY_INSTANCE", pipe_name.trim_start_matches(r"\\.\pipe\"))
         .env("GODLY_NO_DETACH", "1")
         .creation_flags(0x00000200) // CREATE_NEW_PROCESS_GROUP
         .spawn()
