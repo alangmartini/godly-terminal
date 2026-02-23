@@ -38,6 +38,12 @@ export class TabBar {
     this.tabsContainer.style.flex = '1';
     this.container.appendChild(this.tabsContainer);
 
+    // Translate vertical mouse wheel into horizontal tab scroll
+    this.container.addEventListener('wheel', (e) => {
+      this.container.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+
     const addBtn = document.createElement('div');
     addBtn.className = 'add-tab-btn';
     addBtn.textContent = '+';
