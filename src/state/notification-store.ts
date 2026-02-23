@@ -4,6 +4,8 @@ import { globMatch } from '../utils/glob-match';
 const STORAGE_KEY = 'godly-notification-settings';
 const WORKSPACE_MUTE_KEY = 'godly-workspace-mute-settings';
 const DEBOUNCE_MS = 2000;
+/** Bug #289: Global debounce across all terminals to prevent overlapping sounds */
+const GLOBAL_SOUND_DEBOUNCE_MS = 500;
 
 export interface NotificationSettings {
   globalEnabled: boolean;
@@ -37,6 +39,9 @@ class NotificationStore {
 
   /** Debounce: terminal_id → last notify timestamp */
   private lastNotify: Map<string, number> = new Map();
+
+  /** Bug #289: Global sound debounce — timestamp of last sound-eligible notification */
+  private lastGlobalSoundTime = 0;
 
   private subscribers: Subscriber[] = [];
 
@@ -102,12 +107,31 @@ class NotificationStore {
 
   // ── Mutations ────────────────────────────────────────────────────
 
-  /** Record a notification event and add badge. Returns false if debounced. */
+  /**
+   * Record a notification event and add badge.
+   * Returns false if debounced (per-terminal or global sound debounce).
+   * Badge is always added regardless of debounce result.
+   *
+   * Bug #289: Added global sound debounce so simultaneous notifications from
+   * different terminals don't each play a sound.
+   */
   recordNotify(terminalId: string): boolean {
+    // Per-terminal debounce: suppress repeated notifications from the same terminal
     if (this.isDebounced(terminalId)) return false;
-    this.lastNotify.set(terminalId, Date.now());
+
+    const now = Date.now();
+    this.lastNotify.set(terminalId, now);
+
+    // Always add badge regardless of global sound debounce
     this.badgedTerminals.add(terminalId);
     this.notify();
+
+    // Global sound debounce: suppress simultaneous sounds from different terminals
+    if (now - this.lastGlobalSoundTime < GLOBAL_SOUND_DEBOUNCE_MS) {
+      return false;
+    }
+
+    this.lastGlobalSoundTime = now;
     return true;
   }
 
