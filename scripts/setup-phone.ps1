@@ -49,9 +49,37 @@ if (-not (Test-Path $remoteBin)) {
     }
 }
 
-# --- Generate API key and password ---
-$ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
-$Password = -join ((48..57) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
+# --- Read persisted settings (if any) ---
+$configPath = Join-Path $env:APPDATA "com.godly.terminal\remote-config.json"
+$savedConfig = $null
+if (Test-Path $configPath) {
+    try {
+        $savedConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+        Write-Host "Using saved settings from $configPath" -ForegroundColor Green
+    } catch {
+        Write-Host "Could not parse saved config, using defaults" -ForegroundColor Yellow
+    }
+}
+
+# --- Use saved or generate API key and password ---
+if ($savedConfig -and $savedConfig.api_key) {
+    $ApiKey = $savedConfig.api_key
+    Write-Host "  API Key: (from saved settings)" -ForegroundColor DarkGray
+} else {
+    $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+}
+
+if ($savedConfig -and $savedConfig.password) {
+    $Password = $savedConfig.password
+    Write-Host "  Password: (from saved settings)" -ForegroundColor DarkGray
+} else {
+    $Password = -join ((48..57) + (97..122) | Get-Random -Count 16 | ForEach-Object { [char]$_ })
+}
+
+# Override port from saved settings if not explicitly provided via CLI
+if ($savedConfig -and $savedConfig.port -and $Port -eq 3377) {
+    $Port = $savedConfig.port
+}
 
 # --- Kill any existing godly-remote so we start fresh with our API key + password ---
 $remoteProc = $null
