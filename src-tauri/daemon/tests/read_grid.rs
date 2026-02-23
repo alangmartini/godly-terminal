@@ -149,6 +149,7 @@ impl DaemonFixture {
 
         let child = Command::new(&daemon_exe)
             .env("GODLY_PIPE_NAME", &pipe_name)
+            .env("GODLY_INSTANCE", pipe_name.trim_start_matches(r"\\.\pipe\"))
             .env("GODLY_NO_DETACH", "1")
             .stderr(std::process::Stdio::piped())
             .spawn()

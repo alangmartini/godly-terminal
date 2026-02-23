@@ -150,18 +150,29 @@ fn drain_events(pipe: &mut std::fs::File) -> u32 {
     drained
 }
 
+/// Generate a unique pipe name using nanosecond timestamp + PID to avoid
+/// collisions when nextest retries reuse PIDs on Windows.
+fn unique_pipe_name(test_name: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!(r"\\.\pipe\godly-test-{}-{}-{}", test_name, std::process::id(), nonce)
+}
+
 struct DaemonFixture {
     child: Child,
     pipe_name: String,
+    _job: *mut winapi::ctypes::c_void,
 }
+
+// Job handle can be sent across threads (it's a kernel handle).
+unsafe impl Send for DaemonFixture {}
 
 impl DaemonFixture {
     fn spawn(test_name: &str) -> Self {
-        let pipe_name = format!(
-            r"\\.\pipe\godly-test-{}-{}",
-            test_name,
-            std::process::id()
-        );
+        let pipe_name = unique_pipe_name(test_name);
 
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let target_dir = manifest_dir
@@ -176,16 +187,50 @@ impl DaemonFixture {
             daemon_exe
         );
 
+        // Create a Windows Job Object configured to kill all processes on close.
+        // This ensures the daemon AND any pty-shim child processes are terminated
+        // when the fixture is dropped — preventing orphaned shims from corrupting
+        // nextest retries. (Fix for GitHub issue #237)
+        let job = unsafe {
+            use winapi::um::jobapi2::{CreateJobObjectW, SetInformationJobObject};
+            use winapi::um::winnt::{
+                JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            };
+
+            let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            assert!(!job.is_null(), "CreateJobObjectW failed");
+
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ret = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &mut info as *mut _ as *mut _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            assert!(ret != 0, "SetInformationJobObject failed");
+            job
+        };
+
         let child = Command::new(&daemon_exe)
             .env("GODLY_PIPE_NAME", &pipe_name)
+            .env("GODLY_INSTANCE", pipe_name.trim_start_matches(r"\\.\pipe\"))
             .env("GODLY_NO_DETACH", "1")
             .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("Failed to spawn daemon");
 
+        // Assign daemon process to the job so it (and its shim children) are killed on drop.
+        unsafe {
+            use winapi::um::jobapi2::AssignProcessToJobObject;
+            let ret = AssignProcessToJobObject(job, child.as_raw_handle() as *mut _);
+            assert!(ret != 0, "AssignProcessToJobObject failed");
+        }
+
         std::thread::sleep(Duration::from_millis(500));
 
-        Self { child, pipe_name }
+        Self { child, pipe_name, _job: job }
     }
 
     fn connect(&self) -> std::fs::File {
@@ -195,7 +240,12 @@ impl DaemonFixture {
 
 impl Drop for DaemonFixture {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // Closing the job handle kills the daemon + all shim children
+        // (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE). Then we wait for the daemon
+        // process to fully exit.
+        unsafe {
+            winapi::um::handleapi::CloseHandle(self._job);
+        }
         let _ = self.child.wait();
     }
 }
