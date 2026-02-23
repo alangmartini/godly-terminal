@@ -74,13 +74,14 @@ async fn main() {
     let api_key = config.auth.api_key.clone();
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);
     let scan_rows = config.monitor.scan_rows;
+    let idle_threshold = config.monitor.idle_threshold_secs;
 
     let daemon = Arc::new(daemon);
     let event_pump = Arc::new(EventPump::new());
 
     // Start the SSE event pump background task
-    event_pump.spawn(Arc::clone(&daemon), scan_rows);
-    tracing::info!("Event pump started (scan_rows={})", scan_rows);
+    event_pump.spawn(Arc::clone(&daemon), scan_rows, idle_threshold);
+    tracing::info!("Event pump started (scan_rows={}, idle_threshold={}s)", scan_rows, idle_threshold);
 
     let auth_password = std::env::var("GODLY_REMOTE_PASSWORD").ok();
     if auth_password.is_some() {

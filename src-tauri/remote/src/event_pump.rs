@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +29,11 @@ pub enum SseEvent {
     PromptResolved {
         session_id: String,
     },
+    #[serde(rename = "terminal_idle")]
+    TerminalIdle {
+        session_id: String,
+        idle_seconds: u64,
+    },
     #[serde(rename = "heartbeat")]
     Heartbeat {
         timestamp_ms: u64,
@@ -51,7 +58,7 @@ impl EventPump {
     }
 
     /// Spawn the background polling task.
-    pub fn spawn(self: &Arc<Self>, daemon: Arc<DaemonClient>, scan_rows: usize) {
+    pub fn spawn(self: &Arc<Self>, daemon: Arc<DaemonClient>, scan_rows: usize, idle_threshold_secs: u64) {
         let tx = self.tx.clone();
         let daemon = daemon.clone();
 
@@ -59,6 +66,8 @@ impl EventPump {
             let detector = PromptDetector::new();
             // Track prompt state per session: Some(pattern) = active prompt, None = no prompt
             let mut prompt_state: HashMap<String, Option<String>> = HashMap::new();
+            // Track idle state per session: (content_hash, last_change_tick, notified)
+            let mut idle_state: HashMap<String, (u64, u64, bool)> = HashMap::new();
             let mut tick: u64 = 0;
 
             loop {
@@ -78,6 +87,7 @@ impl EventPump {
                             let ids: Vec<String> = sessions.into_iter().map(|s| s.id).collect();
                             // Remove stale entries
                             prompt_state.retain(|k, _| ids.contains(k));
+                            idle_state.retain(|k, _| ids.contains(k));
                             ids
                         }
                         _ => continue,
@@ -86,7 +96,7 @@ impl EventPump {
                     prompt_state.keys().cloned().collect()
                 };
 
-                // Check each session for prompts
+                // Check each session for prompts and idle state
                 for sid in &session_ids {
                     let resp = async_request(
                         &daemon,
@@ -96,12 +106,13 @@ impl EventPump {
                     let rows = match resp {
                         Ok(Response::Grid { grid }) => grid.rows,
                         Ok(Response::Error { message }) if message.contains("not found") => {
-                            // Session closed — resolve any active prompt
+                            // Session closed — resolve any active prompt and clean idle state
                             if let Some(Some(_)) = prompt_state.remove(sid) {
                                 let _ = tx.send(SseEvent::PromptResolved {
                                     session_id: sid.clone(),
                                 });
                             }
+                            idle_state.remove(sid);
                             continue;
                         }
                         _ => continue,
@@ -110,6 +121,7 @@ impl EventPump {
                     let start = rows.len().saturating_sub(scan_rows);
                     let bottom_text: String = rows[start..].join("\n");
 
+                    // --- Prompt detection ---
                     let detection = detector.detect(&bottom_text);
                     let prev = prompt_state.get(sid).cloned().flatten();
 
@@ -151,10 +163,36 @@ impl EventPump {
                             prompt_state.entry(sid.clone()).or_insert(None);
                         }
                     }
+
+                    // --- Idle detection ---
+                    let full_text: String = rows.join("\n");
+                    let content_hash = hash_string(&full_text);
+                    let entry = idle_state.entry(sid.clone()).or_insert((content_hash, tick, false));
+
+                    if content_hash != entry.0 {
+                        // Content changed — reset idle tracking
+                        entry.0 = content_hash;
+                        entry.1 = tick;
+                        entry.2 = false;
+                    } else if !entry.2 && tick.saturating_sub(entry.1) >= idle_threshold_secs {
+                        // Content unchanged for threshold ticks and not yet notified
+                        entry.2 = true;
+                        let idle_secs = tick.saturating_sub(entry.1);
+                        let _ = tx.send(SseEvent::TerminalIdle {
+                            session_id: sid.clone(),
+                            idle_seconds: idle_secs,
+                        });
+                    }
                 }
             }
         });
     }
+}
+
+fn hash_string(s: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn now_epoch_ms() -> u64 {
