@@ -1087,7 +1087,7 @@ export class App {
     await listen<{ terminal_id: string; name: string }>('terminal-renamed', (event) => {
       const { terminal_id, name } = event.payload;
       console.log('[App] MCP terminal-renamed:', terminal_id, name);
-      store.updateTerminal(terminal_id, { name });
+      store.updateTerminal(terminal_id, { name, userRenamed: true });
     });
 
     // MCP: terminal created by MCP handler — add to main window's Agent workspace

@@ -43,6 +43,9 @@ pub struct MonitorConfig {
     pub webhook_secret: Option<String>,
     #[serde(default = "default_scan_rows")]
     pub scan_rows: usize,
+    /// Seconds of unchanged output before emitting a `terminal_idle` event (default: 10).
+    #[serde(default = "default_idle_threshold")]
+    pub idle_threshold_secs: u64,
 }
 
 impl Default for MonitorConfig {
@@ -52,6 +55,7 @@ impl Default for MonitorConfig {
             webhook_url: None,
             webhook_secret: None,
             scan_rows: default_scan_rows(),
+            idle_threshold_secs: default_idle_threshold(),
         }
     }
 }
@@ -98,6 +102,10 @@ fn default_scan_rows() -> usize {
     10
 }
 
+fn default_idle_threshold() -> u64 {
+    10
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -108,6 +116,7 @@ impl Default for Config {
                 webhook_url: None,
                 webhook_secret: None,
                 scan_rows: default_scan_rows(),
+                idle_threshold_secs: default_idle_threshold(),
             },
             phone: PhoneConfig::default(),
         }

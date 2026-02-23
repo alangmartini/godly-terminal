@@ -70,6 +70,9 @@ pub async fn event_stream(
                         crate::event_pump::SseEvent::PromptResolved { .. } => {
                             ("prompt_resolved", serde_json::to_string(&sse_event).unwrap_or_default())
                         }
+                        crate::event_pump::SseEvent::TerminalIdle { .. } => {
+                            ("terminal_idle", serde_json::to_string(&sse_event).unwrap_or_default())
+                        }
                         crate::event_pump::SseEvent::Heartbeat { .. } => {
                             ("heartbeat", serde_json::to_string(&sse_event).unwrap_or_default())
                         }
