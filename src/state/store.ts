@@ -64,6 +64,9 @@ class Store {
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
   private suspendedSplitViews: Map<string, SplitView> = new Map();
   private pendingNotify = false;
+  /** Sessions currently resumed (not paused). Tracks which sessions we've
+   *  sent resumeSession to, so we can pause them when they become invisible. */
+  private resumedSessions: Set<string> = new Set();
 
   getState(): AppState {
     return this.state;
@@ -154,6 +157,7 @@ class Store {
       activeWorkspaceId: id,
       activeTerminalId: rememberedStillExists ? rememberedId : (workspaceTerminals[0]?.id ?? null),
     });
+    this.syncSessionPauseState();
   }
 
   // Terminal operations
@@ -174,6 +178,7 @@ class Store {
         activeTerminalId: terminal.id,
       });
     }
+    this.syncSessionPauseState();
   }
 
   updateTerminal(id: string, updates: Partial<Terminal>) {
@@ -232,6 +237,8 @@ class Store {
       activeTerminalId: newActiveId,
       splitViews,
     });
+    this.resumedSessions.delete(id);
+    this.syncSessionPauseState();
   }
 
   setActiveTerminal(id: string | null) {
@@ -247,6 +254,7 @@ class Store {
         this.setState({ activeTerminalId: id, splitViews: rest });
         invoke('clear_split_view', { workspaceId: wsId }).catch(() => {});
         invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+        this.syncSessionPauseState();
         return;
       }
 
@@ -266,11 +274,13 @@ class Store {
           ratio: suspended.ratio,
         }).catch(() => {});
         invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+        this.syncSessionPauseState();
         return;
       }
     }
     this.setState({ activeTerminalId: id });
     invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+    this.syncSessionPauseState();
   }
 
   moveTerminalToWorkspace(terminalId: string, workspaceId: string) {
@@ -351,6 +361,44 @@ class Store {
         [workspaceId]: { ...split, ratio },
       },
     });
+  }
+
+  /**
+   * Sync session pause/resume state based on currently visible terminals.
+   * Visible terminals are resumed, all others are paused.
+   * This reduces daemon output overhead for background sessions.
+   */
+  syncSessionPauseState() {
+    const { activeTerminalId, activeWorkspaceId, splitViews } = this.state;
+    const visibleIds = new Set<string>();
+
+    if (activeTerminalId) {
+      visibleIds.add(activeTerminalId);
+    }
+
+    // Also include split view terminals
+    if (activeWorkspaceId) {
+      const split = splitViews[activeWorkspaceId];
+      if (split) {
+        visibleIds.add(split.leftTerminalId);
+        visibleIds.add(split.rightTerminalId);
+      }
+    }
+
+    // Resume visible, pause invisible
+    for (const terminal of this.state.terminals) {
+      if (visibleIds.has(terminal.id)) {
+        if (!this.resumedSessions.has(terminal.id)) {
+          this.resumedSessions.add(terminal.id);
+          invoke('resume_session', { sessionId: terminal.id }).catch(() => {});
+        }
+      } else {
+        if (this.resumedSessions.has(terminal.id)) {
+          this.resumedSessions.delete(terminal.id);
+          invoke('pause_session', { sessionId: terminal.id }).catch(() => {});
+        }
+      }
+    }
   }
 
   getWorkspaceTerminals(workspaceId: string): Terminal[] {
