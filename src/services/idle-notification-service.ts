@@ -38,6 +38,8 @@ interface TerminalTracker {
 
 export class IdleNotificationService {
   private trackers = new Map<string, TerminalTracker>();
+  /** Terminal IDs that have been closed — prevents zombie tracker re-creation. */
+  private closedTerminals = new Set<string>();
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private idleThresholdMs: number;
   private startupGraceMs: number;
@@ -60,6 +62,10 @@ export class IdleNotificationService {
 
   /** Record that a terminal produced output. */
   recordOutput(terminalId: string): void {
+    // Bug #272: Don't create trackers for closed terminals (prevents zombie trackers
+    // from late output events arriving after terminal-closed).
+    if (this.closedTerminals.has(terminalId)) return;
+
     const now = Date.now();
     const inGrace = this.startupGraceMs > 0 && (now - this.createdAt) < this.startupGraceMs;
 
@@ -70,7 +76,10 @@ export class IdleNotificationService {
       // it's likely ring buffer replay from reconnection, not new work.
       if (!inGrace) {
         tracker.hadRecentOutput = true;
-        tracker.notified = false;
+        // Bug #272: Don't reset notified here. After a notification fires,
+        // re-arming is handled by tick() only after extended true silence.
+        // This prevents periodic shell noise from restarting the notification
+        // cycle every time the cooldown expires.
       }
     } else {
       this.trackers.set(terminalId, {
@@ -85,6 +94,9 @@ export class IdleNotificationService {
   /** Stop tracking a terminal (e.g., when it closes). */
   recordTerminalClosed(terminalId: string): void {
     this.trackers.delete(terminalId);
+    // Bug #272: Remember this terminal was closed so late output events
+    // don't silently re-create its tracker.
+    this.closedTerminals.add(terminalId);
   }
 
   /** Periodic check: find terminals that went idle and notify. */
@@ -92,13 +104,39 @@ export class IdleNotificationService {
     const now = Date.now();
     const activeId = this.getActiveTerminalId();
 
+    // Bug #272: Re-arm threshold — how long a terminal must be truly silent
+    // (no output at all) before it can be re-notified. Uses max of
+    // 2×cooldown and idleThreshold to ensure periodic shell noise doesn't
+    // trigger repeated notifications after each cooldown expiry.
+    const rearmThreshold = Math.max(this.notifyCooldownMs * 2, this.idleThresholdMs);
+
     for (const [terminalId, tracker] of this.trackers) {
       // Skip the currently focused terminal
       if (terminalId === activeId) continue;
+
+      const idleMs = now - tracker.lastOutputTime;
+
+      // Bug #272: Re-arm after extended true silence. Once notified, a terminal
+      // must go completely silent for rearmThreshold before it can notify again.
+      // This prevents periodic noise from restarting the cycle.
+      if (tracker.notified && !tracker.hadRecentOutput) {
+        if (idleMs >= rearmThreshold) {
+          tracker.notified = false;
+        }
+        continue;
+      }
+
+      // Bug #272: Clear stale hadRecentOutput when already notified. Output
+      // arrived but we're in notified state — acknowledge the output went idle
+      // without firing a new notification.
+      if (tracker.hadRecentOutput && tracker.notified && idleMs >= this.idleThresholdMs) {
+        tracker.hadRecentOutput = false;
+        continue;
+      }
+
       // Skip if no recent output or already notified
       if (!tracker.hadRecentOutput || tracker.notified) continue;
 
-      const idleMs = now - tracker.lastOutputTime;
       if (idleMs >= this.idleThresholdMs) {
         // Check per-terminal cooldown: suppress repeated notifications
         // from rapid idle cycling (e.g., background cursor activity)
