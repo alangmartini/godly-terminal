@@ -49,8 +49,9 @@ if (-not (Test-Path $remoteBin)) {
     }
 }
 
-# --- Generate API key ---
+# --- Generate API key and password ---
 $ApiKey = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+$Password = -join ((48..57) + (97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
 
 # --- Check if something is already listening on this port ---
 $remoteProc = $null
@@ -76,6 +77,7 @@ if ($remoteAlreadyRunning) {
     Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
     $env:GODLY_REMOTE_PORT = $Port
     $env:GODLY_REMOTE_API_KEY = $ApiKey
+    $env:GODLY_REMOTE_PASSWORD = $Password
     $remoteProc = Start-Process -FilePath $remoteBin -PassThru -NoNewWindow
     Start-Sleep -Seconds 1
 
@@ -148,6 +150,11 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  $phoneUrl" -ForegroundColor White
 Write-Host ""
+if (-not $remoteAlreadyRunning) {
+    Write-Host "  Password: $Password" -ForegroundColor White
+    Write-Host "  (enter this on your phone to connect)" -ForegroundColor DarkGray
+    Write-Host ""
+}
 if ($ApiKey) {
     Write-Host "  API Key: $ApiKey" -ForegroundColor DarkGray
 }

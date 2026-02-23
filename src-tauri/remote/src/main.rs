@@ -71,7 +71,11 @@ async fn main() {
     event_pump.spawn(Arc::clone(&daemon), scan_rows);
     tracing::info!("Event pump started (scan_rows={})", scan_rows);
 
-    let device_lock = Arc::new(DeviceLock::new());
+    let auth_password = std::env::var("GODLY_REMOTE_PASSWORD").ok();
+    if auth_password.is_some() {
+        tracing::info!("Device registration requires password");
+    }
+    let device_lock = Arc::new(DeviceLock::new(auth_password));
 
     let state = AppState {
         daemon,
