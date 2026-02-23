@@ -211,6 +211,16 @@ class TerminalService {
     await invoke('set_scrollback', { terminalId, offset });
   }
 
+  /** Pause output streaming for a session (background optimization). */
+  async pauseSession(sessionId: string): Promise<void> {
+    await invoke('pause_session', { sessionId });
+  }
+
+  /** Resume output streaming for a previously paused session. */
+  async resumeSession(sessionId: string): Promise<void> {
+    await invoke('resume_session', { sessionId });
+  }
+
   onTerminalOutput(terminalId: string, callback: () => void) {
     this.outputListeners.set(terminalId, callback);
     return () => this.outputListeners.delete(terminalId);
