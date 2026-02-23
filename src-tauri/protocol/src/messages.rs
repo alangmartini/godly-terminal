@@ -56,12 +56,16 @@ pub enum Request {
         session_id: String,
     },
     /// Read text between two grid positions (for selection/copy).
+    /// Row coordinates are viewport-relative (can be negative for selections
+    /// extending above the viewport). scrollback_offset is needed to convert
+    /// to absolute buffer positions for multi-screen selections.
     ReadGridText {
         session_id: String,
-        start_row: u16,
+        start_row: i32,
         start_col: u16,
-        end_row: u16,
+        end_row: i32,
         end_col: u16,
+        scrollback_offset: usize,
     },
     /// Read differential rich grid snapshot (only dirty rows since last read).
     ReadRichGridDiff {
