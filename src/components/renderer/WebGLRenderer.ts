@@ -213,11 +213,17 @@ export class WebGLRenderer {
     return { cellWidth, cellHeight };
   }
 
+  /** Release encoder/atlas buffers (e.g., when terminal is hidden). */
+  releaseBuffers(): void {
+    this.encoder.release();
+  }
+
   dispose(): void {
     const gl = this.gl;
     gl.deleteProgram(this.program);
     gl.deleteVertexArray(this.vao);
     gl.deleteTexture(this.cellDataTexture);
     this.atlas.dispose(gl);
+    this.encoder.release();
   }
 }

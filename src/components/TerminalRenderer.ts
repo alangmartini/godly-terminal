@@ -412,6 +412,48 @@ export class TerminalRenderer {
     this.canvas.focus();
   }
 
+  /**
+   * Release canvas GPU/memory resources without destroying the renderer.
+   * Called when the terminal is paused (hidden tab). The canvas elements stay
+   * in the DOM but their backing stores are freed by setting dimensions to 1×1.
+   * Call restoreCanvasResources() to re-allocate when the terminal becomes visible.
+   */
+  releaseCanvasResources() {
+    // Shrink canvases to 1×1 to release GPU backing store.
+    // Setting to 0×0 is invalid in some browsers; 1×1 = 4 bytes.
+    this.canvas.width = 1;
+    this.canvas.height = 1;
+    if (this.overlayCanvas) {
+      this.overlayCanvas.width = 1;
+      this.overlayCanvas.height = 1;
+    }
+    // Drop cached snapshot data
+    this.currentSnapshot = null;
+    this.pendingSnapshot = null;
+    // Release encoder buffers (WebGL mode)
+    if (this.webglRenderer) {
+      this.webglRenderer.releaseBuffers();
+    }
+    // Stop cursor blink timer (no need to repaint hidden canvas)
+    if (this.cursorBlinkInterval) {
+      clearInterval(this.cursorBlinkInterval);
+      this.cursorBlinkInterval = null;
+    }
+  }
+
+  /**
+   * Re-allocate canvas resources after releaseCanvasResources().
+   * Called when the terminal becomes visible again. updateSize() will
+   * set the correct dimensions; startCursorBlink() restarts the timer.
+   */
+  restoreCanvasResources() {
+    // updateSize() will set the correct dimensions on next call
+    // Restart cursor blink if it was stopped
+    if (!this.cursorBlinkInterval) {
+      this.startCursorBlink();
+    }
+  }
+
   /** Clean up all resources. */
   dispose() {
     this.stopSelectionAutoScroll();
@@ -432,6 +474,16 @@ export class TerminalRenderer {
       this.webglRenderer.dispose();
       this.webglRenderer = null;
     }
+    // Release canvas backing stores
+    this.canvas.width = 1;
+    this.canvas.height = 1;
+    if (this.overlayCanvas) {
+      this.overlayCanvas.width = 1;
+      this.overlayCanvas.height = 1;
+    }
+    this.currentSnapshot = null;
+    this.pendingSnapshot = null;
+    this.ctx = null;
   }
 
   // ---- Scrollback ----

@@ -861,6 +861,12 @@ export class TerminalPane {
       cancelAnimationFrame(this.renderRAF);
       this.renderRAF = null;
     }
+    // Release canvas GPU/memory resources for this hidden terminal.
+    // Each canvas at 1920×1080 @ 2x DPR holds ~33MB in backing store;
+    // with WebGL overlay that doubles. With 20 hidden terminals this
+    // saves ~600-1000MB of memory.
+    this.renderer.releaseCanvasResources();
+    this.cachedSnapshot = null;
   }
 
   /**
@@ -873,6 +879,8 @@ export class TerminalPane {
     if (!this.paused) return;
     this.paused = false;
     this.cachedSnapshot = null;
+    // Re-allocate canvas resources released by pause()
+    this.renderer.restoreCanvasResources();
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
