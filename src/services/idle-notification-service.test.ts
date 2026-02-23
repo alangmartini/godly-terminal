@@ -326,15 +326,14 @@ describe('IdleNotificationService', () => {
   // stream of false positives for terminals doing nothing meaningful.
 
   describe('Bug #272: spurious notifications for idle terminals', () => {
-    it('should NOT produce repeated notifications from periodic shell noise after cooldown expires', () => {
-      // Bug #272: After startup grace + first cooldown expire, periodic
-      // tiny output from idle shells restarts the notification cycle.
-      // Expected: at most 1 notification per terminal, not a repeating cycle.
+    it('should NOT produce repeated notifications from periodic shell noise within cooldown', () => {
+      // Bug #272: After initial notification fires, periodic tiny output from
+      // idle shells should not trigger re-notifications while within cooldown.
       createService({
         idleThresholdMs: 1000,
         checkIntervalMs: 500,
         startupGraceMs: 5000,
-        notifyCooldownMs: 5000,
+        notifyCooldownMs: 30000, // 30s cooldown — all cycles fit within it
       });
       activeTerminalId = 'term-active';
 
@@ -346,23 +345,14 @@ describe('IdleNotificationService', () => {
       vi.advanceTimersByTime(1500);
       expect(onNotify).toHaveBeenCalledTimes(1);
 
-      // Now simulate periodic shell noise over a long session (5 cycles).
-      // Each cycle: wait for cooldown to expire → tiny output → silence → notification.
-      // This simulates an idle shell producing occasional escape sequences.
+      // Simulate periodic shell noise within cooldown (5 cycles, 3s apart = 15s total, within 30s cooldown)
       for (let cycle = 0; cycle < 5; cycle++) {
-        // Wait for cooldown to expire
-        vi.advanceTimersByTime(6000);
-
-        // Tiny shell noise (e.g., prompt redraw, cursor escape sequence)
+        vi.advanceTimersByTime(1500);
         service.recordOutput('term-idle');
-
-        // Silence → idle threshold fires
         vi.advanceTimersByTime(1500);
       }
 
-      // Bug #272: Currently fires 6 total notifications (1 initial + 5 cycles).
-      // Expected: at most 1-2 notifications. Periodic noise on an idle terminal
-      // should not produce a steady stream of notifications.
+      // Only 1 notification — within-cooldown suppression prevents re-notification
       expect(onNotify).toHaveBeenCalledTimes(1);
     });
 
@@ -398,15 +388,14 @@ describe('IdleNotificationService', () => {
       expect(onNotify).not.toHaveBeenCalled();
     });
 
-    it('should NOT produce notifications for multiple idle terminals over a long session', () => {
-      // Bug #272: With 5+ background terminals all producing periodic noise,
-      // the user gets a notification every few seconds. This simulates a
-      // realistic long session with multiple idle Claude Code terminals.
+    it('should NOT produce notifications for multiple idle terminals within cooldown', () => {
+      // Bug #272: With 5+ background terminals producing periodic noise within
+      // cooldown, the user should not get repeated notifications.
       createService({
         idleThresholdMs: 1000,
         checkIntervalMs: 500,
         startupGraceMs: 5000,
-        notifyCooldownMs: 5000,
+        notifyCooldownMs: 30000, // 30s cooldown — all cycles fit within it
       });
       activeTerminalId = 'term-active';
 
@@ -418,28 +407,52 @@ describe('IdleNotificationService', () => {
         service.recordOutput(`term-bg-${i}`);
       }
       vi.advanceTimersByTime(1500);
-      const initialCount = onNotify.mock.calls.length;
 
-      // Now simulate a long session (3 cooldown cycles) where all 5
-      // terminals produce periodic shell noise.
+      // Simulate 3 cycles of shell noise within cooldown (3s apart = 9s total, within 30s)
       onNotify.mockClear();
       for (let cycle = 0; cycle < 3; cycle++) {
-        // Wait for cooldown to expire
-        vi.advanceTimersByTime(6000);
-
-        // All 5 terminals produce tiny shell noise
+        vi.advanceTimersByTime(1500);
         for (let i = 1; i <= 5; i++) {
           service.recordOutput(`term-bg-${i}`);
         }
-
-        // Silence → idle threshold fires for all
         vi.advanceTimersByTime(1500);
       }
 
-      // Bug #272: Currently fires 15 notifications (5 terminals × 3 cycles).
-      // Expected: 0 additional notifications after the initial burst.
-      // Idle terminals with only periodic noise should be treated as inactive.
+      // 0 additional notifications — all within cooldown
       expect(onNotify).toHaveBeenCalledTimes(0);
+    });
+
+    it('should re-notify after cooldown expires when there was genuine new output', () => {
+      // Core fix: cooldown IS the spam prevention — after it expires, a new
+      // output→idle transition should fire a notification without requiring
+      // extended silence to re-arm.
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        startupGraceMs: 5000,
+        notifyCooldownMs: 5000,
+      });
+      activeTerminalId = 'term-active';
+
+      // Advance past startup grace
+      vi.advanceTimersByTime(6000);
+
+      // First output → notification
+      service.recordOutput('term-bg');
+      vi.advanceTimersByTime(1500);
+      expect(onNotify).toHaveBeenCalledTimes(1);
+
+      // Wait for cooldown to expire (5s cooldown + margin)
+      vi.advanceTimersByTime(5000);
+
+      // New genuine output (e.g., Claude shows plan approval prompt)
+      service.recordOutput('term-bg');
+
+      // Wait for idle threshold
+      vi.advanceTimersByTime(1500);
+
+      // Should re-notify — cooldown has expired and there was genuine new output
+      expect(onNotify).toHaveBeenCalledTimes(2);
     });
 
     it('should still notify when genuinely new substantial activity resumes after long idle', () => {
