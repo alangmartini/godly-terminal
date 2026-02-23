@@ -9,12 +9,34 @@ export async function llmGetStatus(): Promise<LlmStatus> {
   return invoke<LlmStatus>('llm_get_status');
 }
 
-export async function llmDownloadModel(): Promise<void> {
-  return invoke<void>('llm_download_model');
+export async function llmDownloadModel(
+  hfRepo?: string,
+  hfFilename?: string,
+  tokenizerRepo?: string,
+  subdir?: string,
+): Promise<void> {
+  return invoke<void>('llm_download_model', {
+    hfRepo: hfRepo ?? null,
+    hfFilename: hfFilename ?? null,
+    tokenizerRepo: tokenizerRepo ?? null,
+    subdir: subdir ?? null,
+  });
 }
 
-export async function llmLoadModel(): Promise<void> {
-  return invoke<void>('llm_load_model');
+export async function llmLoadModel(
+  opts?: {
+    ggufPath?: string;
+    tokenizerPath?: string;
+    subdir?: string;
+    ggufFilename?: string;
+  },
+): Promise<void> {
+  return invoke<void>('llm_load_model', {
+    ggufPath: opts?.ggufPath ?? null,
+    tokenizerPath: opts?.tokenizerPath ?? null,
+    subdir: opts?.subdir ?? null,
+    ggufFilename: opts?.ggufFilename ?? null,
+  });
 }
 
 export async function llmUnloadModel(): Promise<void> {
@@ -33,8 +55,30 @@ export async function llmGenerate(
   });
 }
 
-export async function llmGenerateBranchName(description: string): Promise<string> {
-  return invoke<string>('llm_generate_branch_name', { description });
+export async function llmGenerateBranchName(
+  description: string,
+  useTiny?: boolean,
+): Promise<string> {
+  return invoke<string>('llm_generate_branch_name', {
+    description,
+    useTiny: useTiny ?? null,
+  });
+}
+
+export async function llmCheckModelFiles(
+  opts?: {
+    subdir?: string;
+    ggufFilename?: string;
+    ggufPath?: string;
+    tokenizerPath?: string;
+  },
+): Promise<boolean> {
+  return invoke<boolean>('llm_check_model_files', {
+    subdir: opts?.subdir ?? null,
+    ggufFilename: opts?.ggufFilename ?? null,
+    ggufPath: opts?.ggufPath ?? null,
+    tokenizerPath: opts?.tokenizerPath ?? null,
+  });
 }
 
 export function isModelReady(status: LlmStatus): boolean {
