@@ -514,6 +514,10 @@ function renderWorkspaces(workspaces) {
 // --- Session ---
 async function openSession(id, name) {
   currentSessionId = id;
+  // Reset input state when opening a new session
+  const field = document.getElementById('inputField');
+  field.disabled = false;
+  field.placeholder = 'Type command...';
   showView('session', name || id.slice(0, 8));
   await refreshSession();
 }
@@ -526,6 +530,18 @@ async function refreshSession() {
     const output = document.getElementById('sessionOutput');
     output.textContent = (data.lines || []).join('\n') || '(empty)';
     output.scrollTop = output.scrollHeight;
+
+    // Detect session death
+    if (data.running === false) {
+      const code = data.exit_code != null ? ` (exit code ${data.exit_code})` : '';
+      output.textContent += `\n\n--- Session ended${code} ---`;
+      output.scrollTop = output.scrollHeight;
+      // Disable input and stop polling
+      const field = document.getElementById('inputField');
+      field.disabled = true;
+      field.placeholder = 'Session ended';
+      stopSessionRefresh();
+    }
   } catch (e) {
     document.getElementById('sessionOutput').textContent = 'Error: ' + e.message;
   }
@@ -604,6 +620,19 @@ async function sendToSession(sid, text) {
     }, 300);
   } catch (e) {
     console.error('Write failed:', e);
+    // Detect dead session errors from daemon
+    const msg = e.message || '';
+    if (msg.includes('has exited') || msg.includes('not found')) {
+      const output = document.getElementById('sessionOutput');
+      if (output) {
+        output.textContent += '\n\n--- Session ended ---';
+        output.scrollTop = output.scrollHeight;
+      }
+      const field = document.getElementById('inputField');
+      field.disabled = true;
+      field.placeholder = 'Session ended';
+      stopSessionRefresh();
+    }
   }
 }
 

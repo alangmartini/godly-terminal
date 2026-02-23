@@ -1009,6 +1009,7 @@ pub fn handle_mcp_request(
                     Ok(godly_protocol::Response::LastOutputTime {
                         epoch_ms,
                         running: is_running,
+                        ..
                     }) => {
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -1093,7 +1094,7 @@ pub fn handle_mcp_request(
                     session_id: terminal_id.clone(),
                 };
                 match daemon.send_request(&req) {
-                    Ok(godly_protocol::Response::LastOutputTime { epoch_ms, running }) => {
+                    Ok(godly_protocol::Response::LastOutputTime { epoch_ms, running, .. }) => {
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()

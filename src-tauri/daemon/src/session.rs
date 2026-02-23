@@ -1348,16 +1348,34 @@ impl DaemonSession {
     }
 
     /// Read text between two grid positions (for selection/copy).
+    /// Row coordinates are viewport-relative (can be negative for multi-screen
+    /// selections). scrollback_offset is used to convert to absolute buffer
+    /// positions so the full selection range can be read across scrollback.
     pub fn read_grid_text(
         &self,
-        start_row: u16,
+        start_row: i32,
         start_col: u16,
-        end_row: u16,
+        end_row: i32,
         end_col: u16,
+        scrollback_offset: usize,
     ) -> String {
         let vt = self.vt_parser.lock();
         let screen = vt.screen();
-        screen.contents_between(start_row, start_col, end_row, end_col)
+        let scrollback_count = screen.scrollback_count();
+        let (grid_rows, _) = screen.size();
+
+        // Convert viewport-relative rows to absolute buffer positions.
+        // Absolute row 0 = oldest scrollback row.
+        // Viewport row 0 at scrollback_offset S maps to:
+        //   absolute = scrollback_count - S
+        let base = scrollback_count as i64 - scrollback_offset as i64;
+        let abs_start = (base + start_row as i64).max(0) as usize;
+        let total_rows = scrollback_count + usize::from(grid_rows);
+        let abs_end = (base + end_row as i64)
+            .max(0)
+            .min(total_rows as i64 - 1) as usize;
+
+        screen.contents_between_absolute(abs_start, start_col, abs_end, end_col)
     }
 
     /// Search the output history for a text string.
