@@ -24,6 +24,10 @@ Cargo.lock
 Thumbs.db
 NUL
 
+# Demo recording output
+demo-output/
+demo-screenshots/
+
 # Scratch / personal notes
 TODO.md
 commands.txt

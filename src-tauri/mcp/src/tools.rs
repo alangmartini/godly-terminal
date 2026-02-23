@@ -482,6 +482,10 @@ pub fn list_tools() -> Value {
                         "skip_fetch": {
                             "type": "boolean",
                             "description": "Skip git fetch before creating worktree (default: true for speed). Set false to branch from latest remote state."
+                        },
+                        "no_worktree": {
+                            "type": "boolean",
+                            "description": "Open in the main branch without creating a worktree (default: false). When true, branch_name and skip_fetch are ignored."
                         }
                     },
                     "required": ["workspace_id", "prompt"]
@@ -862,11 +866,13 @@ pub fn call_tool(
                 .to_string();
             let branch_name = args.get("branch_name").and_then(|v| v.as_str()).map(String::from);
             let skip_fetch = args.get("skip_fetch").and_then(|v| v.as_bool());
+            let no_worktree = args.get("no_worktree").and_then(|v| v.as_bool());
             McpRequest::QuickClaude {
                 workspace_id,
                 prompt,
                 branch_name,
                 skip_fetch,
+                no_worktree,
             }
         }
 
