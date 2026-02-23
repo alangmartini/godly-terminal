@@ -16,6 +16,10 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: (...args: unknown[]) => mockListen(...args),
 }));
 
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock localStorage
 const storage = new Map<string, string>();
 vi.stubGlobal('localStorage', {
@@ -57,16 +61,16 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
     plugin = new SmolLM2Plugin();
   });
 
-  describe('Retry button behavior', () => {
-    it('calls llm_download_model when clicking Retry Download after error', async () => {
-      // Bug #199: Retry must call llm_download_model, not just llm_get_status
+  describe('Download button after error state', () => {
+    it('calls llm_download_model when clicking Download after error', async () => {
+      // Bug #199: Download/retry must call llm_download_model, not just llm_get_status
+      // In the new preset UI, error state shows Download button (files don't exist yet)
       mockInvoke.mockImplementation((cmd: string) => {
         if (cmd === 'llm_get_status') {
           return Promise.resolve({ status: 'Error', detail: 'Download failed: Failed to download tokenizer: connection refused' });
         }
-        if (cmd === 'llm_download_model') {
-          return Promise.resolve(undefined);
-        }
+        if (cmd === 'llm_check_model_files') return Promise.resolve(false);
+        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
         return Promise.resolve(undefined);
       });
 
@@ -74,14 +78,24 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
       await plugin.init(ctx);
 
       const el = plugin.renderSettings!();
-      const retryBtn = Array.from(el.querySelectorAll('button'))
-        .find(b => b.textContent?.includes('Retry'));
+      // Wait for async preset buttons to render
+      await new Promise(r => setTimeout(r, 50));
 
-      expect(retryBtn).toBeDefined();
-      expect(retryBtn!.textContent).toContain('Download');
+      const downloadBtn = Array.from(el.querySelectorAll('button'))
+        .find(b => b.textContent?.includes('Download'));
+
+      expect(downloadBtn).toBeDefined();
 
       mockInvoke.mockClear();
-      await retryBtn!.click();
+      // Re-set mocks for the click
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'llm_get_status') return Promise.resolve({ status: 'Downloaded' });
+        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
+        if (cmd === 'llm_check_model_files') return Promise.resolve(true);
+        return Promise.resolve(undefined);
+      });
+
+      await downloadBtn!.click();
       await new Promise(r => setTimeout(r, 50));
 
       const downloadCalls = mockInvoke.mock.calls.filter(
@@ -90,7 +104,7 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
       expect(downloadCalls.length).toBeGreaterThan(0);
     });
 
-    it('updates status after successful retry', async () => {
+    it('updates status after successful download retry', async () => {
       let callCount = 0;
       mockInvoke.mockImplementation((cmd: string) => {
         if (cmd === 'llm_get_status') {
@@ -100,9 +114,8 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
           }
           return Promise.resolve({ status: 'Downloaded' });
         }
-        if (cmd === 'llm_download_model') {
-          return Promise.resolve(undefined);
-        }
+        if (cmd === 'llm_check_model_files') return Promise.resolve(false);
+        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
         return Promise.resolve(undefined);
       });
 
@@ -110,13 +123,23 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
       await plugin.init(ctx);
 
       const el = plugin.renderSettings!();
+      await new Promise(r => setTimeout(r, 50));
+
       const statusValue = el.querySelector('.shortcut-keys') as HTMLElement;
       expect(statusValue?.textContent).toContain('Error');
 
-      const retryBtn = Array.from(el.querySelectorAll('button'))
-        .find(b => b.textContent?.includes('Retry'));
+      const downloadBtn = Array.from(el.querySelectorAll('button'))
+        .find(b => b.textContent?.includes('Download'));
 
-      await retryBtn!.click();
+      // After click, check_model_files should return true
+      mockInvoke.mockImplementation((cmd: string) => {
+        if (cmd === 'llm_get_status') return Promise.resolve({ status: 'Downloaded' });
+        if (cmd === 'llm_check_model_files') return Promise.resolve(true);
+        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
+        return Promise.resolve(undefined);
+      });
+
+      await downloadBtn!.click();
       await new Promise(r => setTimeout(r, 50));
 
       expect(statusValue?.textContent).not.toContain('Error');
@@ -147,9 +170,9 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
     });
   });
 
-  describe('Download button after error', () => {
-    it('shows a button labeled "Retry Download" in error state', async () => {
-      // Bug #199 regression: error state must have a button that clearly retries
+  describe('Download button visible in error state', () => {
+    it('shows a Download button in error state (files not yet on disk)', async () => {
+      // Bug #199 regression: error state must have a button to retry download
       mockInvoke.mockImplementation((cmd: string) => {
         if (cmd === 'llm_get_status') {
           return Promise.resolve({
@@ -157,6 +180,7 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
             detail: 'Download failed: Failed to download tokenizer: connection refused',
           });
         }
+        if (cmd === 'llm_check_model_files') return Promise.resolve(false);
         return Promise.resolve(undefined);
       });
 
@@ -164,11 +188,13 @@ describe('Bug #199 regression: SmolLM2 download retry and error quality', () => 
       await plugin.init(ctx);
 
       const el = plugin.renderSettings!();
+      await new Promise(r => setTimeout(r, 50));
+
       const buttons = Array.from(el.querySelectorAll('button'));
       const buttonTexts = buttons.map(b => b.textContent);
 
       const hasDownloadAction = buttonTexts.some(
-        t => t?.includes('Download') || t?.includes('Retry Download')
+        t => t?.includes('Download')
       );
       expect(hasDownloadAction).toBe(true);
     });
