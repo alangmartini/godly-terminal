@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use godly_protocol::{DaemonMessage, Event, Request, Response, read_request, write_daemon_message};
 
 use crate::debug_log::daemon_log;
+use crate::scrollback_budget::ScrollbackBudget;
 use crate::session::DaemonSession;
 
 /// Log current process memory usage (Windows: working set via GetProcessMemoryInfo).
@@ -47,6 +48,7 @@ pub struct DaemonServer {
     /// it set has_clients=false even if other clients were still connected,
     /// allowing the idle timeout to kill the daemon prematurely.
     client_count: Arc<AtomicUsize>,
+    scrollback_budget: Arc<parking_lot::Mutex<ScrollbackBudget>>,
 }
 
 impl DaemonServer {
@@ -55,6 +57,7 @@ impl DaemonServer {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             running: Arc::new(AtomicBool::new(true)),
             client_count: Arc::new(AtomicUsize::new(0)),
+            scrollback_budget: Arc::new(parking_lot::Mutex::new(ScrollbackBudget::new())),
         }
     }
 
@@ -77,6 +80,7 @@ impl DaemonServer {
         let client_count = self.client_count.clone();
         let last_activity = Arc::new(RwLock::new(Instant::now()));
         let last_activity_for_timeout = last_activity.clone();
+        let scrollback_budget = self.scrollback_budget.clone();
 
         tokio::spawn(async move {
             let idle_timeout = Duration::from_secs(300); // 5 minutes
@@ -108,6 +112,34 @@ impl DaemonServer {
                         session_ids
                     );
                     log_memory_usage("health_check");
+                }
+
+                // Scrollback budget enforcement (every 6th tick = ~60s)
+                if health_tick % 6 == 0 && session_count > 0 {
+                    let mut budget = scrollback_budget.lock();
+                    budget.retain_sessions(&session_ids);
+                    {
+                        let guard = sessions.read();
+                        for (id, session) in guard.iter() {
+                            let (rows, _bytes) = session.scrollback_stats();
+                            budget.update_session(
+                                id,
+                                rows,
+                                session.cols(),
+                                session.is_paused(),
+                                session.last_output_epoch_ms(),
+                            );
+                        }
+                    }
+                    let actions = budget.check_and_trim();
+                    if !actions.is_empty() {
+                        let guard = sessions.read();
+                        for (id, new_len) in &actions {
+                            if let Some(session) = guard.get(id.as_str()) {
+                                session.set_scrollback_len(*new_len);
+                            }
+                        }
+                    }
                 }
 
                 if session_count == 0 && num_clients == 0 && elapsed > idle_timeout {
@@ -558,6 +590,52 @@ fn io_thread(
                                 let msg = DaemonMessage::Response(response);
                                 if write_daemon_message(&mut pipe, &msg).is_err() {
                                     daemon_log!("Write error on direct Resize response, stopping");
+                                    io_running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                                total_resp_writes += 1;
+                                total_writes += 1;
+                                did_work = true;
+                            }
+                            Request::PauseSession { session_id } => {
+                                let response = {
+                                    let sessions_guard = sessions.read();
+                                    match sessions_guard.get(session_id) {
+                                        Some(session) => {
+                                            session.pause();
+                                            Response::Ok
+                                        }
+                                        None => Response::Error {
+                                            message: format!("Session {} not found", session_id),
+                                        },
+                                    }
+                                };
+                                let msg = DaemonMessage::Response(response);
+                                if write_daemon_message(&mut pipe, &msg).is_err() {
+                                    daemon_log!("Write error on direct PauseSession response, stopping");
+                                    io_running.store(false, Ordering::Relaxed);
+                                    break;
+                                }
+                                total_resp_writes += 1;
+                                total_writes += 1;
+                                did_work = true;
+                            }
+                            Request::ResumeSession { session_id } => {
+                                let response = {
+                                    let sessions_guard = sessions.read();
+                                    match sessions_guard.get(session_id) {
+                                        Some(session) => {
+                                            session.resume();
+                                            Response::Ok
+                                        }
+                                        None => Response::Error {
+                                            message: format!("Session {} not found", session_id),
+                                        },
+                                    }
+                                };
+                                let msg = DaemonMessage::Response(response);
+                                if write_daemon_message(&mut pipe, &msg).is_err() {
+                                    daemon_log!("Write error on direct ResumeSession response, stopping");
                                     io_running.store(false, Ordering::Relaxed);
                                     break;
                                 }
@@ -1433,6 +1511,34 @@ async fn handle_request(
                     eprintln!("[daemon] Closed session {}", session_id);
                     daemon_log!("Closed session {} (remaining sessions: {})", session_id, remaining);
                     log_memory_usage(&format!("session_close({})", remaining));
+                    Response::Ok
+                }
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
+        // PauseSession/ResumeSession are handled directly in the I/O thread
+        // for low latency. If they somehow reach here, handle them gracefully.
+        Request::PauseSession { session_id } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => {
+                    session.pause();
+                    Response::Ok
+                }
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
+        Request::ResumeSession { session_id } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => {
+                    session.resume();
                     Response::Ok
                 }
                 None => Response::Error {

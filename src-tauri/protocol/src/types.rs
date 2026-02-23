@@ -50,6 +50,12 @@ pub struct SessionInfo {
     pub created_at: u64,
     pub attached: bool,
     pub running: bool,
+    #[serde(default)]
+    pub scrollback_rows: usize,
+    #[serde(default)]
+    pub scrollback_memory_bytes: usize,
+    #[serde(default)]
+    pub paused: bool,
 }
 
 /// Grid snapshot from the godly-vt terminal state engine.

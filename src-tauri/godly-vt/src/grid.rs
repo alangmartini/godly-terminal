@@ -791,6 +791,18 @@ impl Grid {
             self.pos.col = self.size.cols - 1;
         }
     }
+
+    pub fn set_scrollback_len(&mut self, len: usize) {
+        self.scrollback_len = len;
+        while self.scrollback.len() > self.scrollback_len {
+            self.scrollback.pop_front();
+        }
+        self.scrollback_offset = self.scrollback_offset.min(self.scrollback.len());
+    }
+
+    pub fn scrollback_memory_estimate(&self, cell_bytes: usize) -> usize {
+        self.scrollback.len() * usize::from(self.size.cols) * cell_bytes
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]

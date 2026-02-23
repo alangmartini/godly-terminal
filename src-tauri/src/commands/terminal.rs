@@ -639,6 +639,31 @@ fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: 
     }
 }
 
+/// Pause output streaming for a session (session stays alive, VT parser
+/// keeps running, but no Output/GridDiff events are sent to the client).
+#[tauri::command]
+pub fn pause_session(
+    session_id: String,
+    daemon: State<Arc<DaemonClient>>,
+) -> Result<(), String> {
+    let request = Request::PauseSession {
+        session_id,
+    };
+    daemon.send_fire_and_forget(&request)
+}
+
+/// Resume output streaming for a previously paused session.
+#[tauri::command]
+pub fn resume_session(
+    session_id: String,
+    daemon: State<Arc<DaemonClient>>,
+) -> Result<(), String> {
+    let request = Request::ResumeSession {
+        session_id,
+    };
+    daemon.send_fire_and_forget(&request)
+}
+
 /// Detach all sessions (called on window close instead of killing them)
 #[tauri::command]
 pub fn detach_all_sessions(

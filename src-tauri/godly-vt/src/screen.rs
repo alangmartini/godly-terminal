@@ -152,6 +152,15 @@ impl Screen {
         self.grid().scrollback()
     }
 
+    pub fn set_scrollback_len(&mut self, len: usize) {
+        self.grid_mut().set_scrollback_len(len);
+    }
+
+    #[must_use]
+    pub fn scrollback_memory_estimate(&self) -> usize {
+        self.grid().scrollback_memory_estimate(std::mem::size_of::<crate::Cell>())
+    }
+
     /// Returns the text contents of the terminal.
     ///
     /// This will not include any formatting information, and will be in plain
