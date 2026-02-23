@@ -255,7 +255,7 @@ pub async fn get_idle(
     .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
 
     match resp {
-        Response::LastOutputTime { epoch_ms, running } => {
+        Response::LastOutputTime { epoch_ms, running, .. } => {
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -320,10 +320,14 @@ fn default_text_lines() -> usize {
 pub struct TextResponse {
     pub lines: Vec<String>,
     pub total_rows: usize,
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
 }
 
 /// GET /api/sessions/:id/text?lines=50
 /// Returns last N lines of terminal output as plain text (strips empty trailing lines).
+/// Includes `running` and `exit_code` so the phone UI can detect session death.
 pub async fn get_text(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -332,7 +336,7 @@ pub async fn get_text(
     let resp = async_request(
         &state.daemon,
         Request::ReadGrid {
-            session_id: id,
+            session_id: id.clone(),
         },
     )
     .await
@@ -352,7 +356,18 @@ pub async fn get_text(
             let n = query.lines.min(200).min(rows.len());
             let lines: Vec<String> = rows[rows.len().saturating_sub(n)..].to_vec();
 
-            Ok(Json(TextResponse { lines, total_rows }))
+            // Fetch session status (running/exit_code) via GetLastOutputTime
+            let (running, exit_code) = match async_request(
+                &state.daemon,
+                Request::GetLastOutputTime { session_id: id },
+            )
+            .await
+            {
+                Ok(Response::LastOutputTime { running, exit_code, .. }) => (running, exit_code),
+                _ => (true, None), // default to running if status check fails
+            };
+
+            Ok(Json(TextResponse { lines, total_rows, running, exit_code }))
         }
         Response::Error { message } => Err((StatusCode::BAD_REQUEST, message)),
         other => Err((
@@ -412,6 +427,33 @@ mod tests {
                 has_traversal
             );
         }
+    }
+
+    #[test]
+    fn text_response_includes_running_and_exit_code() {
+        let resp = super::TextResponse {
+            lines: vec!["hello".into()],
+            total_rows: 1,
+            running: true,
+            exit_code: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"running\":true"));
+        // exit_code should be omitted when None (skip_serializing_if)
+        assert!(!json.contains("exit_code"));
+    }
+
+    #[test]
+    fn text_response_with_exit_code() {
+        let resp = super::TextResponse {
+            lines: vec!["goodbye".into()],
+            total_rows: 1,
+            running: false,
+            exit_code: Some(137),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"running\":false"));
+        assert!(json.contains("\"exit_code\":137"));
     }
 
     #[test]

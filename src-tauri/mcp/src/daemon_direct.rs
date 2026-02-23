@@ -348,7 +348,7 @@ impl Backend for DaemonDirectBackend {
                     })?;
 
                     match resp {
-                        Response::LastOutputTime { epoch_ms, running } => {
+                        Response::LastOutputTime { epoch_ms, running, .. } => {
                             let now_ms = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -523,6 +523,7 @@ impl Backend for DaemonDirectBackend {
                         Response::LastOutputTime {
                             epoch_ms,
                             running: is_running,
+                            ..
                         } => {
                             let now_ms = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
