@@ -56,6 +56,9 @@ pub struct SessionInfo {
     pub scrollback_memory_bytes: usize,
     #[serde(default)]
     pub paused: bool,
+    /// OSC window title set by the running program (e.g. Claude Code sets "claude: <task>").
+    #[serde(default)]
+    pub title: String,
 }
 
 /// Grid snapshot from the godly-vt terminal state engine.
