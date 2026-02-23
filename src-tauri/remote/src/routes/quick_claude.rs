@@ -177,7 +177,7 @@ async fn poll_idle(
         .await;
 
         match resp {
-            Ok(Response::LastOutputTime { epoch_ms, running }) => {
+            Ok(Response::LastOutputTime { epoch_ms, running, .. }) => {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
