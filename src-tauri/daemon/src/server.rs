@@ -1397,11 +1397,12 @@ async fn handle_request(
             start_col,
             end_row,
             end_col,
+            scrollback_offset,
         } => {
             let sessions_guard = sessions.read();
             match sessions_guard.get(session_id) {
                 Some(session) => {
-                    let text = session.read_grid_text(*start_row, *start_col, *end_row, *end_col);
+                    let text = session.read_grid_text(*start_row, *start_col, *end_row, *end_col, *scrollback_offset);
                     Response::GridText { text }
                 }
                 None => Response::Error {
