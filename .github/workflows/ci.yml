@@ -85,7 +85,7 @@ jobs:
         run: >
           cd src-tauri && cargo nextest run -p godly-daemon --profile ci
           --partition hash:${{ matrix.partition }}/3
-          -E "not (binary(zombie_tabs) | binary(single_instance) | test(arrow_up_during_multi_session_contention))"
+          -E "not test(arrow_up_during_multi_session_contention)"
         timeout-minutes: 10
 
   # ---------------------------------------------------------------------------

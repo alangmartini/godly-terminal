@@ -131,6 +131,15 @@
   .term-name { flex: 1; font-size: 14px; }
   .term-cwd { font-size: 11px; color: var(--text-dim); }
   .term-arrow { color: var(--text-dim); font-size: 16px; }
+  .term-idle-badge {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); flex-shrink: 0;
+    animation: pulse-idle 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-idle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
 
   /* --- Session view --- */
   .session-output {
@@ -336,6 +345,7 @@ let sseSource = null;
 let refreshTimer = null;
 let sessionRefreshTimer = null;
 let activePrompts = new Map(); // session_id -> prompt data
+let idleTerminals = new Set(); // session_ids that went idle after output
 
 // --- API ---
 function baseUrl() {
@@ -503,6 +513,7 @@ function renderWorkspaces(workspaces) {
             <div class="term-name">${escHtml(t.name)}</div>
             ${t.cwd ? `<div class="term-cwd">${escHtml(t.cwd)}</div>` : ''}
           </div>
+          ${idleTerminals.has(t.id) ? '<div class="term-idle-badge"></div>' : ''}
           <span class="term-arrow">&#8250;</span>
         </div>
       `).join('')}
@@ -514,6 +525,7 @@ function renderWorkspaces(workspaces) {
 // --- Session ---
 async function openSession(id, name) {
   currentSessionId = id;
+  idleTerminals.delete(id);
   // Reset input state when opening a new session
   const field = document.getElementById('inputField');
   field.disabled = false;
@@ -670,6 +682,16 @@ async function connectSSE() {
       try {
         const data = JSON.parse(e.data);
         activePrompts.delete(data.session_id);
+        if (currentView === 'dashboard') refreshDashboard();
+      } catch {}
+    });
+
+    sseSource.addEventListener('terminal_idle', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        idleTerminals.add(data.session_id);
+        // Vibrate phone to alert user
+        if (navigator.vibrate) navigator.vibrate(200);
         if (currentView === 'dashboard') refreshDashboard();
       } catch {}
     });
