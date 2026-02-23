@@ -7,8 +7,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# --- Check ngrok ---
-if (-not (Get-Command ngrok -ErrorAction SilentlyContinue)) {
+# --- Find ngrok ---
+$ngrokBin = (Get-Command ngrok -ErrorAction SilentlyContinue).Source
+if (-not $ngrokBin) {
+    # Check common winget install location
+    $wingetPath = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    $ngrokDir = Get-ChildItem -Path $wingetPath -Filter "Ngrok*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ngrokDir) {
+        $candidate = Join-Path $ngrokDir.FullName "ngrok.exe"
+        if (Test-Path $candidate) { $ngrokBin = $candidate }
+    }
+}
+if (-not $ngrokBin) {
     Write-Host "ngrok not found." -ForegroundColor Red
     Write-Host ""
     Write-Host "Install it with:" -ForegroundColor Yellow
@@ -78,7 +88,7 @@ if ($remoteAlreadyRunning) {
 
 # --- Start ngrok ---
 Write-Host "Starting ngrok tunnel..." -ForegroundColor Green
-$ngrokProc = Start-Process -FilePath "ngrok" -ArgumentList "http", "$Port", "--log=stderr" -PassThru -NoNewWindow -RedirectStandardError "$env:TEMP\ngrok-stderr.log"
+$ngrokProc = Start-Process -FilePath $ngrokBin -ArgumentList "http $Port --log=stdout --log-level=warn" -PassThru -WindowStyle Hidden
 
 # --- Get public URL from ngrok API ---
 $publicUrl = $null
@@ -120,12 +130,15 @@ Write-Host "  Scan this QR code with your phone:" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Use npx qrcode-terminal to render QR in terminal
-$npxPath = (Get-Command npx -ErrorAction SilentlyContinue).Source
-if ($npxPath) {
-    & npx --yes qrcode-terminal "$phoneUrl" --small
+# Use qrcode-terminal (installed as devDependency) to render QR in terminal
+$nodePath = (Get-Command node -ErrorAction SilentlyContinue).Source
+if ($nodePath) {
+    & node -e "require('qrcode-terminal').generate('$phoneUrl', {small: true})" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "(QR code unavailable - run 'npm install' first)" -ForegroundColor Yellow
+    }
 } else {
-    Write-Host "(QR code unavailable - npx not found)" -ForegroundColor Yellow
+    Write-Host "(QR code unavailable - node not found)" -ForegroundColor Yellow
 }
 
 Write-Host ""
