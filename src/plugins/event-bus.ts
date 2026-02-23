@@ -77,30 +77,20 @@ export class PluginEventBus {
   /**
    * Classify an mcp-notify message and emit the appropriate event.
    * Returns the emit result so callers can check if sound was handled.
+   *
+   * Bug #289: Previously emitted both the classified event AND a generic
+   * 'notification' event, causing plugins subscribed to both to fire twice
+   * (double sound play). Now only emits the classified event.
    */
   emitMcpNotify(terminalId: string, message: string | null): EmitResult {
     const classifiedType = classifyMessage(message);
 
-    // First emit the classified event
-    const classifiedResult = this.emit({
+    return this.emit({
       type: classifiedType,
       terminalId,
       message: message ?? undefined,
       timestamp: Date.now(),
     });
-
-    // If the classified type is different from 'notification', also emit
-    // a generic 'notification' event (but only for non-sound purposes)
-    if (classifiedType !== 'notification') {
-      this.emit({
-        type: 'notification',
-        terminalId,
-        message: message ?? undefined,
-        timestamp: Date.now(),
-      });
-    }
-
-    return classifiedResult;
   }
 
   removeAllHandlers(): void {
