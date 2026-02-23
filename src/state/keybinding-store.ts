@@ -30,9 +30,12 @@ export type ActionId =
   | 'scroll.toBottom'
   | 'tabs.renameTerminal'
   | 'tabs.quickClaude'
+  | 'zoom.in'
+  | 'zoom.out'
+  | 'zoom.reset'
   | 'debug.togglePerfOverlay';
 
-export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll' | 'Debug';
+export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll' | 'Zoom' | 'Debug';
 
 /** Whether the shortcut is an app-level action or a terminal control key. */
 export type ShortcutType = 'app' | 'terminal-control';
@@ -201,6 +204,27 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Tabs',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'q' },
+  },
+  {
+    id: 'zoom.in',
+    label: 'Zoom In',
+    category: 'Zoom',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: false, key: '=' },
+  },
+  {
+    id: 'zoom.out',
+    label: 'Zoom Out',
+    category: 'Zoom',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: false, key: '-' },
+  },
+  {
+    id: 'zoom.reset',
+    label: 'Reset Zoom',
+    category: 'Zoom',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: false, key: '0' },
   },
   {
     id: 'debug.togglePerfOverlay',
