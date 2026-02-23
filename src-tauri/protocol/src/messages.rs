@@ -73,6 +73,15 @@ pub enum Request {
         session_id: String,
         offset: usize,
     },
+    /// Pause output streaming for a session (session stays alive, VT parser
+    /// keeps running, but no Output/GridDiff events are sent to the client).
+    PauseSession {
+        session_id: String,
+    },
+    /// Resume output streaming for a previously paused session.
+    ResumeSession {
+        session_id: String,
+    },
     Ping,
 }
 
