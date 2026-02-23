@@ -101,7 +101,7 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
       - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim --release
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote --release
         timeout-minutes: 12
       - name: Upload release binaries
         uses: actions/upload-artifact@v4
@@ -112,6 +112,7 @@ jobs:
             src-tauri/target/release/godly-mcp.exe
             src-tauri/target/release/godly-notify.exe
             src-tauri/target/release/godly-pty-shim.exe
+            src-tauri/target/release/godly-remote.exe
           retention-days: 1
 
   # ---------------------------------------------------------------------------
