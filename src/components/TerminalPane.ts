@@ -927,6 +927,10 @@ export class TerminalPane {
     this.cachedSnapshot = null;
     // Re-allocate canvas resources released by pause()
     this.renderer.restoreCanvasResources();
+    // Promote to WebGL now that the terminal is visible. This is lazy —
+    // WebGL contexts are only created for visible terminals, avoiding
+    // exhaustion of the browser's 8-16 context limit with 20+ terminals.
+    this.tryPromoteWebGL();
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
@@ -948,6 +952,9 @@ export class TerminalPane {
     this.container.classList.toggle('active', active);
     if (active) {
       this.resume();
+      // Promote to WebGL on first activation (when resume() no-ops because
+      // paused is already false). Subsequent activations go through resume().
+      this.tryPromoteWebGL();
       // Sync canvas bitmap to container size immediately to prevent the browser
       // from stretching the stale bitmap (300×150 default) for one frame,
       // which causes a "zoomed in" flash on tab switch / reopen.
@@ -980,6 +987,7 @@ export class TerminalPane {
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
       this.resume();
+      this.tryPromoteWebGL();
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
       this.renderer.updateSize();
       requestAnimationFrame(() => {
@@ -999,6 +1007,16 @@ export class TerminalPane {
 
   focus() {
     this.focusInput();
+  }
+
+  /** Attempt to promote the renderer to WebGL and attach overlay canvas. */
+  private tryPromoteWebGL() {
+    if (this.renderer.promoteToWebGL()) {
+      const overlay = this.renderer.getOverlayElement();
+      if (overlay && !overlay.parentElement) {
+        this.container.appendChild(overlay);
+      }
+    }
   }
 
   /** Focus the hidden textarea for keyboard input.
