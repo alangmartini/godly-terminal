@@ -116,19 +116,10 @@ export const acts = [
         args: { terminal_id: '$testTerminal.terminal_id', mode: 'tail', lines: 10, strip_ansi: true },
         delay: 1000,
       },
-      { type: 'log', message: 'Focus switching...' },
-      {
-        type: 'mcp', tool: 'focus_terminal',
-        args: { terminal_id: '$apiTerminal.terminal_id' }, delay: 1000,
-      },
-      {
-        type: 'mcp', tool: 'focus_terminal',
-        args: { terminal_id: '$testTerminal.terminal_id' }, delay: 1000,
-      },
-      {
-        type: 'mcp', tool: 'focus_terminal',
-        args: { terminal_id: '$logTerminal.terminal_id' }, delay: 1000,
-      },
+      // Note: focus_terminal calls are no longer needed here — MCP tools
+      // auto-focus the terminal they act on (execute_command, write_to_terminal,
+      // send_keys, create_terminal). Explicit focus_terminal is still available
+      // for read-only observation or showcasing the tool itself.
     ],
   },
 
