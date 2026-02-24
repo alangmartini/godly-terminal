@@ -14,6 +14,8 @@ import {
   STREAM_RECONNECT_BASE_MS,
   CIRCUIT_BREAKER_THRESHOLD,
   CIRCUIT_BREAKER_PROBE_INTERVAL_MS,
+  _setJitterRng,
+  _resetJitterRng,
 } from './terminal-service';
 
 /**
@@ -52,6 +54,8 @@ describe('TerminalService stream consumer', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // Zero jitter for deterministic delay assertions in existing tests.
+    _setJitterRng(() => 0);
   });
 
   afterEach(async () => {
@@ -60,6 +64,7 @@ describe('TerminalService stream consumer', () => {
     terminalService.disconnectOutputStream('s2');
     // Let abort handlers fire and clean up circuit breaker state.
     await vi.advanceTimersByTimeAsync(0);
+    _resetJitterRng();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -300,12 +305,15 @@ describe('TerminalService circuit breaker', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // Zero jitter for deterministic delay assertions in circuit breaker tests.
+    _setJitterRng(() => 0);
   });
 
   afterEach(async () => {
     terminalService.disconnectOutputStream('s1');
     terminalService.disconnectOutputStream('s2');
     await vi.advanceTimersByTimeAsync(0);
+    _resetJitterRng();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

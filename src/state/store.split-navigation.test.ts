@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { store, Workspace } from './store';
 
-// Bug: split view is permanently destroyed when switching to a tab outside the split.
-// Switching back to either split terminal should restore the split view.
+// Split view is updated in-place when navigating to a tab outside the split.
+// The active pane is replaced with the new terminal, keeping the split alive.
 
 describe('split view preservation across tab switches', () => {
   const ws1: Workspace = {
@@ -20,15 +20,15 @@ describe('split view preservation across tab switches', () => {
     store.setActiveWorkspace('ws-1');
   });
 
-  it('should restore split when switching back to the left terminal', () => {
-    // Bug: split between t1|t2, switch to t3, switch back to t1 → split gone
+  it('should update split when navigating away and back to the left terminal', () => {
+    // Split t1|t2, navigate to t3 (replaces active left pane), navigate back to t1
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    // Navigate away to a terminal outside the split
+    // Navigate away: active=t1 (left), so left pane becomes t3 → split [t3|t2]
     store.setActiveTerminal('t3');
 
-    // Navigate back to the left split terminal
+    // Navigate back to t1: active=t3 (left), so left pane becomes t1 → split [t1|t2]
     store.setActiveTerminal('t1');
 
     const split = store.getSplitView('ws-1');
@@ -37,22 +37,23 @@ describe('split view preservation across tab switches', () => {
     expect(split!.rightTerminalId).toBe('t2');
   });
 
-  it('should restore split when switching back to the right terminal', () => {
-    // Bug: split between t1|t2, switch to t3, switch back to t2 → split gone
+  it('should update split when navigating away then to the right terminal', () => {
+    // Split t1|t2, navigate to t3 (replaces left), then click t2 (already in split)
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
+    // Navigate to t3: active=t1 (left) → split becomes [t3|t2]
     store.setActiveTerminal('t3');
+    // Navigate to t2: t2 is in split (right), just change focus
     store.setActiveTerminal('t2');
 
     const split = store.getSplitView('ws-1');
     expect(split).not.toBeNull();
-    expect(split!.leftTerminalId).toBe('t1');
+    expect(split!.leftTerminalId).toBe('t3');
     expect(split!.rightTerminalId).toBe('t2');
   });
 
   it('should preserve split direction and ratio after round-trip', () => {
-    // Bug: even if the split is "restored", direction/ratio could be lost
     store.setSplitView('ws-1', 't1', 't2', 'vertical', 0.7);
     store.setActiveTerminal('t1');
 
@@ -65,56 +66,53 @@ describe('split view preservation across tab switches', () => {
     expect(split!.ratio).toBe(0.7);
   });
 
-  it('should restore split after visiting multiple non-split tabs', () => {
-    // Bug: navigating through several tabs before returning should still restore
+  it('should keep split active after visiting multiple non-split tabs', () => {
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    store.setActiveTerminal('t3');
-    store.setActiveTerminal('t4');
-    store.setActiveTerminal('t3');
-    store.setActiveTerminal('t2');
+    // Navigate through several tabs — split updates each time but never disappears
+    store.setActiveTerminal('t3'); // [t3|t2]
+    store.setActiveTerminal('t4'); // [t4|t2]
+    store.setActiveTerminal('t3'); // [t3|t2]
+    store.setActiveTerminal('t2'); // t2 is in split, just focus
 
     const split = store.getSplitView('ws-1');
     expect(split).not.toBeNull();
-    expect(split!.leftTerminalId).toBe('t1');
+    expect(split!.leftTerminalId).toBe('t3');
     expect(split!.rightTerminalId).toBe('t2');
   });
 
-  it('should not restore split if one of the split terminals was closed', () => {
-    // Edge case: if t2 was removed while viewing t3, the split cannot be restored
+  it('should clear split if one of the split terminals was closed', () => {
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    store.setActiveTerminal('t3');
-    store.removeTerminal('t2');
+    store.setActiveTerminal('t3'); // split becomes [t3|t2]
+    store.removeTerminal('t2');    // t2 is in split → split cleared
     store.setActiveTerminal('t1');
 
     expect(store.getSplitView('ws-1')).toBeNull();
   });
 
-  it('should not restore split if both split terminals were closed', () => {
+  it('should clear split if both split terminals were closed', () => {
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    store.setActiveTerminal('t3');
-    store.removeTerminal('t1');
+    store.setActiveTerminal('t3'); // split becomes [t3|t2]
+    store.removeTerminal('t3');    // t3 is in split (left) → split cleared
     store.removeTerminal('t2');
-    store.setActiveTerminal('t3');
+    store.setActiveTerminal('t4');
 
     expect(store.getSplitView('ws-1')).toBeNull();
   });
 
-  it('should allow creating a new split after the previous one was dismissed and restored', () => {
-    // Create a split, navigate away and back (restoring it), then explicitly clear
-    // and create a different split — the new split should take priority
+  it('should allow creating a new split after clearing and navigating', () => {
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
     store.setActiveTerminal('t3');
     store.setActiveTerminal('t1');
 
-    // Now explicitly clear and create a new split
+    // Explicitly clear and create a new split
     store.clearSplitView('ws-1');
     store.setSplitView('ws-1', 't3', 't4', 'vertical');
 
