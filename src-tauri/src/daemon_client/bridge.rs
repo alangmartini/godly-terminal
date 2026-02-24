@@ -1160,4 +1160,96 @@ mod tests {
             "All pushed bytes should be accounted for"
         );
     }
+
+    /// Bug: Under the old single-Mutex design, push/drain for different sessions
+    /// blocked each other because they all contended on the same lock. With per-
+    /// session sharding, operations on different sessions are fully independent.
+    ///
+    /// This test verifies that concurrent push+drain on N independent sessions
+    /// complete without data loss — proving the per-session locks are correct and
+    /// that cross-session operations don't interfere.
+    #[test]
+    fn registry_concurrent_independent_sessions() {
+        const NUM_SESSIONS: usize = 8;
+        const PUSHES_PER_SESSION: u32 = 500;
+
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let mut push_handles = Vec::new();
+        let mut drain_handles = Vec::new();
+
+        for s in 0..NUM_SESSIONS {
+            let session_id = format!("session-{}", s);
+
+            // Push thread: writes PUSHES_PER_SESSION u32 values (4 bytes each)
+            let reg_push = Arc::clone(&reg);
+            let sid = session_id.clone();
+            push_handles.push(std::thread::spawn(move || {
+                for i in 0..PUSHES_PER_SESSION {
+                    reg_push.push(&sid, &i.to_le_bytes());
+                }
+            }));
+
+            // Drain thread: drains repeatedly while pusher is running
+            let reg_drain = Arc::clone(&reg);
+            let sid = session_id.clone();
+            drain_handles.push(std::thread::spawn(move || {
+                let mut total = 0usize;
+                for _ in 0..100 {
+                    total += reg_drain.drain(&sid).len();
+                    std::thread::yield_now();
+                }
+                total
+            }));
+        }
+
+        // Wait for all pushers to finish
+        for h in push_handles {
+            h.join().unwrap();
+        }
+
+        // Collect drain thread totals
+        let mut drain_totals: Vec<usize> =
+            drain_handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // Drain remaining from each session after pushers are done
+        for s in 0..NUM_SESSIONS {
+            let session_id = format!("session-{}", s);
+            drain_totals[s] += reg.drain(&session_id).len();
+        }
+
+        let expected_per_session = (PUSHES_PER_SESSION as usize) * 4; // 4 bytes per u32
+        for (s, total) in drain_totals.iter().enumerate() {
+            assert_eq!(
+                *total, expected_per_session,
+                "Session {} lost data: got {} bytes, expected {}",
+                s, total, expected_per_session
+            );
+        }
+    }
+
+    /// Verify that remove() on one session does not affect others.
+    #[test]
+    fn registry_remove_does_not_affect_other_sessions() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"data-1");
+        reg.push("s2", b"data-2");
+        reg.push("s3", b"data-3");
+
+        reg.remove("s2");
+
+        assert_eq!(reg.drain("s1"), b"data-1");
+        assert!(reg.drain("s2").is_empty());
+        assert_eq!(reg.drain("s3"), b"data-3");
+        assert_eq!(reg.session_count(), 2); // s1 and s3 still have entries
+    }
+
+    /// Verify that push() after remove() creates a fresh buffer.
+    #[test]
+    fn registry_push_after_remove_creates_fresh_buffer() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"old-data");
+        reg.remove("s1");
+        reg.push("s1", b"new-data");
+        assert_eq!(reg.drain("s1"), b"new-data");
+    }
 }
