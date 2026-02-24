@@ -43,6 +43,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 leak-check = ["dhat"]
+staging = []
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
