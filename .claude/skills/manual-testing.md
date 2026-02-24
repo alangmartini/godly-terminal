@@ -195,6 +195,34 @@ Resources cleaned: <count> terminals, <count> worktrees
 - Use `read_grid` to capture terminal screen state for visual verification of terminal-rendered UI
 - Use `resize_terminal` to test responsive behavior at different sizes
 - For features with a `.pen` design file, use pencil MCP tools (`get_screenshot`, `batch_get`) to compare implementation against the design spec
-- Ask the user to take a screenshot if you need to verify the Tauri app's native UI (dialogs, sidebar, tab bar) — these aren't accessible via terminal MCP tools
 - If a feature requires the Tauri app to be running (not just the daemon), note which tests are MCP-only vs require the full app
 - Search for existing issues before creating a new one: `gh issue list --search "<keywords>" --state all`
+
+### Advanced Testing Tools
+
+When MCP-only testing is insufficient (e.g., you need to test drag-and-drop, keyboard shortcuts, visual layout, or mouse interactions), use the **hybrid testing framework**:
+
+#### JS Bridge (godly-terminal MCP)
+- **`execute_js`** — Run JavaScript in the WebView to inspect DOM state, read the store, get element positions, check CSS classes, or dispatch synthetic events. Examples:
+  - `return window.__STORE__.getState().splitViews` — query split state
+  - `return document.querySelector('.split-divider')?.getBoundingClientRect()` — get element position for PyAutoGUI
+  - `return document.querySelector('.terminal-pane')?.className` — check CSS classes
+- **`capture_screenshot`** — Capture a terminal canvas as a PNG file. Pass `terminal_id` for a specific terminal, or omit for the first visible canvas.
+- **`create_split` / `clear_split` / `get_split_state`** — Programmatic split view control via MCP.
+
+#### PyAutoGUI MCP (OS-level automation)
+When the `pyautogui-mcp` server is registered, you have real mouse/keyboard control:
+- **`screenshot`** — Full-screen or region screenshot (see the actual window)
+- **`click` / `drag` / `drag_from_to`** — Real mouse interactions (resize dividers, drag tabs)
+- **`press_key`** — App-level keyboard shortcuts (e.g., `ctrl+\` for split)
+- **`focus_window` / `get_window_rect`** — Window management
+
+#### Hybrid Pattern (recommended for UI testing)
+1. Use `execute_js` to get element positions (reliable, CSS-selector-based)
+2. Use `get_window_rect` to get the window offset
+3. Use PyAutoGUI `click`/`drag` at the computed screen coordinates
+4. Use `capture_screenshot` or PyAutoGUI `screenshot` to verify the result
+5. Use `execute_js` to verify state changes in the store
+
+#### Testing on Staging
+Prefer running tests on the Godly Staging instance (`npm run staging:dev`) to avoid disrupting the production app. The staging instance uses `GODLY_INSTANCE=staging` for full isolation.
