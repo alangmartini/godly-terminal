@@ -96,6 +96,10 @@ export class TerminalPane {
       const newSize = terminalSettingsStore.getFontSize();
       this.renderer.setFontSize(newSize);
       this.fit();
+      // Fetch a fresh snapshot so the daemon's re-flowed grid fills the new
+      // dimensions. Without this, the old snapshot (with fewer/more rows) is
+      // displayed until the shell happens to produce output after SIGWINCH.
+      this.fetchAndRenderSnapshot();
     });
 
     // Forward OSC title changes to the store
@@ -920,13 +924,30 @@ export class TerminalPane {
    * (tab activated, added to split view). Reconnects the output stream,
    * invalidates the cached snapshot to force a full fetch, and immediately
    * fetches the current grid state to catch up.
+   *
+   * If the stream's circuit breaker is in "open" state, triggers an
+   * immediate probe so recovery doesn't wait for the next probe interval.
    */
   resume() {
     if (!this.paused) return;
     this.paused = false;
     this.cachedSnapshot = null;
-    // Re-allocate canvas resources released by pause()
+    // Re-allocate canvas resources released by pause().
+    // This may re-acquire a WebGL context and create a new overlay canvas.
     this.renderer.restoreCanvasResources();
+    // Promote to WebGL now that the terminal is visible. This is lazy —
+    // WebGL contexts are only created for visible terminals, avoiding
+    // exhaustion of the browser's 8-16 context limit with 20+ terminals.
+    this.tryPromoteWebGL();
+    // Attach the overlay canvas if WebGL was acquired (overlay is dynamic)
+    const overlay = this.renderer.getOverlayElement();
+    if (overlay && !overlay.parentNode) {
+      this.container.appendChild(overlay);
+    }
+    // If the circuit breaker is open for this session, trigger an immediate
+    // probe before reconnecting. This handles edge cases where the stream
+    // was not fully torn down yet.
+    terminalService.triggerProbe(this.terminalId);
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
@@ -948,6 +969,9 @@ export class TerminalPane {
     this.container.classList.toggle('active', active);
     if (active) {
       this.resume();
+      // Promote to WebGL on first activation (when resume() no-ops because
+      // paused is already false). Subsequent activations go through resume().
+      this.tryPromoteWebGL();
       // Sync canvas bitmap to container size immediately to prevent the browser
       // from stretching the stale bitmap (300×150 default) for one frame,
       // which causes a "zoomed in" flash on tab switch / reopen.
@@ -980,6 +1004,7 @@ export class TerminalPane {
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
       this.resume();
+      this.tryPromoteWebGL();
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
       this.renderer.updateSize();
       requestAnimationFrame(() => {
@@ -999,6 +1024,16 @@ export class TerminalPane {
 
   focus() {
     this.focusInput();
+  }
+
+  /** Attempt to promote the renderer to WebGL and attach overlay canvas. */
+  private tryPromoteWebGL() {
+    if (this.renderer.promoteToWebGL()) {
+      const overlay = this.renderer.getOverlayElement();
+      if (overlay && !overlay.parentElement) {
+        this.container.appendChild(overlay);
+      }
+    }
   }
 
   /** Focus the hidden textarea for keyboard input.
