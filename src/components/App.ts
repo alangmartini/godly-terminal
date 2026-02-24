@@ -1284,10 +1284,11 @@ export class App {
 
     // Idle-after-activity detection: monitors terminals for output→silence transitions
     const idleService = new IdleNotificationService({
-      idleThresholdMs: 15000,
+      idleThresholdMs: 30000,
       checkIntervalMs: 5000,
       startupGraceMs: 20000,
       notifyCooldownMs: 60000,
+      minOutputEvents: 10,
       getActiveTerminalId: () => store.getState().activeTerminalId ?? undefined,
       onNotify: async (terminalId: string) => {
         const settings = notificationStore.getSettings();
