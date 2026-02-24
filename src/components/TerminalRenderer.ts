@@ -580,8 +580,13 @@ export class TerminalRenderer {
    */
   restoreCanvasResources() {
     // Try to re-acquire WebGL context from the pool.
-    // If the pool is full, we stay on Canvas2D (already initialized).
+    // acquireWebGL() tries getContext('webgl2') on the current canvas, which
+    // fails if it already has a 2d context (always the case after demoteToCanvas2D).
+    // In that case, promoteToWebGL() creates a fresh canvas and acquires through the pool.
     this.acquireWebGL();
+    if (!this.useWebGL) {
+      this.promoteToWebGL();
+    }
 
     // Restart cursor blink if it was stopped
     if (!this.cursorBlinkInterval) {
@@ -597,6 +602,7 @@ export class TerminalRenderer {
    */
   promoteToWebGL(): boolean {
     if (this.useWebGL) return true; // already promoted
+    if (this.contextLostDegraded) return false; // don't retry after context loss
 
     // Need a fresh canvas for WebGL — can't get webgl2 on a canvas that
     // already has a 2d context. Create a new canvas and swap it in.
@@ -608,7 +614,10 @@ export class TerminalRenderer {
     newCanvas.tabIndex = this.canvas.tabIndex;
     newCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    const gl = newCanvas.getContext('webgl2', { alpha: false, antialias: false });
+    // Acquire through the pool to enforce the context limit and enable
+    // proper tracking. Without this, contexts created here are invisible
+    // to the pool and never released, leaking GPU memory.
+    const gl = webGLContextPool.acquire(newCanvas);
     if (!gl) return false;
 
     try {
@@ -656,6 +665,11 @@ export class TerminalRenderer {
    */
   demoteToCanvas2D(): void {
     if (!this.useWebGL) return;
+
+    // Release the WebGL context from the pool BEFORE replacing the canvas.
+    // Without this, the pool keeps tracking the old canvas and its slot count
+    // inflates until MAX_CONTEXTS is reached, blocking all future acquisitions.
+    webGLContextPool.release(this.canvas);
 
     // Dispose WebGL resources
     if (this.webglRenderer) {
