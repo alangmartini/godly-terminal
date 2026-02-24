@@ -928,8 +928,14 @@ export class TerminalPane {
     if (!this.paused) return;
     this.paused = false;
     this.cachedSnapshot = null;
-    // Re-allocate canvas resources released by pause()
+    // Re-allocate canvas resources released by pause().
+    // This may re-acquire a WebGL context and create a new overlay canvas.
     this.renderer.restoreCanvasResources();
+    // Attach the overlay canvas if WebGL was acquired (overlay is dynamic)
+    const overlay = this.renderer.getOverlayElement();
+    if (overlay && !overlay.parentNode) {
+      this.container.appendChild(overlay);
+    }
     // If the circuit breaker is open for this session, trigger an immediate
     // probe before reconnecting. This handles edge cases where the stream
     // was not fully torn down yet.
