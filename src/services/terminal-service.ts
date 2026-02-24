@@ -61,9 +61,21 @@ export interface SessionInfo {
 }
 
 /** Default delay before first reconnect attempt (ms). */
-const STREAM_RECONNECT_BASE_MS = 1000;
+export const STREAM_RECONNECT_BASE_MS = 1000;
 /** Maximum delay between reconnect attempts (ms). */
-const STREAM_RECONNECT_MAX_MS = 10_000;
+export const STREAM_RECONNECT_MAX_MS = 10_000;
+/** Number of consecutive failures before the circuit breaker opens. */
+export const CIRCUIT_BREAKER_THRESHOLD = 5;
+/** Probe interval when circuit breaker is open (ms). */
+export const CIRCUIT_BREAKER_PROBE_INTERVAL_MS = 10_000;
+
+/** Circuit breaker state for a single stream connection. */
+export interface CircuitBreakerState {
+  /** Number of consecutive failures since last success. */
+  failures: number;
+  /** Whether the circuit breaker is in "open" state (polling stopped, probing only). */
+  open: boolean;
+}
 
 /** Returns a random jitter in [0, range) to break thundering herd patterns. */
 let jitterRng = () => Math.random();
@@ -84,6 +96,15 @@ class TerminalService {
   private unlistenFns: UnlistenFn[] = [];
   /** AbortControllers for active stream connections (keyed by session ID). */
   private streamControllers: Map<string, AbortController> = new Map();
+  /** Circuit breaker state per session. @internal — visible for testing. */
+  _circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+  /**
+   * Resolve functions for pending probe wake-ups. When `triggerProbe()` is
+   * called for a session in open state, we resolve this to interrupt the
+   * probe-interval sleep so the next attempt happens immediately.
+   * @internal — visible for testing.
+   */
+  _probeWakeups: Map<string, () => void> = new Map();
 
   async init() {
     const unlistenOutput = await listen<TerminalOutputPayload>(
@@ -272,6 +293,34 @@ class TerminalService {
       controller.abort();
       this.streamControllers.delete(sessionId);
     }
+    // Circuit breaker state is cleaned up inside _consumeStream when the
+    // loop exits (after abort). No need to clear it here — the abort
+    // signal causes the loop to break and clean up.
+  }
+
+  /**
+   * Get the circuit breaker state for a session, or null if none exists.
+   * @internal — visible for testing.
+   */
+  getCircuitBreakerState(sessionId: string): CircuitBreakerState | undefined {
+    return this._circuitBreakers.get(sessionId);
+  }
+
+  /**
+   * Trigger an immediate probe for a session whose circuit breaker is open.
+   * Called when a terminal becomes visible (tab switch) to enable instant
+   * recovery instead of waiting for the next probe interval.
+   *
+   * No-op if the session has no circuit breaker or it is not open.
+   */
+  triggerProbe(sessionId: string): void {
+    const cb = this._circuitBreakers.get(sessionId);
+    if (!cb?.open) return;
+
+    const wakeup = this._probeWakeups.get(sessionId);
+    if (wakeup) {
+      wakeup();
+    }
   }
 
   /** @internal — visible for testing. */
@@ -281,6 +330,12 @@ class TerminalService {
     onData: () => void,
   ): Promise<void> {
     let delay = STREAM_RECONNECT_BASE_MS;
+
+    // Ensure circuit breaker state exists for this session.
+    if (!this._circuitBreakers.has(sessionId)) {
+      this._circuitBreakers.set(sessionId, { failures: 0, open: false });
+    }
+    const cb = this._circuitBreakers.get(sessionId)!;
 
     while (!signal.aborted) {
       try {
@@ -293,8 +348,15 @@ class TerminalService {
           throw new Error(`Stream error: ${response.status}`);
         }
 
-        // Successful connection — reset backoff.
+        // Successful connection — reset backoff and circuit breaker.
         delay = STREAM_RECONNECT_BASE_MS;
+        if (cb.open) {
+          console.info(
+            `[TerminalService] Circuit breaker CLOSED for ${sessionId}, stream recovered`,
+          );
+        }
+        cb.failures = 0;
+        cb.open = false;
 
         const reader = response.body.getReader();
         // Cancel the reader when abort fires so reader.read() resolves
@@ -316,8 +378,19 @@ class TerminalService {
       } catch (err: unknown) {
         if (signal.aborted) break;
 
+        cb.failures++;
+
+        // Check if we should open the circuit breaker.
+        if (!cb.open && cb.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+          cb.open = true;
+          console.warn(
+            `[TerminalService] Circuit breaker OPEN for ${sessionId} after ${cb.failures} failures`,
+          );
+        }
+
         console.debug(
-          `[TerminalService] Output stream error for ${sessionId}, reconnecting in ~${delay}ms (+ jitter)`,
+          `[TerminalService] Output stream error for ${sessionId}, ` +
+          `failures=${cb.failures}, open=${cb.open}, reconnecting in ~${cb.open ? CIRCUIT_BREAKER_PROBE_INTERVAL_MS : delay}ms (+ jitter)`,
           err instanceof Error ? err.message : err,
         );
       }
@@ -327,17 +400,37 @@ class TerminalService {
       // is restarting or the session was closed.
       if (signal.aborted) break;
 
-      // Add random jitter to break thundering herd when all streams
-      // fail simultaneously and would otherwise retry in lockstep.
-      const jitteredDelay = delay + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
+      // In open state, use the probe interval (and support wakeup).
+      // In closed state, use exponential backoff with random jitter to break
+      // thundering herd when all streams fail simultaneously.
+      const baseWaitTime = cb.open ? CIRCUIT_BREAKER_PROBE_INTERVAL_MS : delay;
+      const waitTime = baseWaitTime + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
 
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, jitteredDelay);
-        signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+        const timer = setTimeout(resolve, waitTime);
+        const cleanup = () => { clearTimeout(timer); resolve(); };
+        signal.addEventListener('abort', cleanup, { once: true });
+
+        // If circuit breaker is open, allow triggerProbe() to wake us up early.
+        if (cb.open) {
+          this._probeWakeups.set(sessionId, () => {
+            signal.removeEventListener('abort', cleanup);
+            cleanup();
+          });
+        }
       });
 
-      delay = Math.min(delay * 2, STREAM_RECONNECT_MAX_MS);
+      // Clean up probe wakeup after wait resolves.
+      this._probeWakeups.delete(sessionId);
+
+      if (!cb.open) {
+        delay = Math.min(delay * 2, STREAM_RECONNECT_MAX_MS);
+      }
     }
+
+    // Clean up circuit breaker state when stream loop exits.
+    this._circuitBreakers.delete(sessionId);
+    this._probeWakeups.delete(sessionId);
   }
 
   destroy() {
