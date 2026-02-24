@@ -1159,4 +1159,166 @@ mod tests {
             "All pushed bytes should be accounted for"
         );
     }
+
+    // ── Bug #312: Stream cascade failure — mutex contention tests ────
+
+    /// Bug #312: Single mutex causes cross-session contention — concurrent
+    /// push/drain on different sessions should not block each other.
+    ///
+    /// This test spawns N threads, each operating on its OWN session ID.
+    /// With a single global mutex, all threads contend on the same lock even
+    /// though they access disjoint data. With per-session locks, threads
+    /// operating on different sessions would never block each other.
+    ///
+    /// We measure throughput scaling: if doubling the thread count roughly
+    /// doubles total wall-clock time, that proves lock contention. With
+    /// per-session locks, wall time should stay roughly constant since
+    /// threads never contend.
+    #[test]
+    fn registry_cross_session_contention_scaling() {
+        const OPS_PER_THREAD: usize = 5000;
+        const PAYLOAD: &[u8] = &[0xAB; 64];
+
+        // Measure wall time for N threads, each on its own session.
+        let measure = |thread_count: usize| -> Duration {
+            let reg = Arc::new(OutputStreamRegistry::new());
+            let barrier = Arc::new(std::sync::Barrier::new(thread_count));
+
+            let handles: Vec<_> = (0..thread_count)
+                .map(|i| {
+                    let reg = Arc::clone(&reg);
+                    let barrier = Arc::clone(&barrier);
+                    let session_id = format!("session-{}", i);
+                    std::thread::spawn(move || {
+                        barrier.wait(); // synchronize start
+                        for _ in 0..OPS_PER_THREAD {
+                            reg.push(&session_id, PAYLOAD);
+                            let _ = reg.drain(&session_id);
+                        }
+                    })
+                })
+                .collect();
+
+            let _start = Instant::now();
+            // Threads already started; we just wait for completion.
+            // Actually the barrier ensures they all start ~simultaneously,
+            // but start timing from spawn. Re-measure properly:
+
+            // Need to time from after barrier releases. Use a shared atomic
+            // to capture the wall time from the threads' perspective.
+            for h in handles {
+                h.join().unwrap();
+            }
+            // Since we can't easily time from barrier release, measure
+            // a second run with external timing:
+            let reg2 = Arc::new(OutputStreamRegistry::new());
+            let barrier2 = Arc::new(std::sync::Barrier::new(thread_count + 1));
+            let handles2: Vec<_> = (0..thread_count)
+                .map(|i| {
+                    let reg = Arc::clone(&reg2);
+                    let barrier = Arc::clone(&barrier2);
+                    let session_id = format!("sess-{}", i);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        for _ in 0..OPS_PER_THREAD {
+                            reg.push(&session_id, PAYLOAD);
+                            let _ = reg.drain(&session_id);
+                        }
+                    })
+                })
+                .collect();
+
+            barrier2.wait(); // release all threads
+            let wall_start = Instant::now();
+            for h in handles2 {
+                h.join().unwrap();
+            }
+            wall_start.elapsed()
+        };
+
+        let time_4 = measure(4);
+        let time_20 = measure(20);
+
+        // With per-session locks, 20 threads on 20 sessions should complete
+        // in roughly the same time as 4 threads on 4 sessions (no contention).
+        // With a single mutex, 20 threads will take ~5x longer than 4 threads
+        // because they all serialize on the same lock.
+        //
+        // We assert that 20-thread time should be less than 3x of 4-thread time.
+        // Under the current single-mutex design, this ratio is typically 4-6x,
+        // so this test FAILS — proving cross-session contention exists.
+        let ratio = time_20.as_secs_f64() / time_4.as_secs_f64();
+        assert!(
+            ratio < 3.0,
+            "Bug #312: Cross-session contention detected. \
+             20 threads took {:.1}ms vs 4 threads {:.1}ms (ratio {:.1}x). \
+             With per-session locks, ratio should be <3x but single mutex causes ~5x+ degradation.",
+            time_20.as_secs_f64() * 1000.0,
+            time_4.as_secs_f64() * 1000.0,
+            ratio,
+        );
+    }
+
+    /// Bug #312: Single mutex serializes all sessions — concurrent operations
+    /// on N independent sessions take N times longer than single-session operations.
+    ///
+    /// With per-session locks, N threads operating on N independent sessions
+    /// complete in the same wall time as 1 thread on 1 session (perfect scaling).
+    /// With a single mutex, all N threads serialize, giving ~Nx wall time.
+    #[test]
+    fn registry_single_mutex_serializes_independent_sessions() {
+        const OPS: usize = 10_000;
+        const PAYLOAD: &[u8] = &[0xAB; 64];
+
+        // Measure single-threaded baseline: 1 thread, 1 session, OPS iterations.
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let baseline_start = Instant::now();
+        for _ in 0..OPS {
+            reg.push("baseline", PAYLOAD);
+            let _ = reg.drain("baseline");
+        }
+        let baseline = baseline_start.elapsed();
+
+        // Measure 16 threads, each on its own session, each doing OPS iterations.
+        // With per-session locks, wall time should be ~= baseline (all independent).
+        // With single mutex, wall time should be ~16x baseline (all serialize).
+        let thread_count = 16;
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let barrier = Arc::new(std::sync::Barrier::new(thread_count + 1));
+        let handles: Vec<_> = (0..thread_count)
+            .map(|i| {
+                let reg = Arc::clone(&reg);
+                let barrier = Arc::clone(&barrier);
+                let session_id = format!("session-{}", i);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..OPS {
+                        reg.push(&session_id, PAYLOAD);
+                        let _ = reg.drain(&session_id);
+                    }
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        let parallel_start = Instant::now();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let parallel = parallel_start.elapsed();
+
+        // With per-session locks, parallel/baseline ratio should be ~1-2x.
+        // With single mutex, it's ~8-16x due to serialization.
+        let ratio = parallel.as_secs_f64() / baseline.as_secs_f64();
+        assert!(
+            ratio < 4.0,
+            "Bug #312: {} threads on independent sessions took {:.1}ms vs single-thread {:.1}ms \
+             (ratio {:.1}x). With per-session locks, ratio should be <4x, but single mutex causes \
+             serialization across all sessions.",
+            thread_count,
+            parallel.as_secs_f64() * 1000.0,
+            baseline.as_secs_f64() * 1000.0,
+            ratio,
+        );
+    }
 }
