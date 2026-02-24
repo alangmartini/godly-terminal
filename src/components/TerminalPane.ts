@@ -920,17 +920,30 @@ export class TerminalPane {
    * (tab activated, added to split view). Reconnects the output stream,
    * invalidates the cached snapshot to force a full fetch, and immediately
    * fetches the current grid state to catch up.
+   *
+   * If the stream's circuit breaker is in "open" state, triggers an
+   * immediate probe so recovery doesn't wait for the next probe interval.
    */
   resume() {
     if (!this.paused) return;
     this.paused = false;
     this.cachedSnapshot = null;
-    // Re-allocate canvas resources released by pause()
+    // Re-allocate canvas resources released by pause().
+    // This may re-acquire a WebGL context and create a new overlay canvas.
     this.renderer.restoreCanvasResources();
     // Promote to WebGL now that the terminal is visible. This is lazy —
     // WebGL contexts are only created for visible terminals, avoiding
     // exhaustion of the browser's 8-16 context limit with 20+ terminals.
     this.tryPromoteWebGL();
+    // Attach the overlay canvas if WebGL was acquired (overlay is dynamic)
+    const overlay = this.renderer.getOverlayElement();
+    if (overlay && !overlay.parentNode) {
+      this.container.appendChild(overlay);
+    }
+    // If the circuit breaker is open for this session, trigger an immediate
+    // probe before reconnecting. This handles edge cases where the stream
+    // was not fully torn down yet.
+    terminalService.triggerProbe(this.terminalId);
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
