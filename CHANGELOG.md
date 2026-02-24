@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-24
+
+### Added
+- **User-like testing framework** — JS bridge (`execute_js`), canvas screenshot capture, and split MCP tools for automated UI testing (#332)
+- **Auto-focus terminal on MCP write operations** — terminal tab switches automatically when MCP sends input (#313)
+- **PyAutoGUI MCP server** — OS-level mouse/keyboard automation for testing (#332)
+
+### Fixed
+- **Idle notification false positives** — added output volume threshold to prevent notifications during active output (#334)
+- **Idle re-notification after cooldown** — allow re-notification when output→idle transitions occur after cooldown expires (#311)
+- **WebView2 zoom black border** — disabled native Ctrl+scroll zoom that caused rendering artifacts (#328)
+- **Stream reconnection reliability** — circuit-breaker pattern prevents thundering herd on reconnect failures (#315)
+- **Stream reconnection jitter** — added randomized backoff to prevent synchronized reconnection storms (#320)
+- **Stream:// cascade failure** — non-blocking protocol handler isolates stream handling from IPC thread pool (#326, #321)
+- **OutputStreamRegistry contention** — sharded to per-session locks, eliminating cross-session mutex blocking (#322, #324)
+- **Split view persistence** — split view stays alive during tab navigation (#310)
+
+### Changed
+- **Lazy WebGL context allocation** — WebGL contexts created only for visible terminals, reducing GPU memory (#323)
+- **WebGL context pooling** — contexts recycled across terminal lifecycle to prevent exhaustion (#314)
+- Consolidated screenshot callback into existing JsCallbackState channel
+- Removed flaky `zombie_tabs` daemon tests pending CI reliability fix (#335)
+
+### Tests
+- Reproduction tests for stream:// cascade failure (#325)
+- Split tab grouping regression tests (#310)
+- Native zoom prevention tests (#328)
+- Lazy WebGL allocation tests (#323)
+- WebGL context pool tests (#314)
+- Stream cascade failure tests (#325)
+- Idle notification service tests (#334)
+
 ## [0.7.0] - 2026-02-24
 
 ### Added
