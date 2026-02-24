@@ -6,7 +6,7 @@ export interface GlyphEntry {
 }
 
 const INITIAL_SIZE = 1024;
-const MAX_SIZE = 4096;
+const MAX_SIZE = 2048;  // 2048x2048 = 16MB (was 4096 = 64MB per atlas)
 const LINE_HEIGHT_FACTOR = 1.2;
 const GLYPH_PAD = 1; // 1px padding between glyphs to prevent texture bleeding
 
@@ -180,6 +180,24 @@ export class GlyphAtlas {
     if (neededHeight > this.atlasHeight) {
       this.grow(neededHeight);
     }
+
+    // If still can't fit after growing (atlas at MAX_SIZE), reset and re-populate ASCII.
+    // This evicts rarely-used glyphs instead of silently writing past the atlas bounds.
+    const neededAfterGrow = this.shelfY + Math.max(this.shelfHeight, glyphH + GLYPH_PAD);
+    if (neededAfterGrow > this.atlasHeight) {
+      this.resetAndRepopulate();
+    }
+  }
+
+  /** Clear the atlas and re-populate ASCII when full. Keeps the current canvas size. */
+  private resetAndRepopulate(): void {
+    this.glyphs.clear();
+    this.shelfX = 0;
+    this.shelfY = 0;
+    this.shelfHeight = 0;
+    this.ctx.clearRect(0, 0, this.atlasWidth, this.atlasHeight);
+    this._dirty = true;
+    this.populateAscii();
   }
 
   private grow(neededHeight: number): void {
