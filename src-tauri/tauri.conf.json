@@ -22,6 +22,7 @@
         "decorations": true,
         "transparent": false,
         "dragDropEnabled": true,
+        "zoomHotkeysEnabled": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222"
       }
     ],
