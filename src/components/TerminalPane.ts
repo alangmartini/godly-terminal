@@ -96,6 +96,10 @@ export class TerminalPane {
       const newSize = terminalSettingsStore.getFontSize();
       this.renderer.setFontSize(newSize);
       this.fit();
+      // Fetch a fresh snapshot so the daemon's re-flowed grid fills the new
+      // dimensions. Without this, the old snapshot (with fewer/more rows) is
+      // displayed until the shell happens to produce output after SIGWINCH.
+      this.fetchAndRenderSnapshot();
     });
 
     // Forward OSC title changes to the store
