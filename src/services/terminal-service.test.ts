@@ -20,7 +20,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 import { store } from '../state/store';
-import { terminalService } from './terminal-service';
+import { terminalService, _setJitterRng, _resetJitterRng } from './terminal-service';
 
 describe('TerminalService', () => {
   beforeEach(async () => {
@@ -154,6 +154,168 @@ describe('TerminalService', () => {
       outputCallback!({ payload: { terminal_id: 't2' } });
 
       expect(callback).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('jittered backoff in _consumeStream', () => {
+    // Bug: when all streams fail simultaneously, synchronized retry waves
+    // ("thundering herd") keep hitting the saturated thread pool because
+    // exponential backoff aligns across all terminals.
+
+    afterEach(() => {
+      _resetJitterRng();
+    });
+
+    it('should add jitter to reconnect delay so retries spread over time', async () => {
+      // Use a fixed RNG so delays are deterministic.
+      _setJitterRng(() => 0.5);
+
+      const delays: number[] = [];
+      const originalSetTimeout = globalThis.setTimeout;
+      vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn: () => void, ms?: number) => {
+        if (ms && ms >= 1000) delays.push(ms);
+        // Execute callback immediately so the loop advances.
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      });
+
+      // Mock fetch to always fail so the reconnect loop runs multiple iterations.
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connection refused'));
+
+      const controller = new AbortController();
+      const onData = vi.fn();
+
+      // Let the loop run a few iterations then abort.
+      let iterations = 0;
+      fetchSpy.mockImplementation(async () => {
+        iterations++;
+        if (iterations >= 4) controller.abort();
+        throw new Error('connection refused');
+      });
+
+      await terminalService._consumeStream('test-session', controller.signal, onData);
+
+      // base=1000, jitter=0.5*1000=500 → delays should be base+500, 2*base+500, 4*base+500
+      // i.e. 1500, 2500, 4500
+      expect(delays).toEqual([1500, 2500, 4500]);
+
+      vi.mocked(globalThis.setTimeout).mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('should produce different delays with different jitter RNG values', async () => {
+      const delaysA: number[] = [];
+      const delaysB: number[] = [];
+
+      const runWithJitter = async (rngValue: number, collector: number[]) => {
+        _setJitterRng(() => rngValue);
+
+        vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn: () => void, ms?: number) => {
+          if (ms && ms >= 1000) collector.push(ms);
+          fn();
+          return 0 as unknown as ReturnType<typeof setTimeout>;
+        });
+
+        let iterations = 0;
+        const controller = new AbortController();
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+          iterations++;
+          if (iterations >= 3) controller.abort();
+          throw new Error('refused');
+        });
+
+        await terminalService._consumeStream('test', controller.signal, vi.fn());
+
+        vi.mocked(globalThis.setTimeout).mockRestore();
+        vi.mocked(globalThis.fetch).mockRestore();
+      };
+
+      await runWithJitter(0.1, delaysA);
+      await runWithJitter(0.9, delaysB);
+
+      // With different RNG values, first delays should differ.
+      // rng=0.1 → jitter=100, rng=0.9 → jitter=900
+      expect(delaysA[0]).toBe(1100); // 1000 + floor(0.1*1000)
+      expect(delaysB[0]).toBe(1900); // 1000 + floor(0.9*1000)
+      expect(delaysA[0]).not.toBe(delaysB[0]);
+    });
+
+    it('should keep jittered delay within expected bounds', async () => {
+      // Jitter should add at most STREAM_RECONNECT_BASE_MS (1000ms) on top of base delay.
+      const delays: number[] = [];
+
+      // Use max jitter
+      _setJitterRng(() => 0.999);
+
+      vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn: () => void, ms?: number) => {
+        if (ms && ms >= 1000) delays.push(ms);
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      });
+
+      let iterations = 0;
+      const controller = new AbortController();
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        iterations++;
+        if (iterations >= 5) controller.abort();
+        throw new Error('refused');
+      });
+
+      await terminalService._consumeStream('test', controller.signal, vi.fn());
+
+      // Expected base delays: 1000, 2000, 4000, 8000
+      // With jitter ~999: 1999, 2999, 4999, 8999
+      // All should be <= base*2^attempt + 1000 (jitter range is [0, 1000))
+      const basesBeforeJitter = [1000, 2000, 4000, 8000];
+      for (let i = 0; i < delays.length; i++) {
+        expect(delays[i]).toBeGreaterThanOrEqual(basesBeforeJitter[i]);
+        expect(delays[i]).toBeLessThan(basesBeforeJitter[i] + 1000);
+      }
+
+      vi.mocked(globalThis.setTimeout).mockRestore();
+      vi.mocked(globalThis.fetch).mockRestore();
+    });
+
+    it('should reset delay after successful connection', async () => {
+      _setJitterRng(() => 0.5);
+      const delays: number[] = [];
+
+      vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn: () => void, ms?: number) => {
+        if (ms && ms >= 1000) delays.push(ms);
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      });
+
+      let callCount = 0;
+      const controller = new AbortController();
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          // First call: fail → delay should be base (1000) + jitter (500)
+          throw new Error('refused');
+        }
+        if (callCount === 2) {
+          // Second call: succeed then stream ends → delay resets to base
+          return new Response(new ReadableStream({
+            start(ctrl) { ctrl.close(); },
+          }));
+        }
+        // Third call: fail again → delay should be base (1000) + jitter (500) (reset)
+        controller.abort();
+        throw new Error('refused');
+      });
+
+      await terminalService._consumeStream('test', controller.signal, vi.fn());
+
+      // First delay: 1000+500=1500 (initial base + jitter)
+      // After successful connection, delay resets to base.
+      // Second delay: 1000+500=1500 (reset base + jitter)
+      expect(delays[0]).toBe(1500);
+      expect(delays[1]).toBe(1500);
+
+      vi.mocked(globalThis.setTimeout).mockRestore();
+      vi.mocked(globalThis.fetch).mockRestore();
     });
   });
 });
