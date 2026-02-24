@@ -933,12 +933,9 @@ export class TerminalPane {
     this.paused = false;
     this.cachedSnapshot = null;
     // Re-allocate canvas resources released by pause().
-    // This may re-acquire a WebGL context and create a new overlay canvas.
+    // restoreCanvasResources() tries acquireWebGL() first, then promoteToWebGL()
+    // if the canvas is locked to 2D. Both paths go through the WebGL context pool.
     this.renderer.restoreCanvasResources();
-    // Promote to WebGL now that the terminal is visible. This is lazy —
-    // WebGL contexts are only created for visible terminals, avoiding
-    // exhaustion of the browser's 8-16 context limit with 20+ terminals.
-    this.tryPromoteWebGL();
     // Attach the overlay canvas if WebGL was acquired (overlay is dynamic)
     const overlay = this.renderer.getOverlayElement();
     if (overlay && !overlay.parentNode) {
@@ -1004,7 +1001,6 @@ export class TerminalPane {
     this.container.classList.toggle('split-focused', focused);
     if (visible) {
       this.resume();
-      this.tryPromoteWebGL();
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
       this.renderer.updateSize();
       requestAnimationFrame(() => {
