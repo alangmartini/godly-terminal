@@ -173,7 +173,7 @@
   .send-btn:active { background: var(--accent); }
   .quick-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .quick-btn {
-    min-height: 40px; padding: 0 16px;
+    min-height: 44px; min-width: 44px; padding: 0 16px;
     background: var(--bg-input); border: 1px solid var(--border);
     border-radius: 8px; color: var(--text); font-size: 13px;
     font-family: 'SF Mono', 'Cascadia Code', monospace;
@@ -346,6 +346,7 @@ let refreshTimer = null;
 let sessionRefreshTimer = null;
 let activePrompts = new Map(); // session_id -> prompt data
 let idleTerminals = new Set(); // session_ids that went idle after output
+let userHasInteracted = false; // guard for vibrate API
 
 // --- API ---
 function baseUrl() {
@@ -540,8 +541,12 @@ async function refreshSession() {
     const url = `/api/sessions/${currentSessionId}/text?lines=50`;
     const data = await api(url);
     const output = document.getElementById('sessionOutput');
+    // Only auto-scroll if user is already near the bottom
+    const wasAtBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 30;
     output.textContent = (data.lines || []).join('\n') || '(empty)';
-    output.scrollTop = output.scrollHeight;
+    if (wasAtBottom) {
+      output.scrollTop = output.scrollHeight;
+    }
 
     // Detect session death
     if (data.running === false) {
@@ -690,8 +695,8 @@ async function connectSSE() {
       try {
         const data = JSON.parse(e.data);
         idleTerminals.add(data.session_id);
-        // Vibrate phone to alert user
-        if (navigator.vibrate) navigator.vibrate(200);
+        // Vibrate phone to alert user (requires prior interaction)
+        if (userHasInteracted && navigator.vibrate) navigator.vibrate(200);
         if (currentView === 'dashboard') refreshDashboard();
       } catch {}
     });
@@ -773,6 +778,8 @@ function truncate(s, max) {
 document.getElementById('inputField').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); sendInput(); }
 });
+document.addEventListener('touchstart', () => { userHasInteracted = true; }, { once: true });
+document.addEventListener('click', () => { userHasInteracted = true; }, { once: true });
 
 // --- Device Registration ---
 async function checkDeviceStatus() {
