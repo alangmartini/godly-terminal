@@ -14,6 +14,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { WebGLRenderer } from './renderer/WebGLRenderer';
+import { webGLContextPool } from './renderer/WebGLContextPool';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
@@ -115,6 +116,8 @@ export class TerminalRenderer {
   private overlayCanvas: HTMLCanvasElement | null = null;
   private overlayCtx: CanvasRenderingContext2D | null = null;
   private useWebGL = false;
+  // True after a webglcontextlost event — permanently falls back to Canvas2D.
+  private contextLostDegraded = false;
 
   // Font metrics
   private fontFamily = 'Cascadia Code, Consolas, monospace';
@@ -184,54 +187,33 @@ export class TerminalRenderer {
     // Prevent default context menu on right-click (we handle copy ourselves)
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Try WebGL2 first
-    const gl = this.canvas.getContext('webgl2', { alpha: false, antialias: false });
-    if (gl) {
-      try {
-        console.log('[TerminalRenderer] WebGL2 context obtained, initializing GPU renderer...');
-        this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
-        this.useWebGL = true;
-        console.log('[TerminalRenderer] WebGL2 renderer initialized successfully');
-        // Create overlay canvas for scrollbar and URL hover
-        this.overlayCanvas = document.createElement('canvas');
-        this.overlayCanvas.className = 'terminal-overlay-canvas';
-        this.overlayCanvas.style.display = 'block';
-        this.overlayCtx = this.overlayCanvas.getContext('2d')!;
-      } catch (e) {
-        console.warn('[TerminalRenderer] WebGL2 renderer init failed, falling back to Canvas2D:', e);
-      }
-    } else {
-      console.log('[TerminalRenderer] WebGL2 not available, using Canvas2D');
-    }
+    // Start with Canvas2D only — WebGL is promoted lazily when the terminal
+    // becomes visible, to avoid exhausting browser WebGL context limits
+    // (typically 8-16 per page) when 20+ terminals are open.
+    this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+    this.measureFont();
+    _rendererBackend = 'Canvas2D';
+    console.log('[TerminalRenderer] Initialized with Canvas2D (WebGL deferred until visible)');
 
-    if (!this.useWebGL) {
-      // If WebGL was attempted (getContext('webgl2') succeeded but renderer threw),
-      // the canvas is locked to WebGL and can't get a 2D context. Create a new canvas.
-      let ctx2d = this.canvas.getContext('2d', { alpha: false });
-      if (!ctx2d) {
-        console.log('[TerminalRenderer] Canvas locked to WebGL, creating fresh canvas for 2D fallback');
-        this.canvas = document.createElement('canvas');
-        this.canvas.className = 'terminal-canvas';
-        this.canvas.style.display = 'block';
-        this.canvas.style.width = '100%';
-        this.canvas.style.height = '100%';
-        this.canvas.tabIndex = 0;
-        this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-        ctx2d = this.canvas.getContext('2d', { alpha: false })!;
-      }
-      this.ctx = ctx2d;
-      console.log('[TerminalRenderer] Canvas2D fallback active');
-    }
+    // Listen for context loss events on the canvas. If a WebGL context is lost
+    // (e.g., GPU reset, driver crash, browser reclaiming resources), we
+    // permanently degrade to Canvas2D for this renderer instance.
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      console.warn('[TerminalRenderer] WebGL context lost — falling back to Canvas2D');
+      webGLContextPool.notifyContextLost(this.canvas);
+      this.teardownWebGL();
+      this.contextLostDegraded = true;
+      this.initCanvas2DFallback();
+    });
 
-    if (this.useWebGL && this.webglRenderer) {
-      const metrics = this.webglRenderer.measureFont();
-      this.cellWidth = metrics.cellWidth;
-      this.cellHeight = metrics.cellHeight;
-    } else {
-      this.measureFont();
-    }
-
-    _rendererBackend = this.useWebGL ? 'WebGL2' : 'Canvas2D';
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      console.log('[TerminalRenderer] WebGL context restored event (staying on Canvas2D due to degradation policy)');
+      // We intentionally do NOT re-acquire WebGL here. Once degraded, we stay
+      // on Canvas2D to avoid flicker/instability from repeated loss cycles.
+      // The next acquireWebGL() call (on resume) can attempt to re-acquire
+      // if the degraded flag has been cleared.
+    });
 
     this.setupMouseHandlers();
     this.setupWheelHandler();
@@ -247,6 +229,116 @@ export class TerminalRenderer {
   /** Returns the active rendering backend name. */
   getBackend(): string {
     return this.useWebGL ? 'WebGL2' : 'Canvas2D';
+  }
+
+  /** Returns true if this renderer is in a degraded state (Canvas2D fallback after context loss). */
+  isContextLostDegraded(): boolean {
+    return this.contextLostDegraded;
+  }
+
+  /**
+   * Attempt to acquire a WebGL2 context from the pool and switch to GPU rendering.
+   * Called when the terminal becomes visible (tab switch, split view).
+   * No-op if already using WebGL, if degraded after context loss, or if the pool is full.
+   */
+  acquireWebGL(): void {
+    if (this.useWebGL) return;
+    if (this.contextLostDegraded) {
+      console.log('[TerminalRenderer] Skipping WebGL acquire — degraded after context loss');
+      return;
+    }
+
+    const gl = webGLContextPool.acquire(this.canvas);
+    if (!gl) {
+      // Pool is full or browser refused — stay on Canvas2D
+      return;
+    }
+
+    try {
+      console.log('[TerminalRenderer] Initializing WebGL2 renderer...');
+      this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
+      this.useWebGL = true;
+      this.ctx = null; // Release Canvas2D context reference
+
+      // Create overlay canvas for scrollbar and URL hover
+      this.overlayCanvas = document.createElement('canvas');
+      this.overlayCanvas.className = 'terminal-overlay-canvas';
+      this.overlayCanvas.style.display = 'block';
+      this.overlayCtx = this.overlayCanvas.getContext('2d')!;
+
+      const metrics = this.webglRenderer.measureFont();
+      this.cellWidth = metrics.cellWidth;
+      this.cellHeight = metrics.cellHeight;
+
+      _rendererBackend = 'WebGL2';
+      console.log('[TerminalRenderer] WebGL2 renderer active');
+    } catch (e) {
+      console.warn('[TerminalRenderer] WebGL2 renderer init failed, staying on Canvas2D:', e);
+      webGLContextPool.release(this.canvas);
+      this.webglRenderer = null;
+      this.useWebGL = false;
+      // Re-acquire Canvas2D context
+      this.initCanvas2DFallback();
+    }
+  }
+
+  /**
+   * Release the WebGL2 context back to the pool and switch to Canvas2D.
+   * Called when the terminal becomes hidden (tab switch, pause).
+   * No-op if already using Canvas2D.
+   */
+  releaseWebGL(): void {
+    if (!this.useWebGL) return;
+    this.teardownWebGL();
+    this.initCanvas2DFallback();
+    console.log('[TerminalRenderer] WebGL released, switched to Canvas2D');
+  }
+
+  /** Internal: tear down WebGL resources without switching to Canvas2D. */
+  private teardownWebGL(): void {
+    if (this.webglRenderer) {
+      this.webglRenderer.dispose();
+      this.webglRenderer = null;
+    }
+    webGLContextPool.release(this.canvas);
+    this.useWebGL = false;
+    _rendererBackend = 'Canvas2D';
+
+    // Remove overlay canvas from DOM if present
+    if (this.overlayCanvas) {
+      this.overlayCanvas.remove();
+      this.overlayCanvas = null;
+      this.overlayCtx = null;
+    }
+  }
+
+  /** Internal: initialize or re-initialize Canvas2D context on the current canvas. */
+  private initCanvas2DFallback(): void {
+    // The canvas may still be locked to WebGL after getContext('webgl2') was called.
+    // In that case, getContext('2d') returns null. Create a fresh canvas.
+    let ctx2d = this.canvas.getContext('2d', { alpha: false });
+    if (!ctx2d) {
+      console.log('[TerminalRenderer] Canvas locked to WebGL, creating fresh canvas for 2D fallback');
+      const oldCanvas = this.canvas;
+      this.canvas = document.createElement('canvas');
+      this.canvas.className = 'terminal-canvas';
+      this.canvas.style.display = 'block';
+      this.canvas.style.width = '100%';
+      this.canvas.style.height = '100%';
+      this.canvas.tabIndex = -1;
+      this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+      // Replace in DOM if old canvas is attached
+      if (oldCanvas.parentNode) {
+        oldCanvas.parentNode.replaceChild(this.canvas, oldCanvas);
+      }
+      ctx2d = this.canvas.getContext('2d', { alpha: false })!;
+      // Re-attach mouse/wheel/touch handlers on the new canvas
+      this.setupMouseHandlers();
+      this.setupWheelHandler();
+      this.setupTouchHandler();
+    }
+    this.ctx = ctx2d;
+    this.measureFont();
   }
 
   /** Update the terminal theme and trigger a repaint. */
@@ -454,8 +546,14 @@ export class TerminalRenderer {
    * Called when the terminal is paused (hidden tab). The canvas elements stay
    * in the DOM but their backing stores are freed by setting dimensions to 1×1.
    * Call restoreCanvasResources() to re-allocate when the terminal becomes visible.
+   *
+   * If using WebGL, the context is released back to the pool so other
+   * terminals can use it. On restore, acquireWebGL() re-acquires if available.
    */
   releaseCanvasResources() {
+    // Demote from WebGL before shrinking canvas to release the GL context.
+    // This makes the context available for other visible terminals.
+    this.demoteToCanvas2D();
     // Shrink canvases to 1×1 to release GPU backing store.
     // Setting to 0×0 is invalid in some browsers; 1×1 = 4 bytes.
     this.canvas.width = 1;
@@ -467,10 +565,6 @@ export class TerminalRenderer {
     // Drop cached snapshot data
     this.currentSnapshot = null;
     this.pendingSnapshot = null;
-    // Release encoder buffers (WebGL mode)
-    if (this.webglRenderer) {
-      this.webglRenderer.releaseBuffers();
-    }
     // Stop cursor blink timer (no need to repaint hidden canvas)
     if (this.cursorBlinkInterval) {
       clearInterval(this.cursorBlinkInterval);
@@ -482,13 +576,125 @@ export class TerminalRenderer {
    * Re-allocate canvas resources after releaseCanvasResources().
    * Called when the terminal becomes visible again. updateSize() will
    * set the correct dimensions; startCursorBlink() restarts the timer.
+   * Attempts to re-acquire a WebGL context from the pool.
    */
   restoreCanvasResources() {
-    // updateSize() will set the correct dimensions on next call
+    // Try to re-acquire WebGL context from the pool.
+    // If the pool is full, we stay on Canvas2D (already initialized).
+    this.acquireWebGL();
+
     // Restart cursor blink if it was stopped
     if (!this.cursorBlinkInterval) {
       this.startCursorBlink();
     }
+  }
+
+  /**
+   * Promote this renderer to WebGL2 for GPU-accelerated rendering.
+   * Called when the terminal becomes visible. If WebGL2 is unavailable or
+   * context creation fails, the renderer stays on Canvas2D silently.
+   * Returns true if promotion succeeded.
+   */
+  promoteToWebGL(): boolean {
+    if (this.useWebGL) return true; // already promoted
+
+    // Need a fresh canvas for WebGL — can't get webgl2 on a canvas that
+    // already has a 2d context. Create a new canvas and swap it in.
+    const newCanvas = document.createElement('canvas');
+    newCanvas.className = 'terminal-canvas';
+    newCanvas.style.display = 'block';
+    newCanvas.style.width = '100%';
+    newCanvas.style.height = '100%';
+    newCanvas.tabIndex = this.canvas.tabIndex;
+    newCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    const gl = newCanvas.getContext('webgl2', { alpha: false, antialias: false });
+    if (!gl) return false;
+
+    try {
+      this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
+    } catch {
+      return false;
+    }
+
+    // Create overlay canvas for scrollbar and URL hover
+    this.overlayCanvas = document.createElement('canvas');
+    this.overlayCanvas.className = 'terminal-overlay-canvas';
+    this.overlayCanvas.style.display = 'block';
+    this.overlayCtx = this.overlayCanvas.getContext('2d')!;
+
+    // Swap canvases in the DOM
+    const parent = this.canvas.parentElement;
+    if (parent) {
+      parent.replaceChild(newCanvas, this.canvas);
+      // Insert overlay after the main canvas
+      newCanvas.after(this.overlayCanvas);
+    }
+
+    this.canvas = newCanvas;
+    this.ctx = null;
+    this.useWebGL = true;
+
+    // Re-measure with WebGL renderer
+    const metrics = this.webglRenderer.measureFont();
+    this.cellWidth = metrics.cellWidth;
+    this.cellHeight = metrics.cellHeight;
+
+    // Re-attach event handlers to the new canvas
+    this.setupMouseHandlers();
+    this.setupWheelHandler();
+    this.setupTouchHandler();
+
+    _rendererBackend = 'WebGL2';
+    return true;
+  }
+
+  /**
+   * Demote this renderer from WebGL2 back to Canvas2D.
+   * Called when the terminal becomes hidden, freeing the WebGL context
+   * for other visible terminals. No-op if already using Canvas2D.
+   */
+  demoteToCanvas2D(): void {
+    if (!this.useWebGL) return;
+
+    // Dispose WebGL resources
+    if (this.webglRenderer) {
+      this.webglRenderer.dispose();
+      this.webglRenderer = null;
+    }
+
+    // Remove overlay canvas from DOM
+    if (this.overlayCanvas) {
+      this.overlayCanvas.remove();
+      this.overlayCanvas = null;
+      this.overlayCtx = null;
+    }
+
+    // Create a fresh Canvas2D canvas (can't get 2d context on a webgl canvas)
+    const newCanvas = document.createElement('canvas');
+    newCanvas.className = 'terminal-canvas';
+    newCanvas.style.display = 'block';
+    newCanvas.style.width = '100%';
+    newCanvas.style.height = '100%';
+    newCanvas.tabIndex = this.canvas.tabIndex;
+    newCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    const parent = this.canvas.parentElement;
+    if (parent) {
+      parent.replaceChild(newCanvas, this.canvas);
+    }
+
+    this.canvas = newCanvas;
+    this.ctx = newCanvas.getContext('2d', { alpha: false })!;
+    this.useWebGL = false;
+    this.measureFont();
+
+    // Re-attach event handlers to the new canvas
+    this.setupMouseHandlers();
+    this.setupWheelHandler();
+    this.setupTouchHandler();
+
+    _rendererBackend = 'Canvas2D';
   }
 
   /** Clean up all resources. */
@@ -507,9 +713,9 @@ export class TerminalRenderer {
       document.removeEventListener('mouseup', this.onDocumentMouseUp);
       this.onDocumentMouseUp = null;
     }
-    if (this.webglRenderer) {
-      this.webglRenderer.dispose();
-      this.webglRenderer = null;
+    // Release WebGL context back to the pool
+    if (this.useWebGL) {
+      this.teardownWebGL();
     }
     // Release canvas backing stores
     this.canvas.width = 1;
