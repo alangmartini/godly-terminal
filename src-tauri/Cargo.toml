@@ -31,7 +31,7 @@ features = [
 
 [package]
 name = "godly-terminal"
-version = "0.6.0"
+version = "0.7.0"
 description = "A Windows terminal application with workspaces"
 authors = ["you"]
 edition = "2021"
@@ -43,6 +43,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 leak-check = ["dhat"]
+staging = []
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
@@ -62,6 +63,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.0", features = ["rt"] }
 parking_lot.workspace = true
+dashmap = "6"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 zip = "2"
 tempfile = "3"
