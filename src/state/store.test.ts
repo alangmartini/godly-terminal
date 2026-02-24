@@ -719,17 +719,20 @@ describe('Store', () => {
       expect(store.getState().splitViews).toEqual({});
     });
 
-    it('should auto-clear split when navigating to a terminal outside the split', () => {
-      // Bug: clicking a tab not in the split left the split active,
-      // so the clicked tab was never displayed
+    it('should update split when navigating to a terminal outside the split', () => {
+      // Navigating to a tab outside the split replaces the active pane,
+      // keeping the split alive instead of suspending it.
       store.setActiveWorkspace('ws-1');
       store.setSplitView('ws-1', 't1', 't2', 'horizontal');
       store.setActiveTerminal('t1');
 
-      // Navigate to t3 which is NOT in the split
+      // Navigate to t3 which is NOT in the split — replaces active (left) pane
       store.setActiveTerminal('t3');
 
-      expect(store.getSplitView('ws-1')).toBeNull();
+      const split = store.getSplitView('ws-1');
+      expect(split).not.toBeNull();
+      expect(split!.leftTerminalId).toBe('t3');
+      expect(split!.rightTerminalId).toBe('t2');
       expect(store.getState().activeTerminalId).toBe('t3');
     });
 
