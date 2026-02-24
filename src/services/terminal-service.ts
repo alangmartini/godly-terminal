@@ -65,6 +65,19 @@ const STREAM_RECONNECT_BASE_MS = 1000;
 /** Maximum delay between reconnect attempts (ms). */
 const STREAM_RECONNECT_MAX_MS = 10_000;
 
+/** Returns a random jitter in [0, range) to break thundering herd patterns. */
+let jitterRng = () => Math.random();
+
+/** @internal — override the jitter RNG for deterministic testing. */
+export function _setJitterRng(fn: () => number): void {
+  jitterRng = fn;
+}
+
+/** @internal — restore the default jitter RNG. */
+export function _resetJitterRng(): void {
+  jitterRng = () => Math.random();
+}
+
 class TerminalService {
   private outputListeners: Map<string, () => void> = new Map();
   private gridDiffListeners: Map<string, (diff: RichGridDiff) => void> = new Map();
@@ -304,7 +317,7 @@ class TerminalService {
         if (signal.aborted) break;
 
         console.debug(
-          `[TerminalService] Output stream error for ${sessionId}, reconnecting in ${delay}ms`,
+          `[TerminalService] Output stream error for ${sessionId}, reconnecting in ~${delay}ms (+ jitter)`,
           err instanceof Error ? err.message : err,
         );
       }
@@ -314,8 +327,12 @@ class TerminalService {
       // is restarting or the session was closed.
       if (signal.aborted) break;
 
+      // Add random jitter to break thundering herd when all streams
+      // fail simultaneously and would otherwise retry in lockstep.
+      const jitteredDelay = delay + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
+
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, delay);
+        const timer = setTimeout(resolve, jitteredDelay);
         signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
       });
 
