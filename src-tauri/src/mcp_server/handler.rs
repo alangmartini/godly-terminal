@@ -1400,44 +1400,47 @@ pub fn handle_mcp_request(
                 }
             };
 
-            let request_id = uuid::Uuid::new_v4().to_string();
-            let (tx, rx) = std::sync::mpsc::channel::<String>();
-
-            // Store sender
-            {
-                let ss_state: tauri::State<'_, crate::ScreenshotCallbackState> =
-                    app_handle.state::<crate::ScreenshotCallbackState>();
-                ss_state.senders.lock().insert(request_id.clone(), tx);
-            }
-
-            // Build JS to capture the canvas as a data URL and save to file via invoke
+            // Build JS to capture the canvas as a data URL
             let selector = match terminal_id {
                 Some(tid) => format!("[data-terminal-id=\"{}\"] canvas", tid),
                 None => "canvas".to_string(),
             };
 
+            // Use the JS callback mechanism (same as execute_js) to return the data
+            let request_id = uuid::Uuid::new_v4().to_string();
+            let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
+
+            {
+                let js_state: tauri::State<'_, crate::JsCallbackState> =
+                    app_handle.state::<crate::JsCallbackState>();
+                js_state.senders.lock().insert(request_id.clone(), tx);
+            }
+
+            // JS captures canvas and returns the base64 data (without prefix) to keep it smaller
             let wrapped = format!(
                 r#"(async () => {{
     try {{
         const canvas = document.querySelector('{selector}');
         if (!canvas) {{
-            await window.__TAURI__.core.invoke('mcp_screenshot_result', {{
+            await window.__TAURI__.core.invoke('mcp_js_result', {{
                 id: '{request_id}',
-                data_url: '',
-                error: 'No canvas element found',
+                result: null,
+                error: 'No canvas element found matching selector: {selector}',
             }});
             return;
         }}
         const dataUrl = canvas.toDataURL('image/png');
-        await window.__TAURI__.core.invoke('mcp_screenshot_result', {{
+        // Strip the data:image/png;base64, prefix to reduce transfer size
+        const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
             id: '{request_id}',
-            data_url: dataUrl,
+            result: base64,
             error: null,
         }});
     }} catch (e) {{
-        await window.__TAURI__.core.invoke('mcp_screenshot_result', {{
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
             id: '{request_id}',
-            data_url: '',
+            result: null,
             error: e.message || String(e),
         }});
     }}
@@ -1445,31 +1448,50 @@ pub fn handle_mcp_request(
             );
 
             if let Err(e) = window.eval(&wrapped) {
-                let ss_state: tauri::State<'_, crate::ScreenshotCallbackState> =
-                    app_handle.state::<crate::ScreenshotCallbackState>();
-                ss_state.senders.lock().remove(&request_id);
+                let js_state: tauri::State<'_, crate::JsCallbackState> =
+                    app_handle.state::<crate::JsCallbackState>();
+                js_state.senders.lock().remove(&request_id);
                 return McpResponse::Error {
                     message: format!("Failed to eval screenshot JS: {}", e),
                 };
             }
 
-            // Wait for callback
-            match rx.recv_timeout(std::time::Duration::from_secs(10)) {
-                Ok(path) => {
-                    if path.is_empty() {
-                        McpResponse::Error {
-                            message: "Screenshot capture failed".to_string(),
+            // Wait for the base64 data
+            match rx.recv_timeout(std::time::Duration::from_secs(15)) {
+                Ok((Some(base64_data), None)) | Ok((Some(base64_data), Some(_))) if !base64_data.is_empty() => {
+                    // Decode base64 and save to file
+                    use base64::Engine;
+                    match base64::engine::general_purpose::STANDARD.decode(&base64_data) {
+                        Ok(bytes) => {
+                            let temp_dir = std::env::temp_dir().join("godly-screenshots");
+                            let _ = std::fs::create_dir_all(&temp_dir);
+                            let path = temp_dir.join(format!("screenshot-{}.png", &request_id[..8]));
+                            match std::fs::write(&path, &bytes) {
+                                Ok(_) => McpResponse::Screenshot {
+                                    path: path.to_string_lossy().to_string(),
+                                },
+                                Err(e) => McpResponse::Error {
+                                    message: format!("Failed to write screenshot: {}", e),
+                                },
+                            }
                         }
-                    } else {
-                        McpResponse::Screenshot { path }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to decode screenshot base64: {}", e),
+                        },
                     }
                 }
+                Ok((_, Some(error))) => McpResponse::Error {
+                    message: format!("Screenshot JS error: {}", error),
+                },
+                Ok(_) => McpResponse::Error {
+                    message: "Screenshot capture returned empty data".to_string(),
+                },
                 Err(_) => {
-                    let ss_state: tauri::State<'_, crate::ScreenshotCallbackState> =
-                        app_handle.state::<crate::ScreenshotCallbackState>();
-                    ss_state.senders.lock().remove(&request_id);
+                    let js_state: tauri::State<'_, crate::JsCallbackState> =
+                        app_handle.state::<crate::JsCallbackState>();
+                    js_state.senders.lock().remove(&request_id);
                     McpResponse::Error {
-                        message: "Screenshot capture timed out after 10s".to_string(),
+                        message: "Screenshot capture timed out after 15s".to_string(),
                     }
                 }
             }
