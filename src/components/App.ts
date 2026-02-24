@@ -1213,6 +1213,29 @@ export class App {
       }
     });
 
+    // MCP: split view created by MCP handler
+    await listen<{
+      workspace_id: string;
+      left_terminal_id: string;
+      right_terminal_id: string;
+      direction: string;
+      ratio: number;
+    }>('mcp-set-split-view', (event) => {
+      const { workspace_id, left_terminal_id, right_terminal_id, direction, ratio } = event.payload;
+      console.log('[App] MCP set split view:', workspace_id, direction);
+      const dir = direction === 'vertical' ? 'vertical' : 'horizontal';
+      store.setSplitView(workspace_id, left_terminal_id, right_terminal_id, dir, ratio);
+      this.updateLayout();
+    });
+
+    // MCP: split view cleared by MCP handler
+    await listen<string>('mcp-clear-split-view', (event) => {
+      const workspaceId = event.payload;
+      console.log('[App] MCP clear split view:', workspaceId);
+      store.clearSplitView(workspaceId);
+      this.updateLayout();
+    });
+
     // Terminal bell (BEL character, 0x07) — triggers notification pipeline
     await listen<{ terminal_id: string }>('terminal-bell', async (event) => {
       const { terminal_id } = event.payload;

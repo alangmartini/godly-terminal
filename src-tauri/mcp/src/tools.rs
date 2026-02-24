@@ -490,6 +490,95 @@ pub fn list_tools() -> Value {
                     },
                     "required": ["workspace_id", "prompt"]
                 }
+            },
+            {
+                "name": "create_split",
+                "description": "Create a split-pane view showing two terminals side by side in a workspace. Only one split per workspace is supported.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "left_terminal_id": {
+                            "type": "string",
+                            "description": "ID of the left (or top) terminal"
+                        },
+                        "right_terminal_id": {
+                            "type": "string",
+                            "description": "ID of the right (or bottom) terminal"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["horizontal", "vertical"],
+                            "default": "horizontal",
+                            "description": "Split direction: 'horizontal' for left/right, 'vertical' for top/bottom"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Split ratio (0.15–0.85). Default: 0.5 (equal split)"
+                        }
+                    },
+                    "required": ["workspace_id", "left_terminal_id", "right_terminal_id"]
+                }
+            },
+            {
+                "name": "clear_split",
+                "description": "Remove the split-pane view from a workspace, returning to single-terminal view.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to clear split from"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "get_split_state",
+                "description": "Get the current split-pane configuration for a workspace. Returns the split terminals, direction, and ratio, or null if no split is active.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to query"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "execute_js",
+                "description": "Execute JavaScript in the Godly Terminal webview and return the result. The script runs in the main webview context with access to the DOM, store, and all frontend APIs. The return value is JSON-stringified. Use for DOM inspection, state queries, and UI manipulation.\n\nExamples:\n- Query store state: `return window.__STORE__.getState().splitViews`\n- Get element rect: `return document.querySelector('.split-divider')?.getBoundingClientRect()`\n- Check CSS classes: `return document.querySelector('.terminal-pane')?.className`",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "script": {
+                            "type": "string",
+                            "description": "JavaScript code to evaluate. Use `return` for a value. Async/await is supported."
+                        }
+                    },
+                    "required": ["script"]
+                }
+            },
+            {
+                "name": "capture_screenshot",
+                "description": "Capture a screenshot of a terminal's canvas as a PNG file. Returns the file path to the saved screenshot image. If no terminal_id is provided, captures the first visible canvas.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to screenshot (optional — captures first visible canvas if omitted)"
+                        }
+                    },
+                    "required": []
+                }
             }
         ]
     })
@@ -876,6 +965,41 @@ pub fn call_tool(
             }
         }
 
+        "create_split" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let left_terminal_id = args.get("left_terminal_id").and_then(|v| v.as_str()).ok_or("Missing left_terminal_id")?.to_string();
+            let right_terminal_id = args.get("right_terminal_id").and_then(|v| v.as_str()).ok_or("Missing right_terminal_id")?.to_string();
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("horizontal").to_string();
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            McpRequest::CreateSplit {
+                workspace_id,
+                left_terminal_id,
+                right_terminal_id,
+                direction,
+                ratio,
+            }
+        }
+
+        "clear_split" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::ClearSplit { workspace_id }
+        }
+
+        "get_split_state" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::GetSplitState { workspace_id }
+        }
+
+        "execute_js" => {
+            let script = args.get("script").and_then(|v| v.as_str()).ok_or("Missing script")?.to_string();
+            McpRequest::ExecuteJs { script }
+        }
+
+        "capture_screenshot" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::CaptureScreenshot { terminal_id }
+        }
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -990,6 +1114,32 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "completed": completed,
             "last_output_ago_ms": last_output_ago_ms,
             "running": running,
+        })),
+        McpResponse::SplitState {
+            workspace_id,
+            left_terminal_id,
+            right_terminal_id,
+            direction,
+            ratio,
+        } => Ok(json!({
+            "workspace_id": workspace_id,
+            "left_terminal_id": left_terminal_id,
+            "right_terminal_id": right_terminal_id,
+            "direction": direction,
+            "ratio": ratio,
+        })),
+        McpResponse::NoSplit => Ok(json!({ "split": null })),
+        McpResponse::JsResult { result, error } => {
+            if let Some(err) = error {
+                Err(err)
+            } else {
+                Ok(json!({
+                    "result": result.unwrap_or_else(|| "undefined".to_string()),
+                }))
+            }
+        }
+        McpResponse::Screenshot { path } => Ok(json!({
+            "path": path,
         })),
     }
 }
