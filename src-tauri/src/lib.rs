@@ -497,6 +497,23 @@ pub fn run() {
 
             // Handle window close: detach sessions (don't kill them) and save layout
             let main_window = app.get_webview_window("main").unwrap();
+
+            // Disable WebView2's built-in zoom control. Without this, Ctrl+scroll
+            // triggers native browser zoom in addition to our font-size zoom handler,
+            // causing the content to not fill the window and exposing a black border.
+            #[cfg(target_os = "windows")]
+            {
+                let _ = main_window.with_webview(|webview| unsafe {
+                    // Reset zoom to 100% in case it drifted from a previous session
+                    let _ = webview.controller().SetZoomFactor(1.0);
+                    // Disable all zoom controls (Ctrl+scroll, Ctrl+Plus/Minus, pinch)
+                    if let Ok(core) = webview.controller().CoreWebView2() {
+                        if let Ok(settings) = core.Settings() {
+                            let _ = settings.SetIsZoomControlEnabled(false);
+                        }
+                    }
+                });
+            }
             let state_for_close = state_clone.clone();
             let handle_for_close = app_handle.clone();
             let window_for_close = main_window.clone();
