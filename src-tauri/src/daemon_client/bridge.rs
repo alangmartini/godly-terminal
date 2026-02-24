@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -26,19 +26,18 @@ const MAX_STREAM_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 /// Thread-safe: the bridge I/O thread pushes data, and the Tauri custom
 /// protocol handler (running on the Tauri thread pool) drains data.
 ///
-/// Uses per-session locking: the outer RwLock protects the HashMap structure,
-/// while each session has its own inner Mutex for its byte buffer. This means
-/// push() and drain() for DIFFERENT sessions never block each other — only
-/// same-session operations contend, and those critical sections are short
-/// (push a slice, swap a Vec).
+/// Uses `DashMap` with per-session sharded locks so that push/drain
+/// operations for different sessions never block each other. With 20+
+/// concurrent terminals this eliminates the global-mutex serialization
+/// bottleneck.
 pub struct OutputStreamRegistry {
-    buffers: parking_lot::RwLock<HashMap<String, Arc<parking_lot::Mutex<Vec<u8>>>>>,
+    buffers: dashmap::DashMap<String, Vec<u8>>,
 }
 
 impl OutputStreamRegistry {
     pub fn new() -> Self {
         Self {
-            buffers: parking_lot::RwLock::new(HashMap::new()),
+            buffers: dashmap::DashMap::new(),
         }
     }
 
@@ -51,28 +50,7 @@ impl OutputStreamRegistry {
         if data.is_empty() {
             return;
         }
-
-        // Fast path: session already exists, only need a read lock on the map.
-        {
-            let buffers = self.buffers.read();
-            if let Some(entry) = buffers.get(session_id) {
-                let mut buf = entry.lock();
-                Self::push_into_buf(&mut buf, data);
-                return;
-            }
-        }
-
-        // Slow path: session doesn't exist yet, need a write lock to insert.
-        let mut buffers = self.buffers.write();
-        let entry = buffers
-            .entry(session_id.to_string())
-            .or_insert_with(|| Arc::new(parking_lot::Mutex::new(Vec::new())));
-        let mut buf = entry.lock();
-        Self::push_into_buf(&mut buf, data);
-    }
-
-    /// Push data into a buffer, enforcing MAX_STREAM_BUFFER_SIZE.
-    fn push_into_buf(buf: &mut Vec<u8>, data: &[u8]) {
+        let mut buf = self.buffers.entry(session_id.to_string()).or_default();
         if buf.len() + data.len() > MAX_STREAM_BUFFER_SIZE {
             // Drop oldest data to make room
             let overflow = (buf.len() + data.len()).saturating_sub(MAX_STREAM_BUFFER_SIZE);
@@ -93,22 +71,21 @@ impl OutputStreamRegistry {
     /// Drain all accumulated bytes for a session, returning them.
     /// The buffer is cleared after draining.
     pub fn drain(&self, session_id: &str) -> Vec<u8> {
-        let buffers = self.buffers.read();
-        match buffers.get(session_id) {
-            Some(entry) => std::mem::take(&mut *entry.lock()),
+        match self.buffers.get_mut(session_id) {
+            Some(mut buf) => std::mem::take(buf.value_mut()),
             None => Vec::new(),
         }
     }
 
     /// Remove a session's buffer entirely (on session close).
     pub fn remove(&self, session_id: &str) {
-        self.buffers.write().remove(session_id);
+        self.buffers.remove(session_id);
     }
 
     /// Number of sessions with active buffers (for diagnostics).
     #[cfg(test)]
     pub fn session_count(&self) -> usize {
-        self.buffers.read().len()
+        self.buffers.len()
     }
 }
 

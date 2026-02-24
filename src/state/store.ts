@@ -62,7 +62,6 @@ class Store {
 
   private listeners: Set<Listener> = new Set();
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
-  private suspendedSplitViews: Map<string, SplitView> = new Map();
   private pendingNotify = false;
   /** Sessions currently resumed (not paused). Tracks which sessions we've
    *  sent resumeSession to, so we can pause them when they become invisible. */
@@ -86,7 +85,6 @@ class Store {
       splitViews: {},
     };
     this.lastActiveTerminalByWorkspace.clear();
-    this.suspendedSplitViews.clear();
     this.notify();
   }
 
@@ -128,7 +126,6 @@ class Store {
 
   removeWorkspace(id: string) {
     this.lastActiveTerminalByWorkspace.delete(id);
-    this.suspendedSplitViews.delete(id);
     const { [id]: _, ...remainingSplitViews } = this.state.splitViews;
     this.setState({
       workspaces: this.state.workspaces.filter(w => w.id !== id),
@@ -226,10 +223,6 @@ class Store {
         }
       }
 
-      const suspended = this.suspendedSplitViews.get(terminal.workspaceId);
-      if (suspended && (suspended.leftTerminalId === id || suspended.rightTerminalId === id)) {
-        this.suspendedSplitViews.delete(terminal.workspaceId);
-      }
     }
 
     this.setState({
@@ -246,34 +239,37 @@ class Store {
       this.lastActiveTerminalByWorkspace.set(this.state.activeWorkspaceId, id);
       const wsId = this.state.activeWorkspaceId;
 
-      // If navigating to a terminal outside the current split → suspend the split
+      // If navigating to a terminal outside the current split → update the split
+      // by replacing the currently-active pane with the new terminal
       const split = this.state.splitViews[wsId];
       if (split && id !== split.leftTerminalId && id !== split.rightTerminalId) {
-        this.suspendedSplitViews.set(wsId, split);
-        const { [wsId]: _, ...rest } = this.state.splitViews;
-        this.setState({ activeTerminalId: id, splitViews: rest });
-        invoke('clear_split_view', { workspaceId: wsId }).catch(() => {});
-        invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
-        this.syncSessionPauseState();
-        return;
-      }
+        const activeId = this.state.activeTerminalId;
+        let newLeft = split.leftTerminalId;
+        let newRight = split.rightTerminalId;
 
-      // If navigating to a terminal that was part of a suspended split → restore it
-      const suspended = this.suspendedSplitViews.get(wsId);
-      if (suspended && (id === suspended.leftTerminalId || id === suspended.rightTerminalId)) {
-        this.suspendedSplitViews.delete(wsId);
+        if (activeId === split.leftTerminalId) {
+          newLeft = id;
+        } else if (activeId === split.rightTerminalId) {
+          newRight = id;
+        } else {
+          // Active terminal isn't in the split — replace the right pane
+          newRight = id;
+        }
+
+        const updatedSplit = { ...split, leftTerminalId: newLeft, rightTerminalId: newRight };
         this.setState({
           activeTerminalId: id,
-          splitViews: { ...this.state.splitViews, [wsId]: suspended },
+          splitViews: { ...this.state.splitViews, [wsId]: updatedSplit },
         });
         invoke('set_split_view', {
           workspaceId: wsId,
-          leftTerminalId: suspended.leftTerminalId,
-          rightTerminalId: suspended.rightTerminalId,
-          direction: suspended.direction,
-          ratio: suspended.ratio,
+          leftTerminalId: newLeft,
+          rightTerminalId: newRight,
+          direction: split.direction,
+          ratio: split.ratio,
         }).catch(() => {});
         invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+        this.enforceSplitAdjacency(wsId);
         this.syncSessionPauseState();
         return;
       }
@@ -293,10 +289,6 @@ class Store {
       if (split && (split.leftTerminalId === terminalId || split.rightTerminalId === terminalId)) {
         const { [terminal.workspaceId]: _, ...rest } = splitViews;
         splitViews = rest;
-      }
-      const suspended = this.suspendedSplitViews.get(terminal.workspaceId);
-      if (suspended && (suspended.leftTerminalId === terminalId || suspended.rightTerminalId === terminalId)) {
-        this.suspendedSplitViews.delete(terminal.workspaceId);
       }
     }
 
@@ -324,6 +316,7 @@ class Store {
         return { ...t, order: order >= 0 ? order : t.order };
       }),
     });
+    this.enforceSplitAdjacency(workspaceId);
   }
 
   // Split view operations
@@ -340,10 +333,10 @@ class Store {
         [workspaceId]: { leftTerminalId, rightTerminalId, direction, ratio },
       },
     });
+    this.enforceSplitAdjacency(workspaceId);
   }
 
   clearSplitView(workspaceId: string) {
-    this.suspendedSplitViews.delete(workspaceId);
     const { [workspaceId]: _, ...rest } = this.state.splitViews;
     this.setState({ splitViews: rest });
   }
@@ -360,6 +353,33 @@ class Store {
         ...this.state.splitViews,
         [workspaceId]: { ...split, ratio },
       },
+    });
+  }
+
+  /** Ensure split-paired terminals are adjacent in the tab order. */
+  private enforceSplitAdjacency(workspaceId: string) {
+    const split = this.state.splitViews[workspaceId];
+    if (!split) return;
+
+    const wsTerminals = this.getWorkspaceTerminals(workspaceId);
+    const leftIdx = wsTerminals.findIndex(t => t.id === split.leftTerminalId);
+    const rightIdx = wsTerminals.findIndex(t => t.id === split.rightTerminalId);
+
+    if (leftIdx === -1 || rightIdx === -1) return;
+    if (Math.abs(leftIdx - rightIdx) === 1) return; // already adjacent
+
+    // Move the right terminal to be immediately after the left terminal
+    const ids = wsTerminals.map(t => t.id);
+    ids.splice(rightIdx, 1);
+    const newLeftIdx = ids.indexOf(split.leftTerminalId);
+    ids.splice(newLeftIdx + 1, 0, split.rightTerminalId);
+
+    this.setState({
+      terminals: this.state.terminals.map(t => {
+        if (t.workspaceId !== workspaceId) return t;
+        const order = ids.indexOf(t.id);
+        return { ...t, order: order >= 0 ? order : t.order };
+      }),
     });
   }
 
