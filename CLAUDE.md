@@ -83,6 +83,16 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 - **Features**: Write **E2E tests** (`npm run test:e2e`), not just unit tests.
 - **Performance issues**: Always write automated reproducible tests that demonstrate the problem under realistic conditions. Isolated component benchmarks are useful but insufficient — the test must exercise the real bottleneck (e.g., concurrent I/O, lock contention, IPC round-trips). See `daemon/tests/input_latency.rs` and `daemon/tests/handler_starvation.rs` for patterns.
 
+## User-Like Testing (Post-Implementation)
+
+After completing any feature or bug fix that has a visual/UX component, **ask the user** if they'd like you to run user-like testing via `/manual-testing <feature>`. Prefer testing on **Godly Staging** (`npm run staging:dev`) to avoid disrupting the production app.
+
+The testing framework combines:
+- **godly-terminal MCP** — `execute_js` (DOM/store inspection), `capture_screenshot` (canvas PNG), split view control
+- **pyautogui-mcp** — Real OS-level mouse/keyboard/screenshot for drag-and-drop, divider resize, keyboard shortcuts
+
+See `.claude/skills/manual-testing.md` for the full testing procedure.
+
 ## Parallel Agent Workflow
 
 - **Task claiming**: Create `current_tasks/<branch-name>.md` with scope and files. Check for overlap first. Remove when PR merges.
@@ -133,6 +143,16 @@ These extend the global CLAUDE.md workflows (bug fix, feature development):
 - Full release build of daemon/mcp/notify binaries
 
 Do NOT run `cargo check --workspace`, `npm run build`, or `cargo nextest run --workspace` locally unless debugging a CI failure. Let CI catch cross-crate breakage — local checks are for fast feedback only.
+
+### Staging verification (ask before running)
+
+After completing a feature or bug fix, **ask the user** if they want you to build and install Godly Staging to test the change in an isolated environment:
+
+```bash
+npm run staging:build && npm run staging:install
+```
+
+This builds a fully isolated "Godly Terminal (Staging)" installation with separate pipes, app data, and daemon. Use it to verify the fix/feature works end-to-end in a real terminal before opening a PR. Do NOT run this automatically — always ask first, as it takes several minutes.
 
 ## Product Vision
 
