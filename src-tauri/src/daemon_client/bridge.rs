@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -25,16 +25,19 @@ const MAX_STREAM_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 ///
 /// Thread-safe: the bridge I/O thread pushes data, and the Tauri custom
 /// protocol handler (running on the Tauri thread pool) drains data.
-/// Critical sections are short (push a slice, swap a Vec), so contention
-/// is negligible.
+///
+/// Uses `DashMap` with per-session sharded locks so that push/drain
+/// operations for different sessions never block each other. With 20+
+/// concurrent terminals this eliminates the global-mutex serialization
+/// bottleneck.
 pub struct OutputStreamRegistry {
-    buffers: parking_lot::Mutex<HashMap<String, Vec<u8>>>,
+    buffers: dashmap::DashMap<String, Vec<u8>>,
 }
 
 impl OutputStreamRegistry {
     pub fn new() -> Self {
         Self {
-            buffers: parking_lot::Mutex::new(HashMap::new()),
+            buffers: dashmap::DashMap::new(),
         }
     }
 
@@ -47,8 +50,7 @@ impl OutputStreamRegistry {
         if data.is_empty() {
             return;
         }
-        let mut buffers = self.buffers.lock();
-        let buf = buffers.entry(session_id.to_string()).or_default();
+        let mut buf = self.buffers.entry(session_id.to_string()).or_default();
         if buf.len() + data.len() > MAX_STREAM_BUFFER_SIZE {
             // Drop oldest data to make room
             let overflow = (buf.len() + data.len()).saturating_sub(MAX_STREAM_BUFFER_SIZE);
@@ -69,22 +71,35 @@ impl OutputStreamRegistry {
     /// Drain all accumulated bytes for a session, returning them.
     /// The buffer is cleared after draining.
     pub fn drain(&self, session_id: &str) -> Vec<u8> {
-        let mut buffers = self.buffers.lock();
-        match buffers.get_mut(session_id) {
-            Some(buf) => std::mem::take(buf),
+        match self.buffers.get_mut(session_id) {
+            Some(mut buf) => std::mem::take(buf.value_mut()),
             None => Vec::new(),
         }
     }
 
+    /// Non-blocking drain: attempts to acquire the lock without waiting.
+    /// Returns `None` if the mutex is currently held by another thread
+    /// (e.g. the bridge I/O thread pushing output), allowing the caller
+    /// to return immediately rather than blocking. This is critical for
+    /// the Tauri custom protocol handler which runs on a shared thread pool --
+    /// blocking there can starve other IPC commands.
+    pub fn try_drain(&self, session_id: &str) -> Option<Vec<u8>> {
+        let mut buffers = self.buffers.try_lock()?;
+        Some(match buffers.get_mut(session_id) {
+            Some(buf) => std::mem::take(buf),
+            None => Vec::new(),
+        })
+    }
+
     /// Remove a session's buffer entirely (on session close).
     pub fn remove(&self, session_id: &str) {
-        self.buffers.lock().remove(session_id);
+        self.buffers.remove(session_id);
     }
 
     /// Number of sessions with active buffers (for diagnostics).
     #[cfg(test)]
     pub fn session_count(&self) -> usize {
-        self.buffers.lock().len()
+        self.buffers.len()
     }
 }
 
@@ -1124,6 +1139,80 @@ mod tests {
         assert_eq!(data, &oversized[1000..]);
     }
 
+    // ── try_drain tests ────────────────────────────────────────────
+
+    #[test]
+    fn try_drain_returns_data_when_uncontended() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"hello");
+        let result = reg.try_drain("s1");
+        assert_eq!(result, Some(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn try_drain_returns_empty_vec_for_unknown_session() {
+        let reg = OutputStreamRegistry::new();
+        let result = reg.try_drain("nonexistent");
+        assert_eq!(result, Some(Vec::new()));
+    }
+
+    #[test]
+    fn try_drain_clears_buffer_like_drain() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"data");
+        let _ = reg.try_drain("s1");
+        let result = reg.try_drain("s1");
+        assert_eq!(result, Some(Vec::new()), "Buffer should be empty after try_drain");
+    }
+
+    #[test]
+    fn try_drain_returns_none_when_contended() {
+        let reg = Arc::new(OutputStreamRegistry::new());
+        reg.push("s1", b"data");
+
+        // Hold the lock from another thread to simulate contention
+        let reg_clone = Arc::clone(&reg);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+        let _holder = std::thread::spawn(move || {
+            // Acquire and hold the lock
+            let _guard = reg_clone.buffers.lock();
+            tx.send(()).unwrap(); // signal that we hold the lock
+            done_rx.recv().unwrap(); // wait for test to finish
+        });
+
+        // Wait for the other thread to hold the lock
+        rx.recv().unwrap();
+
+        // try_drain should return None because the mutex is held
+        let result = reg.try_drain("s1");
+        assert!(result.is_none(), "try_drain should return None when mutex is contended");
+
+        // Release the holder thread
+        done_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn try_drain_succeeds_after_contention_resolves() {
+        let reg = Arc::new(OutputStreamRegistry::new());
+        reg.push("s1", b"after-contention");
+
+        // Hold the lock briefly from another thread
+        let reg_clone = Arc::clone(&reg);
+        let handle = std::thread::spawn(move || {
+            let _guard = reg_clone.buffers.lock();
+            std::thread::sleep(Duration::from_millis(10));
+        });
+
+        // Wait for the holder to release
+        handle.join().unwrap();
+
+        // Now try_drain should succeed
+        let result = reg.try_drain("s1");
+        assert_eq!(result, Some(b"after-contention".to_vec()));
+    }
+
     #[test]
     fn registry_concurrent_push_and_drain() {
         let reg = Arc::new(OutputStreamRegistry::new());
@@ -1158,5 +1247,259 @@ mod tests {
             4000,
             "All pushed bytes should be accounted for"
         );
+    }
+
+    // ── Bug #312: Stream cascade failure — mutex contention tests ────
+
+    /// Bug #312: Single mutex causes cross-session contention — concurrent
+    /// push/drain on different sessions should not block each other.
+    ///
+    /// This test spawns N threads, each operating on its OWN session ID.
+    /// With a single global mutex, all threads contend on the same lock even
+    /// though they access disjoint data. With per-session locks, threads
+    /// operating on different sessions would never block each other.
+    ///
+    /// We measure throughput scaling: if doubling the thread count roughly
+    /// doubles total wall-clock time, that proves lock contention. With
+    /// per-session locks, wall time should stay roughly constant since
+    /// threads never contend.
+    #[test]
+    fn registry_cross_session_contention_scaling() {
+        const OPS_PER_THREAD: usize = 5000;
+        const PAYLOAD: &[u8] = &[0xAB; 64];
+
+        // Measure wall time for N threads, each on its own session.
+        let measure = |thread_count: usize| -> Duration {
+            let reg = Arc::new(OutputStreamRegistry::new());
+            let barrier = Arc::new(std::sync::Barrier::new(thread_count));
+
+            let handles: Vec<_> = (0..thread_count)
+                .map(|i| {
+                    let reg = Arc::clone(&reg);
+                    let barrier = Arc::clone(&barrier);
+                    let session_id = format!("session-{}", i);
+                    std::thread::spawn(move || {
+                        barrier.wait(); // synchronize start
+                        for _ in 0..OPS_PER_THREAD {
+                            reg.push(&session_id, PAYLOAD);
+                            let _ = reg.drain(&session_id);
+                        }
+                    })
+                })
+                .collect();
+
+            let _start = Instant::now();
+            // Threads already started; we just wait for completion.
+            // Actually the barrier ensures they all start ~simultaneously,
+            // but start timing from spawn. Re-measure properly:
+
+            // Need to time from after barrier releases. Use a shared atomic
+            // to capture the wall time from the threads' perspective.
+            for h in handles {
+                h.join().unwrap();
+            }
+            // Since we can't easily time from barrier release, measure
+            // a second run with external timing:
+            let reg2 = Arc::new(OutputStreamRegistry::new());
+            let barrier2 = Arc::new(std::sync::Barrier::new(thread_count + 1));
+            let handles2: Vec<_> = (0..thread_count)
+                .map(|i| {
+                    let reg = Arc::clone(&reg2);
+                    let barrier = Arc::clone(&barrier2);
+                    let session_id = format!("sess-{}", i);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        for _ in 0..OPS_PER_THREAD {
+                            reg.push(&session_id, PAYLOAD);
+                            let _ = reg.drain(&session_id);
+                        }
+                    })
+                })
+                .collect();
+
+            barrier2.wait(); // release all threads
+            let wall_start = Instant::now();
+            for h in handles2 {
+                h.join().unwrap();
+            }
+            wall_start.elapsed()
+        };
+
+        let time_4 = measure(4);
+        let time_20 = measure(20);
+
+        // With per-session locks, 20 threads on 20 sessions should complete
+        // in roughly the same time as 4 threads on 4 sessions (no contention).
+        // With a single mutex, 20 threads will take ~5x longer than 4 threads
+        // because they all serialize on the same lock.
+        //
+        // We assert that 20-thread time should be less than 3x of 4-thread time.
+        // Under the current single-mutex design, this ratio is typically 4-6x,
+        // so this test FAILS — proving cross-session contention exists.
+        let ratio = time_20.as_secs_f64() / time_4.as_secs_f64();
+        assert!(
+            ratio < 3.0,
+            "Bug #312: Cross-session contention detected. \
+             20 threads took {:.1}ms vs 4 threads {:.1}ms (ratio {:.1}x). \
+             With per-session locks, ratio should be <3x but single mutex causes ~5x+ degradation.",
+            time_20.as_secs_f64() * 1000.0,
+            time_4.as_secs_f64() * 1000.0,
+            ratio,
+        );
+    }
+
+    /// Bug #312: Single mutex serializes all sessions — concurrent operations
+    /// on N independent sessions take N times longer than single-session operations.
+    ///
+    /// With per-session locks, N threads operating on N independent sessions
+    /// complete in the same wall time as 1 thread on 1 session (perfect scaling).
+    /// With a single mutex, all N threads serialize, giving ~Nx wall time.
+    #[test]
+    fn registry_single_mutex_serializes_independent_sessions() {
+        const OPS: usize = 10_000;
+        const PAYLOAD: &[u8] = &[0xAB; 64];
+
+        // Measure single-threaded baseline: 1 thread, 1 session, OPS iterations.
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let baseline_start = Instant::now();
+        for _ in 0..OPS {
+            reg.push("baseline", PAYLOAD);
+            let _ = reg.drain("baseline");
+        }
+        let baseline = baseline_start.elapsed();
+
+        // Measure 16 threads, each on its own session, each doing OPS iterations.
+        // With per-session locks, wall time should be ~= baseline (all independent).
+        // With single mutex, wall time should be ~16x baseline (all serialize).
+        let thread_count = 16;
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let barrier = Arc::new(std::sync::Barrier::new(thread_count + 1));
+        let handles: Vec<_> = (0..thread_count)
+            .map(|i| {
+                let reg = Arc::clone(&reg);
+                let barrier = Arc::clone(&barrier);
+                let session_id = format!("session-{}", i);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..OPS {
+                        reg.push(&session_id, PAYLOAD);
+                        let _ = reg.drain(&session_id);
+                    }
+                })
+            })
+            .collect();
+
+        barrier.wait();
+        let parallel_start = Instant::now();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let parallel = parallel_start.elapsed();
+
+        // With per-session locks, parallel/baseline ratio should be ~1-2x.
+        // With single mutex, it's ~8-16x due to serialization.
+        let ratio = parallel.as_secs_f64() / baseline.as_secs_f64();
+        assert!(
+            ratio < 4.0,
+            "Bug #312: {} threads on independent sessions took {:.1}ms vs single-thread {:.1}ms \
+             (ratio {:.1}x). With per-session locks, ratio should be <4x, but single mutex causes \
+             serialization across all sessions.",
+            thread_count,
+            parallel.as_secs_f64() * 1000.0,
+            baseline.as_secs_f64() * 1000.0,
+            ratio,
+        );
+    }
+
+    /// Bug: Under the old single-Mutex design, push/drain for different sessions
+    /// blocked each other because they all contended on the same lock. With per-
+    /// session sharding, operations on different sessions are fully independent.
+    ///
+    /// This test verifies that concurrent push+drain on N independent sessions
+    /// complete without data loss — proving the per-session locks are correct and
+    /// that cross-session operations don't interfere.
+    #[test]
+    fn registry_concurrent_independent_sessions() {
+        const NUM_SESSIONS: usize = 8;
+        const PUSHES_PER_SESSION: u32 = 500;
+
+        let reg = Arc::new(OutputStreamRegistry::new());
+        let mut push_handles = Vec::new();
+        let mut drain_handles = Vec::new();
+
+        for s in 0..NUM_SESSIONS {
+            let session_id = format!("session-{}", s);
+
+            // Push thread: writes PUSHES_PER_SESSION u32 values (4 bytes each)
+            let reg_push = Arc::clone(&reg);
+            let sid = session_id.clone();
+            push_handles.push(std::thread::spawn(move || {
+                for i in 0..PUSHES_PER_SESSION {
+                    reg_push.push(&sid, &i.to_le_bytes());
+                }
+            }));
+
+            // Drain thread: drains repeatedly while pusher is running
+            let reg_drain = Arc::clone(&reg);
+            let sid = session_id.clone();
+            drain_handles.push(std::thread::spawn(move || {
+                let mut total = 0usize;
+                for _ in 0..100 {
+                    total += reg_drain.drain(&sid).len();
+                    std::thread::yield_now();
+                }
+                total
+            }));
+        }
+
+        // Wait for all pushers to finish
+        for h in push_handles {
+            h.join().unwrap();
+        }
+
+        // Collect drain thread totals
+        let mut drain_totals: Vec<usize> =
+            drain_handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // Drain remaining from each session after pushers are done
+        for s in 0..NUM_SESSIONS {
+            let session_id = format!("session-{}", s);
+            drain_totals[s] += reg.drain(&session_id).len();
+        }
+
+        let expected_per_session = (PUSHES_PER_SESSION as usize) * 4; // 4 bytes per u32
+        for (s, total) in drain_totals.iter().enumerate() {
+            assert_eq!(
+                *total, expected_per_session,
+                "Session {} lost data: got {} bytes, expected {}",
+                s, total, expected_per_session
+            );
+        }
+    }
+
+    /// Verify that remove() on one session does not affect others.
+    #[test]
+    fn registry_remove_does_not_affect_other_sessions() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"data-1");
+        reg.push("s2", b"data-2");
+        reg.push("s3", b"data-3");
+
+        reg.remove("s2");
+
+        assert_eq!(reg.drain("s1"), b"data-1");
+        assert!(reg.drain("s2").is_empty());
+        assert_eq!(reg.drain("s3"), b"data-3");
+        assert_eq!(reg.session_count(), 2); // s1 and s3 still have entries
+    }
+
+    /// Verify that push() after remove() creates a fresh buffer.
+    #[test]
+    fn registry_push_after_remove_creates_fresh_buffer() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"old-data");
+        reg.remove("s1");
+        reg.push("s1", b"new-data");
+        assert_eq!(reg.drain("s1"), b"new-data");
     }
 }

@@ -307,6 +307,38 @@ pub fn run() {
     // Clone for the custom protocol closure (captured by move)
     let registry_for_protocol = output_registry.clone();
 
+    // Dedicated worker pool for stream:// protocol responses (2 threads).
+    // The WebView2 WebResourceRequested callback runs on the main thread, so
+    // the synchronous register_uri_scheme_protocol variant blocks the main
+    // thread until the response is built. Under load (rapid terminal creation
+    // saturating IPC), stream:// fetches time out ("Failed to fetch"), blanking
+    // all terminals. By using the async variant + a dedicated worker pool, the
+    // handler returns immediately and a pool thread calls responder.respond().
+    type StreamJob = Box<dyn FnOnce() + Send>;
+    let (stream_tx, stream_rx) = {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<StreamJob>(256);
+        let rx = Arc::new(std::sync::Mutex::new(rx));
+        for i in 0..2 {
+            let rx = rx.clone();
+            std::thread::Builder::new()
+                .name(format!("stream-proto-{}", i))
+                .spawn(move || loop {
+                    let job = {
+                        let guard = rx.lock().unwrap();
+                        guard.recv()
+                    };
+                    match job {
+                        Ok(f) => f(),
+                        Err(_) => break, // channel closed
+                    }
+                })
+                .expect("Failed to spawn stream protocol worker");
+        }
+        (tx, rx)
+    };
+    // Keep rx alive for the lifetime of the app (workers hold Arc clones)
+    let _stream_rx_keepalive = stream_rx;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -315,31 +347,36 @@ pub fn run() {
         // Register custom protocol for streaming terminal output as raw bytes.
         // Frontend fetches: http://stream.localhost/terminal-output/{session_id}
         // Returns accumulated raw PTY bytes since last fetch (application/octet-stream).
-        .register_uri_scheme_protocol("stream", move |_ctx, request| {
-            let path = request.uri().path();
-            // Expected path: /terminal-output/{session_id}
-            if let Some(session_id) = path.strip_prefix("/terminal-output/") {
-                if session_id.is_empty() {
-                    return tauri::http::Response::builder()
-                        .status(400)
+        .register_asynchronous_uri_scheme_protocol("stream", move |_ctx, request, responder| {
+            let registry = registry_for_protocol.clone();
+            let path = request.uri().path().to_string();
+            let _ = stream_tx.try_send(Box::new(move || {
+                // Expected path: /terminal-output/{session_id}
+                let response = if let Some(session_id) = path.strip_prefix("/terminal-output/") {
+                    if session_id.is_empty() {
+                        tauri::http::Response::builder()
+                            .status(400)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(b"Missing session_id".to_vec())
+                            .unwrap()
+                    } else {
+                        let bytes = registry.drain(session_id);
+                        tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", "application/octet-stream")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(bytes)
+                            .unwrap()
+                    }
+                } else {
+                    tauri::http::Response::builder()
+                        .status(404)
                         .header("Access-Control-Allow-Origin", "*")
-                        .body(b"Missing session_id".to_vec())
-                        .unwrap();
-                }
-                let bytes = registry_for_protocol.drain(session_id);
-                tauri::http::Response::builder()
-                    .status(200)
-                    .header("Content-Type", "application/octet-stream")
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(bytes)
-                    .unwrap()
-            } else {
-                tauri::http::Response::builder()
-                    .status(404)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(b"Not found. Use /terminal-output/{session_id}".to_vec())
-                    .unwrap()
-            }
+                        .body(b"Not found. Use /terminal-output/{session_id}".to_vec())
+                        .unwrap()
+                };
+                responder.respond(response);
+            }));
         })
         .manage(app_state.clone())
         .manage(auto_save.clone())
@@ -484,6 +521,23 @@ pub fn run() {
 
             // Handle window close: detach sessions (don't kill them) and save layout
             let main_window = app.get_webview_window("main").unwrap();
+
+            // Disable WebView2's built-in zoom control. Without this, Ctrl+scroll
+            // triggers native browser zoom in addition to our font-size zoom handler,
+            // causing the content to not fill the window and exposing a black border.
+            #[cfg(target_os = "windows")]
+            {
+                let _ = main_window.with_webview(|webview| unsafe {
+                    // Reset zoom to 100% in case it drifted from a previous session
+                    let _ = webview.controller().SetZoomFactor(1.0);
+                    // Disable all zoom controls (Ctrl+scroll, Ctrl+Plus/Minus, pinch)
+                    if let Ok(core) = webview.controller().CoreWebView2() {
+                        if let Ok(settings) = core.Settings() {
+                            let _ = settings.SetIsZoomControlEnabled(false);
+                        }
+                    }
+                });
+            }
             let state_for_close = state_clone.clone();
             let handle_for_close = app_handle.clone();
             let window_for_close = main_window.clone();
