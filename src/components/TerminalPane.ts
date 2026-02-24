@@ -920,6 +920,9 @@ export class TerminalPane {
    * (tab activated, added to split view). Reconnects the output stream,
    * invalidates the cached snapshot to force a full fetch, and immediately
    * fetches the current grid state to catch up.
+   *
+   * If the stream's circuit breaker is in "open" state, triggers an
+   * immediate probe so recovery doesn't wait for the next probe interval.
    */
   resume() {
     if (!this.paused) return;
@@ -927,6 +930,10 @@ export class TerminalPane {
     this.cachedSnapshot = null;
     // Re-allocate canvas resources released by pause()
     this.renderer.restoreCanvasResources();
+    // If the circuit breaker is open for this session, trigger an immediate
+    // probe before reconnecting. This handles edge cases where the stream
+    // was not fully torn down yet.
+    terminalService.triggerProbe(this.terminalId);
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
