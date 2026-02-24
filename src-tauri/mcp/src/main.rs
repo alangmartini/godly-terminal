@@ -15,7 +15,7 @@ use jsonrpc::{read_message, write_message};
 use log::mcp_log;
 
 /// Bump this on every godly-mcp code change so logs show which binary is running.
-const BUILD: u32 = 16;
+const BUILD: u32 = 17;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

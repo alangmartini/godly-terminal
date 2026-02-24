@@ -8,9 +8,11 @@ mod state;
 mod utils;
 mod worktree;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 
 use crate::daemon_client::bridge::OutputStreamRegistry;
@@ -27,10 +29,28 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 /// Flag to signal that scrollback save is complete
 static SCROLLBACK_SAVED: AtomicBool = AtomicBool::new(false);
 
+/// Shared state for JS execution callback channels
+pub struct JsCallbackState {
+    pub senders: Mutex<HashMap<String, std::sync::mpsc::Sender<(Option<String>, Option<String>)>>>,
+}
+
 #[tauri::command]
 fn scrollback_save_complete() {
     eprintln!("[lib] Scrollback save complete signal received");
     SCROLLBACK_SAVED.store(true, Ordering::SeqCst);
+}
+
+/// Callback from frontend JS execution — receives the result of execute_js
+#[tauri::command]
+fn mcp_js_result(
+    id: String,
+    result: Option<String>,
+    error: Option<String>,
+    js_state: tauri::State<'_, JsCallbackState>,
+) {
+    if let Some(tx) = js_state.senders.lock().remove(&id) {
+        let _ = tx.send((result, error));
+    }
 }
 
 /// Delete `.old` binaries left in the resource directory from previous upgrades.
@@ -362,6 +382,9 @@ pub fn run() {
         .manage(auto_save.clone())
         .manage(daemon_client.clone())
         .manage(llm_state.clone())
+        .manage(JsCallbackState {
+            senders: Mutex::new(HashMap::new()),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::create_terminal,
             commands::close_terminal,
@@ -437,6 +460,7 @@ pub fn run() {
             commands::save_clipboard_image,
             commands::write_remote_config,
             scrollback_save_complete,
+            mcp_js_result,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

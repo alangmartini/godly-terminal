@@ -14,6 +14,14 @@ fn default_timeout_ms() -> u64 {
     30000
 }
 
+fn default_split_direction() -> String {
+    "horizontal".to_string()
+}
+
+fn default_split_ratio() -> f64 {
+    0.5
+}
+
 /// Requests sent from godly-mcp binary to the Tauri app via MCP pipe
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -119,6 +127,34 @@ pub enum McpRequest {
         timeout_ms: u64,
     },
 
+    // Split view control
+    CreateSplit {
+        workspace_id: String,
+        left_terminal_id: String,
+        right_terminal_id: String,
+        #[serde(default = "default_split_direction")]
+        direction: String,
+        #[serde(default = "default_split_ratio")]
+        ratio: f64,
+    },
+    ClearSplit {
+        workspace_id: String,
+    },
+    GetSplitState {
+        workspace_id: String,
+    },
+
+    // JS bridge (execute JavaScript in WebView, return result)
+    ExecuteJs {
+        script: String,
+    },
+
+    // Screenshot capture
+    CaptureScreenshot {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,
@@ -199,5 +235,20 @@ pub enum McpResponse {
         completed: bool,
         last_output_ago_ms: u64,
         running: bool,
+    },
+    SplitState {
+        workspace_id: String,
+        left_terminal_id: String,
+        right_terminal_id: String,
+        direction: String,
+        ratio: f64,
+    },
+    NoSplit,
+    JsResult {
+        result: Option<String>,
+        error: Option<String>,
+    },
+    Screenshot {
+        path: String,
     },
 }

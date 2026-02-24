@@ -1266,6 +1266,274 @@ pub fn handle_mcp_request(
                 std::thread::sleep(std::time::Duration::from_millis(poll_ms));
             }
         }
+
+        // === Split view control ===
+
+        McpRequest::CreateSplit {
+            workspace_id,
+            left_terminal_id,
+            right_terminal_id,
+            direction,
+            ratio,
+        } => {
+            // Validate both terminals exist
+            {
+                let terminals = app_state.terminals.read();
+                if !terminals.contains_key(left_terminal_id) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", left_terminal_id),
+                    };
+                }
+                if !terminals.contains_key(right_terminal_id) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", right_terminal_id),
+                    };
+                }
+            }
+
+            // Validate direction
+            if direction != "horizontal" && direction != "vertical" {
+                return McpResponse::Error {
+                    message: format!("Invalid direction '{}', must be 'horizontal' or 'vertical'", direction),
+                };
+            }
+
+            // Clamp ratio
+            let ratio = ratio.clamp(0.15, 0.85);
+
+            app_state.set_split_view(
+                workspace_id,
+                crate::state::SplitView {
+                    left_terminal_id: left_terminal_id.clone(),
+                    right_terminal_id: right_terminal_id.clone(),
+                    direction: direction.clone(),
+                    ratio,
+                },
+            );
+            auto_save.mark_dirty();
+
+            #[derive(serde::Serialize, Clone)]
+            struct McpSplitPayload {
+                workspace_id: String,
+                left_terminal_id: String,
+                right_terminal_id: String,
+                direction: String,
+                ratio: f64,
+            }
+            let _ = app_handle.emit(
+                "mcp-set-split-view",
+                McpSplitPayload {
+                    workspace_id: workspace_id.clone(),
+                    left_terminal_id: left_terminal_id.clone(),
+                    right_terminal_id: right_terminal_id.clone(),
+                    direction: direction.clone(),
+                    ratio,
+                },
+            );
+
+            McpResponse::Ok
+        }
+
+        McpRequest::ClearSplit { workspace_id } => {
+            app_state.clear_split_view(workspace_id);
+            auto_save.mark_dirty();
+            let _ = app_handle.emit("mcp-clear-split-view", workspace_id);
+            McpResponse::Ok
+        }
+
+        McpRequest::GetSplitState { workspace_id } => {
+            let views = app_state.get_all_split_views();
+            match views.get(workspace_id) {
+                Some(sv) => McpResponse::SplitState {
+                    workspace_id: workspace_id.clone(),
+                    left_terminal_id: sv.left_terminal_id.clone(),
+                    right_terminal_id: sv.right_terminal_id.clone(),
+                    direction: sv.direction.clone(),
+                    ratio: sv.ratio,
+                },
+                None => McpResponse::NoSplit,
+            }
+        }
+
+        // === JS bridge ===
+
+        McpRequest::ExecuteJs { script } => {
+            use tauri::Manager;
+
+            let window = match app_handle.get_webview_window("main") {
+                Some(w) => w,
+                None => {
+                    return McpResponse::Error {
+                        message: "Main window not found".to_string(),
+                    };
+                }
+            };
+
+            // Generate unique request ID
+            let request_id = uuid::Uuid::new_v4().to_string();
+            let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
+
+            // Store the sender in the shared state
+            {
+                let js_state: tauri::State<'_, crate::JsCallbackState> =
+                    app_handle.state::<crate::JsCallbackState>();
+                js_state.senders.lock().insert(request_id.clone(), tx);
+            }
+
+            // Wrap the user's script: execute it, then invoke the callback command
+            let wrapped = format!(
+                r#"(async () => {{
+    try {{
+        const __result = await (async () => {{ {script} }})();
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: JSON.stringify(__result) ?? 'undefined',
+            error: null,
+        }});
+    }} catch (e) {{
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: null,
+            error: e.message || String(e),
+        }});
+    }}
+}})();"#,
+            );
+
+            if let Err(e) = window.eval(&wrapped) {
+                // Clean up sender
+                let js_state: tauri::State<'_, crate::JsCallbackState> =
+                    app_handle.state::<crate::JsCallbackState>();
+                js_state.senders.lock().remove(&request_id);
+                return McpResponse::Error {
+                    message: format!("Failed to eval JS: {}", e),
+                };
+            }
+
+            // Wait for the callback with 10s timeout
+            match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok((result, error)) => McpResponse::JsResult { result, error },
+                Err(_) => {
+                    let js_state: tauri::State<'_, crate::JsCallbackState> =
+                        app_handle.state::<crate::JsCallbackState>();
+                    js_state.senders.lock().remove(&request_id);
+                    McpResponse::Error {
+                        message: "JS execution timed out after 10s".to_string(),
+                    }
+                }
+            }
+        }
+
+        // === Screenshot capture ===
+
+        McpRequest::CaptureScreenshot { terminal_id } => {
+            use tauri::Manager;
+
+            let window = match app_handle.get_webview_window("main") {
+                Some(w) => w,
+                None => {
+                    return McpResponse::Error {
+                        message: "Main window not found".to_string(),
+                    };
+                }
+            };
+
+            // Build JS to capture the canvas as a data URL
+            let selector = match terminal_id {
+                Some(tid) => format!("[data-terminal-id=\"{}\"] canvas", tid),
+                None => "canvas".to_string(),
+            };
+
+            // Use the JS callback mechanism (same as execute_js) to return the data
+            let request_id = uuid::Uuid::new_v4().to_string();
+            let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
+
+            {
+                let js_state: tauri::State<'_, crate::JsCallbackState> =
+                    app_handle.state::<crate::JsCallbackState>();
+                js_state.senders.lock().insert(request_id.clone(), tx);
+            }
+
+            // JS captures canvas and returns the base64 data (without prefix) to keep it smaller
+            let wrapped = format!(
+                r#"(async () => {{
+    try {{
+        const canvas = document.querySelector('{selector}');
+        if (!canvas) {{
+            await window.__TAURI__.core.invoke('mcp_js_result', {{
+                id: '{request_id}',
+                result: null,
+                error: 'No canvas element found matching selector: {selector}',
+            }});
+            return;
+        }}
+        const dataUrl = canvas.toDataURL('image/png');
+        // Strip the data:image/png;base64, prefix to reduce transfer size
+        const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: base64,
+            error: null,
+        }});
+    }} catch (e) {{
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: null,
+            error: e.message || String(e),
+        }});
+    }}
+}})();"#,
+            );
+
+            if let Err(e) = window.eval(&wrapped) {
+                let js_state: tauri::State<'_, crate::JsCallbackState> =
+                    app_handle.state::<crate::JsCallbackState>();
+                js_state.senders.lock().remove(&request_id);
+                return McpResponse::Error {
+                    message: format!("Failed to eval screenshot JS: {}", e),
+                };
+            }
+
+            // Wait for the base64 data
+            match rx.recv_timeout(std::time::Duration::from_secs(15)) {
+                Ok((Some(base64_data), None)) | Ok((Some(base64_data), Some(_))) if !base64_data.is_empty() => {
+                    // Decode base64 and save to file
+                    use base64::Engine;
+                    match base64::engine::general_purpose::STANDARD.decode(&base64_data) {
+                        Ok(bytes) => {
+                            let temp_dir = std::env::temp_dir().join("godly-screenshots");
+                            let _ = std::fs::create_dir_all(&temp_dir);
+                            let path = temp_dir.join(format!("screenshot-{}.png", &request_id[..8]));
+                            match std::fs::write(&path, &bytes) {
+                                Ok(_) => McpResponse::Screenshot {
+                                    path: path.to_string_lossy().to_string(),
+                                },
+                                Err(e) => McpResponse::Error {
+                                    message: format!("Failed to write screenshot: {}", e),
+                                },
+                            }
+                        }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to decode screenshot base64: {}", e),
+                        },
+                    }
+                }
+                Ok((_, Some(error))) => McpResponse::Error {
+                    message: format!("Screenshot JS error: {}", error),
+                },
+                Ok(_) => McpResponse::Error {
+                    message: "Screenshot capture returned empty data".to_string(),
+                },
+                Err(_) => {
+                    let js_state: tauri::State<'_, crate::JsCallbackState> =
+                        app_handle.state::<crate::JsCallbackState>();
+                    js_state.senders.lock().remove(&request_id);
+                    McpResponse::Error {
+                        message: "Screenshot capture timed out after 15s".to_string(),
+                    }
+                }
+            }
+        }
     }
 }
 
