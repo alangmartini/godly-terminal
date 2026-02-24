@@ -76,6 +76,20 @@ impl OutputStreamRegistry {
         }
     }
 
+    /// Non-blocking drain: attempts to acquire the lock without waiting.
+    /// Returns `None` if the mutex is currently held by another thread
+    /// (e.g. the bridge I/O thread pushing output), allowing the caller
+    /// to return immediately rather than blocking. This is critical for
+    /// the Tauri custom protocol handler which runs on a shared thread pool --
+    /// blocking there can starve other IPC commands.
+    pub fn try_drain(&self, session_id: &str) -> Option<Vec<u8>> {
+        let mut buffers = self.buffers.try_lock()?;
+        Some(match buffers.get_mut(session_id) {
+            Some(buf) => std::mem::take(buf),
+            None => Vec::new(),
+        })
+    }
+
     /// Remove a session's buffer entirely (on session close).
     pub fn remove(&self, session_id: &str) {
         self.buffers.lock().remove(session_id);
@@ -1122,6 +1136,80 @@ mod tests {
         assert_eq!(data.len(), MAX_STREAM_BUFFER_SIZE);
         // Should keep the tail of the oversized data
         assert_eq!(data, &oversized[1000..]);
+    }
+
+    // ── try_drain tests ────────────────────────────────────────────
+
+    #[test]
+    fn try_drain_returns_data_when_uncontended() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"hello");
+        let result = reg.try_drain("s1");
+        assert_eq!(result, Some(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn try_drain_returns_empty_vec_for_unknown_session() {
+        let reg = OutputStreamRegistry::new();
+        let result = reg.try_drain("nonexistent");
+        assert_eq!(result, Some(Vec::new()));
+    }
+
+    #[test]
+    fn try_drain_clears_buffer_like_drain() {
+        let reg = OutputStreamRegistry::new();
+        reg.push("s1", b"data");
+        let _ = reg.try_drain("s1");
+        let result = reg.try_drain("s1");
+        assert_eq!(result, Some(Vec::new()), "Buffer should be empty after try_drain");
+    }
+
+    #[test]
+    fn try_drain_returns_none_when_contended() {
+        let reg = Arc::new(OutputStreamRegistry::new());
+        reg.push("s1", b"data");
+
+        // Hold the lock from another thread to simulate contention
+        let reg_clone = Arc::clone(&reg);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+        let _holder = std::thread::spawn(move || {
+            // Acquire and hold the lock
+            let _guard = reg_clone.buffers.lock();
+            tx.send(()).unwrap(); // signal that we hold the lock
+            done_rx.recv().unwrap(); // wait for test to finish
+        });
+
+        // Wait for the other thread to hold the lock
+        rx.recv().unwrap();
+
+        // try_drain should return None because the mutex is held
+        let result = reg.try_drain("s1");
+        assert!(result.is_none(), "try_drain should return None when mutex is contended");
+
+        // Release the holder thread
+        done_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn try_drain_succeeds_after_contention_resolves() {
+        let reg = Arc::new(OutputStreamRegistry::new());
+        reg.push("s1", b"after-contention");
+
+        // Hold the lock briefly from another thread
+        let reg_clone = Arc::clone(&reg);
+        let handle = std::thread::spawn(move || {
+            let _guard = reg_clone.buffers.lock();
+            std::thread::sleep(Duration::from_millis(10));
+        });
+
+        // Wait for the holder to release
+        handle.join().unwrap();
+
+        // Now try_drain should succeed
+        let result = reg.try_drain("s1");
+        assert_eq!(result, Some(b"after-contention".to_vec()));
     }
 
     #[test]

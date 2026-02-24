@@ -295,6 +295,13 @@ pub fn run() {
         // Register custom protocol for streaming terminal output as raw bytes.
         // Frontend fetches: http://stream.localhost/terminal-output/{session_id}
         // Returns accumulated raw PTY bytes since last fetch (application/octet-stream).
+        //
+        // IMPORTANT: This handler runs on Tauri's shared thread pool. If it blocks,
+        // it can starve other IPC commands (create_terminal, resize, etc.), causing
+        // "Failed to fetch" errors that break all terminal rendering. We use
+        // try_drain() (non-blocking try_lock) to avoid holding a thread while
+        // waiting for the mutex. If contended, we return an empty 200 response --
+        // the frontend will poll again on the next terminal-output event.
         .register_uri_scheme_protocol("stream", move |_ctx, request| {
             let path = request.uri().path();
             // Expected path: /terminal-output/{session_id}
@@ -303,20 +310,28 @@ pub fn run() {
                     return tauri::http::Response::builder()
                         .status(400)
                         .header("Access-Control-Allow-Origin", "*")
+                        .header("Cache-Control", "no-cache, no-store")
                         .body(b"Missing session_id".to_vec())
                         .unwrap();
                 }
-                let bytes = registry_for_protocol.drain(session_id);
+                // Non-blocking: if the registry mutex is contended (bridge I/O
+                // thread pushing output), return empty bytes immediately rather
+                // than blocking this thread pool thread.
+                let bytes = registry_for_protocol
+                    .try_drain(session_id)
+                    .unwrap_or_default();
                 tauri::http::Response::builder()
                     .status(200)
                     .header("Content-Type", "application/octet-stream")
                     .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "no-cache, no-store")
                     .body(bytes)
                     .unwrap()
             } else {
                 tauri::http::Response::builder()
                     .status(404)
                     .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "no-cache, no-store")
                     .body(b"Not found. Use /terminal-output/{session_id}".to_vec())
                     .unwrap()
             }
