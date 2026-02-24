@@ -77,6 +77,19 @@ export interface CircuitBreakerState {
   open: boolean;
 }
 
+/** Returns a random jitter in [0, range) to break thundering herd patterns. */
+let jitterRng = () => Math.random();
+
+/** @internal — override the jitter RNG for deterministic testing. */
+export function _setJitterRng(fn: () => number): void {
+  jitterRng = fn;
+}
+
+/** @internal — restore the default jitter RNG. */
+export function _resetJitterRng(): void {
+  jitterRng = () => Math.random();
+}
+
 class TerminalService {
   private outputListeners: Map<string, () => void> = new Map();
   private gridDiffListeners: Map<string, (diff: RichGridDiff) => void> = new Map();
@@ -377,7 +390,7 @@ class TerminalService {
 
         console.debug(
           `[TerminalService] Output stream error for ${sessionId}, ` +
-          `failures=${cb.failures}, open=${cb.open}, reconnecting in ${cb.open ? CIRCUIT_BREAKER_PROBE_INTERVAL_MS : delay}ms`,
+          `failures=${cb.failures}, open=${cb.open}, reconnecting in ~${cb.open ? CIRCUIT_BREAKER_PROBE_INTERVAL_MS : delay}ms (+ jitter)`,
           err instanceof Error ? err.message : err,
         );
       }
@@ -388,8 +401,10 @@ class TerminalService {
       if (signal.aborted) break;
 
       // In open state, use the probe interval (and support wakeup).
-      // In closed state, use exponential backoff.
-      const waitTime = cb.open ? CIRCUIT_BREAKER_PROBE_INTERVAL_MS : delay;
+      // In closed state, use exponential backoff with random jitter to break
+      // thundering herd when all streams fail simultaneously.
+      const baseWaitTime = cb.open ? CIRCUIT_BREAKER_PROBE_INTERVAL_MS : delay;
+      const waitTime = baseWaitTime + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
 
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, waitTime);
