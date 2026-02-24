@@ -9,7 +9,14 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { terminalService } from './terminal-service';
+import {
+  terminalService,
+  STREAM_RECONNECT_BASE_MS,
+  CIRCUIT_BREAKER_THRESHOLD,
+  CIRCUIT_BREAKER_PROBE_INTERVAL_MS,
+  _setJitterRng,
+  _resetJitterRng,
+} from './terminal-service';
 
 /**
  * Helper: create a ReadableStream from an array of Uint8Array chunks.
@@ -47,12 +54,17 @@ describe('TerminalService stream consumer', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // Zero jitter for deterministic delay assertions in existing tests.
+    _setJitterRng(() => 0);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     // Disconnect all streams to prevent dangling promises.
     terminalService.disconnectOutputStream('s1');
     terminalService.disconnectOutputStream('s2');
+    // Let abort handlers fire and clean up circuit breaker state.
+    await vi.advanceTimersByTimeAsync(0);
+    _resetJitterRng();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -269,19 +281,339 @@ describe('TerminalService stream consumer', () => {
     const controller = new AbortController();
     const promise = terminalService._consumeStream('s1', controller.signal, onData);
 
-    // Delays: 1000, 2000, 4000, 8000, 10000 (capped), 10000, ...
+    // Delays: 1000, 2000, 4000, 8000 (backoff), then circuit breaker opens
+    // at failure 5 and switches to probe interval (10000ms).
     await vi.advanceTimersByTimeAsync(0);    // attempt 1
     await vi.advanceTimersByTimeAsync(1000); // attempt 2
     await vi.advanceTimersByTimeAsync(2000); // attempt 3
     await vi.advanceTimersByTimeAsync(4000); // attempt 4
-    await vi.advanceTimersByTimeAsync(8000); // attempt 5
+    await vi.advanceTimersByTimeAsync(8000); // attempt 5 (circuit breaker opens)
     expect(fetchSpy).toHaveBeenCalledTimes(5);
 
-    // Next delay should be capped at 10000ms, not 16000ms.
-    await vi.advanceTimersByTimeAsync(10000); // attempt 6
+    // After circuit breaker opens, delay is probe interval (10000ms).
+    await vi.advanceTimersByTimeAsync(10000); // attempt 6 (probe)
     expect(fetchSpy).toHaveBeenCalledTimes(6);
 
     controller.abort();
     await promise;
+  });
+});
+
+describe('TerminalService circuit breaker', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // Zero jitter for deterministic delay assertions in circuit breaker tests.
+    _setJitterRng(() => 0);
+  });
+
+  afterEach(async () => {
+    terminalService.disconnectOutputStream('s1');
+    terminalService.disconnectOutputStream('s2');
+    await vi.advanceTimersByTimeAsync(0);
+    _resetJitterRng();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Helper: advance timers to trigger exactly N consecutive fetch failures.
+   * Assumes fetch always rejects. Returns the expected delay for the NEXT
+   * wait after the Nth failure. Uses the exact same backoff schedule as
+   * _consumeStream: 1000, 2000, 4000, 8000, then probe interval once open.
+   *
+   * The _consumeStream loop works as:
+   *   fetch() → catch → wait(delay) → delay*=2 → loop
+   * So the wait after failure K uses the delay that was current BEFORE doubling.
+   */
+  async function advanceThroughFailures(n: number): Promise<void> {
+    // Backoff delays: [1000, 2000, 4000, 8000, ...]
+    // After failure i, the wait uses the current delay, then delay doubles.
+    // Circuit breaker opens at failure THRESHOLD, switching to probe interval.
+    const delays: number[] = [];
+    let d = STREAM_RECONNECT_BASE_MS;
+    for (let i = 0; i < n; i++) {
+      if (i >= CIRCUIT_BREAKER_THRESHOLD) {
+        delays.push(CIRCUIT_BREAKER_PROBE_INTERVAL_MS);
+      } else {
+        delays.push(d);
+        d = Math.min(d * 2, 10_000);
+      }
+    }
+
+    // Attempt 1: fires on first microtask flush.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Attempts 2..n: each fires after the previous failure's wait delay.
+    for (let i = 1; i < n; i++) {
+      await vi.advanceTimersByTimeAsync(delays[i - 1]);
+    }
+  }
+
+  it('should open circuit breaker after CIRCUIT_BREAKER_THRESHOLD consecutive failures', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Advance through exactly THRESHOLD failures.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+
+    const cb = terminalService.getCircuitBreakerState('s1');
+    expect(cb).toBeDefined();
+    expect(cb!.open).toBe(true);
+    expect(cb!.failures).toBe(CIRCUIT_BREAKER_THRESHOLD);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('should not open circuit breaker before reaching threshold', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Advance through THRESHOLD - 1 failures.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD - 1);
+
+    const cb = terminalService.getCircuitBreakerState('s1');
+    expect(cb).toBeDefined();
+    expect(cb!.open).toBe(false);
+    expect(cb!.failures).toBe(CIRCUIT_BREAKER_THRESHOLD - 1);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('should use probe interval (not exponential backoff) in open state', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Open the circuit breaker.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+    expect(fetchSpy).toHaveBeenCalledTimes(CIRCUIT_BREAKER_THRESHOLD);
+
+    // In open state, the next attempt should happen after CIRCUIT_BREAKER_PROBE_INTERVAL_MS.
+    // Advancing by less should NOT trigger a new attempt.
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_PROBE_INTERVAL_MS - 1);
+    expect(fetchSpy).toHaveBeenCalledTimes(CIRCUIT_BREAKER_THRESHOLD);
+
+    // Advancing the remaining 1ms triggers the probe.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(CIRCUIT_BREAKER_THRESHOLD + 1);
+
+    // Next probe also at CIRCUIT_BREAKER_PROBE_INTERVAL_MS (no exponential growth).
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_PROBE_INTERVAL_MS);
+    expect(fetchSpy).toHaveBeenCalledTimes(CIRCUIT_BREAKER_THRESHOLD + 2);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('should close circuit breaker and reset failures on successful connection', async () => {
+    // First THRESHOLD attempts fail, then one succeeds.
+    for (let i = 0; i < CIRCUIT_BREAKER_THRESHOLD; i++) {
+      fetchSpy.mockRejectedValueOnce(new Error('fail'));
+    }
+    fetchSpy.mockResolvedValueOnce(
+      new Response(hangingStream(), { status: 200 }),
+    );
+
+    const onData = vi.fn();
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, onData);
+
+    // Advance through THRESHOLD failures to open the breaker.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+    expect(terminalService.getCircuitBreakerState('s1')!.open).toBe(true);
+
+    // Advance through probe interval to trigger the successful attempt.
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_PROBE_INTERVAL_MS);
+
+    // The circuit breaker should now be closed.
+    const cb = terminalService.getCircuitBreakerState('s1');
+    expect(cb).toBeDefined();
+    expect(cb!.open).toBe(false);
+    expect(cb!.failures).toBe(0);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('should reset backoff delay to base after successful reconnection', async () => {
+    // Fail twice, succeed (stream closes), then fail once more.
+    // After the success, the backoff delay should reset to STREAM_RECONNECT_BASE_MS,
+    // so the next retry after the post-success failure uses 1000ms (base), not 4000ms.
+    fetchSpy
+      .mockRejectedValueOnce(new Error('fail'))   // attempt 1: fail
+      .mockRejectedValueOnce(new Error('fail'))   // attempt 2: fail
+      .mockResolvedValueOnce(                      // attempt 3: succeed then close
+        new Response(chunkedStream([new Uint8Array([1])]), { status: 200 }),
+      )
+      .mockRejectedValueOnce(new Error('fail'))   // attempt 4: fail (after reconnect)
+      .mockResolvedValueOnce(                      // attempt 5: succeed (hangs)
+        new Response(hangingStream(), { status: 200 }),
+      );
+
+    const onData = vi.fn();
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, onData);
+
+    // Attempt 1 fails immediately.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Wait 1000ms (base) for attempt 2.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    // Wait 2000ms (doubled) for attempt 3 (success).
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    // Let the stream read microtasks complete.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onData).toHaveBeenCalledTimes(1);
+
+    // Stream closed cleanly. Delay was reset to STREAM_RECONNECT_BASE_MS on success.
+    // Wait base delay (1000ms) for attempt 4 (fail).
+    await vi.advanceTimersByTimeAsync(STREAM_RECONNECT_BASE_MS);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+
+    // After attempt 4 fails with delay=base, the delay doubles to 2000ms.
+    // Wait base delay — should NOT trigger attempt 5 yet (delay is now 2000ms).
+    await vi.advanceTimersByTimeAsync(STREAM_RECONNECT_BASE_MS);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+
+    // Wait the remaining 1000ms to hit 2000ms total — triggers attempt 5.
+    await vi.advanceTimersByTimeAsync(STREAM_RECONNECT_BASE_MS);
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('should trigger immediate probe when triggerProbe is called in open state', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Open the circuit breaker.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+    const callsAfterOpen = fetchSpy.mock.calls.length;
+    expect(terminalService.getCircuitBreakerState('s1')!.open).toBe(true);
+
+    // Wait a bit (less than probe interval), then trigger probe.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetchSpy.mock.calls.length).toBe(callsAfterOpen);
+
+    // triggerProbe should wake up the sleep immediately.
+    terminalService.triggerProbe('s1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy.mock.calls.length).toBe(callsAfterOpen + 1);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('triggerProbe should be no-op when circuit breaker is closed', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Advance to trigger the first failure and let the backoff timer start.
+    await vi.advanceTimersByTimeAsync(0);
+    const callsAfterFirstFailure = fetchSpy.mock.calls.length;
+
+    // Circuit breaker should be closed (only 1 failure).
+    const cb = terminalService.getCircuitBreakerState('s1');
+    expect(cb).toBeDefined();
+    expect(cb!.open).toBe(false);
+
+    // triggerProbe should do nothing when circuit breaker is closed.
+    terminalService.triggerProbe('s1');
+    await vi.advanceTimersByTimeAsync(0);
+
+    // No additional fetch calls should have been made.
+    expect(fetchSpy.mock.calls.length).toBe(callsAfterFirstFailure);
+
+    controller.abort();
+    await promise;
+  });
+
+  it('triggerProbe should be no-op for unknown session', () => {
+    // Should not throw.
+    expect(() => terminalService.triggerProbe('nonexistent')).not.toThrow();
+  });
+
+  it('should clean up circuit breaker state after disconnect', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Open the circuit breaker.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+    expect(terminalService.getCircuitBreakerState('s1')!.open).toBe(true);
+
+    // Abort (disconnect).
+    controller.abort();
+    await promise;
+
+    // Circuit breaker state should be cleaned up.
+    expect(terminalService.getCircuitBreakerState('s1')).toBeUndefined();
+  });
+
+  it('should log when circuit breaker opens (console.warn)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchSpy.mockRejectedValue(new Error('fail'));
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Circuit breaker OPEN for s1'),
+    );
+
+    controller.abort();
+    await promise;
+    warnSpy.mockRestore();
+  });
+
+  it('should log when circuit breaker closes (console.info)', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    // THRESHOLD failures then success.
+    for (let i = 0; i < CIRCUIT_BREAKER_THRESHOLD; i++) {
+      fetchSpy.mockRejectedValueOnce(new Error('fail'));
+    }
+    fetchSpy.mockResolvedValueOnce(
+      new Response(hangingStream(), { status: 200 }),
+    );
+
+    const controller = new AbortController();
+    const promise = terminalService._consumeStream('s1', controller.signal, vi.fn());
+
+    // Open the breaker.
+    await advanceThroughFailures(CIRCUIT_BREAKER_THRESHOLD);
+
+    // Probe succeeds.
+    await vi.advanceTimersByTimeAsync(CIRCUIT_BREAKER_PROBE_INTERVAL_MS);
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Circuit breaker CLOSED for s1'),
+    );
+
+    controller.abort();
+    await promise;
+    infoSpy.mockRestore();
   });
 });
