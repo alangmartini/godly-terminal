@@ -22,12 +22,14 @@ describe('IdleNotificationService', () => {
     checkIntervalMs?: number;
     startupGraceMs?: number;
     notifyCooldownMs?: number;
+    minOutputEvents?: number;
   }) {
     service = new IdleNotificationService({
       idleThresholdMs: opts?.idleThresholdMs ?? 1000,
       checkIntervalMs: opts?.checkIntervalMs ?? 500,
       startupGraceMs: opts?.startupGraceMs,
       notifyCooldownMs: opts?.notifyCooldownMs,
+      minOutputEvents: opts?.minOutputEvents,
       getActiveTerminalId: () => activeTerminalId,
       onNotify,
     });
@@ -488,6 +490,183 @@ describe('IdleNotificationService', () => {
       // This SHOULD notify — it's genuine new activity after extended silence
       expect(onNotify).toHaveBeenCalledWith('term-bg');
       expect(onNotify).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Issue #333: minOutputEvents — output volume filtering ────────────
+  //
+  // Claude Code regularly pauses 15-60s while "thinking" between tool calls.
+  // A single cursor update or status line followed by silence should NOT
+  // trigger a notification. Only a substantial burst of output (e.g., Claude's
+  // full response) followed by silence should notify.
+
+  describe('Issue #333: minOutputEvents — output volume filtering', () => {
+    it('should NOT notify when output count is below minOutputEvents threshold', () => {
+      // Single output event (e.g., cursor update) should not trigger
+      // when minOutputEvents requires a burst.
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        minOutputEvents: 5,
+      });
+
+      // Single output event — below threshold
+      service.recordOutput('term-1');
+      vi.advanceTimersByTime(1500);
+
+      expect(onNotify).not.toHaveBeenCalled();
+    });
+
+    it('should notify when output count meets minOutputEvents threshold', () => {
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        minOutputEvents: 5,
+      });
+
+      // 5 output events — meets threshold
+      for (let i = 0; i < 5; i++) {
+        service.recordOutput('term-1');
+      }
+      vi.advanceTimersByTime(1500);
+
+      expect(onNotify).toHaveBeenCalledWith('term-1');
+      expect(onNotify).toHaveBeenCalledTimes(1);
+    });
+
+    it('should NOT notify for Claude thinking pause (few events then silence)', () => {
+      // Simulates Claude Code: spinner produces 2-3 output events,
+      // then silence for 30+ seconds while thinking. This should NOT
+      // trigger a notification because it's not a substantial response.
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        minOutputEvents: 10,
+      });
+
+      // Claude starts "thinking" — spinner emits a few events
+      service.recordOutput('term-claude');
+      service.recordOutput('term-claude');
+      service.recordOutput('term-claude');
+
+      // 3 events < 10 threshold → should not notify
+      vi.advanceTimersByTime(1500);
+      expect(onNotify).not.toHaveBeenCalled();
+
+      // Even after a very long silence
+      vi.advanceTimersByTime(60000);
+      expect(onNotify).not.toHaveBeenCalled();
+    });
+
+    it('should notify after Claude response (many events then silence)', () => {
+      // Simulates Claude Code finishing a response: lots of output
+      // events as the response streams, then silence when done.
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        minOutputEvents: 10,
+      });
+
+      // Claude streams its response — many output events
+      for (let i = 0; i < 25; i++) {
+        service.recordOutput('term-claude');
+      }
+
+      // Response finished, terminal goes silent
+      vi.advanceTimersByTime(1500);
+
+      expect(onNotify).toHaveBeenCalledWith('term-claude');
+      expect(onNotify).toHaveBeenCalledTimes(1);
+    });
+
+    it('should accumulate output events across multiple bursts within idle threshold', () => {
+      // Output events spread over time (within idle threshold) should
+      // accumulate toward the minimum.
+      createService({
+        idleThresholdMs: 2000,
+        checkIntervalMs: 500,
+        minOutputEvents: 10,
+      });
+
+      // First burst: 4 events
+      for (let i = 0; i < 4; i++) service.recordOutput('term-1');
+
+      // Short pause (well under idle threshold)
+      vi.advanceTimersByTime(500);
+
+      // Second burst: 4 events (total: 8, still below 10)
+      for (let i = 0; i < 4; i++) service.recordOutput('term-1');
+
+      vi.advanceTimersByTime(500);
+
+      // Third burst: 3 events (total: 11, above 10)
+      for (let i = 0; i < 3; i++) service.recordOutput('term-1');
+
+      // Now go idle
+      vi.advanceTimersByTime(2500);
+
+      expect(onNotify).toHaveBeenCalledWith('term-1');
+      expect(onNotify).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reset output count after notification fires', () => {
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        minOutputEvents: 5,
+      });
+
+      // First burst: 10 events → notification
+      for (let i = 0; i < 10; i++) service.recordOutput('term-1');
+      vi.advanceTimersByTime(1500);
+      expect(onNotify).toHaveBeenCalledTimes(1);
+
+      // Second burst: only 2 events (below threshold) → no notification
+      service.recordOutput('term-1');
+      service.recordOutput('term-1');
+      vi.advanceTimersByTime(1500);
+      expect(onNotify).toHaveBeenCalledTimes(1); // still 1
+    });
+
+    it('should re-notify after cooldown when new burst meets threshold', () => {
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+        startupGraceMs: 5000,
+        notifyCooldownMs: 5000,
+        minOutputEvents: 5,
+      });
+      activeTerminalId = 'term-active';
+
+      // Advance past startup grace
+      vi.advanceTimersByTime(6000);
+
+      // First burst → notification
+      for (let i = 0; i < 10; i++) service.recordOutput('term-bg');
+      vi.advanceTimersByTime(1500);
+      expect(onNotify).toHaveBeenCalledTimes(1);
+
+      // Wait for cooldown
+      vi.advanceTimersByTime(5000);
+
+      // New substantial burst
+      for (let i = 0; i < 10; i++) service.recordOutput('term-bg');
+      vi.advanceTimersByTime(1500);
+
+      expect(onNotify).toHaveBeenCalledTimes(2);
+    });
+
+    it('should use default minOutputEvents=1 when not specified', () => {
+      // Backwards compatibility: existing behavior preserved when option not set
+      createService({
+        idleThresholdMs: 1000,
+        checkIntervalMs: 500,
+      });
+
+      service.recordOutput('term-1');
+      vi.advanceTimersByTime(1500);
+
+      expect(onNotify).toHaveBeenCalledWith('term-1');
     });
   });
 });

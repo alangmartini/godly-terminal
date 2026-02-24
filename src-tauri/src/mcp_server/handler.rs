@@ -1425,6 +1425,11 @@ pub fn handle_mcp_request(
         }
 
         // === Screenshot capture ===
+        //
+        // Strategy: Use execute_js to capture the canvas, then write the file
+        // from Rust. This avoids passing large base64 strings through Tauri IPC
+        // (which causes timeouts). Instead, JS returns just the base64 data via
+        // the JsCallback channel, and Rust decodes + saves it.
 
         McpRequest::CaptureScreenshot { terminal_id } => {
             use tauri::Manager;
