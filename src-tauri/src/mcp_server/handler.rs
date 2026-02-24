@@ -53,6 +53,29 @@ fn ensure_mcp_workspace(
     workspace_id
 }
 
+/// Auto-focus a terminal in the UI so the user sees the terminal being acted on.
+/// Also switches workspace if the terminal is in a different workspace than the current view.
+fn auto_focus_terminal(
+    terminal_id: &str,
+    app_state: &Arc<AppState>,
+    app_handle: &AppHandle,
+) {
+    // Look up the terminal's workspace
+    let terminal_workspace = app_state
+        .terminals
+        .read()
+        .get(terminal_id)
+        .map(|t| t.workspace_id.clone());
+
+    // Switch workspace if needed
+    if let Some(ref ws_id) = terminal_workspace {
+        let _ = app_handle.emit("switch-workspace", ws_id);
+    }
+
+    app_state.set_active_terminal_id(Some(terminal_id.to_string()));
+    let _ = app_handle.emit("focus-terminal", terminal_id.to_string());
+}
+
 /// Handle an MCP request by delegating to AppState and DaemonClient.
 pub fn handle_mcp_request(
     request: &McpRequest,
@@ -291,6 +314,9 @@ pub fn handle_mcp_request(
                     workspace_id: workspace_id.clone(),
                 },
             );
+
+            // Auto-focus the new terminal so the user sees it
+            auto_focus_terminal(&terminal_id, app_state, app_handle);
 
             McpResponse::Created {
                 id: terminal_id,
@@ -806,6 +832,9 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::WriteToTerminal { terminal_id, data } => {
+            // Auto-focus so the user sees the terminal being typed into
+            auto_focus_terminal(terminal_id, app_state, app_handle);
+
             // Convert newlines → \r for PTY: terminals expect CR (Enter), not LF.
             // Also handle literal escape sequences (\\n, \\r\\n) since LLMs often
             // produce these as text instead of actual newline characters.
@@ -905,6 +934,9 @@ pub fn handle_mcp_request(
                 };
             }
 
+            // Auto-focus so the user sees the keystrokes
+            auto_focus_terminal(terminal_id, app_state, app_handle);
+
             // Convert each key name to bytes and concatenate
             let mut all_bytes = Vec::new();
             for key in keys {
@@ -937,6 +969,9 @@ pub fn handle_mcp_request(
                 };
             }
 
+            // Auto-focus so the user sees the erasure
+            auto_focus_terminal(terminal_id, app_state, app_handle);
+
             let backspaces = vec![0x08u8; *count];
             let request = godly_protocol::Request::Write {
                 session_id: terminal_id.clone(),
@@ -966,6 +1001,9 @@ pub fn handle_mcp_request(
                     message: format!("Terminal {} not found", terminal_id),
                 };
             }
+
+            // Auto-focus so the user sees the command executing
+            auto_focus_terminal(terminal_id, app_state, app_handle);
 
             // 1. Snapshot buffer length before command
             let before_len = match daemon.send_request(&godly_protocol::Request::ReadBuffer {
