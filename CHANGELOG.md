@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-24
+
+### Added
+- **Touch-to-scroll** for mobile terminal scrolling (#307)
+- **Demo recording system** — fully automatic demo capture (#305)
+- `no_worktree` option for Quick Claude spawning (#306)
+
+### Fixed
+- **Idle re-notification** — allow re-notification after cooldown expires for output-to-idle transitions
+- **OSC titles** exposed to remote web console
+
+### Changed
+- Comprehensive README.md with full architecture documentation
+
 ## [0.6.0] - 2026-02-23
 
 ### Added
