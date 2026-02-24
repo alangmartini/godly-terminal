@@ -9,7 +9,7 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { terminalService } from './terminal-service';
+import { terminalService, _setJitterRng, _resetJitterRng } from './terminal-service';
 
 /**
  * Helper: create a ReadableStream from an array of Uint8Array chunks.
@@ -47,12 +47,15 @@ describe('TerminalService stream consumer', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // Zero jitter for deterministic delay assertions in existing tests.
+    _setJitterRng(() => 0);
   });
 
   afterEach(() => {
     // Disconnect all streams to prevent dangling promises.
     terminalService.disconnectOutputStream('s1');
     terminalService.disconnectOutputStream('s2');
+    _resetJitterRng();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
