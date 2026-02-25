@@ -8,6 +8,7 @@ import { showCopyDialog } from './CopyDialog';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
+import { GpuTerminalDisplay } from './GpuTerminalDisplay';
 
 /**
  * Terminal pane backed by the godly-vt Canvas2D renderer.
@@ -15,6 +16,9 @@ import { terminalSettingsStore } from '../state/terminal-settings-store';
  * The daemon's godly-vt parser maintains the terminal grid. On each
  * `terminal-output` event, we request a grid snapshot via Tauri IPC
  * and paint it on a <canvas> via TerminalRenderer.
+ *
+ * When the renderer mode is set to 'gpu', the pane delegates rendering
+ * to GpuTerminalDisplay which displays PNG frames from the Rust backend.
  */
 export class TerminalPane {
   private renderer: TerminalRenderer;
@@ -26,6 +30,9 @@ export class TerminalPane {
   private unsubscribeGridDiff: (() => void) | null = null;
   private unsubscribeTheme: (() => void) | null = null;
   private unsubscribeFontSize: (() => void) | null = null;
+
+  // GPU renderer display (active when rendererMode === 'gpu')
+  private gpuDisplay: GpuTerminalDisplay | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
   // fetch via setTimeout(SNAPSHOT_MIN_INTERVAL_MS). Multiple output events
@@ -150,6 +157,13 @@ export class TerminalPane {
     }
     this.resizeObserver.observe(this.container);
 
+    // Initialize GPU display if renderer mode is set to 'gpu'.
+    // The GPU display overlays the canvas — mouse/keyboard interaction
+    // remains handled by the existing TerminalPane/TerminalRenderer code.
+    if (terminalSettingsStore.getRendererMode() === 'gpu') {
+      this.gpuDisplay = new GpuTerminalDisplay(this.container, this.terminalId);
+    }
+
     // ---- Hidden textarea for keyboard input ----
     // Canvas elements don't participate in OS text composition, so dead keys
     // (e.g. ' and " on ABNT2 keyboards) fire event.key="Dead" and the
@@ -260,6 +274,11 @@ export class TerminalPane {
           this.snapToBottom();
           return;
         }
+        // GPU renderer: request a new frame instead of applying the diff locally
+        if (this.gpuDisplay) {
+          this.gpuDisplay.requestFrame();
+          return;
+        }
         this.applyPushedDiff(diff);
       }
     );
@@ -280,6 +299,11 @@ export class TerminalPane {
           this.snapToBottom();
           return;
         }
+        // GPU renderer: request a new frame instead of fetching a snapshot
+        if (this.gpuDisplay) {
+          this.gpuDisplay.requestFrame();
+          return;
+        }
         this.scheduleSnapshotFetch();
       }
     );
@@ -293,6 +317,11 @@ export class TerminalPane {
       if (this.renderer.isActivelySelecting()) return;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
+        return;
+      }
+      // GPU renderer: request a new frame instead of fetching a snapshot
+      if (this.gpuDisplay) {
+        this.gpuDisplay.requestFrame();
         return;
       }
       this.scheduleSnapshotFetch();
@@ -1076,6 +1105,7 @@ export class TerminalPane {
     }
     this.unsubscribeTheme?.();
     this.unsubscribeFontSize?.();
+    this.gpuDisplay?.dispose();
     this.renderer.dispose();
     this.container.remove();
   }
