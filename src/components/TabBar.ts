@@ -44,6 +44,18 @@ export class TabBar {
       e.preventDefault();
     }, { passive: false });
 
+    // Create mic button for voice input
+    const micBtn = document.createElement('div');
+    micBtn.className = 'mic-btn mic-idle';
+    micBtn.title = 'Voice input (Ctrl+Shift+M)';
+    micBtn.setAttribute('role', 'button');
+    micBtn.setAttribute('aria-label', 'Toggle voice recording');
+    micBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
+    micBtn.addEventListener('click', () => {
+      document.dispatchEvent(new CustomEvent('voice-toggle-recording'));
+    });
+    this.container.appendChild(micBtn);
+
     const addBtn = document.createElement('div');
     addBtn.className = 'add-tab-btn';
     addBtn.textContent = '+';
