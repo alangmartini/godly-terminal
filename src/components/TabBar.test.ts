@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getDisplayName } from './TabBar';
+import { getDisplayName, shortenPath } from './TabBar';
 import { Terminal, store } from '../state/store';
 
 function terminal(overrides: Partial<Terminal> = {}): Terminal {
@@ -80,6 +80,70 @@ describe('getDisplayName', () => {
       oscTitle: 'vim',
       userRenamed: false,
     }))).toBe('vim');
+  });
+});
+
+describe('shortenPath', () => {
+  it('shortens Windows absolute paths to last 2 segments', () => {
+    expect(shortenPath('C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal'))
+      .toBe('godly-claude/godly-terminal');
+  });
+
+  it('shortens Unix absolute paths to last 2 segments', () => {
+    expect(shortenPath('/home/user/projects/my-app'))
+      .toBe('projects/my-app');
+  });
+
+  it('leaves short paths unchanged', () => {
+    expect(shortenPath('C:\\Users')).toBe('C:\\Users');
+    expect(shortenPath('C:\\')).toBe('C:\\');
+    expect(shortenPath('/home/user')).toBe('/home/user');
+  });
+
+  it('leaves non-path strings unchanged', () => {
+    expect(shortenPath('powershell')).toBe('powershell');
+    expect(shortenPath('claude: running tests')).toBe('claude: running tests');
+    expect(shortenPath('Terminal')).toBe('Terminal');
+    expect(shortenPath('feat/search')).toBe('feat/search');
+  });
+
+  it('handles trailing slashes', () => {
+    expect(shortenPath('C:\\Users\\alanm\\dev\\godly-terminal\\'))
+      .toBe('dev/godly-terminal');
+  });
+
+  it('handles Windows forward-slash paths', () => {
+    expect(shortenPath('C:/Users/alanm/dev/godly-terminal'))
+      .toBe('dev/godly-terminal');
+  });
+
+  it('allows custom segment count', () => {
+    expect(shortenPath('C:\\Users\\alanm\\dev\\godly-claude\\godly-terminal', 3))
+      .toBe('dev/godly-claude/godly-terminal');
+  });
+});
+
+describe('getDisplayName - path shortening', () => {
+  it('shortens oscTitle paths to last 2 segments', () => {
+    // Bug: tab shows "C:\\Windows\\System32\\..." instead of meaningful end
+    expect(getDisplayName(terminal({
+      name: 'Terminal',
+      oscTitle: 'C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal',
+    }))).toBe('godly-claude/godly-terminal');
+  });
+
+  it('shortens processName paths to last 2 segments', () => {
+    expect(getDisplayName(terminal({
+      name: 'Terminal',
+      processName: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    }))).toBe('v1.0/powershell.exe');
+  });
+
+  it('does not shorten non-path names', () => {
+    expect(getDisplayName(terminal({
+      name: 'Terminal',
+      oscTitle: 'claude: fixing scrollback bug',
+    }))).toBe('claude: fixing scrollback bug');
   });
 });
 
