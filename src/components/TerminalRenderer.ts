@@ -493,11 +493,16 @@ export class TerminalRenderer {
   adjustSelectionForScroll(deltaLines: number) {
     if (!this.selection.active) return;
     this.selection.startRow += deltaLines;
-    this.selection.endRow += deltaLines;
+    // Bug #340: During active drag, only adjust the anchor (startRow).
+    // endRow tracks the mouse position in viewport coordinates and should
+    // not be shifted — this lets the selection grow as the user scrolls.
+    if (!this.isSelecting) {
+      this.selection.endRow += deltaLines;
+    }
     // Bug #290: Only clear off-screen selection when not actively auto-scrolling.
-    // During auto-scroll, the selection extends beyond the viewport and the
-    // endRow is pinned to the viewport edge in the auto-scroll timer callback.
-    if (!this.autoScrollTimer) {
+    // Bug #340: Also don't clear during active drag — the anchor may be
+    // off-screen but the selection is still valid (extends beyond viewport).
+    if (!this.autoScrollTimer && !this.isSelecting) {
       const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
       const normalized = this.normalizeSelection(this.selection);
       if (normalized.endRow < 0 || normalized.startRow >= gridRows) {
