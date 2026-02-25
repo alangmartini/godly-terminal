@@ -1,5 +1,6 @@
 mod commands;
 mod daemon_client;
+mod gpu_renderer;
 mod llm_state;
 mod mcp_server;
 mod persistence;
@@ -17,6 +18,7 @@ use tauri::{Emitter, Manager};
 
 use crate::daemon_client::bridge::OutputStreamRegistry;
 use crate::daemon_client::DaemonClient;
+use crate::gpu_renderer::GpuRendererManager;
 use crate::llm_state::LlmState;
 use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
@@ -270,6 +272,107 @@ fn start_remote_http_server(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Handle a `gpuframe://` protocol request.
+///
+/// Expected URL: `gpuframe://render/{session_id}`
+///
+/// When the `gpu-renderer` feature is enabled, fetches the terminal grid from
+/// the daemon, renders it via the GPU pipeline, and returns a PNG response.
+/// When disabled, returns 501 Not Implemented.
+#[cfg(feature = "gpu-renderer")]
+fn handle_gpuframe_request(
+    path: &str,
+    gpu: &Arc<GpuRendererManager>,
+    daemon: &Arc<DaemonClient>,
+) -> tauri::http::Response<Vec<u8>> {
+    use godly_protocol::{Request, Response};
+
+    let session_id = match path.strip_prefix("/render/") {
+        Some(id) if !id.is_empty() => id,
+        _ => {
+            return tauri::http::Response::builder()
+                .status(400)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(b"Bad request. Use /render/{session_id}".to_vec())
+                .unwrap();
+        }
+    };
+
+    if !gpu.is_available() {
+        return tauri::http::Response::builder()
+            .status(503)
+            .header("Access-Control-Allow-Origin", "*")
+            .body(b"GPU renderer not available".to_vec())
+            .unwrap();
+    }
+
+    // Fetch grid snapshot from daemon
+    let request = Request::ReadRichGrid {
+        session_id: session_id.to_string(),
+    };
+    let response = match daemon.send_request(&request) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = format!("Daemon error: {e}");
+            return tauri::http::Response::builder()
+                .status(502)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(msg.into_bytes())
+                .unwrap();
+        }
+    };
+
+    let grid = match response {
+        Response::RichGrid { grid } => grid,
+        Response::Error { message } => {
+            return tauri::http::Response::builder()
+                .status(404)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(message.into_bytes())
+                .unwrap();
+        }
+        _ => {
+            return tauri::http::Response::builder()
+                .status(500)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(b"Unexpected daemon response".to_vec())
+                .unwrap();
+        }
+    };
+
+    // Render via GPU to PNG
+    match gpu.render_terminal_png(&grid) {
+        Ok(png_bytes) => tauri::http::Response::builder()
+            .status(200)
+            .header("Content-Type", "image/png")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(png_bytes)
+            .unwrap(),
+        Err(e) => {
+            let msg = format!("GPU render failed: {e}");
+            tauri::http::Response::builder()
+                .status(500)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(msg.into_bytes())
+                .unwrap()
+        }
+    }
+}
+
+/// Stub for when the `gpu-renderer` feature is disabled.
+#[cfg(not(feature = "gpu-renderer"))]
+fn handle_gpuframe_request(
+    _path: &str,
+    _gpu: &Arc<GpuRendererManager>,
+    _daemon: &Arc<DaemonClient>,
+) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(501)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(b"GPU renderer not enabled. Build with --features gpu-renderer".to_vec())
+        .unwrap()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(feature = "leak-check")]
@@ -339,6 +442,13 @@ pub fn run() {
     // Keep rx alive for the lifetime of the app (workers hold Arc clones)
     let _stream_rx_keepalive = stream_rx;
 
+    // GPU renderer manager — lazily initializes GPU on first render request.
+    let gpu_renderer_manager = Arc::new(GpuRendererManager::new("Cascadia Code", 14.0));
+
+    // Clones for the gpuframe:// custom protocol closure
+    let gpu_for_protocol = gpu_renderer_manager.clone();
+    let daemon_for_gpuframe = daemon_client.clone();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -378,10 +488,27 @@ pub fn run() {
                 responder.respond(response);
             }));
         })
+        // Register custom protocol for GPU-rendered terminal frames as PNG images.
+        // Frontend fetches: http://gpuframe.localhost/render/{session_id}
+        // Returns a PNG image of the terminal rendered by the GPU pipeline.
+        // When the gpu-renderer feature is disabled, always returns 501.
+        .register_asynchronous_uri_scheme_protocol("gpuframe", move |_ctx, request, responder| {
+            let gpu = gpu_for_protocol.clone();
+            let daemon = daemon_for_gpuframe.clone();
+            let path = request.uri().path().to_string();
+
+            // Offload to a background thread — GPU rendering can take a few ms
+            // and we must not block the WebView2 main thread.
+            std::thread::spawn(move || {
+                let response = handle_gpuframe_request(&path, &gpu, &daemon);
+                responder.respond(response);
+            });
+        })
         .manage(app_state.clone())
         .manage(auto_save.clone())
         .manage(daemon_client.clone())
         .manage(llm_state.clone())
+        .manage(gpu_renderer_manager)
         .manage(JsCallbackState {
             senders: Mutex::new(HashMap::new()),
         })
@@ -437,6 +564,8 @@ pub fn run() {
             commands::uninstall_plugin,
             commands::check_plugin_update,
             commands::fetch_plugin_registry,
+            commands::gpu_render::gpu_renderer_available,
+            commands::gpu_render::render_terminal_gpu,
             commands::get_grid_snapshot,
             commands::get_grid_snapshot_diff,
             commands::get_grid_dimensions,

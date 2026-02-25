@@ -44,6 +44,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 leak-check = ["dhat"]
 staging = []
+gpu-renderer = ["godly-renderer"]
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
@@ -58,6 +59,7 @@ tauri-plugin-notification = "2"
 base64 = "0.22"
 godly-protocol.workspace = true
 godly-llm = { path = "llm" }
+godly-renderer = { path = "renderer", optional = true }
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
