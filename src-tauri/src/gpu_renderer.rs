@@ -3,17 +3,10 @@
 //! Wraps `godly-renderer::GpuRenderer` behind a `Mutex` for thread-safe access
 //! from Tauri command handlers. The renderer is lazily initialized on first use
 //! so app startup isn't blocked by GPU adapter enumeration.
-//!
-//! When the `gpu-renderer` feature is disabled, a no-op stub is provided that
-//! always reports GPU rendering as unavailable.
 
-#[cfg(feature = "gpu-renderer")]
 use std::sync::Mutex;
 
-#[cfg(feature = "gpu-renderer")]
 use godly_renderer::GpuRenderer;
-
-#[cfg(feature = "gpu-renderer")]
 use godly_protocol::types::RichGridData;
 
 /// Manages a lazily-initialized GPU renderer instance.
@@ -21,14 +14,12 @@ use godly_protocol::types::RichGridData;
 /// The renderer is shared across all terminals. It is initialized on first
 /// render request and cached for subsequent calls. A `Mutex` serializes
 /// access since `GpuRenderer` holds GPU device state that is not `Sync`.
-#[cfg(feature = "gpu-renderer")]
 pub struct GpuRendererManager {
     renderer: Mutex<Option<GpuRenderer>>,
     font_family: String,
     font_size: f32,
 }
 
-#[cfg(feature = "gpu-renderer")]
 impl GpuRendererManager {
     pub fn new(font_family: &str, font_size: f32) -> Self {
         Self {
@@ -80,23 +71,38 @@ impl GpuRendererManager {
             .map_err(|e| format!("GPU render failed: {e}"))
     }
 
+    /// Render a terminal grid to raw RGBA bytes with a dimensions header.
+    ///
+    /// Format: `[width: u32 LE][height: u32 LE][rgba_pixels...]`
+    pub fn render_terminal_raw(
+        &self,
+        grid: &RichGridData,
+    ) -> Result<Vec<u8>, String> {
+        self.ensure_renderer()?;
+        let mut renderer = self.renderer.lock().map_err(|e| e.to_string())?;
+        let (width, height, pixels) = renderer
+            .as_mut()
+            .unwrap()
+            .render_to_pixels(grid)
+            .map_err(|e| format!("GPU render failed: {e}"))?;
+
+        let mut result = Vec::with_capacity(8 + pixels.len());
+        result.extend_from_slice(&width.to_le_bytes());
+        result.extend_from_slice(&height.to_le_bytes());
+        result.extend_from_slice(&pixels);
+        Ok(result)
+    }
+
+    /// Get the cell size (width, height) in pixels from the GPU renderer.
+    pub fn cell_size(&self) -> Result<(f64, f64), String> {
+        self.ensure_renderer()?;
+        let renderer = self.renderer.lock().map_err(|e| e.to_string())?;
+        let (w, h) = renderer.as_ref().unwrap().cell_size();
+        Ok((w as f64, h as f64))
+    }
+
     /// Check whether GPU rendering is available (i.e. a renderer can be created).
     pub fn is_available(&self) -> bool {
         self.ensure_renderer().is_ok()
-    }
-}
-
-/// Stub when the `gpu-renderer` feature is disabled.
-#[cfg(not(feature = "gpu-renderer"))]
-pub struct GpuRendererManager;
-
-#[cfg(not(feature = "gpu-renderer"))]
-impl GpuRendererManager {
-    pub fn new(_font_family: &str, _font_size: f32) -> Self {
-        Self
-    }
-
-    pub fn is_available(&self) -> bool {
-        false
     }
 }
