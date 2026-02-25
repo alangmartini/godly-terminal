@@ -543,9 +543,18 @@ export class TerminalPane {
 
   // ---- Scroll handling ----
 
+  // rAF handle for scroll coalescing — batches rapid wheel events into
+  // one IPC per animation frame.
+  private scrollRafId: number | null = null;
+
   /**
    * Handle a scroll request. deltaLines > 0 = scroll up (into history),
    * deltaLines < 0 = scroll down (toward live view).
+   *
+   * Uses three techniques for smooth scrolling:
+   * 1. Optimistic canvas shift — instantly moves existing pixels
+   * 2. rAF coalescing — batches rapid events into one IPC per frame
+   * 3. Combined IPC — sets offset + fetches snapshot in a single round-trip
    */
   private handleScroll(deltaLines: number) {
     const newOffset = Math.max(0, this.scrollbackOffset + deltaLines);
@@ -555,14 +564,21 @@ export class TerminalPane {
     this.isUserScrolled = newOffset > 0;
     // Bug #242: adjust selection so it stays anchored to the same content
     this.renderer.adjustSelectionForScroll(actualDelta);
-    const seq = ++this.scrollSeq;
-    // Scroll changes the viewport — invalidate cache and do a full snapshot
+
+    // Optimistic: shift canvas content immediately for instant feedback
+    this.renderer.shiftCanvas(actualDelta);
+
+    // Invalidate cache — next real snapshot overwrites the shifted view
     this.cachedSnapshot = null;
-    terminalService.setScrollback(this.terminalId, newOffset).then(() => {
-      if (seq === this.scrollSeq) {
-        this.fetchFullSnapshot();
-      }
-    });
+    ++this.scrollSeq;
+
+    // Coalesce: batch into one IPC per animation frame
+    if (this.scrollRafId === null) {
+      this.scrollRafId = requestAnimationFrame(() => {
+        this.scrollRafId = null;
+        this.flushScroll();
+      });
+    }
   }
 
   /**
@@ -577,13 +593,40 @@ export class TerminalPane {
     this.isUserScrolled = newOffset > 0;
     // Bug #242: adjust selection so it stays anchored to the same content
     this.renderer.adjustSelectionForScroll(actualDelta);
-    const seq = ++this.scrollSeq;
+
+    // Optimistic canvas shift + coalesced IPC (same as handleScroll)
+    this.renderer.shiftCanvas(actualDelta);
     this.cachedSnapshot = null;
-    terminalService.setScrollback(this.terminalId, newOffset).then(() => {
-      if (seq === this.scrollSeq) {
-        this.fetchFullSnapshot();
-      }
-    });
+    ++this.scrollSeq;
+
+    if (this.scrollRafId === null) {
+      this.scrollRafId = requestAnimationFrame(() => {
+        this.scrollRafId = null;
+        this.flushScroll();
+      });
+    }
+  }
+
+  /**
+   * Flush coalesced scroll: send combined set-offset + get-snapshot IPC.
+   * Discards the result if the user has scrolled again since dispatch.
+   */
+  private async flushScroll() {
+    const seq = this.scrollSeq;
+    const offset = this.scrollbackOffset;
+    try {
+      const snapshot = await terminalService.scrollAndGetSnapshot(
+        this.terminalId, offset,
+      );
+      if (seq !== this.scrollSeq) return; // stale — user scrolled again
+      this.cachedSnapshot = snapshot;
+      this.scrollbackOffset = snapshot.scrollback_offset; // daemon may clamp
+      this.isUserScrolled = this.scrollbackOffset > 0;
+      this.totalScrollback = snapshot.total_scrollback;
+      this.renderer.render(snapshot);
+    } catch (e) {
+      console.debug('Scroll snapshot failed:', e);
+    }
   }
 
   /** Snap viewport back to live view (offset 0). */
@@ -626,16 +669,15 @@ export class TerminalPane {
   private snapToBottom() {
     if (this.scrollbackOffset === 0) return;
     // Bug #242: adjust selection before resetting offset
-    this.renderer.adjustSelectionForScroll(-this.scrollbackOffset);
+    const delta = -this.scrollbackOffset;
+    this.renderer.adjustSelectionForScroll(delta);
+    this.renderer.shiftCanvas(delta);
     this.scrollbackOffset = 0;
     this.isUserScrolled = false;
-    const seq = ++this.scrollSeq;
     this.cachedSnapshot = null;
-    terminalService.setScrollback(this.terminalId, 0).then(() => {
-      if (seq === this.scrollSeq) {
-        this.fetchFullSnapshot();
-      }
-    });
+    ++this.scrollSeq;
+    // Use combined IPC for snap-to-bottom too
+    this.flushScroll();
   }
 
   // ---- Grid snapshot fetching ----
@@ -1080,6 +1122,10 @@ export class TerminalPane {
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;
+    }
+    if (this.scrollRafId !== null) {
+      cancelAnimationFrame(this.scrollRafId);
+      this.scrollRafId = null;
     }
     if (this.scrollbackSaveInterval) {
       clearInterval(this.scrollbackSaveInterval);

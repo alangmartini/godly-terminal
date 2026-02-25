@@ -77,6 +77,12 @@ pub enum Request {
         session_id: String,
         offset: usize,
     },
+    /// Set scrollback offset AND return the rich grid snapshot in a single
+    /// round-trip. Used by the frontend scroll path to halve IPC latency.
+    ScrollAndReadRichGrid {
+        session_id: String,
+        offset: usize,
+    },
     /// Pause output streaming for a session (session stays alive, VT parser
     /// keeps running, but no Output/GridDiff events are sent to the client).
     PauseSession {

@@ -1537,6 +1537,20 @@ async fn handle_request(
             }
         }
 
+        Request::ScrollAndReadRichGrid { session_id, offset } => {
+            let sessions_guard = sessions.read();
+            match sessions_guard.get(session_id) {
+                Some(session) => {
+                    session.set_scrollback(*offset);
+                    let grid = session.read_rich_grid();
+                    Response::RichGrid { grid }
+                }
+                None => Response::Error {
+                    message: format!("Session {} not found", session_id),
+                },
+            }
+        }
+
         Request::CloseSession { session_id } => {
             let mut sessions_guard = sessions.write();
             match sessions_guard.remove(session_id) {
