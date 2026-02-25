@@ -356,6 +356,23 @@ impl GpuRenderer {
                         bg_color: bg,
                     },
                 ]);
+
+                // Add underline quad if the cell is underlined.
+                if cell.underline {
+                    let underline_h = (cell_h * 0.06).max(1.0); // 1px minimum
+                    let uy0 = 1.0 - ((y + h - underline_h) / h_f) * 2.0;
+                    let uy1 = 1.0 - ((y + h) / h_f) * 2.0;
+                    let blank = self.atlas.get_or_insert(' ', false, false);
+                    // Solid fg-colored quad (blank glyph -> mix returns bg, so use fg as both)
+                    vertices.extend_from_slice(&[
+                        CellVertex { position: [x0, uy0], uv: [blank.u0, blank.v0], fg_color: fg, bg_color: fg },
+                        CellVertex { position: [x1, uy0], uv: [blank.u1, blank.v0], fg_color: fg, bg_color: fg },
+                        CellVertex { position: [x0, uy1], uv: [blank.u0, blank.v1], fg_color: fg, bg_color: fg },
+                        CellVertex { position: [x0, uy1], uv: [blank.u0, blank.v1], fg_color: fg, bg_color: fg },
+                        CellVertex { position: [x1, uy0], uv: [blank.u1, blank.v0], fg_color: fg, bg_color: fg },
+                        CellVertex { position: [x1, uy1], uv: [blank.u1, blank.v1], fg_color: fg, bg_color: fg },
+                    ]);
+                }
             }
         }
 
