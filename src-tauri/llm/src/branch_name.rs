@@ -77,6 +77,43 @@ pub fn sanitize_branch_name(raw: &str) -> String {
     }
 }
 
+/// Check if a sanitized branch name is high enough quality to use.
+///
+/// Rejects names that are mostly single-letter gibberish (common with small LLMs).
+/// Returns `true` if the name has enough meaningful content to be useful.
+pub fn is_quality_branch_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+
+    // Split on hyphens and slashes to get segments
+    let segments: Vec<&str> = name.split(|c| c == '-' || c == '/').collect();
+
+    // Need at least 2 segments (e.g. "fix/something" or "fix-something")
+    if segments.len() < 2 {
+        return false;
+    }
+
+    // Count "meaningful" segments (3+ alphabetic chars)
+    let meaningful = segments
+        .iter()
+        .filter(|s| s.len() >= 3 && s.chars().all(|c| c.is_ascii_alphabetic()))
+        .count();
+
+    // Need at least 2 meaningful segments
+    if meaningful < 2 {
+        return false;
+    }
+
+    // Reject if more than half the segments are single-char
+    let single_char = segments.iter().filter(|s| s.len() <= 1).count();
+    if single_char > segments.len() / 2 {
+        return false;
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +202,68 @@ mod tests {
             sanitize_branch_name("fix/crash-on-startup"),
             "fix/crash-on-startup"
         );
+    }
+
+    // --- Quality gate tests ---
+
+    #[test]
+    fn test_quality_rejects_single_letter_gibberish() {
+        // The actual bad branch name from production
+        assert!(!is_quality_branch_name("s-s-ss-s-s-s-guide-guide"));
+    }
+
+    #[test]
+    fn test_quality_rejects_all_single_chars() {
+        assert!(!is_quality_branch_name("a-b-c-d-e"));
+    }
+
+    #[test]
+    fn test_quality_rejects_empty() {
+        assert!(!is_quality_branch_name(""));
+    }
+
+    #[test]
+    fn test_quality_rejects_single_word() {
+        assert!(!is_quality_branch_name("fix"));
+    }
+
+    #[test]
+    fn test_quality_accepts_good_hyphen_name() {
+        assert!(is_quality_branch_name("feat-add-login"));
+    }
+
+    #[test]
+    fn test_quality_accepts_good_slash_name() {
+        assert!(is_quality_branch_name("fix/crash-on-startup"));
+    }
+
+    #[test]
+    fn test_quality_accepts_prefix_with_short_words() {
+        // "on" is short but there are enough meaningful segments
+        assert!(is_quality_branch_name("fix/crash-on-resize"));
+    }
+
+    #[test]
+    fn test_quality_accepts_two_meaningful_segments() {
+        assert!(is_quality_branch_name("fix/scrollback"));
+    }
+
+    #[test]
+    fn test_quality_rejects_repeated_gibberish() {
+        assert!(!is_quality_branch_name("x-y-z-x-y-z"));
+    }
+
+    #[test]
+    fn test_quality_rejects_mostly_numbers() {
+        assert!(!is_quality_branch_name("1-2-3-fix"));
+    }
+
+    #[test]
+    fn test_quality_accepts_real_llm_output() {
+        assert!(is_quality_branch_name("feat-add-oauth-auth"));
+        assert!(is_quality_branch_name("fix-empty-file-crash"));
+        assert!(is_quality_branch_name("refactor-db-connection-pool"));
+        assert!(is_quality_branch_name("docs-update-readme"));
+        assert!(is_quality_branch_name("chore-bump-deps"));
     }
 }
