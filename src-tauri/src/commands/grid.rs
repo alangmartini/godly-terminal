@@ -88,6 +88,26 @@ pub fn set_scrollback(
     }
 }
 
+/// Set scrollback offset and return the rich grid snapshot in a single IPC
+/// round-trip. Used by the frontend scroll path to halve latency.
+#[tauri::command]
+pub fn scroll_and_get_snapshot(
+    terminal_id: String,
+    offset: usize,
+    daemon: State<Arc<DaemonClient>>,
+) -> Result<RichGridData, String> {
+    let request = Request::ScrollAndReadRichGrid {
+        session_id: terminal_id,
+        offset,
+    };
+    let response = daemon.send_request(&request)?;
+    match response {
+        Response::RichGrid { grid } => Ok(grid),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
+}
+
 /// Get selected text from the terminal grid between two positions.
 /// Row coordinates are viewport-relative (can be negative for multi-screen
 /// selections extending above the viewport). scrollback_offset converts

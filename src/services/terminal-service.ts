@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { store, ShellType } from '../state/store';
 import { perfTracer } from '../utils/PerfTracer';
-import type { RichGridDiff } from '../components/TerminalRenderer';
+import type { RichGridData, RichGridDiff } from '../components/TerminalRenderer';
 
 
 // Backend shell type format - matches Rust serde externally tagged enum
@@ -243,6 +243,11 @@ class TerminalService {
 
   async setScrollback(terminalId: string, offset: number): Promise<void> {
     await invoke('set_scrollback', { terminalId, offset });
+  }
+
+  /** Set scrollback offset and return grid snapshot in a single IPC round-trip. */
+  async scrollAndGetSnapshot(terminalId: string, offset: number): Promise<RichGridData> {
+    return invoke<RichGridData>('scroll_and_get_snapshot', { terminalId, offset });
   }
 
   /** Pause output streaming for a session (background optimization). */
