@@ -492,6 +492,12 @@ export class App {
           break;
         }
 
+        case 'voice.toggleRecording': {
+          e.preventDefault();
+          this.handleVoiceToggle();
+          break;
+        }
+
         case 'tabs.quickClaude': {
           e.preventDefault();
           if (!state.activeWorkspaceId) break;
@@ -530,6 +536,9 @@ export class App {
         }
       }
     });
+
+    // Listen for voice toggle events from the mic button in TabBar
+    document.addEventListener('voice-toggle-recording', () => this.handleVoiceToggle());
   }
 
   async init() {
@@ -921,6 +930,39 @@ export class App {
    * Create a new terminal in the active workspace. Returns the new terminal ID,
    * or null if creation was cancelled (e.g. worktree prompt dismissed).
    */
+  private async handleVoiceToggle(): Promise<void> {
+    try {
+      const { whisperGetStatus, whisperStartRecording, whisperStopRecording } = await import('../plugins/voice/whisper-service');
+      const status = await whisperGetStatus();
+
+      if (status.state === 'idle') {
+        await whisperStartRecording();
+        this.updateMicButtonState('recording');
+      } else if (status.state === 'recording') {
+        this.updateMicButtonState('transcribing');
+        const text = await whisperStopRecording();
+        this.updateMicButtonState('idle');
+        if (text && store.getState().activeTerminalId) {
+          await terminalService.writeToTerminal(store.getState().activeTerminalId!, text);
+        }
+      }
+    } catch (err) {
+      console.error('Voice toggle failed:', err);
+      this.updateMicButtonState('idle');
+    }
+  }
+
+  private updateMicButtonState(state: 'idle' | 'recording' | 'transcribing'): void {
+    const micBtn = document.querySelector('.mic-btn');
+    if (!micBtn) return;
+    micBtn.className = `mic-btn mic-${state}`;
+    micBtn.setAttribute('title',
+      state === 'idle' ? 'Voice input (Ctrl+Shift+M)' :
+      state === 'recording' ? 'Stop recording (Ctrl+Shift+M)' :
+      'Transcribing...'
+    );
+  }
+
   private async createNewTerminal(): Promise<string | null> {
     const state = store.getState();
     if (!state.activeWorkspaceId) return null;
