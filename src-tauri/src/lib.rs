@@ -274,18 +274,21 @@ fn start_remote_http_server(app_handle: &tauri::AppHandle) {
 
 /// Handle a `gpuframe://` protocol request.
 ///
-/// Expected URL: `gpuframe://render/{session_id}`
+/// Expected URLs:
+///   `gpuframe://render/{session_id}`             — returns PNG (backward compat)
+///   `gpuframe://render/{session_id}?format=raw`  — returns raw RGBA with 8-byte header
 ///
-/// When the `gpu-renderer` feature is enabled, fetches the terminal grid from
-/// the daemon, renders it via the GPU pipeline, and returns a PNG response.
-/// When disabled, returns 501 Not Implemented.
-#[cfg(feature = "gpu-renderer")]
+/// Fetches the terminal grid from the daemon and renders it via the GPU pipeline.
 fn handle_gpuframe_request(
-    path: &str,
+    uri: &str,
     gpu: &Arc<GpuRendererManager>,
     daemon: &Arc<DaemonClient>,
 ) -> tauri::http::Response<Vec<u8>> {
     use godly_protocol::{Request, Response};
+
+    // Parse path and query from the URI
+    let (path, query) = uri.split_once('?').unwrap_or((uri, ""));
+    let use_raw = query.contains("format=raw");
 
     let session_id = match path.strip_prefix("/render/") {
         Some(id) if !id.is_empty() => id,
@@ -340,37 +343,43 @@ fn handle_gpuframe_request(
         }
     };
 
-    // Render via GPU to PNG
-    match gpu.render_terminal_png(&grid) {
-        Ok(png_bytes) => tauri::http::Response::builder()
-            .status(200)
-            .header("Content-Type", "image/png")
-            .header("Access-Control-Allow-Origin", "*")
-            .body(png_bytes)
-            .unwrap(),
-        Err(e) => {
-            let msg = format!("GPU render failed: {e}");
-            tauri::http::Response::builder()
-                .status(500)
+    if use_raw {
+        // Raw RGBA format: [width: u32 LE][height: u32 LE][rgba_pixels...]
+        match gpu.render_terminal_raw(&grid) {
+            Ok(raw_bytes) => tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "application/octet-stream")
                 .header("Access-Control-Allow-Origin", "*")
-                .body(msg.into_bytes())
-                .unwrap()
+                .body(raw_bytes)
+                .unwrap(),
+            Err(e) => {
+                let msg = format!("GPU render failed: {e}");
+                tauri::http::Response::builder()
+                    .status(500)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(msg.into_bytes())
+                    .unwrap()
+            }
+        }
+    } else {
+        // PNG format (backward compatible)
+        match gpu.render_terminal_png(&grid) {
+            Ok(png_bytes) => tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "image/png")
+                .header("Access-Control-Allow-Origin", "*")
+                .body(png_bytes)
+                .unwrap(),
+            Err(e) => {
+                let msg = format!("GPU render failed: {e}");
+                tauri::http::Response::builder()
+                    .status(500)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(msg.into_bytes())
+                    .unwrap()
+            }
         }
     }
-}
-
-/// Stub for when the `gpu-renderer` feature is disabled.
-#[cfg(not(feature = "gpu-renderer"))]
-fn handle_gpuframe_request(
-    _path: &str,
-    _gpu: &Arc<GpuRendererManager>,
-    _daemon: &Arc<DaemonClient>,
-) -> tauri::http::Response<Vec<u8>> {
-    tauri::http::Response::builder()
-        .status(501)
-        .header("Access-Control-Allow-Origin", "*")
-        .body(b"GPU renderer not enabled. Build with --features gpu-renderer".to_vec())
-        .unwrap()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -495,12 +504,18 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("gpuframe", move |_ctx, request, responder| {
             let gpu = gpu_for_protocol.clone();
             let daemon = daemon_for_gpuframe.clone();
-            let path = request.uri().path().to_string();
+            // Capture full URI (path + query) so the handler can parse ?format=raw
+            let uri = request.uri();
+            let full_uri = if let Some(query) = uri.query() {
+                format!("{}?{}", uri.path(), query)
+            } else {
+                uri.path().to_string()
+            };
 
             // Offload to a background thread — GPU rendering can take a few ms
             // and we must not block the WebView2 main thread.
             std::thread::spawn(move || {
-                let response = handle_gpuframe_request(&path, &gpu, &daemon);
+                let response = handle_gpuframe_request(&full_uri, &gpu, &daemon);
                 responder.respond(response);
             });
         })
@@ -566,6 +581,7 @@ pub fn run() {
             commands::fetch_plugin_registry,
             commands::gpu_render::gpu_renderer_available,
             commands::gpu_render::render_terminal_gpu,
+            commands::gpu_render::get_gpu_cell_size,
             commands::get_grid_snapshot,
             commands::get_grid_snapshot_diff,
             commands::get_grid_dimensions,
