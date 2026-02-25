@@ -11,14 +11,16 @@ import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { GpuTerminalDisplay } from './GpuTerminalDisplay';
 
 /**
- * Terminal pane backed by the godly-vt Canvas2D renderer.
+ * Terminal pane with GPU rendering.
  *
  * The daemon's godly-vt parser maintains the terminal grid. On each
- * `terminal-output` event, we request a grid snapshot via Tauri IPC
- * and paint it on a <canvas> via TerminalRenderer.
+ * `terminal-output` event:
+ * - GpuTerminalDisplay requests a new frame from the Rust GPU renderer
+ * - A grid snapshot is fetched for overlay metadata (scrollbar, selection)
  *
- * When the renderer mode is set to 'gpu', the pane delegates rendering
- * to GpuTerminalDisplay which displays PNG frames from the Rust backend.
+ * The GPU renderer (Rust-side wgpu) paints the grid on a <canvas> via
+ * putImageData(). A transparent overlay canvas (TerminalRenderer) handles
+ * selection highlights, scrollbar, and URL hover underlines.
  */
 export class TerminalPane {
   private renderer: TerminalRenderer;
@@ -31,7 +33,8 @@ export class TerminalPane {
   private unsubscribeTheme: (() => void) | null = null;
   private unsubscribeFontSize: (() => void) | null = null;
 
-  // GPU renderer display (active when rendererMode === 'gpu')
+  // GPU renderer display — always active. Handles grid painting.
+  // The TerminalRenderer overlay handles selection, scrollbar, URL hover.
   private gpuDisplay: GpuTerminalDisplay | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
@@ -150,19 +153,15 @@ export class TerminalPane {
 
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
-    this.container.appendChild(this.renderer.getElement());
-    const overlay = this.renderer.getOverlayElement();
-    if (overlay) {
-      this.container.appendChild(overlay);
-    }
-    this.resizeObserver.observe(this.container);
 
-    // Initialize GPU display if renderer mode is set to 'gpu'.
-    // The GPU display overlays the canvas — mouse/keyboard interaction
-    // remains handled by the existing TerminalPane/TerminalRenderer code.
-    if (terminalSettingsStore.getRendererMode() === 'gpu') {
-      this.gpuDisplay = new GpuTerminalDisplay(this.container, this.terminalId);
-    }
+    // GPU display renders the grid. Must be added first so the overlay
+    // canvas (for selection, scrollbar, URL hover) sits on top.
+    this.gpuDisplay = new GpuTerminalDisplay(this.container, this.terminalId);
+
+    // The TerminalRenderer canvas serves as a transparent interaction overlay
+    // for selection highlights, scrollbar, and URL hover underline.
+    this.container.appendChild(this.renderer.getElement());
+    this.resizeObserver.observe(this.container);
 
     // ---- Hidden textarea for keyboard input ----
     // Canvas elements don't participate in OS text composition, so dead keys
@@ -274,10 +273,10 @@ export class TerminalPane {
           this.snapToBottom();
           return;
         }
-        // GPU renderer: request a new frame instead of applying the diff locally
+        // GPU renderer paints the grid; request a new frame.
+        // Still apply the diff so the overlay has scrollbar/title metadata.
         if (this.gpuDisplay) {
           this.gpuDisplay.requestFrame();
-          return;
         }
         this.applyPushedDiff(diff);
       }
@@ -299,10 +298,9 @@ export class TerminalPane {
           this.snapToBottom();
           return;
         }
-        // GPU renderer: request a new frame instead of fetching a snapshot
+        // GPU renderer paints the grid; also fetch a snapshot for overlay metadata.
         if (this.gpuDisplay) {
           this.gpuDisplay.requestFrame();
-          return;
         }
         this.scheduleSnapshotFetch();
       }
@@ -319,10 +317,9 @@ export class TerminalPane {
         this.snapToBottom();
         return;
       }
-      // GPU renderer: request a new frame instead of fetching a snapshot
+      // GPU renderer paints the grid; also fetch a snapshot for overlay metadata.
       if (this.gpuDisplay) {
         this.gpuDisplay.requestFrame();
-        return;
       }
       this.scheduleSnapshotFetch();
     });
@@ -941,9 +938,8 @@ export class TerminalPane {
       this.renderRAF = null;
     }
     // Release canvas GPU/memory resources for this hidden terminal.
-    // Each canvas at 1920×1080 @ 2x DPR holds ~33MB in backing store;
-    // with WebGL overlay that doubles. With 20 hidden terminals this
-    // saves ~600-1000MB of memory.
+    // Each canvas at 1920x1080 @ 2x DPR holds ~33MB in backing store.
+    // With 20 hidden terminals, releasing canvas resources saves ~600MB+ of memory.
     this.renderer.releaseCanvasResources();
     this.cachedSnapshot = null;
   }
@@ -962,14 +958,7 @@ export class TerminalPane {
     this.paused = false;
     this.cachedSnapshot = null;
     // Re-allocate canvas resources released by pause().
-    // restoreCanvasResources() tries acquireWebGL() first, then promoteToWebGL()
-    // if the canvas is locked to 2D. Both paths go through the WebGL context pool.
     this.renderer.restoreCanvasResources();
-    // Attach the overlay canvas if WebGL was acquired (overlay is dynamic)
-    const overlay = this.renderer.getOverlayElement();
-    if (overlay && !overlay.parentNode) {
-      this.container.appendChild(overlay);
-    }
     // If the circuit breaker is open for this session, trigger an immediate
     // probe before reconnecting. This handles edge cases where the stream
     // was not fully torn down yet.
@@ -981,8 +970,14 @@ export class TerminalPane {
         this.snapToBottom();
         return;
       }
+      if (this.gpuDisplay) {
+        this.gpuDisplay.requestFrame();
+      }
       this.scheduleSnapshotFetch();
     });
+    if (this.gpuDisplay) {
+      this.gpuDisplay.requestFrame();
+    }
     this.fetchAndRenderSnapshot();
   }
 
@@ -995,9 +990,6 @@ export class TerminalPane {
     this.container.classList.toggle('active', active);
     if (active) {
       this.resume();
-      // Promote to WebGL on first activation (when resume() no-ops because
-      // paused is already false). Subsequent activations go through resume().
-      this.tryPromoteWebGL();
       // Sync canvas bitmap to container size immediately to prevent the browser
       // from stretching the stale bitmap (300×150 default) for one frame,
       // which causes a "zoomed in" flash on tab switch / reopen.
@@ -1049,16 +1041,6 @@ export class TerminalPane {
 
   focus() {
     this.focusInput();
-  }
-
-  /** Attempt to promote the renderer to WebGL and attach overlay canvas. */
-  private tryPromoteWebGL() {
-    if (this.renderer.promoteToWebGL()) {
-      const overlay = this.renderer.getOverlayElement();
-      if (overlay && !overlay.parentElement) {
-        this.container.appendChild(overlay);
-      }
-    }
   }
 
   /** Focus the hidden textarea for keyboard input.
