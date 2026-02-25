@@ -1130,7 +1130,7 @@ export function showSettingsDialog(): Promise<void> {
     function renderShortcuts() {
       shortcutsContainer.textContent = '';
 
-      const categories: ShortcutCategory[] = ['Terminal', 'Clipboard', 'Tabs', 'Split', 'Workspace', 'Scroll', 'Zoom', 'Debug'];
+      const categories: ShortcutCategory[] = ['Terminal', 'Clipboard', 'Tabs', 'Split', 'Workspace', 'Scroll', 'Zoom', 'Voice', 'Debug'];
 
       for (const category of categories) {
         const defs = DEFAULT_SHORTCUTS.filter((d) => {
