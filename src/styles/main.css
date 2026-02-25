@@ -1917,3 +1917,164 @@ body.dragging-active * {
   padding-top: 8px;
   border-top: 1px solid var(--border-color);
 }
+
+/* ── Voice Recording ───────────────────────────────────── */
+
+/* Mic button in tab bar */
+.mic-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: color 0.2s, background-color 0.2s;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.mic-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.mic-btn.mic-recording {
+  color: var(--danger);
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+.mic-btn.mic-transcribing {
+  color: #ffaa00;
+  animation: mic-spin 1s linear infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes mic-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Voice plugin settings */
+.voice-plugin-settings .plugin-settings-section {
+  margin-bottom: 16px;
+}
+
+.voice-plugin-settings h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #666;
+}
+
+.voice-status-indicator.voice-status-connected {
+  background: var(--success);
+}
+
+.voice-status-indicator.voice-status-disconnected {
+  background: var(--danger);
+}
+
+.voice-model-select {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.voice-model-dropdown {
+  flex: 1;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.voice-load-model-btn,
+.voice-test-btn {
+  padding: 4px 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.voice-load-model-btn:disabled,
+.voice-test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.voice-model-description {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.voice-gpu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.voice-gpu-device {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-gpu-device-input {
+  width: 60px;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.voice-language-select {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.voice-test-result {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-style: italic;
+}
+
+/* Quick Claude dialog voice button */
+.quick-claude-voice-btn {
+  min-width: 60px;
+}
+
+.quick-claude-voice-btn.voice-recording {
+  background-color: var(--danger) !important;
+  color: #fff !important;
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}

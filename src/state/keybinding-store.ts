@@ -33,9 +33,10 @@ export type ActionId =
   | 'zoom.in'
   | 'zoom.out'
   | 'zoom.reset'
+  | 'voice.toggleRecording'
   | 'debug.togglePerfOverlay';
 
-export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll' | 'Zoom' | 'Debug';
+export type ShortcutCategory = 'Terminal' | 'Clipboard' | 'Tabs' | 'Split' | 'Workspace' | 'Scroll' | 'Zoom' | 'Voice' | 'Debug';
 
 /** Whether the shortcut is an app-level action or a terminal control key. */
 export type ShortcutType = 'app' | 'terminal-control';
@@ -225,6 +226,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Zoom',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: false, altKey: false, key: '0' },
+  },
+  {
+    id: 'voice.toggleRecording',
+    label: 'Toggle Voice Recording',
+    category: 'Voice',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'm' },
   },
   {
     id: 'debug.togglePerfOverlay',
