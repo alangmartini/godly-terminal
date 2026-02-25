@@ -3,7 +3,7 @@ import type { ShellType } from './store';
 const STORAGE_KEY = 'godly-terminal-settings';
 
 /** Which rendering backend to use for terminal grid display. */
-export type RendererMode = 'canvas2d' | 'webgl' | 'gpu';
+export type RendererMode = 'gpu';
 
 export interface TerminalSettings {
   defaultShell: ShellType;
@@ -11,7 +11,7 @@ export interface TerminalSettings {
   autoScrollOnOutput: boolean;
   /** Terminal font size in CSS pixels (clamped to 8–32). */
   fontSize: number;
-  /** Rendering backend: 'canvas2d', 'webgl' (default), or 'gpu' (Rust-side). */
+  /** Rendering backend: 'gpu' (Rust-side wgpu renderer). */
   rendererMode: RendererMode;
 }
 
@@ -26,7 +26,7 @@ class TerminalSettingsStore {
     defaultShell: { type: 'windows' },
     autoScrollOnOutput: false,
     fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
-    rendererMode: 'webgl',
+    rendererMode: 'gpu',
   };
 
   private subscribers: Subscriber[] = [];
@@ -111,7 +111,8 @@ class TerminalSettingsStore {
       if (typeof data.fontSize === 'number' && data.fontSize >= TerminalSettingsStore.MIN_FONT_SIZE && data.fontSize <= TerminalSettingsStore.MAX_FONT_SIZE) {
         this.settings.fontSize = data.fontSize;
       }
-      if (data.rendererMode === 'canvas2d' || data.rendererMode === 'webgl' || data.rendererMode === 'gpu') {
+      // GPU is now the only renderer mode; ignore stored legacy values (canvas2d, webgl)
+      if (data.rendererMode === 'gpu') {
         this.settings.rendererMode = data.rendererMode;
       }
     } catch {
