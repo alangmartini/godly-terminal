@@ -4,8 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
  * Service for interacting with the Rust-side GPU terminal renderer.
  *
  * The GPU renderer lives entirely in the Tauri backend — it renders
- * terminal grids to PNG frames. This service provides the frontend
- * API to check availability and request rendered frames.
+ * terminal grids using wgpu. This service provides the frontend API
+ * to check availability and request rendered frames as raw RGBA pixels.
  */
 class GpuRendererService {
   private _available: boolean | null = null;
@@ -25,6 +25,19 @@ class GpuRendererService {
   }
 
   /**
+   * Render a terminal and return raw RGBA bytes.
+   * Format: [width: u32 LE][height: u32 LE][rgba_pixels...]
+   */
+  async renderTerminalRaw(terminalId: string): Promise<ArrayBuffer> {
+    const url = `http://gpuframe.localhost/render/${terminalId}?format=raw`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`GPU render failed: ${response.status} ${response.statusText}`);
+    }
+    return response.arrayBuffer();
+  }
+
+  /**
    * Render a terminal using the GPU renderer.
    * Returns a data URL suitable for an <img> src.
    */
@@ -38,7 +51,7 @@ class GpuRendererService {
    * This is faster than the invoke path because it avoids base64 encoding.
    */
   getFrameUrl(terminalId: string): string {
-    return `gpuframe://render/${terminalId}`;
+    return `http://gpuframe.localhost/render/${terminalId}`;
   }
 }
 
