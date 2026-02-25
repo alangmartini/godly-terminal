@@ -1,0 +1,17 @@
+[package]
+name = "godly-renderer"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+
+[dependencies]
+godly-protocol = { path = "../protocol" }
+wgpu = { version = "24", features = [] }
+cosmic-text = "0.12"
+image = { version = "0.25", default-features = false, features = ["png"] }
+bytemuck = { version = "1", features = ["derive"] }
+log = "0.4"
+pollster = "0.4"
+
+[dev-dependencies]
+env_logger = "0.11"
