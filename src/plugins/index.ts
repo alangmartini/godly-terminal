@@ -2,6 +2,7 @@ import { PluginEventBus } from './event-bus';
 import { PluginRegistry } from './plugin-registry';
 import { PeonPingPlugin } from './peon-ping/index';
 import { SmolLM2Plugin } from './smollm2/index';
+import { VoiceToTextPlugin } from './voice/index';
 import { pluginStore } from './plugin-store';
 import { loadExternalPlugin } from './external-plugin-loader';
 import { invoke } from '@tauri-apps/api/core';
@@ -19,6 +20,7 @@ export async function initPlugins(): Promise<PluginRegistry> {
   registry.register(peonPing, { builtin: true });
 
   registry.register(new SmolLM2Plugin(), { builtin: true });
+  registry.register(new VoiceToTextPlugin(), { builtin: true });
 
   // Phase 2: Load installed external plugins
   const installed = pluginStore.getInstalledPlugins();
