@@ -7,6 +7,7 @@ mod persistence;
 mod pty;
 mod state;
 mod utils;
+mod whisper_state;
 mod worktree;
 
 use std::collections::HashMap;
@@ -23,6 +24,7 @@ use crate::llm_state::LlmState;
 use crate::persistence::{save_on_exit, AutoSaveManager};
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
+use crate::whisper_state::WhisperState;
 
 #[cfg(feature = "leak-check")]
 #[global_allocator]
@@ -227,6 +229,39 @@ fn find_remote_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBu
     None
 }
 
+/// Find the godly-whisper binary: resource dir (installed) > exe dir > target/debug (dev).
+fn find_whisper_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    // 1. Resource dir (Tauri bundle)
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        let p = resource_dir.join("godly-whisper.exe");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    // 2. Same dir as current exe
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("godly-whisper.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    // 3. target/debug (dev builds)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("../godly-whisper.exe");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
 /// Start the Remote HTTP server as a detached process.
 /// godly-remote doesn't write a discovery file — if the port is already bound
 /// (from a previous app launch), the new process simply fails to bind and exits.
@@ -402,6 +437,7 @@ pub fn run() {
     let auto_save = Arc::new(AutoSaveManager::new());
     let process_monitor = ProcessMonitor::new();
     let llm_state = Arc::new(LlmState::new());
+    let whisper_state = Arc::new(WhisperState::new());
 
     // Connect to daemon (or launch one)
     let daemon_client = Arc::new(
@@ -523,6 +559,7 @@ pub fn run() {
         .manage(auto_save.clone())
         .manage(daemon_client.clone())
         .manage(llm_state.clone())
+        .manage(whisper_state.clone())
         .manage(gpu_renderer_manager)
         .manage(JsCallbackState {
             senders: Mutex::new(HashMap::new()),
@@ -597,6 +634,13 @@ pub fn run() {
             commands::llm_generate,
             commands::llm_generate_branch_name,
             commands::llm_check_model_files,
+            commands::whisper_get_status,
+            commands::whisper_start_recording,
+            commands::whisper_stop_recording,
+            commands::whisper_load_model,
+            commands::whisper_list_models,
+            commands::whisper_get_config,
+            commands::whisper_set_config,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,
@@ -646,7 +690,8 @@ pub fn run() {
 
             // Initialize LLM state (check if model is already downloaded)
             if let Ok(app_data) = app_handle.path().app_data_dir() {
-                llm_state.init(app_data);
+                llm_state.init(app_data.clone());
+                whisper_state.init(app_data);
             }
 
             // Start MCP pipe server for Claude Code integration
