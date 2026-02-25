@@ -230,7 +230,7 @@ fn find_remote_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBu
 }
 
 /// Find the godly-whisper binary: resource dir (installed) > exe dir > target/debug (dev).
-fn find_whisper_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+pub(crate) fn find_whisper_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     // 1. Resource dir (Tauri bundle)
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
         let p = resource_dir.join("godly-whisper.exe");
@@ -642,6 +642,7 @@ pub fn run() {
             commands::whisper_list_models,
             commands::whisper_get_config,
             commands::whisper_set_config,
+            commands::whisper_start_sidecar,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,
