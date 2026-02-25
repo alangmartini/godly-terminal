@@ -3,6 +3,7 @@ name = "godly-renderer"
 version = "0.1.0"
 edition = "2021"
 license = "BUSL-1.1"
+description = "GPU-accelerated terminal renderer for Godly Terminal"
 
 [dependencies]
 godly-protocol = { path = "../protocol" }
