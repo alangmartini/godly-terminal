@@ -468,6 +468,37 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     cancelBtn.textContent = 'Cancel';
     buttons.appendChild(cancelBtn);
 
+    // Voice input button for dictation
+    const voiceBtn = document.createElement('button');
+    voiceBtn.className = 'dialog-btn dialog-btn-secondary quick-claude-voice-btn';
+    voiceBtn.textContent = 'Voice';
+    voiceBtn.title = 'Dictate with voice';
+    voiceBtn.addEventListener('click', async () => {
+      try {
+        const { whisperGetStatus, whisperStartRecording, whisperStopRecording } = await import('../plugins/voice/whisper-service');
+        const status = await whisperGetStatus();
+        if (status.state === 'idle') {
+          await whisperStartRecording();
+          voiceBtn.textContent = 'Stop';
+          voiceBtn.classList.add('voice-recording');
+        } else if (status.state === 'recording') {
+          voiceBtn.textContent = '...';
+          voiceBtn.classList.remove('voice-recording');
+          const text = await whisperStopRecording();
+          voiceBtn.textContent = 'Voice';
+          if (text) {
+            promptArea.value += (promptArea.value ? ' ' : '') + text;
+            promptArea.dispatchEvent(new Event('input'));
+          }
+        }
+      } catch (err) {
+        voiceBtn.textContent = 'Voice';
+        voiceBtn.classList.remove('voice-recording');
+        console.error('Voice input failed:', err);
+      }
+    });
+    buttons.appendChild(voiceBtn);
+
     const okBtn = document.createElement('button');
     okBtn.className = 'dialog-btn dialog-btn-primary';
     okBtn.textContent = 'Launch';
