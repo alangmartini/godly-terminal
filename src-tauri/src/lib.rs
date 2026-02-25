@@ -587,6 +587,7 @@ pub fn run() {
             commands::get_grid_dimensions,
             commands::get_grid_text,
             commands::set_scrollback,
+            commands::scroll_and_get_snapshot,
             commands::write_frontend_log,
             commands::get_log_dir,
             commands::read_frontend_log,
