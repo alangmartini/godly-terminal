@@ -19,7 +19,7 @@ pub struct GpuRenderer {
 }
 
 /// Output texture format used for offscreen rendering.
-const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 impl GpuRenderer {
     /// Create a new GPU renderer with the given font family and size.
