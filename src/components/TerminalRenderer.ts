@@ -1,20 +1,15 @@
 /**
- * Canvas2D terminal renderer.
+ * Terminal interaction overlay renderer.
  *
- * Paints grid snapshots from godly-vt (via Tauri IPC)
- * onto a <canvas> element. The godly-vt parser in the daemon owns the terminal
- * state; this renderer is purely a display layer.
+ * Handles all user interaction visuals (selection highlights, scrollbar,
+ * URL hover underline) on a transparent <canvas> overlay. The actual grid
+ * painting is done by the GPU renderer (Rust-side wgpu) via GpuTerminalDisplay.
  *
- * Design:
- * - render(snapshot) paints the full grid with per-cell colors and attributes
- * - requestAnimationFrame loop ensures at most 60fps re-renders
- * - Selection is handled via mouse events -> grid coords -> highlight overlay
- * - URL detection underlines URLs on hover, opens on Ctrl+click
+ * Also handles all mouse, wheel, and touch events for selection, scrollbar
+ * drag, URL hover/click, and zoom.
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { WebGLRenderer } from './renderer/WebGLRenderer';
-import { webGLContextPool } from './renderer/WebGLContextPool';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
@@ -95,36 +90,25 @@ interface Selection {
 
 const URL_REGEX = /https?:\/\/[^\s<>'")\]]+/g;
 
-// ---- Renderer backend info (set once on first construction) ----
+// ---- Renderer backend info ----
 
-let _rendererBackend: string | null = null;
-
-/** Returns the rendering backend used by terminal panes ('WebGL2' or 'Canvas2D'). */
+/** Returns the rendering backend name. Always 'GPU' now. */
 export function getRendererBackend(): string {
-  return _rendererBackend ?? 'unknown';
+  return 'GPU';
 }
 
 // ---- Renderer ----
 
 export class TerminalRenderer {
   private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D | null = null;
+  private ctx: CanvasRenderingContext2D;
   private theme: TerminalTheme;
-
-  // WebGL
-  private webglRenderer: WebGLRenderer | null = null;
-  private overlayCanvas: HTMLCanvasElement | null = null;
-  private overlayCtx: CanvasRenderingContext2D | null = null;
-  private useWebGL = false;
-  // True after a webglcontextlost event — permanently falls back to Canvas2D.
-  private contextLostDegraded = false;
 
   // Font metrics
   private fontFamily = 'Cascadia Code, Consolas, monospace';
   private fontSize = terminalSettingsStore.getFontSize();
   private cellWidth = 0;
   private cellHeight = 0;
-  private baselineOffset = 0;
   private devicePixelRatio = 1;
 
   // State
@@ -132,7 +116,7 @@ export class TerminalRenderer {
   private pendingSnapshot: RichGridData | null = null;
   private renderScheduled = false;
 
-  // Cursor blink
+  // Cursor blink (triggers GPU frame requests via repaint callback)
   private cursorVisible = true;
   private cursorBlinkInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -178,42 +162,20 @@ export class TerminalRenderer {
 
   constructor(theme?: Partial<TerminalTheme>) {
     this.theme = theme ? { ...themeStore.getTerminalTheme(), ...theme } : themeStore.getTerminalTheme();
+
+    // The canvas serves as a transparent overlay for selection, scrollbar, and URL hover.
+    // The GPU renderer paints the grid on a separate canvas underneath.
     this.canvas = document.createElement('canvas');
-    this.canvas.className = 'terminal-canvas';
+    this.canvas.className = 'terminal-overlay-canvas';
     this.canvas.style.display = 'block';
-    this.canvas.style.width = '100%';
-    this.canvas.style.height = '100%';
     this.canvas.tabIndex = 0;
     // Prevent default context menu on right-click (we handle copy ourselves)
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Start with Canvas2D only — WebGL is promoted lazily when the terminal
-    // becomes visible, to avoid exhausting browser WebGL context limits
-    // (typically 8-16 per page) when 20+ terminals are open.
-    this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+    // Alpha-enabled context so the GPU-rendered grid shows through
+    this.ctx = this.canvas.getContext('2d', { alpha: true })!;
     this.measureFont();
-    _rendererBackend = 'Canvas2D';
-    console.log('[TerminalRenderer] Initialized with Canvas2D (WebGL deferred until visible)');
-
-    // Listen for context loss events on the canvas. If a WebGL context is lost
-    // (e.g., GPU reset, driver crash, browser reclaiming resources), we
-    // permanently degrade to Canvas2D for this renderer instance.
-    this.canvas.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault();
-      console.warn('[TerminalRenderer] WebGL context lost — falling back to Canvas2D');
-      webGLContextPool.notifyContextLost(this.canvas);
-      this.teardownWebGL();
-      this.contextLostDegraded = true;
-      this.initCanvas2DFallback();
-    });
-
-    this.canvas.addEventListener('webglcontextrestored', () => {
-      console.log('[TerminalRenderer] WebGL context restored event (staying on Canvas2D due to degradation policy)');
-      // We intentionally do NOT re-acquire WebGL here. Once degraded, we stay
-      // on Canvas2D to avoid flicker/instability from repeated loss cycles.
-      // The next acquireWebGL() call (on resume) can attempt to re-acquire
-      // if the degraded flag has been cleared.
-    });
+    console.log('[TerminalRenderer] Initialized as interaction overlay (GPU renders grid)');
 
     this.setupMouseHandlers();
     this.setupWheelHandler();
@@ -228,117 +190,7 @@ export class TerminalRenderer {
 
   /** Returns the active rendering backend name. */
   getBackend(): string {
-    return this.useWebGL ? 'WebGL2' : 'Canvas2D';
-  }
-
-  /** Returns true if this renderer is in a degraded state (Canvas2D fallback after context loss). */
-  isContextLostDegraded(): boolean {
-    return this.contextLostDegraded;
-  }
-
-  /**
-   * Attempt to acquire a WebGL2 context from the pool and switch to GPU rendering.
-   * Called when the terminal becomes visible (tab switch, split view).
-   * No-op if already using WebGL, if degraded after context loss, or if the pool is full.
-   */
-  acquireWebGL(): void {
-    if (this.useWebGL) return;
-    if (this.contextLostDegraded) {
-      console.log('[TerminalRenderer] Skipping WebGL acquire — degraded after context loss');
-      return;
-    }
-
-    const gl = webGLContextPool.acquire(this.canvas);
-    if (!gl) {
-      // Pool is full or browser refused — stay on Canvas2D
-      return;
-    }
-
-    try {
-      console.log('[TerminalRenderer] Initializing WebGL2 renderer...');
-      this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
-      this.useWebGL = true;
-      this.ctx = null; // Release Canvas2D context reference
-
-      // Create overlay canvas for scrollbar and URL hover
-      this.overlayCanvas = document.createElement('canvas');
-      this.overlayCanvas.className = 'terminal-overlay-canvas';
-      this.overlayCanvas.style.display = 'block';
-      this.overlayCtx = this.overlayCanvas.getContext('2d')!;
-
-      const metrics = this.webglRenderer.measureFont();
-      this.cellWidth = metrics.cellWidth;
-      this.cellHeight = metrics.cellHeight;
-
-      _rendererBackend = 'WebGL2';
-      console.log('[TerminalRenderer] WebGL2 renderer active');
-    } catch (e) {
-      console.warn('[TerminalRenderer] WebGL2 renderer init failed, staying on Canvas2D:', e);
-      webGLContextPool.release(this.canvas);
-      this.webglRenderer = null;
-      this.useWebGL = false;
-      // Re-acquire Canvas2D context
-      this.initCanvas2DFallback();
-    }
-  }
-
-  /**
-   * Release the WebGL2 context back to the pool and switch to Canvas2D.
-   * Called when the terminal becomes hidden (tab switch, pause).
-   * No-op if already using Canvas2D.
-   */
-  releaseWebGL(): void {
-    if (!this.useWebGL) return;
-    this.teardownWebGL();
-    this.initCanvas2DFallback();
-    console.log('[TerminalRenderer] WebGL released, switched to Canvas2D');
-  }
-
-  /** Internal: tear down WebGL resources without switching to Canvas2D. */
-  private teardownWebGL(): void {
-    if (this.webglRenderer) {
-      this.webglRenderer.dispose();
-      this.webglRenderer = null;
-    }
-    webGLContextPool.release(this.canvas);
-    this.useWebGL = false;
-    _rendererBackend = 'Canvas2D';
-
-    // Remove overlay canvas from DOM if present
-    if (this.overlayCanvas) {
-      this.overlayCanvas.remove();
-      this.overlayCanvas = null;
-      this.overlayCtx = null;
-    }
-  }
-
-  /** Internal: initialize or re-initialize Canvas2D context on the current canvas. */
-  private initCanvas2DFallback(): void {
-    // The canvas may still be locked to WebGL after getContext('webgl2') was called.
-    // In that case, getContext('2d') returns null. Create a fresh canvas.
-    let ctx2d = this.canvas.getContext('2d', { alpha: false });
-    if (!ctx2d) {
-      console.log('[TerminalRenderer] Canvas locked to WebGL, creating fresh canvas for 2D fallback');
-      const oldCanvas = this.canvas;
-      this.canvas = document.createElement('canvas');
-      this.canvas.className = 'terminal-canvas';
-      this.canvas.style.display = 'block';
-      this.canvas.style.width = '100%';
-      this.canvas.style.height = '100%';
-      this.canvas.tabIndex = -1;
-      this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-      // Replace in DOM if old canvas is attached
-      if (oldCanvas.parentNode) {
-        oldCanvas.parentNode.replaceChild(this.canvas, oldCanvas);
-      }
-      ctx2d = this.canvas.getContext('2d', { alpha: false })!;
-      // Re-attach mouse/wheel/touch handlers on the new canvas
-      this.setupMouseHandlers();
-      this.setupWheelHandler();
-      this.setupTouchHandler();
-    }
-    this.ctx = ctx2d;
-    this.measureFont();
+    return 'GPU';
   }
 
   /** Update the terminal theme and trigger a repaint. */
@@ -351,13 +203,7 @@ export class TerminalRenderer {
   setFontSize(size: number): void {
     if (size === this.fontSize) return;
     this.fontSize = size;
-    if (this.useWebGL && this.webglRenderer) {
-      const metrics = this.webglRenderer.setFontSize(size);
-      this.cellWidth = metrics.cellWidth;
-      this.cellHeight = metrics.cellHeight;
-    } else {
-      this.measureFont();
-    }
+    this.measureFont();
     this.repaint();
   }
 
@@ -404,7 +250,8 @@ export class TerminalRenderer {
 
   /**
    * Schedule a render with the given snapshot.
-   * Uses requestAnimationFrame to avoid rendering faster than 60fps.
+   * Updates snapshot state for selection/scrollbar reference and repaints the overlay.
+   * The GPU renderer handles actual grid painting separately.
    */
   render(snapshot: RichGridData) {
     this.pendingSnapshot = snapshot;
@@ -423,7 +270,7 @@ export class TerminalRenderer {
           this.currentSnapshot = this.pendingSnapshot;
           this.pendingSnapshot = null;
           perfTracer.measure('raf_wait', 'render_start');
-          this.paint();
+          this.paintOverlay();
           perfTracer.measure('paint_duration', 'paint_start');
           perfTracer.measure('keydown_to_paint', 'keydown');
           perfTracer.tick();
@@ -432,10 +279,10 @@ export class TerminalRenderer {
     }
   }
 
-  /** Force an immediate re-render of the current snapshot. */
+  /** Force an immediate re-render of the overlay. */
   repaint() {
     if (this.currentSnapshot) {
-      this.paint();
+      this.paintOverlay();
     }
   }
 
@@ -493,20 +340,7 @@ export class TerminalRenderer {
     this.devicePixelRatio = dpr;
     this.canvas.width = newWidth;
     this.canvas.height = newHeight;
-
-    if (this.useWebGL && this.webglRenderer) {
-      this.webglRenderer.resize(newWidth, newHeight, dpr);
-      const metrics = this.webglRenderer.measureFont();
-      this.cellWidth = metrics.cellWidth;
-      this.cellHeight = metrics.cellHeight;
-      // Resize overlay canvas
-      if (this.overlayCanvas) {
-        this.overlayCanvas.width = newWidth;
-        this.overlayCanvas.height = newHeight;
-      }
-    } else {
-      this.measureFont();
-    }
+    this.measureFont();
     return true;
   }
 
@@ -584,26 +418,15 @@ export class TerminalRenderer {
   }
 
   /**
-   * Release canvas GPU/memory resources without destroying the renderer.
-   * Called when the terminal is paused (hidden tab). The canvas elements stay
-   * in the DOM but their backing stores are freed by setting dimensions to 1×1.
+   * Release canvas resources without destroying the renderer.
+   * Called when the terminal is paused (hidden tab). The canvas stays
+   * in the DOM but its backing store is freed by setting dimensions to 1x1.
    * Call restoreCanvasResources() to re-allocate when the terminal becomes visible.
-   *
-   * If using WebGL, the context is released back to the pool so other
-   * terminals can use it. On restore, acquireWebGL() re-acquires if available.
    */
   releaseCanvasResources() {
-    // Demote from WebGL before shrinking canvas to release the GL context.
-    // This makes the context available for other visible terminals.
-    this.demoteToCanvas2D();
-    // Shrink canvases to 1×1 to release GPU backing store.
-    // Setting to 0×0 is invalid in some browsers; 1×1 = 4 bytes.
+    // Shrink canvas to 1x1 to release GPU backing store.
     this.canvas.width = 1;
     this.canvas.height = 1;
-    if (this.overlayCanvas) {
-      this.overlayCanvas.width = 1;
-      this.overlayCanvas.height = 1;
-    }
     // Drop cached snapshot data
     this.currentSnapshot = null;
     this.pendingSnapshot = null;
@@ -618,18 +441,8 @@ export class TerminalRenderer {
    * Re-allocate canvas resources after releaseCanvasResources().
    * Called when the terminal becomes visible again. updateSize() will
    * set the correct dimensions; startCursorBlink() restarts the timer.
-   * Attempts to re-acquire a WebGL context from the pool.
    */
   restoreCanvasResources() {
-    // Try to re-acquire WebGL context from the pool.
-    // acquireWebGL() tries getContext('webgl2') on the current canvas, which
-    // fails if it already has a 2d context (always the case after demoteToCanvas2D).
-    // In that case, promoteToWebGL() creates a fresh canvas and acquires through the pool.
-    this.acquireWebGL();
-    if (!this.useWebGL) {
-      this.promoteToWebGL();
-    }
-
     // Restart cursor blink if it was stopped
     if (!this.cursorBlinkInterval) {
       this.startCursorBlink();
@@ -637,120 +450,17 @@ export class TerminalRenderer {
   }
 
   /**
-   * Promote this renderer to WebGL2 for GPU-accelerated rendering.
-   * Called when the terminal becomes visible. If WebGL2 is unavailable or
-   * context creation fails, the renderer stays on Canvas2D silently.
-   * Returns true if promotion succeeded.
+   * No-op retained for API compatibility with TerminalPane.
+   * WebGL promotion is no longer needed since the GPU renderer
+   * handles all grid painting.
    */
   promoteToWebGL(): boolean {
-    if (this.useWebGL) return true; // already promoted
-    if (this.contextLostDegraded) return false; // don't retry after context loss
-
-    // Need a fresh canvas for WebGL — can't get webgl2 on a canvas that
-    // already has a 2d context. Create a new canvas and swap it in.
-    const newCanvas = document.createElement('canvas');
-    newCanvas.className = 'terminal-canvas';
-    newCanvas.style.display = 'block';
-    newCanvas.style.width = '100%';
-    newCanvas.style.height = '100%';
-    newCanvas.tabIndex = this.canvas.tabIndex;
-    newCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    // Acquire through the pool to enforce the context limit and enable
-    // proper tracking. Without this, contexts created here are invisible
-    // to the pool and never released, leaking GPU memory.
-    const gl = webGLContextPool.acquire(newCanvas);
-    if (!gl) return false;
-
-    try {
-      this.webglRenderer = new WebGLRenderer(gl, this.fontFamily, this.fontSize, window.devicePixelRatio || 1);
-    } catch {
-      return false;
-    }
-
-    // Create overlay canvas for scrollbar and URL hover
-    this.overlayCanvas = document.createElement('canvas');
-    this.overlayCanvas.className = 'terminal-overlay-canvas';
-    this.overlayCanvas.style.display = 'block';
-    this.overlayCtx = this.overlayCanvas.getContext('2d')!;
-
-    // Swap canvases in the DOM
-    const parent = this.canvas.parentElement;
-    if (parent) {
-      parent.replaceChild(newCanvas, this.canvas);
-      // Insert overlay after the main canvas
-      newCanvas.after(this.overlayCanvas);
-    }
-
-    this.canvas = newCanvas;
-    this.ctx = null;
-    this.useWebGL = true;
-
-    // Re-measure with WebGL renderer
-    const metrics = this.webglRenderer.measureFont();
-    this.cellWidth = metrics.cellWidth;
-    this.cellHeight = metrics.cellHeight;
-
-    // Re-attach event handlers to the new canvas
-    this.setupMouseHandlers();
-    this.setupWheelHandler();
-    this.setupTouchHandler();
-
-    _rendererBackend = 'WebGL2';
-    return true;
+    return false;
   }
 
-  /**
-   * Demote this renderer from WebGL2 back to Canvas2D.
-   * Called when the terminal becomes hidden, freeing the WebGL context
-   * for other visible terminals. No-op if already using Canvas2D.
-   */
-  demoteToCanvas2D(): void {
-    if (!this.useWebGL) return;
-
-    // Release the WebGL context from the pool BEFORE replacing the canvas.
-    // Without this, the pool keeps tracking the old canvas and its slot count
-    // inflates until MAX_CONTEXTS is reached, blocking all future acquisitions.
-    webGLContextPool.release(this.canvas);
-
-    // Dispose WebGL resources
-    if (this.webglRenderer) {
-      this.webglRenderer.dispose();
-      this.webglRenderer = null;
-    }
-
-    // Remove overlay canvas from DOM
-    if (this.overlayCanvas) {
-      this.overlayCanvas.remove();
-      this.overlayCanvas = null;
-      this.overlayCtx = null;
-    }
-
-    // Create a fresh Canvas2D canvas (can't get 2d context on a webgl canvas)
-    const newCanvas = document.createElement('canvas');
-    newCanvas.className = 'terminal-canvas';
-    newCanvas.style.display = 'block';
-    newCanvas.style.width = '100%';
-    newCanvas.style.height = '100%';
-    newCanvas.tabIndex = this.canvas.tabIndex;
-    newCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    const parent = this.canvas.parentElement;
-    if (parent) {
-      parent.replaceChild(newCanvas, this.canvas);
-    }
-
-    this.canvas = newCanvas;
-    this.ctx = newCanvas.getContext('2d', { alpha: false })!;
-    this.useWebGL = false;
-    this.measureFont();
-
-    // Re-attach event handlers to the new canvas
-    this.setupMouseHandlers();
-    this.setupWheelHandler();
-    this.setupTouchHandler();
-
-    _rendererBackend = 'Canvas2D';
+  /** Returns null since there is no separate overlay canvas. The main canvas IS the overlay. */
+  getOverlayElement(): HTMLCanvasElement | null {
+    return null;
   }
 
   /** Clean up all resources. */
@@ -769,20 +479,11 @@ export class TerminalRenderer {
       document.removeEventListener('mouseup', this.onDocumentMouseUp);
       this.onDocumentMouseUp = null;
     }
-    // Release WebGL context back to the pool
-    if (this.useWebGL) {
-      this.teardownWebGL();
-    }
-    // Release canvas backing stores
+    // Release canvas backing store
     this.canvas.width = 1;
     this.canvas.height = 1;
-    if (this.overlayCanvas) {
-      this.overlayCanvas.width = 1;
-      this.overlayCanvas.height = 1;
-    }
     this.currentSnapshot = null;
     this.pendingSnapshot = null;
-    this.ctx = null;
   }
 
   // ---- Scrollback ----
@@ -806,7 +507,6 @@ export class TerminalRenderer {
   // ---- Private: Font measurement ----
 
   private measureFont() {
-    if (!this.ctx) return; // WebGL mode — font measured by WebGLRenderer
     const dpr = this.devicePixelRatio;
     // Round to integer pixel size for clean font hinting (avoids subpixel artifacts
     // at fractional DPR like 1.25 where 13*1.25=16.25 causes poor ClearType rendering)
@@ -816,177 +516,71 @@ export class TerminalRenderer {
     this.cellWidth = Math.ceil(metrics.width);
     // Line height = fontSize * 1.2 is a reasonable approximation
     this.cellHeight = Math.ceil(scaledSize * 1.2);
-    // Baseline offset: distance from the top of the cell to the text baseline
-    this.baselineOffset = Math.ceil(scaledSize);
   }
 
-  // ---- Private: Painting ----
+  // ---- Private: Overlay painting ----
 
-  private paint() {
+  /**
+   * Paint the interaction overlay: selection highlights, scrollbar, URL hover.
+   * This is drawn on a transparent canvas that sits on top of the GPU-rendered grid.
+   */
+  private paintOverlay() {
     const snap = this.currentSnapshot;
     if (!snap) return;
 
     perfTracer.mark('paint_start');
 
-    if (this.useWebGL && this.webglRenderer) {
-      // WebGL path: delegate grid rendering to GPU
-      const sel = this.selection.active ? this.normalizeSelection(this.selection) : null;
-      this.webglRenderer.paint(snap, this.theme, sel, this.cursorVisible && !snap.cursor_hidden && snap.scrollback_offset === 0);
-      perfTracer.measure('webgl_paint', 'paint_start');
-      // Draw scrollbar and URL hover on overlay
-      this.paintOverlay(snap);
-      return;
-    }
-
-    // Canvas2D fallback — two-pass rendering to prevent background rects
-    // from clipping adjacent glyphs (e.g. 'm' trailing edge cut by next cell's bg)
-    const ctx = this.ctx!;
-    const { cellWidth, cellHeight, baselineOffset } = this;
+    const ctx = this.ctx;
     const dpr = this.devicePixelRatio;
-    const scaledSize = Math.round(this.fontSize * dpr);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Clear canvas with background
-    ctx.fillStyle = this.theme.background;
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
+    // Selection highlight
     const normalizedSel = this.selection.active ? this.normalizeSelection(this.selection) : null;
+    if (normalizedSel) {
+      ctx.fillStyle = this.theme.selectionBackground;
+      for (let row = normalizedSel.startRow; row <= normalizedSel.endRow; row++) {
+        if (row < 0 || row >= snap.dimensions.rows) continue;
+        const y = row * this.cellHeight;
 
-    // Pass 1: Draw all backgrounds
-    for (let row = 0; row < snap.rows.length; row++) {
-      const gridRow = snap.rows[row];
-      const y = row * cellHeight;
-
-      for (let col = 0; col < gridRow.cells.length; col++) {
-        const cell = gridRow.cells[col];
-        if (cell.wide_continuation) continue;
-
-        const x = col * cellWidth;
-        const w = cell.wide ? cellWidth * 2 : cellWidth;
-
-        let bg = cell.bg === 'default' ? this.theme.background : cell.bg;
-        if (cell.inverse) {
-          bg = cell.fg === 'default' ? this.theme.foreground : cell.fg;
+        let startCol: number;
+        let endCol: number;
+        if (row === normalizedSel.startRow && row === normalizedSel.endRow) {
+          startCol = normalizedSel.startCol;
+          endCol = normalizedSel.endCol;
+        } else if (row === normalizedSel.startRow) {
+          startCol = normalizedSel.startCol;
+          endCol = snap.dimensions.cols;
+        } else if (row === normalizedSel.endRow) {
+          startCol = 0;
+          endCol = normalizedSel.endCol;
+        } else {
+          startCol = 0;
+          endCol = snap.dimensions.cols;
         }
 
-        const inSelection = normalizedSel && this.cellInSelection(row, col, normalizedSel);
-
-        if (inSelection) {
-          ctx.fillStyle = this.theme.selectionBackground;
-          ctx.fillRect(x, y, w, cellHeight);
-        } else if (bg !== this.theme.background) {
-          ctx.fillStyle = bg;
-          ctx.fillRect(x, y, w, cellHeight);
-        }
+        const x = startCol * this.cellWidth;
+        const w = (endCol - startCol) * this.cellWidth;
+        ctx.fillRect(x, y, w, this.cellHeight);
       }
     }
 
-    // Pass 2: Draw all text and decorations (on top of backgrounds)
-    for (let row = 0; row < snap.rows.length; row++) {
-      const gridRow = snap.rows[row];
-      const y = row * cellHeight;
-
-      for (let col = 0; col < gridRow.cells.length; col++) {
-        const cell = gridRow.cells[col];
-        if (cell.wide_continuation) continue;
-
-        const x = col * cellWidth;
-        const w = cell.wide ? cellWidth * 2 : cellWidth;
-
-        let fg = cell.fg === 'default' ? this.theme.foreground : cell.fg;
-        if (cell.inverse) {
-          fg = cell.bg === 'default' ? this.theme.background : cell.bg;
-        }
-        if (cell.dim) {
-          fg = this.dimColor(fg);
-        }
-
-        const inSelection = normalizedSel && this.cellInSelection(row, col, normalizedSel);
-
-        // Draw text
-        if (cell.content && cell.content !== ' ') {
-          const fontWeight = cell.bold ? 'bold ' : '';
-          const fontStyle = cell.italic ? 'italic ' : '';
-          ctx.font = `${fontStyle}${fontWeight}${scaledSize}px ${this.fontFamily}`;
-
-          if (inSelection) {
-            ctx.fillStyle = this.theme.foreground;
-          } else {
-            ctx.fillStyle = fg;
-          }
-
-          ctx.fillText(cell.content, x, y + baselineOffset);
-        }
-
-        // Draw underline
-        if (cell.underline) {
-          ctx.strokeStyle = fg;
-          ctx.lineWidth = dpr;
-          ctx.beginPath();
-          ctx.moveTo(x, y + cellHeight - dpr);
-          ctx.lineTo(x + w, y + cellHeight - dpr);
-          ctx.stroke();
-        }
-      }
-
-      // URL hover underline
-      if (this.hoveredUrl && row === this.hoveredUrlRow) {
-        const urlX = this.hoveredUrlStartCol * cellWidth;
-        const urlW = (this.hoveredUrlEndCol - this.hoveredUrlStartCol) * cellWidth;
-        ctx.strokeStyle = this.theme.blue;
-        ctx.lineWidth = dpr;
-        ctx.beginPath();
-        ctx.moveTo(urlX, y + cellHeight - dpr);
-        ctx.lineTo(urlX + urlW, y + cellHeight - dpr);
-        ctx.stroke();
-      }
+    // Scrollbar
+    if (snap.scrollback_offset > 0 && snap.total_scrollback > 0) {
+      this.paintScrollbar(snap);
     }
 
-    // Draw cursor (only when at live view — no cursor when scrolled up)
-    if (!snap.cursor_hidden && this.cursorVisible && snap.scrollback_offset === 0) {
-      this.paintCursor(snap.cursor.row, snap.cursor.col);
+    // URL hover underline
+    if (this.hoveredUrl && this.hoveredUrlRow >= 0) {
+      const urlX = this.hoveredUrlStartCol * this.cellWidth;
+      const urlW = (this.hoveredUrlEndCol - this.hoveredUrlStartCol) * this.cellWidth;
+      const y = this.hoveredUrlRow * this.cellHeight;
+      ctx.strokeStyle = this.theme.blue;
+      ctx.lineWidth = dpr;
+      ctx.beginPath();
+      ctx.moveTo(urlX, y + this.cellHeight - dpr);
+      ctx.lineTo(urlX + urlW, y + this.cellHeight - dpr);
+      ctx.stroke();
     }
-
-    // Draw scrollbar indicator when scrolled into history
-    this.paintScrollbar(snap);
-  }
-
-  private paintCursor(row: number, col: number) {
-    const ctx = this.ctx!;
-    const x = col * this.cellWidth;
-    const y = row * this.cellHeight;
-    const dpr = this.devicePixelRatio;
-
-    // Block cursor
-    ctx.fillStyle = this.theme.cursor;
-    ctx.globalAlpha = 0.7;
-    ctx.fillRect(x, y, this.cellWidth, this.cellHeight);
-    ctx.globalAlpha = 1.0;
-
-    // Draw the character under the cursor with the accent color
-    if (this.currentSnapshot) {
-      const gridRow = this.currentSnapshot.rows[row];
-      if (gridRow) {
-        const cell = gridRow.cells[col];
-        if (cell && cell.content && cell.content !== ' ') {
-          const scaledSize = Math.round(this.fontSize * dpr);
-          ctx.font = `${scaledSize}px ${this.fontFamily}`;
-          ctx.fillStyle = this.theme.cursorAccent;
-          ctx.fillText(cell.content, x, y + this.baselineOffset);
-        }
-      }
-    }
-  }
-
-  // ---- Private: Color helpers ----
-
-  private dimColor(hex: string): string {
-    // Dim by reducing luminance by ~33%
-    if (!hex.startsWith('#') || hex.length < 7) return hex;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const dim = (v: number) => Math.round(v * 0.67);
-    return `#${dim(r).toString(16).padStart(2, '0')}${dim(g).toString(16).padStart(2, '0')}${dim(b).toString(16).padStart(2, '0')}`;
   }
 
   // ---- Private: Selection ----
@@ -1002,16 +596,6 @@ export class TerminalRenderer {
       endCol: sel.startCol,
       active: sel.active,
     };
-  }
-
-  private cellInSelection(row: number, col: number, sel: Selection): boolean {
-    if (row < sel.startRow || row > sel.endRow) return false;
-    if (row === sel.startRow && row === sel.endRow) {
-      return col >= sel.startCol && col < sel.endCol;
-    }
-    if (row === sel.startRow) return col >= sel.startCol;
-    if (row === sel.endRow) return col < sel.endCol;
-    return true;
   }
 
   private pixelToGrid(clientX: number, clientY: number): { row: number; col: number } {
@@ -1077,11 +661,11 @@ export class TerminalRenderer {
 
         // Edge detection for auto-scroll
         if (raw.row < 0) {
-          // Mouse above viewport → scroll up into history
+          // Mouse above viewport -> scroll up into history
           const linesPerTick = Math.min(10, Math.ceil(Math.abs(raw.row)));
           this.startSelectionAutoScroll(linesPerTick);
         } else if (raw.row >= gridRows) {
-          // Mouse below viewport → scroll down toward live
+          // Mouse below viewport -> scroll down toward live
           const linesPerTick = -Math.min(10, raw.row - gridRows + 1);
           this.startSelectionAutoScroll(linesPerTick);
         } else {
@@ -1415,7 +999,7 @@ export class TerminalRenderer {
   private paintScrollbar(snap: RichGridData) {
     if (snap.scrollback_offset <= 0 || snap.total_scrollback <= 0) return;
 
-    const ctx = this.ctx!;
+    const ctx = this.ctx;
     const canvasHeight = this.canvas.height;
     const canvasWidth = this.canvas.width;
     const dpr = this.devicePixelRatio;
@@ -1441,53 +1025,6 @@ export class TerminalRenderer {
 
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.fillRect(trackX + 1 * dpr, thumbY, trackWidth - 2 * dpr, thumbHeight);
-  }
-
-  // ---- Private: WebGL overlay painting ----
-
-  private paintOverlay(snap: RichGridData) {
-    if (!this.overlayCanvas || !this.overlayCtx) return;
-    const ctx = this.overlayCtx;
-    const dpr = this.devicePixelRatio;
-    ctx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
-
-    // Scrollbar
-    if (snap.scrollback_offset > 0 && snap.total_scrollback > 0) {
-      const canvasHeight = this.overlayCanvas.height;
-      const canvasWidth = this.overlayCanvas.width;
-      const trackWidth = 6 * dpr;
-      const trackX = canvasWidth - trackWidth;
-      const trackPadding = 2 * dpr;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.fillRect(trackX, trackPadding, trackWidth, canvasHeight - trackPadding * 2);
-      const totalRange = snap.total_scrollback;
-      const visibleRows = snap.dimensions.rows;
-      const totalContent = totalRange + visibleRows;
-      const thumbHeight = Math.max(20 * dpr, (visibleRows / totalContent) * (canvasHeight - trackPadding * 2));
-      const scrollFraction = snap.scrollback_offset / totalRange;
-      const trackHeight = canvasHeight - trackPadding * 2 - thumbHeight;
-      const thumbY = trackPadding + trackHeight * (1 - scrollFraction);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.fillRect(trackX + 1 * dpr, thumbY, trackWidth - 2 * dpr, thumbHeight);
-    }
-
-    // URL hover underline
-    if (this.hoveredUrl && this.hoveredUrlRow >= 0) {
-      const urlX = this.hoveredUrlStartCol * this.cellWidth;
-      const urlW = (this.hoveredUrlEndCol - this.hoveredUrlStartCol) * this.cellWidth;
-      const y = this.hoveredUrlRow * this.cellHeight;
-      ctx.strokeStyle = this.theme.blue;
-      ctx.lineWidth = dpr;
-      ctx.beginPath();
-      ctx.moveTo(urlX, y + this.cellHeight - dpr);
-      ctx.lineTo(urlX + urlW, y + this.cellHeight - dpr);
-      ctx.stroke();
-    }
-  }
-
-  /** Get the overlay canvas element (WebGL mode only). */
-  getOverlayElement(): HTMLCanvasElement | null {
-    return this.overlayCanvas;
   }
 
   // ---- Private: Cursor blink ----
