@@ -710,7 +710,7 @@ impl DaemonSession {
                         let data = std::mem::take(&mut coalesce_buf);
                         coalesce_start = None;
                         coalesced_flushes += 1;
-                        flush_output(
+                        process_output(
                             &data,
                             &session_id,
                             &reader_tx,
@@ -719,13 +719,23 @@ impl DaemonSession {
                             &reader_last_output,
                             &reader_history,
                             &reader_vt,
-                            &mut last_diff_time,
-                            DIFF_INTERVAL,
                             &mut channel_send_failures,
                             &reader_paused,
                         );
                         did_work = true;
                     }
+
+                    // Drain point: pipe has no data. Send diff now so it
+                    // captures the final state after all available output.
+                    maybe_send_diff(
+                        &session_id,
+                        &reader_tx,
+                        &reader_attached,
+                        &reader_vt,
+                        &mut last_diff_time,
+                        DIFF_INTERVAL,
+                        &reader_paused,
+                    );
 
                     if !did_work {
                         thread::sleep(Duration::from_millis(1));
@@ -758,7 +768,7 @@ impl DaemonSession {
                                     let pending = std::mem::take(&mut coalesce_buf);
                                     coalesce_start = None;
                                     coalesced_flushes += 1;
-                                    flush_output(
+                                    process_output(
                                         &pending,
                                         &session_id,
                                         &reader_tx,
@@ -767,15 +777,14 @@ impl DaemonSession {
                                         &reader_last_output,
                                         &reader_history,
                                         &reader_vt,
-                                        &mut last_diff_time,
-                                        DIFF_INTERVAL,
                                         &mut channel_send_failures,
                                         &reader_paused,
                                     );
                                 }
 
-                                // Send immediately (unchanged behavior)
-                                flush_output(
+                                // Send raw bytes immediately; diff is deferred
+                                // to the drain point (when pipe has no more data)
+                                process_output(
                                     &data,
                                     &session_id,
                                     &reader_tx,
@@ -784,8 +793,6 @@ impl DaemonSession {
                                     &reader_last_output,
                                     &reader_history,
                                     &reader_vt,
-                                    &mut last_diff_time,
-                                    DIFF_INTERVAL,
                                     &mut channel_send_failures,
                                     &reader_paused,
                                 );
@@ -807,7 +814,7 @@ impl DaemonSession {
                                     let flushed = std::mem::take(&mut coalesce_buf);
                                     coalesce_start = None;
                                     coalesced_flushes += 1;
-                                    flush_output(
+                                    process_output(
                                         &flushed,
                                         &session_id,
                                         &reader_tx,
@@ -816,8 +823,6 @@ impl DaemonSession {
                                         &reader_last_output,
                                         &reader_history,
                                         &reader_vt,
-                                        &mut last_diff_time,
-                                        DIFF_INTERVAL,
                                         &mut channel_send_failures,
                                         &reader_paused,
                                     );
@@ -912,7 +917,7 @@ impl DaemonSession {
             if !coalesce_buf.is_empty() {
                 let data = std::mem::take(&mut coalesce_buf);
                 coalesced_flushes += 1;
-                flush_output(
+                process_output(
                     &data,
                     &session_id,
                     &reader_tx,
@@ -921,12 +926,21 @@ impl DaemonSession {
                     &reader_last_output,
                     &reader_history,
                     &reader_vt,
-                    &mut last_diff_time,
-                    DIFF_INTERVAL,
                     &mut channel_send_failures,
                     &reader_paused,
                 );
             }
+
+            // Final diff before exit so the frontend sees the last state
+            maybe_send_diff(
+                &session_id,
+                &reader_tx,
+                &reader_attached,
+                &reader_vt,
+                &mut last_diff_time,
+                DIFF_INTERVAL,
+                &reader_paused,
+            );
 
             // Shim disconnected or shell exited -- mark session as dead and close output channel
             reader_running.store(false, Ordering::Relaxed);
@@ -1428,11 +1442,15 @@ impl Drop for DaemonSession {
     }
 }
 
-/// Send output data through the session pipeline: history, vt parser, diff,
-/// and then to attached client or ring buffer. Extracted to avoid duplication
-/// between interactive-mode immediate sends and bulk-mode coalesce flushes.
+/// Process output data through the session pipeline: history, vt parser,
+/// and then send raw bytes to attached client or ring buffer.
+///
+/// Diff extraction is intentionally NOT done here — it is deferred to
+/// `maybe_send_diff()` which runs after the pipe is drained. This ensures
+/// the diff captures the final state after all available TUI output has been
+/// processed, avoiding intermediate-state rendering artifacts (see #350).
 #[allow(clippy::too_many_arguments)]
-fn flush_output(
+fn process_output(
     data: &[u8],
     session_id: &str,
     reader_tx: &Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
@@ -1441,8 +1459,6 @@ fn flush_output(
     reader_last_output: &Arc<AtomicU64>,
     reader_history: &Arc<Mutex<VecDeque<u8>>>,
     reader_vt: &Arc<Mutex<godly_vt::Parser>>,
-    last_diff_time: &mut Instant,
-    diff_interval: Duration,
     channel_send_failures: &mut u64,
     reader_paused: &Arc<AtomicBool>,
 ) {
@@ -1464,7 +1480,7 @@ fn flush_output(
     }
 
     // Always feed VT parser (grid state must stay current even when paused)
-    // but skip sending Output/GridDiff events to the client when paused.
+    // but skip sending Output/Bell events to the client when paused.
     if reader_paused.load(Ordering::Relaxed) {
         let mut vt = reader_vt.lock();
         vt.process(data);
@@ -1472,21 +1488,10 @@ fn flush_output(
     }
 
     // Feed PTY output into godly-vt parser for grid state.
-    let (maybe_diff, bell_fired) = {
+    let bell_fired = {
         let mut vt = reader_vt.lock();
         vt.process(data);
-        let bell = vt.take_bell_pending();
-        let now = Instant::now();
-        let diff = if reader_attached.load(Ordering::Relaxed)
-            && vt.screen().has_dirty_rows()
-            && now.duration_since(*last_diff_time) >= diff_interval
-        {
-            *last_diff_time = now;
-            Some(extract_diff(&mut vt))
-        } else {
-            None
-        };
-        (diff, bell)
+        vt.take_bell_pending()
     };
 
     let lock_start = Instant::now();
@@ -1505,9 +1510,6 @@ fn flush_output(
         // Client attached: try to send live output
         match tx.try_send(SessionOutput::RawBytes(data.to_vec())) {
             Ok(()) => {
-                if let Some(diff) = maybe_diff {
-                    let _ = tx.try_send(SessionOutput::GridDiff(diff));
-                }
                 if bell_fired {
                     let _ = tx.try_send(SessionOutput::Bell);
                 }
@@ -1527,9 +1529,6 @@ fn flush_output(
                                 session_id,
                                 bp_elapsed.as_secs_f64() * 1000.0
                             );
-                        }
-                        if let Some(diff) = maybe_diff {
-                            let _ = tx_clone.try_send(SessionOutput::GridDiff(diff));
                         }
                         if bell_fired {
                             let _ = tx_clone.try_send(SessionOutput::Bell);
@@ -1571,6 +1570,51 @@ fn flush_output(
         drop(tx_guard);
         let mut ring = reader_ring.lock();
         append_to_ring(&mut ring, data);
+    }
+}
+
+/// Extract and send a grid diff to the attached client, if conditions are met:
+/// - Client is attached
+/// - VT parser has dirty rows
+/// - Enough time has elapsed since the last diff (rate-limited to ~60fps)
+///
+/// Called at "drain points" — when the shim pipe has no more data available —
+/// so the diff captures the final state after all pending TUI output has been
+/// processed. This eliminates intermediate-state rendering artifacts (#350).
+#[allow(clippy::too_many_arguments)]
+fn maybe_send_diff(
+    _session_id: &str,
+    reader_tx: &Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
+    reader_attached: &Arc<AtomicBool>,
+    reader_vt: &Arc<Mutex<godly_vt::Parser>>,
+    last_diff_time: &mut Instant,
+    diff_interval: Duration,
+    reader_paused: &Arc<AtomicBool>,
+) {
+    if reader_paused.load(Ordering::Relaxed) {
+        return;
+    }
+    if !reader_attached.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let now = Instant::now();
+    if now.duration_since(*last_diff_time) < diff_interval {
+        return;
+    }
+
+    let mut vt = reader_vt.lock();
+    if !vt.screen().has_dirty_rows() {
+        return;
+    }
+
+    *last_diff_time = now;
+    let diff = extract_diff(&mut vt);
+    drop(vt);
+
+    let tx_guard = reader_tx.lock();
+    if let Some(tx) = tx_guard.as_ref() {
+        let _ = tx.try_send(SessionOutput::GridDiff(diff));
     }
 }
 

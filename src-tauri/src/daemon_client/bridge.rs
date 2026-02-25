@@ -84,11 +84,13 @@ impl OutputStreamRegistry {
     /// the Tauri custom protocol handler which runs on a shared thread pool --
     /// blocking there can starve other IPC commands.
     pub fn try_drain(&self, session_id: &str) -> Option<Vec<u8>> {
-        let mut buffers = self.buffers.try_lock()?;
-        Some(match buffers.get_mut(session_id) {
-            Some(buf) => std::mem::take(buf),
-            None => Vec::new(),
-        })
+        match self.buffers.try_get_mut(session_id) {
+            dashmap::try_result::TryResult::Present(mut buf) => {
+                Some(std::mem::take(buf.value_mut()))
+            }
+            dashmap::try_result::TryResult::Absent => Some(Vec::new()),
+            dashmap::try_result::TryResult::Locked => None,
+        }
     }
 
     /// Remove a session's buffer entirely (on session close).
@@ -1176,8 +1178,8 @@ mod tests {
         let (done_tx, done_rx) = std::sync::mpsc::channel();
 
         let _holder = std::thread::spawn(move || {
-            // Acquire and hold the lock
-            let _guard = reg_clone.buffers.lock();
+            // Acquire and hold the shard lock for "s1"
+            let _guard = reg_clone.buffers.get_mut("s1");
             tx.send(()).unwrap(); // signal that we hold the lock
             done_rx.recv().unwrap(); // wait for test to finish
         });
@@ -1201,7 +1203,7 @@ mod tests {
         // Hold the lock briefly from another thread
         let reg_clone = Arc::clone(&reg);
         let handle = std::thread::spawn(move || {
-            let _guard = reg_clone.buffers.lock();
+            let _guard = reg_clone.buffers.get_mut("s1");
             std::thread::sleep(Duration::from_millis(10));
         });
 
