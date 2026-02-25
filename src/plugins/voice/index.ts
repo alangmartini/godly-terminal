@@ -17,11 +17,9 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   description = 'Dictate text into the terminal using Whisper speech-to-text';
   version = '1.0.0';
 
-  private ctx!: PluginContext;
   private status: WhisperStatus | null = null;
 
-  async init(ctx: PluginContext): Promise<void> {
-    this.ctx = ctx;
+  async init(_ctx: PluginContext): Promise<void> {
     try {
       this.status = await whisperGetStatus();
     } catch {
