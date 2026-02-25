@@ -1,4 +1,5 @@
 pub mod files;
+pub mod gpu_render;
 pub mod grid;
 pub mod llm;
 pub mod log;
