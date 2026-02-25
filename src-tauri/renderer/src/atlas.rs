@@ -206,7 +206,11 @@ impl GlyphAtlas {
         entry
     }
 
-    /// Rasterize a single glyph and pack it into the atlas.
+    /// Rasterize a single glyph into a cell-sized atlas region.
+    ///
+    /// Each glyph is placed at its correct bearing offset within a region
+    /// that matches the cell dimensions. This ensures the UV mapping from
+    /// the cell quad to the atlas region is 1:1 — no stretching.
     fn rasterize_glyph(&mut self, ch: char, bold: bool, italic: bool) -> AtlasEntry {
         let line_height = self.cell_height;
         let metrics = Metrics::new(self.font_size, line_height);
@@ -232,8 +236,8 @@ impl GlyphAtlas {
         let mut glyph_pixels: Vec<u8> = Vec::new();
         let mut glyph_w: u32 = 0;
         let mut glyph_h: u32 = 0;
-        let mut offset_x: i32 = 0;
-        let mut offset_y: i32 = 0;
+        let mut blit_x: i32 = 0;
+        let mut blit_y: i32 = 0;
 
         for run in buffer.layout_runs() {
             for layout_glyph in run.glyphs.iter() {
@@ -250,8 +254,14 @@ impl GlyphAtlas {
 
                     glyph_w = w;
                     glyph_h = h;
-                    offset_x = image.placement.left;
-                    offset_y = image.placement.top;
+
+                    // Position glyph within the cell using physical coordinates
+                    // and swash placement offsets.
+                    // physical.x/y = glyph origin in pixel coords (baseline position)
+                    // placement.left = X offset from origin to bitmap left edge
+                    // placement.top = Y offset from origin to bitmap top edge (positive = above)
+                    blit_x = physical.x + image.placement.left;
+                    blit_y = physical.y - image.placement.top;
 
                     // Convert image data to single-channel alpha.
                     // cosmic-text may return different formats.
@@ -291,27 +301,41 @@ impl GlyphAtlas {
             return *self.entries.get(&blank_key).unwrap();
         }
 
+        // Allocate a cell-sized region in the atlas (not tight glyph bounds).
+        // This ensures the UV mapping from cell quad to atlas is 1:1.
+        let cell_w = self.cell_width.ceil() as u32;
+        let cell_h = self.cell_height.ceil() as u32;
+
         // Check if we need to wrap to a new row.
-        if self.cursor_x + glyph_w >= self.atlas_width {
+        if self.cursor_x + cell_w >= self.atlas_width {
             self.cursor_y += self.row_height + 1; // +1 for padding
             self.cursor_x = 0;
             self.row_height = 0;
         }
 
         // Check if we need to grow the atlas vertically.
-        while self.cursor_y + glyph_h >= self.atlas_height {
+        while self.cursor_y + cell_h >= self.atlas_height {
             self.grow_atlas();
         }
 
-        // Blit glyph pixels into the atlas (RED channel only).
-        let x0 = self.cursor_x;
-        let y0 = self.cursor_y;
+        // Blit glyph pixels into the cell-sized atlas region at the correct offset.
+        let region_x = self.cursor_x;
+        let region_y = self.cursor_y;
         for row in 0..glyph_h {
             for col in 0..glyph_w {
+                let dst_x = region_x as i32 + blit_x + col as i32;
+                let dst_y = region_y as i32 + blit_y + row as i32;
+
+                // Clamp to cell region bounds.
+                if dst_x < region_x as i32 || dst_x >= (region_x + cell_w) as i32 {
+                    continue;
+                }
+                if dst_y < region_y as i32 || dst_y >= (region_y + cell_h) as i32 {
+                    continue;
+                }
+
                 let src_idx = (row * glyph_w + col) as usize;
-                let dst_x = x0 + col;
-                let dst_y = y0 + row;
-                let dst_idx = ((dst_y * self.atlas_width + dst_x) * 4) as usize;
+                let dst_idx = ((dst_y as u32 * self.atlas_width + dst_x as u32) * 4) as usize;
                 if src_idx < glyph_pixels.len() && dst_idx + 3 < self.atlas_data.len() {
                     self.atlas_data[dst_idx] = glyph_pixels[src_idx]; // R = alpha
                     self.atlas_data[dst_idx + 1] = 0;
@@ -322,20 +346,20 @@ impl GlyphAtlas {
         }
 
         let entry = AtlasEntry {
-            u0: x0 as f32 / self.atlas_width as f32,
-            v0: y0 as f32 / self.atlas_height as f32,
-            u1: (x0 + glyph_w) as f32 / self.atlas_width as f32,
-            v1: (y0 + glyph_h) as f32 / self.atlas_height as f32,
-            width: glyph_w,
-            height: glyph_h,
-            offset_x,
-            offset_y,
+            u0: region_x as f32 / self.atlas_width as f32,
+            v0: region_y as f32 / self.atlas_height as f32,
+            u1: (region_x + cell_w) as f32 / self.atlas_width as f32,
+            v1: (region_y + cell_h) as f32 / self.atlas_height as f32,
+            width: cell_w,
+            height: cell_h,
+            offset_x: blit_x,
+            offset_y: blit_y,
         };
 
-        // Advance cursor.
-        self.cursor_x += glyph_w + 1; // +1 for padding between glyphs
-        if glyph_h > self.row_height {
-            self.row_height = glyph_h;
+        // Advance cursor by cell size (not glyph size).
+        self.cursor_x += cell_w + 1; // +1 for padding between regions
+        if cell_h > self.row_height {
+            self.row_height = cell_h;
         }
         self.dirty = true;
 
