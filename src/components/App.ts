@@ -1225,7 +1225,6 @@ export class App {
       console.log('[App] MCP set split view:', workspace_id, direction);
       const dir = direction === 'vertical' ? 'vertical' : 'horizontal';
       store.setSplitView(workspace_id, left_terminal_id, right_terminal_id, dir, ratio);
-      this.updateLayout();
     });
 
     // MCP: split view cleared by MCP handler
@@ -1233,7 +1232,6 @@ export class App {
       const workspaceId = event.payload;
       console.log('[App] MCP clear split view:', workspaceId);
       store.clearSplitView(workspaceId);
-      this.updateLayout();
     });
 
     // Terminal bell (BEL character, 0x07) — triggers notification pipeline
