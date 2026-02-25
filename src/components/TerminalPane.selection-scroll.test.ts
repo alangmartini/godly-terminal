@@ -119,12 +119,20 @@ class SelectionScrollSimulator {
   private adjustSelectionForScroll(deltaLines: number) {
     if (!this.selection.active) return;
     this.selection.startRow += deltaLines;
-    this.selection.endRow += deltaLines;
-    // Clear if the entire selection is off-screen
-    const normStart = Math.min(this.selection.startRow, this.selection.endRow);
-    const normEnd = Math.max(this.selection.startRow, this.selection.endRow);
-    if (normEnd < 0 || normStart >= this.gridRows) {
-      this.selection.active = false;
+    // Bug #340: During active drag, only adjust the anchor (startRow).
+    // endRow tracks the mouse position in viewport coordinates and should
+    // not be shifted — this lets the selection grow as the user scrolls.
+    if (!this.isSelecting) {
+      this.selection.endRow += deltaLines;
+    }
+    // Bug #340: Don't clear off-screen selection during active drag.
+    // The anchor may be off-screen but the selection is still valid.
+    if (!this.isSelecting) {
+      const normStart = Math.min(this.selection.startRow, this.selection.endRow);
+      const normEnd = Math.max(this.selection.startRow, this.selection.endRow);
+      if (normEnd < 0 || normStart >= this.gridRows) {
+        this.selection.active = false;
+      }
     }
   }
 
@@ -312,6 +320,122 @@ describe('Bug #242: selection anchor during wheel scroll', () => {
 
       expect(absStart).toBe(10); // anchor stays at original content position
       expect(absEnd).toBe(-3);   // end follows mouse in new viewport (row 2 - offset 5)
+    });
+  });
+
+  describe('Bug #340: selection should grow when scrolling during active drag', () => {
+    // Bug #340: During active drag selection, wheel-scrolling shifts both
+    // startRow AND endRow by the scroll delta. This makes the selection
+    // maintain the same size and slide with the content. Instead, only
+    // the anchor (startRow) should be adjusted; endRow should stay at the
+    // mouse's viewport position so the selection grows to include the
+    // newly revealed content.
+
+    it('endRow should NOT shift when wheel-scrolling during active drag', () => {
+      // Start selection at row 10, drag to row 15
+      sim.mouseDown(0, 10 * sim.cellHeight);
+      sim.mouseMove(sim.gridCols * sim.cellWidth, 15 * sim.cellHeight);
+      expect(sim.isSelecting).toBe(true);
+
+      const endRowBefore = sim.selection.endRow; // 15
+
+      // Scroll up 5 lines while still holding mouse (no mousemove fires)
+      sim.wheelScroll(5);
+
+      // Bug #340: endRow should stay at 15 (viewport-relative, tracks mouse)
+      // NOT shift to 20 (which would keep same content but prevent growth)
+      expect(sim.selection.endRow).toBe(endRowBefore);
+    });
+
+    it('selection content range should grow when scrolling up during downward drag', () => {
+      // Select from row 5 to row 15 (10 rows of content)
+      sim.mouseDown(0, 5 * sim.cellHeight);
+      sim.mouseMove(sim.gridCols * sim.cellWidth, 15 * sim.cellHeight);
+      expect(sim.isSelecting).toBe(true);
+
+      // Content range before scroll: rows [5,15] at offset 0 → absolute [5,15]
+      const contentRangeBefore = sim.contentPosition(sim.selection.endRow) - sim.contentPosition(sim.selection.startRow);
+      expect(contentRangeBefore).toBe(10);
+
+      // Scroll up 5 lines (offset becomes 5)
+      sim.wheelScroll(5);
+
+      // startRow should track content: 5+5=10, contentPos = 10-5=5 (same absolute)
+      // endRow should stay at 15 (mouse position), contentPos = 15-5=10
+      // Content range after: 10-5 = 5... wait, the selection CONTENT shrinks
+      // because the mouse is now pointing at different (older) content.
+      // But the BUFFER range grows: anchor is at absolute 5, end is at absolute 10
+      // which covers both the original anchor AND the newly visible content.
+      //
+      // With the bug (both adjusted): startRow=10, endRow=20, contentRange = 10
+      // Selection stays same size, just slides.
+      //
+      // Fixed: startRow=10, endRow=15, and the selection spans from
+      // absolute 5 to absolute 10 — the end has moved CLOSER to the anchor
+      // in absolute terms (the viewport scrolled up, so viewport row 15 now
+      // shows older content). The user's mouse at row 15 now selects up to
+      // what was originally at row 10.
+      //
+      // The key difference: the end of selection changes with scroll,
+      // allowing the user to select content they couldn't see before.
+      expect(sim.selection.startRow).toBe(10); // anchor tracked content
+      expect(sim.selection.endRow).toBe(15);   // end stayed at mouse position
+    });
+
+    it('selection should grow when scrolling up during upward drag', () => {
+      // Start at row 15, drag UP to row 5 (selecting upward)
+      sim.mouseDown(0, 15 * sim.cellHeight);
+      sim.mouseMove(sim.gridCols * sim.cellWidth, 5 * sim.cellHeight);
+      expect(sim.isSelecting).toBe(true);
+      expect(sim.selection.startRow).toBe(15); // anchor (where clicked)
+      expect(sim.selection.endRow).toBe(5);     // end (where mouse is)
+
+      // Scroll up 5 lines
+      sim.wheelScroll(5);
+
+      // Anchor (startRow) should track content: 15+5=20
+      // End (endRow) should stay at viewport position: 5
+      // Normalized: rows 5 to 20 → 16 viewport rows (was 11)
+      // The selection GREW by 5 rows to include the newly revealed scrollback
+      expect(sim.selection.startRow).toBe(20); // anchor tracked content
+      expect(sim.selection.endRow).toBe(5);     // end stayed at mouse position
+
+      const normalizedStart = Math.min(sim.selection.startRow, sim.selection.endRow);
+      const normalizedEnd = Math.max(sim.selection.startRow, sim.selection.endRow);
+      expect(normalizedEnd - normalizedStart).toBe(15); // grew from 10 to 15
+    });
+
+    it('after mouseup, scrolling should adjust both endpoints again', () => {
+      // Active selection
+      sim.mouseDown(0, 5 * sim.cellHeight);
+      sim.mouseMove(sim.gridCols * sim.cellWidth, 15 * sim.cellHeight);
+      sim.mouseUp(); // complete the selection
+
+      expect(sim.isSelecting).toBe(false);
+
+      const startBefore = sim.selection.startRow; // 5
+      const endBefore = sim.selection.endRow;     // 15
+
+      // Scroll up 3 lines — completed selection, both should adjust
+      sim.wheelScroll(3);
+
+      expect(sim.selection.startRow).toBe(startBefore + 3); // 8
+      expect(sim.selection.endRow).toBe(endBefore + 3);     // 18
+    });
+
+    it('selection should not be cleared during active drag even if anchor goes off-screen', () => {
+      // Start at row 3, drag to row 10
+      sim.mouseDown(0, 3 * sim.cellHeight);
+      sim.mouseMove(sim.gridCols * sim.cellWidth, 10 * sim.cellHeight);
+      expect(sim.isSelecting).toBe(true);
+
+      // Scroll up 30 lines — anchor would be at viewport row 33 (way off-screen)
+      sim.wheelScroll(30);
+
+      // Selection should still be active (anchor is off-screen but selection is valid)
+      expect(sim.selection.active).toBe(true);
+      expect(sim.selection.startRow).toBe(33); // off-screen anchor
+      expect(sim.selection.endRow).toBe(10);    // mouse position on-screen
     });
   });
 
