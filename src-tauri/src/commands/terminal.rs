@@ -555,6 +555,21 @@ pub(crate) fn quick_claude_background(
     // timestamps from the shell echo and return immediately.
     std::thread::sleep(std::time::Duration::from_millis(5_000));
 
+    // Step 3b: Check for workspace trust prompt and auto-accept if present.
+    // Claude Code sometimes shows "Do you trust the files in this folder?" on
+    // first launch in a new directory. This blocks the automation flow — Claude
+    // won't accept the prompt until the user responds. Detect it and send "y".
+    if has_trust_prompt(&daemon, &terminal_id) {
+        eprintln!("[quick_claude] Detected trust prompt, auto-accepting");
+        let accept_req = Request::Write {
+            session_id: terminal_id.clone(),
+            data: b"y".to_vec(),
+        };
+        let _ = daemon.send_request(&accept_req);
+        // Give Claude time to process the acceptance and continue startup
+        std::thread::sleep(std::time::Duration::from_millis(3_000));
+    }
+
     // Now poll for idle. Claude Code's ink TUI blinks the cursor every ~500ms,
     // producing output that resets the idle timer. Use a 400ms threshold to detect
     // the gap between blinks. Timeout after 25s (30s total with the 5s above).
@@ -647,6 +662,20 @@ fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: 
         }
         std::thread::sleep(std::time::Duration::from_millis(poll_interval));
     }
+}
+
+/// Check if Claude Code is showing a workspace trust prompt by searching the
+/// terminal output buffer for the characteristic text.
+fn has_trust_prompt(daemon: &DaemonClient, session_id: &str) -> bool {
+    let req = Request::SearchBuffer {
+        session_id: session_id.to_string(),
+        text: "Do you trust the files".to_string(),
+        strip_ansi: true,
+    };
+    matches!(
+        daemon.send_request(&req),
+        Ok(Response::SearchResult { found: true, .. })
+    )
 }
 
 /// Pause output streaming for a session (session stays alive, VT parser
