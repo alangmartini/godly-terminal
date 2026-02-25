@@ -18,6 +18,9 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   version = '1.0.0';
 
   private status: WhisperStatus | null = null;
+  private audioContext: AudioContext | null = null;
+  private audioStream: MediaStream | null = null;
+  private volumeAnimFrame: number = 0;
 
   async init(_ctx: PluginContext): Promise<void> {
     try {
@@ -47,7 +50,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   }
 
   destroy(): void {
-    // Nothing to clean up
+    this.stopVolumeMonitor();
   }
 
   renderSettings(): HTMLElement {
@@ -61,6 +64,54 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     statusValue.textContent = 'Checking...';
     statusRow.appendChild(statusValue);
     container.appendChild(statusRow);
+
+    // ── Section: Microphone ──
+    const micSection = document.createElement('div');
+    micSection.className = 'settings-section';
+    const micTitle = document.createElement('div');
+    micTitle.className = 'settings-section-title';
+    micTitle.textContent = 'Microphone';
+    micSection.appendChild(micTitle);
+
+    // Device dropdown
+    const micRow = this.createRow('Input Device');
+    const micSelect = document.createElement('select');
+    micSelect.className = 'dialog-input';
+    micSelect.style.cssText = 'width: auto; font-size: 12px; padding: 4px 8px; min-width: 200px;';
+
+    // Default option
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = 'Default Microphone';
+    micSelect.appendChild(defaultOpt);
+
+    micRow.appendChild(micSelect);
+    micSection.appendChild(micRow);
+
+    // Volume meter row
+    const volumeRow = this.createRow('Level');
+    const volumeContainer = document.createElement('div');
+    volumeContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
+
+    const volumeBar = document.createElement('div');
+    volumeBar.style.cssText = 'flex: 1; height: 8px; background: var(--bg-secondary, #2a2a2a); border-radius: 4px; overflow: hidden;';
+    const volumeFill = document.createElement('div');
+    volumeFill.style.cssText = 'height: 100%; width: 0%; background: var(--accent, #4a9eff); border-radius: 4px; transition: width 0.05s;';
+    volumeBar.appendChild(volumeFill);
+
+    const volumeLabel = document.createElement('span');
+    volumeLabel.style.cssText = 'font-size: 10px; color: var(--text-secondary); min-width: 30px;';
+    volumeLabel.textContent = '\u2014';
+
+    volumeContainer.appendChild(volumeBar);
+    volumeContainer.appendChild(volumeLabel);
+    volumeRow.appendChild(volumeContainer);
+    micSection.appendChild(volumeRow);
+
+    container.appendChild(micSection);
+
+    // Populate devices and start volume monitoring
+    this.setupMicrophoneUI(micSelect, volumeFill, volumeLabel);
 
     // ── Section A: Model ──
     const modelSection = document.createElement('div');
@@ -108,6 +159,13 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     loadBtn.className = 'dialog-btn dialog-btn-primary';
     loadBtn.textContent = 'Load Model';
     loadBtn.onclick = async () => {
+      // Check if sidecar is running first
+      if (!this.status?.sidecarRunning) {
+        loadBtn.textContent = 'Start sidecar first!';
+        loadBtn.style.color = 'var(--error, #f44)';
+        setTimeout(() => { loadBtn.textContent = 'Load Model'; loadBtn.style.color = ''; }, 2000);
+        return;
+      }
       loadBtn.disabled = true;
       loadBtn.textContent = 'Loading...';
       try {
@@ -206,6 +264,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
           language: langSelect.value,
           useGpu: gpuCheckbox.checked,
           gpuDevice: parseInt(gpuDeviceInput.value) || 0,
+          microphoneDeviceId: micSelect.value || null,
         });
       } catch {
         // Config save failed silently
@@ -287,18 +346,54 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   }
 
   private updateStatusDisplay(statusValue: HTMLElement): void {
-    if (!this.status) {
-      statusValue.textContent = 'Unable to connect';
+    // Clear previous content
+    statusValue.innerHTML = '';
+
+    if (!this.status || !this.status.sidecarRunning) {
+      const wrapper = document.createElement('span');
+      wrapper.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+      const text = document.createElement('span');
+      text.textContent = 'Sidecar not running';
+      text.style.color = 'var(--text-secondary)';
+      wrapper.appendChild(text);
+
+      const startBtn = document.createElement('button');
+      startBtn.className = 'dialog-btn dialog-btn-primary';
+      startBtn.style.cssText = 'font-size: 11px; padding: 2px 10px;';
+      startBtn.textContent = 'Start';
+      startBtn.onclick = async () => {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Starting...';
+        try {
+          const { whisperStartSidecar } = await import('./whisper-service');
+          const result = await whisperStartSidecar();
+          text.textContent = result;
+          text.style.color = 'var(--accent)';
+          // Refresh status after a brief delay for sidecar to initialize
+          setTimeout(async () => {
+            try {
+              const { whisperGetStatus: getStatus } = await import('./whisper-service');
+              this.status = await getStatus();
+              this.updateStatusDisplay(statusValue);
+            } catch { /* ignore */ }
+          }, 2000);
+        } catch (e) {
+          text.textContent = `Failed: ${e}`;
+          text.style.color = 'var(--error, #f44)';
+          startBtn.disabled = false;
+          startBtn.textContent = 'Retry';
+        }
+      };
+      wrapper.appendChild(startBtn);
+      statusValue.appendChild(wrapper);
       return;
     }
-    if (!this.status.sidecarRunning) {
-      statusValue.textContent = 'Sidecar not running';
-      return;
-    }
+
     if (this.status.modelLoaded) {
-      statusValue.textContent = `Connected — ${this.status.modelName ?? 'model loaded'}`;
+      statusValue.textContent = `Connected \u2014 ${this.status.modelName ?? 'model loaded'}`;
     } else {
-      statusValue.textContent = 'Connected — no model loaded';
+      statusValue.textContent = 'Connected \u2014 no model loaded';
     }
   }
 
@@ -333,6 +428,119 @@ export class VoiceToTextPlugin implements GodlyPlugin {
       }
     } catch {
       statusValue.textContent = 'Unable to connect';
+    }
+  }
+
+  private async setupMicrophoneUI(
+    micSelect: HTMLSelectElement,
+    volumeFill: HTMLElement,
+    volumeLabel: HTMLElement,
+  ): Promise<void> {
+    // Enumerate audio input devices
+    try {
+      // Request mic permission first (needed to get device labels)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+
+      for (const device of audioInputs) {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Microphone ${micSelect.options.length}`;
+        micSelect.appendChild(option);
+      }
+
+      // Start volume monitoring with the permission stream we already have
+      this.startVolumeMonitor(stream, volumeFill, volumeLabel);
+
+      // When device changes, restart monitoring
+      micSelect.addEventListener('change', async () => {
+        this.stopVolumeMonitor();
+        try {
+          const constraints: MediaStreamConstraints = {
+            audio: micSelect.value ? { deviceId: { exact: micSelect.value } } : true,
+          };
+          const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+          this.startVolumeMonitor(newStream, volumeFill, volumeLabel);
+
+          // Save to config
+          const { whisperSetConfig: setConfig, whisperGetConfig: getConfig } = await import('./whisper-service');
+          const config = await getConfig();
+          config.microphoneDeviceId = micSelect.value || null;
+          await setConfig(config);
+        } catch (e) {
+          volumeLabel.textContent = 'Error';
+          console.warn('[VoiceToText] Failed to switch mic:', e);
+        }
+      });
+    } catch (e) {
+      // Mic permission denied or not available
+      const option = document.createElement('option');
+      option.textContent = 'Microphone access denied';
+      option.disabled = true;
+      micSelect.appendChild(option);
+      volumeLabel.textContent = 'N/A';
+      console.warn('[VoiceToText] Mic enumeration failed:', e);
+    }
+  }
+
+  private startVolumeMonitor(
+    stream: MediaStream,
+    volumeFill: HTMLElement,
+    volumeLabel: HTMLElement,
+  ): void {
+    this.stopVolumeMonitor();
+
+    this.audioStream = stream;
+    this.audioContext = new AudioContext();
+    const source = this.audioContext.createMediaStreamSource(stream);
+    const analyser = this.audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.5;
+    source.connect(analyser);
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    const update = () => {
+      analyser.getByteFrequencyData(dataArray);
+      // Calculate RMS-like level from frequency data
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const avg = sum / dataArray.length;
+      const level = Math.min(100, Math.round((avg / 128) * 100));
+
+      volumeFill.style.width = `${level}%`;
+      // Color: green for low, yellow for medium, red for high
+      if (level > 70) {
+        volumeFill.style.background = '#f44336';
+      } else if (level > 40) {
+        volumeFill.style.background = '#ff9800';
+      } else {
+        volumeFill.style.background = 'var(--accent, #4a9eff)';
+      }
+      volumeLabel.textContent = `${level}%`;
+
+      this.volumeAnimFrame = requestAnimationFrame(update);
+    };
+
+    this.volumeAnimFrame = requestAnimationFrame(update);
+  }
+
+  private stopVolumeMonitor(): void {
+    if (this.volumeAnimFrame) {
+      cancelAnimationFrame(this.volumeAnimFrame);
+      this.volumeAnimFrame = 0;
+    }
+    if (this.audioStream) {
+      this.audioStream.getTracks().forEach(t => t.stop());
+      this.audioStream = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close().catch(() => {});
+      this.audioContext = null;
     }
   }
 }
