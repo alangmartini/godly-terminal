@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-02-25
+
+### Added
+- **GPU terminal renderer** — new `godly-renderer` crate with wgpu-based GPU rendering pipeline, Tauri integration, and frontend renderer switching (#330, #343, #344, #345)
+- **Branch name quality gate** — rejects garbage LLM-generated branch names with pattern validation (#342)
+
+### Fixed
+- **Selection grows when scrolling during active drag** — selection no longer expands incorrectly while scrolling (#340, #341)
+- **WebGL context pool leak** — pool slots released on demote, promotes routed through pool to prevent ~1.6GB RAM leak (#339)
+- **Glyph atlas overflow** — capped at 2048px and resets when full instead of overflowing (#337)
+- **Phone UI scroll and touch UX** — improved scroll behavior and touch interactions on mobile (#338)
+- **CI nextest config** — removed stale `zombie_tabs` binary reference that broke all CI jobs
+
 ## [0.8.0] - 2026-02-24
 
 ### Added
