@@ -8,12 +8,27 @@ import {
   onDragMove, onDragDrop, notifyMove, notifyDrop,
 } from '../state/drag-state';
 
+/**
+ * Shorten a path-like string to its last N meaningful segments.
+ * e.g. "C:\Users\alanm\dev\godly-claude\godly-terminal" → "godly-claude/godly-terminal"
+ */
+export function shortenPath(value: string, segments = 2): string {
+  // Detect absolute paths: Windows (C:\...) or Unix (/...)
+  const isPath = /^[A-Za-z]:[\\\/]/.test(value) || value.startsWith('/');
+  if (!isPath) return value;
+
+  const parts = value.replace(/[\\\/]+$/, '').split(/[\\\/]/).filter(Boolean);
+  if (parts.length <= segments) return value;
+  return parts.slice(-segments).join('/');
+}
+
 export function getDisplayName(terminal: Terminal): string {
   if (terminal.userRenamed) return terminal.name;
   // Skip the generic default 'Terminal' so processName can show through.
   // Worktree branch names and other intentional names still take priority.
   const name = terminal.name === 'Terminal' ? '' : terminal.name;
-  return terminal.oscTitle || name || terminal.processName || 'Terminal';
+  const raw = terminal.oscTitle || name || terminal.processName || 'Terminal';
+  return shortenPath(raw);
 }
 
 const DRAG_THRESHOLD = 5; // px of movement before drag starts
