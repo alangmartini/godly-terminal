@@ -7,7 +7,7 @@ use candle_transformers::generation::LogitsProcessor;
 use candle_transformers::models::quantized_llama::ModelWeights;
 use tokenizers::Tokenizer;
 
-use crate::branch_name::sanitize_branch_name;
+use crate::branch_name::{is_quality_branch_name, sanitize_branch_name};
 
 /// System prompt baked into the tiny model's training.
 const SYSTEM_PROMPT: &str = "\
@@ -143,9 +143,12 @@ pub fn try_generate_branch_name(
     description: &str,
 ) -> Option<String> {
     match engine.generate(description) {
-        Ok(name) if !name.is_empty() && name.len() >= 3 => Some(name),
-        Ok(_) => {
-            eprintln!("[branch-name-engine] Generated name too short, falling back");
+        Ok(name) if is_quality_branch_name(&name) => Some(name),
+        Ok(name) => {
+            eprintln!(
+                "[branch-name-engine] Generated name '{}' failed quality check, falling back",
+                name
+            );
             None
         }
         Err(e) => {
