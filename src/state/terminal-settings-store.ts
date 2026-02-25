@@ -2,12 +2,17 @@ import type { ShellType } from './store';
 
 const STORAGE_KEY = 'godly-terminal-settings';
 
+/** Which rendering backend to use for terminal grid display. */
+export type RendererMode = 'canvas2d' | 'webgl' | 'gpu';
+
 export interface TerminalSettings {
   defaultShell: ShellType;
   /** When true, new output snaps the view to bottom even when scrolled up. */
   autoScrollOnOutput: boolean;
   /** Terminal font size in CSS pixels (clamped to 8–32). */
   fontSize: number;
+  /** Rendering backend: 'canvas2d', 'webgl' (default), or 'gpu' (Rust-side). */
+  rendererMode: RendererMode;
 }
 
 type Subscriber = () => void;
@@ -21,6 +26,7 @@ class TerminalSettingsStore {
     defaultShell: { type: 'windows' },
     autoScrollOnOutput: false,
     fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
+    rendererMode: 'webgl',
   };
 
   private subscribers: Subscriber[] = [];
@@ -64,6 +70,17 @@ class TerminalSettingsStore {
     this.notify();
   }
 
+  getRendererMode(): RendererMode {
+    return this.settings.rendererMode;
+  }
+
+  setRendererMode(mode: RendererMode): void {
+    if (mode === this.settings.rendererMode) return;
+    this.settings.rendererMode = mode;
+    this.saveToStorage();
+    this.notify();
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -93,6 +110,9 @@ class TerminalSettingsStore {
       }
       if (typeof data.fontSize === 'number' && data.fontSize >= TerminalSettingsStore.MIN_FONT_SIZE && data.fontSize <= TerminalSettingsStore.MAX_FONT_SIZE) {
         this.settings.fontSize = data.fontSize;
+      }
+      if (data.rendererMode === 'canvas2d' || data.rendererMode === 'webgl' || data.rendererMode === 'gpu') {
+        this.settings.rendererMode = data.rendererMode;
       }
     } catch {
       // Corrupt data — use defaults

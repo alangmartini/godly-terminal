@@ -14,6 +14,8 @@ import { settingsTabStore } from '../state/settings-tab-store';
 import { workspaceService } from '../services/workspace-service';
 import { playNotificationSound, type SoundPreset } from '../services/notification-sound';
 import { getRendererBackend } from './TerminalRenderer';
+import { gpuRendererService } from '../services/gpu-renderer-service';
+import type { RendererMode } from '../state/terminal-settings-store';
 import { remoteSettingsStore, generatePassword, generateApiKey } from '../state/remote-settings-store';
 import { themeStore } from '../state/theme-store';
 import type { ThemeDefinition } from '../themes/types';
@@ -640,6 +642,65 @@ export function showSettingsDialog(): Promise<void> {
     aliasSection.appendChild(aliasRow);
 
     terminalContent.appendChild(aliasSection);
+
+    // ── Renderer section ───────────────────────────────────────
+    const rendererSection = document.createElement('div');
+    rendererSection.className = 'settings-section';
+
+    const rendererTitle = document.createElement('div');
+    rendererTitle.className = 'settings-section-title';
+    rendererTitle.textContent = 'Renderer';
+    rendererSection.appendChild(rendererTitle);
+
+    const rendererDesc = document.createElement('div');
+    rendererDesc.className = 'settings-description';
+    rendererDesc.textContent = 'Choose the rendering backend for terminal display. Changes apply to newly opened terminals.';
+    rendererSection.appendChild(rendererDesc);
+
+    const rendererRow = document.createElement('div');
+    rendererRow.className = 'shortcut-row';
+    const rendererLabel = document.createElement('span');
+    rendererLabel.className = 'shortcut-label';
+    rendererLabel.textContent = 'Rendering backend';
+    rendererRow.appendChild(rendererLabel);
+
+    const rendererSelect = document.createElement('select');
+    rendererSelect.className = 'notification-preset';
+
+    const rendererOptions: { value: RendererMode; label: string }[] = [
+      { value: 'canvas2d', label: 'Canvas2D' },
+      { value: 'webgl', label: 'WebGL2' },
+    ];
+
+    const currentMode = terminalSettingsStore.getRendererMode();
+    for (const opt of rendererOptions) {
+      const el = document.createElement('option');
+      el.value = opt.value;
+      el.textContent = opt.label;
+      if (opt.value === currentMode) el.selected = true;
+      rendererSelect.appendChild(el);
+    }
+
+    // Only add the GPU option if the backend supports it
+    gpuRendererService.isAvailable().then(available => {
+      if (available) {
+        const gpuOpt = document.createElement('option');
+        gpuOpt.value = 'gpu';
+        gpuOpt.textContent = 'GPU (Experimental)';
+        if (currentMode === 'gpu') gpuOpt.selected = true;
+        rendererSelect.appendChild(gpuOpt);
+      }
+    }).catch(() => {
+      // GPU renderer not available — silently omit the option
+    });
+
+    rendererSelect.onchange = () => {
+      terminalSettingsStore.setRendererMode(rendererSelect.value as RendererMode);
+    };
+    rendererRow.appendChild(rendererSelect);
+    rendererSection.appendChild(rendererRow);
+
+    terminalContent.appendChild(rendererSection);
 
     dialog.appendChild(terminalContent);
 
