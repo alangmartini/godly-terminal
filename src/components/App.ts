@@ -671,9 +671,30 @@ export class App {
             order: 0,
           });
         }
+
+        // Clean up orphaned daemon sessions not in the saved layout.
+        // These accumulate when the app crashes before autosave.
+        const layoutTerminalIds = new Set(layout.terminals.map((t) => t.id));
+        const orphanSessions = liveSessions.filter((s) => !layoutTerminalIds.has(s.id));
+        if (orphanSessions.length > 0) {
+          console.log(
+            '[App] Closing',
+            orphanSessions.length,
+            'orphaned daemon sessions:',
+            orphanSessions.map((s) => s.id),
+          );
+          for (const orphan of orphanSessions) {
+            try {
+              await terminalService.closeTerminal(orphan.id);
+            } catch {
+              // Session may already be gone — ignore
+            }
+          }
+        }
+
         // Restore split views
         if (layout.split_views) {
-          const terminalIds = new Set(store.getState().terminals.map(t => t.id));
+          const terminalIds = new Set(store.getState().terminals.map((t) => t.id));
           for (const [wsId, sv] of Object.entries(layout.split_views)) {
             if (terminalIds.has(sv.left_terminal_id) && terminalIds.has(sv.right_terminal_id)) {
               const dir = sv.direction === 'vertical' ? 'vertical' : 'horizontal';
@@ -692,11 +713,17 @@ export class App {
         console.log('[App] Restore complete!');
       } else {
         console.log('[App] No workspaces in layout, creating default...');
+        // No layout — close all stale daemon sessions from previous runs
+        await this.closeAllDaemonSessions();
         await this.createDefaultWorkspace();
       }
     } catch (error) {
       console.error('[App] Error loading layout:', error);
       (window as any).__app_init_error = String(error);
+
+      // Layout failed — close all daemon sessions since none are in use
+      await this.closeAllDaemonSessions();
+
       try {
         await this.createDefaultWorkspace();
       } catch (e2) {
@@ -705,6 +732,25 @@ export class App {
       }
     }
     perfTracer.measure('app_startup', 'app_init_start');
+  }
+
+  /** Close all daemon sessions. Used when no layout is loaded. */
+  private async closeAllDaemonSessions() {
+    try {
+      const sessions = await terminalService.reconnectSessions();
+      if (sessions.length > 0) {
+        console.log('[App] Closing', sessions.length, 'stale daemon sessions');
+        for (const s of sessions) {
+          try {
+            await terminalService.closeTerminal(s.id);
+          } catch {
+            // Ignore — session may already be gone
+          }
+        }
+      }
+    } catch {
+      // Daemon may not be reachable — nothing to clean up
+    }
   }
 
   private async createDefaultWorkspace() {

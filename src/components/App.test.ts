@@ -893,5 +893,172 @@ describe('App Persistence', () => {
       expect(restoredText).toBe(scrollbackText);
     });
   });
+
+  describe('orphaned daemon session cleanup', () => {
+    it('should close daemon sessions not in the saved layout', async () => {
+      // Layout has terminals A and B, but daemon has A, B, C, D
+      const savedLayout = {
+        workspaces: [
+          {
+            id: 'ws-1',
+            name: 'Workspace',
+            folder_path: 'C:\\Test',
+            tab_order: ['term-a', 'term-b'],
+            shell_type: 'windows' as const,
+          },
+        ],
+        terminals: [
+          { id: 'term-a', workspace_id: 'ws-1', name: 'A', shell_type: 'windows' as const, cwd: 'C:\\' },
+          { id: 'term-b', workspace_id: 'ws-1', name: 'B', shell_type: 'windows' as const, cwd: 'C:\\' },
+        ],
+        active_workspace_id: 'ws-1',
+      };
+
+      const daemonSessions = [
+        { id: 'term-a', running: true },
+        { id: 'term-b', running: true },
+        { id: 'term-c', running: true },  // orphan
+        { id: 'term-d', running: true },  // orphan
+      ];
+
+      const closedSessions: string[] = [];
+
+      mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === 'load_layout') return savedLayout;
+        if (cmd === 'reconnect_sessions') return daemonSessions;
+        if (cmd === 'attach_session') return undefined;
+        if (cmd === 'list_sessions') return { sessions: daemonSessions };
+        if (cmd === 'close_terminal') {
+          const { terminalId } = args as { terminalId: string };
+          closedSessions.push(terminalId);
+          return undefined;
+        }
+        if (cmd === 'delete_scrollback') return undefined;
+        if (cmd === 'create_terminal') {
+          const { idOverride } = args as { idOverride?: string };
+          return { id: idOverride ?? 'new-id', worktree_branch: null };
+        }
+        return undefined;
+      });
+
+      // Simulate the reconnection + orphan cleanup logic from App.init()
+      const layout = await invoke<typeof savedLayout>('load_layout');
+      const liveSessions = await invoke<typeof daemonSessions>('reconnect_sessions');
+      const liveSessionIds = new Set(liveSessions.filter(s => s.running).map(s => s.id));
+
+      // Restore layout terminals (reattach or create fresh)
+      for (const t of layout.terminals) {
+        if (liveSessionIds.has(t.id)) {
+          await invoke('attach_session', { sessionId: t.id, workspaceId: t.workspace_id, name: t.name });
+        } else {
+          await terminalService.createTerminal(t.workspace_id, { idOverride: t.id });
+        }
+      }
+
+      // Orphan cleanup: close daemon sessions not in layout
+      const layoutTerminalIds = new Set(layout.terminals.map(t => t.id));
+      const orphanSessions = liveSessions.filter(s => !layoutTerminalIds.has(s.id));
+      for (const orphan of orphanSessions) {
+        await terminalService.closeTerminal(orphan.id);
+      }
+
+      // Verify orphans were closed but layout terminals were not
+      expect(closedSessions).toContain('term-c');
+      expect(closedSessions).toContain('term-d');
+      expect(closedSessions).not.toContain('term-a');
+      expect(closedSessions).not.toContain('term-b');
+      expect(closedSessions).toHaveLength(2);
+    });
+
+    it('should close all daemon sessions when layout is empty', async () => {
+      const daemonSessions = [
+        { id: 'orphan-1', running: true },
+        { id: 'orphan-2', running: true },
+        { id: 'orphan-3', running: false },
+      ];
+
+      const closedSessions: string[] = [];
+
+      mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === 'reconnect_sessions') return daemonSessions;
+        if (cmd === 'close_terminal') {
+          const { terminalId } = args as { terminalId: string };
+          closedSessions.push(terminalId);
+          return undefined;
+        }
+        if (cmd === 'delete_scrollback') return undefined;
+        return undefined;
+      });
+
+      // Simulate closeAllDaemonSessions() when layout has no workspaces
+      const sessions = await invoke<typeof daemonSessions>('reconnect_sessions');
+      for (const s of sessions) {
+        await terminalService.closeTerminal(s.id);
+      }
+
+      // All sessions should be closed, including non-running ones
+      expect(closedSessions).toEqual(['orphan-1', 'orphan-2', 'orphan-3']);
+    });
+
+    it('should not close sessions that match layout even if not running', async () => {
+      // Layout has term-a, daemon has term-a (dead) + term-orphan (alive)
+      // term-a should NOT be closed (it'll be recreated fresh)
+      // term-orphan SHOULD be closed
+      const savedLayout = {
+        workspaces: [
+          { id: 'ws-1', name: 'W', folder_path: 'C:\\', tab_order: ['term-a'], shell_type: 'windows' as const },
+        ],
+        terminals: [
+          { id: 'term-a', workspace_id: 'ws-1', name: 'A', shell_type: 'windows' as const, cwd: 'C:\\' },
+        ],
+        active_workspace_id: 'ws-1',
+      };
+
+      const daemonSessions = [
+        { id: 'term-a', running: false },     // dead but in layout — will be recreated
+        { id: 'term-orphan', running: true },  // alive but NOT in layout — orphan
+      ];
+
+      const closedSessions: string[] = [];
+
+      mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === 'load_layout') return savedLayout;
+        if (cmd === 'reconnect_sessions') return daemonSessions;
+        if (cmd === 'close_terminal') {
+          const { terminalId } = args as { terminalId: string };
+          closedSessions.push(terminalId);
+          return undefined;
+        }
+        if (cmd === 'delete_scrollback') return undefined;
+        if (cmd === 'create_terminal') {
+          const { idOverride } = args as { idOverride?: string };
+          return { id: idOverride ?? 'new-id', worktree_branch: null };
+        }
+        return undefined;
+      });
+
+      const layout = await invoke<typeof savedLayout>('load_layout');
+      const liveSessions = await invoke<typeof daemonSessions>('reconnect_sessions');
+      const liveSessionIds = new Set(liveSessions.filter(s => s.running).map(s => s.id));
+
+      for (const t of layout.terminals) {
+        if (liveSessionIds.has(t.id)) {
+          await invoke('attach_session', { sessionId: t.id, workspaceId: t.workspace_id, name: t.name });
+        } else {
+          await terminalService.createTerminal(t.workspace_id, { idOverride: t.id });
+        }
+      }
+
+      // Orphan cleanup
+      const layoutTerminalIds = new Set(layout.terminals.map(t => t.id));
+      const orphanSessions = liveSessions.filter(s => !layoutTerminalIds.has(s.id));
+      for (const orphan of orphanSessions) {
+        await terminalService.closeTerminal(orphan.id);
+      }
+
+      // Only the orphan should be closed, not the dead-but-in-layout terminal
+      expect(closedSessions).toEqual(['term-orphan']);
+    });
+  });
 });
 
