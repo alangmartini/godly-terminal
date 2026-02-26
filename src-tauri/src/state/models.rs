@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use godly_protocol::LayoutNode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -60,6 +61,7 @@ pub struct Workspace {
     pub claude_code_mode: bool,
 }
 
+#[deprecated(note = "Use LayoutNode tree instead for recursive split pane support")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SplitView {
     pub left_terminal_id: String,
@@ -68,6 +70,7 @@ pub struct SplitView {
     pub ratio: f64,
 }
 
+#[allow(deprecated)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layout {
     pub workspaces: Vec<Workspace>,
@@ -75,6 +78,9 @@ pub struct Layout {
     pub active_workspace_id: Option<String>,
     #[serde(default)]
     pub split_views: HashMap<String, SplitView>,
+    /// Recursive layout trees per workspace (replaces flat split_views).
+    #[serde(default)]
+    pub layout_trees: HashMap<String, LayoutNode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +110,7 @@ pub struct SessionMetadata {
     pub worktree_branch: Option<String>,
 }
 
+#[allow(deprecated)]
 impl Default for Layout {
     fn default() -> Self {
         Self {
@@ -111,11 +118,13 @@ impl Default for Layout {
             terminals: Vec::new(),
             active_workspace_id: None,
             split_views: HashMap::new(),
+            layout_trees: HashMap::new(),
         }
     }
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -277,6 +286,7 @@ mod tests {
             terminals: vec![],
             active_workspace_id: Some("ws-1".to_string()),
             split_views: HashMap::new(),
+            layout_trees: HashMap::new(),
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -329,6 +339,7 @@ mod tests {
             ],
             active_workspace_id: Some("ws-abc123".to_string()),
             split_views: HashMap::new(),
+            layout_trees: HashMap::new(),
         };
 
         // Serialize to JSON (simulates save)
@@ -382,6 +393,7 @@ mod tests {
             }],
             active_workspace_id: Some("ws-1".to_string()),
             split_views: HashMap::new(),
+            layout_trees: HashMap::new(),
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -510,6 +522,7 @@ mod tests {
             terminals: vec![],
             active_workspace_id: Some("ws-1".to_string()),
             split_views,
+            layout_trees: HashMap::new(),
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -615,6 +628,7 @@ mod tests {
             ],
             active_workspace_id: None,
             split_views: HashMap::new(),
+            layout_trees: HashMap::new(),
         };
 
         let json = serde_json::to_string(&layout).unwrap();

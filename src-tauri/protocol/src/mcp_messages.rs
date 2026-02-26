@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::layout_tree::{LayoutNode, SplitDirection};
 use crate::types::ShellType;
 
 fn default_erase_count() -> usize {
@@ -127,7 +128,7 @@ pub enum McpRequest {
         timeout_ms: u64,
     },
 
-    // Split view control
+    // Split view control (legacy — prefer layout tree commands below)
     CreateSplit {
         workspace_id: String,
         left_terminal_id: String,
@@ -142,6 +143,28 @@ pub enum McpRequest {
     },
     GetSplitState {
         workspace_id: String,
+    },
+
+    // Layout tree commands (recursive split pane model)
+    SplitTerminal {
+        workspace_id: String,
+        target_terminal_id: String,
+        new_terminal_id: String,
+        direction: SplitDirection,
+        #[serde(default = "default_split_ratio")]
+        ratio: f64,
+    },
+    UnsplitTerminal {
+        workspace_id: String,
+        terminal_id: String,
+    },
+    GetLayoutTree {
+        workspace_id: String,
+    },
+    SwapPanes {
+        workspace_id: String,
+        terminal_id_a: String,
+        terminal_id_b: String,
     },
 
     // JS bridge (execute JavaScript in WebView, return result)
@@ -244,6 +267,7 @@ pub enum McpResponse {
         ratio: f64,
     },
     NoSplit,
+    LayoutTree(Option<LayoutNode>),
     JsResult {
         result: Option<String>,
         error: Option<String>,
