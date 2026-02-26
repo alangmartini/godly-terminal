@@ -209,6 +209,7 @@ fn test_render_basic_grid() {
         }
     };
 
+    let (cell_w, cell_h) = renderer.cell_size();
     let (width, height, pixels) = renderer.render_to_pixels(&grid).expect("render failed");
     assert!(width > 0, "width should be positive");
     assert!(height > 0, "height should be positive");
@@ -217,10 +218,27 @@ fn test_render_basic_grid() {
         (width * height * 4) as usize,
         "pixel buffer size mismatch"
     );
-    // Verify non-zero pixels (something was rendered).
+
+    // Bug regression: the old assertion `pixels.iter().any(|&b| b != 0)` passed
+    // even with invisible text because background alpha (255) is always non-zero.
+    // Verify that the first text cell ('H') has bright foreground pixels.
+    // Default theme: foreground=0.8 (R≈204), background=0.12 (R≈31).
+    let mut max_r: u8 = 0;
+    let cell_w_u = cell_w.ceil() as u32;
+    let cell_h_u = cell_h.ceil() as u32;
+    for py in 0..cell_h_u {
+        for px in 0..cell_w_u {
+            let idx = (py * width + px) as usize * 4;
+            if idx < pixels.len() {
+                max_r = max_r.max(pixels[idx]);
+            }
+        }
+    }
     assert!(
-        pixels.iter().any(|&b| b != 0),
-        "pixels should not all be zero"
+        max_r > 100,
+        "text cell 'H' must have visible foreground pixels (max R={}); \
+         text is invisible (likely a glyph blit coordinate bug)",
+        max_r
     );
 }
 
@@ -348,4 +366,108 @@ fn test_multiple_renders_reuse_renderer() {
         let result = renderer.render_to_pixels(&grid);
         assert!(result.is_ok(), "repeated render should succeed");
     }
+}
+
+// ---- Text visibility regression tests ----
+// Bug: blit_y was negative (physical.y - placement.top in atlas.rs), causing all
+// glyph pixels to be clipped. Tests that only check `any(|&b| b != 0)` miss this
+// because background alpha alone is non-zero.
+
+/// Verify each text cell in the grid has visible foreground pixels.
+/// Samples multiple characters across different rows to catch partial failures.
+#[test]
+fn test_text_visible_across_all_rows() {
+    let grid = make_test_grid(); // Row 0: "HelloWorld", Row 1: "Red Green!", Row 2: "BoldItalic"
+    let mut renderer = match GpuRenderer::new("Cascadia Code", 14.0) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Skipping GPU test (no adapter): {}", e);
+            return;
+        }
+    };
+
+    let (cell_w, cell_h) = renderer.cell_size();
+    let (width, _height, pixels) = renderer.render_to_pixels(&grid).expect("render failed");
+    let cell_w_u = cell_w.ceil() as u32;
+    let cell_h_u = cell_h.ceil() as u32;
+
+    // Check representative cells: (row, col, char_description)
+    let test_cells = [
+        (0, 0, 'H'), (0, 4, 'o'), (0, 9, 'd'),  // row 0: default colors
+        (1, 0, 'R'), (1, 4, 'G'),                  // row 1: colored text
+        (2, 0, 'B'), (2, 4, 'I'),                  // row 2: bold + italic
+    ];
+
+    for (row, col, ch) in test_cells {
+        let x0 = (col as f32 * cell_w) as u32;
+        let y0 = (row as f32 * cell_h) as u32;
+        let mut max_r: u8 = 0;
+        for py in y0..(y0 + cell_h_u) {
+            for px in x0..(x0 + cell_w_u) {
+                let idx = (py * width + px) as usize * 4;
+                if idx < pixels.len() {
+                    max_r = max_r.max(pixels[idx]);
+                }
+            }
+        }
+        // Any text cell should have pixels brighter than pure background (~31).
+        // Threshold 50 gives margin for dim text, colored text with low R, etc.
+        // For red/green colored text, check G channel too.
+        let x0_ = (col as f32 * cell_w) as u32;
+        let y0_ = (row as f32 * cell_h) as u32;
+        let mut max_channel: u8 = 0;
+        for py in y0_..(y0_ + cell_h_u) {
+            for px in x0_..(x0_ + cell_w_u) {
+                let idx = (py * width + px) as usize * 4;
+                if idx + 2 < pixels.len() {
+                    max_channel = max_channel.max(pixels[idx]);     // R
+                    max_channel = max_channel.max(pixels[idx + 1]); // G
+                    max_channel = max_channel.max(pixels[idx + 2]); // B
+                }
+            }
+        }
+        assert!(
+            max_channel > 50,
+            "cell ({},{}) '{}' has no visible pixels (max channel={})",
+            row, col, ch, max_channel
+        );
+    }
+}
+
+/// Verify that space-only cells contain only background-colored pixels.
+/// This confirms the text visibility tests above aren't false positives.
+#[test]
+fn test_empty_cells_are_background_only() {
+    let grid = make_empty_grid(); // All spaces
+    let mut renderer = match GpuRenderer::new("Consolas", 14.0) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Skipping GPU test (no adapter): {}", e);
+            return;
+        }
+    };
+
+    let (cell_w, cell_h) = renderer.cell_size();
+    let (width, _height, pixels) = renderer.render_to_pixels(&grid).expect("render failed");
+    let cell_w_u = cell_w.ceil() as u32;
+    let cell_h_u = cell_h.ceil() as u32;
+
+    // Sample cell (0,0) which is a space
+    let mut max_brightness: u8 = 0;
+    for py in 0..cell_h_u {
+        for px in 0..cell_w_u {
+            let idx = (py * width + px) as usize * 4;
+            if idx + 2 < pixels.len() {
+                max_brightness = max_brightness.max(pixels[idx]);
+                max_brightness = max_brightness.max(pixels[idx + 1]);
+                max_brightness = max_brightness.max(pixels[idx + 2]);
+            }
+        }
+    }
+    // Background is 0.12 ≈ 31. Space cells should have no foreground pixels.
+    assert!(
+        max_brightness < 50,
+        "space cell should be background-only, got max channel={} (glyph leak)",
+        max_brightness
+    );
 }

@@ -44,7 +44,7 @@ pub fn render_terminal_gpu(
     };
 
     // Render via GPU
-    let png_bytes = gpu.render_terminal_png(&grid)?;
+    let png_bytes = gpu.render_terminal_png(&grid, 1.0)?;
 
     // Return as base64
     Ok(base64::engine::general_purpose::STANDARD.encode(&png_bytes))

@@ -14,10 +14,14 @@ use godly_protocol::types::RichGridData;
 /// The renderer is shared across all terminals. It is initialized on first
 /// render request and cached for subsequent calls. A `Mutex` serializes
 /// access since `GpuRenderer` holds GPU device state that is not `Sync`.
+///
+/// The renderer is recreated when the DPI scale factor changes (e.g. window
+/// moved to a different monitor).
 pub struct GpuRendererManager {
     renderer: Mutex<Option<GpuRenderer>>,
     font_family: String,
     font_size: f32,
+    current_dpr: Mutex<f32>,
 }
 
 impl GpuRendererManager {
@@ -26,24 +30,41 @@ impl GpuRendererManager {
             renderer: Mutex::new(None),
             font_family: font_family.to_string(),
             font_size,
+            current_dpr: Mutex::new(0.0), // 0 = not yet initialized
         }
     }
 
-    /// Ensure the GPU renderer is initialized, creating it if needed.
-    fn ensure_renderer(&self) -> Result<(), String> {
+    /// Ensure the GPU renderer is initialized at the given DPI scale.
+    /// Recreates the renderer if the DPI changed.
+    fn ensure_renderer_with_dpr(&self, dpr: f32) -> Result<(), String> {
         let mut renderer = self.renderer.lock().map_err(|e| e.to_string())?;
-        if renderer.is_none() {
+        let mut current_dpr = self.current_dpr.lock().map_err(|e| e.to_string())?;
+
+        let dpr_changed = (*current_dpr - dpr).abs() > 0.01;
+
+        if renderer.is_none() || dpr_changed {
+            if dpr_changed && renderer.is_some() {
+                eprintln!(
+                    "[gpu_renderer] DPR changed {:.2} -> {:.2}, recreating atlas",
+                    *current_dpr, dpr
+                );
+            }
+            let scaled_size = self.font_size * dpr;
             *renderer = Some(
-                GpuRenderer::new(&self.font_family, self.font_size)
+                GpuRenderer::new(&self.font_family, scaled_size)
                     .map_err(|e| format!("GPU renderer init failed: {e}"))?,
             );
+            *current_dpr = dpr;
         }
         Ok(())
     }
 
+    /// Ensure the GPU renderer is initialized (1x DPI fallback).
+    fn ensure_renderer(&self) -> Result<(), String> {
+        self.ensure_renderer_with_dpr(1.0)
+    }
+
     /// Render a terminal grid to raw RGBA pixels.
-    ///
-    /// Returns `(width, height, rgba_bytes)`.
     pub fn render_terminal(
         &self,
         grid: &RichGridData,
@@ -61,8 +82,9 @@ impl GpuRendererManager {
     pub fn render_terminal_png(
         &self,
         grid: &RichGridData,
+        dpr: f32,
     ) -> Result<Vec<u8>, String> {
-        self.ensure_renderer()?;
+        self.ensure_renderer_with_dpr(dpr)?;
         let mut renderer = self.renderer.lock().map_err(|e| e.to_string())?;
         renderer
             .as_mut()
@@ -77,8 +99,9 @@ impl GpuRendererManager {
     pub fn render_terminal_raw(
         &self,
         grid: &RichGridData,
+        dpr: f32,
     ) -> Result<Vec<u8>, String> {
-        self.ensure_renderer()?;
+        self.ensure_renderer_with_dpr(dpr)?;
         let mut renderer = self.renderer.lock().map_err(|e| e.to_string())?;
         let (width, height, pixels) = renderer
             .as_mut()
@@ -101,7 +124,12 @@ impl GpuRendererManager {
         Ok((w as f64, h as f64))
     }
 
-    /// Check whether GPU rendering is available (i.e. a renderer can be created).
+    /// Check whether GPU rendering is available at the given DPI.
+    pub fn is_available_with_dpr(&self, dpr: f32) -> bool {
+        self.ensure_renderer_with_dpr(dpr).is_ok()
+    }
+
+    /// Check whether GPU rendering is available.
     pub fn is_available(&self) -> bool {
         self.ensure_renderer().is_ok()
     }
