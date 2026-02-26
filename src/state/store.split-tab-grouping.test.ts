@@ -134,8 +134,9 @@ describe('split tab grouping (#309)', () => {
 
     it('split terminals should be adjacent even when other tabs exist between them', () => {
       // Tab order: t1, t2, t3, t4. Split: t1|t2 (already adjacent by default)
-      // Add a new terminal — the split pair should remain adjacent
-      store.addTerminal({ id: 't5', workspaceId: 'ws-1', name: 'Tab 5', processName: 'cmd', order: 1 });
+      // Add a background terminal — the split pair should remain adjacent
+      // (foreground addTerminal clears the split per Bug #391)
+      store.addTerminal({ id: 't5', workspaceId: 'ws-1', name: 'Tab 5', processName: 'cmd', order: 1 }, { background: true });
 
       const terminals = store.getWorkspaceTerminals('ws-1');
       const split = store.getSplitView('ws-1');
