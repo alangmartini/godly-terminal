@@ -1004,7 +1004,9 @@ export class App {
         const tree = store.getLayoutTree(state.activeWorkspaceId);
         if (tree) {
           const newTree = swapTerminals(tree, targetId, droppedTerminalId);
-          store.setLayoutTree(state.activeWorkspaceId, newTree);
+          if (newTree) {
+            store.setLayoutTree(state.activeWorkspaceId, newTree);
+          }
         }
       }
     });
