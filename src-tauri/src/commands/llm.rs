@@ -23,6 +23,20 @@ pub async fn llm_set_api_key(
 }
 
 #[tauri::command]
+pub async fn llm_set_model(
+    llm: State<'_, Arc<LlmState>>,
+    model: String,
+) -> Result<(), String> {
+    llm.set_model(model);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn llm_get_model(llm: State<'_, Arc<LlmState>>) -> Result<String, String> {
+    Ok(llm.get_model())
+}
+
+#[tauri::command]
 pub async fn llm_generate_branch_name(
     llm: State<'_, Arc<LlmState>>,
     description: String,
@@ -31,8 +45,9 @@ pub async fn llm_generate_branch_name(
         "No API key configured. Add your Google Gemini API key in Settings > Branch Name AI."
             .to_string()
     })?;
+    let model = llm.get_model();
 
-    let name = generate_branch_name_gemini(&api_key, &description)
+    let name = generate_branch_name_gemini(&api_key, &description, &model)
         .await
         .map_err(|e| format!("Branch name generation failed: {}", e))?;
 

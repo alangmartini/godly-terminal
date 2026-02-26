@@ -648,6 +648,8 @@ pub fn run() {
             commands::read_frontend_log,
             commands::llm_has_api_key,
             commands::llm_set_api_key,
+            commands::llm_set_model,
+            commands::llm_get_model,
             commands::llm_generate_branch_name,
             commands::whisper_get_status,
             commands::whisper_start_recording,

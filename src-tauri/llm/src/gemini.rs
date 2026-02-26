@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::branch_name::sanitize_branch_name;
 
-const GEMINI_API_URL: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
+const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const SYSTEM_PROMPT: &str = "\
 You are a git branch name generator. Given a description of a task, output ONLY a short, \
@@ -76,10 +75,17 @@ struct GeminiError {
     message: String,
 }
 
+/// Maximum number of retries for rate-limited (429) requests.
+const MAX_RETRIES: u32 = 3;
+
 /// Generate a branch name using the Gemini API.
+///
+/// `model` is the Gemini model ID (e.g. "gemini-2.0-flash-lite", "gemini-2.0-flash").
+/// Retries up to 3 times with exponential backoff on 429 rate-limit responses.
 pub async fn generate_branch_name_gemini(
     api_key: &str,
     description: &str,
+    model: &str,
 ) -> Result<String> {
     let client = reqwest::Client::new();
 
@@ -100,33 +106,53 @@ pub async fn generate_branch_name_gemini(
         },
     };
 
-    let url = format!("{}?key={}", GEMINI_API_URL, api_key);
+    let url = format!("{}/{}:generateContent?key={}", GEMINI_API_BASE, model, api_key);
 
-    let response = client
-        .post(&url)
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to call Gemini API")?;
+    let mut last_error = None;
+    for attempt in 0..=MAX_RETRIES {
+        if attempt > 0 {
+            let delay = std::time::Duration::from_millis(500 * 2u64.pow(attempt - 1));
+            tokio::time::sleep(delay).await;
+        }
 
-    let status = response.status();
-    let body: GeminiResponse = response
-        .json()
-        .await
-        .context("Failed to parse Gemini response")?;
+        let response = client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to call Gemini API")?;
 
-    if let Some(error) = body.error {
-        anyhow::bail!("Gemini API error ({}): {}", status, error.message);
+        let status = response.status();
+
+        if status.as_u16() == 429 {
+            last_error = Some(format!("Rate limited (429) on attempt {}", attempt + 1));
+            continue;
+        }
+
+        let body: GeminiResponse = response
+            .json()
+            .await
+            .context("Failed to parse Gemini response")?;
+
+        if let Some(error) = body.error {
+            anyhow::bail!("Gemini API error ({}): {}", status, error.message);
+        }
+
+        let raw_text = body
+            .candidates
+            .and_then(|c| c.into_iter().next())
+            .and_then(|c| c.content.parts.into_iter().next())
+            .and_then(|p| p.text)
+            .ok_or_else(|| anyhow::anyhow!("No text in Gemini response"))?;
+
+        return Ok(sanitize_branch_name(&raw_text));
     }
 
-    let raw_text = body
-        .candidates
-        .and_then(|c| c.into_iter().next())
-        .and_then(|c| c.content.parts.into_iter().next())
-        .and_then(|p| p.text)
-        .ok_or_else(|| anyhow::anyhow!("No text in Gemini response"))?;
-
-    Ok(sanitize_branch_name(&raw_text))
+    anyhow::bail!(
+        "Gemini API rate limited after {} retries. {}",
+        MAX_RETRIES,
+        last_error.unwrap_or_default()
+    )
 }
 
 #[cfg(test)]
