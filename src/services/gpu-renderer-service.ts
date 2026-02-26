@@ -29,8 +29,10 @@ class GpuRendererService {
    * Format: [width: u32 LE][height: u32 LE][rgba_pixels...]
    */
   async renderTerminalRaw(terminalId: string): Promise<ArrayBuffer> {
-    const dpr = window.devicePixelRatio || 1;
-    const url = `http://gpuframe.localhost/render/${terminalId}?format=raw&dpr=${dpr}`;
+    // DPR scaling improves text quality but makes frames 2-3x larger,
+    // causing typing lag with the current offscreen GPU -> CPU readback pipeline.
+    // Cap at 1.0 until we optimize (surface rendering or async double-buffer).
+    const url = `http://gpuframe.localhost/render/${terminalId}?format=raw&dpr=1`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`GPU render failed: ${response.status} ${response.statusText}`);
