@@ -1,29 +1,3 @@
-use crate::engine::LlmEngine;
-use crate::prompt::build_chat_prompt;
-
-const BRANCH_NAME_SYSTEM_PROMPT: &str = "\
-You are a git branch name generator. Given a description of a task, output ONLY a short, \
-kebab-case branch name. Rules:\n\
-- Use lowercase letters, numbers, and hyphens only\n\
-- Start with a conventional prefix: feat/, fix/, refactor/, docs/, chore/, test/\n\
-- Keep it under 50 characters total\n\
-- No explanations, just the branch name\n\
-\n\
-Examples:\n\
-Input: \"Add user authentication with OAuth\"\n\
-Output: feat/add-oauth-auth\n\
-Input: \"Fix crash when opening empty file\"\n\
-Output: fix/empty-file-crash\n\
-Input: \"Refactor database connection pooling\"\n\
-Output: refactor/db-connection-pool";
-
-/// Generate a git branch name from a description using the LLM.
-pub fn generate_branch_name(engine: &mut LlmEngine, description: &str) -> anyhow::Result<String> {
-    let prompt = build_chat_prompt(BRANCH_NAME_SYSTEM_PROMPT, description);
-    let raw = engine.generate(&prompt, 30, 0.3)?;
-    Ok(sanitize_branch_name(&raw))
-}
-
 /// Sanitize a raw LLM output into a valid git branch name.
 pub fn sanitize_branch_name(raw: &str) -> String {
     let trimmed = raw.trim();
