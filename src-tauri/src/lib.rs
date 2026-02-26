@@ -7,6 +7,7 @@ mod persistence;
 mod pty;
 mod state;
 mod utils;
+mod whisper_client;
 mod whisper_state;
 mod worktree;
 
@@ -71,6 +72,7 @@ fn cleanup_old_binaries(app_handle: &tauri::AppHandle) {
         "godly-mcp.exe.old",
         "godly-notify.exe.old",
         "godly-remote.exe.old",
+        "godly-whisper.exe.old",
     ] {
         let path = resource_dir.join(name);
         if path.exists() {
