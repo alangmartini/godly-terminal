@@ -1,17 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
   LayoutNode,
-  findTerminal,
   terminalIds,
   replaceLeaf,
   removeLeaf,
-  removeTerminal as removeTerminalFromTree,
   containsTerminal,
   updateRatioAtPath,
-  splitAt,
   swapTerminals,
   findAdjacentTerminal,
-  replaceTerminal,
 } from './split-types';
 
 export type { LayoutNode } from './split-types';
