@@ -519,7 +519,11 @@ export class TabBar {
       splitSep.className = 'context-menu-separator';
       menu.appendChild(splitSep);
 
-      if (split) {
+      const isInSplitPair = split &&
+        (terminal.id === split.leftTerminalId || terminal.id === split.rightTerminalId);
+
+      if (isInSplitPair) {
+        // Right-clicked a tab that's in the split → offer unsplit
         const unsplitItem = document.createElement('div');
         unsplitItem.className = 'context-menu-item';
         unsplitItem.textContent = 'Unsplit';
@@ -529,6 +533,18 @@ export class TabBar {
         };
         menu.appendChild(unsplitItem);
       } else {
+        // Right-clicked a tab not in a split → offer split options
+        if (split) {
+          const unsplitItem = document.createElement('div');
+          unsplitItem.className = 'context-menu-item';
+          unsplitItem.textContent = 'Unsplit';
+          unsplitItem.onclick = () => {
+            menu.remove();
+            this.onUnsplitCallback?.();
+          };
+          menu.appendChild(unsplitItem);
+        }
+
         const splitRightItem = document.createElement('div');
         splitRightItem.className = 'context-menu-item';
         splitRightItem.textContent = 'Split Right';
