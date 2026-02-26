@@ -25,10 +25,32 @@ export type LayoutNode = LeafNode | SplitNode;
 // Tree utility functions
 // ---------------------------------------------------------------------------
 
+/** Check whether a terminal ID exists anywhere in the tree. */
+export function findTerminal(node: LayoutNode, id: string): boolean {
+  if (node.type === 'leaf') {
+    return node.terminal_id === id;
+  }
+  return findTerminal(node.first, id) || findTerminal(node.second, id);
+}
+
+/** Check whether a terminal exists in the tree. */
+export function containsTerminal(node: LayoutNode, terminalId: string): boolean {
+  if (node.type === 'leaf') return node.terminal_id === terminalId;
+  return containsTerminal(node.first, terminalId) || containsTerminal(node.second, terminalId);
+}
+
 /** Collect all terminal IDs from the tree via depth-first traversal. */
 export function terminalIds(node: LayoutNode): string[] {
   if (node.type === 'leaf') return [node.terminal_id];
   return [...terminalIds(node.first), ...terminalIds(node.second)];
+}
+
+/** Count the number of leaf nodes (terminal panes) in the tree. */
+export function countLeaves(node: LayoutNode): number {
+  if (node.type === 'leaf') {
+    return 1;
+  }
+  return countLeaves(node.first) + countLeaves(node.second);
 }
 
 /** Find the leaf containing `terminalId` and replace it with `replacement`. */
@@ -96,10 +118,41 @@ export function removeLeaf(
   return { result: node, found: false };
 }
 
-/** Check whether a terminal exists in the tree. */
-export function containsTerminal(node: LayoutNode, terminalId: string): boolean {
-  if (node.type === 'leaf') return node.terminal_id === terminalId;
-  return containsTerminal(node.first, terminalId) || containsTerminal(node.second, terminalId);
+/**
+ * Remove a terminal from the tree. When a leaf is removed, its parent split
+ * collapses to the sibling node. Returns null if the entire tree is removed
+ * (i.e. the root was the removed leaf).
+ */
+export function removeTerminal(node: LayoutNode, id: string): LayoutNode | null {
+  if (node.type === 'leaf') {
+    return node.terminal_id === id ? null : node;
+  }
+
+  // Check if either child is the target leaf
+  if (node.first.type === 'leaf' && node.first.terminal_id === id) {
+    return node.second;
+  }
+  if (node.second.type === 'leaf' && node.second.terminal_id === id) {
+    return node.first;
+  }
+
+  // Recurse into children
+  const newFirst = removeTerminal(node.first, id);
+  if (newFirst !== node.first) {
+    // Removal happened in the first subtree
+    if (newFirst === null) return node.second;
+    return { ...node, first: newFirst };
+  }
+
+  const newSecond = removeTerminal(node.second, id);
+  if (newSecond !== node.second) {
+    // Removal happened in the second subtree
+    if (newSecond === null) return node.first;
+    return { ...node, second: newSecond };
+  }
+
+  // ID not found — return unchanged
+  return node;
 }
 
 /**
@@ -144,6 +197,46 @@ export function updateRatioAtPath(
 }
 
 /**
+ * Split a leaf node into two panes. The target leaf (identified by targetId)
+ * is replaced by a split node containing the original leaf and a new leaf
+ * for newId. The new terminal is placed in the "second" position.
+ *
+ * Returns the original tree unchanged if targetId is not found.
+ */
+export function splitAt(
+  node: LayoutNode,
+  targetId: string,
+  newId: string,
+  direction: 'horizontal' | 'vertical',
+  ratio = 0.5,
+): LayoutNode {
+  if (node.type === 'leaf') {
+    if (node.terminal_id === targetId) {
+      return {
+        type: 'split',
+        direction,
+        ratio,
+        first: { type: 'leaf', terminal_id: targetId },
+        second: { type: 'leaf', terminal_id: newId },
+      };
+    }
+    return node;
+  }
+
+  const newFirst = splitAt(node.first, targetId, newId, direction, ratio);
+  if (newFirst !== node.first) {
+    return { ...node, first: newFirst };
+  }
+
+  const newSecond = splitAt(node.second, targetId, newId, direction, ratio);
+  if (newSecond !== node.second) {
+    return { ...node, second: newSecond };
+  }
+
+  return node;
+}
+
+/**
  * Swap two terminal IDs in the tree. Both must exist as leaves.
  */
 export function swapTerminals(
@@ -166,6 +259,62 @@ function mapLeaves(node: LayoutNode, fn: (leaf: LeafNode) => LeafNode): LayoutNo
     ...node,
     first: mapLeaves(node.first, fn),
     second: mapLeaves(node.second, fn),
+  };
+}
+
+/**
+ * Update the ratio of a split node that contains the given targetId as a
+ * direct child leaf AND matches the given direction. The delta is added to
+ * the current ratio, clamped to [0.15, 0.85].
+ *
+ * This walks the tree and applies the delta to the first matching ancestor
+ * split of the target leaf with the specified direction.
+ */
+export function updateRatio(
+  node: LayoutNode,
+  targetId: string,
+  direction: 'horizontal' | 'vertical',
+  delta: number,
+): LayoutNode {
+  if (node.type === 'leaf') return node;
+
+  // Check if this split directly contains the target and matches direction
+  const firstHasTarget = findTerminal(node.first, targetId);
+  const secondHasTarget = findTerminal(node.second, targetId);
+
+  if ((firstHasTarget || secondHasTarget) && node.direction === direction) {
+    const newRatio = Math.max(0.15, Math.min(0.85, node.ratio + delta));
+    return { ...node, ratio: newRatio };
+  }
+
+  // Recurse into the child that contains the target
+  if (firstHasTarget) {
+    const newFirst = updateRatio(node.first, targetId, direction, delta);
+    if (newFirst !== node.first) return { ...node, first: newFirst };
+  }
+  if (secondHasTarget) {
+    const newSecond = updateRatio(node.second, targetId, direction, delta);
+    if (newSecond !== node.second) return { ...node, second: newSecond };
+  }
+
+  return node;
+}
+
+/**
+ * Convert a legacy flat SplitView into a two-leaf LayoutNode tree.
+ */
+export function fromLegacySplitView(split: {
+  leftTerminalId: string;
+  rightTerminalId: string;
+  direction: string;
+  ratio: number;
+}): LayoutNode {
+  return {
+    type: 'split',
+    direction: split.direction === 'vertical' ? 'vertical' : 'horizontal',
+    ratio: split.ratio,
+    first: { type: 'leaf', terminal_id: split.leftTerminalId },
+    second: { type: 'leaf', terminal_id: split.rightTerminalId },
   };
 }
 
@@ -221,4 +370,22 @@ function firstLeaf(node: LayoutNode): string {
 function lastLeaf(node: LayoutNode): string {
   if (node.type === 'leaf') return node.terminal_id;
   return lastLeaf(node.second);
+}
+
+/**
+ * Replace a terminal ID in the tree with a different terminal ID.
+ * Used when navigating to a tab outside the current layout — the focused
+ * pane is swapped to show the new terminal.
+ */
+export function replaceTerminal(node: LayoutNode, oldId: string, newId: string): LayoutNode {
+  if (node.type === 'leaf') {
+    if (node.terminal_id === oldId) return { ...node, terminal_id: newId };
+    return node;
+  }
+
+  const newFirst = replaceTerminal(node.first, oldId, newId);
+  const newSecond = replaceTerminal(node.second, oldId, newId);
+
+  if (newFirst === node.first && newSecond === node.second) return node;
+  return { ...node, first: newFirst, second: newSecond };
 }
