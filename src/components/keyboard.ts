@@ -11,12 +11,14 @@ import { keybindingStore } from '../state/keybinding-store';
  */
 export function isAppShortcut(event: { ctrlKey: boolean; shiftKey: boolean; altKey?: boolean; key: string; type: string }): boolean {
   if (event.type !== 'keydown') return false;
-  if (!event.ctrlKey) return false;
 
   // Hardcoded shortcuts that should always bubble (not customisable)
-  if (event.shiftKey && (event.key === 'S' || event.key === 'L')) return true;
+  if (event.ctrlKey && event.shiftKey && (event.key === 'S' || event.key === 'L')) return true;
   // Ctrl+, (open settings)
-  if (!event.shiftKey && event.key === ',') return true;
+  if (event.ctrlKey && !event.shiftKey && event.key === ',') return true;
+
+  // No modifier at all — not an app shortcut (let plain keys through to PTY)
+  if (!event.ctrlKey && !event.altKey) return false;
 
   return keybindingStore.isAppShortcut({
     ctrlKey: event.ctrlKey,

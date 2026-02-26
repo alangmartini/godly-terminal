@@ -22,6 +22,17 @@ export type ActionId =
   | 'split.splitDown'
   | 'split.focusOtherPane'
   | 'split.unsplit'
+  | 'split.focusLeft'
+  | 'split.focusRight'
+  | 'split.focusUp'
+  | 'split.focusDown'
+  | 'split.resizeLeft'
+  | 'split.resizeRight'
+  | 'split.resizeUp'
+  | 'split.resizeDown'
+  | 'split.zoom'
+  | 'split.swapPanes'
+  | 'split.rotateSplit'
   | 'workspace.toggleWorktreeMode'
   | 'workspace.toggleClaudeCodeMode'
   | 'scroll.pageUp'
@@ -149,6 +160,83 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Split',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: '\\' },
+  },
+  {
+    id: 'split.focusLeft',
+    label: 'Focus Pane Left',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: 'arrowleft' },
+  },
+  {
+    id: 'split.focusRight',
+    label: 'Focus Pane Right',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: 'arrowright' },
+  },
+  {
+    id: 'split.focusUp',
+    label: 'Focus Pane Up',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: 'arrowup' },
+  },
+  {
+    id: 'split.focusDown',
+    label: 'Focus Pane Down',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: false, shiftKey: false, altKey: true, key: 'arrowdown' },
+  },
+  {
+    id: 'split.resizeLeft',
+    label: 'Resize Pane Left',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: true, key: 'arrowleft' },
+  },
+  {
+    id: 'split.resizeRight',
+    label: 'Resize Pane Right',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: true, key: 'arrowright' },
+  },
+  {
+    id: 'split.resizeUp',
+    label: 'Resize Pane Up',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: true, key: 'arrowup' },
+  },
+  {
+    id: 'split.resizeDown',
+    label: 'Resize Pane Down',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: false, altKey: true, key: 'arrowdown' },
+  },
+  {
+    id: 'split.zoom',
+    label: 'Zoom/Unzoom Pane',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'z' },
+  },
+  {
+    id: 'split.swapPanes',
+    label: 'Swap Panes',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'x' },
+  },
+  {
+    id: 'split.rotateSplit',
+    label: 'Rotate Split Direction',
+    category: 'Split',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'r' },
   },
   {
     id: 'workspace.toggleWorktreeMode',
@@ -289,6 +377,10 @@ export function formatChord(chord: KeyChord): string {
     home: 'Home',
     end: 'End',
     f2: 'F2',
+    arrowleft: '\u2190',
+    arrowright: '\u2192',
+    arrowup: '\u2191',
+    arrowdown: '\u2193',
   };
   const displayKey = keyDisplayMap[chord.key] ?? chord.key.toUpperCase();
   parts.push(displayKey);
