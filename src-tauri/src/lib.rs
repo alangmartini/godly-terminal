@@ -495,8 +495,11 @@ pub fn run() {
     // Keep rx alive for the lifetime of the app (workers hold Arc clones)
     let _stream_rx_keepalive = stream_rx;
 
-    // GPU renderer manager — lazily initializes GPU on first render request.
+    // GPU renderer manager — pre-warmed on background thread during startup.
+    // wgpu device init takes ~500ms; running it here means it completes
+    // concurrently with window creation and is ready before first render.
     let gpu_renderer_manager = Arc::new(GpuRendererManager::new("Cascadia Code", 14.0));
+    gpu_renderer_manager.warm();
 
     // Clones for the gpuframe:// custom protocol closure
     let gpu_for_protocol = gpu_renderer_manager.clone();
