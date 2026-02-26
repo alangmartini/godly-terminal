@@ -1288,6 +1288,9 @@ export class App {
     const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
 
     await getCurrentWebviewWindow().onDragDropEvent((event) => {
+      // Skip when a dialog overlay is open (e.g., Quick Claude handles its own drops)
+      if (document.querySelector('.dialog-overlay')) return;
+
       if (event.payload.type === 'enter') {
         this.terminalContainer.classList.add('drag-file-over');
       } else if (event.payload.type === 'leave') {
