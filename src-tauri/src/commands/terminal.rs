@@ -365,16 +365,16 @@ pub struct QuickClaudeResult {
 /// in the background. Returns immediately with the terminal ID so the caller can
 /// fire multiple in rapid succession without waiting.
 #[tauri::command]
-pub fn quick_claude(
+pub async fn quick_claude(
     workspace_id: String,
     prompt: String,
     branch_name: Option<String>,
     skip_fetch: Option<bool>,
     no_worktree: Option<bool>,
-    state: State<Arc<AppState>>,
-    daemon: State<Arc<DaemonClient>>,
-    auto_save: State<Arc<AutoSaveManager>>,
-    llm: State<Arc<LlmState>>,
+    state: State<'_, Arc<AppState>>,
+    daemon: State<'_, Arc<DaemonClient>>,
+    auto_save: State<'_, Arc<AutoSaveManager>>,
+    llm: State<'_, Arc<LlmState>>,
     app_handle: tauri::AppHandle,
 ) -> Result<QuickClaudeResult, String> {
     let terminal_id = Uuid::new_v4().to_string();
@@ -386,12 +386,17 @@ pub fn quick_claude(
     let use_worktree = !no_worktree.unwrap_or(false);
 
     // Auto-generate branch name from prompt if not provided
-    let branch_name = if use_worktree {
-        branch_name.or_else(|| {
-            llm.try_generate_branch_name(&prompt)
-        })
+    let branch_name = if use_worktree && branch_name.is_none() {
+        if let Some(api_key) = llm.get_api_key() {
+            match godly_llm::generate_branch_name_gemini(&api_key, &prompt).await {
+                Ok(name) if godly_llm::is_quality_branch_name(&name) => Some(name),
+                _ => None,
+            }
+        } else {
+            None
+        }
     } else {
-        None
+        branch_name
     };
 
     // Determine working directory (worktree or fallback to workspace folder)

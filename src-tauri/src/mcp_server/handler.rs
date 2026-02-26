@@ -339,12 +339,20 @@ pub fn handle_mcp_request(
             let use_worktree = !no_worktree.unwrap_or(false);
 
             // Auto-generate branch name from prompt if not provided
-            let branch_name = if use_worktree {
-                branch_name.clone().or_else(|| {
-                    llm_state.try_generate_branch_name(prompt)
-                })
+            let branch_name = if use_worktree && branch_name.is_none() {
+                if let Some(api_key) = llm_state.get_api_key() {
+                    tokio::runtime::Runtime::new()
+                        .ok()
+                        .and_then(|rt| {
+                            rt.block_on(godly_llm::generate_branch_name_gemini(&api_key, prompt))
+                                .ok()
+                        })
+                        .filter(|name| godly_llm::is_quality_branch_name(name))
+                } else {
+                    None
+                }
             } else {
-                None
+                branch_name.clone()
             };
 
             // MCP terminals always go into the Agent workspace (separate window)
