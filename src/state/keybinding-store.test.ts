@@ -142,11 +142,11 @@ describe('KeybindingStore', () => {
   describe('setBinding', () => {
     it('changes the action binding and rebuilds the index', () => {
       const store = new KeybindingStore();
-      const newChord: KeyChord = { ctrlKey: true, shiftKey: true, altKey: false, key: 'x' };
+      const newChord: KeyChord = { ctrlKey: true, shiftKey: true, altKey: false, key: 'j' };
       store.setBinding('terminal.interrupt', newChord);
 
       expect(store.getBinding('terminal.interrupt')).toEqual(newChord);
-      expect(store.matchAction(keydown('X', { ctrlKey: true, shiftKey: true }))).toBe(
+      expect(store.matchAction(keydown('J', { ctrlKey: true, shiftKey: true }))).toBe(
         'terminal.interrupt'
       );
       // Old binding no longer matches
@@ -170,13 +170,13 @@ describe('KeybindingStore', () => {
         ctrlKey: true,
         shiftKey: true,
         altKey: false,
-        key: 'x',
+        key: 'j',
       });
       expect(storage.has('godly-custom-keybindings')).toBe(true);
 
       // A new store picks up the override
       const store2 = new KeybindingStore();
-      expect(chordToString(store2.getBinding('terminal.interrupt'))).toBe('Ctrl+Shift+x');
+      expect(chordToString(store2.getBinding('terminal.interrupt'))).toBe('Ctrl+Shift+j');
     });
   });
 
@@ -259,19 +259,19 @@ describe('KeybindingStore', () => {
     });
 
     it('type follows the action, not the binding', () => {
-      // Bug scenario: user rebinds SIGINT to Ctrl+Shift+X — it should still
+      // Bug scenario: user rebinds SIGINT to Ctrl+Shift+J — it should still
       // be classified as terminal-control so it gets preventDefault().
       const store = new KeybindingStore();
       store.setBinding('terminal.interrupt', {
         ctrlKey: true,
         shiftKey: true,
         altKey: false,
-        key: 'x',
+        key: 'j',
       });
-      expect(store.isTerminalControlKey(keydown('X', { ctrlKey: true, shiftKey: true }))).toBe(
+      expect(store.isTerminalControlKey(keydown('J', { ctrlKey: true, shiftKey: true }))).toBe(
         true
       );
-      expect(store.isAppShortcut(keydown('X', { ctrlKey: true, shiftKey: true }))).toBe(false);
+      expect(store.isAppShortcut(keydown('J', { ctrlKey: true, shiftKey: true }))).toBe(false);
     });
 
     it('returns false for keyup events', () => {
