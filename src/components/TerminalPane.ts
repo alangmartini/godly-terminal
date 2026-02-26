@@ -75,6 +75,11 @@ export class TerminalPane {
   // null until first full snapshot is received.
   private cachedSnapshot: RichGridData | null = null;
 
+  // When true, the next fetchAndRenderSnapshot() skips the diff path and
+  // does a full fetch. Set after resume() because dirty tracking may be
+  // unreliable after the output stream was disconnected.
+  private forceFullFetch = false;
+
   // Pending render scheduled via requestAnimationFrame (for pushed diffs).
   private renderRAF: number | null = null;
 
@@ -713,11 +718,15 @@ export class TerminalPane {
   private useDiffSnapshots = true;
 
   private async fetchAndRenderSnapshot() {
+    const forceFull = this.forceFullFetch;
+    if (forceFull) this.forceFullFetch = false;
     const seqBefore = this.scrollSeq;
     const diffSeqBefore = this.diffSeq;
     try {
       // Use diff snapshots when we have a cached full snapshot and diff is supported.
-      if (this.cachedSnapshot && this.useDiffSnapshots) {
+      // Skip diff path after resume (forceFull) since dirty tracking is unreliable
+      // after the output stream was disconnected.
+      if (!forceFull && this.cachedSnapshot && this.useDiffSnapshots) {
         try {
           const diff = await invoke<RichGridDiff>('get_grid_snapshot_diff', {
             terminalId: this.terminalId,
@@ -1007,7 +1016,6 @@ export class TerminalPane {
     // With 20 hidden terminals, releasing canvas resources saves ~600MB+ of memory.
     this.renderer.releaseCanvasResources();
     this.gridRenderer?.releaseResources();
-    this.cachedSnapshot = null;
   }
 
   /**
@@ -1022,7 +1030,7 @@ export class TerminalPane {
   resume() {
     if (!this.paused) return;
     this.paused = false;
-    this.cachedSnapshot = null;
+    this.forceFullFetch = true;
     // Re-allocate canvas resources released by pause().
     this.renderer.restoreCanvasResources();
     this.gridRenderer?.restoreResources();
@@ -1039,7 +1047,8 @@ export class TerminalPane {
       }
       this.scheduleSnapshotFetch();
     });
-    this.fetchAndRenderSnapshot();
+    // No fetchAndRenderSnapshot() here — the single fetch in setActive/setSplitVisible's
+    // RAF callback handles it, avoiding a redundant double-fetch.
   }
 
   isPaused(): boolean {
@@ -1056,6 +1065,11 @@ export class TerminalPane {
       // which causes a "zoomed in" flash on tab switch / reopen.
       this.renderer.updateSize();
       this.gridRenderer?.updateSize();
+      // Render stale cached snapshot immediately so the user sees content
+      // instead of a black screen while the fresh fetch is in flight.
+      if (this.cachedSnapshot) {
+        this.renderSnapshot(this.cachedSnapshot);
+      }
       requestAnimationFrame(() => {
         this.fit();
         if (!this.isUserScrolled) {
@@ -1087,6 +1101,11 @@ export class TerminalPane {
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
       this.renderer.updateSize();
       this.gridRenderer?.updateSize();
+      // Render stale cached snapshot immediately so the user sees content
+      // instead of a black screen while the fresh fetch is in flight.
+      if (this.cachedSnapshot) {
+        this.renderSnapshot(this.cachedSnapshot);
+      }
       requestAnimationFrame(() => {
         this.fit();
         if (!this.isUserScrolled) {
