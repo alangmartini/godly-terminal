@@ -240,6 +240,12 @@ impl GlyphAtlas {
         let mut blit_y: i32 = 0;
 
         for run in buffer.layout_runs() {
+            // run.line_y = Y offset to BASELINE of line
+            // run.line_top = Y offset to TOP of line
+            // physical.y derives from LayoutGlyph.y which is line_top, NOT baseline.
+            // placement.top is relative to baseline, so we must use line_y.
+            let baseline_y = run.line_y.round() as i32;
+
             for layout_glyph in run.glyphs.iter() {
                 let physical = layout_glyph.physical((0.0, 0.0), 1.0);
                 if let Some(image) = self
@@ -255,13 +261,13 @@ impl GlyphAtlas {
                     glyph_w = w;
                     glyph_h = h;
 
-                    // Position glyph within the cell using physical coordinates
-                    // and swash placement offsets.
-                    // physical.x/y = glyph origin in pixel coords (baseline position)
-                    // placement.left = X offset from origin to bitmap left edge
-                    // placement.top = Y offset from origin to bitmap top edge (positive = above)
+                    // Position glyph within the cell:
+                    // physical.x = horizontal pixel position (from layout)
+                    // placement.left = X offset from glyph origin to bitmap left edge
+                    // baseline_y = Y position of baseline within the cell
+                    // placement.top = distance from baseline to bitmap top (positive = above)
                     blit_x = physical.x + image.placement.left;
-                    blit_y = physical.y - image.placement.top;
+                    blit_y = baseline_y - image.placement.top;
 
                     // Convert image data to single-channel alpha.
                     // cosmic-text may return different formats.
@@ -528,5 +534,45 @@ mod tests {
         // but it should not panic.
         let _entry = atlas.get_or_insert('\u{2588}', false, false); // Full block
         let _entry = atlas.get_or_insert('\u{00e9}', false, false); // e-acute
+    }
+
+    /// Verify that glyph pixels land inside the cell-sized atlas region.
+    /// Bug: blit_y was negative (physical.y - placement.top) causing all pixels
+    /// to be clipped. Fix: use run.line_y (baseline) instead of physical.y.
+    #[test]
+    fn glyph_pixels_within_cell_region() {
+        let atlas = GlyphAtlas::new("Consolas", 14.0);
+        let (cell_w, cell_h) = atlas.cell_size();
+        let cell_w_u = cell_w.ceil() as u32;
+        let cell_h_u = cell_h.ceil() as u32;
+
+        // Check several representative characters have non-zero pixel data
+        // within their cell-sized atlas region.
+        for ch in ['A', 'g', 'M', '|', '_'] {
+            let key = GlyphKey { ch, bold: false, italic: false };
+            let entry = atlas.entries.get(&key).unwrap();
+
+            // Entry should span a cell-sized region (not zero-sized like blank).
+            assert_eq!(entry.width, cell_w_u, "char '{}' width", ch);
+            assert_eq!(entry.height, cell_h_u, "char '{}' height", ch);
+
+            // Check that at least some pixels in the atlas region have non-zero alpha.
+            let region_x = (entry.u0 * atlas.atlas_width as f32).round() as u32;
+            let region_y = (entry.v0 * atlas.atlas_height as f32).round() as u32;
+            let mut has_pixels = false;
+            for row in 0..cell_h_u {
+                for col in 0..cell_w_u {
+                    let idx = ((region_y + row) * atlas.atlas_width + (region_x + col)) as usize * 4;
+                    if idx < atlas.atlas_data.len() && atlas.atlas_data[idx] > 0 {
+                        has_pixels = true;
+                        break;
+                    }
+                }
+                if has_pixels {
+                    break;
+                }
+            }
+            assert!(has_pixels, "char '{}' has no visible pixels in atlas region", ch);
+        }
     }
 }

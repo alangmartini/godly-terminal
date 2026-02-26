@@ -3,7 +3,7 @@
  *
  * Handles all user interaction visuals (selection highlights, scrollbar,
  * URL hover underline) on a transparent <canvas> overlay. The actual grid
- * painting is done by the GPU renderer (Rust-side wgpu) via GpuTerminalDisplay.
+ * painting is done by Canvas2DGridRenderer on a separate canvas underneath.
  *
  * Also handles all mouse, wheel, and touch events for selection, scrollbar
  * drag, URL hover/click, and zoom.
@@ -92,9 +92,9 @@ const URL_REGEX = /https?:\/\/[^\s<>'")\]]+/g;
 
 // ---- Renderer backend info ----
 
-/** Returns the rendering backend name. Always 'GPU' now. */
+/** Returns the rendering backend name. */
 export function getRendererBackend(): string {
-  return 'GPU';
+  return 'Canvas2D';
 }
 
 // ---- Renderer ----
@@ -190,7 +190,7 @@ export class TerminalRenderer {
 
   /** Returns the active rendering backend name. */
   getBackend(): string {
-    return 'GPU';
+    return 'Canvas2D';
   }
 
   /** Update the terminal theme and trigger a repaint. */
