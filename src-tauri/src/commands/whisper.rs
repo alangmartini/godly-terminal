@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::whisper_state::{WhisperConfig, WhisperRecordingState, WhisperState, WhisperStatus};
 
@@ -139,5 +139,109 @@ pub async fn whisper_set_config(
     config: WhisperConfig,
 ) -> Result<(), String> {
     whisper.set_config(config);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn whisper_download_model(
+    app: tauri::AppHandle,
+    whisper: State<'_, Arc<WhisperState>>,
+    model_name: String,
+) -> Result<(), String> {
+    let models_dir = whisper
+        .get_models_dir()
+        .ok_or("App data directory not initialized")?;
+
+    // Create models dir if it doesn't exist
+    std::fs::create_dir_all(&models_dir)
+        .map_err(|e| format!("Failed to create models directory: {}", e))?;
+
+    let dest = models_dir.join(&model_name);
+
+    // Already downloaded?
+    if dest.exists() {
+        return Ok(());
+    }
+
+    let url = format!(
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
+        model_name
+    );
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Download request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Download failed: HTTP {}", resp.status()));
+    }
+
+    let total = resp.content_length().unwrap_or(0);
+    let _ = app.emit("whisper-download-progress", serde_json::json!({
+        "model": model_name,
+        "downloaded": 0u64,
+        "total": total,
+        "phase": "downloading",
+    }));
+
+    // Download to a temp file first, then rename (atomic-ish)
+    let tmp_dest = models_dir.join(format!("{}.downloading", model_name));
+    let mut file = tokio::fs::File::create(&tmp_dest)
+        .await
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+    let mut downloaded: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+    let mut stream = resp;
+
+    loop {
+        let chunk = stream
+            .chunk()
+            .await
+            .map_err(|e| format!("Download interrupted: {}", e))?;
+
+        match chunk {
+            Some(bytes) => {
+                use tokio::io::AsyncWriteExt;
+                file.write_all(&bytes)
+                    .await
+                    .map_err(|e| format!("Failed to write: {}", e))?;
+                downloaded += bytes.len() as u64;
+
+                // Emit progress at most every 100ms
+                if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+                    let _ = app.emit("whisper-download-progress", serde_json::json!({
+                        "model": model_name,
+                        "downloaded": downloaded,
+                        "total": total,
+                        "phase": "downloading",
+                    }));
+                    last_emit = std::time::Instant::now();
+                }
+            }
+            None => break,
+        }
+    }
+
+    // Flush and rename
+    {
+        use tokio::io::AsyncWriteExt;
+        file.flush().await.map_err(|e| format!("Flush failed: {}", e))?;
+    }
+    drop(file);
+
+    std::fs::rename(&tmp_dest, &dest)
+        .map_err(|e| format!("Failed to finalize download: {}", e))?;
+
+    let _ = app.emit("whisper-download-progress", serde_json::json!({
+        "model": model_name,
+        "downloaded": total,
+        "total": total,
+        "phase": "complete",
+    }));
+
     Ok(())
 }
