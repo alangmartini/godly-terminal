@@ -644,13 +644,9 @@ pub fn run() {
             commands::write_frontend_log,
             commands::get_log_dir,
             commands::read_frontend_log,
-            commands::llm_get_status,
-            commands::llm_download_model,
-            commands::llm_load_model,
-            commands::llm_unload_model,
-            commands::llm_generate,
+            commands::llm_has_api_key,
+            commands::llm_set_api_key,
             commands::llm_generate_branch_name,
-            commands::llm_check_model_files,
             commands::whisper_get_status,
             commands::whisper_start_recording,
             commands::whisper_stop_recording,
@@ -707,9 +703,8 @@ pub fn run() {
             // Copy bundled sound packs (first run)
             commands::install_bundled_sound_packs(&app_handle);
 
-            // Initialize LLM state (check if model is already downloaded)
+            // Initialize whisper state
             if let Ok(app_data) = app_handle.path().app_data_dir() {
-                llm_state.init(app_data.clone());
                 whisper_state.init(app_data);
             }
 

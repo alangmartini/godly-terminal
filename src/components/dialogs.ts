@@ -1,4 +1,4 @@
-import { llmGetStatus, llmGenerateBranchName, isModelReady } from '../plugins/smollm2/llm-service';
+import { llmHasApiKey, llmGenerateBranchName } from '../plugins/smollm2/llm-service';
 
 /**
  * Show a prompt dialog for entering a custom worktree branch name.
@@ -61,8 +61,8 @@ export function showWorktreeNamePrompt(): Promise<string | null> {
     inputRow.appendChild(aiBtn);
 
     // Check if model is ready and show AI features
-    llmGetStatus().then(status => {
-      if (isModelReady(status)) {
+    llmHasApiKey().then(hasKey => {
+      if (hasKey) {
         descInput.style.display = '';
         aiBtn.style.display = '';
       }
@@ -524,8 +524,8 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     branchRow.appendChild(branchAiBtn);
 
     // Show AI button if model is ready
-    llmGetStatus().then(status => {
-      if (isModelReady(status)) {
+    llmHasApiKey().then(hasKey => {
+      if (hasKey) {
         branchAiBtn.style.display = '';
       }
     }).catch(() => {});

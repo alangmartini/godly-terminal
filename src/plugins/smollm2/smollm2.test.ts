@@ -7,14 +7,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
-}));
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  open: vi.fn().mockResolvedValue(null),
-}));
-
 // Mock localStorage
 const storage = new Map<string, string>();
 vi.stubGlobal('localStorage', {
@@ -45,11 +37,6 @@ function createMockContext(overrides: Partial<PluginContext> = {}): PluginContex
   };
 }
 
-/** Wait for pending microtasks (async button rendering). */
-function flushMicrotasks(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
-
 describe('SmolLM2Plugin', () => {
   let plugin: SmolLM2Plugin;
 
@@ -61,18 +48,18 @@ describe('SmolLM2Plugin', () => {
 
   it('has correct metadata', () => {
     expect(plugin.id).toBe('smollm2');
-    expect(plugin.name).toBe('SmolLM2 Local LLM');
-    expect(plugin.version).toBe('1.0.0');
+    expect(plugin.name).toBe('Branch Name AI');
+    expect(plugin.version).toBe('2.0.0');
   });
 
-  it('init fetches model status', async () => {
-    mockInvoke.mockResolvedValue({ status: 'NotDownloaded' });
+  it('init checks for API key', async () => {
+    mockInvoke.mockResolvedValue(false);
     const ctx = createMockContext();
     await plugin.init(ctx);
-    expect(mockInvoke).toHaveBeenCalledWith('llm_get_status');
+    expect(mockInvoke).toHaveBeenCalledWith('llm_has_api_key');
   });
 
-  it('init handles status fetch failure gracefully', async () => {
+  it('init handles API key check failure gracefully', async () => {
     mockInvoke.mockRejectedValue(new Error('not available'));
     const ctx = createMockContext();
     await plugin.init(ctx);
@@ -80,7 +67,7 @@ describe('SmolLM2Plugin', () => {
   });
 
   it('renderSettings returns a DOM element', async () => {
-    mockInvoke.mockResolvedValue({ status: 'NotDownloaded' });
+    mockInvoke.mockResolvedValue(false);
     const ctx = createMockContext();
     await plugin.init(ctx);
 
@@ -89,106 +76,53 @@ describe('SmolLM2Plugin', () => {
     expect(el.className).toBe('smollm2-settings');
   });
 
-  it('renderSettings includes status, engine, model source, auto-load, and test sections', async () => {
-    mockInvoke.mockResolvedValue({ status: 'Ready' });
+  it('renderSettings has API key input', async () => {
+    mockInvoke.mockResolvedValue(false);
     const ctx = createMockContext();
     await plugin.init(ctx);
 
     const el = plugin.renderSettings!();
-    const rows = el.querySelectorAll('.shortcut-row');
-    // Status + Engine + Source + Preset model + hint + preset action + Auto-load + Test row
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    const passwordInput = el.querySelector('input[type="password"]');
+    expect(passwordInput).toBeDefined();
   });
 
-  it('renderSettings has auto-load checkbox defaulting to true', async () => {
-    mockInvoke.mockResolvedValue({ status: 'Downloaded' });
+  it('renderSettings has save button', async () => {
+    mockInvoke.mockResolvedValue(false);
     const ctx = createMockContext();
     await plugin.init(ctx);
 
     const el = plugin.renderSettings!();
-    const checkboxes = el.querySelectorAll('input[type="checkbox"]');
-    expect(checkboxes.length).toBe(1);
-    expect((checkboxes[0] as HTMLInputElement).checked).toBe(true);
+    const saveBtn = Array.from(el.querySelectorAll('button'))
+      .find(b => b.textContent === 'Save');
+    expect(saveBtn).toBeDefined();
   });
 
-  it('renderSettings shows download button when preset not downloaded', async () => {
-    // llm_get_status returns NotDownloaded
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === 'llm_get_status') return Promise.resolve({ status: 'NotDownloaded' });
-      if (cmd === 'llm_check_model_files') return Promise.resolve(false);
-      return Promise.resolve(null);
-    });
+  it('renderSettings has test generation button', async () => {
+    mockInvoke.mockResolvedValue(true);
     const ctx = createMockContext();
     await plugin.init(ctx);
 
     const el = plugin.renderSettings!();
-    // Wait for async updatePresetButtons to populate
-    await flushMicrotasks();
-
-    const buttons = el.querySelectorAll('button');
-    const downloadBtn = Array.from(buttons).find(b => b.textContent?.includes('Download'));
-    expect(downloadBtn).toBeDefined();
+    const testBtn = Array.from(el.querySelectorAll('button'))
+      .find(b => b.textContent === 'Generate Branch Name');
+    expect(testBtn).toBeDefined();
   });
 
-  it('renderSettings shows load button when preset downloaded but not loaded', async () => {
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === 'llm_get_status') return Promise.resolve({ status: 'Downloaded' });
-      if (cmd === 'llm_check_model_files') return Promise.resolve(true);
-      return Promise.resolve(null);
-    });
+  it('renderSettings shows Active status when API key is set', async () => {
+    mockInvoke.mockResolvedValue(true);
     const ctx = createMockContext();
     await plugin.init(ctx);
 
     const el = plugin.renderSettings!();
-    await flushMicrotasks();
-
-    const buttons = el.querySelectorAll('button');
-    const loadBtn = Array.from(buttons).find(b => b.textContent?.includes('Load'));
-    expect(loadBtn).toBeDefined();
+    expect(el.textContent).toContain('Active');
   });
 
-  it('renderSettings shows unload button when ready', async () => {
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === 'llm_get_status') return Promise.resolve({ status: 'Ready' });
-      if (cmd === 'llm_check_model_files') return Promise.resolve(true);
-      return Promise.resolve(null);
-    });
+  it('renderSettings shows Not set status when no API key', async () => {
+    mockInvoke.mockResolvedValue(false);
     const ctx = createMockContext();
     await plugin.init(ctx);
 
     const el = plugin.renderSettings!();
-    await flushMicrotasks();
-
-    const buttons = el.querySelectorAll('button');
-    const unloadBtn = Array.from(buttons).find(b => b.textContent?.includes('Unload'));
-    expect(unloadBtn).toBeDefined();
-  });
-
-  it('renderSettings has engine toggle defaulting to tiny', async () => {
-    mockInvoke.mockResolvedValue({ status: 'NotDownloaded' });
-    const ctx = createMockContext();
-    await plugin.init(ctx);
-
-    const el = plugin.renderSettings!();
-    const selects = el.querySelectorAll('select');
-    const engineSelect = Array.from(selects).find(s =>
-      Array.from(s.options).some(o => o.value === 'tiny'),
-    );
-    expect(engineSelect).toBeDefined();
-    expect((engineSelect as HTMLSelectElement).value).toBe('tiny');
-  });
-
-  it('renderSettings has model source toggle defaulting to preset', async () => {
-    mockInvoke.mockResolvedValue({ status: 'NotDownloaded' });
-    const ctx = createMockContext();
-    await plugin.init(ctx);
-
-    const el = plugin.renderSettings!();
-    const selects = el.querySelectorAll('select');
-    const sourceSelect = Array.from(selects).find(s =>
-      Array.from(s.options).some(o => o.value === 'preset'),
-    );
-    expect(sourceSelect).toBeDefined();
-    expect((sourceSelect as HTMLSelectElement).value).toBe('preset');
+    expect(el.textContent).toContain('Not set');
   });
 });
