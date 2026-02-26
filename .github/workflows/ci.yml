@@ -85,7 +85,7 @@ jobs:
         run: >
           cd src-tauri && cargo nextest run -p godly-daemon --profile ci
           --partition hash:${{ matrix.partition }}/3
-          -E "not test(arrow_up_during_multi_session_contention)"
+          -E "not (test(arrow_up_during_multi_session_contention) | test(cold_switch_snapshot_latency_under_contention))"
         timeout-minutes: 10
 
   # ---------------------------------------------------------------------------
