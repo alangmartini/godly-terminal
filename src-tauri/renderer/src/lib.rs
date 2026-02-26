@@ -36,6 +36,27 @@ pub use color::{parse_hex_color, resolve_cell_colors};
 pub use renderer::GpuRenderer;
 pub use theme::TerminalTheme;
 
+/// Expose internal construction phases for benchmarking cold-start costs.
+/// Not intended for production use — use `GpuRenderer::new()` instead.
+pub mod cold_start_phases {
+    use crate::atlas::GlyphAtlas;
+    use crate::device::GpuDevice;
+    use crate::pipeline::RenderPipeline;
+    use crate::GpuError;
+
+    pub fn create_device() -> Result<GpuDevice, GpuError> {
+        GpuDevice::new()
+    }
+
+    pub fn create_atlas(font_family: &str, font_size: f32) -> GlyphAtlas {
+        GlyphAtlas::new(font_family, font_size)
+    }
+
+    pub fn create_pipeline(device: &GpuDevice) -> RenderPipeline {
+        RenderPipeline::new(&device.device, wgpu::TextureFormat::Rgba8Unorm)
+    }
+}
+
 use std::fmt;
 
 /// Errors that can occur during GPU rendering.
