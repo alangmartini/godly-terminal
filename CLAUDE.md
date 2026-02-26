@@ -100,6 +100,39 @@ See `.claude/skills/manual-testing.md` for the full testing procedure.
 - **Stay in sync**: Rebase from master before opening a PR. If another agent merges first, rebase on top.
 - **Scope boundaries**: Each agent owns one clearly scoped task. Avoid modifying the same files as another active agent.
 
+## Task Board Protocol
+
+A global `kanban-board` MCP server tracks work across all projects. Godly Terminal has its own dedicated **board/tab** to keep its tasks organized separately from other projects.
+
+### Board access:
+- **All:** Default view showing all tasks across all projects
+- **godly-terminal:** Tasks specific to Godly Terminal development (this is your project board)
+- Other projects have their own boards (Typesense, personal-assistant, etc.)
+
+### Task naming convention:
+- **Format:** `Action - <key-identifier>`
+- **No project prefix** (board is already project-scoped for godly-terminal tasks)
+- **Action verb** matches work type: `Fix`, `Add`, `Refactor`, `Investigate`, etc.
+- **Key identifier:** The specific issue (component, feature name, issue #, etc.)
+- **Examples:**
+  - `Fix Terminal scrolling - missing text`
+  - `Add binary framing - IPC messages`
+  - `Investigate memory leak - Arc clones`
+  - `Refactor GPU renderer - Phase 3+4`
+
+### When starting work on a feature or bug fix:
+1. Use `mcp__kanban-board__create_task` with `board_id="godly-terminal"`
+2. Follow the naming convention above (status: `todo`)
+3. Immediately use `mcp__kanban-board__move_task` to move it to `in_progress`
+
+### During implementation:
+- If you discover sub-tasks, create them with the same `board_id="godly-terminal"`
+- If you hit a blocker, use `mcp__kanban-board__update_task` to add blocker details to the description
+
+### When implementation is done:
+- Use `mcp__kanban-board__move_task` to move the task to `validation` (awaiting review)
+- Use `mcp__kanban-board__move_task` to move to `done` after validation passes
+
 ## Output Hygiene
 
 - **Run targeted tests first**: `cargo nextest run -p godly-daemon` before the full suite.
