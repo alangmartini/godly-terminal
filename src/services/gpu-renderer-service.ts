@@ -29,7 +29,8 @@ class GpuRendererService {
    * Format: [width: u32 LE][height: u32 LE][rgba_pixels...]
    */
   async renderTerminalRaw(terminalId: string): Promise<ArrayBuffer> {
-    const url = `http://gpuframe.localhost/render/${terminalId}?format=raw`;
+    const dpr = window.devicePixelRatio || 1;
+    const url = `http://gpuframe.localhost/render/${terminalId}?format=raw&dpr=${dpr}`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`GPU render failed: ${response.status} ${response.statusText}`);
