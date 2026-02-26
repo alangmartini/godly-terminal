@@ -144,6 +144,15 @@ describe('layout tree state management', () => {
       expect(tree).not.toBeNull();
       expect(terminalIds(tree!)).toEqual(['t1', 't2']);
     });
+
+    it('should remove the entire tree when called without terminalId', () => {
+      addTerminals(['t1', 't2']);
+      store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
+
+      store.unsplitTerminal('ws-1');
+
+      expect(store.getLayoutTree('ws-1')).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -359,7 +368,7 @@ describe('layout tree state management', () => {
   });
 
   // -------------------------------------------------------------------------
-  // updateTreeRatio
+  // updateTreeRatio and updateLayoutTreeRatio
   // -------------------------------------------------------------------------
 
   describe('updateTreeRatio', () => {
@@ -425,6 +434,39 @@ describe('layout tree state management', () => {
       if (tree!.type === 'split') {
         expect(tree!.ratio).toBe(0.5); // unchanged
       }
+    });
+  });
+
+  describe('updateLayoutTreeRatio', () => {
+    it('should delegate to updateTreeRatio', () => {
+      addTerminals(['t1', 't2']);
+      store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
+
+      store.updateLayoutTreeRatio('ws-1', [], 0.7);
+
+      const tree = store.getLayoutTree('ws-1');
+      if (tree!.type === 'split') {
+        expect(tree!.ratio).toBe(0.7);
+      }
+    });
+
+    it('should update ratio at nested level', () => {
+      addTerminals(['t1', 't2', 't3']);
+      store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
+      store.splitTerminalAt('ws-1', 't2', 't3', 'vertical');
+
+      store.updateLayoutTreeRatio('ws-1', [1], 0.3);
+
+      const tree = store.getLayoutTree('ws-1');
+      if (tree!.type === 'split' && tree!.second.type === 'split') {
+        expect(tree!.second.ratio).toBe(0.3);
+        expect(tree!.ratio).toBe(0.5);
+      }
+    });
+
+    it('should no-op when workspace has no tree', () => {
+      store.updateLayoutTreeRatio('ws-1', [], 0.7);
+      expect(store.getLayoutTree('ws-1')).toBeNull();
     });
   });
 
