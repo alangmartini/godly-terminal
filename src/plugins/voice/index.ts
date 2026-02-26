@@ -1,3 +1,4 @@
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { GodlyPlugin, PluginContext } from '../types';
 import {
   whisperGetStatus,
@@ -5,11 +6,22 @@ import {
   whisperSetConfig,
   whisperLoadModel,
   whisperListModels,
+  whisperDownloadModel,
+  whisperStartSidecar,
   whisperStartRecording,
   whisperStopRecording,
   type WhisperStatus,
 } from './whisper-service';
 import { WHISPER_MODEL_PRESETS } from './model-presets';
+
+const DEFAULT_MODEL = WHISPER_MODEL_PRESETS.find(p => p.recommended)?.fileName ?? 'ggml-base.bin';
+
+interface DownloadProgress {
+  model: string;
+  downloaded: number;
+  total: number;
+  phase: 'downloading' | 'complete';
+}
 
 export class VoiceToTextPlugin implements GodlyPlugin {
   id = 'voice-to-text';
@@ -18,22 +30,20 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   version = '1.0.0';
 
   private status: WhisperStatus | null = null;
+  private progressUnlisten: UnlistenFn | null = null;
+  private statusElement: HTMLElement | null = null;
 
   async init(_ctx: PluginContext): Promise<void> {
     try {
       this.status = await whisperGetStatus();
     } catch {
-      // Sidecar not running yet — that's ok
       this.status = null;
     }
   }
 
   async enable(): Promise<void> {
-    try {
-      this.status = await whisperGetStatus();
-    } catch {
-      // Will retry on first use
-    }
+    // Fire-and-forget auto-setup so we don't block plugin init
+    this.autoSetup();
   }
 
   async disable(): Promise<void> {
@@ -44,10 +54,98 @@ export class VoiceToTextPlugin implements GodlyPlugin {
         console.warn('[VoiceToText] Failed to stop recording on disable:', e);
       }
     }
+    if (this.progressUnlisten) {
+      this.progressUnlisten();
+      this.progressUnlisten = null;
+    }
   }
 
   destroy(): void {
-    // Nothing to clean up
+    if (this.progressUnlisten) {
+      this.progressUnlisten();
+      this.progressUnlisten = null;
+    }
+  }
+
+  /**
+   * Auto-setup: download default model if needed → start sidecar → load model.
+   * Runs in background on enable(). Updates status element if settings panel is open.
+   */
+  private async autoSetup(): Promise<void> {
+    try {
+      // 1. Check if any model is downloaded
+      let models: string[] = [];
+      try {
+        models = await whisperListModels();
+      } catch {
+        // whisper state not initialized yet, skip
+      }
+
+      // 2. Download default model if none exist
+      if (models.length === 0) {
+        this.setStatusText(`Downloading ${DEFAULT_MODEL}...`);
+        try {
+          await whisperDownloadModel(DEFAULT_MODEL);
+          models = [DEFAULT_MODEL];
+        } catch (e) {
+          this.setStatusText(`Download failed: ${e}`);
+          console.warn('[VoiceToText] Auto-download failed:', e);
+          return;
+        }
+      }
+
+      // 3. Start sidecar if not running
+      try {
+        this.status = await whisperGetStatus();
+      } catch {
+        this.status = null;
+      }
+
+      if (!this.status?.sidecarRunning) {
+        this.setStatusText('Starting sidecar...');
+        try {
+          await whisperStartSidecar();
+        } catch (e) {
+          // Sidecar binary may not exist yet — not fatal
+          this.setStatusText('Model downloaded — sidecar not available');
+          console.warn('[VoiceToText] Sidecar start failed:', e);
+          return;
+        }
+      }
+
+      // 4. Load the first available model
+      const modelToLoad = models[0];
+      this.setStatusText(`Loading ${modelToLoad}...`);
+      try {
+        const config = await whisperGetConfig();
+        await whisperLoadModel(
+          modelToLoad,
+          config.useGpu,
+          config.gpuDevice,
+          config.language,
+        );
+      } catch (e) {
+        this.setStatusText('Model downloaded — load failed');
+        console.warn('[VoiceToText] Model load failed:', e);
+        return;
+      }
+
+      // 5. Refresh status
+      try {
+        this.status = await whisperGetStatus();
+        this.updateStatusEl();
+      } catch {
+        // ignore
+      }
+    } catch (e) {
+      console.warn('[VoiceToText] Auto-setup failed:', e);
+    }
+  }
+
+  private setStatusText(text: string): void {
+    if (this.statusElement) {
+      this.statusElement.textContent = text;
+    }
   }
 
   renderSettings(): HTMLElement {
@@ -59,8 +157,26 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     const statusValue = document.createElement('span');
     statusValue.className = 'shortcut-keys';
     statusValue.textContent = 'Checking...';
+    this.statusElement = statusValue;
     statusRow.appendChild(statusValue);
     container.appendChild(statusRow);
+
+    // ── Download progress bar ──
+    const progressRow = document.createElement('div');
+    progressRow.style.cssText = 'padding: 0 12px; display: none;';
+    const progressBar = document.createElement('div');
+    progressBar.style.cssText = 'height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;';
+    const progressFill = document.createElement('div');
+    progressFill.style.cssText = 'height: 100%; width: 0%; background: var(--accent); transition: width 0.1s;';
+    progressBar.appendChild(progressFill);
+    const progressLabel = document.createElement('div');
+    progressLabel.style.cssText = 'font-size: 10px; color: var(--text-secondary); margin-top: 2px;';
+    progressRow.appendChild(progressBar);
+    progressRow.appendChild(progressLabel);
+    container.appendChild(progressRow);
+
+    // Listen for download progress events
+    this.listenForProgress(progressRow, progressFill, progressLabel, statusValue);
 
     // ── Section A: Model ──
     const modelSection = document.createElement('div');
@@ -102,8 +218,31 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     availableRow.style.cssText = 'padding: 4px 12px; font-size: 10px; color: var(--text-secondary);';
     modelSection.appendChild(availableRow);
 
-    // Load model button
-    const loadRow = this.createRow('');
+    // Download + Load buttons
+    const btnRow = this.createRow('');
+    btnRow.style.gap = '8px';
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'dialog-btn dialog-btn-secondary';
+    downloadBtn.textContent = 'Download';
+    downloadBtn.style.fontSize = '11px';
+    downloadBtn.onclick = async () => {
+      downloadBtn.disabled = true;
+      downloadBtn.textContent = 'Downloading...';
+      try {
+        await whisperDownloadModel(modelSelect.value);
+        downloadBtn.textContent = 'Downloaded!';
+        // Refresh available models list
+        const models = await whisperListModels();
+        availableRow.textContent = models.length > 0 ? `Downloaded: ${models.join(', ')}` : '';
+        setTimeout(() => { downloadBtn.textContent = 'Download'; downloadBtn.disabled = false; }, 2000);
+      } catch (e) {
+        downloadBtn.textContent = 'Error';
+        console.warn('[VoiceToText] Download failed:', e);
+        setTimeout(() => { downloadBtn.textContent = 'Download'; downloadBtn.disabled = false; }, 2000);
+      }
+    };
+
     const loadBtn = document.createElement('button');
     loadBtn.className = 'dialog-btn dialog-btn-primary';
     loadBtn.textContent = 'Load Model';
@@ -121,7 +260,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
           langSelect?.value ?? '',
         );
         this.status = await whisperGetStatus();
-        this.updateStatusDisplay(statusValue);
+        this.updateStatusEl();
         loadBtn.textContent = 'Loaded!';
         setTimeout(() => { loadBtn.textContent = 'Load Model'; loadBtn.disabled = false; }, 2000);
       } catch (e) {
@@ -130,8 +269,10 @@ export class VoiceToTextPlugin implements GodlyPlugin {
         setTimeout(() => { loadBtn.textContent = 'Load Model'; loadBtn.disabled = false; }, 2000);
       }
     };
-    loadRow.appendChild(loadBtn);
-    modelSection.appendChild(loadRow);
+
+    btnRow.appendChild(downloadBtn);
+    btnRow.appendChild(loadBtn);
+    modelSection.appendChild(btnRow);
 
     container.appendChild(modelSection);
 
@@ -276,7 +417,6 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     return container;
   }
 
-  // ── Helper: create a shortcut-row with a label ──
   private createRow(label: string): HTMLElement {
     const row = document.createElement('div');
     row.className = 'shortcut-row';
@@ -287,19 +427,53 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     return row;
   }
 
-  private updateStatusDisplay(statusValue: HTMLElement): void {
+  private updateStatusEl(): void {
+    if (!this.statusElement) return;
     if (!this.status) {
-      statusValue.textContent = 'Unable to connect';
+      this.statusElement.textContent = 'Unable to connect';
       return;
     }
     if (!this.status.sidecarRunning) {
-      statusValue.textContent = 'Sidecar not running';
+      this.statusElement.textContent = 'Sidecar not running';
       return;
     }
     if (this.status.modelLoaded) {
-      statusValue.textContent = `Connected — ${this.status.modelName ?? 'model loaded'}`;
+      this.statusElement.textContent = `Connected — ${this.status.modelName ?? 'model loaded'}`;
     } else {
-      statusValue.textContent = 'Connected — no model loaded';
+      this.statusElement.textContent = 'Connected — no model loaded';
+    }
+  }
+
+  private async listenForProgress(
+    progressRow: HTMLElement,
+    progressFill: HTMLElement,
+    progressLabel: HTMLElement,
+    statusValue: HTMLElement,
+  ): Promise<void> {
+    try {
+      this.progressUnlisten = await listen<DownloadProgress>('whisper-download-progress', (event) => {
+        const { model, downloaded, total, phase } = event.payload;
+        if (phase === 'complete') {
+          progressRow.style.display = 'none';
+          statusValue.textContent = `${model} downloaded`;
+          return;
+        }
+        progressRow.style.display = '';
+        if (total > 0) {
+          const pct = Math.round((downloaded / total) * 100);
+          progressFill.style.width = `${pct}%`;
+          const dlMB = (downloaded / 1024 / 1024).toFixed(1);
+          const totalMB = (total / 1024 / 1024).toFixed(0);
+          progressLabel.textContent = `${model}: ${dlMB} / ${totalMB} MB (${pct}%)`;
+          statusValue.textContent = `Downloading ${model}... ${pct}%`;
+        } else {
+          const dlMB = (downloaded / 1024 / 1024).toFixed(1);
+          progressLabel.textContent = `${model}: ${dlMB} MB`;
+          statusValue.textContent = `Downloading ${model}...`;
+        }
+      });
+    } catch {
+      // listen not available (e.g. in tests)
     }
   }
 
@@ -320,7 +494,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
       ]);
 
       this.status = status;
-      this.updateStatusDisplay(statusValue);
+      this.updateStatusEl();
 
       // Update config fields
       if (config.modelName) modelSelect.value = config.modelName;

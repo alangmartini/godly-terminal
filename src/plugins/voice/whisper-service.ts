@@ -46,6 +46,10 @@ export async function whisperStartSidecar(): Promise<string> {
   return invoke<string>('whisper_start_sidecar');
 }
 
+export async function whisperDownloadModel(modelName: string): Promise<void> {
+  return invoke<void>('whisper_download_model', { modelName });
+}
+
 export async function whisperGetConfig(): Promise<WhisperConfig> {
   return invoke<WhisperConfig>('whisper_get_config');
 }
