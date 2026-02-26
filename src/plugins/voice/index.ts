@@ -206,6 +206,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
           language: langSelect.value,
           useGpu: gpuCheckbox.checked,
           gpuDevice: parseInt(gpuDeviceInput.value) || 0,
+          microphoneDeviceId: null,
         });
       } catch {
         // Config save failed silently
