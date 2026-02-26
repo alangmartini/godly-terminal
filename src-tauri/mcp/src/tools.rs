@@ -553,6 +553,111 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "split_terminal",
+                "description": "Split an existing terminal pane to add another terminal next to it. Supports nested splits — you can split a pane that is already part of a split layout. Creates a binary tree of panes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "target_terminal_id": {
+                            "type": "string",
+                            "description": "ID of the existing terminal pane to split"
+                        },
+                        "new_terminal_id": {
+                            "type": "string",
+                            "description": "ID of the new terminal to add next to the target"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["horizontal", "vertical"],
+                            "default": "horizontal",
+                            "description": "Split direction: 'horizontal' for left/right, 'vertical' for top/bottom"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Split ratio (0.15–0.85). Default: 0.5 (equal split)"
+                        }
+                    },
+                    "required": ["workspace_id", "target_terminal_id", "new_terminal_id"]
+                }
+            },
+            {
+                "name": "unsplit_terminal",
+                "description": "Remove a terminal pane from the split layout. The sibling pane expands to fill the space. If only one pane remains, the layout returns to single-pane mode.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to remove from the layout"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_id"]
+                }
+            },
+            {
+                "name": "get_layout_tree",
+                "description": "Get the full split layout tree for a workspace. Returns a recursive tree structure where each node is either a Leaf (containing a terminal_id) or a Split (containing direction, ratio, and two children). Returns null if the workspace has no split layout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to query"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "swap_panes",
+                "description": "Swap the positions of two terminal panes in the split layout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_id_a": {
+                            "type": "string",
+                            "description": "ID of the first terminal to swap"
+                        },
+                        "terminal_id_b": {
+                            "type": "string",
+                            "description": "ID of the second terminal to swap"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_id_a", "terminal_id_b"]
+                }
+            },
+            {
+                "name": "zoom_pane",
+                "description": "Zoom (maximize) a terminal pane to fill the workspace, or unzoom by passing null. The layout tree is preserved and restored when unzooming.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_id": {
+                            "type": ["string", "null"],
+                            "description": "ID of the terminal to zoom, or null to unzoom"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
                 "name": "execute_js",
                 "description": "Execute JavaScript in the Godly Terminal webview and return the result. The script runs in the main webview context with access to the DOM, store, and all frontend APIs. The return value is JSON-stringified. Use for DOM inspection, state queries, and UI manipulation.\n\nExamples:\n- Query store state: `return window.__STORE__.getState().splitViews`\n- Get element rect: `return document.querySelector('.split-divider')?.getBoundingClientRect()`\n- Check CSS classes: `return document.querySelector('.terminal-pane')?.className`",
                 "inputSchema": {
@@ -987,7 +1092,94 @@ pub fn call_tool(
 
         "get_split_state" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
-            McpRequest::GetSplitState { workspace_id }
+
+            // Send both legacy split state and layout tree requests, merge results
+            let split_req = McpRequest::GetSplitState { workspace_id: workspace_id.clone() };
+            let tree_req = McpRequest::GetLayoutTree { workspace_id };
+
+            let split_resp = client.send_request(&split_req)?;
+            let tree_resp = client.send_request(&tree_req)?;
+
+            let split_json = match split_resp {
+                McpResponse::SplitState {
+                    workspace_id: _,
+                    left_terminal_id,
+                    right_terminal_id,
+                    direction,
+                    ratio,
+                } => json!({
+                    "left_terminal_id": left_terminal_id,
+                    "right_terminal_id": right_terminal_id,
+                    "direction": direction,
+                    "ratio": ratio,
+                }),
+                McpResponse::NoSplit => serde_json::Value::Null,
+                McpResponse::Error { message } => return Err(message),
+                _ => serde_json::Value::Null,
+            };
+
+            let tree_json = match tree_resp {
+                McpResponse::LayoutTree(tree) => tree
+                    .map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null))
+                    .unwrap_or(serde_json::Value::Null),
+                _ => serde_json::Value::Null,
+            };
+
+            return Ok(json!({
+                "split": split_json,
+                "layout_tree": tree_json,
+            }));
+        }
+
+        "split_terminal" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let target_terminal_id = args.get("target_terminal_id").and_then(|v| v.as_str()).ok_or("Missing target_terminal_id")?.to_string();
+            let new_terminal_id = args.get("new_terminal_id").and_then(|v| v.as_str()).ok_or("Missing new_terminal_id")?.to_string();
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("horizontal").to_string();
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            McpRequest::SplitTerminal {
+                workspace_id,
+                target_terminal_id,
+                new_terminal_id,
+                direction,
+                ratio,
+            }
+        }
+
+        "unsplit_terminal" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            McpRequest::UnsplitTerminal {
+                workspace_id,
+                terminal_id,
+            }
+        }
+
+        "get_layout_tree" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::GetLayoutTree { workspace_id }
+        }
+
+        "swap_panes" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_id_a = args.get("terminal_id_a").and_then(|v| v.as_str()).ok_or("Missing terminal_id_a")?.to_string();
+            let terminal_id_b = args.get("terminal_id_b").and_then(|v| v.as_str()).ok_or("Missing terminal_id_b")?.to_string();
+            McpRequest::SwapPanes {
+                workspace_id,
+                terminal_id_a,
+                terminal_id_b,
+            }
+        }
+
+        "zoom_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_id = args.get("terminal_id").and_then(|v| {
+                if v.is_null() { None } else { v.as_str().map(String::from) }
+            });
+            McpRequest::ZoomPane {
+                workspace_id,
+                terminal_id,
+            }
         }
 
         "execute_js" => {
@@ -1129,6 +1321,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "ratio": ratio,
         })),
         McpResponse::NoSplit => Ok(json!({ "split": null })),
+        McpResponse::LayoutTree(tree) => Ok(json!({ "layout_tree": tree })),
         McpResponse::JsResult { result, error } => {
             if let Some(err) = error {
                 Err(err)
@@ -1140,9 +1333,6 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         }
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
-        })),
-        McpResponse::LayoutTree(tree) => Ok(json!({
-            "layout_tree": tree,
         })),
     }
 }
