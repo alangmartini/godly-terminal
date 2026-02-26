@@ -164,18 +164,18 @@ describe('custom keybinding integration', () => {
   });
 
   it('isTerminalControlKey respects custom bindings from the store', () => {
-    // Rebind terminal.interrupt from Ctrl+C to Ctrl+Shift+X
+    // Rebind terminal.interrupt from Ctrl+C to Ctrl+Shift+J
     keybindingStore.setBinding('terminal.interrupt', {
       ctrlKey: true,
       shiftKey: true,
       altKey: false,
-      key: 'x',
+      key: 'j',
     });
 
     // Old binding should no longer be a terminal control key
     expect(isTerminalControlKey(keydown('c', { ctrlKey: true }))).toBe(false);
     // New binding should be a terminal control key
-    expect(isTerminalControlKey(keydown('X', { ctrlKey: true, shiftKey: true }))).toBe(true);
+    expect(isTerminalControlKey(keydown('J', { ctrlKey: true, shiftKey: true }))).toBe(true);
   });
 
   it('Ctrl+, is always an app shortcut regardless of bindings', () => {
