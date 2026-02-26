@@ -8,19 +8,21 @@ import { showCopyDialog } from './CopyDialog';
 import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
-import { GpuTerminalDisplay } from './GpuTerminalDisplay';
+import { Canvas2DGridRenderer } from './Canvas2DGridRenderer';
 
 /**
- * Terminal pane with GPU rendering.
+ * Terminal pane with Canvas2D grid rendering.
  *
  * The daemon's godly-vt parser maintains the terminal grid. On each
- * `terminal-output` event:
- * - GpuTerminalDisplay requests a new frame from the Rust GPU renderer
- * - A grid snapshot is fetched for overlay metadata (scrollbar, selection)
+ * `terminal-output` event or pushed grid diff, a RichGridData snapshot
+ * is fetched/updated and rendered directly via Canvas2D fillText().
  *
- * The GPU renderer (Rust-side wgpu) paints the grid on a <canvas> via
- * putImageData(). A transparent overlay canvas (TerminalRenderer) handles
- * selection highlights, scrollbar, and URL hover underlines.
+ * Two canvases are stacked:
+ * - Bottom: Canvas2DGridRenderer paints cell backgrounds, text, and cursor
+ * - Top: TerminalRenderer overlay handles selection, scrollbar, URL hover
+ *
+ * This eliminates the GPU offscreen readback pipeline, giving native DPR
+ * scaling and ClearType font rendering at zero transfer latency.
  */
 export class TerminalPane {
   private renderer: TerminalRenderer;
@@ -34,8 +36,8 @@ export class TerminalPane {
   private unsubscribeFontSize: (() => void) | null = null;
 
   // GPU renderer display — always active. Handles grid painting.
-  // The TerminalRenderer overlay handles selection, scrollbar, URL hover.
-  private gpuDisplay: GpuTerminalDisplay | null = null;
+  // Canvas2D grid renderer — paints cell backgrounds, text, and cursor.
+  private gridRenderer: Canvas2DGridRenderer | null = null;
 
   // Debounce grid snapshot requests: on terminal-output we schedule a snapshot
   // fetch via setTimeout(SNAPSHOT_MIN_INTERVAL_MS). Multiple output events
@@ -98,13 +100,23 @@ export class TerminalPane {
     this.renderer = new TerminalRenderer();
 
     this.unsubscribeTheme = themeStore.subscribe(() => {
-      this.renderer.setTheme(themeStore.getTerminalTheme());
+      const theme = themeStore.getTerminalTheme();
+      this.renderer.setTheme(theme);
+      if (this.gridRenderer) {
+        this.gridRenderer.setTheme(theme);
+        if (this.cachedSnapshot) {
+          this.gridRenderer.render(this.cachedSnapshot);
+        }
+      }
     });
 
-    // Propagate font size changes to the renderer
+    // Propagate font size changes to both renderers
     this.unsubscribeFontSize = terminalSettingsStore.subscribe(() => {
       const newSize = terminalSettingsStore.getFontSize();
       this.renderer.setFontSize(newSize);
+      if (this.gridRenderer) {
+        this.gridRenderer.setFontSize(newSize);
+      }
       this.fit();
       // Fetch a fresh snapshot so the daemon's re-flowed grid fills the new
       // dimensions. Without this, the old snapshot (with fewer/more rows) is
@@ -154,9 +166,16 @@ export class TerminalPane {
   mount(parent: HTMLElement) {
     parent.appendChild(this.container);
 
-    // GPU display renders the grid. Must be added first so the overlay
-    // canvas (for selection, scrollbar, URL hover) sits on top.
-    this.gpuDisplay = new GpuTerminalDisplay(this.container, this.terminalId);
+    // Grid renderer paints cell backgrounds, text, and cursor. Must be
+    // added first so the overlay canvas (selection, scrollbar, URL hover)
+    // sits on top via DOM stacking order.
+    this.gridRenderer = new Canvas2DGridRenderer(this.container);
+    this.gridRenderer.setOnRepaintNeeded(() => {
+      // Cursor blink: re-render grid with current snapshot
+      if (this.cachedSnapshot) {
+        this.gridRenderer!.render(this.cachedSnapshot);
+      }
+    });
 
     // The TerminalRenderer canvas serves as a transparent interaction overlay
     // for selection highlights, scrollbar, and URL hover underline.
@@ -273,11 +292,6 @@ export class TerminalPane {
           this.snapToBottom();
           return;
         }
-        // GPU renderer paints the grid; request a new frame.
-        // Still apply the diff so the overlay has scrollbar/title metadata.
-        if (this.gpuDisplay) {
-          this.gpuDisplay.requestFrame();
-        }
         this.applyPushedDiff(diff);
       }
     );
@@ -298,10 +312,6 @@ export class TerminalPane {
           this.snapToBottom();
           return;
         }
-        // GPU renderer paints the grid; also fetch a snapshot for overlay metadata.
-        if (this.gpuDisplay) {
-          this.gpuDisplay.requestFrame();
-        }
         this.scheduleSnapshotFetch();
       }
     );
@@ -317,10 +327,6 @@ export class TerminalPane {
         this.snapToBottom();
         return;
       }
-      // GPU renderer paints the grid; also fetch a snapshot for overlay metadata.
-      if (this.gpuDisplay) {
-        this.gpuDisplay.requestFrame();
-      }
       this.scheduleSnapshotFetch();
     });
 
@@ -331,6 +337,7 @@ export class TerminalPane {
     // preventing a zoom flash on the initially active terminal after reopen.
     if (this.container.offsetWidth && this.container.offsetHeight) {
       this.renderer.updateSize();
+      this.gridRenderer?.updateSize();
     }
 
     // Initial fit + snapshot
@@ -620,7 +627,7 @@ export class TerminalPane {
       this.scrollbackOffset = snapshot.scrollback_offset; // daemon may clamp
       this.isUserScrolled = this.scrollbackOffset > 0;
       this.totalScrollback = snapshot.total_scrollback;
-      this.renderer.render(snapshot);
+      this.renderSnapshot(snapshot);
     } catch (e) {
       console.debug('Scroll snapshot failed:', e);
     }
@@ -764,7 +771,7 @@ export class TerminalPane {
             this.scrollbackOffset = diff.scrollback_offset;
           }
           this.totalScrollback = diff.total_scrollback;
-          this.renderer.render(this.cachedSnapshot);
+          this.renderSnapshot(this.cachedSnapshot);
           return;
         } catch {
           // Diff not supported by daemon — fall back to full snapshots permanently
@@ -806,7 +813,7 @@ export class TerminalPane {
         this.scrollbackOffset = snapshot.scrollback_offset;
       }
       this.totalScrollback = snapshot.total_scrollback;
-      this.renderer.render(snapshot);
+      this.renderSnapshot(snapshot);
     } catch (error) {
       console.debug('Full grid snapshot fetch failed:', error);
     }
@@ -879,6 +886,18 @@ export class TerminalPane {
   }
 
   /**
+   * Render a snapshot to both the grid canvas and the overlay canvas.
+   * Grid canvas: cell backgrounds, text, cursor (Canvas2D fillText)
+   * Overlay canvas: selection highlights, scrollbar, URL hover
+   */
+  private renderSnapshot(snapshot: RichGridData): void {
+    if (this.gridRenderer) {
+      this.gridRenderer.render(snapshot);
+    }
+    this.renderer.render(snapshot);
+  }
+
+  /**
    * Schedule a render via requestAnimationFrame. Multiple calls within the
    * same frame collapse into a single render.
    */
@@ -887,7 +906,7 @@ export class TerminalPane {
     this.renderRAF = requestAnimationFrame(() => {
       this.renderRAF = null;
       if (this.cachedSnapshot) {
-        this.renderer.render(this.cachedSnapshot);
+        this.renderSnapshot(this.cachedSnapshot);
       }
     });
   }
@@ -942,6 +961,7 @@ export class TerminalPane {
         return;
       }
       this.renderer.updateSize();
+      this.gridRenderer?.updateSize();
       const { rows, cols } = this.renderer.getGridSize();
       if (rows > 0 && cols > 0) {
         // Resize changes grid dimensions — invalidate cache
@@ -979,10 +999,11 @@ export class TerminalPane {
       cancelAnimationFrame(this.renderRAF);
       this.renderRAF = null;
     }
-    // Release canvas GPU/memory resources for this hidden terminal.
+    // Release canvas memory for this hidden terminal.
     // Each canvas at 1920x1080 @ 2x DPR holds ~33MB in backing store.
     // With 20 hidden terminals, releasing canvas resources saves ~600MB+ of memory.
     this.renderer.releaseCanvasResources();
+    this.gridRenderer?.releaseResources();
     this.cachedSnapshot = null;
   }
 
@@ -1001,6 +1022,7 @@ export class TerminalPane {
     this.cachedSnapshot = null;
     // Re-allocate canvas resources released by pause().
     this.renderer.restoreCanvasResources();
+    this.gridRenderer?.restoreResources();
     // If the circuit breaker is open for this session, trigger an immediate
     // probe before reconnecting. This handles edge cases where the stream
     // was not fully torn down yet.
@@ -1012,14 +1034,8 @@ export class TerminalPane {
         this.snapToBottom();
         return;
       }
-      if (this.gpuDisplay) {
-        this.gpuDisplay.requestFrame();
-      }
       this.scheduleSnapshotFetch();
     });
-    if (this.gpuDisplay) {
-      this.gpuDisplay.requestFrame();
-    }
     this.fetchAndRenderSnapshot();
   }
 
@@ -1036,6 +1052,7 @@ export class TerminalPane {
       // from stretching the stale bitmap (300×150 default) for one frame,
       // which causes a "zoomed in" flash on tab switch / reopen.
       this.renderer.updateSize();
+      this.gridRenderer?.updateSize();
       requestAnimationFrame(() => {
         this.fit();
         if (!this.isUserScrolled) {
@@ -1066,6 +1083,7 @@ export class TerminalPane {
       this.resume();
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
       this.renderer.updateSize();
+      this.gridRenderer?.updateSize();
       requestAnimationFrame(() => {
         this.fit();
         if (!this.isUserScrolled) {
@@ -1129,7 +1147,7 @@ export class TerminalPane {
     }
     this.unsubscribeTheme?.();
     this.unsubscribeFontSize?.();
-    this.gpuDisplay?.dispose();
+    this.gridRenderer?.dispose();
     this.renderer.dispose();
     this.container.remove();
   }

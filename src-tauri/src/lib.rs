@@ -325,6 +325,14 @@ fn handle_gpuframe_request(
     let (path, query) = uri.split_once('?').unwrap_or((uri, ""));
     let use_raw = query.contains("format=raw");
 
+    // Parse DPI scale factor from query (e.g. &dpr=1.5)
+    let dpr = query
+        .split('&')
+        .find_map(|param| param.strip_prefix("dpr="))
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(1.0)
+        .clamp(0.5, 4.0);
+
     let session_id = match path.strip_prefix("/render/") {
         Some(id) if !id.is_empty() => id,
         _ => {
@@ -336,7 +344,7 @@ fn handle_gpuframe_request(
         }
     };
 
-    if !gpu.is_available() {
+    if !gpu.is_available_with_dpr(dpr) {
         return tauri::http::Response::builder()
             .status(503)
             .header("Access-Control-Allow-Origin", "*")
@@ -380,7 +388,7 @@ fn handle_gpuframe_request(
 
     if use_raw {
         // Raw RGBA format: [width: u32 LE][height: u32 LE][rgba_pixels...]
-        match gpu.render_terminal_raw(&grid) {
+        match gpu.render_terminal_raw(&grid, dpr) {
             Ok(raw_bytes) => tauri::http::Response::builder()
                 .status(200)
                 .header("Content-Type", "application/octet-stream")
@@ -398,7 +406,7 @@ fn handle_gpuframe_request(
         }
     } else {
         // PNG format (backward compatible)
-        match gpu.render_terminal_png(&grid) {
+        match gpu.render_terminal_png(&grid, dpr) {
             Ok(png_bytes) => tauri::http::Response::builder()
                 .status(200)
                 .header("Content-Type", "image/png")
