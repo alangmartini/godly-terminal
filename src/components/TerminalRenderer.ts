@@ -534,9 +534,13 @@ export class TerminalRenderer {
     const dpr = this.devicePixelRatio;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Selection highlight
+    // Selection highlight — semi-transparent so grid text shows through.
+    // Bug #374: the overlay canvas is separate from the grid canvas, so an
+    // opaque fill completely hides the text underneath.
     const normalizedSel = this.selection.active ? this.normalizeSelection(this.selection) : null;
     if (normalizedSel) {
+      ctx.save();
+      ctx.globalAlpha = 0.6;
       ctx.fillStyle = this.theme.selectionBackground;
       for (let row = normalizedSel.startRow; row <= normalizedSel.endRow; row++) {
         if (row < 0 || row >= snap.dimensions.rows) continue;
@@ -562,6 +566,7 @@ export class TerminalRenderer {
         const w = (endCol - startCol) * this.cellWidth;
         ctx.fillRect(x, y, w, this.cellHeight);
       }
+      ctx.restore();
     }
 
     // Scrollbar
