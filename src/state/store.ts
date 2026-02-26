@@ -327,82 +327,33 @@ class Store {
           return;
         }
 
-        // Terminal is NOT in the tree — replace the active pane in the tree
-        const activeId = this.state.activeTerminalId;
-        if (activeId && containsTerminal(tree, activeId)) {
-          const newTree = replaceLeaf(tree, activeId, { type: 'leaf', terminal_id: id });
-          if (newTree) {
-            const zoomedPanes = { ...this.state.zoomedPanes };
-            if (zoomedPanes[wsId]) {
-              delete zoomedPanes[wsId];
-            }
-            this.setState({
-              activeTerminalId: id,
-              layoutTrees: { ...this.state.layoutTrees, [wsId]: newTree },
-              splitViews: { ...this.state.splitViews, ...this.treeToSplitViews(wsId, newTree) },
-              zoomedPanes,
-            });
-            invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
-            this.enforceSplitAdjacency(wsId);
-            this.syncSessionPauseState();
-            return;
-          }
-        }
-
-        // Active terminal isn't in the tree either — replace second child's first leaf
-        const ids = terminalIds(tree);
-        if (ids.length > 0) {
-          // Replace the last leaf (rightmost/bottommost)
-          const lastId = ids[ids.length - 1];
-          const newTree = replaceLeaf(tree, lastId, { type: 'leaf', terminal_id: id });
-          if (newTree) {
-            const zoomedPanes = { ...this.state.zoomedPanes };
-            if (zoomedPanes[wsId]) {
-              delete zoomedPanes[wsId];
-            }
-            this.setState({
-              activeTerminalId: id,
-              layoutTrees: { ...this.state.layoutTrees, [wsId]: newTree },
-              splitViews: { ...this.state.splitViews, ...this.treeToSplitViews(wsId, newTree) },
-              zoomedPanes,
-            });
-            invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
-            this.enforceSplitAdjacency(wsId);
-            this.syncSessionPauseState();
-            return;
-          }
-        }
-      }
-
-      // Legacy: handle splitViews without a layout tree (shouldn't happen normally)
-      const split = this.state.splitViews[wsId];
-      if (split && id !== split.leftTerminalId && id !== split.rightTerminalId) {
-        const activeId = this.state.activeTerminalId;
-        let newLeft = split.leftTerminalId;
-        let newRight = split.rightTerminalId;
-
-        if (activeId === split.leftTerminalId) {
-          newLeft = id;
-        } else if (activeId === split.rightTerminalId) {
-          newRight = id;
-        } else {
-          newRight = id;
-        }
-
-        const updatedSplit = { ...split, leftTerminalId: newLeft, rightTerminalId: newRight };
+        // Terminal is NOT in the tree — clear the tree and show single-pane mode
+        const { [wsId]: _tree, ...remainingTrees } = this.state.layoutTrees;
+        const { [wsId]: _split, ...remainingSplits } = this.state.splitViews;
+        const { [wsId]: _zoom, ...remainingZooms } = this.state.zoomedPanes;
         this.setState({
           activeTerminalId: id,
-          splitViews: { ...this.state.splitViews, [wsId]: updatedSplit },
+          layoutTrees: remainingTrees,
+          splitViews: remainingSplits,
+          zoomedPanes: remainingZooms,
         });
-        invoke('set_split_view', {
-          workspaceId: wsId,
-          leftTerminalId: newLeft,
-          rightTerminalId: newRight,
-          direction: split.direction,
-          ratio: split.ratio,
-        }).catch(() => {});
+        invoke('clear_split_view', { workspaceId: wsId }).catch(() => {});
         invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
-        this.enforceSplitAdjacency(wsId);
+        this.syncSessionPauseState();
+        return;
+      }
+
+      // Legacy: If navigating to a terminal outside the current split → clear the split
+      // and show the new terminal in single-pane mode
+      const split = this.state.splitViews[wsId];
+      if (split && id !== split.leftTerminalId && id !== split.rightTerminalId) {
+        const { [wsId]: _, ...remainingSplits } = this.state.splitViews;
+        this.setState({
+          activeTerminalId: id,
+          splitViews: remainingSplits,
+        });
+        invoke('clear_split_view', { workspaceId: wsId }).catch(() => {});
+        invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
         this.syncSessionPauseState();
         return;
       }

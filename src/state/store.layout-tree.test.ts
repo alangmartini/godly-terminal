@@ -488,8 +488,8 @@ describe('layout tree state management', () => {
       addTerminals(['t1', 't2', 't3']);
       store.setActiveWorkspace('ws-1');
       store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
-      // setActiveTerminal('t3') will replace the active pane in the tree,
-      // so t3 will be in the tree after this call. Set it via setState instead.
+      // setActiveTerminal('t3') will clear the tree since t3 is outside it.
+      // Use setState to set active terminal without triggering tree logic.
       store.setState({ activeTerminalId: 't3' });
 
       expect(store.getFocusedPaneId('ws-1')).toBeNull();
@@ -655,20 +655,17 @@ describe('layout tree state management', () => {
       expect(store.getState().activeTerminalId).toBe('t2');
     });
 
-    it('should replace active pane when clicking a terminal outside the tree', () => {
+    it('should clear tree when clicking a terminal outside the tree', () => {
       addTerminals(['t1', 't2', 't3']);
       store.setActiveWorkspace('ws-1');
       store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
       store.setActiveTerminal('t1');
 
-      // Click t3 (not in tree) — should replace t1 (active) in the tree
+      // Click t3 (not in tree) — should clear the tree and show single-pane mode
       store.setActiveTerminal('t3');
 
-      const tree = store.getLayoutTree('ws-1');
-      expect(tree).not.toBeNull();
-      expect(terminalIds(tree!)).toContain('t3');
-      expect(terminalIds(tree!)).toContain('t2');
-      expect(terminalIds(tree!)).not.toContain('t1');
+      expect(store.getLayoutTree('ws-1')).toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t3');
     });
   });
 

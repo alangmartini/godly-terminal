@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { store, Workspace } from './store';
 
-// Navigating to a tab outside the split pair clears the split and shows
-// the new terminal in single-pane mode.
+// Bug #371: Clicking a tab while in split view keeps the split instead of
+// exiting to single view. Expected: clicking a tab outside the split pair
+// should clear the split and show the tab in normal single-pane mode.
 
-describe('split view clears on navigation to outside tab', () => {
+describe('split view should exit when clicking a tab outside the split pair', () => {
   const ws1: Workspace = {
     id: 'ws-1', name: 'WS 1', folderPath: 'C:\\ws1', tabOrder: [],
     shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
@@ -20,96 +21,78 @@ describe('split view clears on navigation to outside tab', () => {
     store.setActiveWorkspace('ws-1');
   });
 
-  it('should clear split when navigating to an outside tab then back', () => {
+  it('should clear split when clicking a tab outside the split pair', () => {
+    // Bug #371: split [t1|t2], click t3 → should exit split, show t3 in single view
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    // Navigate away clears split
+    // Click t3 (outside split pair) — should clear split
     store.setActiveTerminal('t3');
-    expect(store.getSplitView('ws-1')).toBeNull();
 
-    // Navigate back to t1 — still no split
-    store.setActiveTerminal('t1');
     expect(store.getSplitView('ws-1')).toBeNull();
+    expect(store.getState().activeTerminalId).toBe('t3');
   });
 
-  it('should clear split when navigating away then to the former right terminal', () => {
+  it('should clear split when clicking a tab while right pane is focused', () => {
+    // Bug #371: split [t1|t2] with right pane active, click t3 → exit split
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
-    store.setActiveTerminal('t1');
-
-    // Navigate to t3 clears split
-    store.setActiveTerminal('t3');
-    expect(store.getSplitView('ws-1')).toBeNull();
-
-    // Navigate to t2 — still single view
     store.setActiveTerminal('t2');
+
+    store.setActiveTerminal('t3');
+
     expect(store.getSplitView('ws-1')).toBeNull();
-    expect(store.getState().activeTerminalId).toBe('t2');
+    expect(store.getState().activeTerminalId).toBe('t3');
   });
 
-  it('should not affect switching within the split pair', () => {
+  it('should not clear split when clicking a tab already in the split pair', () => {
+    // Clicking a tab that's part of the split should just change focus, not clear
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    // Switch to t2 (in split) — split stays
     store.setActiveTerminal('t2');
+
     const split = store.getSplitView('ws-1');
     expect(split).not.toBeNull();
     expect(split!.leftTerminalId).toBe('t1');
     expect(split!.rightTerminalId).toBe('t2');
+    expect(store.getState().activeTerminalId).toBe('t2');
   });
 
-  it('should clear split after visiting multiple non-split tabs', () => {
+  it('should clear split after navigating through multiple non-split tabs', () => {
+    // Bug #371: split [t1|t2], click t3 → exit split, click t4 → still no split
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    // First outside tab clears split
     store.setActiveTerminal('t3');
     expect(store.getSplitView('ws-1')).toBeNull();
 
-    // Subsequent navigation stays in single view
     store.setActiveTerminal('t4');
     expect(store.getSplitView('ws-1')).toBeNull();
-    store.setActiveTerminal('t2');
-    expect(store.getSplitView('ws-1')).toBeNull();
+    expect(store.getState().activeTerminalId).toBe('t4');
   });
 
-  it('should clear split if one of the split terminals was closed', () => {
+  it('should allow navigating back to a former split terminal in single view', () => {
+    // Bug #371: split [t1|t2], click t3 → exit split, click t1 → still single view
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
-    store.removeTerminal('t2');
-    store.setActiveTerminal('t1');
-
-    expect(store.getSplitView('ws-1')).toBeNull();
-  });
-
-  it('should clear split if both split terminals were closed', () => {
-    store.setSplitView('ws-1', 't1', 't2', 'horizontal');
-    store.setActiveTerminal('t1');
-
-    store.removeTerminal('t1');
-    store.removeTerminal('t2');
-    store.setActiveTerminal('t4');
-
-    expect(store.getSplitView('ws-1')).toBeNull();
-  });
-
-  it('should allow creating a new split after clearing via navigation', () => {
-    store.setSplitView('ws-1', 't1', 't2', 'horizontal');
-    store.setActiveTerminal('t1');
-
-    // Navigate away clears split
     store.setActiveTerminal('t3');
     expect(store.getSplitView('ws-1')).toBeNull();
 
-    // Create a new split
-    store.setSplitView('ws-1', 't3', 't4', 'vertical');
+    // Navigate back to t1 — should stay in single view, no auto-restore of split
+    store.setActiveTerminal('t1');
+    expect(store.getSplitView('ws-1')).toBeNull();
+    expect(store.getState().activeTerminalId).toBe('t1');
+  });
 
-    const split = store.getSplitView('ws-1');
-    expect(split).not.toBeNull();
-    expect(split!.leftTerminalId).toBe('t3');
-    expect(split!.rightTerminalId).toBe('t4');
-    expect(split!.direction).toBe('vertical');
+  it('should clear vertical split when clicking an outside tab', () => {
+    // Bug #371: same behavior for vertical splits
+    store.setSplitView('ws-1', 't1', 't2', 'vertical', 0.7);
+    store.setActiveTerminal('t1');
+
+    store.setActiveTerminal('t3');
+
+    expect(store.getSplitView('ws-1')).toBeNull();
+    expect(store.getState().activeTerminalId).toBe('t3');
   });
 });
