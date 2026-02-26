@@ -25,72 +25,42 @@ describe('split tab grouping (#309)', () => {
     store.setActiveTerminal('t1');
   });
 
-  describe('tab navigation should preserve split', () => {
-    // Bug #309: Using Ctrl+Tab (nextTab) while in split mode breaks the split
-    // when the next tab is outside the split pair. The split should be
-    // maintained and advance as a group.
+  describe('tab navigation clears split when leaving the pair', () => {
+    // Navigating (Ctrl+Tab) to a tab outside the split pair clears the split,
+    // just like clicking a tab. Feature #329 may later add grouped navigation.
 
-    it('nextTab from left split terminal should not break the split', () => {
-      // Currently: t1 is active in split t1|t2. nextTab goes to t2 (still in split).
-      // Then nextTab goes to t3 which suspends the split.
-      // Expected: the split pair should advance together, so after nextTab twice
-      // the split should show t2|t3 or at minimum the split should not be suspended.
-
-      // Simulate nextTab behavior (from App.ts nextTab handler)
+    it('nextTab within split pair should preserve split', () => {
       const terminals = store.getWorkspaceTerminals('ws-1');
       const currentIndex = terminals.findIndex(t => t.id === 't1');
       const nextIndex = (currentIndex + 1) % terminals.length;
-      store.setActiveTerminal(terminals[nextIndex].id); // goes to t2
+      store.setActiveTerminal(terminals[nextIndex].id); // t1→t2 (within split)
 
-      // First nextTab: t1→t2 (within split, fine)
       expect(store.getSplitView('ws-1')).not.toBeNull();
-
-      // Second nextTab: t2→t3 (this is where the split breaks)
-      const terminals2 = store.getWorkspaceTerminals('ws-1');
-      const idx2 = terminals2.findIndex(t => t.id === 't2');
-      const nextIdx2 = (idx2 + 1) % terminals2.length;
-      store.setActiveTerminal(terminals2[nextIdx2].id); // goes to t3
-
-      // Bug: split is now suspended. It should still be active.
-      const split = store.getSplitView('ws-1');
-      expect(split).not.toBeNull();
     });
 
-    it('prevTab from right split terminal should not break the split', () => {
-      // Active is t1 in split t1|t2. Switch to t2 first.
+    it('nextTab outside split pair should clear split', () => {
+      // t1→t2 (within split), then t2→t3 (outside) clears split
       store.setActiveTerminal('t2');
       expect(store.getSplitView('ws-1')).not.toBeNull();
 
-      // prevTab from t2 goes to t1 (within split, fine)
-      store.setActiveTerminal('t1');
-      expect(store.getSplitView('ws-1')).not.toBeNull();
+      const terminals = store.getWorkspaceTerminals('ws-1');
+      const idx = terminals.findIndex(t => t.id === 't2');
+      const nextIdx = (idx + 1) % terminals.length;
+      store.setActiveTerminal(terminals[nextIdx].id); // goes to t3
 
-      // prevTab from t1 wraps to t4 — this should not break the split
+      expect(store.getSplitView('ws-1')).toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t3');
+    });
+
+    it('prevTab outside split pair should clear split', () => {
+      store.setActiveTerminal('t1');
       const terminals = store.getWorkspaceTerminals('ws-1');
       const idx = terminals.findIndex(t => t.id === 't1');
       const prevIdx = (idx - 1 + terminals.length) % terminals.length;
-      store.setActiveTerminal(terminals[prevIdx].id); // goes to t4
+      store.setActiveTerminal(terminals[prevIdx].id); // wraps to t4
 
-      const split = store.getSplitView('ws-1');
-      expect(split).not.toBeNull();
-    });
-
-    it('rapid nextTab should keep split active through full cycle', () => {
-      // Simulate pressing nextTab repeatedly through all tabs
-      // The split should never be broken during navigation
-      const terminals = store.getWorkspaceTerminals('ws-1');
-      let currentId = 't1';
-
-      for (let i = 0; i < terminals.length; i++) {
-        const idx = terminals.findIndex(t => t.id === currentId);
-        const nextIdx = (idx + 1) % terminals.length;
-        currentId = terminals[nextIdx].id;
-        store.setActiveTerminal(currentId);
-
-        // Split should remain active through the entire cycle
-        const split = store.getSplitView('ws-1');
-        expect(split).not.toBeNull();
-      }
+      expect(store.getSplitView('ws-1')).toBeNull();
+      expect(store.getState().activeTerminalId).toBe('t4');
     });
   });
 
