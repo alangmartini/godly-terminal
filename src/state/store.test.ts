@@ -719,20 +719,17 @@ describe('Store', () => {
       expect(store.getState().splitViews).toEqual({});
     });
 
-    it('should update split when navigating to a terminal outside the split', () => {
-      // Navigating to a tab outside the split replaces the active pane,
-      // keeping the split alive instead of suspending it.
+    it('should clear split when navigating to a terminal outside the split', () => {
+      // Navigating to a tab outside the split clears the split
+      // and shows the new terminal in single-pane mode.
       store.setActiveWorkspace('ws-1');
       store.setSplitView('ws-1', 't1', 't2', 'horizontal');
       store.setActiveTerminal('t1');
 
-      // Navigate to t3 which is NOT in the split — replaces active (left) pane
+      // Navigate to t3 which is NOT in the split — clears the split
       store.setActiveTerminal('t3');
 
-      const split = store.getSplitView('ws-1');
-      expect(split).not.toBeNull();
-      expect(split!.leftTerminalId).toBe('t3');
-      expect(split!.rightTerminalId).toBe('t2');
+      expect(store.getSplitView('ws-1')).toBeNull();
       expect(store.getState().activeTerminalId).toBe('t3');
     });
 
