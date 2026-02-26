@@ -365,16 +365,16 @@ pub struct QuickClaudeResult {
 /// in the background. Returns immediately with the terminal ID so the caller can
 /// fire multiple in rapid succession without waiting.
 #[tauri::command]
-pub fn quick_claude(
+pub async fn quick_claude(
     workspace_id: String,
     prompt: String,
     branch_name: Option<String>,
     skip_fetch: Option<bool>,
     no_worktree: Option<bool>,
-    state: State<Arc<AppState>>,
-    daemon: State<Arc<DaemonClient>>,
-    auto_save: State<Arc<AutoSaveManager>>,
-    llm: State<Arc<LlmState>>,
+    state: State<'_, Arc<AppState>>,
+    daemon: State<'_, Arc<DaemonClient>>,
+    auto_save: State<'_, Arc<AutoSaveManager>>,
+    llm: State<'_, Arc<LlmState>>,
     app_handle: tauri::AppHandle,
 ) -> Result<QuickClaudeResult, String> {
     let terminal_id = Uuid::new_v4().to_string();
