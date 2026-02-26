@@ -1,8 +1,11 @@
+use godly_protocol::LayoutNode;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
+#[allow(deprecated)]
 use super::models::{SessionMetadata, SplitView, Terminal, Workspace};
 
+#[allow(deprecated)]
 pub struct AppState {
     pub workspaces: RwLock<HashMap<String, Workspace>>,
     pub terminals: RwLock<HashMap<String, Terminal>>,
@@ -15,11 +18,15 @@ pub struct AppState {
     /// Per-workspace notification overrides (workspace_id → enabled)
     pub notification_overrides_workspace: RwLock<HashMap<String, bool>>,
     /// Split views per workspace (workspace_id → SplitView)
+    #[deprecated(note = "Use layout_trees instead")]
     pub split_views: RwLock<HashMap<String, SplitView>>,
+    /// Recursive layout trees per workspace (workspace_id → LayoutNode)
+    pub layout_trees: RwLock<HashMap<String, LayoutNode>>,
     /// Workspace ID for MCP-created terminals (Agent workspace in separate window)
     pub mcp_workspace_id: RwLock<Option<String>>,
 }
 
+#[allow(deprecated)]
 impl AppState {
     pub fn new() -> Self {
         Self {
@@ -31,6 +38,7 @@ impl AppState {
             notification_overrides_terminal: RwLock::new(HashMap::new()),
             notification_overrides_workspace: RwLock::new(HashMap::new()),
             split_views: RwLock::new(HashMap::new()),
+            layout_trees: RwLock::new(HashMap::new()),
             mcp_workspace_id: RwLock::new(None),
         }
     }
@@ -139,6 +147,26 @@ impl AppState {
         self.split_views.read().clone()
     }
 
+    pub fn set_layout_tree(&self, workspace_id: &str, tree: LayoutNode) {
+        let mut trees = self.layout_trees.write();
+        trees.insert(workspace_id.to_string(), tree);
+    }
+
+    pub fn get_layout_tree(&self, workspace_id: &str) -> Option<LayoutNode> {
+        let trees = self.layout_trees.read();
+        trees.get(workspace_id).cloned()
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_layout_tree(&self, workspace_id: &str) {
+        let mut trees = self.layout_trees.write();
+        trees.remove(workspace_id);
+    }
+
+    pub fn get_all_layout_trees(&self) -> HashMap<String, LayoutNode> {
+        self.layout_trees.read().clone()
+    }
+
     /// Check if notifications are enabled for a given terminal/workspace.
     /// Priority: per-terminal override > per-workspace override > global default (true).
     /// Returns (enabled, source_description).
@@ -181,6 +209,7 @@ impl AppState {
     }
 }
 
+#[allow(deprecated)]
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
