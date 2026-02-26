@@ -14,6 +14,7 @@ export interface WhisperConfig {
   language: string;
   useGpu: boolean;
   gpuDevice: number;
+  microphoneDeviceId: string | null;
 }
 
 export async function whisperGetStatus(): Promise<WhisperStatus> {
@@ -39,6 +40,10 @@ export async function whisperLoadModel(
 
 export async function whisperListModels(): Promise<string[]> {
   return invoke<string[]>('whisper_list_models');
+}
+
+export async function whisperStartSidecar(): Promise<string> {
+  return invoke<string>('whisper_start_sidecar');
 }
 
 export async function whisperGetConfig(): Promise<WhisperConfig> {

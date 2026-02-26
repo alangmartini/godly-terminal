@@ -29,6 +29,7 @@ pub struct WhisperConfig {
     pub language: String,
     pub use_gpu: bool,
     pub gpu_device: i32,
+    pub microphone_device_id: Option<String>,
 }
 
 impl Default for WhisperConfig {
@@ -38,6 +39,7 @@ impl Default for WhisperConfig {
             language: String::new(), // empty = auto-detect
             use_gpu: true,
             gpu_device: 0,
+            microphone_device_id: None,
         }
     }
 }

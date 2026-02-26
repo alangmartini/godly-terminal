@@ -5,6 +5,49 @@ use tauri::State;
 use crate::whisper_state::{WhisperConfig, WhisperRecordingState, WhisperState, WhisperStatus};
 
 #[tauri::command]
+pub async fn whisper_start_sidecar(
+    app: tauri::AppHandle,
+    whisper: State<'_, Arc<WhisperState>>,
+) -> Result<String, String> {
+    // Check if already running
+    if whisper.get_status().sidecar_running {
+        return Ok("Sidecar already running".to_string());
+    }
+
+    let binary = crate::find_whisper_binary(&app).ok_or_else(|| {
+        "godly-whisper binary not found. Place godly-whisper.exe next to the app binary.".to_string()
+    })?;
+
+    let pipe_name = whisper.get_pipe_name();
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+
+        let child = std::process::Command::new(&binary)
+            .arg("--pipe")
+            .arg(&pipe_name)
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to start sidecar: {}", e))?;
+
+        let pid = child.id();
+        whisper.set_sidecar_running(true, Some(pid));
+        Ok(format!("Sidecar started (PID {})", pid))
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err("Voice sidecar is only supported on Windows".to_string())
+    }
+}
+
+#[tauri::command]
 pub async fn whisper_get_status(
     whisper: State<'_, Arc<WhisperState>>,
 ) -> Result<WhisperStatus, String> {
@@ -48,6 +91,7 @@ pub async fn whisper_load_model(
         use_gpu,
         gpu_device,
         language,
+        microphone_device_id: None,
     };
     whisper.set_config(config);
 
