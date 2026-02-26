@@ -94,6 +94,39 @@ export class Canvas2DGridRenderer {
   }
 
   /**
+   * Optimistic scroll: shift existing canvas content by deltaLines immediately.
+   * Gives instant visual feedback while the real snapshot IPC is in flight.
+   * Positive delta = scrolling up (into history), content moves down on screen.
+   */
+  shiftCanvas(deltaLines: number): void {
+    if (deltaLines === 0 || this.cellHeight === 0) return;
+
+    const ctx = this.ctx;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const shiftPx = Math.round(deltaLines * this.cellHeight);
+
+    if (Math.abs(shiftPx) >= h) {
+      ctx.fillStyle = this.theme.background;
+      ctx.fillRect(0, 0, w, h);
+      return;
+    }
+
+    if (shiftPx > 0) {
+      // Scrolling up: content moves down, new rows appear at top
+      ctx.drawImage(this.canvas, 0, 0, w, h - shiftPx, 0, shiftPx, w, h - shiftPx);
+      ctx.fillStyle = this.theme.background;
+      ctx.fillRect(0, 0, w, shiftPx);
+    } else {
+      // Scrolling down: content moves up, new rows appear at bottom
+      const absShift = -shiftPx;
+      ctx.drawImage(this.canvas, 0, absShift, w, h - absShift, 0, 0, w, h - absShift);
+      ctx.fillStyle = this.theme.background;
+      ctx.fillRect(0, h - absShift, w, absShift);
+    }
+  }
+
+  /**
    * Render a terminal grid snapshot to the canvas.
    * This is synchronous and fast — no IPC, no async pipeline.
    */

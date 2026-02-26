@@ -569,8 +569,9 @@ export class TerminalPane {
     // Bug #242: adjust selection so it stays anchored to the same content
     this.renderer.adjustSelectionForScroll(actualDelta);
 
-    // Optimistic: shift canvas content immediately for instant feedback
+    // Optimistic: shift both canvases immediately for instant feedback
     this.renderer.shiftCanvas(actualDelta);
+    this.gridRenderer?.shiftCanvas(actualDelta);
 
     // Invalidate cache — next real snapshot overwrites the shifted view
     this.cachedSnapshot = null;
@@ -600,6 +601,7 @@ export class TerminalPane {
 
     // Optimistic canvas shift + coalesced IPC (same as handleScroll)
     this.renderer.shiftCanvas(actualDelta);
+    this.gridRenderer?.shiftCanvas(actualDelta);
     this.cachedSnapshot = null;
     ++this.scrollSeq;
 
@@ -676,6 +678,7 @@ export class TerminalPane {
     const delta = -this.scrollbackOffset;
     this.renderer.adjustSelectionForScroll(delta);
     this.renderer.shiftCanvas(delta);
+    this.gridRenderer?.shiftCanvas(delta);
     this.scrollbackOffset = 0;
     this.isUserScrolled = false;
     this.cachedSnapshot = null;
