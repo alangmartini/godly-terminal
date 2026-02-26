@@ -1302,6 +1302,7 @@ pub fn handle_mcp_request(
             // Clamp ratio
             let ratio = ratio.clamp(0.15, 0.85);
 
+            // Legacy split view
             app_state.set_split_view(
                 workspace_id,
                 crate::state::SplitView {
@@ -1311,6 +1312,27 @@ pub fn handle_mcp_request(
                     ratio,
                 },
             );
+
+            // Also create a layout tree for backward compat
+            let dir = if direction == "vertical" {
+                godly_protocol::SplitDirection::Vertical
+            } else {
+                godly_protocol::SplitDirection::Horizontal
+            };
+            app_state.set_layout_tree(
+                workspace_id,
+                godly_protocol::LayoutNode::Split {
+                    direction: dir,
+                    ratio,
+                    first: Box::new(godly_protocol::LayoutNode::Leaf {
+                        terminal_id: left_terminal_id.clone(),
+                    }),
+                    second: Box::new(godly_protocol::LayoutNode::Leaf {
+                        terminal_id: right_terminal_id.clone(),
+                    }),
+                },
+            );
+
             auto_save.mark_dirty();
 
             #[derive(serde::Serialize, Clone)]
@@ -1337,6 +1359,8 @@ pub fn handle_mcp_request(
 
         McpRequest::ClearSplit { workspace_id } => {
             app_state.clear_split_view(workspace_id);
+            app_state.clear_layout_tree(workspace_id);
+            app_state.set_zoomed_pane(workspace_id, None);
             auto_save.mark_dirty();
             let _ = app_handle.emit("mcp-clear-split-view", workspace_id);
             McpResponse::Ok
@@ -1365,20 +1389,72 @@ pub fn handle_mcp_request(
             direction,
             ratio,
         } => {
-            let ratio = ratio.clamp(0.15, 0.85);
-            let mut trees = app_state.layout_trees.write();
-            let tree = trees.entry(workspace_id.clone()).or_insert_with(|| {
-                godly_protocol::LayoutNode::Leaf {
-                    terminal_id: target_terminal_id.clone(),
-                }
-            });
-            if !tree.split_at(target_terminal_id, new_terminal_id, *direction, ratio) {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
                 return McpResponse::Error {
-                    message: format!("Terminal {} not found in layout tree", target_terminal_id),
+                    message: format!("Workspace {} not found", workspace_id),
                 };
             }
-            drop(trees);
+
+            // Validate both terminals exist
+            {
+                let terminals = app_state.terminals.read();
+                if !terminals.contains_key(target_terminal_id) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", target_terminal_id),
+                    };
+                }
+                if !terminals.contains_key(new_terminal_id) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", new_terminal_id),
+                    };
+                }
+            }
+
+            // Validate direction
+            if direction != "horizontal" && direction != "vertical" {
+                return McpResponse::Error {
+                    message: format!("Invalid direction '{}', must be 'horizontal' or 'vertical'", direction),
+                };
+            }
+
+            let dir = if direction == "vertical" {
+                godly_protocol::SplitDirection::Vertical
+            } else {
+                godly_protocol::SplitDirection::Horizontal
+            };
+
+            if let Err(msg) = app_state.split_terminal_in_tree(
+                workspace_id,
+                target_terminal_id,
+                new_terminal_id,
+                dir,
+                *ratio,
+            ) {
+                return McpResponse::Error { message: msg };
+            }
+
             auto_save.mark_dirty();
+
+            #[derive(serde::Serialize, Clone)]
+            struct SplitTerminalPayload {
+                workspace_id: String,
+                target_terminal_id: String,
+                new_terminal_id: String,
+                direction: String,
+                ratio: f64,
+            }
+            let _ = app_handle.emit(
+                "mcp-split-terminal",
+                SplitTerminalPayload {
+                    workspace_id: workspace_id.clone(),
+                    target_terminal_id: target_terminal_id.clone(),
+                    new_terminal_id: new_terminal_id.clone(),
+                    direction: direction.clone(),
+                    ratio: ratio.clamp(0.15, 0.85),
+                },
+            );
+
             McpResponse::Ok
         }
 
@@ -1386,35 +1462,39 @@ pub fn handle_mcp_request(
             workspace_id,
             terminal_id,
         } => {
-            let mut trees = app_state.layout_trees.write();
-            if let Some(tree) = trees.get_mut(workspace_id) {
-                if let godly_protocol::LayoutNode::Leaf { terminal_id: ref id } = tree {
-                    if id == terminal_id {
-                        trees.remove(workspace_id);
-                        drop(trees);
-                        auto_save.mark_dirty();
-                        return McpResponse::Ok;
-                    }
-                }
-                match tree.remove_terminal(terminal_id) {
-                    Some(_) => {
-                        if tree.count_leaves() <= 1 {
-                            trees.remove(workspace_id);
-                        }
-                    }
-                    None => {
-                        return McpResponse::Error {
-                            message: format!("Terminal {} not found in layout tree", terminal_id),
-                        };
-                    }
-                }
-            } else {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
                 return McpResponse::Error {
-                    message: format!("No layout tree for workspace {}", workspace_id),
+                    message: format!("Workspace {} not found", workspace_id),
                 };
             }
-            drop(trees);
+
+            if let Err(msg) = app_state.unsplit_terminal_in_tree(workspace_id, terminal_id) {
+                return McpResponse::Error { message: msg };
+            }
+
+            // Clear zoom if the unsplit removed the zoomed pane
+            if let Some(zoomed) = app_state.get_zoomed_pane(workspace_id) {
+                if zoomed == *terminal_id {
+                    app_state.set_zoomed_pane(workspace_id, None);
+                }
+            }
+
             auto_save.mark_dirty();
+
+            #[derive(serde::Serialize, Clone)]
+            struct UnsplitPayload {
+                workspace_id: String,
+                terminal_id: String,
+            }
+            let _ = app_handle.emit(
+                "mcp-unsplit-terminal",
+                UnsplitPayload {
+                    workspace_id: workspace_id.clone(),
+                    terminal_id: terminal_id.clone(),
+                },
+            );
+
             McpResponse::Ok
         }
 
@@ -1427,23 +1507,87 @@ pub fn handle_mcp_request(
             terminal_id_a,
             terminal_id_b,
         } => {
-            let mut trees = app_state.layout_trees.write();
-            if let Some(tree) = trees.get_mut(workspace_id) {
-                if !tree.swap_terminals(terminal_id_a, terminal_id_b) {
-                    return McpResponse::Error {
-                        message: format!(
-                            "One or both terminals ({}, {}) not found in layout tree",
-                            terminal_id_a, terminal_id_b
-                        ),
-                    };
-                }
-            } else {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
                 return McpResponse::Error {
-                    message: format!("No layout tree for workspace {}", workspace_id),
+                    message: format!("Workspace {} not found", workspace_id),
                 };
             }
-            drop(trees);
+
+            // Validate both terminals exist
+            {
+                let terminals = app_state.terminals.read();
+                if !terminals.contains_key(terminal_id_a) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", terminal_id_a),
+                    };
+                }
+                if !terminals.contains_key(terminal_id_b) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", terminal_id_b),
+                    };
+                }
+            }
+
+            if let Err(msg) = app_state.swap_panes_in_tree(workspace_id, terminal_id_a, terminal_id_b) {
+                return McpResponse::Error { message: msg };
+            }
+
             auto_save.mark_dirty();
+
+            #[derive(serde::Serialize, Clone)]
+            struct SwapPayload {
+                workspace_id: String,
+                terminal_id_a: String,
+                terminal_id_b: String,
+            }
+            let _ = app_handle.emit(
+                "mcp-swap-panes",
+                SwapPayload {
+                    workspace_id: workspace_id.clone(),
+                    terminal_id_a: terminal_id_a.clone(),
+                    terminal_id_b: terminal_id_b.clone(),
+                },
+            );
+
+            McpResponse::Ok
+        }
+
+        McpRequest::ZoomPane {
+            workspace_id,
+            terminal_id,
+        } => {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
+                return McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                };
+            }
+
+            // If zooming, validate terminal exists
+            if let Some(tid) = terminal_id {
+                if !app_state.terminals.read().contains_key(tid) {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", tid),
+                    };
+                }
+            }
+
+            app_state.set_zoomed_pane(workspace_id, terminal_id.clone());
+
+            #[derive(serde::Serialize, Clone)]
+            struct ZoomPayload {
+                workspace_id: String,
+                terminal_id: Option<String>,
+            }
+            let _ = app_handle.emit(
+                "mcp-zoom-pane",
+                ZoomPayload {
+                    workspace_id: workspace_id.clone(),
+                    terminal_id: terminal_id.clone(),
+                },
+            );
+
             McpResponse::Ok
         }
 

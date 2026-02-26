@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::layout_tree::{LayoutNode, SplitDirection};
 use crate::types::ShellType;
 
 fn default_erase_count() -> usize {
@@ -150,7 +149,8 @@ pub enum McpRequest {
         workspace_id: String,
         target_terminal_id: String,
         new_terminal_id: String,
-        direction: SplitDirection,
+        #[serde(default = "default_split_direction")]
+        direction: String,
         #[serde(default = "default_split_ratio")]
         ratio: f64,
     },
@@ -165,6 +165,10 @@ pub enum McpRequest {
         workspace_id: String,
         terminal_id_a: String,
         terminal_id_b: String,
+    },
+    ZoomPane {
+        workspace_id: String,
+        terminal_id: Option<String>,
     },
 
     // JS bridge (execute JavaScript in WebView, return result)
@@ -267,7 +271,7 @@ pub enum McpResponse {
         ratio: f64,
     },
     NoSplit,
-    LayoutTree(Option<LayoutNode>),
+    LayoutTree(Option<crate::layout_tree::LayoutNode>),
     JsResult {
         result: Option<String>,
         error: Option<String>,
