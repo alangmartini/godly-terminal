@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use godly_protocol::{WhisperRequest, WhisperResponse};
 use tauri::{Emitter, State};
 
 use crate::whisper_state::{WhisperConfig, WhisperRecordingState, WhisperState, WhisperStatus};
@@ -9,8 +10,8 @@ pub async fn whisper_start_sidecar(
     app: tauri::AppHandle,
     whisper: State<'_, Arc<WhisperState>>,
 ) -> Result<String, String> {
-    // Check if already running
-    if whisper.get_status().sidecar_running {
+    // Check if already running and connected
+    if whisper.get_status().sidecar_running && whisper.client().is_connected() {
         return Ok("Sidecar already running".to_string());
     }
 
@@ -18,7 +19,12 @@ pub async fn whisper_start_sidecar(
         "godly-whisper binary not found. Place godly-whisper.exe next to the app binary.".to_string()
     })?;
 
-    let pipe_name = whisper.get_pipe_name();
+    let pipe_name = whisper.get_pipe_name().to_string();
+    let models_dir = whisper.get_models_dir()
+        .ok_or("App data directory not initialized")?;
+
+    // Build instance arg from GODLY_INSTANCE if set
+    let instance = std::env::var("GODLY_INSTANCE").unwrap_or_default();
 
     #[cfg(windows)]
     {
@@ -26,9 +32,15 @@ pub async fn whisper_start_sidecar(
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         const DETACHED_PROCESS: u32 = 0x00000008;
 
-        let child = std::process::Command::new(&binary)
-            .arg("--pipe")
-            .arg(&pipe_name)
+        let mut cmd = std::process::Command::new(&binary);
+        cmd.arg("--pipe").arg(&pipe_name)
+            .arg("--models-dir").arg(models_dir.to_string_lossy().as_ref());
+
+        if !instance.is_empty() {
+            cmd.arg("--instance").arg(&instance);
+        }
+
+        let child = cmd
             .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -38,6 +50,28 @@ pub async fn whisper_start_sidecar(
 
         let pid = child.id();
         whisper.set_sidecar_running(true, Some(pid));
+
+        // Retry connecting to the pipe (sidecar needs time to create it)
+        let mut connected = false;
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if whisper.client().connect(&pipe_name).is_ok() {
+                connected = true;
+                break;
+            }
+        }
+
+        if !connected {
+            return Err("Sidecar started but failed to connect to pipe".to_string());
+        }
+
+        // Verify with a ping
+        match whisper.client().send_request(&WhisperRequest::Ping) {
+            Ok(WhisperResponse::Pong) => {}
+            Ok(other) => return Err(format!("Unexpected ping response: {:?}", other)),
+            Err(e) => return Err(format!("Ping failed: {}", e)),
+        }
+
         Ok(format!("Sidecar started (PID {})", pid))
     }
 
@@ -58,24 +92,45 @@ pub async fn whisper_get_status(
 pub async fn whisper_start_recording(
     whisper: State<'_, Arc<WhisperState>>,
 ) -> Result<(), String> {
-    // For now, just update the state. The actual pipe IPC to godly-whisper
-    // sidecar will be wired when the sidecar protocol is finalized.
-    whisper.set_recording_state(WhisperRecordingState::Recording);
-    Ok(())
+    let resp = whisper.client().send_request(&WhisperRequest::StartRecording)
+        .map_err(|e| format!("Failed to send StartRecording: {}", e))?;
+
+    match resp {
+        WhisperResponse::RecordingStarted => {
+            whisper.set_recording_state(WhisperRecordingState::Recording);
+            Ok(())
+        }
+        WhisperResponse::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
 }
 
 #[tauri::command]
 pub async fn whisper_stop_recording(
     whisper: State<'_, Arc<WhisperState>>,
 ) -> Result<String, String> {
-    // Update state to transcribing
     whisper.set_recording_state(WhisperRecordingState::Transcribing);
 
-    // TODO: Send StopRecording to sidecar via named pipe, wait for TranscriptionResult
-    // For now, return empty string (sidecar integration pending)
+    let resp = whisper.client().send_request(&WhisperRequest::StopRecording)
+        .map_err(|e| {
+            whisper.set_recording_state(WhisperRecordingState::Idle);
+            format!("Failed to send StopRecording: {}", e)
+        })?;
 
-    whisper.set_recording_state(WhisperRecordingState::Idle);
-    Ok(String::new())
+    match resp {
+        WhisperResponse::TranscriptionResult { text, .. } => {
+            whisper.set_recording_state(WhisperRecordingState::Idle);
+            Ok(text)
+        }
+        WhisperResponse::Error { message } => {
+            whisper.set_recording_state(WhisperRecordingState::Idle);
+            Err(message)
+        }
+        other => {
+            whisper.set_recording_state(WhisperRecordingState::Idle);
+            Err(format!("Unexpected response: {:?}", other))
+        }
+    }
 }
 
 #[tauri::command]
@@ -90,15 +145,34 @@ pub async fn whisper_load_model(
         model_name: model_name.clone(),
         use_gpu,
         gpu_device,
-        language,
+        language: language.clone(),
         microphone_device_id: None,
     };
     whisper.set_config(config);
 
-    // TODO: Send LoadModel to sidecar via named pipe
-    // For now, mark as loaded optimistically
-    whisper.set_model_loaded(true, Some(model_name));
-    Ok(())
+    let model_path = whisper.get_models_dir()
+        .ok_or("App data directory not initialized")?
+        .join(&model_name)
+        .to_string_lossy()
+        .to_string();
+
+    let resp = whisper.client().send_request(&WhisperRequest::LoadModel {
+        model_path,
+        use_gpu,
+        gpu_device,
+        language,
+    }).map_err(|e| format!("Failed to send LoadModel: {}", e))?;
+
+    match resp {
+        WhisperResponse::ModelLoaded { model_name: name, gpu_in_use } => {
+            whisper.set_model_loaded(true, Some(name));
+            let mut status = whisper.get_status();
+            status.gpu_in_use = gpu_in_use;
+            Ok(())
+        }
+        WhisperResponse::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
 }
 
 #[tauri::command]
