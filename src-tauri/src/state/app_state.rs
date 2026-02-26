@@ -1,4 +1,4 @@
-use godly_protocol::LayoutNode;
+use godly_protocol::{LayoutNode, SplitDirection};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
@@ -22,6 +22,8 @@ pub struct AppState {
     pub split_views: RwLock<HashMap<String, SplitView>>,
     /// Recursive layout trees per workspace (workspace_id → LayoutNode)
     pub layout_trees: RwLock<HashMap<String, LayoutNode>>,
+    /// Zoomed pane per workspace (workspace_id → terminal_id)
+    pub zoomed_panes: RwLock<HashMap<String, String>>,
     /// Workspace ID for MCP-created terminals (Agent workspace in separate window)
     pub mcp_workspace_id: RwLock<Option<String>>,
 }
@@ -39,6 +41,7 @@ impl AppState {
             notification_overrides_workspace: RwLock::new(HashMap::new()),
             split_views: RwLock::new(HashMap::new()),
             layout_trees: RwLock::new(HashMap::new()),
+            zoomed_panes: RwLock::new(HashMap::new()),
             mcp_workspace_id: RwLock::new(None),
         }
     }
@@ -157,7 +160,6 @@ impl AppState {
         trees.get(workspace_id).cloned()
     }
 
-    #[allow(dead_code)]
     pub fn clear_layout_tree(&self, workspace_id: &str) {
         let mut trees = self.layout_trees.write();
         trees.remove(workspace_id);
@@ -165,6 +167,205 @@ impl AppState {
 
     pub fn get_all_layout_trees(&self) -> HashMap<String, LayoutNode> {
         self.layout_trees.read().clone()
+    }
+
+    /// Split a target terminal in the layout tree, inserting a new terminal next to it.
+    /// If no layout tree exists for the workspace, creates a 2-leaf tree.
+    /// Returns Ok(()) on success or Err with a message.
+    pub fn split_terminal_in_tree(
+        &self,
+        workspace_id: &str,
+        target_terminal_id: &str,
+        new_terminal_id: &str,
+        direction: SplitDirection,
+        ratio: f64,
+    ) -> Result<(), String> {
+        let mut trees = self.layout_trees.write();
+        let ratio = ratio.clamp(0.15, 0.85);
+
+        if let Some(tree) = trees.get_mut(workspace_id) {
+            // Insert into existing tree: find the target leaf and replace it with a split
+            if !Self::insert_split(tree, target_terminal_id, new_terminal_id, direction, ratio) {
+                return Err(format!(
+                    "Terminal {} not found in layout tree for workspace {}",
+                    target_terminal_id, workspace_id
+                ));
+            }
+        } else {
+            // No tree exists -- create a 2-leaf tree
+            let tree = LayoutNode::Split {
+                direction,
+                ratio,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: target_terminal_id.to_string(),
+                }),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: new_terminal_id.to_string(),
+                }),
+            };
+            trees.insert(workspace_id.to_string(), tree);
+        }
+
+        Ok(())
+    }
+
+    /// Remove a terminal from the layout tree. The sibling takes its parent's place.
+    /// Returns Ok(()) on success, Err if terminal not found.
+    pub fn unsplit_terminal_in_tree(
+        &self,
+        workspace_id: &str,
+        terminal_id: &str,
+    ) -> Result<(), String> {
+        let mut trees = self.layout_trees.write();
+
+        let tree = trees.get_mut(workspace_id).ok_or_else(|| {
+            format!("No layout tree for workspace {}", workspace_id)
+        })?;
+
+        // If the tree is just a single leaf, remove the whole tree
+        if let LayoutNode::Leaf { terminal_id: tid } = tree {
+            if tid == terminal_id {
+                trees.remove(workspace_id);
+                return Ok(());
+            }
+            return Err(format!(
+                "Terminal {} not found in layout tree",
+                terminal_id
+            ));
+        }
+
+        // Try to remove the terminal and collapse
+        match Self::remove_from_tree(tree, terminal_id) {
+            Some(replacement) => {
+                // If replacement is a single leaf, we could keep or remove the tree
+                *tree = replacement;
+                // If the result is a single leaf, remove the tree entirely
+                // (single-pane mode needs no tree)
+                if matches!(tree, LayoutNode::Leaf { .. }) {
+                    trees.remove(workspace_id);
+                }
+                Ok(())
+            }
+            None => Err(format!(
+                "Terminal {} not found in layout tree for workspace {}",
+                terminal_id, workspace_id
+            )),
+        }
+    }
+
+    /// Swap two terminals' positions in the layout tree.
+    pub fn swap_panes_in_tree(
+        &self,
+        workspace_id: &str,
+        terminal_id_a: &str,
+        terminal_id_b: &str,
+    ) -> Result<(), String> {
+        let mut trees = self.layout_trees.write();
+        let tree = trees.get_mut(workspace_id).ok_or_else(|| {
+            format!("No layout tree for workspace {}", workspace_id)
+        })?;
+
+        Self::swap_terminals(tree, terminal_id_a, terminal_id_b);
+        Ok(())
+    }
+
+    /// Set/clear zoomed pane for a workspace.
+    pub fn set_zoomed_pane(&self, workspace_id: &str, terminal_id: Option<String>) {
+        let mut zoomed = self.zoomed_panes.write();
+        match terminal_id {
+            Some(tid) => { zoomed.insert(workspace_id.to_string(), tid); }
+            None => { zoomed.remove(workspace_id); }
+        }
+    }
+
+    pub fn get_zoomed_pane(&self, workspace_id: &str) -> Option<String> {
+        self.zoomed_panes.read().get(workspace_id).cloned()
+    }
+
+    // --- Private tree helpers ---
+
+    /// Recursively find a leaf with `target_id` and replace it with a split
+    /// containing both the original and the new terminal.
+    fn insert_split(
+        node: &mut LayoutNode,
+        target_id: &str,
+        new_id: &str,
+        direction: SplitDirection,
+        ratio: f64,
+    ) -> bool {
+        match node {
+            LayoutNode::Leaf { terminal_id } if terminal_id == target_id => {
+                // Replace this leaf with a split
+                let old_leaf = LayoutNode::Leaf {
+                    terminal_id: target_id.to_string(),
+                };
+                let new_leaf = LayoutNode::Leaf {
+                    terminal_id: new_id.to_string(),
+                };
+                *node = LayoutNode::Split {
+                    direction,
+                    ratio,
+                    first: Box::new(old_leaf),
+                    second: Box::new(new_leaf),
+                };
+                true
+            }
+            LayoutNode::Split { first, second, .. } => {
+                Self::insert_split(first, target_id, new_id, direction, ratio)
+                    || Self::insert_split(second, target_id, new_id, direction, ratio)
+            }
+            _ => false,
+        }
+    }
+
+    /// Remove a terminal from the tree. Returns the replacement subtree (the sibling)
+    /// or None if the terminal was not found.
+    fn remove_from_tree(node: &mut LayoutNode, terminal_id: &str) -> Option<LayoutNode> {
+        match node {
+            LayoutNode::Leaf { .. } => None, // Can't remove from a leaf at this level
+            LayoutNode::Split { first, second, .. } => {
+                // Check if either child is the target leaf
+                if let LayoutNode::Leaf { terminal_id: tid } = first.as_ref() {
+                    if tid == terminal_id {
+                        return Some(*second.clone());
+                    }
+                }
+                if let LayoutNode::Leaf { terminal_id: tid } = second.as_ref() {
+                    if tid == terminal_id {
+                        return Some(*first.clone());
+                    }
+                }
+
+                // Recurse into children
+                if let Some(replacement) = Self::remove_from_tree(first, terminal_id) {
+                    *first = Box::new(replacement);
+                    return Some(node.clone());
+                }
+                if let Some(replacement) = Self::remove_from_tree(second, terminal_id) {
+                    *second = Box::new(replacement);
+                    return Some(node.clone());
+                }
+
+                None
+            }
+        }
+    }
+
+    /// Swap two terminals in the tree by swapping their IDs in-place.
+    fn swap_terminals(node: &mut LayoutNode, id_a: &str, id_b: &str) {
+        match node {
+            LayoutNode::Leaf { terminal_id } => {
+                if terminal_id == id_a {
+                    *terminal_id = id_b.to_string();
+                } else if terminal_id == id_b {
+                    *terminal_id = id_a.to_string();
+                }
+            }
+            LayoutNode::Split { first, second, .. } => {
+                Self::swap_terminals(first, id_a, id_b);
+                Self::swap_terminals(second, id_a, id_b);
+            }
+        }
     }
 
     /// Check if notifications are enabled for a given terminal/workspace.

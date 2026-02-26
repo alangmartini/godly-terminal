@@ -1,6 +1,8 @@
 use std::collections::HashMap;
-use godly_protocol::LayoutNode;
 use serde::{Deserialize, Serialize};
+
+// Re-export layout tree types from protocol
+pub use godly_protocol::LayoutNode;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
