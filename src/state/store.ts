@@ -203,9 +203,27 @@ class Store {
       });
     } else {
       this.lastActiveTerminalByWorkspace.set(terminal.workspaceId, terminal.id);
+
+      // Clear the layout tree if the new terminal's workspace has an active split,
+      // since the new terminal is not in the tree (Bug #391).
+      let layoutTrees = this.state.layoutTrees;
+      let splitViews = this.state.splitViews;
+      let zoomedPanes = this.state.zoomedPanes;
+      if (layoutTrees[terminal.workspaceId]) {
+        const { [terminal.workspaceId]: _t, ...restTrees } = layoutTrees;
+        const { [terminal.workspaceId]: _s, ...restSplits } = splitViews;
+        const { [terminal.workspaceId]: _z, ...restZoomed } = zoomedPanes;
+        layoutTrees = restTrees;
+        splitViews = restSplits;
+        zoomedPanes = restZoomed;
+      }
+
       this.setState({
         terminals: [...this.state.terminals, { ...terminal, order }],
         activeTerminalId: terminal.id,
+        layoutTrees,
+        splitViews,
+        zoomedPanes,
       });
     }
     this.syncSessionPauseState();
