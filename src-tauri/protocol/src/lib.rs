@@ -1,6 +1,7 @@
 pub mod ansi;
 pub mod frame;
 pub mod keys;
+pub mod layout_tree;
 pub mod mcp_messages;
 pub mod messages;
 pub mod types;
@@ -10,6 +11,7 @@ pub use frame::{
     read_shim_frame, write_shim_binary, write_shim_json, ShimFrame,
     TAG_SHIM_WRITE, TAG_SHIM_BUFFER_DATA, TAG_SHIM_OUTPUT,
 };
+pub use layout_tree::{LayoutNode, SplitDirection};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 pub use messages::{DaemonMessage, Event, Request, Response};
 pub use messages::{ShimRequest, ShimResponse};

@@ -1141,5 +1141,8 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
         })),
+        McpResponse::LayoutTree(tree) => Ok(json!({
+            "layout_tree": tree,
+        })),
     }
 }
