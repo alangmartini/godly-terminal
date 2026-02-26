@@ -91,6 +91,10 @@ export class App {
   private pendingNotificationTerminalId: string | null = null;
   private pendingNotificationTimestamp: number = 0;
   private perfOverlay: PerfOverlay | null = null;
+  /** Tracks which pane is currently zoomed (null = no zoom active). */
+  private zoomedPaneId: string | null = null;
+  /** Stores the split ratio before zoom, so it can be restored on unzoom. */
+  private preZoomRatio: number | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -440,6 +444,121 @@ export class App {
         case 'split.unsplit': {
           e.preventDefault();
           this.handleUnsplitRequest();
+          break;
+        }
+
+        case 'split.focusLeft':
+        case 'split.focusRight':
+        case 'split.focusUp':
+        case 'split.focusDown': {
+          e.preventDefault();
+          if (state.activeWorkspaceId && state.activeTerminalId) {
+            const split = store.getSplitView(state.activeWorkspaceId);
+            if (split) {
+              // Determine which pane to focus based on direction and split orientation
+              const isHorizontal = split.direction === 'horizontal';
+              const isVertical = split.direction === 'vertical';
+              let targetId: string | null = null;
+
+              if (action === 'split.focusLeft' && isHorizontal) {
+                targetId = split.leftTerminalId;
+              } else if (action === 'split.focusRight' && isHorizontal) {
+                targetId = split.rightTerminalId;
+              } else if (action === 'split.focusUp' && isVertical) {
+                targetId = split.leftTerminalId; // "left" = top in vertical
+              } else if (action === 'split.focusDown' && isVertical) {
+                targetId = split.rightTerminalId; // "right" = bottom in vertical
+              }
+
+              if (targetId && targetId !== state.activeTerminalId) {
+                store.setActiveTerminal(targetId);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'split.resizeLeft':
+        case 'split.resizeRight':
+        case 'split.resizeUp':
+        case 'split.resizeDown': {
+          e.preventDefault();
+          if (state.activeWorkspaceId) {
+            const split = store.getSplitView(state.activeWorkspaceId);
+            if (split) {
+              const isHorizontal = split.direction === 'horizontal';
+              const isVertical = split.direction === 'vertical';
+              const RESIZE_STEP = 0.05;
+              let delta = 0;
+
+              if (action === 'split.resizeLeft' && isHorizontal) delta = -RESIZE_STEP;
+              else if (action === 'split.resizeRight' && isHorizontal) delta = RESIZE_STEP;
+              else if (action === 'split.resizeUp' && isVertical) delta = -RESIZE_STEP;
+              else if (action === 'split.resizeDown' && isVertical) delta = RESIZE_STEP;
+
+              if (delta !== 0) {
+                const newRatio = Math.max(0.1, Math.min(0.9, split.ratio + delta));
+                store.updateSplitRatio(state.activeWorkspaceId, newRatio);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'split.zoom': {
+          e.preventDefault();
+          if (state.activeWorkspaceId && state.activeTerminalId) {
+            const split = store.getSplitView(state.activeWorkspaceId);
+            if (split) {
+              if (this.zoomedPaneId) {
+                // Unzoom: restore split ratio
+                store.updateSplitRatio(state.activeWorkspaceId, this.preZoomRatio ?? 0.5);
+                this.zoomedPaneId = null;
+                this.preZoomRatio = null;
+              } else {
+                // Zoom: save ratio, then push active pane to near-full width
+                this.preZoomRatio = split.ratio;
+                this.zoomedPaneId = state.activeTerminalId;
+                const isLeft = state.activeTerminalId === split.leftTerminalId;
+                store.updateSplitRatio(state.activeWorkspaceId, isLeft ? 0.95 : 0.05);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'split.swapPanes': {
+          e.preventDefault();
+          if (state.activeWorkspaceId) {
+            const split = store.getSplitView(state.activeWorkspaceId);
+            if (split) {
+              store.setSplitView(
+                state.activeWorkspaceId,
+                split.rightTerminalId,
+                split.leftTerminalId,
+                split.direction,
+                1 - split.ratio,
+              );
+            }
+          }
+          break;
+        }
+
+        case 'split.rotateSplit': {
+          e.preventDefault();
+          if (state.activeWorkspaceId) {
+            const split = store.getSplitView(state.activeWorkspaceId);
+            if (split) {
+              const newDirection = split.direction === 'horizontal' ? 'vertical' : 'horizontal';
+              store.setSplitView(
+                state.activeWorkspaceId,
+                split.leftTerminalId,
+                split.rightTerminalId,
+                newDirection,
+                split.ratio,
+              );
+            }
+          }
           break;
         }
 
