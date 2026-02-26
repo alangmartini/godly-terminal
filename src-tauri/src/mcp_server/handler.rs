@@ -77,6 +77,7 @@ fn auto_focus_terminal(
 }
 
 /// Handle an MCP request by delegating to AppState and DaemonClient.
+#[allow(deprecated)]
 pub fn handle_mcp_request(
     request: &McpRequest,
     app_state: &Arc<AppState>,
@@ -1353,6 +1354,97 @@ pub fn handle_mcp_request(
                 },
                 None => McpResponse::NoSplit,
             }
+        }
+
+        // === Layout tree commands ===
+
+        McpRequest::SplitTerminal {
+            workspace_id,
+            target_terminal_id,
+            new_terminal_id,
+            direction,
+            ratio,
+        } => {
+            let ratio = ratio.clamp(0.15, 0.85);
+            let mut trees = app_state.layout_trees.write();
+            let tree = trees.entry(workspace_id.clone()).or_insert_with(|| {
+                godly_protocol::LayoutNode::Leaf {
+                    terminal_id: target_terminal_id.clone(),
+                }
+            });
+            if !tree.split_at(target_terminal_id, new_terminal_id, *direction, ratio) {
+                return McpResponse::Error {
+                    message: format!("Terminal {} not found in layout tree", target_terminal_id),
+                };
+            }
+            drop(trees);
+            auto_save.mark_dirty();
+            McpResponse::Ok
+        }
+
+        McpRequest::UnsplitTerminal {
+            workspace_id,
+            terminal_id,
+        } => {
+            let mut trees = app_state.layout_trees.write();
+            if let Some(tree) = trees.get_mut(workspace_id) {
+                if let godly_protocol::LayoutNode::Leaf { terminal_id: ref id } = tree {
+                    if id == terminal_id {
+                        trees.remove(workspace_id);
+                        drop(trees);
+                        auto_save.mark_dirty();
+                        return McpResponse::Ok;
+                    }
+                }
+                match tree.remove_terminal(terminal_id) {
+                    Some(_) => {
+                        if tree.count_leaves() <= 1 {
+                            trees.remove(workspace_id);
+                        }
+                    }
+                    None => {
+                        return McpResponse::Error {
+                            message: format!("Terminal {} not found in layout tree", terminal_id),
+                        };
+                    }
+                }
+            } else {
+                return McpResponse::Error {
+                    message: format!("No layout tree for workspace {}", workspace_id),
+                };
+            }
+            drop(trees);
+            auto_save.mark_dirty();
+            McpResponse::Ok
+        }
+
+        McpRequest::GetLayoutTree { workspace_id } => {
+            McpResponse::LayoutTree(app_state.get_layout_tree(workspace_id))
+        }
+
+        McpRequest::SwapPanes {
+            workspace_id,
+            terminal_id_a,
+            terminal_id_b,
+        } => {
+            let mut trees = app_state.layout_trees.write();
+            if let Some(tree) = trees.get_mut(workspace_id) {
+                if !tree.swap_terminals(terminal_id_a, terminal_id_b) {
+                    return McpResponse::Error {
+                        message: format!(
+                            "One or both terminals ({}, {}) not found in layout tree",
+                            terminal_id_a, terminal_id_b
+                        ),
+                    };
+                }
+            } else {
+                return McpResponse::Error {
+                    message: format!("No layout tree for workspace {}", workspace_id),
+                };
+            }
+            drop(trees);
+            auto_save.mark_dirty();
+            McpResponse::Ok
         }
 
         // === JS bridge ===
