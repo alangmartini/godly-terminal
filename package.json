@@ -5,7 +5,7 @@
   "license": "BUSL-1.1",
   "type": "module",
   "scripts": {
-    "dev": "npm run unlock && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-remote && cd .. && vite",
+    "dev": "npm run unlock && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-remote -p godly-whisper && cd .. && vite",
     "dev:watch": "cd src-tauri && cargo watch -w daemon/src -w protocol/src -w mcp/src -w notify/src -w remote/src -x \"build -p godly-daemon -p godly-mcp -p godly-notify -p godly-remote\"",
     "dev:test": "cross-env GODLY_INSTANCE=test npx tauri dev --config src-tauri/tauri.conf.test.json",
     "build": "vite build",
@@ -20,6 +20,8 @@
     "build:notify:release": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-notify --release",
     "build:remote": "npm run unlock && cd src-tauri && cargo build -p godly-remote",
     "build:remote:release": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-remote --release",
+    "build:whisper": "npm run unlock && cd src-tauri && cargo build -p godly-whisper",
+    "build:whisper:release": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-whisper --release",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
