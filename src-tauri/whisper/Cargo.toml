@@ -1,0 +1,22 @@
+[package]
+name = "godly-whisper"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+
+[[bin]]
+name = "godly-whisper"
+path = "src/main.rs"
+
+[dependencies]
+godly-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+whisper-rs = "0.13"
+cpal = "0.15"
+
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true
+
+[features]
+cuda = ["whisper-rs/cuda"]

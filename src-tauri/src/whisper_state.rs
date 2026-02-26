@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
+use crate::whisper_client::WhisperClient;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum WhisperRecordingState {
@@ -44,63 +46,18 @@ impl Default for WhisperConfig {
     }
 }
 
-/// Named pipe IPC protocol messages sent to the godly-whisper sidecar.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum WhisperRequest {
-    Ping,
-    StartRecording,
-    StopRecording,
-    GetStatus,
-    LoadModel {
-        model_name: String,
-        use_gpu: bool,
-        gpu_device: i32,
-        language: String,
-    },
-    ListModels,
-}
-
-/// Named pipe IPC protocol messages received from the godly-whisper sidecar.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum WhisperResponse {
-    Pong,
-    RecordingStarted,
-    TranscriptionResult {
-        text: String,
-        duration_ms: u64,
-    },
-    Status {
-        state: String,
-        model_loaded: bool,
-        gpu_available: bool,
-    },
-    ModelLoaded,
-    ModelList {
-        models: Vec<String>,
-    },
-    Error {
-        message: String,
-    },
-}
-
 pub struct WhisperState {
     config: RwLock<WhisperConfig>,
     status: RwLock<WhisperStatus>,
     app_data_dir: RwLock<Option<PathBuf>>,
     sidecar_pid: RwLock<Option<u32>>,
-    pipe_name: RwLock<String>,
+    pipe_name: String,
+    client: WhisperClient,
 }
 
 impl WhisperState {
     pub fn new() -> Self {
-        let instance = std::env::var("GODLY_INSTANCE").unwrap_or_default();
-        let pipe_name = if instance.is_empty() {
-            r"\\.\pipe\godly-whisper".to_string()
-        } else {
-            format!(r"\\.\pipe\godly-whisper-{}", instance)
-        };
+        let pipe_name = godly_protocol::whisper_pipe_name();
 
         Self {
             config: RwLock::new(WhisperConfig::default()),
@@ -114,7 +71,8 @@ impl WhisperState {
             }),
             app_data_dir: RwLock::new(None),
             sidecar_pid: RwLock::new(None),
-            pipe_name: RwLock::new(pipe_name),
+            pipe_name,
+            client: WhisperClient::new(),
         }
     }
 
@@ -150,8 +108,12 @@ impl WhisperState {
         status.model_name = name;
     }
 
-    pub fn get_pipe_name(&self) -> String {
-        self.pipe_name.read().clone()
+    pub fn get_pipe_name(&self) -> &str {
+        &self.pipe_name
+    }
+
+    pub fn client(&self) -> &WhisperClient {
+        &self.client
     }
 
     pub fn get_models_dir(&self) -> Option<PathBuf> {
