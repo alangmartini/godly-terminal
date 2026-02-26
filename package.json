@@ -22,6 +22,7 @@
     "build:remote:release": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-remote --release",
     "build:whisper": "npm run unlock && cd src-tauri && cargo build -p godly-whisper",
     "build:whisper:release": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-whisper --release",
+    "build:whisper:cuda": "npm run unlock && cd src-tauri && cross-env CMAKE_GENERATOR=Ninja CUDAHOSTCXX=\"C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe\" CMAKE_CUDA_ARCHITECTURES=89 CXXFLAGS=/std:c++17 CUDAFLAGS=-std=c++17 cargo build -p godly-whisper --features cuda",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
