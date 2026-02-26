@@ -237,6 +237,16 @@ export interface QuickClaudeOptions {
 }
 
 const QUICK_CLAUDE_WORKSPACE_KEY = 'quick-claude-last-workspace';
+const QUICK_CLAUDE_NO_WORKTREE_KEY = 'quick-claude-no-worktree';
+
+const IMAGE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.ico',
+]);
+
+function isImagePath(path: string): boolean {
+  const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext);
+}
 
 export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<QuickClaudeInput | null> {
   return new Promise((resolve) => {
@@ -398,6 +408,87 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       }
     });
 
+    // -- Image attachments (drag-and-drop) --
+    const attachedImages: string[] = [];
+
+    const attachContainer = document.createElement('div');
+    attachContainer.className = 'quick-claude-attachments';
+    attachContainer.style.display = 'none';
+    dialog.appendChild(attachContainer);
+
+    function addImage(path: string) {
+      if (attachedImages.includes(path)) return;
+      attachedImages.push(path);
+      renderAttachments();
+    }
+
+    function removeImage(path: string) {
+      const idx = attachedImages.indexOf(path);
+      if (idx >= 0) {
+        attachedImages.splice(idx, 1);
+        renderAttachments();
+      }
+    }
+
+    function renderAttachments() {
+      attachContainer.innerHTML = '';
+      if (attachedImages.length === 0) {
+        attachContainer.style.display = 'none';
+        return;
+      }
+      attachContainer.style.display = '';
+      for (const imgPath of attachedImages) {
+        const chip = document.createElement('div');
+        chip.className = 'quick-claude-image-chip';
+
+        const icon = document.createElement('span');
+        icon.className = 'quick-claude-image-chip-icon';
+        icon.textContent = '\uD83D\uDDBC'; // framed picture emoji
+        chip.appendChild(icon);
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'quick-claude-image-chip-name';
+        const fileName = imgPath.split(/[\\/]/).pop() || imgPath;
+        nameEl.textContent = fileName;
+        nameEl.title = imgPath;
+        chip.appendChild(nameEl);
+
+        const removeBtn = document.createElement('span');
+        removeBtn.className = 'quick-claude-image-chip-remove';
+        removeBtn.textContent = '\u00d7';
+        removeBtn.title = 'Remove';
+        removeBtn.onclick = () => removeImage(imgPath);
+        chip.appendChild(removeBtn);
+
+        attachContainer.appendChild(chip);
+      }
+    }
+
+    // Register Tauri drag-drop listener for images while dialog is open
+    let unlistenDragDrop: (() => void) | null = null;
+    (async () => {
+      try {
+        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        unlistenDragDrop = await getCurrentWebviewWindow().onDragDropEvent((event) => {
+          if (event.payload.type === 'enter') {
+            dialog.classList.add('quick-claude-drag-over');
+          } else if (event.payload.type === 'leave') {
+            dialog.classList.remove('quick-claude-drag-over');
+          } else if (event.payload.type === 'drop') {
+            dialog.classList.remove('quick-claude-drag-over');
+            const paths: string[] = (event.payload as { paths?: string[] }).paths || [];
+            for (const p of paths) {
+              if (isImagePath(p)) {
+                addImage(p);
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('[QuickClaude] Failed to register drag-drop listener:', err);
+      }
+    })();
+
     const branchRow = document.createElement('div');
     branchRow.style.cssText = 'display: flex; gap: 8px; align-items: center; margin-top: 8px;';
 
@@ -448,8 +539,17 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     const noWorktreeCheckbox = document.createElement('input');
     noWorktreeCheckbox.type = 'checkbox';
     noWorktreeCheckbox.style.margin = '0';
+    const savedNoWorktree = localStorage.getItem(QUICK_CLAUDE_NO_WORKTREE_KEY) === 'true';
+    noWorktreeCheckbox.checked = savedNoWorktree;
     worktreeRow.appendChild(noWorktreeCheckbox);
     worktreeRow.append('Open in main branch (no worktree)');
+
+    // Apply initial state if restored from localStorage
+    if (savedNoWorktree) {
+      branchInput.disabled = true;
+      branchAiBtn.disabled = true;
+      branchInput.style.opacity = '0.5';
+    }
 
     noWorktreeCheckbox.addEventListener('change', () => {
       const disabled = noWorktreeCheckbox.checked;
@@ -507,12 +607,25 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     dialog.appendChild(buttons);
     overlay.appendChild(dialog);
 
-    const close = () => overlay.remove();
+    const close = () => {
+      if (unlistenDragDrop) unlistenDragDrop();
+      overlay.remove();
+    };
 
     const submit = () => {
-      const prompt = promptArea.value.trim();
-      if (!prompt) return;
+      const promptText = promptArea.value.trim();
+      if (!promptText && attachedImages.length === 0) return;
       localStorage.setItem(QUICK_CLAUDE_WORKSPACE_KEY, workspaceSelect.value);
+      localStorage.setItem(QUICK_CLAUDE_NO_WORKTREE_KEY, String(noWorktreeCheckbox.checked));
+
+      // Prepend image paths to the prompt so Claude Code auto-loads them
+      let prompt = promptText;
+      if (attachedImages.length > 0) {
+        const quotedPaths = attachedImages.map(p => p.includes(' ') ? `"${p}"` : p);
+        const imagePrefix = quotedPaths.join(' ');
+        prompt = prompt ? `${imagePrefix} ${prompt}` : imagePrefix;
+      }
+
       close();
       resolve({
         prompt,
