@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use godly_protocol::{LayoutNode, SplitDirection};
 use tauri::State;
 use uuid::Uuid;
 
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
+#[allow(deprecated)]
 use crate::state::{AppState, ShellType, SplitView, Workspace};
 
 #[tauri::command]
@@ -89,6 +91,7 @@ pub fn reorder_tabs(
     Ok(())
 }
 
+#[allow(deprecated)]
 #[tauri::command]
 pub fn set_split_view(
     workspace_id: String,
@@ -119,6 +122,113 @@ pub fn clear_split_view(
     auto_save: State<Arc<AutoSaveManager>>,
 ) -> Result<(), String> {
     state.clear_split_view(&workspace_id);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn split_terminal(
+    workspace_id: String,
+    target_terminal_id: String,
+    new_terminal_id: String,
+    direction: SplitDirection,
+    ratio: f64,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    let mut trees = state.layout_trees.write();
+    let tree = trees.entry(workspace_id).or_insert_with(|| {
+        // No tree yet — create one with the target as the root leaf
+        LayoutNode::Leaf {
+            terminal_id: target_terminal_id.clone(),
+        }
+    });
+    if !tree.split_at(&target_terminal_id, &new_terminal_id, direction, ratio) {
+        return Err(format!("Terminal {} not found in layout tree", target_terminal_id));
+    }
+    drop(trees);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn unsplit_terminal(
+    workspace_id: String,
+    terminal_id: String,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    let mut trees = state.layout_trees.write();
+    if let Some(tree) = trees.get_mut(&workspace_id) {
+        // Check if this terminal is the root (only leaf)
+        if let LayoutNode::Leaf { terminal_id: ref id } = tree {
+            if id == &terminal_id {
+                // Last terminal — remove the tree entirely
+                trees.remove(&workspace_id);
+                drop(trees);
+                auto_save.mark_dirty();
+                return Ok(());
+            }
+        }
+        match tree.remove_terminal(&terminal_id) {
+            Some(_sibling) => {
+                // If the tree collapsed to a single leaf, remove it
+                if tree.count_leaves() <= 1 {
+                    trees.remove(&workspace_id);
+                }
+            }
+            None => {
+                return Err(format!("Terminal {} not found in layout tree", terminal_id));
+            }
+        }
+    } else {
+        return Err(format!("No layout tree for workspace {}", workspace_id));
+    }
+    drop(trees);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_layout_tree(
+    workspace_id: String,
+    state: State<Arc<AppState>>,
+) -> Option<LayoutNode> {
+    state.get_layout_tree(&workspace_id)
+}
+
+#[tauri::command]
+pub fn swap_panes(
+    workspace_id: String,
+    terminal_id_a: String,
+    terminal_id_b: String,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    let mut trees = state.layout_trees.write();
+    if let Some(tree) = trees.get_mut(&workspace_id) {
+        if !tree.swap_terminals(&terminal_id_a, &terminal_id_b) {
+            return Err(format!(
+                "One or both terminals ({}, {}) not found in layout tree",
+                terminal_id_a, terminal_id_b
+            ));
+        }
+    } else {
+        return Err(format!("No layout tree for workspace {}", workspace_id));
+    }
+    drop(trees);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_layout_tree(
+    workspace_id: String,
+    tree: LayoutNode,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    state.set_layout_tree(&workspace_id, tree);
     auto_save.mark_dirty();
     Ok(())
 }

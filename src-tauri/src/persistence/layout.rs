@@ -1,7 +1,9 @@
 use std::sync::Arc;
+use godly_protocol::{LayoutNode, SplitDirection};
 use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
 
+#[allow(deprecated)]
 use crate::state::{AppState, Layout, TerminalInfo};
 
 const STORE_PATH: &str = "layout.json";
@@ -43,6 +45,7 @@ fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
         .collect()
 }
 
+#[allow(deprecated)]
 #[tauri::command]
 pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<(), String> {
     log_info("Saving layout...");
@@ -59,12 +62,14 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
     let terminals = build_terminal_infos(&state);
     let active_workspace_id = state.active_workspace_id.read().clone();
     let split_views = state.get_all_split_views();
+    let layout_trees = state.get_all_layout_trees();
 
     let layout = Layout {
         workspaces,
         terminals,
         active_workspace_id,
         split_views,
+        layout_trees,
     };
 
     let json_value = serde_json::to_value(&layout)
@@ -90,6 +95,7 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
     Ok(())
 }
 
+#[allow(deprecated)]
 #[tauri::command]
 pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<Layout, String> {
     log_info("Loading layout...");
@@ -136,6 +142,38 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                 *state.active_workspace_id.write() = Some(active_id.clone());
             }
 
+            // Restore layout trees to backend state
+            if !layout.layout_trees.is_empty() {
+                for (ws_id, tree) in &layout.layout_trees {
+                    state.set_layout_tree(ws_id, tree.clone());
+                }
+                log_info(&format!("Restored {} layout trees", layout.layout_trees.len()));
+            } else if !layout.split_views.is_empty() {
+                // Migrate old split_views to layout trees
+                for (ws_id, sv) in &layout.split_views {
+                    let direction = if sv.direction == "vertical" {
+                        SplitDirection::Vertical
+                    } else {
+                        SplitDirection::Horizontal
+                    };
+                    let tree = LayoutNode::Split {
+                        direction,
+                        ratio: sv.ratio,
+                        first: Box::new(LayoutNode::Leaf {
+                            terminal_id: sv.left_terminal_id.clone(),
+                        }),
+                        second: Box::new(LayoutNode::Leaf {
+                            terminal_id: sv.right_terminal_id.clone(),
+                        }),
+                    };
+                    state.set_layout_tree(ws_id, tree);
+                }
+                log_info(&format!(
+                    "Migrated {} split_views to layout trees",
+                    layout.split_views.len()
+                ));
+            }
+
             Ok(layout)
         }
         None => {
@@ -145,6 +183,7 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
     }
 }
 
+#[allow(deprecated)]
 pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     log_info("Saving layout on exit...");
 
@@ -160,12 +199,14 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     let terminals = build_terminal_infos(state);
     let active_workspace_id = state.active_workspace_id.read().clone();
     let split_views = state.get_all_split_views();
+    let layout_trees = state.get_all_layout_trees();
 
     let layout = Layout {
         workspaces,
         terminals,
         active_workspace_id,
         split_views,
+        layout_trees,
     };
 
     match serde_json::to_value(&layout) {
@@ -249,6 +290,7 @@ mod tests {
 }
 
 /// Save layout from a background thread context (not a command)
+#[allow(deprecated)]
 pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
     let store = app_handle
         .store(STORE_PATH)
@@ -258,12 +300,14 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
     let terminals = build_terminal_infos(state);
     let active_workspace_id = state.active_workspace_id.read().clone();
     let split_views = state.get_all_split_views();
+    let layout_trees = state.get_all_layout_trees();
 
     let layout = Layout {
         workspaces,
         terminals,
         active_workspace_id,
         split_views,
+        layout_trees,
     };
 
     let json_value = serde_json::to_value(&layout)
