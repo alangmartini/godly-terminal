@@ -587,10 +587,8 @@ pub(crate) fn quick_claude_background(
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Step 5: Write the prompt text (convert \n → \r for PTY line breaks).
-    // IMPORTANT: Write the text and the submit key (\r) as SEPARATE writes with a
-    // delay between them. Claude Code's ink TUI detects multi-character input as
-    // "paste" and treats \r as a literal newline. Sending \r in its own write makes
-    // ink interpret it as a keypress (Enter), triggering prompt submission.
+    // IMPORTANT: Do NOT send \r (Enter) with the text. Enter must arrive as a
+    // SEPARATE stdin read so ink interprets it as a keypress, not a paste.
     let prompt_text = prompt.replace("\r\n", "\r").replace('\n', "\r");
     let text_req = Request::Write {
         session_id: terminal_id.clone(),
@@ -601,9 +599,25 @@ pub(crate) fn quick_claude_background(
         return;
     }
 
-    // Step 5b: Small delay so ink processes the text as "paste", then send Enter
-    // separately so it's recognized as a keypress, not part of the paste.
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Step 5b: Wait for the TUI to echo the prompt text before sending Enter.
+    //
+    // Bug #393: A fixed 100ms delay between text and Enter is insufficient.
+    // If the TUI hasn't started reading stdin yet (still initializing), both
+    // writes accumulate in the PTY buffer and arrive as one chunk — ink treats
+    // the merged \r as a literal newline (paste), not a submit keypress.
+    //
+    // Fix: Poll SearchBuffer until the prompt text appears in the terminal
+    // output. Ink echoes typed text to the input area, so the text showing up
+    // in output means the TUI has consumed it from stdin and is actively
+    // reading. Sending \r AFTER this guarantees a separate stdin read.
+    let search_prefix: String = prompt.chars().take(40).collect();
+    let echo_detected = poll_text_in_output(&daemon, &terminal_id, &search_prefix, 30_000);
+    if !echo_detected {
+        eprintln!("[quick_claude] Prompt text not echoed within 30s, sending Enter anyway");
+    }
+
+    // Step 5c: Small buffer after echo detection, then send Enter.
+    std::thread::sleep(std::time::Duration::from_millis(200));
 
     let submit_req = Request::Write {
         session_id: terminal_id.clone(),
@@ -687,6 +701,39 @@ fn has_trust_prompt(daemon: &DaemonClient, session_id: &str) -> bool {
         }
     }
     false
+}
+
+/// Poll until the specified text appears in the session's output buffer.
+/// Used to confirm that ink's TUI has consumed text from stdin (it echoes
+/// typed characters to the input area, which shows up in terminal output).
+/// Returns true if found before timeout, false otherwise.
+fn poll_text_in_output(
+    daemon: &DaemonClient,
+    session_id: &str,
+    text: &str,
+    timeout_ms: u64,
+) -> bool {
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    loop {
+        let req = Request::SearchBuffer {
+            session_id: session_id.to_string(),
+            text: text.to_string(),
+            strip_ansi: true,
+        };
+        if matches!(
+            daemon.send_request(&req),
+            Ok(Response::SearchResult { found: true, .. })
+        ) {
+            return true;
+        }
+
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
 }
 
 /// Pause output streaming for a session (session stays alive, VT parser
