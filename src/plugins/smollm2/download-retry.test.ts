@@ -1,23 +1,12 @@
 // @vitest-environment jsdom
 
-// Regression tests for Bug #199: SmolLM2 download Retry button and error quality.
-// Retry button must call llmDownloadModel() (not just llmGetStatus()).
-// Error messages must include the root cause from the full anyhow chain.
+// Tests for SmolLM2Plugin (Branch Name AI) settings UI.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockInvoke = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
-}));
-
-const mockListen = vi.fn().mockResolvedValue(() => {});
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
-}));
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  open: vi.fn().mockResolvedValue(null),
 }));
 
 // Mock localStorage
@@ -33,6 +22,7 @@ import { SmolLM2Plugin } from './index';
 import type { PluginContext, PluginEventType } from '../types';
 
 function createMockContext(overrides: Partial<PluginContext> = {}): PluginContext {
+  const settings = new Map<string, unknown>();
   return {
     on: vi.fn((_type: PluginEventType, _handler: (e: any) => void) => {
       return () => {};
@@ -43,160 +33,106 @@ function createMockContext(overrides: Partial<PluginContext> = {}): PluginContex
     getAudioContext: vi.fn().mockReturnValue({
       decodeAudioData: vi.fn().mockResolvedValue({ duration: 1 }),
     }),
-    getSetting: vi.fn().mockImplementation((_key: string, defaultValue: any) => defaultValue),
-    setSetting: vi.fn(),
+    getSetting: vi.fn().mockImplementation((key: string, defaultValue: any) => {
+      return settings.has(key) ? settings.get(key) : defaultValue;
+    }),
+    setSetting: vi.fn().mockImplementation((key: string, value: any) => {
+      settings.set(key, value);
+    }),
     playSound: vi.fn(),
     ...overrides,
   };
 }
 
-describe('Bug #199 regression: SmolLM2 download retry and error quality', () => {
+describe('SmolLM2Plugin settings', () => {
   let plugin: SmolLM2Plugin;
 
   beforeEach(() => {
     storage.clear();
     mockInvoke.mockReset();
-    mockListen.mockReset();
-    mockListen.mockResolvedValue(() => {});
     plugin = new SmolLM2Plugin();
   });
 
-  describe('Download button after error state', () => {
-    it('calls llm_download_model when clicking Download after error', async () => {
-      // Bug #199: Download/retry must call llm_download_model, not just llm_get_status
-      // In the new preset UI, error state shows Download button (files don't exist yet)
-      mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === 'llm_get_status') {
-          return Promise.resolve({ status: 'Error', detail: 'Download failed: Failed to download tokenizer: connection refused' });
-        }
-        if (cmd === 'llm_check_model_files') return Promise.resolve(false);
-        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
-        return Promise.resolve(undefined);
-      });
-
-      const ctx = createMockContext();
-      await plugin.init(ctx);
-
-      const el = plugin.renderSettings!();
-      // Wait for async preset buttons to render
-      await new Promise(r => setTimeout(r, 50));
-
-      const downloadBtn = Array.from(el.querySelectorAll('button'))
-        .find(b => b.textContent?.includes('Download'));
-
-      expect(downloadBtn).toBeDefined();
-
-      mockInvoke.mockClear();
-      // Re-set mocks for the click
-      mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === 'llm_get_status') return Promise.resolve({ status: 'Downloaded' });
-        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
-        if (cmd === 'llm_check_model_files') return Promise.resolve(true);
-        return Promise.resolve(undefined);
-      });
-
-      await downloadBtn!.click();
-      await new Promise(r => setTimeout(r, 50));
-
-      const downloadCalls = mockInvoke.mock.calls.filter(
-        (call: unknown[]) => call[0] === 'llm_download_model'
-      );
-      expect(downloadCalls.length).toBeGreaterThan(0);
+  it('renders API key input and save button', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'llm_has_api_key') return Promise.resolve(false);
+      return Promise.resolve(undefined);
     });
 
-    it('updates status after successful download retry', async () => {
-      let callCount = 0;
-      mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === 'llm_get_status') {
-          callCount++;
-          if (callCount <= 1) {
-            return Promise.resolve({ status: 'Error', detail: 'Download failed: Failed to download tokenizer: connection refused' });
-          }
-          return Promise.resolve({ status: 'Downloaded' });
-        }
-        if (cmd === 'llm_check_model_files') return Promise.resolve(false);
-        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
-        return Promise.resolve(undefined);
-      });
+    const ctx = createMockContext();
+    await plugin.init(ctx);
 
-      const ctx = createMockContext();
-      await plugin.init(ctx);
+    const el = plugin.renderSettings!();
 
-      const el = plugin.renderSettings!();
-      await new Promise(r => setTimeout(r, 50));
+    const inputs = el.querySelectorAll('input[type="password"]');
+    expect(inputs.length).toBe(1);
 
-      const statusValue = el.querySelector('.shortcut-keys') as HTMLElement;
-      expect(statusValue?.textContent).toContain('Error');
-
-      const downloadBtn = Array.from(el.querySelectorAll('button'))
-        .find(b => b.textContent?.includes('Download'));
-
-      // After click, check_model_files should return true
-      mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === 'llm_get_status') return Promise.resolve({ status: 'Downloaded' });
-        if (cmd === 'llm_check_model_files') return Promise.resolve(true);
-        if (cmd === 'llm_download_model') return Promise.resolve(undefined);
-        return Promise.resolve(undefined);
-      });
-
-      await downloadBtn!.click();
-      await new Promise(r => setTimeout(r, 50));
-
-      expect(statusValue?.textContent).not.toContain('Error');
-    });
+    const saveBtn = Array.from(el.querySelectorAll('button'))
+      .find(b => b.textContent === 'Save');
+    expect(saveBtn).toBeDefined();
   });
 
-  describe('Error message quality', () => {
-    it('displays full error chain including root cause', async () => {
-      // Bug #199 regression: backend now sends full chain via {:#} format
-      mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === 'llm_get_status') {
-          return Promise.resolve({
-            status: 'Error',
-            detail: 'Download failed: Failed to download tokenizer: connection refused: huggingface.co:443',
-          });
-        }
-        return Promise.resolve(undefined);
-      });
-
-      const ctx = createMockContext();
-      await plugin.init(ctx);
-
-      const el = plugin.renderSettings!();
-      const statusValue = el.querySelector('.shortcut-keys') as HTMLElement;
-      const statusText = statusValue?.textContent || '';
-
-      expect(statusText).toContain('connection refused');
+  it('saves API key via llm_set_api_key', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'llm_has_api_key') return Promise.resolve(false);
+      if (cmd === 'llm_set_api_key') return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
     });
+
+    const ctx = createMockContext();
+    await plugin.init(ctx);
+
+    const el = plugin.renderSettings!();
+    const keyInput = el.querySelector('input[type="password"]') as HTMLInputElement;
+    const saveBtn = Array.from(el.querySelectorAll('button'))
+      .find(b => b.textContent === 'Save')!;
+
+    keyInput.value = 'AIza-test-key-123';
+    await saveBtn.click();
+    await new Promise(r => setTimeout(r, 50));
+
+    const setCalls = mockInvoke.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'llm_set_api_key',
+    );
+    expect(setCalls.length).toBe(1);
+    expect(setCalls[0][1]).toEqual({ key: 'AIza-test-key-123' });
+    expect(ctx.setSetting).toHaveBeenCalledWith('geminiApiKey', 'AIza-test-key-123');
   });
 
-  describe('Download button visible in error state', () => {
-    it('shows a Download button in error state (files not yet on disk)', async () => {
-      // Bug #199 regression: error state must have a button to retry download
-      mockInvoke.mockImplementation((cmd: string) => {
-        if (cmd === 'llm_get_status') {
-          return Promise.resolve({
-            status: 'Error',
-            detail: 'Download failed: Failed to download tokenizer: connection refused',
-          });
-        }
-        if (cmd === 'llm_check_model_files') return Promise.resolve(false);
-        return Promise.resolve(undefined);
-      });
-
-      const ctx = createMockContext();
-      await plugin.init(ctx);
-
-      const el = plugin.renderSettings!();
-      await new Promise(r => setTimeout(r, 50));
-
-      const buttons = Array.from(el.querySelectorAll('button'));
-      const buttonTexts = buttons.map(b => b.textContent);
-
-      const hasDownloadAction = buttonTexts.some(
-        t => t?.includes('Download')
-      );
-      expect(hasDownloadAction).toBe(true);
+  it('shows test generation section', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'llm_has_api_key') return Promise.resolve(true);
+      return Promise.resolve(undefined);
     });
+
+    const ctx = createMockContext();
+    await plugin.init(ctx);
+
+    const el = plugin.renderSettings!();
+    const testBtn = Array.from(el.querySelectorAll('button'))
+      .find(b => b.textContent === 'Generate Branch Name');
+    expect(testBtn).toBeDefined();
+  });
+
+  it('restores API key on enable', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'llm_has_api_key') return Promise.resolve(false);
+      if (cmd === 'llm_set_api_key') return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+
+    const ctx = createMockContext();
+    (ctx.getSetting as ReturnType<typeof vi.fn>).mockImplementation(
+      (key: string, def: any) => key === 'geminiApiKey' ? 'saved-key' : def,
+    );
+
+    await plugin.init(ctx);
+    await plugin.enable();
+
+    const setCalls = mockInvoke.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'llm_set_api_key',
+    );
+    expect(setCalls.length).toBe(1);
+    expect(setCalls[0][1]).toEqual({ key: 'saved-key' });
   });
 });
