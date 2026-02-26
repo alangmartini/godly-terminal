@@ -2123,3 +2123,55 @@ body.dragging-active * {
   color: #fff !important;
   animation: mic-pulse 1.5s ease-in-out infinite;
 }
+
+/* Quick Claude image drag-and-drop */
+.dialog.quick-claude-drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.quick-claude-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.quick-claude-image-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 260px;
+}
+
+.quick-claude-image-chip-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.quick-claude-image-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-claude-image-chip-remove {
+  flex-shrink: 0;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-secondary);
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+.quick-claude-image-chip-remove:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
