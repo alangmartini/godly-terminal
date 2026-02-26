@@ -605,12 +605,13 @@ impl Backend for DaemonDirectBackend {
             McpRequest::CreateSplit { .. } => Ok(Self::app_only_error("create_split")),
             McpRequest::ClearSplit { .. } => Ok(Self::app_only_error("clear_split")),
             McpRequest::GetSplitState { .. } => Ok(Self::app_only_error("get_split_state")),
-            McpRequest::ExecuteJs { .. } => Ok(Self::app_only_error("execute_js")),
-            McpRequest::CaptureScreenshot { .. } => Ok(Self::app_only_error("capture_screenshot")),
             McpRequest::SplitTerminal { .. } => Ok(Self::app_only_error("split_terminal")),
             McpRequest::UnsplitTerminal { .. } => Ok(Self::app_only_error("unsplit_terminal")),
             McpRequest::GetLayoutTree { .. } => Ok(Self::app_only_error("get_layout_tree")),
             McpRequest::SwapPanes { .. } => Ok(Self::app_only_error("swap_panes")),
+            McpRequest::ZoomPane { .. } => Ok(Self::app_only_error("zoom_pane")),
+            McpRequest::ExecuteJs { .. } => Ok(Self::app_only_error("execute_js")),
+            McpRequest::CaptureScreenshot { .. } => Ok(Self::app_only_error("capture_screenshot")),
         }
     }
 
