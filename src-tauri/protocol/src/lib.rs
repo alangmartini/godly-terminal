@@ -5,6 +5,7 @@ pub mod layout_tree;
 pub mod mcp_messages;
 pub mod messages;
 pub mod types;
+pub mod whisper;
 
 pub use frame::{read_daemon_message, read_message, read_request, write_daemon_message, write_message, write_request};
 pub use frame::{
@@ -17,12 +18,16 @@ pub use messages::{DaemonMessage, Event, Request, Response};
 pub use messages::{ShimRequest, ShimResponse};
 pub use types::{GridData, SessionInfo, ShellType};
 pub use types::ShimMetadata;
+pub use whisper::{WhisperRequest, WhisperResponse};
 
 /// Default named pipe path used by both daemon and client
 pub const PIPE_NAME: &str = r"\\.\pipe\godly-terminal-daemon";
 
 /// Named pipe path for MCP communication (Tauri app <-> godly-mcp binary)
 pub const MCP_PIPE_NAME: &str = r"\\.\pipe\godly-terminal-mcp";
+
+/// Named pipe path for whisper communication (Tauri app <-> godly-whisper binary)
+pub const WHISPER_PIPE_NAME: &str = r"\\.\pipe\godly-whisper";
 
 /// Get a suffix derived from the GODLY_INSTANCE env var (e.g. "-test").
 /// Returns empty string when unset, so production paths are unchanged.
@@ -46,6 +51,13 @@ pub fn pipe_name() -> String {
 pub fn mcp_pipe_name() -> String {
     std::env::var("GODLY_MCP_PIPE_NAME")
         .unwrap_or_else(|_| format!(r"\\.\pipe\godly-terminal-mcp{}", instance_suffix()))
+}
+
+/// Get the whisper pipe name, allowing override via GODLY_WHISPER_PIPE_NAME env var.
+/// Falls back to the default whisper pipe name with an optional instance suffix.
+pub fn whisper_pipe_name() -> String {
+    std::env::var("GODLY_WHISPER_PIPE_NAME")
+        .unwrap_or_else(|_| format!(r"\\.\pipe\godly-whisper{}", instance_suffix()))
 }
 
 /// Get the named pipe name for a pty-shim process.
