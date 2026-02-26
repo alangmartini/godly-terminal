@@ -556,14 +556,14 @@ pub(crate) fn quick_claude_background(
     std::thread::sleep(std::time::Duration::from_millis(5_000));
 
     // Step 3b: Check for workspace trust prompt and auto-accept if present.
-    // Claude Code sometimes shows "Do you trust the files in this folder?" on
-    // first launch in a new directory. This blocks the automation flow — Claude
-    // won't accept the prompt until the user responds. Detect it and send "y".
+    // Claude Code shows a trust prompt on first launch in a new directory.
+    // Newer versions use a selection UI ("1. Yes, I trust this folder") that
+    // needs Enter to confirm (option 1 is pre-selected). Detect and accept.
     if has_trust_prompt(&daemon, &terminal_id) {
         eprintln!("[quick_claude] Detected trust prompt, auto-accepting");
         let accept_req = Request::Write {
             session_id: terminal_id.clone(),
-            data: b"y".to_vec(),
+            data: b"\r".to_vec(),
         };
         let _ = daemon.send_request(&accept_req);
         // Give Claude time to process the acceptance and continue startup
@@ -665,17 +665,23 @@ fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: 
 }
 
 /// Check if Claude Code is showing a workspace trust prompt by searching the
-/// terminal output buffer for the characteristic text.
+/// terminal output buffer for the characteristic text. Handles both old
+/// ("Do you trust the files") and new ("I trust this folder") prompt formats.
 fn has_trust_prompt(daemon: &DaemonClient, session_id: &str) -> bool {
-    let req = Request::SearchBuffer {
-        session_id: session_id.to_string(),
-        text: "Do you trust the files".to_string(),
-        strip_ansi: true,
-    };
-    matches!(
-        daemon.send_request(&req),
-        Ok(Response::SearchResult { found: true, .. })
-    )
+    for needle in &["Do you trust the files", "I trust this folder"] {
+        let req = Request::SearchBuffer {
+            session_id: session_id.to_string(),
+            text: needle.to_string(),
+            strip_ansi: true,
+        };
+        if matches!(
+            daemon.send_request(&req),
+            Ok(Response::SearchResult { found: true, .. })
+        ) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Pause output streaming for a session (session stays alive, VT parser
