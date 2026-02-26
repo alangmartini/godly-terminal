@@ -328,6 +328,60 @@ fn bench_full_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark first-render latency when the renderer was pre-warmed.
+/// Simulates the app startup path: GpuRenderer::new() runs on a background
+/// thread, then the first actual render request hits an already-initialized renderer.
+fn bench_prewarmed_first_render(c: &mut Criterion) {
+    let mut group = c.benchmark_group("prewarmed");
+
+    // Pre-warm: create renderer once (simulates background thread completion)
+    let mut renderer = match GpuRenderer::new("Cascadia Code", 14.0) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Skipping GPU benchmarks: {e}");
+            return;
+        }
+    };
+
+    // First render on a pre-warmed renderer (atlas populated, GPU device ready)
+    let snapshot = make_snapshot(30, 120);
+    group.bench_function("first_render_30x120", |b| {
+        b.iter(|| renderer.render_to_pixels(&snapshot).unwrap());
+    });
+
+    group.finish();
+}
+
+/// Benchmark individual cold-start phases to isolate the bottleneck.
+/// This breaks `GpuRenderer::new()` into its constituent parts:
+///   1. GPU device initialization (wgpu adapter + device)
+///   2. GlyphAtlas construction (FontSystem + ASCII pre-rasterization)
+///   3. RenderPipeline creation (WGSL shader compilation)
+fn bench_cold_start_phases(c: &mut Criterion) {
+    use godly_renderer::cold_start_phases;
+
+    let mut group = c.benchmark_group("cold_start_phases");
+
+    // Phase 1: GPU device creation
+    group.bench_function("gpu_device", |b| {
+        b.iter(|| cold_start_phases::create_device().unwrap());
+    });
+
+    // Phase 2: Glyph atlas (FontSystem + pre-rasterize ASCII)
+    group.bench_function("glyph_atlas", |b| {
+        b.iter(|| cold_start_phases::create_atlas("Cascadia Code", 14.0));
+    });
+
+    // Phase 3: Render pipeline (shader compile)
+    // Need a device for this
+    let dev = cold_start_phases::create_device().unwrap();
+    group.bench_function("render_pipeline", |b| {
+        b.iter(|| cold_start_phases::create_pipeline(&dev));
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_render_to_pixels,
@@ -335,5 +389,7 @@ criterion_group!(
     bench_content_patterns,
     bench_warm_vs_cold,
     bench_full_pipeline,
+    bench_prewarmed_first_render,
+    bench_cold_start_phases,
 );
 criterion_main!(benches);

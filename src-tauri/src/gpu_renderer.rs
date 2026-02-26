@@ -1,19 +1,20 @@
 //! GPU renderer state management for the Tauri app.
 //!
 //! Wraps `godly-renderer::GpuRenderer` behind a `Mutex` for thread-safe access
-//! from Tauri command handlers. The renderer is lazily initialized on first use
-//! so app startup isn't blocked by GPU adapter enumeration.
+//! from Tauri command handlers. The renderer is pre-warmed on a background thread
+//! during app startup so it's ready before the first render request.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use godly_renderer::GpuRenderer;
 use godly_protocol::types::RichGridData;
 
-/// Manages a lazily-initialized GPU renderer instance.
+/// Manages a GPU renderer instance that is pre-warmed on app startup.
 ///
-/// The renderer is shared across all terminals. It is initialized on first
-/// render request and cached for subsequent calls. A `Mutex` serializes
-/// access since `GpuRenderer` holds GPU device state that is not `Sync`.
+/// The renderer is shared across all terminals. A background thread initializes
+/// it during app startup (~500ms for GPU device + atlas), so the first render
+/// request doesn't pay the cold-start cost. A `Mutex` serializes access since
+/// `GpuRenderer` holds GPU device state that is not `Sync`.
 ///
 /// The renderer is recreated when the DPI scale factor changes (e.g. window
 /// moved to a different monitor).
@@ -32,6 +33,32 @@ impl GpuRendererManager {
             font_size,
             current_dpr: Mutex::new(0.0), // 0 = not yet initialized
         }
+    }
+
+    /// Pre-warm the GPU renderer on a background thread.
+    ///
+    /// Spawns a thread that initializes the wgpu device, glyph atlas, and
+    /// render pipeline (~500ms total). This runs concurrently with app startup
+    /// so the renderer is ready before the first terminal render request.
+    pub fn warm(self: &Arc<Self>) {
+        let mgr = Arc::clone(self);
+        std::thread::Builder::new()
+            .name("gpu-warm".into())
+            .spawn(move || {
+                let start = std::time::Instant::now();
+                match mgr.ensure_renderer() {
+                    Ok(()) => {
+                        eprintln!(
+                            "[gpu_renderer] Pre-warmed in {:.0}ms",
+                            start.elapsed().as_secs_f64() * 1000.0
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[gpu_renderer] Pre-warm failed: {e}");
+                    }
+                }
+            })
+            .expect("Failed to spawn GPU warm thread");
     }
 
     /// Ensure the GPU renderer is initialized at the given DPI scale.
