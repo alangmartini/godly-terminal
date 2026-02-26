@@ -27,9 +27,16 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return output;
 }
 
+// Gamma correction exponent for stem darkening.
+// pow(coverage, 1/gamma) boosts mid-range alpha, making text visually thicker
+// and matching the weight produced by DirectWrite/ClearType renderers.
+// 1.0/1.6 ≈ 0.625 — moderate darkening that matches Windows Terminal aesthetics.
+const GAMMA_INV: f32 = 0.625;
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let glyph_alpha = textureSample(atlas_texture, atlas_sampler, input.uv).r;
-    // Blend: background where no glyph, foreground where glyph is present
+    let raw_alpha = textureSample(atlas_texture, atlas_sampler, input.uv).r;
+    // Apply stem darkening: boost coverage for perceptually correct text weight
+    let glyph_alpha = pow(raw_alpha, GAMMA_INV);
     return mix(input.bg_color, input.fg_color, glyph_alpha);
 }
