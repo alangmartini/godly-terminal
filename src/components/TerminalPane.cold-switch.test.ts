@@ -80,31 +80,30 @@ class ColdSwitchSimulator {
   /**
    * Resume — mirrors real TerminalPane.resume() (lines 1022-1042).
    *
-   * Current (buggy) behavior:
-   *   this.cachedSnapshot = null;   ← screen goes black
-   *   this.fetchAndRenderSnapshot(); ← async, takes 2-3s under contention
-   *
-   * Expected (fixed) behavior:
-   *   const staleSnapshot = this.cachedSnapshot;
-   *   if (staleSnapshot) this.renderSnapshot(staleSnapshot); ← instant display
-   *   this.fetchAndRenderSnapshot(); ← background refresh
+   * Stale-while-revalidate pattern:
+   *   1. Preserve cached snapshot for immediate rendering (no black screen)
+   *   2. Render stale snapshot instantly so the user sees content
+   *   3. Kick off a full fetch in background to get fresh data
    */
   resume() {
     if (!this.paused) return;
     this.paused = false;
 
-    // ─── Current buggy behavior (matches real code) ───
-    this.cachedSnapshot = null;
-    // ──────────────────────────────────────────────────
+    // ─── Stale-while-revalidate: preserve cached snapshot ───
+    const staleSnapshot = this.cachedSnapshot;
+    if (staleSnapshot) {
+      this.renderSnapshot(staleSnapshot);
+    }
+    // ────────────────────────────────────────────────────────
 
     mockTriggerProbe(this.terminalId);
     mockConnectOutputStream(this.terminalId);
-    this.fetchAndRenderSnapshot();
+    this.fetchAndRenderSnapshot(true); // force full fetch after resume
   }
 
-  async fetchAndRenderSnapshot() {
+  async fetchAndRenderSnapshot(forceFullFetch = false) {
     this.fetchStarted = true;
-    if (this.cachedSnapshot && this.useDiffSnapshots) {
+    if (!forceFullFetch && this.cachedSnapshot && this.useDiffSnapshots) {
       // Diff path — fast, but requires cached snapshot
       return;
     }
@@ -133,11 +132,11 @@ class ColdSwitchSimulator {
 
 describe('Bug #373: Cold switch black screen on tab switch', () => {
   beforeEach(() => {
-    mockDisconnectOutputStream.mockReset();
-    mockConnectOutputStream.mockReset();
-    mockTriggerProbe.mockReset();
-    mockRenderSnapshot.mockReset();
-    mockFetchFullSnapshot.mockReset();
+    mockDisconnectOutputStream.mockClear();
+    mockConnectOutputStream.mockClear();
+    mockTriggerProbe.mockClear();
+    mockRenderSnapshot.mockClear();
+    mockFetchFullSnapshot.mockClear();
     fetchResolve = null;
   });
 
