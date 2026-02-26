@@ -543,10 +543,16 @@ class Store {
   /**
    * Remove a terminal from the layout tree, collapsing the split.
    * If the tree collapses to a single leaf, clears the tree entirely.
+   * If called without terminalId, clears the entire tree.
    */
-  unsplitTerminal(workspaceId: string, terminalId: string): void {
+  unsplitTerminal(workspaceId: string, terminalId?: string): void {
     const tree = this.state.layoutTrees[workspaceId];
     if (!tree) return;
+
+    if (!terminalId) {
+      this.clearLayoutTree(workspaceId);
+      return;
+    }
 
     if (!containsTerminal(tree, terminalId)) return;
 
@@ -618,6 +624,11 @@ class Store {
         splitViews: { ...this.state.splitViews, ...this.treeToSplitViews(workspaceId, updated) },
       });
     }
+  }
+
+  /** Alias for updateTreeRatio — used by the recursive split renderer. */
+  updateLayoutTreeRatio(workspaceId: string, path: number[], ratio: number): void {
+    this.updateTreeRatio(workspaceId, path, ratio);
   }
 
   // ---------------------------------------------------------------------------
