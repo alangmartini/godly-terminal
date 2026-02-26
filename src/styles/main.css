@@ -361,6 +361,51 @@ html, body {
   background: var(--accent);
 }
 
+/* Recursive split containers (SplitContainer.ts) */
+.split-root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.split-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.split-container.horizontal {
+  flex-direction: row;
+}
+
+.split-container.vertical {
+  flex-direction: column;
+}
+
+/* Panes inside recursive split containers use relative positioning */
+.split-container > .split-pane,
+.split-container > .terminal-pane.split-visible {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  display: block;
+  overflow: hidden;
+}
+
+/* Placeholder for panes not yet mounted */
+.split-pane-placeholder {
+  background: var(--bg-primary);
+}
+
+/* During divider drag, prevent pointer events on iframes/canvases */
+body.split-resizing iframe,
+body.split-resizing canvas {
+  pointer-events: none;
+}
+
 /* Drop overlay zones */
 .split-drop-overlay {
   position: absolute;

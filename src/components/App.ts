@@ -16,6 +16,8 @@ import { FigmaPane } from './FigmaPane';
 import { ToastContainer } from './ToastContainer';
 import { PerfOverlay } from './PerfOverlay';
 import { onDragMove, onDragDrop } from '../state/drag-state';
+import { SplitContainer } from './SplitContainer';
+import { terminalIds, fromLegacySplitView, swapTerminals } from '../state/split-types';
 
 type BackendShellType =
   | 'windows'
@@ -88,6 +90,8 @@ export class App {
   private reattachedTerminalIds: Set<string> = new Set();
   private splitDivider: HTMLElement | null = null;
   private splitDropOverlay: HTMLElement | null = null;
+  private splitContainer: SplitContainer | null = null;
+  private splitContainerWorkspaceId: string | null = null;
   private pendingNotificationTerminalId: string | null = null;
   private pendingNotificationTimestamp: number = 0;
   private perfOverlay: PerfOverlay | null = null;
@@ -172,31 +176,70 @@ export class App {
     });
 
     // Remove panes for deleted terminals
-    const terminalIds = new Set(state.terminals.map((t) => t.id));
+    const existingTerminalIds = new Set(state.terminals.map((t) => t.id));
     this.terminalPanes.forEach((pane, id) => {
-      if (!terminalIds.has(id)) {
+      if (!existingTerminalIds.has(id)) {
         pane.destroy();
         this.terminalPanes.delete(id);
       }
     });
 
     // Update active state (split-aware)
-    const split = state.activeWorkspaceId
+    const layoutTree = state.activeWorkspaceId
+      ? store.getLayoutTree(state.activeWorkspaceId)
+      : null;
+    const legacySplit = state.activeWorkspaceId
       ? store.getSplitView(state.activeWorkspaceId)
       : null;
 
-    if (split) {
-      // Split mode: show two panes
+    if (layoutTree) {
+      // Recursive split mode: use SplitContainer
+      this.terminalContainer.classList.remove('split-horizontal', 'split-vertical');
+      this.removeSplitDivider();
+
+      // Hide all panes that are NOT in the layout tree
+      const visibleIds = new Set(terminalIds(layoutTree));
+      this.terminalPanes.forEach((pane, id) => {
+        if (!visibleIds.has(id)) {
+          pane.setActive(false);
+          pane.getContainer().style.flexBasis = '';
+        }
+      });
+
+      if (this.splitContainer && this.splitContainerWorkspaceId === state.activeWorkspaceId) {
+        // Update existing SplitContainer
+        this.splitContainer.update(layoutTree, state.activeTerminalId);
+      } else {
+        // Create new SplitContainer
+        this.destroySplitContainer();
+        this.splitContainerWorkspaceId = state.activeWorkspaceId;
+        this.splitContainer = new SplitContainer(layoutTree, {
+          paneMap: this.terminalPanes as Map<string, import('./SplitContainer').SplitPaneHandle>,
+          onRatioChange: (path, ratio) => {
+            if (state.activeWorkspaceId) {
+              store.updateLayoutTreeRatio(state.activeWorkspaceId, path, ratio);
+            }
+          },
+          onFocusPane: (terminalId) => {
+            store.setActiveTerminal(terminalId);
+          },
+          focusedTerminalId: state.activeTerminalId,
+        });
+        this.terminalContainer.appendChild(this.splitContainer.getElement());
+      }
+    } else if (legacySplit) {
+      // Legacy 2-pane split mode
+      this.destroySplitContainer();
       this.terminalContainer.classList.remove('split-horizontal', 'split-vertical');
       this.terminalContainer.classList.add(
-        split.direction === 'horizontal' ? 'split-horizontal' : 'split-vertical'
+        legacySplit.direction === 'horizontal' ? 'split-horizontal' : 'split-vertical'
       );
 
-      const leftPane = this.terminalPanes.get(split.leftTerminalId);
-      const rightPane = this.terminalPanes.get(split.rightTerminalId);
+      const leftPane = this.terminalPanes.get(legacySplit.leftTerminalId);
+      const rightPane = this.terminalPanes.get(legacySplit.rightTerminalId);
 
       // Ensure divider exists
-      this.ensureSplitDivider(split.direction);
+      this.ensureSplitDivider(legacySplit.direction);
 
       // Reorder DOM: left pane, divider, right pane
       if (leftPane) {
@@ -213,8 +256,8 @@ export class App {
       }
 
       // Set flex-basis based on ratio
-      const leftBasis = `calc(${split.ratio * 100}% - 2px)`;
-      const rightBasis = `calc(${(1 - split.ratio) * 100}% - 2px)`;
+      const leftBasis = `calc(${legacySplit.ratio * 100}% - 2px)`;
+      const rightBasis = `calc(${(1 - legacySplit.ratio) * 100}% - 2px)`;
 
       this.terminalPanes.forEach((pane, id) => {
         const terminal = state.terminals.find((t) => t.id === id);
@@ -223,10 +266,10 @@ export class App {
           return;
         }
 
-        if (id === split.leftTerminalId) {
+        if (id === legacySplit.leftTerminalId) {
           pane.getContainer().style.flexBasis = leftBasis;
           pane.setSplitVisible(true, state.activeTerminalId === id);
-        } else if (id === split.rightTerminalId) {
+        } else if (id === legacySplit.rightTerminalId) {
           pane.getContainer().style.flexBasis = rightBasis;
           pane.setSplitVisible(true, state.activeTerminalId === id);
         } else {
@@ -235,6 +278,7 @@ export class App {
       });
     } else {
       // Single pane mode
+      this.destroySplitContainer();
       this.terminalContainer.classList.remove('split-horizontal', 'split-vertical');
       this.removeSplitDivider();
 
@@ -418,12 +462,24 @@ export class App {
         case 'split.focusOtherPane': {
           e.preventDefault();
           if (state.activeWorkspaceId && state.activeTerminalId) {
-            const activeSplit = store.getSplitView(state.activeWorkspaceId);
-            if (activeSplit) {
-              const otherId = state.activeTerminalId === activeSplit.leftTerminalId
-                ? activeSplit.rightTerminalId
-                : activeSplit.leftTerminalId;
-              store.setActiveTerminal(otherId);
+            // Layout tree: cycle through panes in tree order
+            const tree = store.getLayoutTree(state.activeWorkspaceId);
+            if (tree) {
+              const ids = terminalIds(tree);
+              const currentIdx = ids.indexOf(state.activeTerminalId);
+              if (currentIdx >= 0 && ids.length > 1) {
+                const nextIdx = (currentIdx + 1) % ids.length;
+                store.setActiveTerminal(ids[nextIdx]);
+              }
+            } else {
+              // Legacy split
+              const activeSplit = store.getSplitView(state.activeWorkspaceId);
+              if (activeSplit) {
+                const otherId = state.activeTerminalId === activeSplit.leftTerminalId
+                  ? activeSplit.rightTerminalId
+                  : activeSplit.leftTerminalId;
+                store.setActiveTerminal(otherId);
+              }
             }
           }
           break;
@@ -811,12 +867,21 @@ export class App {
           }
         }
 
-        // Restore split views
+        // Restore split views (create layout trees from persisted flat splits)
         if (layout.split_views) {
-          const terminalIds = new Set(store.getState().terminals.map((t) => t.id));
+          const knownTerminalIds = new Set(store.getState().terminals.map((t) => t.id));
           for (const [wsId, sv] of Object.entries(layout.split_views)) {
-            if (terminalIds.has(sv.left_terminal_id) && terminalIds.has(sv.right_terminal_id)) {
+            if (knownTerminalIds.has(sv.left_terminal_id) && knownTerminalIds.has(sv.right_terminal_id)) {
               const dir = sv.direction === 'vertical' ? 'vertical' : 'horizontal';
+              // Create layout tree from legacy split
+              const tree = fromLegacySplitView({
+                leftTerminalId: sv.left_terminal_id,
+                rightTerminalId: sv.right_terminal_id,
+                direction: dir,
+                ratio: sv.ratio,
+              });
+              store.setLayoutTree(wsId, tree);
+              // Also set legacy split for backend persistence
               store.setSplitView(wsId, sv.left_terminal_id, sv.right_terminal_id, dir, sv.ratio);
               await this.syncSplitToBackend(wsId, {
                 leftTerminalId: sv.left_terminal_id,
@@ -955,6 +1020,14 @@ export class App {
     }
   }
 
+  private destroySplitContainer() {
+    if (this.splitContainer) {
+      this.splitContainer.destroy();
+      this.splitContainer = null;
+      this.splitContainerWorkspaceId = null;
+    }
+  }
+
   private setupSplitDropZone() {
     // Create drop overlay element (reused from previous implementation)
     this.splitDropOverlay = document.createElement('div');
@@ -1034,45 +1107,27 @@ export class App {
       const droppedTerminal = state.terminals.find(t => t.id === droppedTerminalId);
       if (!droppedTerminal || droppedTerminal.workspaceId !== state.activeWorkspaceId) return;
 
-      let direction: 'horizontal' | 'vertical';
-      let leftId: string;
-      let rightId: string;
+      // Determine split direction from drop zone
+      const direction: 'horizontal' | 'vertical' =
+        (zone === 'left' || zone === 'right') ? 'horizontal' : 'vertical';
 
-      const existingSplit = store.getSplitView(state.activeWorkspaceId);
+      // Use layout tree model: split the focused pane with the dropped terminal
+      const targetId = state.activeTerminalId;
 
-      if (existingSplit) {
-        if (zone === 'right' || zone === 'bottom') {
-          leftId = existingSplit.leftTerminalId;
-          rightId = droppedTerminalId;
-          direction = existingSplit.direction;
-        } else {
-          leftId = droppedTerminalId;
-          rightId = existingSplit.rightTerminalId;
-          direction = existingSplit.direction;
-        }
-      } else {
-        if (zone === 'right') {
-          direction = 'horizontal';
-          leftId = state.activeTerminalId;
-          rightId = droppedTerminalId;
-        } else if (zone === 'left') {
-          direction = 'horizontal';
-          leftId = droppedTerminalId;
-          rightId = state.activeTerminalId;
-        } else if (zone === 'bottom') {
-          direction = 'vertical';
-          leftId = state.activeTerminalId;
-          rightId = droppedTerminalId;
-        } else {
-          direction = 'vertical';
-          leftId = droppedTerminalId;
-          rightId = state.activeTerminalId;
+      // For right/bottom drops, the new terminal goes in the "second" slot (default).
+      // For left/top drops, we need to swap the order after splitting.
+      store.splitTerminalAt(state.activeWorkspaceId, targetId, droppedTerminalId, direction);
+
+      // For left/top drops, swap the terminals so the dropped one appears first
+      if (zone === 'left' || zone === 'top') {
+        const tree = store.getLayoutTree(state.activeWorkspaceId);
+        if (tree) {
+          const newTree = swapTerminals(tree, targetId, droppedTerminalId);
+          if (newTree) {
+            store.setLayoutTree(state.activeWorkspaceId, newTree);
+          }
         }
       }
-
-      store.setSplitView(state.activeWorkspaceId, leftId, rightId, direction);
-      const split = store.getSplitView(state.activeWorkspaceId)!;
-      this.syncSplitToBackend(state.activeWorkspaceId, split);
     });
   }
 
@@ -1173,9 +1228,8 @@ export class App {
     const newId = await this.createNewTerminal();
     if (!newId) return;
 
-    store.setSplitView(state.activeWorkspaceId, currentActiveId, newId, direction);
-    const split = store.getSplitView(state.activeWorkspaceId)!;
-    await this.syncSplitToBackend(state.activeWorkspaceId, split);
+    // Use layout tree model
+    store.splitTerminalAt(state.activeWorkspaceId, currentActiveId, newId, direction);
   }
 
   private async handleSplitRequest(terminalId: string, direction: 'horizontal' | 'vertical') {
@@ -1183,17 +1237,19 @@ export class App {
     if (!state.activeWorkspaceId || !state.activeTerminalId) return;
     if (terminalId === state.activeTerminalId) return;
 
-    const leftId = state.activeTerminalId;
-    const rightId = terminalId;
-
-    store.setSplitView(state.activeWorkspaceId, leftId, rightId, direction);
-    const split = store.getSplitView(state.activeWorkspaceId)!;
-    await this.syncSplitToBackend(state.activeWorkspaceId, split);
+    // Use layout tree model: create a 2-pane split with active + dropped terminal
+    store.splitTerminalAt(state.activeWorkspaceId, state.activeTerminalId, terminalId, direction);
   }
 
   private async handleUnsplitRequest() {
     const state = store.getState();
     if (!state.activeWorkspaceId) return;
+
+    // Clear layout tree first, then legacy split
+    const tree = store.getLayoutTree(state.activeWorkspaceId);
+    if (tree) {
+      store.unsplitTerminal(state.activeWorkspaceId);
+    }
     store.clearSplitView(state.activeWorkspaceId);
     await this.clearSplitFromBackend(state.activeWorkspaceId);
   }
@@ -1431,6 +1487,15 @@ export class App {
       const { workspace_id, left_terminal_id, right_terminal_id, direction, ratio } = event.payload;
       console.log('[App] MCP set split view:', workspace_id, direction);
       const dir = direction === 'vertical' ? 'vertical' : 'horizontal';
+      // Create layout tree from MCP split view
+      const tree = fromLegacySplitView({
+        leftTerminalId: left_terminal_id,
+        rightTerminalId: right_terminal_id,
+        direction: dir,
+        ratio,
+      });
+      store.setLayoutTree(workspace_id, tree);
+      // Also set legacy split for backend persistence
       store.setSplitView(workspace_id, left_terminal_id, right_terminal_id, dir, ratio);
     });
 
@@ -1438,6 +1503,7 @@ export class App {
     await listen<string>('mcp-clear-split-view', (event) => {
       const workspaceId = event.payload;
       console.log('[App] MCP clear split view:', workspaceId);
+      store.clearLayoutTree(workspaceId);
       store.clearSplitView(workspaceId);
     });
 
