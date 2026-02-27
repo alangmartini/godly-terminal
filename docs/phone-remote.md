@@ -12,7 +12,7 @@ The phone remote is a mobile web UI served by `godly-remote` (the Axum HTTP serv
 - Terminal text view with auto-refresh
 - Quick input: `y`, `n`, Enter, Ctrl+C buttons
 - Real-time SSE push notifications for prompt detection
-- Works over ngrok tunnel for access from anywhere
+- Works over Cloudflare Tunnel, ngrok, or local Wi-Fi
 
 ## Architecture
 
@@ -33,23 +33,64 @@ The phone UI is a single HTML file embedded in the `godly-remote` binary. No bui
 
 ### Prerequisites
 
-- `godly-daemon` running
-- `godly-remote` built: `cd src-tauri && cargo build -p godly-remote --release`
-- [ngrok](https://ngrok.com/download) installed (for remote access)
+- Godly Terminal (or `godly-daemon`) running
+- `godly-remote` built: `cd src-tauri && cargo build -p godly-remote --release` (the setup script builds it automatically if missing)
+- For remote access: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/) or [ngrok](https://ngrok.com/download)
 
-### One-command startup
+### Automated setup
+
+The setup script handles everything — starts `godly-remote`, generates API keys, optionally starts a tunnel, and displays a QR code.
+
+**Local only** (phone on the same Wi-Fi):
 
 ```powershell
-.\src-tauri\remote\start-phone.ps1
+pwsh scripts/setup-phone.ps1
 ```
 
-This will:
-1. Start `godly-remote` on port 3377
-2. Generate a random API key (printed to console)
-3. Open an ngrok tunnel
-4. Print the public URL
+Binds `0.0.0.0`, detects your LAN IP, and shows a QR code your phone can scan.
 
-Open `<ngrok-url>/phone` on your phone, enter the API key in Settings.
+**With Cloudflare Tunnel** (access from anywhere):
+
+```powershell
+pwsh scripts/setup-phone.ps1 -Tunnel cloudflare -TunnelName my-tunnel -Hostname phone.example.com
+```
+
+Requires a pre-configured named tunnel:
+```powershell
+cloudflared tunnel login
+cloudflared tunnel create my-tunnel
+cloudflared tunnel route dns my-tunnel phone.example.com
+```
+
+**With ngrok** (access from anywhere):
+
+```powershell
+# Auto-assigned URL:
+pwsh scripts/setup-phone.ps1 -Tunnel ngrok
+
+# Static domain:
+pwsh scripts/setup-phone.ps1 -Tunnel ngrok -NgrokDomain my-app.ngrok-free.app
+```
+
+All modes generate and persist API key + password in `%APPDATA%/com.godly.terminal/remote-config.json`, so subsequent runs reuse the same credentials.
+
+### Personal config
+
+For frequent use, create `scripts/setup-phone.local.ps1` (gitignored) to wrap the generic script with your preferred tunnel settings:
+
+```powershell
+# scripts/setup-phone.local.ps1
+& "$PSScriptRoot\setup-phone.ps1" `
+    -Tunnel cloudflare `
+    -TunnelName "my-tunnel" `
+    -Hostname "phone.example.com" `
+    @args
+```
+
+Then just run:
+```powershell
+pwsh scripts/setup-phone.local.ps1
+```
 
 ### Manual startup
 
@@ -63,11 +104,12 @@ $env:GODLY_REMOTE_API_KEY = "your-secret-key"
 # 3. Start the remote server
 godly-remote
 
-# 4. Start ngrok tunnel
+# 4. Optionally start a tunnel
 ngrok http 3377
+# or: cloudflared tunnel run my-tunnel
 ```
 
-Open `http://localhost:3377/phone` (local) or `<ngrok-url>/phone` (remote).
+Open `http://localhost:3377/phone` (local) or your tunnel URL `/phone` (remote).
 
 ## API Endpoints
 
@@ -142,7 +184,7 @@ The remote server detects Claude Code permission prompts by pattern-matching the
 
 ## Security
 
-- Always use an API key when exposing over ngrok
+- Always use an API key when exposing over a tunnel (Cloudflare, ngrok, etc.)
 - The `/phone` page itself has no auth (the API key is entered in-app and stored in localStorage)
 - API key can be set via `GODLY_REMOTE_API_KEY` env var or `auth.api_key` in config
 - The `?api_key=` query param is supported for SSE EventSource (which can't set custom headers)
