@@ -2175,3 +2175,24 @@ body.dragging-active * {
   background: var(--bg-active);
   color: var(--text-primary);
 }
+
+/* Copy toast notification */
+.copy-toast {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-tertiary);
+  color: var(--text-active);
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  z-index: 10000;
+  pointer-events: none;
+  animation: copy-toast-fade 1.5s ease-out forwards;
+}
+
+@keyframes copy-toast-fade {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
