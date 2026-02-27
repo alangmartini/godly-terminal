@@ -111,6 +111,8 @@ pub enum Response {
         running: bool,
         #[serde(default)]
         exit_code: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_expected: Option<bool>,
     },
     SearchResult { found: bool, running: bool },
     /// Grid snapshot from the godly-vt terminal state engine.
@@ -272,15 +274,18 @@ mod tests {
             epoch_ms: 1700000000000,
             running: false,
             exit_code: Some(1),
+            input_expected: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"exit_code\":1"));
+        assert!(!json.contains("input_expected"));
         let deserialized: Response = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Response::LastOutputTime { epoch_ms, running, exit_code } => {
+            Response::LastOutputTime { epoch_ms, running, exit_code, input_expected } => {
                 assert_eq!(epoch_ms, 1700000000000);
                 assert!(!running);
                 assert_eq!(exit_code, Some(1));
+                assert_eq!(input_expected, None);
             }
             other => panic!("Expected LastOutputTime, got {:?}", other),
         }
@@ -288,14 +293,15 @@ mod tests {
 
     #[test]
     fn last_output_time_without_exit_code_backward_compat() {
-        // Simulate an older daemon that doesn't send exit_code
+        // Simulate an older daemon that doesn't send exit_code or input_expected
         let json = r#"{"type":"LastOutputTime","epoch_ms":1700000000000,"running":true}"#;
         let deserialized: Response = serde_json::from_str(json).unwrap();
         match deserialized {
-            Response::LastOutputTime { epoch_ms, running, exit_code } => {
+            Response::LastOutputTime { epoch_ms, running, exit_code, input_expected } => {
                 assert_eq!(epoch_ms, 1700000000000);
                 assert!(running);
                 assert_eq!(exit_code, None);
+                assert_eq!(input_expected, None);
             }
             other => panic!("Expected LastOutputTime, got {:?}", other),
         }
@@ -307,12 +313,15 @@ mod tests {
             epoch_ms: 1700000000000,
             running: true,
             exit_code: None,
+            input_expected: Some(true),
         };
         let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"input_expected\":true"));
         let deserialized: Response = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Response::LastOutputTime { exit_code, .. } => {
+            Response::LastOutputTime { exit_code, input_expected, .. } => {
                 assert_eq!(exit_code, None);
+                assert_eq!(input_expected, Some(true));
             }
             other => panic!("Expected LastOutputTime, got {:?}", other),
         }

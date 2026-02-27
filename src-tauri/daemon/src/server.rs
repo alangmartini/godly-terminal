@@ -1441,6 +1441,7 @@ async fn handle_request(
                     epoch_ms: session.last_output_epoch_ms(),
                     running: session.is_running(),
                     exit_code: session.exit_code(),
+                    input_expected: Some(session.is_likely_waiting_for_input()),
                 },
                 None => Response::Error {
                     message: format!("Session {} not found", session_id),
