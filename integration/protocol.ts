@@ -78,7 +78,7 @@ export type Response =
   | { type: 'SessionList'; sessions: SessionInfo[] }
   | { type: 'Pong' }
   | { type: 'Buffer'; session_id: string; data: number[] }
-  | { type: 'LastOutputTime'; epoch_ms: number; running: boolean; exit_code?: number }
+  | { type: 'LastOutputTime'; epoch_ms: number; running: boolean; exit_code?: number; input_expected?: boolean }
   | { type: 'SearchResult'; found: boolean; running: boolean }
   | { type: 'Grid'; grid: GridData }
   | { type: 'GridText'; text: string };

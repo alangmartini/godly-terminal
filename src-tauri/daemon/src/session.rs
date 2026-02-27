@@ -1118,6 +1118,44 @@ impl DaemonSession {
         self.running.load(Ordering::Relaxed)
     }
 
+    /// Heuristic: is the terminal likely waiting for user input?
+    ///
+    /// Returns true when the cursor is visible, on the primary screen,
+    /// not at column 0, and the text before the cursor doesn't end with
+    /// a typical shell prompt character (`>`, `$`, `#`). This catches
+    /// interactive prompts like "Continue? [y/n]" or "Enter password:".
+    pub fn is_likely_waiting_for_input(&self) -> bool {
+        if !self.is_running() {
+            return false;
+        }
+        let vt = self.vt_parser.lock();
+        let screen = vt.screen();
+        // TUI apps (vim, less) hide the cursor or use the alternate screen
+        if screen.hide_cursor() || screen.alternate_screen() {
+            return false;
+        }
+        let (cursor_row, cursor_col) = screen.cursor_position();
+        if cursor_col == 0 {
+            return false;
+        }
+        // Get text of the cursor row up to the cursor position
+        let (_, cols) = screen.size();
+        let row_text: String = match screen.rows(0, cols).nth(cursor_row as usize) {
+            Some(text) => text,
+            None => return false,
+        };
+        // Only look at text before cursor, trimmed
+        let end = (cursor_col as usize).min(row_text.len());
+        let before_cursor = row_text[..end].trim_end();
+        if before_cursor.is_empty() {
+            return false;
+        }
+        // Shell prompts typically end with > $ # — anything else suggests
+        // a program prompt (e.g., "Continue? [y/n]:", "Enter password:")
+        let last_char = before_cursor.chars().last().unwrap_or(' ');
+        !matches!(last_char, '>' | '$' | '#')
+    }
+
     /// Get the exit code of the child process, if it has exited.
     /// Returns None if the process hasn't exited yet or exit code is unavailable.
     pub fn exit_code(&self) -> Option<i64> {

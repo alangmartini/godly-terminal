@@ -435,7 +435,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "execute_command",
-                "description": "Run a command in a terminal and return its output. This is the PRIMARY tool for running commands — it combines write + wait_for_idle + read into a single call, saving 2 round-trips.\n\nHow it works:\n1. Snapshots the current buffer length\n2. Writes the command + Enter\n3. Waits until the terminal is idle (no output for `idle_ms`)\n4. Reads only the NEW output (since step 1), strips ANSI codes and command echo\n5. Returns clean text output with completion status\n\nIMPORTANT — Always check the output:\n- The `output` field contains stdout AND stderr. ALWAYS read it to verify the command succeeded.\n- Look for error indicators: 'error', 'not found', 'no such file', 'permission denied', non-zero exit codes.\n- Common failure: wrong working directory. If you see path-related errors, the terminal is likely not in the project directory. Use `cd /correct/path && your_command` or create a new terminal with the `cwd` parameter.\n- If `completed` is false, the command timed out — use `read_terminal` to see full output and diagnose.\n- Do NOT fire-and-forget commands. If you run something, read the result before moving on.\n\nBest practices:\n- Use this for any command where you need the output (build, test, git, ls, etc.).\n- Use `write_to_terminal` instead for interactive programs that don't have a clear end (e.g., vim, top).\n- If the command produces output for longer than `timeout_ms`, you'll get partial output with completed=false.",
+                "description": "Run a command in a terminal and return its output. This is the PRIMARY tool for running commands — it combines write + wait_for_idle + read into a single call, saving 2 round-trips.\n\nHow it works:\n1. Snapshots the current buffer length\n2. Writes the command + Enter\n3. Waits until the terminal is idle (no output for `idle_ms`)\n4. Reads only the NEW output (since step 1), strips ANSI codes and command echo\n5. Returns clean text output with completion status\n\nIMPORTANT — Always check the output:\n- The `output` field contains stdout AND stderr. ALWAYS read it to verify the command succeeded.\n- Look for error indicators: 'error', 'not found', 'no such file', 'permission denied', non-zero exit codes.\n- Common failure: wrong working directory. If you see path-related errors, the terminal is likely not in the project directory. Use `cd /correct/path && your_command` or create a new terminal with the `cwd` parameter.\n- If `completed` is false, the command timed out — use `read_terminal` to see full output and diagnose.\n- If `input_expected` is true, the command is waiting for your input (e.g., yes/no prompt, selection menu). Use `read_grid` to see the prompt, then `write_to_terminal` or `send_keys` to respond.\n- Do NOT fire-and-forget commands. If you run something, read the result before moving on.\n\nBest practices:\n- Use this for any command where you need the output (build, test, git, ls, etc.).\n- Use `write_to_terminal` instead for interactive programs that don't have a clear end (e.g., vim, top).\n- If the command produces output for longer than `timeout_ms`, you'll get partial output with completed=false.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -1320,11 +1320,13 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             completed,
             last_output_ago_ms,
             running,
+            input_expected,
         } => Ok(json!({
             "output": output,
             "completed": completed,
             "last_output_ago_ms": last_output_ago_ms,
             "running": running,
+            "input_expected": input_expected.unwrap_or(false),
         })),
         McpResponse::SplitState {
             workspace_id,
