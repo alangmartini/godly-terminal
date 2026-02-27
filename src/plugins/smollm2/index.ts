@@ -2,6 +2,7 @@ import type { GodlyPlugin, PluginContext } from '../types';
 import {
   llmHasApiKey,
   llmSetApiKey,
+  llmSetModel,
   llmGenerateBranchName,
 } from './llm-service';
 
@@ -13,6 +14,14 @@ export class SmolLM2Plugin implements GodlyPlugin {
 
   private ctx!: PluginContext;
   private hasKey = false;
+  private selectedModel = 'gemini-2.0-flash-lite';
+
+  static readonly MODELS: { id: string; label: string }[] = [
+    { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite (fastest, free)' },
+    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (balanced)' },
+    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro (highest quality)' },
+  ];
 
   async init(ctx: PluginContext): Promise<void> {
     this.ctx = ctx;
@@ -32,6 +41,16 @@ export class SmolLM2Plugin implements GodlyPlugin {
         this.hasKey = true;
       } catch (e) {
         console.warn('[BranchNameAI] Failed to restore API key:', e);
+      }
+    }
+    // Restore saved model
+    const savedModel = this.ctx.getSetting<string | null>('geminiModel', null);
+    if (savedModel) {
+      this.selectedModel = savedModel;
+      try {
+        await llmSetModel(savedModel);
+      } catch (e) {
+        console.warn('[BranchNameAI] Failed to restore model:', e);
       }
     }
   }
@@ -127,6 +146,43 @@ export class SmolLM2Plugin implements GodlyPlugin {
     keyRow.appendChild(statusDot);
     keySection.appendChild(keyRow);
     container.appendChild(keySection);
+
+    // -- Model selector section --
+    const modelSection = document.createElement('div');
+    modelSection.className = 'settings-section';
+    const modelTitle = document.createElement('div');
+    modelTitle.className = 'settings-section-title';
+    modelTitle.textContent = 'Gemini Model';
+    modelSection.appendChild(modelTitle);
+
+    const modelRow = document.createElement('div');
+    modelRow.className = 'shortcut-row';
+    modelRow.style.gap = '8px';
+
+    const modelSelect = document.createElement('select');
+    modelSelect.className = 'dialog-input';
+    modelSelect.style.cssText = 'flex: 1; font-size: 12px;';
+    for (const m of SmolLM2Plugin.MODELS) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      if (m.id === this.selectedModel) opt.selected = true;
+      modelSelect.appendChild(opt);
+    }
+    modelSelect.onchange = async () => {
+      const model = modelSelect.value;
+      this.selectedModel = model;
+      this.ctx.setSetting('geminiModel', model);
+      try {
+        await llmSetModel(model);
+      } catch (e) {
+        console.warn('[BranchNameAI] Failed to set model:', e);
+      }
+    };
+
+    modelRow.appendChild(modelSelect);
+    modelSection.appendChild(modelRow);
+    container.appendChild(modelSection);
 
     // -- Test Generation section --
     const testSection = document.createElement('div');
