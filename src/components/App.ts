@@ -92,8 +92,6 @@ export class App {
   private splitDropOverlay: HTMLElement | null = null;
   private splitContainer: SplitContainer | null = null;
   private splitContainerWorkspaceId: string | null = null;
-  private pendingNotificationTerminalId: string | null = null;
-  private pendingNotificationTimestamp: number = 0;
   private perfOverlay: PerfOverlay | null = null;
   /** Tracks which pane is currently zoomed (null = no zoom active). */
   private zoomedPaneId: string | null = null;
@@ -1314,25 +1312,8 @@ export class App {
     });
   }
 
-  private handlePendingNotificationNavigation(): void {
-    const terminalId = this.pendingNotificationTerminalId;
-    if (!terminalId) return;
-    const elapsed = Date.now() - this.pendingNotificationTimestamp;
-    this.pendingNotificationTerminalId = null;
-    this.pendingNotificationTimestamp = 0;
-    if (elapsed > 30_000) return;
-    const terminal = store.getState().terminals.find(t => t.id === terminalId);
-    if (terminal) {
-      store.setActiveWorkspace(terminal.workspaceId);
-      store.setActiveTerminal(terminalId);
-    }
-  }
-
   private async setupMcpEventListeners() {
     const { listen } = await import('@tauri-apps/api/event');
-
-    // Navigate to notification source when window regains focus
-    window.addEventListener('focus', () => this.handlePendingNotificationNavigation());
 
     // MCP: focus a terminal tab
     await listen<string>('focus-terminal', (event) => {
@@ -1467,8 +1448,6 @@ export class App {
                 title,
                 body: message || 'New notification',
               });
-              this.pendingNotificationTerminalId = terminal_id;
-              this.pendingNotificationTimestamp = Date.now();
             }
           } catch (e) {
             console.warn('[App] Failed to send native notification:', e);
@@ -1545,8 +1524,6 @@ export class App {
             if (permitted) {
               const title = buildNotificationTitle(terminal_id);
               sendNotification({ title, body: 'Terminal bell' });
-              this.pendingNotificationTerminalId = terminal_id;
-              this.pendingNotificationTimestamp = Date.now();
             }
           } catch (e) {
             console.warn('[App] Failed to send native notification:', e);
@@ -1594,8 +1571,6 @@ export class App {
               if (permitted) {
                 const title = buildNotificationTitle(terminalId);
                 sendNotification({ title, body: 'Waiting for input' });
-                this.pendingNotificationTerminalId = terminalId;
-                this.pendingNotificationTimestamp = Date.now();
               }
             } catch (e) {
               console.warn('[App] Failed to send native notification:', e);
