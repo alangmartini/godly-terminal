@@ -123,33 +123,54 @@ The installer is output to `src-tauri/target/release/bundle/`.
 
 ### Running Tests
 
+Six test tiers target different layers of the stack:
+
+| Tier | Command | Environment | What it tests |
+|------|---------|-------------|---------------|
+| **Unit** | `npm test` | Node / jsdom | Store logic, services, keyboard routing, pure functions |
+| **Browser** | `npm run test:browser` | Real Chromium (Playwright) | Canvas2D rendering, pixel correctness, CSS layout, pointer events |
+| **Integration** | `npm run build:daemon && npm run test:integration` | Node + real daemon | Daemon protocol, session lifecycle, IPC, Quick Claude flow |
+| **E2E** | `npm run test:e2e` | Full Tauri app (WebdriverIO) | Persistence across restarts, full user workflows, input latency |
+| **Daemon** | `cd src-tauri && cargo nextest run -p godly-daemon` | Isolated daemon process | Concurrency, lock contention, memory leaks, pipe saturation |
+| **Crate** | `cd src-tauri && cargo nextest run -p <crate>` | Rust unit | VT parser, serialization, data structures |
+
 ```bash
-# TypeScript unit tests (Node/jsdom)
+# Unit tests — store logic, services, keyboard handling
 npm test
 
-# Browser tests (real Chromium via Vitest Browser Mode + Playwright)
+# Browser tests — Canvas2D rendering, real CSS flexbox layout
 npm run test:browser
+npm run test:browser:headed   # with visible Chromium window
 
-# Browser tests with visible browser window
-npm run test:browser:headed
+# Integration tests — daemon protocol, session I/O, Quick Claude
+npm run build:daemon && npm run test:integration
 
-# Rust tests (smart runner — only affected crates)
-npm run test:smart
+# E2E tests — full app lifecycle, persistence, keyboard shortcuts
+npm run test:e2e
 
-# Rust tests (specific crate)
+# Daemon tests — concurrency, performance, memory
 cd src-tauri && cargo nextest run -p godly-daemon
 
-# Rust tests (full workspace)
-cd src-tauri && cargo nextest run --workspace
+# Crate tests — VT parser, protocol serialization
+cd src-tauri && cargo nextest run -p godly-vt
+cd src-tauri && cargo nextest run -p godly-protocol
 
-# E2E tests
-npm run test:e2e
+# Smart runner — auto-detects affected crates from git diff
+npm run test:smart
+
+# Full Rust workspace (let CI handle this — use smart runner locally)
+cd src-tauri && cargo nextest run --workspace
 ```
 
-**Test file naming convention:**
-- `*.test.ts` — Unit tests (Node/jsdom)
-- `*.browser.test.ts` — Browser tests (real Chromium, Canvas2D, real layout)
-- `e2e/*.ts` — E2E tests (full Tauri app + WebdriverIO)
+**File naming conventions:**
+
+| Pattern | Tier | Location |
+|---------|------|----------|
+| `*.test.ts` | Unit | `src/` |
+| `*.browser.test.ts` | Browser | `src/` |
+| `*.integration.test.ts` | Integration | `integration/tests/` |
+| `*.e2e.ts` | E2E | `e2e/specs/` |
+| `*.rs` (in `tests/`) | Daemon / Crate | `src-tauri/<crate>/tests/` |
 
 ## Keyboard Shortcuts
 
