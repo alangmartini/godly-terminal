@@ -124,8 +124,14 @@ The installer is output to `src-tauri/target/release/bundle/`.
 ### Running Tests
 
 ```bash
-# TypeScript tests
+# TypeScript unit tests (Node/jsdom)
 npm test
+
+# Browser tests (real Chromium via Vitest Browser Mode + Playwright)
+npm run test:browser
+
+# Browser tests with visible browser window
+npm run test:browser:headed
 
 # Rust tests (smart runner — only affected crates)
 npm run test:smart
@@ -139,6 +145,11 @@ cd src-tauri && cargo nextest run --workspace
 # E2E tests
 npm run test:e2e
 ```
+
+**Test file naming convention:**
+- `*.test.ts` — Unit tests (Node/jsdom)
+- `*.browser.test.ts` — Browser tests (real Chromium, Canvas2D, real layout)
+- `e2e/*.ts` — E2E tests (full Tauri app + WebdriverIO)
 
 ## Keyboard Shortcuts
 

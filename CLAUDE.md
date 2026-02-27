@@ -33,8 +33,14 @@ cd src-tauri && cargo nextest run --workspace --profile fast
 # Smart test runner (only affected crates based on git diff)
 npm run test:smart
 
-# Run TypeScript tests
+# Run TypeScript unit tests
 npm test
+
+# Run browser tests (real Chromium via Playwright)
+npm run test:browser
+
+# Run browser tests with visible browser window
+npm run test:browser:headed
 ```
 
 ## Git Workflow
@@ -75,12 +81,27 @@ Track all bugs and investigations as **GitHub Issues**, not local docs.
 ### Reference docs
 Architecture docs, design specs, and testing guides stay in `docs/` — only investigation/bug tracking uses GitHub Issues.
 
+## Frontend Test Tiers
+
+Three tiers of frontend tests, each for different use cases:
+
+| Tier | Naming | Command | Environment | Use for |
+|------|--------|---------|-------------|---------|
+| Unit | `*.test.ts` | `npm test` | Node/jsdom | Logic, state, services, pure functions |
+| Browser | `*.browser.test.ts` | `npm run test:browser` | Real Chromium | Canvas2D rendering, real layout, pointer events |
+| E2E | `e2e/*.ts` | `npm run test:e2e` | Tauri + WebdriverIO | Full app integration with daemon |
+
+- Browser tests run in headless Chromium via Vitest Browser Mode + Playwright
+- Use `npm run test:browser:headed` to see the browser window during tests
+- Browser test setup auto-mocks Tauri APIs (`src/test-utils/browser-setup.ts`)
+- Prefer browser tests over jsdom when testing: Canvas2D, `getBoundingClientRect`, CSS flexbox, real DOM events
+
 ## Project-Specific Workflow Notes
 
 These extend the global CLAUDE.md workflows (bug fix, feature development):
 
 - **Bug fixes**: Write a full test **suite** (not a single test) to reproduce the bug.
-- **Features**: Write **E2E tests** (`npm run test:e2e`), not just unit tests.
+- **Features**: Write **E2E tests** (`npm run test:e2e`), not just unit tests. For Canvas2D/layout features, also write **browser tests** (`*.browser.test.ts`).
 - **Performance issues**: Always write automated reproducible tests that demonstrate the problem under realistic conditions. Isolated component benchmarks are useful but insufficient — the test must exercise the real bottleneck (e.g., concurrent I/O, lock contention, IPC round-trips). See `daemon/tests/input_latency.rs` and `daemon/tests/handler_starvation.rs` for patterns.
 
 ## User-Like Testing (Post-Implementation)
@@ -161,12 +182,17 @@ A global `kanban-board` MCP server tracks work across all projects. Godly Termin
    npm run test:smart
    ```
 
-3. **Frontend tests** (only if you touched TS/JS):
+3. **Frontend unit tests** (only if you touched TS/JS):
    ```bash
    npm test
    ```
 
-4. If any step fails, fix and repeat.
+4. **Frontend browser tests** (if you touched components with Canvas2D, layout, or pointer events):
+   ```bash
+   npm run test:browser
+   ```
+
+5. If any step fails, fix and repeat.
 
 ### What CI handles (so you don't have to):
 - `cargo check --workspace` (cross-crate type checking)
