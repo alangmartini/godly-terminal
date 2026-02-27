@@ -509,25 +509,28 @@ export class App {
         case 'split.focusDown': {
           e.preventDefault();
           if (state.activeWorkspaceId && state.activeTerminalId) {
-            const split = store.getSplitView(state.activeWorkspaceId);
-            if (split) {
-              // Determine which pane to focus based on direction and split orientation
-              const isHorizontal = split.direction === 'horizontal';
-              const isVertical = split.direction === 'vertical';
-              let targetId: string | null = null;
+            const direction = (action === 'split.focusLeft' || action === 'split.focusRight')
+              ? 'horizontal' : 'vertical';
+            const goSecond = action === 'split.focusRight' || action === 'split.focusDown';
 
-              if (action === 'split.focusLeft' && isHorizontal) {
-                targetId = split.leftTerminalId;
-              } else if (action === 'split.focusRight' && isHorizontal) {
-                targetId = split.rightTerminalId;
-              } else if (action === 'split.focusUp' && isVertical) {
-                targetId = split.leftTerminalId; // "left" = top in vertical
-              } else if (action === 'split.focusDown' && isVertical) {
-                targetId = split.rightTerminalId; // "right" = bottom in vertical
-              }
-
-              if (targetId && targetId !== state.activeTerminalId) {
-                store.setActiveTerminal(targetId);
+            // Try layout tree first (supports arbitrary nesting)
+            const adjacent = store.getAdjacentPane(
+              state.activeWorkspaceId, state.activeTerminalId, direction, goSecond,
+            );
+            if (adjacent) {
+              store.setActiveTerminal(adjacent);
+            } else {
+              // Fallback to legacy 2-pane split
+              const split = store.getSplitView(state.activeWorkspaceId);
+              if (split) {
+                const isMatch = (direction === 'horizontal' && split.direction === 'horizontal')
+                  || (direction === 'vertical' && split.direction === 'vertical');
+                const targetId = isMatch
+                  ? (goSecond ? split.rightTerminalId : split.leftTerminalId)
+                  : null;
+                if (targetId && targetId !== state.activeTerminalId) {
+                  store.setActiveTerminal(targetId);
+                }
               }
             }
           }
