@@ -612,6 +612,9 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ZoomPane { .. } => Ok(Self::app_only_error("zoom_pane")),
             McpRequest::ExecuteJs { .. } => Ok(Self::app_only_error("execute_js")),
             McpRequest::CaptureScreenshot { .. } => Ok(Self::app_only_error("capture_screenshot")),
+            McpRequest::ExportTerminalInfo { .. } => {
+                Ok(Self::app_only_error("export_terminal_info"))
+            }
         }
     }
 
