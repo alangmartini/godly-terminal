@@ -182,6 +182,12 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+    // Terminal info export (for cross-session discovery)
+    ExportTerminalInfo {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,
