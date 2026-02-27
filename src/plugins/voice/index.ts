@@ -8,6 +8,7 @@ import {
   whisperListModels,
   whisperDownloadModel,
   whisperStartSidecar,
+  whisperRestartSidecar,
   whisperStartRecording,
   whisperStopRecording,
   type WhisperStatus,
@@ -160,6 +161,30 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     this.statusElement = statusValue;
     statusRow.appendChild(statusValue);
     container.appendChild(statusRow);
+
+    // ── Restart Sidecar button ──
+    const restartRow = this.createRow('');
+    const restartBtn = document.createElement('button');
+    restartBtn.className = 'dialog-btn dialog-btn-secondary';
+    restartBtn.textContent = 'Restart Sidecar';
+    restartBtn.style.fontSize = '11px';
+    restartBtn.onclick = async () => {
+      restartBtn.disabled = true;
+      restartBtn.textContent = 'Restarting...';
+      try {
+        await whisperRestartSidecar();
+        this.status = await whisperGetStatus();
+        this.updateStatusEl();
+        restartBtn.textContent = 'Restarted!';
+        setTimeout(() => { restartBtn.textContent = 'Restart Sidecar'; restartBtn.disabled = false; }, 2000);
+      } catch (e) {
+        restartBtn.textContent = 'Error';
+        console.warn('[VoiceToText] Restart sidecar failed:', e);
+        setTimeout(() => { restartBtn.textContent = 'Restart Sidecar'; restartBtn.disabled = false; }, 2000);
+      }
+    };
+    restartRow.appendChild(restartBtn);
+    container.appendChild(restartRow);
 
     // ── Download progress bar ──
     const progressRow = document.createElement('div');

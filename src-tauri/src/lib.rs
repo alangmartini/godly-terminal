@@ -659,6 +659,7 @@ pub fn run() {
             commands::whisper_get_config,
             commands::whisper_set_config,
             commands::whisper_start_sidecar,
+            commands::whisper_restart_sidecar,
             commands::whisper_download_model,
             persistence::save_layout,
             persistence::load_layout,

@@ -5,17 +5,13 @@ use tauri::{Emitter, State};
 
 use crate::whisper_state::{WhisperConfig, WhisperRecordingState, WhisperState, WhisperStatus};
 
-#[tauri::command]
-pub async fn whisper_start_sidecar(
-    app: tauri::AppHandle,
-    whisper: State<'_, Arc<WhisperState>>,
+/// Spawn the whisper sidecar binary, connect to its pipe, and verify with a ping.
+/// Shared by `whisper_start_sidecar` and `whisper_restart_sidecar`.
+fn start_sidecar_inner(
+    app: &tauri::AppHandle,
+    whisper: &WhisperState,
 ) -> Result<String, String> {
-    // Check if already running and connected
-    if whisper.get_status().sidecar_running && whisper.client().is_connected() {
-        return Ok("Sidecar already running".to_string());
-    }
-
-    let binary = crate::find_whisper_binary(&app).ok_or_else(|| {
+    let binary = crate::find_whisper_binary(app).ok_or_else(|| {
         "godly-whisper binary not found. Place godly-whisper.exe next to the app binary.".to_string()
     })?;
 
@@ -23,7 +19,6 @@ pub async fn whisper_start_sidecar(
     let models_dir = whisper.get_models_dir()
         .ok_or("App data directory not initialized")?;
 
-    // Build instance arg from GODLY_INSTANCE if set
     let instance = std::env::var("GODLY_INSTANCE").unwrap_or_default();
 
     #[cfg(windows)]
@@ -79,6 +74,68 @@ pub async fn whisper_start_sidecar(
     {
         Err("Voice sidecar is only supported on Windows".to_string())
     }
+}
+
+/// Kill a process by PID using the Windows TerminateProcess API.
+#[cfg(windows)]
+fn kill_process_by_pid(pid: u32) -> Result<(), String> {
+    use winapi::um::processthreadsapi::{OpenProcess, TerminateProcess};
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::winnt::PROCESS_TERMINATE;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return Err(format!("Failed to open process {}: {}", pid, std::io::Error::last_os_error()));
+        }
+        let result = TerminateProcess(handle, 1);
+        CloseHandle(handle);
+        if result == 0 {
+            return Err(format!("Failed to terminate process {}: {}", pid, std::io::Error::last_os_error()));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn whisper_start_sidecar(
+    app: tauri::AppHandle,
+    whisper: State<'_, Arc<WhisperState>>,
+) -> Result<String, String> {
+    // Check if already running and connected
+    if whisper.get_status().sidecar_running && whisper.client().is_connected() {
+        return Ok("Sidecar already running".to_string());
+    }
+
+    start_sidecar_inner(&app, &whisper)
+}
+
+#[tauri::command]
+pub async fn whisper_restart_sidecar(
+    app: tauri::AppHandle,
+    whisper: State<'_, Arc<WhisperState>>,
+) -> Result<String, String> {
+    // 1. Try graceful shutdown via pipe
+    let graceful = whisper.client().send_request(&WhisperRequest::Shutdown);
+    if graceful.is_err() {
+        // 2. Fallback: kill by PID
+        #[cfg(windows)]
+        if let Some(pid) = whisper.get_sidecar_pid() {
+            let _ = kill_process_by_pid(pid);
+        }
+    }
+
+    // 3. Disconnect client and reset state
+    whisper.client().disconnect();
+    whisper.set_sidecar_running(false, None);
+    whisper.set_model_loaded(false, None);
+    whisper.set_recording_state(WhisperRecordingState::Idle);
+
+    // 4. Wait for pipe to be released
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // 5. Spawn new sidecar
+    start_sidecar_inner(&app, &whisper)
 }
 
 #[tauri::command]
