@@ -33,6 +33,7 @@
     "test:rust": "cd src-tauri && cargo nextest run --workspace",
     "test:rust:fast": "cd src-tauri && cargo nextest run --workspace --profile fast",
     "test:smart": "bash scripts/test-smart.sh",
+    "test:integration": "vitest run --project integration",
     "test:e2e": "wdio run e2e/wdio.conf.ts",
     "test:e2e:no-build": "cross-env SKIP_BUILD=1 wdio run e2e/wdio.conf.ts",
     "test:all": "npm run test && npm run test:rust && npm run test:e2e",

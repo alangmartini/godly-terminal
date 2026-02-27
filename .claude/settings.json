@@ -42,6 +42,11 @@
       "name": "manual-testing",
       "description": "Manually test a feature via MCP tools, document findings, and create a GitHub issue with improvement points",
       "path": "skills/manual-testing.md"
+    },
+    {
+      "name": "fix-integration",
+      "description": "Run integration tests in a loop, diagnosing and fixing real failures until they pass (max 5 iterations). Never masks failures.",
+      "path": "skills/fix-integration.md"
     }
   ]
 }
