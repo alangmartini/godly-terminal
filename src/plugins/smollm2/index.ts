@@ -16,12 +16,6 @@ export class SmolLM2Plugin implements GodlyPlugin {
   private hasKey = false;
   private selectedModel = 'gemini-2.0-flash-lite';
 
-  static readonly MODELS: { id: string; label: string }[] = [
-    { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite (fastest, free)' },
-    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (balanced)' },
-    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
-    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro (highest quality)' },
-  ];
 
   async init(ctx: PluginContext): Promise<void> {
     this.ctx = ctx;
@@ -159,18 +153,15 @@ export class SmolLM2Plugin implements GodlyPlugin {
     modelRow.className = 'shortcut-row';
     modelRow.style.gap = '8px';
 
-    const modelSelect = document.createElement('select');
-    modelSelect.className = 'dialog-input';
-    modelSelect.style.cssText = 'flex: 1; font-size: 12px;';
-    for (const m of SmolLM2Plugin.MODELS) {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.label;
-      if (m.id === this.selectedModel) opt.selected = true;
-      modelSelect.appendChild(opt);
-    }
-    modelSelect.onchange = async () => {
-      const model = modelSelect.value;
+    const modelInput = document.createElement('input');
+    modelInput.type = 'text';
+    modelInput.className = 'dialog-input';
+    modelInput.style.cssText = 'flex: 1; font-size: 12px;';
+    modelInput.placeholder = 'e.g. gemini-2.0-flash-lite';
+    modelInput.value = this.selectedModel;
+    modelInput.onchange = async () => {
+      const model = modelInput.value.trim();
+      if (!model) return;
       this.selectedModel = model;
       this.ctx.setSetting('geminiModel', model);
       try {
@@ -180,7 +171,7 @@ export class SmolLM2Plugin implements GodlyPlugin {
       }
     };
 
-    modelRow.appendChild(modelSelect);
+    modelRow.appendChild(modelInput);
     modelSection.appendChild(modelRow);
     container.appendChild(modelSection);
 
