@@ -425,9 +425,18 @@ export class TerminalPane {
       return;
     }
 
-    // App-level shortcuts should bubble to App.ts
+    // App-level shortcuts should bubble to App.ts — but split-only shortcuts
+    // (focus/resize/zoom/swap/rotate/unsplit) must pass through to the terminal
+    // when no split exists, so keys like Ctrl+Arrow still work for word navigation.
     if (isAppShortcut(event)) {
-      return; // Don't prevent default -- let it bubble
+      const isSplitAction = action !== null && action.startsWith('split.') &&
+        action !== 'split.vertical' && action !== 'split.horizontal';
+      const wsId = store.state.activeWorkspaceId;
+      const hasSplit = wsId ? store.getLayoutTree(wsId) !== null : false;
+      if (!isSplitAction || hasSplit) {
+        return; // Don't prevent default -- let it bubble
+      }
+      // No split exists and this is a split-only action → fall through to PTY
     }
 
     // Prevent WebView2 from intercepting terminal control keys
