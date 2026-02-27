@@ -5,65 +5,13 @@
  * real CSS flexbox layout, and real pointer events.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SplitContainer, SplitPaneHandle } from './SplitContainer';
-import { LayoutNode, LeafNode, SplitNode } from '../state/split-types';
-
-function leaf(id: string): LeafNode {
-  return { type: 'leaf', terminal_id: id };
-}
-
-function split(
-  dir: 'horizontal' | 'vertical',
-  first: LayoutNode,
-  second: LayoutNode,
-  ratio = 0.5,
-): SplitNode {
-  return { type: 'split', direction: dir, ratio, first, second };
-}
-
-function mockPane(id: string): SplitPaneHandle {
-  const container = document.createElement('div');
-  container.className = 'terminal-pane';
-  container.dataset.id = id;
-  // Give it some default size so flex layout has something to work with
-  container.style.minWidth = '50px';
-  container.style.minHeight = '50px';
-  return {
-    getContainer: () => container,
-    setSplitVisible: vi.fn(),
-    setActive: vi.fn(),
-  };
-}
-
-function createPaneMap(ids: string[]): Map<string, SplitPaneHandle> {
-  const map = new Map<string, SplitPaneHandle>();
-  for (const id of ids) {
-    map.set(id, mockPane(id));
-  }
-  return map;
-}
-
-/** Mount the split container into the real DOM and inject layout styles. */
-function mountWithStyles(sc: SplitContainer): HTMLElement {
-  const root = sc.getElement();
-
-  // Inject minimal split layout CSS
-  const style = document.createElement('style');
-  style.textContent = `
-    .split-root { width: 800px; height: 600px; position: relative; }
-    .split-container { display: flex; width: 100%; height: 100%; }
-    .split-container.horizontal { flex-direction: row; }
-    .split-container.vertical { flex-direction: column; }
-    .split-divider { flex-shrink: 0; }
-    .split-divider.horizontal { width: 2px; cursor: col-resize; }
-    .split-divider.vertical { height: 2px; cursor: row-resize; }
-    .terminal-pane { overflow: hidden; }
-  `;
-  document.head.appendChild(style);
-  document.body.appendChild(root);
-
-  return root;
-}
+import { SplitContainer } from './SplitContainer';
+import {
+  leaf,
+  split,
+  createMockPaneMap,
+  mountSplitContainer,
+} from '../test-utils/browser-split-helpers';
 
 describe('SplitContainer (browser)', () => {
   let onRatioChange: ReturnType<typeof vi.fn>;
@@ -81,23 +29,24 @@ describe('SplitContainer (browser)', () => {
   });
 
   it('renders a single leaf pane into the DOM', () => {
-    const paneMap = createPaneMap(['t1']);
+    const paneMap = createMockPaneMap(['t1']);
     const sc = new SplitContainer(leaf('t1'), {
       paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1',
     });
 
-    const root = mountWithStyles(sc);
+    const { root, cleanup } = mountSplitContainer(sc);
     expect(root.querySelector('[data-id="t1"]')).not.toBeNull();
+    cleanup();
   });
 
   it('creates a horizontal split with real flex layout', () => {
-    const paneMap = createPaneMap(['t1', 't2']);
+    const paneMap = createMockPaneMap(['t1', 't2']);
     const sc = new SplitContainer(
       split('horizontal', leaf('t1'), leaf('t2'), 0.5),
       { paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1' },
     );
 
-    const root = mountWithStyles(sc);
+    const { root, cleanup } = mountSplitContainer(sc);
 
     const container = root.querySelector('.split-container.horizontal');
     expect(container).not.toBeNull();
@@ -107,18 +56,20 @@ describe('SplitContainer (browser)', () => {
     const rootRect = root.getBoundingClientRect();
     expect(rootRect.width).toBeGreaterThan(0);
     expect(rootRect.height).toBeGreaterThan(0);
+    cleanup();
   });
 
   it('creates a vertical split', () => {
-    const paneMap = createPaneMap(['t1', 't2']);
+    const paneMap = createMockPaneMap(['t1', 't2']);
     const sc = new SplitContainer(
       split('vertical', leaf('t1'), leaf('t2')),
       { paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1' },
     );
 
-    const root = mountWithStyles(sc);
+    const { root, cleanup } = mountSplitContainer(sc);
     const container = root.querySelector('.split-container.vertical');
     expect(container).not.toBeNull();
+    cleanup();
   });
 
   it('renders nested 3-pane layout with real bounding rects', () => {
@@ -126,12 +77,12 @@ describe('SplitContainer (browser)', () => {
       leaf('t1'),
       split('vertical', leaf('t2'), leaf('t3')),
     );
-    const paneMap = createPaneMap(['t1', 't2', 't3']);
+    const paneMap = createMockPaneMap(['t1', 't2', 't3']);
     const sc = new SplitContainer(tree, {
       paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1',
     });
 
-    const root = mountWithStyles(sc);
+    const { root, cleanup } = mountSplitContainer(sc);
 
     // All 3 panes should be in the DOM
     expect(root.querySelectorAll('.terminal-pane').length).toBe(3);
@@ -144,16 +95,17 @@ describe('SplitContainer (browser)', () => {
       // In real Chromium, dividers get actual layout — not zeros like jsdom
       expect(rect.width + rect.height).toBeGreaterThan(0);
     }
+    cleanup();
   });
 
   it('updates focus without re-rendering structure', () => {
-    const paneMap = createPaneMap(['t1', 't2']);
+    const paneMap = createMockPaneMap(['t1', 't2']);
     const sc = new SplitContainer(
       split('horizontal', leaf('t1'), leaf('t2')),
       { paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1' },
     );
 
-    mountWithStyles(sc);
+    const { cleanup } = mountSplitContainer(sc);
 
     vi.mocked(paneMap.get('t1')!.setSplitVisible).mockClear();
     vi.mocked(paneMap.get('t2')!.setSplitVisible).mockClear();
@@ -162,16 +114,17 @@ describe('SplitContainer (browser)', () => {
 
     expect(paneMap.get('t1')!.setSplitVisible).toHaveBeenCalledWith(true, false);
     expect(paneMap.get('t2')!.setSplitVisible).toHaveBeenCalledWith(true, true);
+    cleanup();
   });
 
   it('handles divider drag with real getBoundingClientRect', () => {
-    const paneMap = createPaneMap(['t1', 't2']);
+    const paneMap = createMockPaneMap(['t1', 't2']);
     const sc = new SplitContainer(
       split('horizontal', leaf('t1'), leaf('t2'), 0.5),
       { paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1' },
     );
 
-    const root = mountWithStyles(sc);
+    const { root, cleanup } = mountSplitContainer(sc);
     const divider = root.querySelector('.split-divider') as HTMLElement;
     expect(divider).not.toBeNull();
 
@@ -198,15 +151,16 @@ describe('SplitContainer (browser)', () => {
 
     // Clean up: mouseup
     document.dispatchEvent(new MouseEvent('mouseup'));
+    cleanup();
   });
 
   it('destroy removes element from DOM', () => {
-    const paneMap = createPaneMap(['t1']);
+    const paneMap = createMockPaneMap(['t1']);
     const sc = new SplitContainer(leaf('t1'), {
       paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1',
     });
 
-    mountWithStyles(sc);
+    mountSplitContainer(sc);
     expect(document.body.querySelector('.split-root')).not.toBeNull();
 
     sc.destroy();

@@ -349,7 +349,7 @@ describe('SplitContainer', () => {
   });
 
   describe('destroy', () => {
-    it('removes the element from DOM', () => {
+    it('removes the split-root from DOM', () => {
       const paneMap = createPaneMap(['t1']);
       const sc = new SplitContainer(leaf('t1'), {
         paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1',
@@ -357,10 +357,27 @@ describe('SplitContainer', () => {
 
       const parent = document.createElement('div');
       parent.appendChild(sc.getElement());
-      expect(parent.children.length).toBe(1);
+      expect(parent.querySelector('.split-root')).not.toBeNull();
 
       sc.destroy();
-      expect(parent.children.length).toBe(0);
+      expect(parent.querySelector('.split-root')).toBeNull();
+    });
+
+    it('re-parents pane containers back to parent on destroy', () => {
+      const paneMap = createPaneMap(['t1', 't2']);
+      const sc = new SplitContainer(
+        split('horizontal', leaf('t1'), leaf('t2')),
+        { paneMap, onRatioChange, onFocusPane, focusedTerminalId: 't1' },
+      );
+
+      const parent = document.createElement('div');
+      parent.appendChild(sc.getElement());
+
+      sc.destroy();
+
+      // Pane containers should be back in the parent, not orphaned
+      expect(parent.contains(paneMap.get('t1')!.getContainer())).toBe(true);
+      expect(parent.contains(paneMap.get('t2')!.getContainer())).toBe(true);
     });
   });
 });
