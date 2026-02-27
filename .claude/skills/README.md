@@ -14,6 +14,7 @@ These are defined in `.claude/settings.json` and scoped to godly-terminal.
 | `/tauri-command` | `/tauri-command <name> [desc]` | Scaffold the full Tauri IPC chain: Rust handler + register in lib.rs + TypeScript service wrapper |
 | `/tidy-up-docs` | `/tidy-up-docs` | Audit `docs/`, classify status (resolved/active/reference), build index, distill lessons into MEMORY.md, archive stale docs |
 | `/manual-testing` | `/manual-testing <feature>` | QA a feature via MCP tools: design test matrix, execute tests, take screenshots, analyze UX, file a GitHub issue with all findings |
+| `/fix-integration` | `/fix-integration [filter]` | Run integration tests in a loop, diagnose and fix real failures until green (max 5 iterations). Never masks failures. |
 
 **Unregistered** (in `skills/` but not in `settings.json`):
 
