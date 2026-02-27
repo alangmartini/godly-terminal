@@ -698,7 +698,7 @@ fn poll_idle_or_trust(
         let req = Request::GetLastOutputTime {
             session_id: session_id.to_string(),
         };
-        match daemon.send_request(&req) {
+        let is_idle = match daemon.send_request(&req) {
             Ok(Response::LastOutputTime { epoch_ms, running, .. }) => {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -706,29 +706,33 @@ fn poll_idle_or_trust(
                     .as_millis() as u64;
                 let ago = now_ms.saturating_sub(epoch_ms);
 
-                if ago >= idle_ms {
-                    return true;
-                }
-                if !running {
-                    return true;
-                }
+                ago >= idle_ms || !running
             }
             Ok(_) | Err(_) => {
                 return false;
             }
-        }
+        };
 
-        // Check trust prompt every ~2s
-        if iteration % trust_check_interval == 0 && has_trust_prompt(daemon, session_id) {
-            eprintln!("[quick_claude] Detected trust prompt, auto-accepting");
-            let accept_req = Request::Write {
-                session_id: session_id.to_string(),
-                data: b"\r".to_vec(),
-            };
-            let _ = daemon.send_request(&accept_req);
-            // Give Claude time to process the acceptance and continue startup
-            std::thread::sleep(std::time::Duration::from_millis(3_000));
-            // Continue polling — don't return, Claude needs time to finish startup
+        // Check trust prompt every ~2s, AND always when idle is detected.
+        // Bug #411: The trust prompt screen is idle (waiting for Enter), so
+        // the idle check fires immediately. We must check for the trust prompt
+        // before returning, otherwise it's never auto-accepted.
+        if is_idle || iteration % trust_check_interval == 0 {
+            if has_trust_prompt(daemon, session_id) {
+                eprintln!("[quick_claude] Detected trust prompt, auto-accepting");
+                let accept_req = Request::Write {
+                    session_id: session_id.to_string(),
+                    data: b"\r".to_vec(),
+                };
+                let _ = daemon.send_request(&accept_req);
+                // Give Claude time to process the acceptance and continue startup
+                std::thread::sleep(std::time::Duration::from_millis(3_000));
+                // Continue polling — don't return, Claude needs time to finish startup
+            } else if is_idle {
+                return true;
+            }
+        } else if is_idle {
+            return true;
         }
 
         if std::time::Instant::now() >= deadline {
