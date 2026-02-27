@@ -38,4 +38,14 @@ export default defineWorkspace([
       },
     },
   },
+  {
+    test: {
+      name: 'integration',
+      environment: 'node',
+      include: ['integration/tests/**/*.integration.test.ts'],
+      testTimeout: 120_000,
+      hookTimeout: 30_000,
+      sequence: { concurrent: false },
+    },
+  },
 ]);
