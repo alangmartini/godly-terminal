@@ -37,7 +37,7 @@ jobs:
         timeout-minutes: 3
       # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
       - name: Cargo check
-        run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon -p godly-pty-shim
+        run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon -p godly-pty-shim -p godly-llm -p godly-whisper
         timeout-minutes: 8
 
   # ---------------------------------------------------------------------------
@@ -101,8 +101,8 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
       - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote --release
-        timeout-minutes: 12
+        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote -p godly-whisper --release
+        timeout-minutes: 15
       - name: Upload release binaries
         uses: actions/upload-artifact@v4
         with:
@@ -113,6 +113,7 @@ jobs:
             src-tauri/target/release/godly-notify.exe
             src-tauri/target/release/godly-pty-shim.exe
             src-tauri/target/release/godly-remote.exe
+            src-tauri/target/release/godly-whisper.exe
           retention-days: 1
 
   # ---------------------------------------------------------------------------
