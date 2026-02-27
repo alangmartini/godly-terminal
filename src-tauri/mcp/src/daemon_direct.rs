@@ -513,6 +513,8 @@ impl Backend for DaemonDirectBackend {
                 let mut last_ago = 0u64;
                 #[allow(unused_assignments)]
                 let mut running = true;
+                #[allow(unused_assignments)]
+                let mut input_expected = None;
 
                 loop {
                     let resp = self.daemon_request(&Request::GetLastOutputTime {
@@ -523,6 +525,7 @@ impl Backend for DaemonDirectBackend {
                         Response::LastOutputTime {
                             epoch_ms,
                             running: is_running,
+                            input_expected: ie,
                             ..
                         } => {
                             let now_ms = std::time::SystemTime::now()
@@ -531,9 +534,20 @@ impl Backend for DaemonDirectBackend {
                                 .as_millis() as u64;
                             last_ago = now_ms.saturating_sub(epoch_ms);
                             running = is_running;
+                            input_expected = ie;
 
-                            if last_ago >= *idle_ms || !running {
+                            if !running {
                                 completed = true;
+                                break;
+                            }
+
+                            if last_ago >= *idle_ms {
+                                if input_expected.unwrap_or(false) {
+                                    // Terminal is idle but waiting for input — not completed
+                                    completed = false;
+                                } else {
+                                    completed = true;
+                                }
                                 break;
                             }
 
@@ -578,6 +592,7 @@ impl Backend for DaemonDirectBackend {
                     completed,
                     last_output_ago_ms: last_ago,
                     running,
+                    input_expected,
                 })
             }
 

@@ -268,6 +268,8 @@ pub enum McpResponse {
         completed: bool,
         last_output_ago_ms: u64,
         running: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_expected: Option<bool>,
     },
     SplitState {
         workspace_id: String,
