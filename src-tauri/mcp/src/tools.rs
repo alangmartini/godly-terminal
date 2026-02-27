@@ -825,11 +825,11 @@ pub fn call_tool(
                 .and_then(|v| v.as_str())
                 .ok_or("Missing terminal_id")?
                 .to_string();
-            let data = args
+            let raw_data = args
                 .get("data")
                 .and_then(|v| v.as_str())
-                .ok_or("Missing data")?
-                .to_string();
+                .ok_or("Missing data")?;
+            let data = convert_newlines_to_cr(raw_data);
             McpRequest::WriteToTerminal { terminal_id, data }
         }
 
@@ -1353,5 +1353,78 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
         })),
+    }
+}
+
+/// Convert newlines in terminal write data to CR for PTY.
+/// Terminals expect CR (0x0D) for Enter, not LF (0x0A).
+/// Also handles literal escape sequences (\\n, \\r\\n) that LLMs produce.
+fn convert_newlines_to_cr(data: &str) -> String {
+    data.replace("\\r\\n", "\r")
+        .replace("\\n", "\r")
+        .replace("\r\n", "\r")
+        .replace('\n', "\r")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trailing_newline_converted_to_cr() {
+        // Bug #400: trailing \n must become \r (Enter)
+        let result = convert_newlines_to_cr("echo hello\n");
+        assert_eq!(result, "echo hello\r");
+    }
+
+    #[test]
+    fn embedded_newlines_converted_to_cr() {
+        let result = convert_newlines_to_cr("line1\nline2\n");
+        assert_eq!(result, "line1\rline2\r");
+    }
+
+    #[test]
+    fn literal_backslash_n_converted_to_cr() {
+        // LLMs sometimes send literal \n instead of actual newline
+        let result = convert_newlines_to_cr("echo hello\\n");
+        assert_eq!(result, "echo hello\r");
+    }
+
+    #[test]
+    fn literal_backslash_r_n_converted_to_cr() {
+        let result = convert_newlines_to_cr("echo hello\\r\\n");
+        assert_eq!(result, "echo hello\r");
+    }
+
+    #[test]
+    fn crlf_converted_to_cr() {
+        let result = convert_newlines_to_cr("echo hello\r\n");
+        assert_eq!(result, "echo hello\r");
+    }
+
+    #[test]
+    fn no_newlines_unchanged() {
+        let result = convert_newlines_to_cr("echo hello");
+        assert_eq!(result, "echo hello");
+    }
+
+    #[test]
+    fn cr_only_unchanged() {
+        // Existing CR should not be doubled or altered
+        let result = convert_newlines_to_cr("echo hello\r");
+        assert_eq!(result, "echo hello\r");
+    }
+
+    #[test]
+    fn empty_string_unchanged() {
+        let result = convert_newlines_to_cr("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn only_newline() {
+        // Just pressing Enter
+        let result = convert_newlines_to_cr("\n");
+        assert_eq!(result, "\r");
     }
 }
