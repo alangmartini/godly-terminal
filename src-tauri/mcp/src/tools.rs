@@ -684,6 +684,20 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "export_terminal_info",
+                "description": "Get a terminal's metadata and example MCP tool calls for cross-session discovery. Useful when one Claude Code session needs to read another terminal's output.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to export info for (optional — defaults to active terminal)"
+                        }
+                    },
+                    "required": []
+                }
             }
         ]
     })
@@ -1190,6 +1204,11 @@ pub fn call_tool(
         "capture_screenshot" => {
             let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::CaptureScreenshot { terminal_id }
+        }
+
+        "export_terminal_info" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ExportTerminalInfo { terminal_id }
         }
 
         _ => return Err(format!("Unknown tool: {}", name)),

@@ -565,6 +565,19 @@ export class TabBar {
       }
     }
 
+    const copySep = document.createElement('div');
+    copySep.className = 'context-menu-separator';
+    menu.appendChild(copySep);
+
+    const copyInfoItem = document.createElement('div');
+    copyInfoItem.className = 'context-menu-item';
+    copyInfoItem.textContent = 'Copy Terminal Info';
+    copyInfoItem.onclick = () => {
+      menu.remove();
+      this.copyTerminalInfo(terminal);
+    };
+    menu.appendChild(copyInfoItem);
+
     const separator = document.createElement('div');
     separator.className = 'context-menu-separator';
     menu.appendChild(separator);
@@ -624,6 +637,43 @@ export class TabBar {
     if (titleEl) {
       this.startRename(titleEl, terminal);
     }
+  }
+
+  private copyTerminalInfo(terminal: Terminal) {
+    const state = store.getState();
+    const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
+    const workspaceName = workspace?.name ?? 'Unknown';
+    const wsTerminals = store.getWorkspaceTerminals(terminal.workspaceId);
+    const tabNumber = wsTerminals.findIndex(t => t.id === terminal.id) + 1;
+    const displayName = getDisplayName(terminal);
+    const tabLabel = tabNumber > 0 ? ` (#${tabNumber})` : '';
+
+    const snippet = [
+      `Terminal: ${displayName}${tabLabel}`,
+      `Terminal ID: ${terminal.id}`,
+      `Workspace ID: ${terminal.workspaceId}`,
+      `Workspace: ${workspaceName}`,
+      '',
+      'To read this terminal via MCP:',
+      `  read_terminal(terminal_id="${terminal.id}")`,
+      `  read_grid(terminal_id="${terminal.id}")`,
+    ].join('\n');
+
+    navigator.clipboard.writeText(snippet).then(() => {
+      this.showCopyToast();
+    });
+  }
+
+  private showCopyToast() {
+    const existing = document.querySelector('.copy-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'copy-toast';
+    toast.textContent = 'Copied!';
+    document.body.appendChild(toast);
+
+    setTimeout(() => toast.remove(), 1500);
   }
 
   setOnSplit(callback: (terminalId: string, direction: 'horizontal' | 'vertical') => void) {

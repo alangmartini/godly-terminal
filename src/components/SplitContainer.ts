@@ -88,6 +88,13 @@ export class SplitContainer {
 
   destroy(): void {
     this.cleanup();
+    // Re-parent pane containers back to the split-root's parent before
+    // removing the split-root. Without this, pane containers become orphaned
+    // and invisible when single-pane mode tries to show them. (Bug #405)
+    const parent = this.element.parentElement;
+    if (parent) {
+      this.restorePaneContainers(this.root, parent);
+    }
     this.element.remove();
   }
 
@@ -242,6 +249,23 @@ export class SplitContainer {
       }
       // Note: hiding non-visible panes is handled by the caller (App.ts)
       // since the paneMap may contain panes from other workspaces.
+    }
+  }
+
+  /**
+   * Walk the rendered tree and move pane containers (leaf elements that
+   * came from the paneMap) back to the given parent element.
+   */
+  private restorePaneContainers(rendered: RenderedNode | null, parent: HTMLElement): void {
+    if (!rendered) return;
+    if (rendered.node.type === 'leaf') {
+      const pane = this.options.paneMap.get(rendered.node.terminal_id);
+      if (pane) {
+        parent.appendChild(pane.getContainer());
+      }
+    } else if (rendered.children) {
+      this.restorePaneContainers(rendered.children.first, parent);
+      this.restorePaneContainers(rendered.children.second, parent);
     }
   }
 
