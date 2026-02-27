@@ -28,6 +28,9 @@ NUL
 demo-output/
 demo-screenshots/
 
+# Personal scripts (tunnel configs, credentials)
+scripts/*.local.ps1
+
 # Scratch / personal notes
 TODO.md
 commands.txt

@@ -1,44 +1,81 @@
-# Automated phone setup: starts godly-remote + Cloudflare Tunnel + displays QR code
-# Usage: pwsh scripts/setup-phone.ps1 [-Port <port>]
+# Automated phone setup: starts godly-remote + optional tunnel + displays QR code
+# Usage:
+#   pwsh scripts/setup-phone.ps1                          # local-only (no tunnel)
+#   pwsh scripts/setup-phone.ps1 -Tunnel cloudflare -TunnelName my-tunnel -Hostname phone.example.com
+#   pwsh scripts/setup-phone.ps1 -Tunnel ngrok -NgrokDomain my-app.ngrok-free.app
 #
-# Prerequisites:
-#   winget install Cloudflare.cloudflared
-#   cloudflared tunnel login
-#   cloudflared tunnel create godly-phone
-#   cloudflared tunnel route dns godly-phone phone.godlybr.com
+# Tunnel modes:
+#   local       — no tunnel, accessible only on your LAN (default)
+#   cloudflare  — requires cloudflared + a pre-configured named tunnel
+#   ngrok       — requires ngrok + optional static domain
 
 param(
     [int]$Port = 3377,
-    [string]$TunnelName = "godly-phone",
-    [string]$Hostname = "phone.godlybr.com"
+    [ValidateSet("local", "cloudflare", "ngrok")]
+    [string]$Tunnel = "local",
+
+    # Cloudflare options
+    [string]$TunnelName,
+    [string]$Hostname,
+
+    # ngrok options
+    [string]$NgrokDomain
 )
 
 $ErrorActionPreference = "Stop"
 
-# --- Find cloudflared ---
-$cfBin = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
-if (-not $cfBin) {
-    $candidate = "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe"
-    if (Test-Path $candidate) { $cfBin = $candidate }
-}
-if (-not $cfBin) {
-    $candidate = "$env:ProgramFiles\cloudflared\cloudflared.exe"
-    if (Test-Path $candidate) { $cfBin = $candidate }
-}
-if (-not $cfBin) {
-    Write-Host "cloudflared not found." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Install it with:" -ForegroundColor Yellow
-    Write-Host "  winget install Cloudflare.cloudflared" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Then authenticate and create tunnel:" -ForegroundColor Yellow
-    Write-Host "  cloudflared tunnel login" -ForegroundColor Cyan
-    Write-Host "  cloudflared tunnel create godly-phone" -ForegroundColor Cyan
-    Write-Host "  cloudflared tunnel route dns godly-phone phone.godlybr.com" -ForegroundColor Cyan
-    exit 1
+# ─── Validate tunnel-specific params ───
+
+if ($Tunnel -eq "cloudflare") {
+    if (-not $TunnelName) { Write-Host "-TunnelName is required for cloudflare tunnel mode." -ForegroundColor Red; exit 1 }
+    if (-not $Hostname)   { Write-Host "-Hostname is required for cloudflare tunnel mode." -ForegroundColor Red; exit 1 }
 }
 
-# --- Check godly-remote binary ---
+# ─── Find tunnel binary (if needed) ───
+
+$tunnelBin = $null
+$tunnelProc = $null
+
+if ($Tunnel -eq "cloudflare") {
+    $tunnelBin = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
+    if (-not $tunnelBin) {
+        $candidate = "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe"
+        if (Test-Path $candidate) { $tunnelBin = $candidate }
+    }
+    if (-not $tunnelBin) {
+        $candidate = "$env:ProgramFiles\cloudflared\cloudflared.exe"
+        if (Test-Path $candidate) { $tunnelBin = $candidate }
+    }
+    if (-not $tunnelBin) {
+        Write-Host "cloudflared not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Install it with:" -ForegroundColor Yellow
+        Write-Host "  winget install Cloudflare.cloudflared" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Then authenticate and create a tunnel:" -ForegroundColor Yellow
+        Write-Host "  cloudflared tunnel login" -ForegroundColor Cyan
+        Write-Host "  cloudflared tunnel create <name>" -ForegroundColor Cyan
+        Write-Host "  cloudflared tunnel route dns <name> <hostname>" -ForegroundColor Cyan
+        exit 1
+    }
+}
+
+if ($Tunnel -eq "ngrok") {
+    $tunnelBin = (Get-Command ngrok -ErrorAction SilentlyContinue).Source
+    if (-not $tunnelBin) {
+        Write-Host "ngrok not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Install it with:" -ForegroundColor Yellow
+        Write-Host "  winget install ngrok.ngrok" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Then authenticate:" -ForegroundColor Yellow
+        Write-Host "  ngrok config add-authtoken <token>" -ForegroundColor Cyan
+        exit 1
+    }
+}
+
+# ─── Check godly-remote binary ───
+
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path "$scriptDir\..").Path
 $remoteBin = "$repoRoot\src-tauri\target\release\godly-remote.exe"
@@ -57,7 +94,8 @@ if (-not (Test-Path $remoteBin)) {
     }
 }
 
-# --- Read persisted settings (if any) ---
+# ─── Read persisted settings (if any) ───
+
 $configPath = Join-Path $env:APPDATA "com.godly.terminal\remote-config.json"
 $savedConfig = $null
 if (Test-Path $configPath) {
@@ -69,10 +107,8 @@ if (Test-Path $configPath) {
     }
 }
 
-# --- Use saved or generate API key and password ---
+# ─── API key and password ───
 # Match the charset and length from the Settings UI (remote-settings-store.ts)
-# API key: 24 chars, alphanumeric (A-Z, a-z, 0-9)
-# Password: 100 chars, alphanumeric + special (!@#$%^&*()-_=+[]{}|;:,.<>?)
 $alphanumeric = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 $passwordCharset = $alphanumeric + '!@#$%^&*()-_=+[]{}|;:,.<>?'
 
@@ -96,23 +132,23 @@ if ($savedConfig -and $savedConfig.password) {
     $Password = New-SecureString $passwordCharset 100
 }
 
-# Override port from saved settings if not explicitly provided via CLI
 if ($savedConfig -and $savedConfig.port -and $Port -eq 3377) {
     $Port = $savedConfig.port
 }
 
-# --- Save settings for next run ---
+# ─── Save settings for next run ───
+
 $configDir = Split-Path $configPath
 if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir -Force | Out-Null }
 @{
     api_key  = $ApiKey
     password = $Password
     port     = $Port
-    tunnel   = $TunnelName
-    hostname = $Hostname
+    tunnel   = $Tunnel
 } | ConvertTo-Json | Set-Content $configPath
 
-# --- Kill any existing godly-remote so we start fresh with our API key + password ---
+# ─── Kill any existing godly-remote ───
+
 $remoteProc = $null
 $existingPids = Get-Process -Name "godly-remote" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
 if ($existingPids) {
@@ -124,10 +160,12 @@ if ($existingPids) {
     Start-Sleep -Milliseconds 500
 }
 
-# --- Start godly-remote ---
+# ─── Start godly-remote ───
+
+$bindHost = if ($Tunnel -eq "local") { "0.0.0.0" } else { "127.0.0.1" }
 Write-Host ""
-Write-Host "Starting godly-remote on port $Port..." -ForegroundColor Green
-$env:GODLY_REMOTE_HOST = "127.0.0.1"  # Cloudflare Tunnel connects locally — no need to bind 0.0.0.0
+Write-Host "Starting godly-remote on ${bindHost}:${Port}..." -ForegroundColor Green
+$env:GODLY_REMOTE_HOST = $bindHost
 $env:GODLY_REMOTE_PORT = $Port
 $env:GODLY_REMOTE_API_KEY = $ApiKey
 $env:GODLY_REMOTE_PASSWORD = $Password
@@ -140,39 +178,78 @@ if ($remoteProc.HasExited) {
     exit 1
 }
 
-# --- Start Cloudflare Tunnel ---
-Write-Host "Starting Cloudflare Tunnel ($TunnelName -> $Hostname)..." -ForegroundColor Green
-$cfLog = Join-Path $env:TEMP "godly-cloudflared.log"
-$cfProc = Start-Process -FilePath $cfBin -ArgumentList "tunnel run $TunnelName" -PassThru -WindowStyle Hidden -RedirectStandardOutput $cfLog -RedirectStandardError (Join-Path $env:TEMP "godly-cloudflared-err.log")
+# ─── Start tunnel ───
 
-# --- Wait for tunnel to be ready ---
-# cloudflared doesn't have a local API — just verify it stays alive for a few seconds
-Write-Host "  Waiting for tunnel connection..." -ForegroundColor DarkGray
-Start-Sleep -Seconds 3
-if ($cfProc.HasExited) {
-    Write-Host "cloudflared exited unexpectedly (exit code: $($cfProc.ExitCode))." -ForegroundColor Red
-    $errLog = Join-Path $env:TEMP "godly-cloudflared-err.log"
-    if (Test-Path $errLog) {
-        $logTail = Get-Content $errLog -Tail 15
-        if ($logTail) {
-            Write-Host ""
-            $logTail | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+$publicUrl = $null
+
+if ($Tunnel -eq "cloudflare") {
+    Write-Host "Starting Cloudflare Tunnel ($TunnelName -> $Hostname)..." -ForegroundColor Green
+    $cfLog = Join-Path $env:TEMP "godly-cloudflared.log"
+    $cfErrLog = Join-Path $env:TEMP "godly-cloudflared-err.log"
+    $tunnelProc = Start-Process -FilePath $tunnelBin -ArgumentList "tunnel run $TunnelName" -PassThru -WindowStyle Hidden -RedirectStandardOutput $cfLog -RedirectStandardError $cfErrLog
+
+    Write-Host "  Waiting for tunnel connection..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds 3
+    if ($tunnelProc.HasExited) {
+        Write-Host "cloudflared exited unexpectedly (exit code: $($tunnelProc.ExitCode))." -ForegroundColor Red
+        if (Test-Path $cfErrLog) {
+            $logTail = Get-Content $cfErrLog -Tail 15
+            if ($logTail) {
+                Write-Host ""
+                $logTail | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+            }
+        }
+        Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
+    Write-Host "  Tunnel connected." -ForegroundColor Green
+    $publicUrl = "https://$Hostname"
+}
+
+if ($Tunnel -eq "ngrok") {
+    Write-Host "Starting ngrok tunnel to port $Port..." -ForegroundColor Green
+    $ngrokArgs = "http $Port --log=stdout"
+    if ($NgrokDomain) { $ngrokArgs += " --domain=$NgrokDomain" }
+    $ngrokLog = Join-Path $env:TEMP "godly-ngrok.log"
+    $tunnelProc = Start-Process -FilePath $tunnelBin -ArgumentList $ngrokArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $ngrokLog -RedirectStandardError (Join-Path $env:TEMP "godly-ngrok-err.log")
+
+    Write-Host "  Waiting for ngrok..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds 3
+    if ($tunnelProc.HasExited) {
+        Write-Host "ngrok exited unexpectedly." -ForegroundColor Red
+        Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
+
+    if ($NgrokDomain) {
+        $publicUrl = "https://$NgrokDomain"
+    } else {
+        # Query ngrok API for the auto-assigned URL
+        try {
+            $ngrokApi = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -TimeoutSec 5
+            $publicUrl = $ngrokApi.tunnels[0].public_url
+        } catch {
+            Write-Host "  Could not detect ngrok URL from API. Check http://127.0.0.1:4040" -ForegroundColor Yellow
         }
     }
-    Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
-    exit 1
+    if ($publicUrl) {
+        Write-Host "  ngrok tunnel: $publicUrl" -ForegroundColor Green
+    }
 }
-Write-Host "  Tunnel connected." -ForegroundColor Green
 
-# --- Build phone URL ---
-$publicUrl = "https://$Hostname"
-if ($ApiKey) {
-    $phoneUrl = "$publicUrl/phone#key=$ApiKey"
+# ─── Build phone URL ───
+
+if ($publicUrl) {
+    $phoneUrl = if ($ApiKey) { "$publicUrl/phone#key=$ApiKey" } else { "$publicUrl/phone" }
 } else {
-    $phoneUrl = "$publicUrl/phone"
+    # Local mode — use LAN IP so the phone can reach it
+    $lanIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.PrefixOrigin -eq "Dhcp" } | Select-Object -First 1).IPAddress
+    if (-not $lanIp) { $lanIp = "localhost" }
+    $phoneUrl = if ($ApiKey) { "http://${lanIp}:${Port}/phone#key=$ApiKey" } else { "http://${lanIp}:${Port}/phone" }
 }
 
-# --- Display QR code ---
+# ─── Display QR code ───
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Scan this QR code with your phone:" -ForegroundColor Cyan
@@ -196,19 +273,22 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  $phoneUrl" -ForegroundColor White
 Write-Host ""
-Write-Host "  Password: $Password" -ForegroundColor White
-Write-Host "  (enter this on your phone to connect)" -ForegroundColor DarkGray
+Write-Host "  Password: (saved in $configPath)" -ForegroundColor DarkGray
+Write-Host "  (run: Get-Content '$configPath' | ConvertFrom-Json | Select -Expand password)" -ForegroundColor DarkGray
 Write-Host ""
 if ($ApiKey) {
     Write-Host "  API Key: (embedded in QR code)" -ForegroundColor DarkGray
 }
-Write-Host "  Tunnel:  $publicUrl (permanent)" -ForegroundColor DarkGray
+if ($publicUrl) {
+    Write-Host "  Tunnel:  $publicUrl" -ForegroundColor DarkGray
+}
 Write-Host "  Local:   http://localhost:$Port/phone" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Press Ctrl+C to stop." -ForegroundColor Yellow
 Write-Host ""
 
-# --- Wait for Ctrl+C, then cleanup ---
+# ─── Wait for Ctrl+C, then cleanup ───
+
 try {
     while ($true) {
         Start-Sleep -Seconds 1
@@ -216,17 +296,19 @@ try {
             Write-Host "godly-remote exited unexpectedly." -ForegroundColor Red
             break
         }
-        if ($cfProc.HasExited) {
+        if ($tunnelProc -and $tunnelProc.HasExited) {
             Write-Host ""
-            Write-Host "cloudflared exited unexpectedly (exit code: $($cfProc.ExitCode))." -ForegroundColor Red
-            $errLog = Join-Path $env:TEMP "godly-cloudflared-err.log"
-            if (Test-Path $errLog) {
-                $logTail = Get-Content $errLog -Tail 20
-                if ($logTail) {
-                    Write-Host ""
-                    Write-Host "--- cloudflared log (last 20 lines) ---" -ForegroundColor Yellow
-                    $logTail | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-                    Write-Host "--- end ---" -ForegroundColor Yellow
+            Write-Host "Tunnel process exited unexpectedly." -ForegroundColor Red
+            if ($Tunnel -eq "cloudflare") {
+                $errLog = Join-Path $env:TEMP "godly-cloudflared-err.log"
+                if (Test-Path $errLog) {
+                    $logTail = Get-Content $errLog -Tail 20
+                    if ($logTail) {
+                        Write-Host ""
+                        Write-Host "--- cloudflared log (last 20 lines) ---" -ForegroundColor Yellow
+                        $logTail | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+                        Write-Host "--- end ---" -ForegroundColor Yellow
+                    }
                 }
             }
             break
@@ -235,7 +317,7 @@ try {
 } finally {
     Write-Host ""
     Write-Host "Shutting down..." -ForegroundColor Yellow
-    Stop-Process -Id $cfProc.Id -Force -ErrorAction SilentlyContinue
+    if ($tunnelProc) { Stop-Process -Id $tunnelProc.Id -Force -ErrorAction SilentlyContinue }
     Stop-Process -Id $remoteProc.Id -Force -ErrorAction SilentlyContinue
     Write-Host "Done." -ForegroundColor Green
 }
