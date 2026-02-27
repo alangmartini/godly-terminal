@@ -743,11 +743,25 @@ fn poll_idle_or_trust(
     }
 }
 
-/// Check if Claude Code is showing a workspace trust prompt by searching the
-/// terminal output buffer for the characteristic text. Handles both old
-/// ("Do you trust the files") and new ("I trust this folder") prompt formats.
+/// Check if Claude Code is showing a workspace trust prompt.
+///
+/// Two search strategies are used:
+/// 1. **Raw output history** (`SearchBuffer`) — fast search through the PTY
+///    byte ring buffer with ANSI stripping.
+/// 2. **Rendered grid** (`ReadGrid`) — searches the visible screen text.
+///    This is the fallback for TUI apps (ink, @clack/prompts) that render
+///    via cursor-positioning sequences. After stripping ANSI from raw bytes,
+///    the text fragments may not be contiguous, but the grid always contains
+///    the final rendered text as visible on screen.
 fn has_trust_prompt(daemon: &DaemonClient, session_id: &str) -> bool {
-    for needle in &["Do you trust the files", "I trust this folder"] {
+    const NEEDLES: &[&str] = &[
+        "Do you trust the files",
+        "I trust this folder",
+        "Quick safety check",
+    ];
+
+    // Strategy 1: Search raw output history (fast path)
+    for needle in NEEDLES {
         let req = Request::SearchBuffer {
             session_id: session_id.to_string(),
             text: needle.to_string(),
@@ -760,6 +774,23 @@ fn has_trust_prompt(daemon: &DaemonClient, session_id: &str) -> bool {
             return true;
         }
     }
+
+    // Strategy 2: Search the rendered grid (fallback for TUI renderers).
+    // The grid contains exactly what the user sees on screen — no ANSI
+    // ambiguity, no cursor-positioning fragmentation.
+    let grid_req = Request::ReadGrid {
+        session_id: session_id.to_string(),
+    };
+    if let Ok(Response::Grid { grid }) = daemon.send_request(&grid_req) {
+        let screen_text = grid.rows.join(" ");
+        for needle in NEEDLES {
+            if screen_text.contains(needle) {
+                eprintln!("[quick_claude] Trust prompt found via grid search: {:?}", needle);
+                return true;
+            }
+        }
+    }
+
     false
 }
 
