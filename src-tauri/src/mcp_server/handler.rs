@@ -1784,6 +1784,78 @@ pub fn handle_mcp_request(
                 }
             }
         }
+
+        McpRequest::ExportTerminalInfo { terminal_id } => {
+            // Resolve terminal: use provided ID or fall back to active terminal
+            let tid = terminal_id
+                .clone()
+                .or_else(|| app_state.get_active_terminal_id());
+
+            let tid = match tid {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No terminal_id provided and no active terminal".to_string(),
+                    };
+                }
+            };
+
+            let terminals = app_state.terminals.read();
+            let terminal = match terminals.get(&tid) {
+                Some(t) => t,
+                None => {
+                    return McpResponse::Error {
+                        message: format!("Terminal {} not found", tid),
+                    };
+                }
+            };
+
+            let workspace_id = terminal.workspace_id.clone();
+            let terminal_name = terminal.name.clone();
+            let terminal_id = terminal.id.clone();
+            drop(terminals);
+
+            // Look up workspace name and tab number
+            let workspace_name = app_state
+                .get_workspace(&workspace_id)
+                .map(|w| w.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            let tab_number = app_state
+                .get_workspace(&workspace_id)
+                .and_then(|w| {
+                    w.tab_order
+                        .iter()
+                        .position(|id| id == &terminal_id)
+                        .map(|i| i + 1)
+                })
+                .unwrap_or(0);
+
+            let tab_label = if tab_number > 0 {
+                format!(" (#{tab_number})")
+            } else {
+                String::new()
+            };
+
+            let snippet = format!(
+                "Terminal: {}{}\n\
+                 Terminal ID: {}\n\
+                 Workspace ID: {}\n\
+                 Workspace: {}\n\
+                 \n\
+                 To read this terminal via MCP:\n  \
+                 read_terminal(terminal_id=\"{}\")\n  \
+                 read_grid(terminal_id=\"{}\")",
+                terminal_name, tab_label,
+                terminal_id,
+                workspace_id,
+                workspace_name,
+                terminal_id,
+                terminal_id,
+            );
+
+            McpResponse::TerminalOutput { content: snippet }
+        }
     }
 }
 
