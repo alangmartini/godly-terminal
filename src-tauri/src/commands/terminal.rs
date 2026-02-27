@@ -230,9 +230,15 @@ pub fn write_to_terminal(
     data: String,
     daemon: State<Arc<DaemonClient>>,
 ) -> Result<(), String> {
+    // Convert \n → \r for PTY: terminals expect CR (Enter), not LF.
+    // Frontend already sends \r for Enter, so this is a no-op for keyboard input
+    // but fixes programmatic writes (MCP, paste) that use \n.
+    let converted = data
+        .replace("\r\n", "\r")
+        .replace('\n', "\r");
     let request = Request::Write {
         session_id: terminal_id,
-        data: data.into_bytes(),
+        data: converted.into_bytes(),
     };
     // Fire-and-forget: don't block the Tauri thread pool waiting for the
     // daemon's Ok response. Blocking here caused ~2s input lag under rapid
