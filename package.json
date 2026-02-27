@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "npm run unlock && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-remote -p godly-whisper && cd .. && vite",
-    "dev:watch": "cd src-tauri && cargo watch -w daemon/src -w protocol/src -w mcp/src -w notify/src -w remote/src -x \"build -p godly-daemon -p godly-mcp -p godly-notify -p godly-remote\"",
+    "dev:watch": "cd src-tauri && cargo watch -w daemon/src -w protocol/src -w mcp/src -w notify/src -w remote/src -w whisper/src -x \"build -p godly-daemon -p godly-mcp -p godly-notify -p godly-remote -p godly-whisper\"",
+    "dev:whisper": "cd src-tauri && cargo watch -w whisper/src -w protocol/src -x \"build -p godly-whisper\"",
     "dev:test": "cross-env GODLY_INSTANCE=test npx tauri dev --config src-tauri/tauri.conf.test.json",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
