@@ -92,24 +92,24 @@ describe('Split shortcut matching', () => {
     storage.clear();
   });
 
-  it('matches Alt+ArrowLeft to split.focusLeft', () => {
+  it('matches Ctrl+ArrowLeft to split.focusLeft', () => {
     const store = new KeybindingStore();
-    expect(store.matchAction(keydown('ArrowLeft', { altKey: true }))).toBe('split.focusLeft');
+    expect(store.matchAction(keydown('ArrowLeft', { ctrlKey: true }))).toBe('split.focusLeft');
   });
 
-  it('matches Alt+ArrowRight to split.focusRight', () => {
+  it('matches Ctrl+ArrowRight to split.focusRight', () => {
     const store = new KeybindingStore();
-    expect(store.matchAction(keydown('ArrowRight', { altKey: true }))).toBe('split.focusRight');
+    expect(store.matchAction(keydown('ArrowRight', { ctrlKey: true }))).toBe('split.focusRight');
   });
 
-  it('matches Alt+ArrowUp to split.focusUp', () => {
+  it('matches Ctrl+ArrowUp to split.focusUp', () => {
     const store = new KeybindingStore();
-    expect(store.matchAction(keydown('ArrowUp', { altKey: true }))).toBe('split.focusUp');
+    expect(store.matchAction(keydown('ArrowUp', { ctrlKey: true }))).toBe('split.focusUp');
   });
 
-  it('matches Alt+ArrowDown to split.focusDown', () => {
+  it('matches Ctrl+ArrowDown to split.focusDown', () => {
     const store = new KeybindingStore();
-    expect(store.matchAction(keydown('ArrowDown', { altKey: true }))).toBe('split.focusDown');
+    expect(store.matchAction(keydown('ArrowDown', { ctrlKey: true }))).toBe('split.focusDown');
   });
 
   it('matches Ctrl+Alt+ArrowLeft to split.resizeLeft', () => {
@@ -159,9 +159,9 @@ describe('Split shortcut non-conflicts', () => {
     expect(store.matchAction(keydown('Z', { ctrlKey: true, shiftKey: true }))).toBe('split.zoom');
   });
 
-  it('Alt+Arrow focus shortcuts do not conflict with Ctrl+Alt+Arrow resize shortcuts', () => {
+  it('Ctrl+Arrow focus shortcuts do not conflict with Ctrl+Alt+Arrow resize shortcuts', () => {
     const store = new KeybindingStore();
-    expect(store.matchAction(keydown('ArrowLeft', { altKey: true }))).toBe('split.focusLeft');
+    expect(store.matchAction(keydown('ArrowLeft', { ctrlKey: true }))).toBe('split.focusLeft');
     expect(store.matchAction(keydown('ArrowLeft', { ctrlKey: true, altKey: true }))).toBe('split.resizeLeft');
   });
 
@@ -172,10 +172,10 @@ describe('Split shortcut non-conflicts', () => {
     }
 
     // Check each shortcut is classified correctly
-    expect(store.isAppShortcut(keydown('ArrowLeft', { altKey: true }))).toBe(true);
-    expect(store.isAppShortcut(keydown('ArrowRight', { altKey: true }))).toBe(true);
-    expect(store.isAppShortcut(keydown('ArrowUp', { altKey: true }))).toBe(true);
-    expect(store.isAppShortcut(keydown('ArrowDown', { altKey: true }))).toBe(true);
+    expect(store.isAppShortcut(keydown('ArrowLeft', { ctrlKey: true }))).toBe(true);
+    expect(store.isAppShortcut(keydown('ArrowRight', { ctrlKey: true }))).toBe(true);
+    expect(store.isAppShortcut(keydown('ArrowUp', { ctrlKey: true }))).toBe(true);
+    expect(store.isAppShortcut(keydown('ArrowDown', { ctrlKey: true }))).toBe(true);
     expect(store.isAppShortcut(keydown('ArrowLeft', { ctrlKey: true, altKey: true }))).toBe(true);
     expect(store.isAppShortcut(keydown('ArrowRight', { ctrlKey: true, altKey: true }))).toBe(true);
     expect(store.isAppShortcut(keydown('ArrowUp', { ctrlKey: true, altKey: true }))).toBe(true);
@@ -198,7 +198,7 @@ describe('Split shortcut non-conflicts', () => {
 describe('Split shortcut display formatting', () => {
   it('formats arrow key shortcuts with arrow symbols', () => {
     const leftDef = DEFAULT_SHORTCUTS.find(s => s.id === 'split.focusLeft')!;
-    expect(formatChord(leftDef.defaultChord)).toBe('Alt+\u2190');
+    expect(formatChord(leftDef.defaultChord)).toBe('Ctrl+\u2190');
   });
 
   it('formats resize shortcuts with Ctrl+Alt+arrow', () => {
