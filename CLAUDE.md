@@ -41,6 +41,9 @@ npm run test:browser
 
 # Run browser tests with visible browser window
 npm run test:browser:headed
+
+# Run integration tests (daemon required — spawns isolated daemon per suite)
+npm run build:daemon && npm run test:integration
 ```
 
 ## Git Workflow
@@ -83,12 +86,13 @@ Architecture docs, design specs, and testing guides stay in `docs/` — only inv
 
 ## Frontend Test Tiers
 
-Three tiers of frontend tests, each for different use cases:
+Four tiers of tests, each for different use cases:
 
 | Tier | Naming | Command | Environment | Use for |
 |------|--------|---------|-------------|---------|
 | Unit | `*.test.ts` | `npm test` | Node/jsdom | Logic, state, services, pure functions |
 | Browser | `*.browser.test.ts` | `npm run test:browser` | Real Chromium | Canvas2D rendering, real layout, pointer events |
+| Integration | `*.integration.test.ts` | `npm run test:integration` | Node + daemon | Terminal I/O, daemon protocol, Quick Claude flow |
 | E2E | `e2e/*.ts` | `npm run test:e2e` | Tauri + WebdriverIO | Full app integration with daemon |
 
 - Browser tests run in headless Chromium via Vitest Browser Mode + Playwright
@@ -192,7 +196,12 @@ A global `kanban-board` MCP server tracks work across all projects. Godly Termin
    npm run test:browser
    ```
 
-5. If any step fails, fix and repeat.
+5. **Integration tests** (if you touched daemon protocol, session lifecycle, or Quick Claude flow):
+   ```bash
+   npm run build:daemon && npm run test:integration
+   ```
+
+6. If any step fails, fix and repeat.
 
 ### What CI handles (so you don't have to):
 - `cargo check --workspace` (cross-crate type checking)

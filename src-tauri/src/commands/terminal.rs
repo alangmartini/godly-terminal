@@ -561,25 +561,12 @@ pub(crate) fn quick_claude_background(
     // timestamps from the shell echo and return immediately.
     std::thread::sleep(std::time::Duration::from_millis(5_000));
 
-    // Step 3b: Check for workspace trust prompt and auto-accept if present.
-    // Claude Code shows a trust prompt on first launch in a new directory.
-    // Newer versions use a selection UI ("1. Yes, I trust this folder") that
-    // needs Enter to confirm (option 1 is pre-selected). Detect and accept.
-    if has_trust_prompt(&daemon, &terminal_id) {
-        eprintln!("[quick_claude] Detected trust prompt, auto-accepting");
-        let accept_req = Request::Write {
-            session_id: terminal_id.clone(),
-            data: b"\r".to_vec(),
-        };
-        let _ = daemon.send_request(&accept_req);
-        // Give Claude time to process the acceptance and continue startup
-        std::thread::sleep(std::time::Duration::from_millis(3_000));
-    }
-
-    // Now poll for idle. Claude Code's ink TUI blinks the cursor every ~500ms,
-    // producing output that resets the idle timer. Use a 400ms threshold to detect
-    // the gap between blinks. Timeout after 25s (30s total with the 5s above).
-    let claude_ready = poll_idle(&daemon, &terminal_id, 400, 25_000);
+    // Step 3b: Poll for idle, checking for trust prompt on each iteration.
+    // Claude Code's ink TUI blinks the cursor every ~500ms, producing output
+    // that resets the idle timer. Use a 400ms threshold to detect the gap
+    // between blinks. Timeout after 25s (30s total with the 5s above).
+    // If a trust prompt appears at any point, auto-accept it and keep polling.
+    let claude_ready = poll_idle_or_trust(&daemon, &terminal_id, 400, 25_000);
     if !claude_ready {
         eprintln!("[quick_claude] Claude did not become idle within timeout, writing prompt anyway");
     }
@@ -681,6 +668,68 @@ fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: 
             return false;
         }
         std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+    }
+}
+
+/// Combined poll loop that checks for both idle state AND trust prompt on each
+/// iteration. If the trust prompt is detected, auto-accepts it (sends \r),
+/// waits for Claude to process, then continues polling for idle.
+/// Returns true if idle was detected before timeout, false otherwise.
+fn poll_idle_or_trust(
+    daemon: &DaemonClient,
+    session_id: &str,
+    idle_ms: u64,
+    timeout_ms: u64,
+) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    let poll_interval = (idle_ms / 4).min(500).max(50);
+    // Check trust prompt every ~2s to avoid spamming SearchBuffer
+    let trust_check_interval = 2_000u64 / poll_interval;
+    let mut iteration = 0u64;
+
+    loop {
+        // Check idle state
+        let req = Request::GetLastOutputTime {
+            session_id: session_id.to_string(),
+        };
+        match daemon.send_request(&req) {
+            Ok(Response::LastOutputTime { epoch_ms, running, .. }) => {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let ago = now_ms.saturating_sub(epoch_ms);
+
+                if ago >= idle_ms {
+                    return true;
+                }
+                if !running {
+                    return true;
+                }
+            }
+            Ok(_) | Err(_) => {
+                return false;
+            }
+        }
+
+        // Check trust prompt every ~2s
+        if iteration % trust_check_interval == 0 && has_trust_prompt(daemon, session_id) {
+            eprintln!("[quick_claude] Detected trust prompt, auto-accepting");
+            let accept_req = Request::Write {
+                session_id: session_id.to_string(),
+                data: b"\r".to_vec(),
+            };
+            let _ = daemon.send_request(&accept_req);
+            // Give Claude time to process the acceptance and continue startup
+            std::thread::sleep(std::time::Duration::from_millis(3_000));
+            // Continue polling — don't return, Claude needs time to finish startup
+        }
+
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(poll_interval));
+        iteration += 1;
     }
 }
 
