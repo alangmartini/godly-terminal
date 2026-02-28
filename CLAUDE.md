@@ -52,6 +52,17 @@ Always commit all staged and unstaged changes when making a commit. Do not leave
 
 Never add "Generated with Claude Code" or any similar attribution message to commits, PRs, or any other output.
 
+### Changelog Fragments
+
+Every `feat:` and `fix:` commit must include a changelog fragment file in `changelog/unreleased/`.
+
+- **Naming**: `<PR-number>-<short-description>.md` (e.g., `425-fix-scroll-snap.md`). If no PR yet, use the branch name.
+- **Format**: One or more [Keep a Changelog](https://keepachangelog.com/) sections (`### Added`, `### Fixed`, `### Changed`, `### Removed`, `### Tests`).
+- **Content**: Bold title + dash + description + PR reference. See `changelog/TEMPLATE.md`.
+- **When**: Create the fragment as part of the same commit that introduces the change.
+- **Who collects**: `/bump-version` merges fragments into `CHANGELOG.md` and deletes them at release time.
+- `chore:`, `docs:`, `style:`, `refactor:`, `test:` commits do NOT need fragments unless they represent user-facing changes.
+
 ### PR Policy
 
 - **Features (`feat:`) and bug fixes (`fix:`)**: Create a feature branch, open a PR to master, and wait for merge.
