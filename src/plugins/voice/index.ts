@@ -507,8 +507,8 @@ export class VoiceToTextPlugin implements GodlyPlugin {
         await whisperStartRecording();
         await new Promise(resolve => setTimeout(resolve, 3000));
         testBtn.textContent = 'Transcribing...';
-        const text = await whisperStopRecording();
-        testResult.textContent = text ? `"${text}"` : '(no speech detected)';
+        const result = await whisperStopRecording();
+        testResult.textContent = result.text ? `"${result.text}"` : '(no speech detected)';
         testResult.style.color = 'var(--accent)';
         // Enable playback after successful recording
         playBtn.disabled = false;
