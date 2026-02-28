@@ -286,7 +286,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
 
     const promptArea = document.createElement('textarea');
     promptArea.className = 'dialog-input';
-    promptArea.placeholder = 'Describe your idea... (type / for skills)';
+    promptArea.placeholder = 'Describe your idea... (/ for skills, @ for files)';
     promptArea.rows = 4;
     promptArea.style.cssText = 'resize: vertical; min-height: 80px; font-family: inherit; font-size: 13px;';
     promptWrapper.appendChild(promptArea);
@@ -295,6 +295,11 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     skillDropdown.className = 'skill-dropdown';
     skillDropdown.style.display = 'none';
     promptWrapper.appendChild(skillDropdown);
+
+    const fileDropdown = document.createElement('div');
+    fileDropdown.className = 'file-dropdown';
+    fileDropdown.style.display = 'none';
+    promptWrapper.appendChild(fileDropdown);
 
     dialog.appendChild(promptWrapper);
 
@@ -399,14 +404,145 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       renderDropdown(filtered, activeIndex);
     }
 
-    promptArea.addEventListener('input', refreshSkillDropdown);
+    promptArea.addEventListener('input', () => {
+      refreshSkillDropdown();
+      refreshFileDropdown();
+    });
 
     workspaceSelect.addEventListener('change', () => {
       const before = promptArea.value.slice(0, promptArea.selectionStart);
       if (dropdownVisible || before.match(/(^|[\s\n])\/([\w-]*)$/)) {
         refreshSkillDropdown();
       }
+      // Clear file cache and refresh if file dropdown is active
+      dirCache.clear();
+      if (fileDropdownVisible) {
+        refreshFileDropdown();
+      }
     });
+
+    // -- File autocomplete state --
+    interface DirEntryInfo { name: string; is_dir: boolean }
+    const dirCache = new Map<string, DirEntryInfo[]>();
+    let activeFiles: DirEntryInfo[] = [];
+    let fileActiveIndex = -1;
+    let fileDropdownVisible = false;
+
+    async function fetchDirEntries(dirPath: string): Promise<DirEntryInfo[]> {
+      const wsId = workspaceSelect.value;
+      const cacheKey = `${wsId}:${dirPath}`;
+      if (dirCache.has(cacheKey)) return dirCache.get(cacheKey)!;
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const entries = await invoke<DirEntryInfo[]>('list_directory', { path: dirPath });
+        dirCache.set(cacheKey, entries);
+        return entries;
+      } catch {
+        return [];
+      }
+    }
+
+    function renderFileDropdown(entries: DirEntryInfo[], highlightIndex: number) {
+      fileDropdown.innerHTML = '';
+      if (entries.length === 0) {
+        hideFileDropdown();
+        return;
+      }
+      entries.forEach((entry, i) => {
+        const item = document.createElement('div');
+        item.className = 'file-item' + (i === highlightIndex ? ' file-item-active' : '');
+        const icon = document.createElement('span');
+        icon.className = 'file-item-icon';
+        icon.textContent = entry.is_dir ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'file-item-name';
+        nameEl.textContent = entry.name + (entry.is_dir ? '/' : '');
+        item.appendChild(icon);
+        item.appendChild(nameEl);
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          selectFile(entry);
+        });
+        item.addEventListener('mouseenter', () => {
+          fileActiveIndex = i;
+          updateFileHighlight();
+        });
+        fileDropdown.appendChild(item);
+      });
+      fileDropdown.style.display = '';
+      fileDropdownVisible = true;
+    }
+
+    function updateFileHighlight() {
+      const items = fileDropdown.querySelectorAll('.file-item');
+      items.forEach((el, i) => {
+        el.classList.toggle('file-item-active', i === fileActiveIndex);
+        if (i === fileActiveIndex) el.scrollIntoView?.({ block: 'nearest' });
+      });
+    }
+
+    function hideFileDropdown() {
+      fileDropdown.style.display = 'none';
+      fileDropdownVisible = false;
+      fileActiveIndex = -1;
+      activeFiles = [];
+    }
+
+    function selectFile(entry: DirEntryInfo) {
+      const val = promptArea.value;
+      const cursor = promptArea.selectionStart;
+      const before = val.slice(0, cursor);
+      const atMatch = before.match(/(^|[\s\n])@([\w./_-]*)$/);
+      if (!atMatch) { hideFileDropdown(); return; }
+      const atStart = before.lastIndexOf('@');
+      const currentPath = atMatch[2];
+      const lastSlash = currentPath.lastIndexOf('/');
+      const dirPrefix = lastSlash >= 0 ? currentPath.slice(0, lastSlash + 1) : '';
+
+      if (entry.is_dir) {
+        const newPath = dirPrefix + entry.name + '/';
+        promptArea.value = val.slice(0, atStart) + '@' + newPath + val.slice(cursor);
+        const newPos = atStart + 1 + newPath.length;
+        promptArea.setSelectionRange(newPos, newPos);
+        promptArea.focus();
+        refreshFileDropdown();
+      } else {
+        const fullPath = dirPrefix + entry.name;
+        promptArea.value = val.slice(0, atStart) + '@' + fullPath + ' ' + val.slice(cursor);
+        const newPos = atStart + 1 + fullPath.length + 1;
+        promptArea.setSelectionRange(newPos, newPos);
+        hideFileDropdown();
+        promptArea.focus();
+      }
+    }
+
+    async function refreshFileDropdown() {
+      const val = promptArea.value;
+      const cursor = promptArea.selectionStart;
+      const before = val.slice(0, cursor);
+      const atMatch = before.match(/(^|[\s\n])@([\w./_-]*)$/);
+      if (!atMatch) {
+        hideFileDropdown();
+        return;
+      }
+      const currentPath = atMatch[2];
+      const lastSlash = currentPath.lastIndexOf('/');
+      const dirPart = lastSlash >= 0 ? currentPath.slice(0, lastSlash) : '';
+      const filterPart = lastSlash >= 0 ? currentPath.slice(lastSlash + 1) : currentPath;
+
+      const ws = options.workspaces.find(w => w.id === workspaceSelect.value);
+      if (!ws) { hideFileDropdown(); return; }
+
+      const fullDirPath = dirPart ? `${ws.folderPath}/${dirPart}` : ws.folderPath;
+      const entries = await fetchDirEntries(fullDirPath);
+      const filtered = filterPart
+        ? entries.filter(e => e.name.toLowerCase().includes(filterPart.toLowerCase()))
+        : entries;
+
+      activeFiles = filtered;
+      fileActiveIndex = filtered.length > 0 ? 0 : -1;
+      renderFileDropdown(filtered, fileActiveIndex);
+    }
 
     // -- Image attachments (drag-and-drop) --
     const attachedImages: string[] = [];
@@ -670,6 +806,32 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
             selectSkill(activeSkills[activeIndex]);
             return;
           }
+        }
+      }
+      if (fileDropdownVisible) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          fileActiveIndex = Math.min(fileActiveIndex + 1, activeFiles.length - 1);
+          updateFileHighlight();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          fileActiveIndex = Math.max(fileActiveIndex - 1, 0);
+          updateFileHighlight();
+          return;
+        }
+        if ((e.key === 'Enter' || e.key === 'Tab') && !e.ctrlKey) {
+          if (fileActiveIndex >= 0 && fileActiveIndex < activeFiles.length) {
+            e.preventDefault();
+            selectFile(activeFiles[fileActiveIndex]);
+            return;
+          }
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideFileDropdown();
+          return;
         }
       }
       if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); submit(); }
