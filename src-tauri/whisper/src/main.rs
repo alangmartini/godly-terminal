@@ -5,7 +5,7 @@ mod transcribe;
 use audio::AudioRecorder;
 use transcribe::Transcriber;
 
-const BUILD: u32 = 1;
+const BUILD: u32 = 2;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -57,7 +57,7 @@ fn main() {
         i += 1;
     }
 
-    eprintln!("=== godly-whisper starting === build={}", BUILD);
+    eprintln!("=== godly-whisper starting === build={} cuda={}", BUILD, cfg!(feature = "cuda"));
     eprintln!("[whisper] Pipe: {}", pipe_name);
     if !models_dir.is_empty() {
         eprintln!("[whisper] Models dir: {}", models_dir);
