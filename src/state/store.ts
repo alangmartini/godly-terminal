@@ -83,6 +83,9 @@ class Store {
   private listeners: Set<Listener> = new Set();
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
   private pendingNotify = false;
+  /** Suspended layout trees, keyed by workspaceId. Stored when navigating to a
+   *  tab outside the split so the split can be restored on return. */
+  private suspendedLayoutTrees: Map<string, { tree: LayoutNode; splitView?: SplitView; zoomedPane?: string }> = new Map();
   /** Sessions currently resumed (not paused). Tracks which sessions we've
    *  sent resumeSession to, so we can pause them when they become invisible. */
   private resumedSessions: Set<string> = new Set();
@@ -108,6 +111,7 @@ class Store {
     };
     this.lastActiveTerminalByWorkspace.clear();
     this.resumedSessions.clear();
+    this.suspendedLayoutTrees.clear();
     this.notify();
   }
 
@@ -264,6 +268,13 @@ class Store {
 
     if (terminal) {
       const wsId = terminal.workspaceId;
+
+      // Invalidate suspended tree if the removed terminal was part of it
+      const suspended = this.suspendedLayoutTrees.get(wsId);
+      if (suspended && containsTerminal(suspended.tree, id)) {
+        this.suspendedLayoutTrees.delete(wsId);
+      }
+
       const tree = layoutTrees[wsId];
 
       if (tree && containsTerminal(tree, id)) {
@@ -345,10 +356,15 @@ class Store {
           return;
         }
 
-        // Terminal is NOT in the tree — clear the tree and show single-pane mode
+        // Terminal is NOT in the tree — suspend the tree so it can be restored later
         const { [wsId]: _tree, ...remainingTrees } = this.state.layoutTrees;
         const { [wsId]: _split, ...remainingSplits } = this.state.splitViews;
         const { [wsId]: _zoom, ...remainingZooms } = this.state.zoomedPanes;
+        this.suspendedLayoutTrees.set(wsId, {
+          tree,
+          splitView: _split,
+          zoomedPane: _zoom,
+        });
         this.setState({
           activeTerminalId: id,
           layoutTrees: remainingTrees,
@@ -361,8 +377,24 @@ class Store {
         return;
       }
 
-      // Legacy: If navigating to a terminal outside the current split → clear the split
-      // and show the new terminal in single-pane mode
+      // Check if terminal is in a suspended layout tree — restore the split
+      const suspended = this.suspendedLayoutTrees.get(wsId);
+      if (suspended && containsTerminal(suspended.tree, id)) {
+        this.suspendedLayoutTrees.delete(wsId);
+        const layoutTrees = { ...this.state.layoutTrees, [wsId]: suspended.tree };
+        const splitViews = suspended.splitView
+          ? { ...this.state.splitViews, [wsId]: suspended.splitView }
+          : this.state.splitViews;
+        const zoomedPanes = suspended.zoomedPane
+          ? { ...this.state.zoomedPanes, [wsId]: suspended.zoomedPane }
+          : this.state.zoomedPanes;
+        this.setState({ activeTerminalId: id, layoutTrees, splitViews, zoomedPanes });
+        invoke('sync_active_terminal', { terminalId: id }).catch(() => {});
+        this.syncSessionPauseState();
+        return;
+      }
+
+      // Legacy: If navigating to a terminal outside the current split → suspend
       const split = this.state.splitViews[wsId];
       if (split && id !== split.leftTerminalId && id !== split.rightTerminalId) {
         const { [wsId]: _, ...remainingSplits } = this.state.splitViews;
@@ -470,6 +502,7 @@ class Store {
     const { [workspaceId]: _t, ...restTrees } = this.state.layoutTrees;
     const { [workspaceId]: _s, ...restSplits } = this.state.splitViews;
     const { [workspaceId]: _z, ...restZoomed } = this.state.zoomedPanes;
+    this.suspendedLayoutTrees.delete(workspaceId);
     this.setState({
       layoutTrees: restTrees,
       splitViews: restSplits,

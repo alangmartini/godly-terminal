@@ -71,17 +71,20 @@ describe('split view should exit when clicking a tab outside the split pair', ()
     expect(store.getState().activeTerminalId).toBe('t4');
   });
 
-  it('should allow navigating back to a former split terminal in single view', () => {
-    // Bug #371: split [t1|t2], click t3 → exit split, click t1 → still single view
+  it('should restore split when navigating back to a former split terminal', () => {
+    // Fix #426: split [t1|t2], click t3 → suspend split, click t1 → restore split
     store.setSplitView('ws-1', 't1', 't2', 'horizontal');
     store.setActiveTerminal('t1');
 
     store.setActiveTerminal('t3');
     expect(store.getSplitView('ws-1')).toBeNull();
 
-    // Navigate back to t1 — should stay in single view, no auto-restore of split
+    // Navigate back to t1 — split should be restored
     store.setActiveTerminal('t1');
-    expect(store.getSplitView('ws-1')).toBeNull();
+    const split = store.getSplitView('ws-1');
+    expect(split).not.toBeNull();
+    expect(split!.leftTerminalId).toBe('t1');
+    expect(split!.rightTerminalId).toBe('t2');
     expect(store.getState().activeTerminalId).toBe('t1');
   });
 
