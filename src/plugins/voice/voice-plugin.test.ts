@@ -25,7 +25,10 @@ vi.mock('./whisper-service', () => ({
   whisperStartSidecar: vi.fn().mockResolvedValue('started'),
   whisperRestartSidecar: vi.fn().mockResolvedValue('restarted'),
   whisperStartRecording: vi.fn().mockResolvedValue(undefined),
-  whisperStopRecording: vi.fn().mockResolvedValue('test text'),
+  whisperStopRecording: vi.fn().mockResolvedValue({ text: 'test text', durationMs: 1200 }),
+  listGpuDevices: vi.fn().mockResolvedValue([]),
+  whisperListAudioDevices: vi.fn().mockResolvedValue([]),
+  whisperPlaybackRecording: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock Tauri event listener
@@ -88,5 +91,28 @@ describe('VoiceToTextPlugin', () => {
     plugin.destroy();
     expect(mockUnlisten).toHaveBeenCalled();
     expect((plugin as any).progressUnlisten).toBeNull();
+  });
+
+  it('test recording button displays transcription text, not [object Object]', async () => {
+    // Bug: whisperStopRecording returns TranscriptionResult { text, durationMs }
+    // but the UI was interpolating the whole object as a string → "[object Object]"
+    const el = plugin.renderSettings();
+    const buttons = el.querySelectorAll('button');
+    const testBtn = Array.from(buttons).find(b => b.textContent === 'Test Recording (3s)');
+    expect(testBtn).toBeDefined();
+
+    // Click the test recording button
+    testBtn!.click();
+
+    // Wait for recording (3s timeout) + transcription to complete
+    // The mock resolves immediately so we just need to flush promises
+    await vi.waitFor(() => {
+      const spans = el.querySelectorAll('span[style*="monospace"]');
+      const resultSpan = Array.from(spans).find(s => s.textContent && s.textContent.length > 0);
+      expect(resultSpan).toBeDefined();
+      // Must show the actual text, never [object Object]
+      expect(resultSpan!.textContent).not.toContain('[object Object]');
+      expect(resultSpan!.textContent).toBe('"test text"');
+    }, { timeout: 5000 });
   });
 });
