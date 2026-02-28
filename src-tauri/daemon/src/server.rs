@@ -9,12 +9,14 @@ use tokio::sync::mpsc;
 use godly_protocol::{DaemonMessage, Event, Request, Response, read_request, write_daemon_message};
 
 use crate::debug_log::daemon_log;
+use crate::handlers;
+use crate::handlers::HandlerContext;
 use crate::scrollback_budget::ScrollbackBudget;
 use crate::session::DaemonSession;
 
 /// Log current process memory usage (Windows: working set via GetProcessMemoryInfo).
 #[cfg(windows)]
-fn log_memory_usage(label: &str) {
+pub(crate) fn log_memory_usage(label: &str) {
     use winapi::um::processthreadsapi::GetCurrentProcess;
     use winapi::um::psapi::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 
@@ -34,7 +36,7 @@ fn log_memory_usage(label: &str) {
 }
 
 #[cfg(not(windows))]
-fn log_memory_usage(label: &str) {
+pub(crate) fn log_memory_usage(label: &str) {
     daemon_log!("MEMORY [{}]: (not available on this platform)", label);
 }
 
@@ -590,18 +592,7 @@ fn io_thread(
                         // I/O thread when ConPTY input fills during heavy output (deadlock fix).
                         match &request {
                             Request::Resize { session_id, rows, cols } => {
-                                let response = {
-                                    let sessions_guard = sessions.read();
-                                    match sessions_guard.get(session_id) {
-                                        Some(session) => match session.resize(*rows, *cols) {
-                                            Ok(()) => Response::Ok,
-                                            Err(e) => Response::Error { message: e },
-                                        },
-                                        None => Response::Error {
-                                            message: format!("Session {} not found", session_id),
-                                        },
-                                    }
-                                };
+                                let response = handlers::resize::handle_raw(&sessions, session_id, *rows, *cols);
                                 let msg = DaemonMessage::Response(response);
                                 if write_daemon_message(&mut pipe, &msg).is_err() {
                                     daemon_log!("Write error on direct Resize response, stopping");
@@ -613,18 +604,7 @@ fn io_thread(
                                 did_work = true;
                             }
                             Request::PauseSession { session_id } => {
-                                let response = {
-                                    let sessions_guard = sessions.read();
-                                    match sessions_guard.get(session_id) {
-                                        Some(session) => {
-                                            session.pause();
-                                            Response::Ok
-                                        }
-                                        None => Response::Error {
-                                            message: format!("Session {} not found", session_id),
-                                        },
-                                    }
-                                };
+                                let response = handlers::pause_session::handle_raw(&sessions, session_id);
                                 let msg = DaemonMessage::Response(response);
                                 if write_daemon_message(&mut pipe, &msg).is_err() {
                                     daemon_log!("Write error on direct PauseSession response, stopping");
@@ -636,18 +616,7 @@ fn io_thread(
                                 did_work = true;
                             }
                             Request::ResumeSession { session_id } => {
-                                let response = {
-                                    let sessions_guard = sessions.read();
-                                    match sessions_guard.get(session_id) {
-                                        Some(session) => {
-                                            session.resume();
-                                            Response::Ok
-                                        }
-                                        None => Response::Error {
-                                            message: format!("Session {} not found", session_id),
-                                        },
-                                    }
-                                };
+                                let response = handlers::resume_session::handle_raw(&sessions, session_id);
                                 let msg = DaemonMessage::Response(response);
                                 if write_daemon_message(&mut pipe, &msg).is_err() {
                                     daemon_log!("Write error on direct ResumeSession response, stopping");
@@ -1207,395 +1176,81 @@ async fn handle_request(
     msg_tx: &mpsc::Sender<DaemonMessage>,
     attached_sessions: &Arc<RwLock<Vec<String>>>,
 ) -> Response {
+    let ctx = HandlerContext {
+        sessions: sessions.clone(),
+        msg_tx: msg_tx.clone(),
+        attached_sessions: attached_sessions.clone(),
+    };
+
     match request {
         Request::Ping => Response::Pong,
 
-        Request::CreateSession {
-            id,
-            shell_type,
-            cwd,
-            rows,
-            cols,
-            env,
-        } => {
-            match DaemonSession::new(id.clone(), shell_type.clone(), cwd.clone(), *rows, *cols, env.clone()) {
-                Ok(session) => {
-                    let info = session.info();
-                    sessions.write().insert(id.clone(), session);
-                    let session_count = sessions.read().len();
-                    eprintln!("[daemon] Created session {}", id);
-                    daemon_log!("Created session {} (total sessions: {})", id, session_count);
-                    log_memory_usage(&format!("session_create({})", session_count));
-                    Response::SessionCreated { session: info }
-                }
-                Err(e) => {
-                    eprintln!("[daemon] Failed to create session {}: {}", id, e);
-                    daemon_log!("Failed to create session {}: {}", id, e);
-                    Response::Error { message: e }
-                }
-            }
+        Request::CreateSession { id, shell_type, cwd, rows, cols, env } => {
+            handlers::create_session::handle(&ctx, id, shell_type, cwd, *rows, *cols, env).await
         }
 
-        Request::ListSessions => {
-            let sessions_guard = sessions.read();
-            let list: Vec<_> = sessions_guard.values().map(|s| s.info()).collect();
-            Response::SessionList { sessions: list }
-        }
+        Request::ListSessions => handlers::list_sessions::handle(&ctx).await,
 
-        Request::Attach { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    let is_already_dead = !session.is_running();
-                    let (buffer, mut rx) = session.attach();
-                    attached_sessions.write().push(session_id.clone());
+        Request::Attach { session_id } => handlers::attach::handle(&ctx, session_id).await,
 
-                    // Spawn a task to forward live output as events.
-                    // When the channel closes, check if the PTY exited (running == false)
-                    // and send SessionClosed so the client knows the process is dead.
-                    let tx = msg_tx.clone();
-                    let sid = session_id.clone();
-                    let running_flag = session.running_flag();
-                    let session_exit_code = session.exit_code();
-                    let exit_code_arc = session.exit_code_arc();
-                    tokio::spawn(async move {
-                        // Bug A2 fix: if the session is already dead when we attach,
-                        // send SessionClosed immediately. The reader thread and child
-                        // monitor are already gone, so the output channel will never
-                        // close on its own — rx.recv() would block forever.
-                        if is_already_dead {
-                            daemon_log!(
-                                "Session {} already dead at attach time, sending SessionClosed (exit_code={:?})",
-                                sid,
-                                session_exit_code
-                            );
-                            let _ = tx
-                                .send(DaemonMessage::Event(Event::SessionClosed {
-                                    session_id: sid,
-                                    exit_code: session_exit_code,
-                                }))
-                                .await;
-                            return;
-                        }
-
-                        while let Some(output) = rx.recv().await {
-                            let event = match output {
-                                crate::session::SessionOutput::RawBytes(data) => {
-                                    DaemonMessage::Event(Event::Output {
-                                        session_id: sid.clone(),
-                                        data,
-                                    })
-                                }
-                                crate::session::SessionOutput::GridDiff(diff) => {
-                                    DaemonMessage::Event(Event::GridDiff {
-                                        session_id: sid.clone(),
-                                        diff,
-                                    })
-                                }
-                                crate::session::SessionOutput::Bell => {
-                                    DaemonMessage::Event(Event::Bell {
-                                        session_id: sid.clone(),
-                                    })
-                                }
-                            };
-                            if tx.send(event).await.is_err() {
-                                break;
-                            }
-                        }
-                        // Channel closed — check why:
-                        // - running == false → PTY exited → notify client
-                        // - running == true  → client detached → session still alive, don't notify
-                        if !running_flag.load(Ordering::Relaxed) {
-                            let code = {
-                                let raw = exit_code_arc.load(Ordering::Relaxed);
-                                if raw == i64::MIN { None } else { Some(raw) }
-                            };
-                            daemon_log!("Session {} PTY exited, sending SessionClosed (exit_code={:?})", sid, code);
-                            let _ = tx
-                                .send(DaemonMessage::Event(Event::SessionClosed {
-                                    session_id: sid,
-                                    exit_code: code,
-                                }))
-                                .await;
-                        }
-                    });
-
-                    eprintln!(
-                        "[daemon] Attached to session {} (buffer: {} bytes)",
-                        session_id,
-                        buffer.len()
-                    );
-                    daemon_log!(
-                        "Attached to session {} (buffer: {} bytes)",
-                        session_id,
-                        buffer.len()
-                    );
-
-                    // Return buffered data for replay
-                    if buffer.is_empty() {
-                        Response::Ok
-                    } else {
-                        Response::Buffer {
-                            session_id: session_id.clone(),
-                            data: buffer,
-                        }
-                    }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::Detach { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    session.detach();
-                    attached_sessions.write().retain(|id| id != session_id);
-                    eprintln!("[daemon] Detached from session {}", session_id);
-                    daemon_log!("Detached from session {}", session_id);
-                    Response::Ok
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
+        Request::Detach { session_id } => handlers::detach::handle(&ctx, session_id).await,
 
         Request::Write { session_id, data } => {
-            // Pre-check: reject writes to dead or missing sessions immediately
-            // so remote clients get actionable errors instead of silent success.
-            {
-                let sessions_guard = sessions.read();
-                match sessions_guard.get(session_id) {
-                    None => {
-                        return Response::Error {
-                            message: format!("Session {} not found", session_id),
-                        };
-                    }
-                    Some(session) if !session.is_running() => {
-                        return Response::Error {
-                            message: format!("Session {} has exited", session_id),
-                        };
-                    }
-                    _ => {}
-                }
-            }
-
-            // Fire-and-forget: spawn_blocking so write_all() never blocks
-            // the async handler or the I/O thread. This breaks the circular
-            // deadlock when ConPTY input fills during heavy output.
-            // Write ordering is preserved by session.writer Mutex.
-            let sessions = sessions.clone();
-            let session_id = session_id.clone();
-            let data = data.clone();
-            tokio::task::spawn_blocking(move || {
-                let sessions_guard = sessions.read();
-                if let Some(session) = sessions_guard.get(&session_id) {
-                    if let Err(e) = session.write(&data) {
-                        daemon_log!("Write failed for session {}: {}", session_id, e);
-                    }
-                }
-            });
-            Response::Ok
+            handlers::write::handle(&ctx, session_id, data).await
         }
 
-        Request::Resize {
-            session_id,
-            rows,
-            cols,
-        } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => match session.resize(*rows, *cols) {
-                    Ok(()) => Response::Ok,
-                    Err(e) => Response::Error { message: e },
-                },
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::ReadBuffer { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    let data = session.read_output_history();
-                    Response::Buffer {
-                        session_id: session_id.clone(),
-                        data,
-                    }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::GetLastOutputTime { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => Response::LastOutputTime {
-                    epoch_ms: session.last_output_epoch_ms(),
-                    running: session.is_running(),
-                    exit_code: session.exit_code(),
-                    input_expected: Some(session.is_likely_waiting_for_input()),
-                },
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::SearchBuffer {
-            session_id,
-            text,
-            strip_ansi,
-        } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => Response::SearchResult {
-                    found: session.search_output_history(text, *strip_ansi),
-                    running: session.is_running(),
-                },
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::ReadGrid { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    let grid = session.read_grid();
-                    Response::Grid { grid }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::ReadRichGrid { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    let grid = session.read_rich_grid();
-                    Response::RichGrid { grid }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::ReadRichGridDiff { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    let diff = session.read_rich_grid_diff();
-                    Response::RichGridDiff { diff }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::ReadGridText {
-            session_id,
-            start_row,
-            start_col,
-            end_row,
-            end_col,
-            scrollback_offset,
-        } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    let text = session.read_grid_text(*start_row, *start_col, *end_row, *end_col, *scrollback_offset);
-                    Response::GridText { text }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::SetScrollback { session_id, offset } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    session.set_scrollback(*offset);
-                    Response::Ok
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
-        }
-
-        Request::ScrollAndReadRichGrid { session_id, offset } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    session.set_scrollback(*offset);
-                    let grid = session.read_rich_grid();
-                    Response::RichGrid { grid }
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
+        Request::Resize { session_id, rows, cols } => {
+            handlers::resize::handle(&ctx, session_id, *rows, *cols).await
         }
 
         Request::CloseSession { session_id } => {
-            let mut sessions_guard = sessions.write();
-            match sessions_guard.remove(session_id) {
-                Some(session) => {
-                    session.close();
-                    attached_sessions.write().retain(|id| id != session_id);
-                    let remaining = sessions_guard.len(); // already removed
-                    eprintln!("[daemon] Closed session {}", session_id);
-                    daemon_log!("Closed session {} (remaining sessions: {})", session_id, remaining);
-                    log_memory_usage(&format!("session_close({})", remaining));
-                    Response::Ok
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
+            handlers::close_session::handle(&ctx, session_id).await
+        }
+
+        Request::ReadBuffer { session_id } => {
+            handlers::read_buffer::handle(&ctx, session_id).await
+        }
+
+        Request::GetLastOutputTime { session_id } => {
+            handlers::get_last_output_time::handle(&ctx, session_id).await
+        }
+
+        Request::SearchBuffer { session_id, text, strip_ansi } => {
+            handlers::search_buffer::handle(&ctx, session_id, text, *strip_ansi).await
+        }
+
+        Request::ReadGrid { session_id } => {
+            handlers::read_grid::handle(&ctx, session_id).await
+        }
+
+        Request::ReadRichGrid { session_id } => {
+            handlers::read_rich_grid::handle(&ctx, session_id).await
+        }
+
+        Request::ReadRichGridDiff { session_id } => {
+            handlers::read_rich_grid_diff::handle(&ctx, session_id).await
+        }
+
+        Request::ReadGridText { session_id, start_row, start_col, end_row, end_col, scrollback_offset } => {
+            handlers::read_grid_text::handle(&ctx, session_id, *start_row, *start_col, *end_row, *end_col, *scrollback_offset).await
+        }
+
+        Request::SetScrollback { session_id, offset } => {
+            handlers::set_scrollback::handle(&ctx, session_id, *offset).await
+        }
+
+        Request::ScrollAndReadRichGrid { session_id, offset } => {
+            handlers::scroll_and_read_rich_grid::handle(&ctx, session_id, *offset).await
         }
 
         // PauseSession/ResumeSession are handled directly in the I/O thread
         // for low latency. If they somehow reach here, handle them gracefully.
         Request::PauseSession { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    session.pause();
-                    Response::Ok
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
+            handlers::pause_session::handle(&ctx, session_id).await
         }
 
         Request::ResumeSession { session_id } => {
-            let sessions_guard = sessions.read();
-            match sessions_guard.get(session_id) {
-                Some(session) => {
-                    session.resume();
-                    Response::Ok
-                }
-                None => Response::Error {
-                    message: format!("Session {} not found", session_id),
-                },
-            }
+            handlers::resume_session::handle(&ctx, session_id).await
         }
     }
 }
