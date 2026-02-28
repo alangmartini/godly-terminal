@@ -38,14 +38,20 @@ impl Transcriber {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| model_path.to_string());
 
+        let cuda_compiled = cfg!(feature = "cuda");
+        let effective_gpu = use_gpu && cuda_compiled;
+
+        if use_gpu && !cuda_compiled {
+            eprintln!("[whisper] WARNING: GPU requested but binary was built without CUDA support. Running on CPU.");
+        }
+
         let mut params = WhisperContextParameters::default();
-        params.use_gpu(use_gpu);
+        params.use_gpu(effective_gpu);
 
         let ctx = WhisperContext::new_with_params(model_path, params)
             .map_err(|e| format!("Failed to load whisper model: {}", e))?;
 
-        // whisper.cpp reports whether GPU was actually used
-        let gpu_in_use = use_gpu; // whisper-rs doesn't expose this directly; trust the flag
+        let gpu_in_use = effective_gpu;
 
         self.ctx = Some(ctx);
         self.model_name = Some(model_name.clone());
@@ -106,5 +112,9 @@ impl Transcriber {
 
     pub fn gpu_in_use(&self) -> bool {
         self.gpu_in_use
+    }
+
+    pub fn cuda_available() -> bool {
+        cfg!(feature = "cuda")
     }
 }
