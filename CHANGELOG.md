@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Whisper test recording shows [object Object]** — The "Test Recording" button in settings and the Quick Claude voice input displayed `[object Object]` instead of the transcribed text because `whisperStopRecording()` returns a `TranscriptionResult` object, not a string (#443)
+- **Scrollback dirty-flag row-index mismatch** — diff snapshots no longer send garbled data when scrolled into history; `set_scrollback()` now marks all rows dirty and diff extraction forces full repaint when scrollback offset is active (#448)
+- **Gemini 3 Flash Preview response parsing** — branch name AI no longer fails with "Failed to parse Gemini response" when using gemini-3-flash-preview. Handles optional candidate content, thinking parts, string error responses, and non-JSON HTTP errors (#449)
+- **Stale terminal IDs in persisted layout** — Layout trees, tab orders, split views, and zoomed panes could hold terminal IDs that become invalid after app crash or dirty exit, causing phantom panes and `self_split` failures. Added centralized pruning after terminal restoration (#450)
+
+### Changed
+- **Refactored daemon handlers** — Extracted 19 request handlers from `server.rs` into individual files with `HandlerContext` for better code organization (#453)
+- **Refactored settings dialog** — Extracted 6 settings tabs into separate files with a registry pattern for easier extensibility (#451)
+
 ## [0.9.0] - 2026-02-25
 
 ### Added
