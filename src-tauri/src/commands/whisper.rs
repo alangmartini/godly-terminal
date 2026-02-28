@@ -166,10 +166,17 @@ pub async fn whisper_start_recording(
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptionResult {
+    pub text: String,
+    pub duration_ms: u64,
+}
+
 #[tauri::command]
 pub async fn whisper_stop_recording(
     whisper: State<'_, Arc<WhisperState>>,
-) -> Result<String, String> {
+) -> Result<TranscriptionResult, String> {
     whisper.set_recording_state(WhisperRecordingState::Transcribing);
 
     let resp = whisper.client().send_request(&WhisperRequest::StopRecording)
@@ -179,9 +186,9 @@ pub async fn whisper_stop_recording(
         })?;
 
     match resp {
-        WhisperResponse::TranscriptionResult { text, .. } => {
+        WhisperResponse::TranscriptionResult { text, duration_ms } => {
             whisper.set_recording_state(WhisperRecordingState::Idle);
-            Ok(text)
+            Ok(TranscriptionResult { text, duration_ms })
         }
         WhisperResponse::Error { message } => {
             whisper.set_recording_state(WhisperRecordingState::Idle);
@@ -191,6 +198,30 @@ pub async fn whisper_stop_recording(
             whisper.set_recording_state(WhisperRecordingState::Idle);
             Err(format!("Unexpected response: {:?}", other))
         }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioLevelInfo {
+    pub rms: f32,
+    pub peak: f32,
+    pub duration_ms: u64,
+}
+
+#[tauri::command]
+pub async fn whisper_get_audio_level(
+    whisper: State<'_, Arc<WhisperState>>,
+) -> Result<AudioLevelInfo, String> {
+    let resp = whisper.client().send_request(&WhisperRequest::GetAudioLevel)
+        .map_err(|e| format!("Failed to get audio level: {}", e))?;
+
+    match resp {
+        WhisperResponse::AudioLevel { rms, peak, duration_ms } => {
+            Ok(AudioLevelInfo { rms, peak, duration_ms })
+        }
+        WhisperResponse::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
     }
 }
 

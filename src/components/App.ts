@@ -97,6 +97,7 @@ export class App {
   private zoomedPaneId: string | null = null;
   /** Stores the split ratio before zoom, so it can be restored on unzoom. */
   private preZoomRatio: number | null = null;
+  private voicePollInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -1153,22 +1154,41 @@ export class App {
    */
   private async handleVoiceToggle(): Promise<void> {
     try {
-      const { whisperGetStatus, whisperStartRecording, whisperStopRecording } = await import('../plugins/voice/whisper-service');
+      const { whisperGetStatus, whisperStartRecording, whisperStopRecording, whisperGetAudioLevel } = await import('../plugins/voice/whisper-service');
       const status = await whisperGetStatus();
 
       if (status.state === 'idle') {
         await whisperStartRecording();
         this.updateMicButtonState('recording');
+        // Start polling audio levels every 60ms
+        this.voicePollInterval = setInterval(async () => {
+          try {
+            const level = await whisperGetAudioLevel();
+            this.updateMicLevel(level.rms, level.durationMs);
+          } catch {
+            // ignore polling errors
+          }
+        }, 60);
       } else if (status.state === 'recording') {
-        this.updateMicButtonState('transcribing');
-        const text = await whisperStopRecording();
-        this.updateMicButtonState('idle');
-        if (text && store.getState().activeTerminalId) {
-          await terminalService.writeToTerminal(store.getState().activeTerminalId!, text);
+        // Stop polling
+        if (this.voicePollInterval) {
+          clearInterval(this.voicePollInterval);
+          this.voicePollInterval = null;
         }
+        this.updateMicButtonState('transcribing');
+        const result = await whisperStopRecording();
+        this.updateMicButtonState('idle');
+        if (result.text && store.getState().activeTerminalId) {
+          await terminalService.writeToTerminal(store.getState().activeTerminalId!, result.text);
+        }
+        this.showTranscriptionToast(result.text, result.durationMs);
       }
     } catch (err) {
       console.error('Voice toggle failed:', err);
+      if (this.voicePollInterval) {
+        clearInterval(this.voicePollInterval);
+        this.voicePollInterval = null;
+      }
       this.updateMicButtonState('idle');
     }
   }
@@ -1182,6 +1202,38 @@ export class App {
       state === 'recording' ? 'Stop recording (Ctrl+Shift+M)' :
       'Transcribing...'
     );
+  }
+
+  private updateMicLevel(rms: number, durationMs: number): void {
+    const levelBar = document.querySelector('.mic-level-bar') as HTMLElement;
+    const timer = document.querySelector('.mic-timer') as HTMLElement;
+    if (levelBar) {
+      // Scale RMS (typically 0-0.3) to height percentage
+      const height = Math.min(100, rms * 300);
+      levelBar.style.height = `${height}%`;
+    }
+    if (timer) {
+      const secs = Math.floor(durationMs / 1000);
+      const mins = Math.floor(secs / 60);
+      const remainder = secs % 60;
+      timer.textContent = `${mins}:${String(remainder).padStart(2, '0')}`;
+    }
+  }
+
+  private showTranscriptionToast(text: string, durationMs: number): void {
+    // Remove any existing toast
+    document.querySelector('.mic-toast')?.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'mic-toast';
+    const speed = durationMs > 0 ? `${durationMs}ms` : '';
+    toast.textContent = text ? `"${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" ${speed}` : '(no speech detected)';
+
+    const micBtn = document.querySelector('.mic-btn');
+    if (micBtn) {
+      micBtn.parentElement?.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
   }
 
   private async createNewTerminal(): Promise<string | null> {

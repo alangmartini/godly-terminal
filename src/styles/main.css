@@ -2080,6 +2080,64 @@ body.dragging-active * {
   100% { transform: rotate(360deg); }
 }
 
+.mic-overlay {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  pointer-events: none;
+}
+
+.mic-btn.mic-recording .mic-overlay {
+  display: flex;
+}
+
+.mic-level-bar {
+  width: 3px;
+  height: 0%;
+  max-height: 30px;
+  background: var(--accent);
+  border-radius: 1.5px;
+  transition: height 0.06s ease-out;
+}
+
+.mic-timer {
+  font-family: monospace;
+  font-size: 9px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.mic-toast {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: mic-toast-fade 3s ease-in-out forwards;
+  pointer-events: none;
+  z-index: 100;
+}
+
+@keyframes mic-toast-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* Voice plugin settings */
 .voice-plugin-settings .plugin-settings-section {
   margin-bottom: 16px;
