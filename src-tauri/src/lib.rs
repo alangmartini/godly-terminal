@@ -614,6 +614,7 @@ pub fn run() {
             commands::remove_worktree,
             commands::cleanup_all_worktrees,
             commands::list_skills,
+            commands::list_directory,
             commands::read_file,
             commands::write_file,
             commands::get_user_claude_md_path,

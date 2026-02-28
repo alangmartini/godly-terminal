@@ -157,6 +157,56 @@ pub fn save_clipboard_image(image_data: Vec<u8>, extension: String) -> Result<St
         .ok_or_else(|| "Invalid path encoding".to_string())
 }
 
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+}
+
+const EXCLUDED_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    ".next",
+    "dist",
+    "build",
+    "__pycache__",
+    ".tox",
+    ".venv",
+    "venv",
+    ".cache",
+];
+
+#[tauri::command]
+pub fn list_directory(path: String) -> Vec<DirEntry> {
+    let dir = PathBuf::from(&path);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut results: Vec<DirEntry> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            if is_dir && EXCLUDED_DIRS.contains(&name.as_str()) {
+                return None;
+            }
+            Some(DirEntry { name, is_dir })
+        })
+        .collect();
+
+    // Sort: directories first, then files, each group alphabetical (case-insensitive)
+    results.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    results
+}
+
 #[tauri::command]
 pub fn get_user_claude_md_path() -> Result<String, String> {
     let home = std::env::var("USERPROFILE")
@@ -336,5 +386,69 @@ mod tests {
             "Bug #292: Expected 'global-command' from ~/.claude/commands/ but got: {:?}",
             names
         );
+    }
+
+    // -- list_directory tests --
+
+    #[test]
+    fn list_directory_sorts_dirs_first_then_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join("README.md"), "").unwrap();
+        fs::write(root.join("app.ts"), "").unwrap();
+
+        let entries = list_directory(root.to_string_lossy().to_string());
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+
+        // Dirs first (alphabetical), then files (alphabetical)
+        assert_eq!(names, vec!["docs", "src", "app.ts", "README.md"]);
+        assert!(entries[0].is_dir);
+        assert!(entries[1].is_dir);
+        assert!(!entries[2].is_dir);
+        assert!(!entries[3].is_dir);
+    }
+
+    #[test]
+    fn list_directory_excludes_noise_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::create_dir(root.join("node_modules")).unwrap();
+        fs::create_dir(root.join(".git")).unwrap();
+        fs::create_dir(root.join("target")).unwrap();
+        fs::write(root.join("index.ts"), "").unwrap();
+
+        let entries = list_directory(root.to_string_lossy().to_string());
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+
+        assert!(names.contains(&"src"));
+        assert!(names.contains(&"index.ts"));
+        assert!(!names.contains(&"node_modules"));
+        assert!(!names.contains(&".git"));
+        assert!(!names.contains(&"target"));
+    }
+
+    #[test]
+    fn list_directory_returns_empty_for_nonexistent_path() {
+        let entries = list_directory("/nonexistent/path/that/does/not/exist".to_string());
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn list_directory_reads_subdirectory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let sub = root.join("src").join("components");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("App.ts"), "").unwrap();
+        fs::write(sub.join("Header.ts"), "").unwrap();
+        fs::create_dir(sub.join("utils")).unwrap();
+
+        let entries = list_directory(sub.to_string_lossy().to_string());
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+
+        assert_eq!(names, vec!["utils", "App.ts", "Header.ts"]);
     }
 }
