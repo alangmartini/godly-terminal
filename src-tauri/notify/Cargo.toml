@@ -1,6 +1,6 @@
 [package]
 name = "godly-notify"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 license = "BUSL-1.1"
 
