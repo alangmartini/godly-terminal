@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 /// Direction of a split in the layout tree.
@@ -259,6 +260,41 @@ impl LayoutNode {
                 }
 
                 None
+            }
+        }
+    }
+
+    /// Remove all leaves whose terminal ID is not in `live_ids`.
+    /// Collapses splits that lose a child. Returns `None` if the entire tree
+    /// is pruned (no live terminals remain).
+    pub fn prune_stale_terminal_ids(&self, live_ids: &HashSet<String>) -> Option<LayoutNode> {
+        match self {
+            LayoutNode::Leaf { terminal_id } => {
+                if live_ids.contains(terminal_id) {
+                    Some(self.clone())
+                } else {
+                    None
+                }
+            }
+            LayoutNode::Split {
+                direction,
+                ratio,
+                first,
+                second,
+            } => {
+                let pruned_first = first.prune_stale_terminal_ids(live_ids);
+                let pruned_second = second.prune_stale_terminal_ids(live_ids);
+                match (pruned_first, pruned_second) {
+                    (Some(f), Some(s)) => Some(LayoutNode::Split {
+                        direction: *direction,
+                        ratio: *ratio,
+                        first: Box::new(f),
+                        second: Box::new(s),
+                    }),
+                    (Some(f), None) => Some(f),
+                    (None, Some(s)) => Some(s),
+                    (None, None) => None,
+                }
             }
         }
     }
@@ -903,5 +939,96 @@ mod tests {
         tree.remove_terminal("t1");
         // H(t1, t2) collapses → t2
         assert_eq!(tree, leaf("t2"));
+    }
+
+    // ---------------------------------------------------------------
+    // prune_stale_terminal_ids
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn prune_all_live_returns_same_tree() {
+        let tree = split(SplitDirection::Horizontal, 0.5, leaf("t1"), leaf("t2"));
+        let live: HashSet<String> = ["t1", "t2"].iter().map(|s| s.to_string()).collect();
+        let pruned = tree.prune_stale_terminal_ids(&live);
+        assert_eq!(pruned, Some(tree));
+    }
+
+    #[test]
+    fn prune_one_dead_collapses_to_sibling() {
+        let tree = split(SplitDirection::Horizontal, 0.5, leaf("t1"), leaf("t2"));
+        let live: HashSet<String> = ["t1"].iter().map(|s| s.to_string()).collect();
+        let pruned = tree.prune_stale_terminal_ids(&live);
+        assert_eq!(pruned, Some(leaf("t1")));
+    }
+
+    #[test]
+    fn prune_all_dead_returns_none() {
+        let tree = split(SplitDirection::Horizontal, 0.5, leaf("t1"), leaf("t2"));
+        let live: HashSet<String> = HashSet::new();
+        assert_eq!(tree.prune_stale_terminal_ids(&live), None);
+    }
+
+    #[test]
+    fn prune_single_live_leaf_returns_leaf() {
+        let node = leaf("t1");
+        let live: HashSet<String> = ["t1"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(node.prune_stale_terminal_ids(&live), Some(leaf("t1")));
+    }
+
+    #[test]
+    fn prune_single_dead_leaf_returns_none() {
+        let node = leaf("t1");
+        let live: HashSet<String> = HashSet::new();
+        assert_eq!(node.prune_stale_terminal_ids(&live), None);
+    }
+
+    #[test]
+    fn prune_nested_dead_collapses_correctly() {
+        // Tree: H(V(t1, t2), t3) — t2 is dead
+        let tree = split(
+            SplitDirection::Horizontal,
+            0.5,
+            split(SplitDirection::Vertical, 0.5, leaf("t1"), leaf("t2")),
+            leaf("t3"),
+        );
+        let live: HashSet<String> = ["t1", "t3"].iter().map(|s| s.to_string()).collect();
+        let pruned = tree.prune_stale_terminal_ids(&live).unwrap();
+        // V(t1, t2) collapses to t1 → result is H(t1, t3)
+        assert_eq!(pruned.count_leaves(), 2);
+        assert!(pruned.find_terminal("t1"));
+        assert!(pruned.find_terminal("t3"));
+        assert!(!pruned.find_terminal("t2"));
+    }
+
+    #[test]
+    fn prune_entire_subtree_dead() {
+        // Tree: H(V(t1, t2), t3) — t1 and t2 both dead
+        let tree = split(
+            SplitDirection::Horizontal,
+            0.5,
+            split(SplitDirection::Vertical, 0.5, leaf("t1"), leaf("t2")),
+            leaf("t3"),
+        );
+        let live: HashSet<String> = ["t3"].iter().map(|s| s.to_string()).collect();
+        let pruned = tree.prune_stale_terminal_ids(&live).unwrap();
+        // Entire left subtree is dead → result is just t3
+        assert_eq!(pruned, leaf("t3"));
+    }
+
+    #[test]
+    fn prune_preserves_structure_when_all_live() {
+        // Tree: H(V(t1, t2), V(t3, t4))
+        let tree = split(
+            SplitDirection::Horizontal,
+            0.5,
+            split(SplitDirection::Vertical, 0.5, leaf("t1"), leaf("t2")),
+            split(SplitDirection::Vertical, 0.5, leaf("t3"), leaf("t4")),
+        );
+        let live: HashSet<String> = ["t1", "t2", "t3", "t4"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let pruned = tree.prune_stale_terminal_ids(&live);
+        assert_eq!(pruned, Some(tree));
     }
 }
