@@ -37,11 +37,13 @@ describe('whisper-service', () => {
     expect(mockInvoke).toHaveBeenCalledWith('whisper_start_recording');
   });
 
-  it('whisperStopRecording invokes correct command', async () => {
-    mockInvoke.mockResolvedValue('hello world');
+  it('whisperStopRecording invokes correct command and returns TranscriptionResult', async () => {
+    mockInvoke.mockResolvedValue({ text: 'hello world', durationMs: 1500 });
     const result = await whisperStopRecording();
     expect(mockInvoke).toHaveBeenCalledWith('whisper_stop_recording');
-    expect(result).toBe('hello world');
+    expect(result).toEqual({ text: 'hello world', durationMs: 1500 });
+    expect(result.text).toBe('hello world');
+    expect(result.durationMs).toBe(1500);
   });
 
   it('whisperLoadModel invokes with correct args', async () => {
