@@ -36,8 +36,23 @@ export async function whisperStartRecording(): Promise<void> {
   return invoke<void>('whisper_start_recording');
 }
 
-export async function whisperStopRecording(): Promise<string> {
-  return invoke<string>('whisper_stop_recording');
+export interface TranscriptionResult {
+  text: string;
+  durationMs: number;
+}
+
+export async function whisperStopRecording(): Promise<TranscriptionResult> {
+  return invoke<TranscriptionResult>('whisper_stop_recording');
+}
+
+export interface AudioLevelInfo {
+  rms: number;
+  peak: number;
+  durationMs: number;
+}
+
+export async function whisperGetAudioLevel(): Promise<AudioLevelInfo> {
+  return invoke<AudioLevelInfo>('whisper_get_audio_level');
 }
 
 export async function whisperLoadModel(
