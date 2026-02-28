@@ -10,7 +10,7 @@ These are defined in `.claude/settings.json` and scoped to godly-terminal.
 |-------|-------|---------|
 | `/build` | `/build [dev\|prod\|preview]` | Build and run Godly Terminal in development or production mode |
 | `/component` | `/component <Name> [desc]` | Generate a new TypeScript UI component following the project's vanilla DOM + Canvas2D pattern |
-| `/feature` | `/feature <name> [desc]` | Implement a new feature end-to-end: Rust backend command + TypeScript frontend service + state + UI |
+| `/feature` | `/feature <name> [desc]` | TDD feature development: GitHub issue → kanban → failing tests → implementation → refactor → docs → changelog → PR |
 | `/tauri-command` | `/tauri-command <name> [desc]` | Scaffold the full Tauri IPC chain: Rust handler + register in lib.rs + TypeScript service wrapper |
 | `/tidy-up-docs` | `/tidy-up-docs` | Audit `docs/`, classify status (resolved/active/reference), build index, distill lessons into MEMORY.md, archive stale docs |
 | `/manual-testing` | `/manual-testing <feature>` | QA a feature via MCP tools: design test matrix, execute tests, take screenshots, analyze UX, file a GitHub issue with all findings |
