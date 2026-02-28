@@ -1,4 +1,5 @@
 mod debug_log;
+mod handlers;
 mod pid;
 mod scrollback_budget;
 mod server;
