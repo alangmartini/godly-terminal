@@ -15,7 +15,7 @@ jobs:
   # Job 1: Lint, type-check, and frontend tests (~5 min)
   # ---------------------------------------------------------------------------
   check-and-lint:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
   # Job 2: Unit tests for library crates (parallel matrix, ~5 min each)
   # ---------------------------------------------------------------------------
   unit-tests:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -65,7 +65,7 @@ jobs:
   # Job 3: Daemon integration tests (3 partitions, ~5-8 min each)
   # ---------------------------------------------------------------------------
   daemon-tests:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -92,7 +92,7 @@ jobs:
   # Job 4: Build release binaries and upload as artifact (~10 min)
   # ---------------------------------------------------------------------------
   build-release-binaries:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -108,19 +108,19 @@ jobs:
         with:
           name: release-binaries
           path: |
-            src-tauri/target/release/godly-daemon.exe
-            src-tauri/target/release/godly-mcp.exe
-            src-tauri/target/release/godly-notify.exe
-            src-tauri/target/release/godly-pty-shim.exe
-            src-tauri/target/release/godly-remote.exe
-            src-tauri/target/release/godly-whisper.exe
+            src-tauri/target/release/godly-daemon
+            src-tauri/target/release/godly-mcp
+            src-tauri/target/release/godly-notify
+            src-tauri/target/release/godly-pty-shim
+            src-tauri/target/release/godly-remote
+            src-tauri/target/release/godly-whisper
           retention-days: 1
 
   # ---------------------------------------------------------------------------
   # Job 5: App crate tests + production frontend build (~10 min)
   # ---------------------------------------------------------------------------
   build-and-app-tests:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: build-release-binaries
     steps:

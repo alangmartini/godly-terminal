@@ -11,6 +11,10 @@ pub struct Transcriber {
 }
 
 impl Transcriber {
+    pub fn cuda_compiled() -> bool {
+        cfg!(feature = "cuda")
+    }
+
     pub fn new() -> Self {
         Self {
             ctx: None,
@@ -51,7 +55,8 @@ impl Transcriber {
         let ctx = WhisperContext::new_with_params(model_path, params)
             .map_err(|e| format!("Failed to load whisper model: {}", e))?;
 
-        let gpu_in_use = effective_gpu;
+        // whisper.cpp reports whether GPU was actually used
+        let gpu_in_use = use_gpu && Self::cuda_compiled();
 
         self.ctx = Some(ctx);
         self.model_name = Some(model_name.clone());
@@ -116,5 +121,35 @@ impl Transcriber {
 
     pub fn cuda_available() -> bool {
         cfg!(feature = "cuda")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_transcriber_not_loaded() {
+        let t = Transcriber::new();
+        assert!(!t.is_loaded());
+        assert!(t.model_name().is_none());
+        assert!(!t.gpu_in_use());
+    }
+
+    #[test]
+    fn load_model_nonexistent_file() {
+        let mut t = Transcriber::new();
+        let result = t.load_model("/nonexistent/model.bin", false, 0, String::new());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+        assert!(!t.is_loaded());
+    }
+
+    #[test]
+    fn transcribe_without_model() {
+        let t = Transcriber::new();
+        let result = t.transcribe(&[0.0; 1000]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No model loaded"));
     }
 }
