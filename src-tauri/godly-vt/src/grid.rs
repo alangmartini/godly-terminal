@@ -223,7 +223,11 @@ impl Grid {
     }
 
     pub fn set_scrollback(&mut self, rows: usize) {
-        self.scrollback_offset = rows.min(self.scrollback.len());
+        let new_offset = rows.min(self.scrollback.len());
+        if new_offset != self.scrollback_offset {
+            self.scrollback_offset = new_offset;
+            self.mark_all_dirty();
+        }
     }
 
     /// Mark a specific drawing row as dirty.
