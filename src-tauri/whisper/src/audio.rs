@@ -11,6 +11,7 @@ pub struct AudioRecorder {
     native_sample_rate: u32,
     native_channels: u16,
     last_recording: Option<Vec<f32>>,
+    recording_start: Option<std::time::Instant>,
 }
 
 impl AudioRecorder {
@@ -21,6 +22,7 @@ impl AudioRecorder {
             native_sample_rate: 16_000,
             native_channels: 1,
             last_recording: None,
+            recording_start: None,
         }
     }
 
@@ -70,7 +72,7 @@ impl AudioRecorder {
                 .ok_or("No audio input device found")?
         };
 
-        // Use the device's default config — most devices don't support 16kHz directly
+        // Use the device's default config -- most devices don't support 16kHz directly
         let default_config = device
             .default_input_config()
             .map_err(|e| format!("Failed to get default input config: {}", e))?;
@@ -113,12 +115,14 @@ impl AudioRecorder {
             .map_err(|e| format!("Failed to start audio stream: {}", e))?;
 
         self.stream = Some(stream);
+        self.recording_start = Some(std::time::Instant::now());
         Ok(())
     }
 
     /// Stop recording and return the captured PCM samples (16kHz mono f32).
     /// Also stores the samples for later playback.
     pub fn stop(&mut self) -> Result<Vec<f32>, String> {
+        self.recording_start = None;
         let stream = self.stream.take().ok_or("Not recording")?;
 
         drop(stream);
@@ -156,6 +160,39 @@ impl AudioRecorder {
 
     pub fn has_last_recording(&self) -> bool {
         self.last_recording.is_some()
+    }
+
+    /// Compute RMS and peak from the last ~50ms of the buffer.
+    pub fn current_levels(&self) -> (f32, f32) {
+        let buf = match self.buffer.lock() {
+            Ok(b) => b,
+            Err(_) => return (0.0, 0.0),
+        };
+        if buf.is_empty() {
+            return (0.0, 0.0);
+        }
+        // Look at last ~50ms of samples (native_sample_rate * native_channels * 0.05)
+        let window = (self.native_sample_rate as usize * self.native_channels as usize / 20).max(1);
+        let start = buf.len().saturating_sub(window);
+        let slice = &buf[start..];
+
+        let mut sum_sq = 0.0f64;
+        let mut peak = 0.0f32;
+        for &s in slice {
+            sum_sq += (s as f64) * (s as f64);
+            let abs = s.abs();
+            if abs > peak {
+                peak = abs;
+            }
+        }
+        let rms = (sum_sq / slice.len() as f64).sqrt() as f32;
+        (rms, peak)
+    }
+
+    pub fn recording_duration_ms(&self) -> u64 {
+        self.recording_start
+            .map(|start| start.elapsed().as_millis() as u64)
+            .unwrap_or(0)
     }
 
     /// Play back the last recording through the default output device.
@@ -281,4 +318,79 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     }
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_mono_single_channel() {
+        let input = vec![0.5, -0.3, 0.7];
+        let result = to_mono(&input, 1);
+        assert_eq!(result, vec![0.5, -0.3, 0.7]);
+    }
+
+    #[test]
+    fn to_mono_stereo() {
+        let input = vec![0.4, 0.6, -0.2, 0.8];
+        let result = to_mono(&input, 2);
+        assert_eq!(result.len(), 2);
+        assert!((result[0] - 0.5).abs() < 1e-6); // (0.4 + 0.6) / 2
+        assert!((result[1] - 0.3).abs() < 1e-6); // (-0.2 + 0.8) / 2
+    }
+
+    #[test]
+    fn to_mono_empty() {
+        let result = to_mono(&[], 2);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resample_same_rate() {
+        let input = vec![1.0, 2.0, 3.0];
+        let result = resample(&input, 16000, 16000);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn resample_downsample() {
+        // 48kHz to 16kHz = 3:1 ratio
+        let input: Vec<f32> = (0..48000).map(|i| (i as f32) / 48000.0).collect();
+        let result = resample(&input, 48000, 16000);
+        // Should produce approximately 16000 samples
+        assert!((result.len() as i32 - 16000).abs() < 2);
+    }
+
+    #[test]
+    fn resample_upsample() {
+        // 8kHz to 16kHz = 1:2 ratio
+        let input: Vec<f32> = (0..800).map(|i| (i as f32) / 800.0).collect();
+        let result = resample(&input, 8000, 16000);
+        // Should produce approximately 1600 samples
+        assert!((result.len() as i32 - 1600).abs() < 2);
+    }
+
+    #[test]
+    fn resample_empty() {
+        let result = resample(&[], 48000, 16000);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resample_interpolation_accuracy() {
+        // Simple case: 2 samples at 2Hz resampled to 4Hz
+        let input = vec![0.0, 1.0];
+        let result = resample(&input, 2, 4);
+        // Should interpolate: 0.0, 0.5, 1.0, (possibly 1.0)
+        assert!(result.len() >= 3);
+        assert!((result[0] - 0.0).abs() < 1e-5);
+        assert!((result[1] - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn audio_recorder_new_defaults() {
+        let recorder = AudioRecorder::new();
+        assert!(!recorder.is_recording());
+    }
 }

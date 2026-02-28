@@ -665,6 +665,7 @@ pub fn run() {
             commands::list_gpu_devices,
             commands::whisper_list_audio_devices,
             commands::whisper_playback_recording,
+            commands::whisper_get_audio_level,
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,

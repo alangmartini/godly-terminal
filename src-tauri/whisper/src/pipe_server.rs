@@ -63,7 +63,7 @@ pub fn handle_client(
     loop {
         let request: WhisperRequest = match read_message(pipe)? {
             Some(req) => req,
-            None => return Ok(()), // EOF — client disconnected
+            None => return Ok(()), // EOF -- client disconnected
         };
 
         let response = handle_request(request, recorder, transcriber);
@@ -76,7 +76,7 @@ pub fn handle_client(
     }
 }
 
-fn handle_request(
+pub(crate) fn handle_request(
     request: WhisperRequest,
     recorder: &mut AudioRecorder,
     transcriber: &mut Transcriber,
@@ -165,6 +165,17 @@ fn handle_request(
             }
         }
 
+        WhisperRequest::GetAudioLevel => {
+            if !recorder.is_recording() {
+                return WhisperResponse::Error {
+                    message: "Not recording".to_string(),
+                };
+            }
+            let (rms, peak) = recorder.current_levels();
+            let duration_ms = recorder.recording_duration_ms();
+            WhisperResponse::AudioLevel { rms, peak, duration_ms }
+        }
+
         WhisperRequest::StopRecording => {
             let samples = match recorder.stop() {
                 Ok(s) => s,
@@ -193,6 +204,83 @@ fn handle_request(
                     WhisperResponse::Error { message: e }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_ping() {
+        let mut recorder = AudioRecorder::new();
+        let mut transcriber = Transcriber::new();
+        let resp = handle_request(WhisperRequest::Ping, &mut recorder, &mut transcriber);
+        assert!(matches!(resp, WhisperResponse::Pong));
+    }
+
+    #[test]
+    fn handle_get_status_idle_no_model() {
+        let mut recorder = AudioRecorder::new();
+        let mut transcriber = Transcriber::new();
+        let resp = handle_request(WhisperRequest::GetStatus, &mut recorder, &mut transcriber);
+        match resp {
+            WhisperResponse::Status { state, model_loaded, model_name, gpu_in_use, .. } => {
+                assert_eq!(state, "idle");
+                assert!(!model_loaded);
+                assert!(model_name.is_none());
+                assert!(!gpu_in_use);
+            }
+            other => panic!("Expected Status, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_start_recording_without_model() {
+        let mut recorder = AudioRecorder::new();
+        let mut transcriber = Transcriber::new();
+        let resp = handle_request(WhisperRequest::StartRecording { device_name: None }, &mut recorder, &mut transcriber);
+        match resp {
+            WhisperResponse::Error { message } => {
+                assert!(message.contains("No model loaded"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_stop_recording_when_not_recording() {
+        let mut recorder = AudioRecorder::new();
+        let mut transcriber = Transcriber::new();
+        let resp = handle_request(WhisperRequest::StopRecording, &mut recorder, &mut transcriber);
+        match resp {
+            WhisperResponse::Error { message } => {
+                assert!(message.contains("Not recording"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn handle_load_model_bad_path() {
+        let mut recorder = AudioRecorder::new();
+        let mut transcriber = Transcriber::new();
+        let resp = handle_request(
+            WhisperRequest::LoadModel {
+                model_path: "/nonexistent/model.bin".to_string(),
+                use_gpu: false,
+                gpu_device: 0,
+                language: String::new(),
+            },
+            &mut recorder,
+            &mut transcriber,
+        );
+        match resp {
+            WhisperResponse::Error { message } => {
+                assert!(message.contains("not found"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
         }
     }
 }
