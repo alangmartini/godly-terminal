@@ -17,6 +17,17 @@ export interface WhisperConfig {
   microphoneDeviceId: string | null;
 }
 
+export interface GpuDeviceInfo {
+  index: number;
+  name: string;
+  backend: string;
+}
+
+export interface AudioDeviceInfo {
+  name: string;
+  isDefault: boolean;
+}
+
 export async function whisperGetStatus(): Promise<WhisperStatus> {
   return invoke<WhisperStatus>('whisper_get_status');
 }
@@ -60,4 +71,16 @@ export async function whisperGetConfig(): Promise<WhisperConfig> {
 
 export async function whisperSetConfig(config: WhisperConfig): Promise<void> {
   return invoke<void>('whisper_set_config', { config });
+}
+
+export async function listGpuDevices(): Promise<GpuDeviceInfo[]> {
+  return invoke<GpuDeviceInfo[]>('list_gpu_devices');
+}
+
+export async function whisperListAudioDevices(): Promise<AudioDeviceInfo[]> {
+  return invoke<AudioDeviceInfo[]>('whisper_list_audio_devices');
+}
+
+export async function whisperPlaybackRecording(): Promise<void> {
+  return invoke<void>('whisper_playback_recording');
 }

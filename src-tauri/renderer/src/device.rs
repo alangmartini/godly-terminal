@@ -1,4 +1,36 @@
+use serde::{Deserialize, Serialize};
+
 use crate::GpuError;
+
+/// Info about an available GPU adapter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuAdapterInfo {
+    pub index: usize,
+    pub name: String,
+    pub backend: String,
+}
+
+/// Enumerate all GPU adapters available on the system.
+pub fn enumerate_gpu_adapters() -> Vec<GpuAdapterInfo> {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::all(),
+        ..Default::default()
+    });
+
+    instance
+        .enumerate_adapters(wgpu::Backends::all())
+        .into_iter()
+        .enumerate()
+        .map(|(i, adapter)| {
+            let info = adapter.get_info();
+            GpuAdapterInfo {
+                index: i,
+                name: info.name,
+                backend: format!("{:?}", info.backend),
+            }
+        })
+        .collect()
+}
 
 /// Shared GPU device and queue for headless (offscreen) rendering.
 ///
