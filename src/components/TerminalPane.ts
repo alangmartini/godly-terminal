@@ -1079,6 +1079,7 @@ export class TerminalPane {
   setActive(active: boolean) {
     this.container.classList.remove('split-visible', 'split-focused');
     this.container.classList.toggle('active', active);
+    this.gridRenderer?.setFocused(active);
     if (active) {
       this.resume();
       // Sync canvas bitmap to container size immediately to prevent the browser
@@ -1117,6 +1118,7 @@ export class TerminalPane {
     this.container.classList.remove('active');
     this.container.classList.toggle('split-visible', visible);
     this.container.classList.toggle('split-focused', focused);
+    this.gridRenderer?.setFocused(focused);
     if (visible) {
       this.resume();
       // Sync canvas bitmap to container size immediately to prevent zoom flash.
