@@ -430,8 +430,8 @@ export class TerminalPane {
     // when no split exists, so keys like Ctrl+Arrow still work for word navigation.
     if (isAppShortcut(event)) {
       const isSplitAction = action !== null && action.startsWith('split.') &&
-        action !== 'split.vertical' && action !== 'split.horizontal';
-      const wsId = store.state.activeWorkspaceId;
+        action !== 'split.splitRight' && action !== 'split.splitDown';
+      const wsId = store.getState().activeWorkspaceId;
       const hasSplit = wsId ? store.getLayoutTree(wsId) !== null : false;
       if (!isSplitAction || hasSplit) {
         return; // Don't prevent default -- let it bubble
