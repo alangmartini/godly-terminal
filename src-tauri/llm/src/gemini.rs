@@ -57,7 +57,7 @@ struct GeminiResponse {
 
 #[derive(Deserialize)]
 struct Candidate {
-    content: CandidateContent,
+    content: Option<CandidateContent>,
 }
 
 #[derive(Deserialize)]
@@ -68,11 +68,23 @@ struct CandidateContent {
 #[derive(Deserialize)]
 struct ResponsePart {
     text: Option<String>,
+    thought: Option<bool>,
 }
 
 #[derive(Deserialize)]
-struct GeminiError {
-    message: String,
+#[serde(untagged)]
+enum GeminiError {
+    Structured { message: String },
+    Plain(String),
+}
+
+impl GeminiError {
+    fn message(&self) -> &str {
+        match self {
+            GeminiError::Structured { message } => message,
+            GeminiError::Plain(s) => s,
+        }
+    }
 }
 
 /// Maximum number of retries for rate-limited (429) requests.
@@ -129,20 +141,40 @@ pub async fn generate_branch_name_gemini(
             continue;
         }
 
+        if !status.is_success() {
+            let body_text = response
+                .text()
+                .await
+                .unwrap_or_default();
+            if let Ok(body) = serde_json::from_str::<GeminiResponse>(&body_text) {
+                if let Some(error) = body.error {
+                    anyhow::bail!("Gemini API error ({}): {}", status, error.message());
+                }
+            }
+            anyhow::bail!("Gemini API returned HTTP {}: {}", status, body_text);
+        }
+
         let body: GeminiResponse = response
             .json()
             .await
             .context("Failed to parse Gemini response")?;
 
         if let Some(error) = body.error {
-            anyhow::bail!("Gemini API error ({}): {}", status, error.message);
+            anyhow::bail!("Gemini API error ({}): {}", status, error.message());
         }
 
         let raw_text = body
             .candidates
             .and_then(|c| c.into_iter().next())
-            .and_then(|c| c.content.parts.into_iter().next())
-            .and_then(|p| p.text)
+            .and_then(|candidate| {
+                candidate.content.and_then(|content| {
+                    content
+                        .parts
+                        .into_iter()
+                        .find(|p| p.thought != Some(true))
+                        .and_then(|p| p.text)
+                })
+            })
             .ok_or_else(|| anyhow::anyhow!("No text in Gemini response"))?;
 
         return Ok(sanitize_branch_name(&raw_text));
