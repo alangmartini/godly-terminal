@@ -586,6 +586,35 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "self_split",
+                "description": "Split YOUR OWN terminal pane to create a new terminal next to it. No IDs needed — auto-detects from GODLY_SESSION_ID. The new terminal opens in the same workspace as the calling terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "direction": {
+                            "type": "string",
+                            "enum": ["horizontal", "vertical"],
+                            "default": "horizontal",
+                            "description": "Split direction: 'horizontal' for left/right, 'vertical' for top/bottom"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Split ratio (0.15–0.85). Default: 0.5 (equal split)"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the new terminal (optional — defaults to workspace folder)"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to run in the new terminal after creation (optional)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
                 "name": "unsplit_terminal",
                 "description": "Remove a terminal pane from the split layout. The sibling pane expands to fill the space. If only one pane remains, the layout returns to single-pane mode.",
                 "inputSchema": {
@@ -1160,6 +1189,24 @@ pub fn call_tool(
             }
         }
 
+        "self_split" => {
+            let session_id = match session_id {
+                Some(id) => id.clone(),
+                None => return Err("self_split requires GODLY_SESSION_ID to be set (are you running inside Godly Terminal?)".to_string()),
+            };
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("horizontal").to_string();
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+            let command = args.get("command").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::SelfSplit {
+                session_id,
+                direction,
+                ratio,
+                cwd,
+                command,
+            }
+        }
+
         "unsplit_terminal" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
             let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
@@ -1342,6 +1389,20 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "ratio": ratio,
         })),
         McpResponse::NoSplit => Ok(json!({ "split": null })),
+        McpResponse::SplitCreated {
+            original_terminal_id,
+            new_terminal_id,
+            workspace_id,
+            direction,
+            ratio,
+        } => Ok(json!({
+            "success": true,
+            "original_terminal_id": original_terminal_id,
+            "new_terminal_id": new_terminal_id,
+            "workspace_id": workspace_id,
+            "direction": direction,
+            "ratio": ratio,
+        })),
         McpResponse::LayoutTree(tree) => Ok(json!({ "layout_tree": tree })),
         McpResponse::JsResult { result, error } => {
             if let Some(err) = error {
