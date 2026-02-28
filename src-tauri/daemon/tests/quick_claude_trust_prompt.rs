@@ -542,10 +542,11 @@ fn test_trust_prompt_missed_because_idle_fires_first() {
 
     // Wait for the trust prompt text to appear in the buffer
     // (the mock outputs it after TRUST_DELAY_MS = 1500ms)
-    // NOTE: The trust prompt text may already have been consumed by the
-    // RAW_MODE_UNSUPPORTED check above (its 1s window overlaps with the
-    // mock's 1.5s trust delay), so check accumulated output first.
+    //
+    // The trust prompt data may have already been consumed during the raw mode
+    // check above (timing-dependent), so check the accumulated output first.
     let trust_visible = if output.contains("I trust this folder") {
+        eprintln!("  Trust prompt already in accumulated output");
         true
     } else {
         let (trust_out, found) = collect_output_until(
