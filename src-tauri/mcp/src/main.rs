@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod app_backend;
 mod backend;
 mod daemon_direct;
@@ -15,7 +17,7 @@ use jsonrpc::{read_message, write_message};
 use log::mcp_log;
 
 /// Bump this on every godly-mcp code change so logs show which binary is running.
-const BUILD: u32 = 20;
+const BUILD: u32 = 21;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

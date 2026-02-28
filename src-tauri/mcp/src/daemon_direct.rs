@@ -621,6 +621,7 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ClearSplit { .. } => Ok(Self::app_only_error("clear_split")),
             McpRequest::GetSplitState { .. } => Ok(Self::app_only_error("get_split_state")),
             McpRequest::SplitTerminal { .. } => Ok(Self::app_only_error("split_terminal")),
+            McpRequest::SelfSplit { .. } => Ok(Self::app_only_error("self_split")),
             McpRequest::UnsplitTerminal { .. } => Ok(Self::app_only_error("unsplit_terminal")),
             McpRequest::GetLayoutTree { .. } => Ok(Self::app_only_error("get_layout_tree")),
             McpRequest::SwapPanes { .. } => Ok(Self::app_only_error("swap_panes")),
