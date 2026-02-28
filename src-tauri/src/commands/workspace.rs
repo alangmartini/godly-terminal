@@ -3,6 +3,7 @@ use godly_protocol::{LayoutNode, SplitDirection};
 use tauri::State;
 use uuid::Uuid;
 
+use std::collections::HashSet;
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
 #[allow(deprecated)]
@@ -83,9 +84,15 @@ pub fn reorder_tabs(
     state: State<Arc<AppState>>,
     auto_save: State<Arc<AutoSaveManager>>,
 ) -> Result<(), String> {
+    let terminals = state.terminals.read();
+    let filtered: Vec<String> = tab_order
+        .into_iter()
+        .filter(|id| terminals.contains_key(id))
+        .collect();
+    drop(terminals);
     let mut workspaces = state.workspaces.write();
     if let Some(workspace) = workspaces.get_mut(&workspace_id) {
-        workspace.tab_order = tab_order;
+        workspace.tab_order = filtered;
     }
     auto_save.mark_dirty();
     Ok(())
@@ -228,7 +235,26 @@ pub fn set_layout_tree(
     state: State<Arc<AppState>>,
     auto_save: State<Arc<AutoSaveManager>>,
 ) -> Result<(), String> {
-    state.set_layout_tree(&workspace_id, tree);
+    state.set_layout_tree_validated(&workspace_id, tree);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+/// Prune stale terminal IDs from layout trees, split views, zoomed panes,
+/// tab orders, and active terminal ID. Called by the frontend after terminal
+/// restoration is complete so the backend knows which IDs are live.
+#[tauri::command]
+pub fn prune_stale_terminal_ids(
+    live_terminal_ids: Vec<String>,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    let live_ids: HashSet<String> = live_terminal_ids.into_iter().collect();
+    eprintln!(
+        "[workspace] prune_stale_terminal_ids: {} live terminals",
+        live_ids.len()
+    );
+    state.prune_stale_ids(&live_ids);
     auto_save.mark_dirty();
     Ok(())
 }

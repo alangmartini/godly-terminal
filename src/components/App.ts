@@ -849,6 +849,15 @@ export class App {
           });
         }
 
+        // Prune stale terminal IDs from backend layout trees, tab orders,
+        // split views, and zoomed panes. This handles the case where persisted
+        // data references terminals that failed to restore (crash, dead sessions).
+        const liveTerminalIds = store.getState().terminals.map((t) => t.id);
+        await invoke('prune_stale_terminal_ids', {
+          liveTerminalIds,
+        });
+        console.log('[App] Pruned stale terminal IDs from backend state');
+
         // Clean up orphaned daemon sessions not in the saved layout.
         // These accumulate when the app crashes before autosave.
         const layoutTerminalIds = new Set(layout.terminals.map((t) => t.id));
