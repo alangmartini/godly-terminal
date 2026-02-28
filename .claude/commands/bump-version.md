@@ -9,17 +9,6 @@ Accepts an optional argument: `patch` (default), `minor`, `major`, or an explici
 3. Stage all changed files and commit: `chore: bump version to X.Y.Z`
 4. Create an annotated git tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
 5. Report the old version, new version, and tag name.
-
-## Files Updated
-
-The bump script (`scripts/bump-version.mjs`) updates these files:
-- `package.json`
-- `src-tauri/tauri.conf.json`
-- `src-tauri/Cargo.toml`
-- `src-tauri/protocol/Cargo.toml`
-- `src-tauri/daemon/Cargo.toml`
-- `src-tauri/mcp/Cargo.toml`
-- `src-tauri/godly-vt/Cargo.toml`
-- `src-tauri/notify/Cargo.toml`
-
-Do NOT push. The user will push when ready, or `production_build.ps1` handles push automatically.
+6. Ask the user: **"Do you want to build a release installer?"**
+   - If **yes**: push the commit and tag (`git push && git push origin vX.Y.Z`). This triggers the `build-installer` workflow which builds the NSIS/MSI installer and creates a draft GitHub Release.
+   - If **no**: do NOT push. The user will push when ready.
