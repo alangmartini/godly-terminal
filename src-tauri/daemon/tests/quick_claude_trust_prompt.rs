@@ -542,13 +542,23 @@ fn test_trust_prompt_missed_because_idle_fires_first() {
 
     // Wait for the trust prompt text to appear in the buffer
     // (the mock outputs it after TRUST_DELAY_MS = 1500ms)
-    let (trust_out, trust_visible) = collect_output_until(
-        &mut pipe,
-        session_id,
-        Duration::from_secs(10),
-        |o| o.contains("I trust this folder"),
-    );
-    output.push_str(&trust_out);
+    //
+    // The trust prompt text may have already arrived during the raw mode check
+    // above (the mock's 1500ms delay can overlap with the 500ms sleep + 1s
+    // collect_output_until for RAW_MODE_UNSUPPORTED). Check the accumulated
+    // output first before blocking on a fresh pipe read.
+    let trust_visible = if output.contains("I trust this folder") {
+        true
+    } else {
+        let (trust_out, found) = collect_output_until(
+            &mut pipe,
+            session_id,
+            Duration::from_secs(10),
+            |o| o.contains("I trust this folder"),
+        );
+        output.push_str(&trust_out);
+        found
+    };
     eprintln!("  Trust prompt visible: {}", trust_visible);
     assert!(
         trust_visible,

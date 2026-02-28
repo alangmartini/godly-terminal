@@ -98,7 +98,7 @@ fn handle_request(
             },
             model_loaded: transcriber.is_loaded(),
             model_name: transcriber.model_name().map(|s| s.to_string()),
-            gpu_available: true, // simplified — whisper.cpp checks at load time
+            gpu_available: crate::transcribe::Transcriber::cuda_available(),
             gpu_in_use: transcriber.gpu_in_use(),
         },
 

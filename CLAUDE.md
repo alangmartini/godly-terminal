@@ -506,6 +506,7 @@ Shell output → daemon reader thread → ring buffer + godly-vt parser → name
 |-----------|------|----------|
 | Daemon | `godly-daemon-debug.log` | `%APPDATA%/com.godly.terminal/` |
 | Bridge | `godly-bridge-debug.log` | `%APPDATA%/com.godly.terminal/` |
+| Whisper | `godly-whisper-debug.log` | `%APPDATA%/com.godly.terminal/` |
 | MCP | `godly-mcp.log` | Next to `godly-mcp.exe` binary |
 | Frontend | `frontend.log` | `%APPDATA%/com.godly.terminal/logs/` |
 
