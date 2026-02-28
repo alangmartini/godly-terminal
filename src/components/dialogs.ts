@@ -787,10 +787,10 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         } else if (status.state === 'recording') {
           voiceBtn.textContent = '...';
           voiceBtn.classList.remove('voice-recording');
-          const text = await whisperStopRecording();
+          const result = await whisperStopRecording();
           voiceBtn.textContent = 'Voice';
-          if (text) {
-            promptArea.value += (promptArea.value ? ' ' : '') + text;
+          if (result.text) {
+            promptArea.value += (promptArea.value ? ' ' : '') + result.text;
             promptArea.dispatchEvent(new Event('input'));
           }
         }
