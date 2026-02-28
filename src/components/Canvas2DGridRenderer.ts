@@ -33,6 +33,7 @@ export class Canvas2DGridRenderer {
   // Cursor blink state
   private cursorVisible = true;
   private cursorBlinkTimer: ReturnType<typeof setInterval> | null = null;
+  private focused = true; // Whether this pane has keyboard focus
 
   // Repaint callback (called on cursor blink to trigger re-render)
   private onRepaintNeeded: (() => void) | null = null;
@@ -58,6 +59,23 @@ export class Canvas2DGridRenderer {
   /** Update the terminal theme. Does not trigger repaint — caller should re-render. */
   setTheme(theme: TerminalTheme): void {
     this.theme = theme;
+  }
+
+  /**
+   * Set whether this pane has keyboard focus. Unfocused panes render an
+   * outline cursor and stop blinking; focused panes render a solid block
+   * cursor with blinking.
+   */
+  setFocused(value: boolean): void {
+    if (value === this.focused) return;
+    this.focused = value;
+    if (value) {
+      this.startCursorBlink();
+    } else {
+      this.stopCursorBlink();
+      this.cursorVisible = true; // Keep cursor visible (as outline) when unfocused
+      if (this.onRepaintNeeded) this.onRepaintNeeded();
+    }
   }
 
   /** Update font size and re-measure. Does not trigger repaint. */
@@ -163,8 +181,20 @@ export class Canvas2DGridRenderer {
       const cr = snapshot.cursor.row;
       const cc = snapshot.cursor.col;
       if (cr >= 0 && cr < rows.length && cc >= 0 && cc < numCols) {
-        ctx.fillStyle = theme.cursor;
-        ctx.fillRect(cc * cellWidth, cr * cellHeight, cellWidth, cellHeight);
+        const cx = cc * cellWidth;
+        const cy = cr * cellHeight;
+        if (this.focused) {
+          // Solid block cursor for focused pane
+          ctx.fillStyle = theme.cursor;
+          ctx.fillRect(cx, cy, cellWidth, cellHeight);
+        } else {
+          // Outline (hollow) cursor for unfocused pane
+          const lineWidth = Math.max(1, dpr);
+          ctx.strokeStyle = theme.cursor;
+          ctx.lineWidth = lineWidth;
+          const half = lineWidth / 2;
+          ctx.strokeRect(cx + half, cy + half, cellWidth - lineWidth, cellHeight - lineWidth);
+        }
       }
     }
 
@@ -181,8 +211,8 @@ export class Canvas2DGridRenderer {
         // Resolve foreground color
         let fg = this.resolveFg(cell);
 
-        // On cursor position, use cursorAccent for text color
-        if (!snapshot.cursor_hidden && this.cursorVisible &&
+        // On cursor position, use cursorAccent for text color (only on solid/focused cursor)
+        if (this.focused && !snapshot.cursor_hidden && this.cursorVisible &&
             row === snapshot.cursor.row && col === snapshot.cursor.col) {
           fg = theme.cursorAccent;
         }
@@ -225,7 +255,7 @@ export class Canvas2DGridRenderer {
 
   /** Restore canvas resources after release (called when terminal becomes visible). */
   restoreResources(): void {
-    if (!this.cursorBlinkTimer) {
+    if (this.focused && !this.cursorBlinkTimer) {
       this.startCursorBlink();
     }
   }
