@@ -121,19 +121,45 @@ fn handle_request(
             }
         },
 
-        WhisperRequest::StartRecording => {
+        WhisperRequest::StartRecording { device_name } => {
             if !transcriber.is_loaded() {
                 return WhisperResponse::Error {
                     message: "No model loaded".to_string(),
                 };
             }
-            match recorder.start() {
+            match recorder.start(device_name.as_deref()) {
                 Ok(()) => {
                     eprintln!("[whisper] Recording started");
                     WhisperResponse::RecordingStarted
                 }
                 Err(e) => {
                     eprintln!("[whisper] Failed to start recording: {}", e);
+                    WhisperResponse::Error { message: e }
+                }
+            }
+        }
+
+        WhisperRequest::ListAudioDevices => {
+            match AudioRecorder::list_devices() {
+                Ok(devices) => {
+                    eprintln!("[whisper] Found {} audio devices", devices.len());
+                    WhisperResponse::AudioDeviceList { devices }
+                }
+                Err(e) => {
+                    eprintln!("[whisper] Failed to list audio devices: {}", e);
+                    WhisperResponse::Error { message: e }
+                }
+            }
+        }
+
+        WhisperRequest::PlaybackLastRecording => {
+            match recorder.playback_last_recording() {
+                Ok(()) => {
+                    eprintln!("[whisper] Playback complete");
+                    WhisperResponse::PlaybackComplete
+                }
+                Err(e) => {
+                    eprintln!("[whisper] Playback failed: {}", e);
                     WhisperResponse::Error { message: e }
                 }
             }

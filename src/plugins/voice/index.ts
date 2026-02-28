@@ -11,6 +11,9 @@ import {
   whisperRestartSidecar,
   whisperStartRecording,
   whisperStopRecording,
+  listGpuDevices,
+  whisperListAudioDevices,
+  whisperPlaybackRecording,
   type WhisperStatus,
 } from './whisper-service';
 import { WHISPER_MODEL_PRESETS } from './model-presets';
@@ -276,12 +279,12 @@ export class VoiceToTextPlugin implements GodlyPlugin {
       loadBtn.textContent = 'Loading...';
       try {
         const gpuCheckbox = container.querySelector('.voice-gpu-checkbox') as HTMLInputElement;
-        const gpuDeviceInput = container.querySelector('.voice-gpu-device-input') as HTMLInputElement;
+        const gpuDeviceEl = container.querySelector('.voice-gpu-device-input') as HTMLSelectElement;
         const langSelect = container.querySelector('.voice-language-select') as HTMLSelectElement;
         await whisperLoadModel(
           modelSelect.value,
           gpuCheckbox?.checked ?? true,
-          parseInt(gpuDeviceInput?.value ?? '0') || 0,
+          parseInt(gpuDeviceEl?.value ?? '0') || 0,
           langSelect?.value ?? '',
         );
         this.status = await whisperGetStatus();
@@ -318,15 +321,41 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     gpuSection.appendChild(gpuRow);
 
     const deviceRow = this.createRow('GPU Device');
-    const gpuDeviceInput = document.createElement('input');
-    gpuDeviceInput.type = 'number';
-    gpuDeviceInput.className = 'dialog-input voice-gpu-device-input';
-    gpuDeviceInput.style.cssText = 'width: 60px; font-size: 12px; padding: 4px 8px;';
-    gpuDeviceInput.value = '0';
-    gpuDeviceInput.min = '0';
-    gpuDeviceInput.max = '7';
-    deviceRow.appendChild(gpuDeviceInput);
+    const gpuDeviceSelect = document.createElement('select');
+    gpuDeviceSelect.className = 'dialog-input voice-gpu-device-input';
+    gpuDeviceSelect.style.cssText = 'width: auto; font-size: 12px; padding: 4px 8px;';
+    // Default option while loading
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '0';
+    defaultOpt.textContent = 'Device 0 (loading...)';
+    gpuDeviceSelect.appendChild(defaultOpt);
+    deviceRow.appendChild(gpuDeviceSelect);
     gpuSection.appendChild(deviceRow);
+
+    const gpuNote = document.createElement('div');
+    gpuNote.style.cssText = 'padding: 0 12px; font-size: 10px; color: var(--text-secondary);';
+    gpuNote.textContent = 'Note: whisper.cpp currently uses the default CUDA device regardless of selection.';
+    gpuSection.appendChild(gpuNote);
+
+    // Populate GPU devices async
+    listGpuDevices().then(devices => {
+      gpuDeviceSelect.innerHTML = '';
+      if (devices.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '0';
+        opt.textContent = 'No GPU adapters found';
+        gpuDeviceSelect.appendChild(opt);
+      } else {
+        for (const dev of devices) {
+          const opt = document.createElement('option');
+          opt.value = String(dev.index);
+          opt.textContent = `${dev.name} (${dev.backend})`;
+          gpuDeviceSelect.appendChild(opt);
+        }
+      }
+    }).catch(() => {
+      // Keep the default option
+    });
 
     container.appendChild(gpuSection);
 
@@ -364,23 +393,62 @@ export class VoiceToTextPlugin implements GodlyPlugin {
 
     container.appendChild(langSection);
 
-    // Save config on GPU/language/model changes
+    // ── Section C2: Audio (Microphone) ──
+    const audioSection = document.createElement('div');
+    audioSection.className = 'settings-section';
+    const audioTitle = document.createElement('div');
+    audioTitle.className = 'settings-section-title';
+    audioTitle.textContent = 'Audio';
+    audioSection.appendChild(audioTitle);
+
+    const micRow = this.createRow('Microphone');
+    const micSelect = document.createElement('select');
+    micSelect.className = 'dialog-input voice-mic-select';
+    micSelect.style.cssText = 'width: auto; font-size: 12px; padding: 4px 8px;';
+    const micDefaultOpt = document.createElement('option');
+    micDefaultOpt.value = '';
+    micDefaultOpt.textContent = 'System Default';
+    micSelect.appendChild(micDefaultOpt);
+    micRow.appendChild(micSelect);
+    audioSection.appendChild(micRow);
+
+    // Populate microphone devices async
+    whisperListAudioDevices().then(devices => {
+      micSelect.innerHTML = '';
+      const defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = 'System Default';
+      micSelect.appendChild(defOpt);
+      for (const dev of devices) {
+        const opt = document.createElement('option');
+        opt.value = dev.name;
+        opt.textContent = dev.isDefault ? `${dev.name} (default)` : dev.name;
+        micSelect.appendChild(opt);
+      }
+    }).catch(() => {
+      // Keep the default option on error (sidecar may not be running)
+    });
+
+    container.appendChild(audioSection);
+
+    // Save config on GPU/language/model/mic changes
     const saveConfig = async () => {
       try {
         await whisperSetConfig({
           modelName: modelSelect.value,
           language: langSelect.value,
           useGpu: gpuCheckbox.checked,
-          gpuDevice: parseInt(gpuDeviceInput.value) || 0,
-          microphoneDeviceId: null,
+          gpuDevice: parseInt(gpuDeviceSelect.value) || 0,
+          microphoneDeviceId: micSelect.value || null,
         });
       } catch {
         // Config save failed silently
       }
     };
     gpuCheckbox.addEventListener('change', saveConfig);
-    gpuDeviceInput.addEventListener('change', saveConfig);
+    gpuDeviceSelect.addEventListener('change', saveConfig);
     langSelect.addEventListener('change', saveConfig);
+    micSelect.addEventListener('change', saveConfig);
 
     // ── Section D: Test Recording ──
     const testSection = document.createElement('div');
@@ -409,6 +477,27 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     const testResult = document.createElement('span');
     testResult.style.cssText = 'font-family: monospace; font-size: 12px;';
 
+    const playBtn = document.createElement('button');
+    playBtn.className = 'dialog-btn dialog-btn-secondary';
+    playBtn.textContent = 'Play Recording';
+    playBtn.style.fontSize = '11px';
+    playBtn.disabled = true;
+
+    playBtn.onclick = async () => {
+      playBtn.disabled = true;
+      playBtn.textContent = 'Playing...';
+      try {
+        await whisperPlaybackRecording();
+        playBtn.textContent = 'Play Recording';
+        playBtn.disabled = false;
+      } catch (e) {
+        testResult.textContent = `Playback error: ${e}`;
+        testResult.style.color = 'var(--error)';
+        playBtn.textContent = 'Play Recording';
+        playBtn.disabled = false;
+      }
+    };
+
     testBtn.onclick = async () => {
       testBtn.disabled = true;
       testBtn.textContent = 'Recording...';
@@ -421,6 +510,8 @@ export class VoiceToTextPlugin implements GodlyPlugin {
         const text = await whisperStopRecording();
         testResult.textContent = text ? `"${text}"` : '(no speech detected)';
         testResult.style.color = 'var(--accent)';
+        // Enable playback after successful recording
+        playBtn.disabled = false;
       } catch (e) {
         testResult.textContent = `Error: ${e}`;
         testResult.style.color = 'var(--error)';
@@ -431,13 +522,14 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     };
 
     testResultRow.appendChild(testBtn);
+    testResultRow.appendChild(playBtn);
     testResultRow.appendChild(testResult);
     testRow.appendChild(testResultRow);
     testSection.appendChild(testRow);
     container.appendChild(testSection);
 
     // Load current state from sidecar
-    this.refreshSettingsState(container, statusValue, modelSelect, gpuCheckbox, gpuDeviceInput, langSelect, availableRow);
+    this.refreshSettingsState(container, statusValue, modelSelect, gpuCheckbox, gpuDeviceSelect, langSelect, micSelect, availableRow);
 
     return container;
   }
@@ -507,8 +599,9 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     statusValue: HTMLElement,
     modelSelect: HTMLSelectElement,
     gpuCheckbox: HTMLInputElement,
-    gpuDeviceInput: HTMLInputElement,
+    gpuDeviceSelect: HTMLSelectElement,
     langSelect: HTMLSelectElement,
+    micSelect: HTMLSelectElement,
     availableRow: HTMLElement,
   ): Promise<void> {
     try {
@@ -524,8 +617,9 @@ export class VoiceToTextPlugin implements GodlyPlugin {
       // Update config fields
       if (config.modelName) modelSelect.value = config.modelName;
       gpuCheckbox.checked = config.useGpu;
-      gpuDeviceInput.value = String(config.gpuDevice);
+      gpuDeviceSelect.value = String(config.gpuDevice);
       langSelect.value = config.language;
+      if (config.microphoneDeviceId) micSelect.value = config.microphoneDeviceId;
 
       // Show available models
       if (models.length > 0) {

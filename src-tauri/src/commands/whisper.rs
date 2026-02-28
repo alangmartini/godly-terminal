@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use godly_protocol::{WhisperRequest, WhisperResponse};
+use godly_protocol::{AudioDeviceInfo, WhisperRequest, WhisperResponse};
+use godly_renderer::GpuAdapterInfo;
 use tauri::{Emitter, State};
 
 use crate::whisper_state::{WhisperConfig, WhisperRecordingState, WhisperState, WhisperStatus};
@@ -149,7 +150,10 @@ pub async fn whisper_get_status(
 pub async fn whisper_start_recording(
     whisper: State<'_, Arc<WhisperState>>,
 ) -> Result<(), String> {
-    let resp = whisper.client().send_request(&WhisperRequest::StartRecording)
+    let config = whisper.get_config();
+    let resp = whisper.client().send_request(&WhisperRequest::StartRecording {
+        device_name: config.microphone_device_id.clone(),
+    })
         .map_err(|e| format!("Failed to send StartRecording: {}", e))?;
 
     match resp {
@@ -271,6 +275,39 @@ pub async fn whisper_set_config(
 ) -> Result<(), String> {
     whisper.set_config(config);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn list_gpu_devices() -> Result<Vec<GpuAdapterInfo>, String> {
+    Ok(godly_renderer::enumerate_gpu_adapters())
+}
+
+#[tauri::command]
+pub async fn whisper_list_audio_devices(
+    whisper: State<'_, Arc<WhisperState>>,
+) -> Result<Vec<AudioDeviceInfo>, String> {
+    let resp = whisper.client().send_request(&WhisperRequest::ListAudioDevices)
+        .map_err(|e| format!("Failed to send ListAudioDevices: {}", e))?;
+
+    match resp {
+        WhisperResponse::AudioDeviceList { devices } => Ok(devices),
+        WhisperResponse::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
+}
+
+#[tauri::command]
+pub async fn whisper_playback_recording(
+    whisper: State<'_, Arc<WhisperState>>,
+) -> Result<(), String> {
+    let resp = whisper.client().send_request(&WhisperRequest::PlaybackLastRecording)
+        .map_err(|e| format!("Failed to send PlaybackLastRecording: {}", e))?;
+
+    match resp {
+        WhisperResponse::PlaybackComplete => Ok(()),
+        WhisperResponse::Error { message } => Err(message),
+        other => Err(format!("Unexpected response: {:?}", other)),
+    }
 }
 
 #[tauri::command]
