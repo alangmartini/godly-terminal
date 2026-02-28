@@ -4,6 +4,8 @@ A Windows terminal built for AI-assisted development workflows. Run 10-20 concur
 
 ## Why Godly Terminal?
 
+Don't. Just don't. This is a shitty vide-coded terminal that... just kind of went too far?
+
 Modern AI coding workflows involve multiple agents working in parallel — each in its own terminal, often across different git worktrees. Godly Terminal is designed for exactly this:
 
 - **Sessions never die.** A background daemon owns all PTY sessions. Close the app, reopen it, and every terminal is exactly where you left it — scrollback, cursor position, running processes, all intact.
