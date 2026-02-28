@@ -1481,6 +1481,190 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        McpRequest::SelfSplit {
+            session_id,
+            direction,
+            ratio,
+            cwd,
+            command,
+        } => {
+            use std::collections::HashMap;
+            use uuid::Uuid;
+
+            // 1. Look up the calling terminal by session_id
+            let (workspace_id, calling_terminal_id) = {
+                let terminals = app_state.terminals.read();
+                match terminals.get(session_id) {
+                    Some(t) => (t.workspace_id.clone(), t.id.clone()),
+                    None => {
+                        return McpResponse::Error {
+                            message: format!(
+                                "Session {} not found — is GODLY_SESSION_ID correct?",
+                                session_id
+                            ),
+                        };
+                    }
+                }
+            };
+
+            // 2. Validate direction
+            if direction != "horizontal" && direction != "vertical" {
+                return McpResponse::Error {
+                    message: format!(
+                        "Invalid direction '{}', must be 'horizontal' or 'vertical'",
+                        direction
+                    ),
+                };
+            }
+
+            // 3. Create new terminal in the SAME workspace as the caller
+            let new_terminal_id = Uuid::new_v4().to_string();
+
+            let shell = app_state
+                .get_workspace(&workspace_id)
+                .map(|ws| to_protocol_shell_type(&ws.shell_type))
+                .unwrap_or(godly_protocol::ShellType::Windows);
+
+            let working_dir = if let Some(dir) = cwd {
+                Some(dir.clone())
+            } else {
+                app_state
+                    .get_workspace(&workspace_id)
+                    .map(|ws| ws.folder_path)
+            };
+
+            let process_name = shell.display_name();
+
+            let mut env_vars = HashMap::new();
+            env_vars.insert("GODLY_SESSION_ID".to_string(), new_terminal_id.clone());
+            env_vars.insert("GODLY_WORKSPACE_ID".to_string(), workspace_id.clone());
+
+            let create_req = godly_protocol::Request::CreateSession {
+                id: new_terminal_id.clone(),
+                shell_type: shell.clone(),
+                cwd: working_dir.clone(),
+                rows: 24,
+                cols: 80,
+                env: Some(env_vars),
+            };
+
+            match daemon.send_request(&create_req) {
+                Ok(godly_protocol::Response::SessionCreated { .. }) => {}
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error { message };
+                }
+                Ok(other) => {
+                    return McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    };
+                }
+                Err(e) => return McpResponse::Error { message: e },
+            }
+
+            // Attach
+            let attach_req = godly_protocol::Request::Attach {
+                session_id: new_terminal_id.clone(),
+            };
+            match daemon.send_request(&attach_req) {
+                Ok(godly_protocol::Response::Ok | godly_protocol::Response::Buffer { .. }) => {}
+                Ok(godly_protocol::Response::Error { message }) => {
+                    return McpResponse::Error {
+                        message: format!("Failed to attach: {}", message),
+                    };
+                }
+                _ => {}
+            }
+
+            // Run command if specified
+            if let Some(ref cmd) = command {
+                let write_req = godly_protocol::Request::Write {
+                    session_id: new_terminal_id.clone(),
+                    data: format!("{}\r", cmd).into_bytes(),
+                };
+                let _ = daemon.send_request(&write_req);
+            }
+
+            // Store metadata
+            let app_shell = from_protocol_shell_type(&shell);
+            app_state.add_session_metadata(
+                new_terminal_id.clone(),
+                crate::state::SessionMetadata {
+                    shell_type: app_shell,
+                    cwd: working_dir,
+                    worktree_path: None,
+                    worktree_branch: None,
+                },
+            );
+
+            app_state.add_terminal(crate::state::Terminal {
+                id: new_terminal_id.clone(),
+                workspace_id: workspace_id.clone(),
+                name: String::from("Terminal"),
+                process_name,
+            });
+
+            // Notify frontend about the new terminal
+            #[derive(serde::Serialize, Clone)]
+            struct McpTerminalCreatedPayload {
+                terminal_id: String,
+                workspace_id: String,
+            }
+            let _ = app_handle.emit(
+                "mcp-terminal-created",
+                McpTerminalCreatedPayload {
+                    terminal_id: new_terminal_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                },
+            );
+
+            // 4. Split the calling terminal pane
+            let clamped_ratio = ratio.clamp(0.15, 0.85);
+            let dir = if direction == "vertical" {
+                godly_protocol::SplitDirection::Vertical
+            } else {
+                godly_protocol::SplitDirection::Horizontal
+            };
+
+            if let Err(msg) = app_state.split_terminal_in_tree(
+                &workspace_id,
+                &calling_terminal_id,
+                &new_terminal_id,
+                dir,
+                clamped_ratio,
+            ) {
+                return McpResponse::Error { message: msg };
+            }
+
+            auto_save.mark_dirty();
+
+            #[derive(serde::Serialize, Clone)]
+            struct SplitTerminalPayload {
+                workspace_id: String,
+                target_terminal_id: String,
+                new_terminal_id: String,
+                direction: String,
+                ratio: f64,
+            }
+            let _ = app_handle.emit(
+                "mcp-split-terminal",
+                SplitTerminalPayload {
+                    workspace_id: workspace_id.clone(),
+                    target_terminal_id: calling_terminal_id.clone(),
+                    new_terminal_id: new_terminal_id.clone(),
+                    direction: direction.clone(),
+                    ratio: clamped_ratio,
+                },
+            );
+
+            McpResponse::SplitCreated {
+                original_terminal_id: calling_terminal_id,
+                new_terminal_id,
+                workspace_id,
+                direction: direction.clone(),
+                ratio: clamped_ratio,
+            }
+        }
+
         McpRequest::UnsplitTerminal {
             workspace_id,
             terminal_id,
