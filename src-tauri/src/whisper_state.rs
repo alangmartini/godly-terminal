@@ -123,6 +123,10 @@ impl WhisperState {
             .map(|d| d.join("whisper-models"))
     }
 
+    pub fn set_gpu_available(&self, available: bool) {
+        self.status.write().gpu_available = available;
+    }
+
     pub fn get_sidecar_pid(&self) -> Option<u32> {
         *self.sidecar_pid.read()
     }
