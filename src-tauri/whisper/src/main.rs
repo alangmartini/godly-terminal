@@ -5,7 +5,7 @@ mod transcribe;
 use audio::AudioRecorder;
 use transcribe::Transcriber;
 
-const BUILD: u32 = 2;
+const BUILD: u32 = 3;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -69,8 +69,8 @@ fn main() {
         unsafe {
             winapi::um::wincon::FreeConsole();
         }
-        // Redirect stdio to NUL to avoid broken pipe errors
-        redirect_stdio_to_nul();
+        // Redirect stderr to a log file (stdout to NUL)
+        redirect_stdio_to_log();
     }
 
     let mut recorder = AudioRecorder::new();
@@ -101,21 +101,66 @@ fn main() {
     }
 }
 
-/// Redirect stdout/stderr to NUL on Windows (for detached mode).
+/// Redirect stderr to a log file and stdout to NUL on Windows (detached mode).
+/// Log file: `godly-whisper-debug.log` in %APPDATA%/com.godly.terminal[suffix]/
+/// Rotates to `.prev.log` when the file exceeds 2MB.
 #[cfg(windows)]
-fn redirect_stdio_to_nul() {
-    use std::fs::OpenOptions;
+fn redirect_stdio_to_log() {
+    use std::fs::{self, OpenOptions};
     use std::os::windows::io::AsRawHandle;
 
-    if let Ok(nul) = OpenOptions::new().write(true).open("NUL") {
-        let nul_handle = nul.as_raw_handle();
-        unsafe {
-            use winapi::um::processenv::SetStdHandle;
-            use winapi::um::winbase::{STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
-            SetStdHandle(STD_OUTPUT_HANDLE, nul_handle as _);
-            SetStdHandle(STD_ERROR_HANDLE, nul_handle as _);
+    let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    let dir_name = format!(
+        "com.godly.terminal{}",
+        godly_protocol::instance_suffix()
+    );
+    let dir = std::path::PathBuf::from(app_data).join(dir_name);
+    fs::create_dir_all(&dir).ok();
+
+    let log_path = dir.join("godly-whisper-debug.log");
+    let prev_path = dir.join("godly-whisper-debug.prev.log");
+
+    // Rotate if the log file is too large (2MB)
+    if let Ok(meta) = fs::metadata(&log_path) {
+        if meta.len() > 2 * 1024 * 1024 {
+            let _ = fs::copy(&log_path, &prev_path);
+            let _ = fs::remove_file(&log_path);
         }
-        // Keep the NUL file open for the lifetime of the process
-        std::mem::forget(nul);
+    }
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path);
+
+    match log_file {
+        Ok(file) => {
+            let log_handle = file.as_raw_handle();
+            // Redirect stdout to NUL, stderr to log file
+            if let Ok(nul) = OpenOptions::new().write(true).open("NUL") {
+                let nul_handle = nul.as_raw_handle();
+                unsafe {
+                    use winapi::um::processenv::SetStdHandle;
+                    use winapi::um::winbase::{STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+                    SetStdHandle(STD_OUTPUT_HANDLE, nul_handle as _);
+                    SetStdHandle(STD_ERROR_HANDLE, log_handle as _);
+                }
+                std::mem::forget(nul);
+            }
+            std::mem::forget(file);
+        }
+        Err(_) => {
+            // Fallback: redirect everything to NUL
+            if let Ok(nul) = OpenOptions::new().write(true).open("NUL") {
+                let nul_handle = nul.as_raw_handle();
+                unsafe {
+                    use winapi::um::processenv::SetStdHandle;
+                    use winapi::um::winbase::{STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+                    SetStdHandle(STD_OUTPUT_HANDLE, nul_handle as _);
+                    SetStdHandle(STD_ERROR_HANDLE, nul_handle as _);
+                }
+                std::mem::forget(nul);
+            }
+        }
     }
 }
