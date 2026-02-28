@@ -33,6 +33,7 @@ pub mod renderer;
 pub mod theme;
 
 pub use color::{parse_hex_color, resolve_cell_colors};
+pub use device::{enumerate_gpu_adapters, GpuAdapterInfo};
 pub use renderer::GpuRenderer;
 pub use theme::TerminalTheme;
 
