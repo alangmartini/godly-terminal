@@ -152,4 +152,11 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No model loaded"));
     }
+
+    #[test]
+    fn cuda_available_matches_feature() {
+        let compiled = Transcriber::cuda_available();
+        // When running without --features cuda, this should be false
+        assert_eq!(compiled, cfg!(feature = "cuda"));
+    }
 }
