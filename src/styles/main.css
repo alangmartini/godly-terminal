@@ -559,6 +559,38 @@ body.dragging-active * {
   background: var(--bg-active);
 }
 
+.dialog-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Quick Claude step indicators */
+.qc-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.qc-step {
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.qc-step-active {
+  opacity: 1;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.qc-step-arrow {
+  opacity: 0.3;
+  font-size: 10px;
+}
+
 /* Skill autocomplete dropdown */
 .skill-dropdown {
   position: absolute;
