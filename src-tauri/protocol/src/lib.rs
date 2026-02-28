@@ -18,7 +18,7 @@ pub use messages::{DaemonMessage, Event, Request, Response};
 pub use messages::{ShimRequest, ShimResponse};
 pub use types::{GridData, SessionInfo, ShellType};
 pub use types::ShimMetadata;
-pub use whisper::{WhisperRequest, WhisperResponse};
+pub use whisper::{AudioDeviceInfo, WhisperRequest, WhisperResponse};
 
 /// Default named pipe path used by both daemon and client
 pub const PIPE_NAME: &str = r"\\.\pipe\godly-terminal-daemon";
