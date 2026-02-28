@@ -602,6 +602,7 @@ pub fn run() {
             commands::get_layout_tree,
             commands::swap_panes,
             commands::set_layout_tree,
+            commands::prune_stale_terminal_ids,
             commands::get_wsl_distributions,
             commands::is_wsl_available,
             commands::is_pwsh_available,
