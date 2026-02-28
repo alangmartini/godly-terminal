@@ -162,9 +162,8 @@ impl AppState {
         self.split_views.read().clone()
     }
 
-    /// Store a layout tree. If `validate` is true, prune any leaf IDs not present
-    /// in `self.terminals`. Pass `false` during load_layout restoration (terminals
-    /// haven't been created yet).
+    /// Store a layout tree, pruning any leaf IDs not present in `self.terminals`.
+    /// Discards the tree entirely if fewer than 2 leaves survive pruning.
     pub fn set_layout_tree_validated(&self, workspace_id: &str, tree: LayoutNode) {
         let terminals = self.terminals.read();
         let live_ids: HashSet<String> = terminals.keys().cloned().collect();
@@ -219,6 +218,17 @@ impl AppState {
         let mut trees = self.layout_trees.write();
         let ratio = ratio.clamp(0.15, 0.85);
 
+        let make_fresh_tree = || LayoutNode::Split {
+            direction,
+            ratio,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: target_terminal_id.to_string(),
+            }),
+            second: Box::new(LayoutNode::Leaf {
+                terminal_id: new_terminal_id.to_string(),
+            }),
+        };
+
         if let Some(tree) = trees.get_mut(workspace_id) {
             // Insert into existing tree: find the target leaf and replace it with a split
             if !Self::insert_split(tree, target_terminal_id, new_terminal_id, direction, ratio) {
@@ -227,30 +237,11 @@ impl AppState {
                     "[app_state] split_terminal_in_tree: terminal {} not found in stale tree for workspace {}, replacing tree",
                     target_terminal_id, workspace_id
                 );
-                *tree = LayoutNode::Split {
-                    direction,
-                    ratio,
-                    first: Box::new(LayoutNode::Leaf {
-                        terminal_id: target_terminal_id.to_string(),
-                    }),
-                    second: Box::new(LayoutNode::Leaf {
-                        terminal_id: new_terminal_id.to_string(),
-                    }),
-                };
+                *tree = make_fresh_tree();
             }
         } else {
             // No tree exists -- create a 2-leaf tree
-            let tree = LayoutNode::Split {
-                direction,
-                ratio,
-                first: Box::new(LayoutNode::Leaf {
-                    terminal_id: target_terminal_id.to_string(),
-                }),
-                second: Box::new(LayoutNode::Leaf {
-                    terminal_id: new_terminal_id.to_string(),
-                }),
-            };
-            trees.insert(workspace_id.to_string(), tree);
+            trees.insert(workspace_id.to_string(), make_fresh_tree());
         }
 
         Ok(())
@@ -318,19 +309,18 @@ impl AppState {
 
     /// Set/clear zoomed pane for a workspace. Validates terminal exists when setting.
     pub fn set_zoomed_pane(&self, workspace_id: &str, terminal_id: Option<String>) {
+        if let Some(ref tid) = terminal_id {
+            if !self.terminals.read().contains_key(tid) {
+                eprintln!(
+                    "[app_state] set_zoomed_pane: terminal {} doesn't exist, ignoring",
+                    tid
+                );
+                return;
+            }
+        }
         let mut zoomed = self.zoomed_panes.write();
         match terminal_id {
-            Some(tid) => {
-                let terminals = self.terminals.read();
-                if terminals.contains_key(&tid) {
-                    zoomed.insert(workspace_id.to_string(), tid);
-                } else {
-                    eprintln!(
-                        "[app_state] set_zoomed_pane: terminal {} doesn't exist, ignoring",
-                        tid
-                    );
-                }
-            }
+            Some(tid) => { zoomed.insert(workspace_id.to_string(), tid); }
             None => { zoomed.remove(workspace_id); }
         }
     }

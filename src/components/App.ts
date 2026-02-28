@@ -880,7 +880,7 @@ export class App {
 
         // Restore split views (create layout trees from persisted flat splits)
         if (layout.split_views) {
-          const knownTerminalIds = new Set(store.getState().terminals.map((t) => t.id));
+          const knownTerminalIds = new Set(liveTerminalIds);
           for (const [wsId, sv] of Object.entries(layout.split_views)) {
             if (knownTerminalIds.has(sv.left_terminal_id) && knownTerminalIds.has(sv.right_terminal_id)) {
               const dir = sv.direction === 'vertical' ? 'vertical' : 'horizontal';
