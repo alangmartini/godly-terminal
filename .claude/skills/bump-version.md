@@ -35,7 +35,10 @@ Bump the project version across all crates and config files, collect changelog f
 5. Run `cd src-tauri && cargo check --workspace` to confirm all Rust crates compile.
 6. Commit directly to the current branch with message `chore: bump version to X.Y.Z`.
 7. Create an annotated git tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
-8. Do NOT push. Report old version, new version, tag name, and changelog entries collected.
+8. Report old version, new version, tag name, and changelog entries collected.
+9. Ask the user: **"Do you want to build a release installer?"**
+   - If **yes**: push the commit and tag (`git push && git push origin vX.Y.Z`). This triggers the `build-installer` workflow which builds the NSIS/MSI installer and creates a draft GitHub Release.
+   - If **no**: do NOT push. The user will push when ready.
 
 ## Changelog Fragment Format
 
