@@ -9,10 +9,7 @@ env:
 
 jobs:
   build-installer:
-    # To use a larger runner for faster builds, replace with:
-    #   runs-on: windows-latest-xlarge    (16 cores, ~$0.064/min)
-    # Requires GitHub Team/Enterprise plan with larger runners enabled.
-    runs-on: windows-latest
+    runs-on: windows-latest-x64-64core
     timeout-minutes: 30
 
     steps:
