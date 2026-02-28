@@ -7,6 +7,7 @@ description = "GPU-accelerated terminal renderer for Godly Terminal"
 
 [dependencies]
 godly-protocol = { path = "../protocol" }
+serde = { version = "1", features = ["derive"] }
 wgpu = { version = "24", features = [] }
 cosmic-text = "0.12"
 image = { version = "0.25", default-features = false, features = ["png"] }

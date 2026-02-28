@@ -146,7 +146,7 @@ fn main() {
                 .unwrap_or(3);
 
             // Start recording
-            match send(&mut pipe, &WhisperRequest::StartRecording) {
+            match send(&mut pipe, &WhisperRequest::StartRecording { device_name: None }) {
                 Ok(WhisperResponse::RecordingStarted) => println!("Recording for {}s...", seconds),
                 Ok(WhisperResponse::Error { message }) => {
                     eprintln!("Error: {}", message);
