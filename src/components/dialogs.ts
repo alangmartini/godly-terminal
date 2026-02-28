@@ -238,6 +238,7 @@ export interface QuickClaudeOptions {
 
 const QUICK_CLAUDE_WORKSPACE_KEY = 'quick-claude-last-workspace';
 const QUICK_CLAUDE_NO_WORKTREE_KEY = 'quick-claude-no-worktree';
+const QUICK_CLAUDE_AUTO_SUGGEST_KEY = 'quick-claude-auto-suggest';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.ico',
@@ -263,8 +264,35 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
 
     const hint = document.createElement('div');
     hint.style.cssText = 'font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;';
-    hint.textContent = 'Ctrl+Enter to launch \u00b7 Escape to cancel';
+    hint.textContent = 'Ctrl+Enter to launch \u00b7 Shift+V voice \u00b7 Shift+B AI suggest \u00b7 Escape to cancel';
     dialog.appendChild(hint);
+
+    // Step indicators
+    const stepsRow = document.createElement('div');
+    stepsRow.className = 'qc-steps';
+    const step1 = document.createElement('span');
+    step1.className = 'qc-step qc-step-active';
+    step1.textContent = '\u2460 Workspace';
+    const arrow1 = document.createElement('span');
+    arrow1.className = 'qc-step-arrow';
+    arrow1.textContent = '\u2192';
+    const step2 = document.createElement('span');
+    step2.className = 'qc-step';
+    step2.textContent = '\u2461 Prompt';
+    const arrow2 = document.createElement('span');
+    arrow2.className = 'qc-step-arrow';
+    arrow2.textContent = '\u2192';
+    const step3 = document.createElement('span');
+    step3.className = 'qc-step';
+    step3.textContent = '\u2462 Launch';
+    stepsRow.append(step1, arrow1, step2, arrow2, step3);
+    dialog.appendChild(stepsRow);
+
+    function setActiveStep(n: number) {
+      step1.classList.toggle('qc-step-active', n === 1);
+      step2.classList.toggle('qc-step-active', n === 2);
+      step3.classList.toggle('qc-step-active', n === 3);
+    }
 
     const workspaceSelect = document.createElement('select');
     workspaceSelect.className = 'dialog-input';
@@ -278,6 +306,8 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     const savedId = localStorage.getItem(QUICK_CLAUDE_WORKSPACE_KEY);
     const validSaved = savedId && options.workspaces.some(ws => ws.id === savedId);
     workspaceSelect.value = validSaved ? savedId : options.activeWorkspaceId;
+    workspaceSelect.tabIndex = 1;
+    workspaceSelect.addEventListener('focus', () => setActiveStep(1));
     dialog.appendChild(workspaceSelect);
 
     // -- Prompt textarea with skill dropdown wrapper --
@@ -289,6 +319,8 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     promptArea.placeholder = 'Describe your idea... (/ for skills, @ for files)';
     promptArea.rows = 4;
     promptArea.style.cssText = 'resize: vertical; min-height: 80px; font-family: inherit; font-size: 13px;';
+    promptArea.tabIndex = 2;
+    promptArea.addEventListener('focus', () => setActiveStep(2));
     promptWrapper.appendChild(promptArea);
 
     const skillDropdown = document.createElement('div');
@@ -633,12 +665,14 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     branchInput.className = 'dialog-input';
     branchInput.placeholder = 'Branch name (optional, auto-generated if empty)';
     branchInput.style.flex = '1';
+    branchInput.tabIndex = -1;
     branchRow.appendChild(branchInput);
 
     const branchAiBtn = document.createElement('button');
     branchAiBtn.className = 'dialog-btn dialog-btn-secondary';
     branchAiBtn.textContent = 'AI Suggest';
     branchAiBtn.style.cssText = 'font-size: 11px; padding: 4px 10px; white-space: nowrap; display: none;';
+    branchAiBtn.tabIndex = -1;
     branchAiBtn.onclick = async () => {
       const desc = promptArea.value.trim();
       if (!desc) {
@@ -675,6 +709,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     const noWorktreeCheckbox = document.createElement('input');
     noWorktreeCheckbox.type = 'checkbox';
     noWorktreeCheckbox.style.margin = '0';
+    noWorktreeCheckbox.tabIndex = -1;
     const savedNoWorktree = localStorage.getItem(QUICK_CLAUDE_NO_WORKTREE_KEY) === 'true';
     noWorktreeCheckbox.checked = savedNoWorktree;
     worktreeRow.appendChild(noWorktreeCheckbox);
@@ -696,17 +731,49 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
 
     dialog.appendChild(worktreeRow);
 
+    // -- Auto AI suggest checkbox --
+    const autoSuggestRow = document.createElement('label');
+    autoSuggestRow.style.cssText = 'display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none;';
+
+    const autoSuggestCheckbox = document.createElement('input');
+    autoSuggestCheckbox.type = 'checkbox';
+    autoSuggestCheckbox.style.margin = '0';
+    autoSuggestCheckbox.tabIndex = -1;
+    autoSuggestCheckbox.checked = localStorage.getItem(QUICK_CLAUDE_AUTO_SUGGEST_KEY) === 'true';
+    autoSuggestRow.appendChild(autoSuggestCheckbox);
+    autoSuggestRow.append('Auto-suggest branch name when leaving prompt');
+
+    autoSuggestCheckbox.addEventListener('change', () => {
+      localStorage.setItem(QUICK_CLAUDE_AUTO_SUGGEST_KEY, String(autoSuggestCheckbox.checked));
+    });
+
+    promptArea.addEventListener('blur', () => {
+      if (
+        autoSuggestCheckbox.checked &&
+        promptArea.value.trim() &&
+        !branchInput.value &&
+        !noWorktreeCheckbox.checked &&
+        branchAiBtn.style.display !== 'none'
+      ) {
+        branchAiBtn.click();
+      }
+    });
+
+    dialog.appendChild(autoSuggestRow);
+
     const buttons = document.createElement('div');
     buttons.className = 'dialog-buttons';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'dialog-btn dialog-btn-secondary';
     cancelBtn.textContent = 'Cancel';
+    cancelBtn.tabIndex = -1;
     buttons.appendChild(cancelBtn);
 
     // Voice input button for dictation
     const voiceBtn = document.createElement('button');
     voiceBtn.className = 'dialog-btn dialog-btn-secondary quick-claude-voice-btn';
+    voiceBtn.tabIndex = -1;
     voiceBtn.textContent = 'Voice';
     voiceBtn.title = 'Dictate with voice';
     voiceBtn.addEventListener('click', async () => {
@@ -738,6 +805,8 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     const okBtn = document.createElement('button');
     okBtn.className = 'dialog-btn dialog-btn-primary';
     okBtn.textContent = 'Launch';
+    okBtn.tabIndex = 3;
+    okBtn.addEventListener('focus', () => setActiveStep(3));
     buttons.appendChild(okBtn);
 
     dialog.appendChild(buttons);
@@ -773,6 +842,16 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
 
     cancelBtn.onclick = () => { close(); resolve(null); };
     okBtn.onclick = submit;
+
+    workspaceSelect.onkeydown = (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') { close(); resolve(null); }
+    };
+
+    okBtn.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      if (e.key === 'Escape') { close(); resolve(null); }
+    };
 
     promptArea.onkeydown = (e) => {
       if (dropdownVisible) {
@@ -847,7 +926,21 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       if (e.target === overlay) { close(); resolve(null); }
     };
 
+    // Shift+V / Shift+B shortcuts (only when not in a text input)
+    dialog.addEventListener('keydown', (e) => {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+      if (e.shiftKey && e.key === 'V') {
+        e.preventDefault();
+        voiceBtn.click();
+      }
+      if (e.shiftKey && e.key === 'B') {
+        e.preventDefault();
+        branchAiBtn.click();
+      }
+    });
+
     document.body.appendChild(overlay);
-    promptArea.focus();
+    workspaceSelect.focus();
   });
 }
