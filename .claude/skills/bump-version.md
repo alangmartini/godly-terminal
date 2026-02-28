@@ -1,6 +1,6 @@
 # Bump Version
 
-Bump the project version across all crates and config files, then build to verify.
+Bump the project version across all crates and config files, collect changelog fragments, then build to verify.
 
 ## Usage
 
@@ -12,11 +12,41 @@ Bump the project version across all crates and config files, then build to verif
 
 1. Run `npm run version:bump -- <arg>` where `<arg>` is the bump type or explicit version from the user's input.
 2. Verify the output shows all files updated successfully.
-3. Run `npm run build` to confirm the frontend builds with the new version constant.
-4. Run `cd src-tauri && cargo check --workspace` to confirm all Rust crates compile.
-5. Commit directly to the current branch with message `chore: bump version to X.Y.Z`.
-6. Create an annotated git tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
-7. Do NOT push. Report old version, new version, and tag name.
+3. **Collect changelog fragments** into `CHANGELOG.md`:
+   a. Read all `.md` files from `changelog/unreleased/` (skip `.gitkeep` and `TEMPLATE.md`).
+   b. If fragments exist:
+      - Group entries by section (`### Added`, `### Fixed`, `### Changed`, `### Removed`, `### Tests`).
+      - Merge duplicate sections (e.g., two fragments both with `### Fixed` get combined).
+      - Replace the `## [Unreleased]` line and any content below it (up to the next `## [`) with:
+        ```
+        ## [Unreleased]
+
+        ## [X.Y.Z] - YYYY-MM-DD
+
+        ### Added
+        - ...
+
+        ### Fixed
+        - ...
+        ```
+      - Delete the fragment files (keep `.gitkeep`).
+   c. If no fragments exist, warn and add `## [X.Y.Z] - YYYY-MM-DD` with empty content.
+4. Run `npm run build` to confirm the frontend builds with the new version constant.
+5. Run `cd src-tauri && cargo check --workspace` to confirm all Rust crates compile.
+6. Commit directly to the current branch with message `chore: bump version to X.Y.Z`.
+7. Create an annotated git tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
+8. Do NOT push. Report old version, new version, tag name, and changelog entries collected.
+
+## Changelog Fragment Format
+
+Fragments live in `changelog/unreleased/` as individual `.md` files. Each contains one or more Keep a Changelog sections:
+
+```markdown
+### Fixed
+- **Bug title** — description (#PR)
+```
+
+See `changelog/TEMPLATE.md` for the full format reference.
 
 ## Files Updated
 
