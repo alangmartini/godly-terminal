@@ -1331,7 +1331,7 @@ impl DaemonSession {
         let dirty_flags = screen.take_dirty_rows();
         let dirty_count = dirty_flags.iter().filter(|&&d| d).count();
         let total_rows = usize::from(num_rows);
-        let full_repaint = dirty_count * 2 >= total_rows;
+        let full_repaint = dirty_count * 2 >= total_rows || screen.scrollback() > 0;
 
         // Read the screen immutably now that we've taken dirty flags
         let screen = vt.screen();
@@ -1666,7 +1666,7 @@ fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDif
     let dirty_flags = screen.take_dirty_rows();
     let dirty_count = dirty_flags.iter().filter(|&&d| d).count();
     let total_rows = usize::from(num_rows);
-    let full_repaint = dirty_count * 2 >= total_rows;
+    let full_repaint = dirty_count * 2 >= total_rows || screen.scrollback() > 0;
 
     let screen = vt.screen();
     let mut dirty_rows = Vec::with_capacity(if full_repaint { total_rows } else { dirty_count });
