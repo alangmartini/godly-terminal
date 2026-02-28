@@ -804,6 +804,11 @@ export class TerminalPane {
       await this.fetchFullSnapshot(seqBefore, diffSeqBefore);
     } catch (error) {
       console.debug('Grid snapshot fetch failed:', error);
+      // Bug #424: If we have no cached snapshot, the canvas is blank.
+      // Schedule a retry so the user doesn't have to scroll to recover.
+      if (!this.cachedSnapshot && !this.paused) {
+        this.scheduleSnapshotFetch();
+      }
     }
   }
 
@@ -1019,6 +1024,13 @@ export class TerminalPane {
     if (this.renderRAF !== null) {
       cancelAnimationFrame(this.renderRAF);
       this.renderRAF = null;
+    }
+    // Bug #424: Cancel pending scroll flush to prevent it from firing
+    // against the released 1x1 canvas (painting to a no-op surface and
+    // potentially setting cachedSnapshot from a stale scroll position).
+    if (this.scrollRafId !== null) {
+      cancelAnimationFrame(this.scrollRafId);
+      this.scrollRafId = null;
     }
     // Release canvas memory for this hidden terminal.
     // Each canvas at 1920x1080 @ 2x DPR holds ~33MB in backing store.
