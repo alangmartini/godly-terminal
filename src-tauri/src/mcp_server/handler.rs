@@ -1342,7 +1342,7 @@ pub fn handle_mcp_request(
             } else {
                 godly_protocol::SplitDirection::Horizontal
             };
-            app_state.set_layout_tree(
+            app_state.set_layout_tree_validated(
                 workspace_id,
                 godly_protocol::LayoutNode::Split {
                     direction: dir,

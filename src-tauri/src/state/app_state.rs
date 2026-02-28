@@ -1,6 +1,6 @@
 use godly_protocol::{LayoutNode, SplitDirection};
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[allow(deprecated)]
 use super::models::{SessionMetadata, SplitView, Terminal, Workspace};
@@ -137,6 +137,18 @@ impl AppState {
     }
 
     pub fn set_split_view(&self, workspace_id: &str, split_view: SplitView) {
+        // Validate both terminal IDs exist
+        let terminals = self.terminals.read();
+        if !terminals.contains_key(&split_view.left_terminal_id)
+            || !terminals.contains_key(&split_view.right_terminal_id)
+        {
+            eprintln!(
+                "[app_state] set_split_view: skipping — one or both terminal IDs don't exist (left={}, right={})",
+                split_view.left_terminal_id, split_view.right_terminal_id
+            );
+            return;
+        }
+        drop(terminals);
         let mut views = self.split_views.write();
         views.insert(workspace_id.to_string(), split_view);
     }
@@ -148,6 +160,29 @@ impl AppState {
 
     pub fn get_all_split_views(&self) -> HashMap<String, SplitView> {
         self.split_views.read().clone()
+    }
+
+    /// Store a layout tree, pruning any leaf IDs not present in `self.terminals`.
+    /// Discards the tree entirely if fewer than 2 leaves survive pruning.
+    pub fn set_layout_tree_validated(&self, workspace_id: &str, tree: LayoutNode) {
+        let terminals = self.terminals.read();
+        let live_ids: HashSet<String> = terminals.keys().cloned().collect();
+        drop(terminals);
+
+        match tree.prune_stale_terminal_ids(&live_ids) {
+            Some(pruned) if pruned.count_leaves() >= 2 => {
+                let mut trees = self.layout_trees.write();
+                trees.insert(workspace_id.to_string(), pruned);
+            }
+            _ => {
+                eprintln!(
+                    "[app_state] set_layout_tree_validated: tree for workspace {} pruned to <2 leaves, discarding",
+                    workspace_id
+                );
+                let mut trees = self.layout_trees.write();
+                trees.remove(workspace_id);
+            }
+        }
     }
 
     pub fn set_layout_tree(&self, workspace_id: &str, tree: LayoutNode) {
@@ -183,27 +218,30 @@ impl AppState {
         let mut trees = self.layout_trees.write();
         let ratio = ratio.clamp(0.15, 0.85);
 
+        let make_fresh_tree = || LayoutNode::Split {
+            direction,
+            ratio,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: target_terminal_id.to_string(),
+            }),
+            second: Box::new(LayoutNode::Leaf {
+                terminal_id: new_terminal_id.to_string(),
+            }),
+        };
+
         if let Some(tree) = trees.get_mut(workspace_id) {
             // Insert into existing tree: find the target leaf and replace it with a split
             if !Self::insert_split(tree, target_terminal_id, new_terminal_id, direction, ratio) {
-                return Err(format!(
-                    "Terminal {} not found in layout tree for workspace {}",
+                // Target not in tree (stale tree from previous session) — replace with fresh 2-leaf tree
+                eprintln!(
+                    "[app_state] split_terminal_in_tree: terminal {} not found in stale tree for workspace {}, replacing tree",
                     target_terminal_id, workspace_id
-                ));
+                );
+                *tree = make_fresh_tree();
             }
         } else {
             // No tree exists -- create a 2-leaf tree
-            let tree = LayoutNode::Split {
-                direction,
-                ratio,
-                first: Box::new(LayoutNode::Leaf {
-                    terminal_id: target_terminal_id.to_string(),
-                }),
-                second: Box::new(LayoutNode::Leaf {
-                    terminal_id: new_terminal_id.to_string(),
-                }),
-            };
-            trees.insert(workspace_id.to_string(), tree);
+            trees.insert(workspace_id.to_string(), make_fresh_tree());
         }
 
         Ok(())
@@ -269,8 +307,17 @@ impl AppState {
         Ok(())
     }
 
-    /// Set/clear zoomed pane for a workspace.
+    /// Set/clear zoomed pane for a workspace. Validates terminal exists when setting.
     pub fn set_zoomed_pane(&self, workspace_id: &str, terminal_id: Option<String>) {
+        if let Some(ref tid) = terminal_id {
+            if !self.terminals.read().contains_key(tid) {
+                eprintln!(
+                    "[app_state] set_zoomed_pane: terminal {} doesn't exist, ignoring",
+                    tid
+                );
+                return;
+            }
+        }
         let mut zoomed = self.zoomed_panes.write();
         match terminal_id {
             Some(tid) => { zoomed.insert(workspace_id.to_string(), tid); }
@@ -399,6 +446,59 @@ impl AppState {
     pub fn set_notification_enabled_workspace(&self, workspace_id: &str, enabled: bool) {
         let mut overrides = self.notification_overrides_workspace.write();
         overrides.insert(workspace_id.to_string(), enabled);
+    }
+
+    /// Prune all state structures that reference terminal IDs not in `live_ids`.
+    /// Call after load_layout once terminal restoration is complete.
+    pub fn prune_stale_ids(&self, live_ids: &HashSet<String>) {
+        // Prune layout trees
+        let mut trees = self.layout_trees.write();
+        let ws_ids: Vec<String> = trees.keys().cloned().collect();
+        for ws_id in ws_ids {
+            if let Some(tree) = trees.get(&ws_id) {
+                match tree.prune_stale_terminal_ids(live_ids) {
+                    Some(pruned) => {
+                        // If pruned to a single leaf, remove the tree (no split needed)
+                        if pruned.count_leaves() <= 1 {
+                            trees.remove(&ws_id);
+                        } else {
+                            trees.insert(ws_id, pruned);
+                        }
+                    }
+                    None => {
+                        trees.remove(&ws_id);
+                    }
+                }
+            }
+        }
+        drop(trees);
+
+        // Prune legacy split views
+        let mut views = self.split_views.write();
+        views.retain(|_, sv| {
+            live_ids.contains(&sv.left_terminal_id) && live_ids.contains(&sv.right_terminal_id)
+        });
+        drop(views);
+
+        // Prune zoomed panes
+        let mut zoomed = self.zoomed_panes.write();
+        zoomed.retain(|_, tid| live_ids.contains(tid));
+        drop(zoomed);
+
+        // Prune active terminal ID
+        let mut active = self.active_terminal_id.write();
+        if let Some(ref tid) = *active {
+            if !live_ids.contains(tid) {
+                *active = None;
+            }
+        }
+        drop(active);
+
+        // Prune workspace tab_orders
+        let mut workspaces = self.workspaces.write();
+        for ws in workspaces.values_mut() {
+            ws.tab_order.retain(|tid| live_ids.contains(tid));
+        }
     }
 
     pub fn set_active_terminal_id(&self, id: Option<String>) {
@@ -572,5 +672,192 @@ mod tests {
         let m = meta.get("term-1").unwrap();
         assert_eq!(m.shell_type, ShellType::Windows);
         assert_eq!(m.cwd, Some("C:\\Users\\test".to_string()));
+    }
+
+    // ---------------------------------------------------------------
+    // prune_stale_ids
+    // ---------------------------------------------------------------
+
+    fn make_state_with_terminals(ids: &[&str]) -> AppState {
+        let state = AppState::new();
+        for id in ids {
+            state.add_terminal(Terminal {
+                id: id.to_string(),
+                workspace_id: "ws-1".to_string(),
+                name: "Terminal".to_string(),
+                process_name: "powershell".to_string(),
+            });
+        }
+        state
+    }
+
+    #[test]
+    fn prune_removes_dead_layout_tree() {
+        let state = make_state_with_terminals(&["t1"]);
+        // Layout tree references t1 and t2, but only t1 is live
+        state.set_layout_tree(
+            "ws-1",
+            LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t1".to_string(),
+                }),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t2".to_string(),
+                }),
+            },
+        );
+
+        let live: HashSet<String> = ["t1"].iter().map(|s| s.to_string()).collect();
+        state.prune_stale_ids(&live);
+
+        // Tree had 2 leaves, now only 1 is live → tree should be removed (single leaf = no split)
+        assert!(state.get_layout_tree("ws-1").is_none());
+    }
+
+    #[test]
+    fn prune_keeps_valid_layout_tree() {
+        let state = make_state_with_terminals(&["t1", "t2"]);
+        state.set_layout_tree(
+            "ws-1",
+            LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t1".to_string(),
+                }),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t2".to_string(),
+                }),
+            },
+        );
+
+        let live: HashSet<String> = ["t1", "t2"].iter().map(|s| s.to_string()).collect();
+        state.prune_stale_ids(&live);
+
+        let tree = state.get_layout_tree("ws-1");
+        assert!(tree.is_some());
+        assert_eq!(tree.unwrap().count_leaves(), 2);
+    }
+
+    #[test]
+    fn prune_removes_dead_zoomed_pane() {
+        let state = make_state_with_terminals(&["t1"]);
+        state.zoomed_panes
+            .write()
+            .insert("ws-1".to_string(), "t2".to_string());
+
+        let live: HashSet<String> = ["t1"].iter().map(|s| s.to_string()).collect();
+        state.prune_stale_ids(&live);
+
+        assert!(state.get_zoomed_pane("ws-1").is_none());
+    }
+
+    #[test]
+    fn prune_clears_dead_active_terminal() {
+        let state = make_state_with_terminals(&["t1"]);
+        state.set_active_terminal_id(Some("t_dead".to_string()));
+
+        let live: HashSet<String> = ["t1"].iter().map(|s| s.to_string()).collect();
+        state.prune_stale_ids(&live);
+
+        assert_eq!(state.get_active_terminal_id(), None);
+    }
+
+    #[test]
+    fn prune_filters_tab_order() {
+        let state = AppState::new();
+        state.add_workspace(Workspace {
+            id: "ws-1".to_string(),
+            name: "Test".to_string(),
+            folder_path: "C:\\".to_string(),
+            tab_order: vec!["t1".to_string(), "t_dead".to_string(), "t2".to_string()],
+            shell_type: ShellType::Windows,
+            worktree_mode: false,
+            claude_code_mode: false,
+        });
+        state.add_terminal(Terminal {
+            id: "t1".to_string(),
+            workspace_id: "ws-1".to_string(),
+            name: "T".to_string(),
+            process_name: "p".to_string(),
+        });
+        state.add_terminal(Terminal {
+            id: "t2".to_string(),
+            workspace_id: "ws-1".to_string(),
+            name: "T".to_string(),
+            process_name: "p".to_string(),
+        });
+
+        let live: HashSet<String> = ["t1", "t2"].iter().map(|s| s.to_string()).collect();
+        state.prune_stale_ids(&live);
+
+        let ws = state.get_workspace("ws-1").unwrap();
+        assert_eq!(ws.tab_order, vec!["t1", "t2"]);
+    }
+
+    // ---------------------------------------------------------------
+    // split_terminal_in_tree — stale tree fallback (Issue #444)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn split_in_stale_tree_replaces_with_fresh_tree() {
+        let state = make_state_with_terminals(&["t_new", "t_target"]);
+        // Stale tree with old IDs that don't include t_target
+        state.set_layout_tree(
+            "ws-1",
+            LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: "old_t1".to_string(),
+                }),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: "old_t2".to_string(),
+                }),
+            },
+        );
+
+        // Bug: this used to return Err because t_target isn't in the stale tree
+        let result = state.split_terminal_in_tree(
+            "ws-1",
+            "t_target",
+            "t_new",
+            SplitDirection::Horizontal,
+            0.5,
+        );
+        assert!(result.is_ok());
+
+        // Should have replaced the stale tree with a fresh 2-leaf tree
+        let tree = state.get_layout_tree("ws-1").unwrap();
+        assert_eq!(tree.count_leaves(), 2);
+        assert!(tree.find_terminal("t_target"));
+        assert!(tree.find_terminal("t_new"));
+    }
+
+    #[test]
+    fn split_in_valid_tree_still_works() {
+        let state = make_state_with_terminals(&["t1", "t2"]);
+        state.set_layout_tree(
+            "ws-1",
+            LayoutNode::Leaf {
+                terminal_id: "t1".to_string(),
+            },
+        );
+
+        let result = state.split_terminal_in_tree(
+            "ws-1",
+            "t1",
+            "t2",
+            SplitDirection::Vertical,
+            0.5,
+        );
+        assert!(result.is_ok());
+
+        let tree = state.get_layout_tree("ws-1").unwrap();
+        assert_eq!(tree.count_leaves(), 2);
+        assert!(tree.find_terminal("t1"));
+        assert!(tree.find_terminal("t2"));
     }
 }
