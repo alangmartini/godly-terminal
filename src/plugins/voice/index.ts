@@ -481,13 +481,14 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     // Save config on GPU/language/model/mic changes
     const saveConfig = async () => {
       try {
+        const currentConfig = await whisperGetConfig().catch(() => null);
         await whisperSetConfig({
           modelName: modelSelect.value,
           language: langSelect.value,
           useGpu: gpuCheckbox.checked,
           gpuDevice: parseInt(gpuDeviceSelect.value) || 0,
           microphoneDeviceId: micSelect.value || null,
-          customVocabulary: vocabInput.value.trim(),
+          customVocabulary: currentConfig?.customVocabulary ?? '',
         });
       } catch {
         // Config save failed silently
@@ -577,7 +578,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     container.appendChild(testSection);
 
     // Load current state from sidecar
-    this.refreshSettingsState(container, statusValue, modelSelect, gpuCheckbox, gpuDeviceSelect, langSelect, micSelect, vocabInput, availableRow);
+    this.refreshSettingsState(statusValue, modelSelect, gpuCheckbox, gpuDeviceSelect, langSelect, micSelect, vocabInput, availableRow);
 
     return container;
   }
@@ -615,6 +616,10 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     progressLabel: HTMLElement,
     statusValue: HTMLElement,
   ): Promise<void> {
+    if (this.progressUnlisten) {
+      this.progressUnlisten();
+      this.progressUnlisten = null;
+    }
     try {
       this.progressUnlisten = await listen<DownloadProgress>('whisper-download-progress', (event) => {
         const { model, downloaded, total, phase } = event.payload;
@@ -643,7 +648,6 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   }
 
   private async refreshSettingsState(
-    _container: HTMLElement,
     statusValue: HTMLElement,
     modelSelect: HTMLSelectElement,
     gpuCheckbox: HTMLInputElement,
