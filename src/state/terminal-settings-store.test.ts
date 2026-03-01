@@ -117,4 +117,48 @@ describe('TerminalSettingsStore', () => {
     store.setAutoScrollOnOutput(true);
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  it('defaults splitTabMode to individual', async () => {
+    const store = await createStore();
+    expect(store.getSplitTabMode()).toBe('individual');
+  });
+
+  it('persists splitTabMode to localStorage', async () => {
+    const store = await createStore();
+    store.setSplitTabMode('unified');
+
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'godly-terminal-settings',
+      expect.stringContaining('"splitTabMode":"unified"'),
+    );
+  });
+
+  it('loads persisted splitTabMode from localStorage', async () => {
+    localStorageMock.setItem(
+      'godly-terminal-settings',
+      JSON.stringify({ defaultShell: { type: 'windows' }, splitTabMode: 'unified' }),
+    );
+
+    const store = await createStore();
+    expect(store.getSplitTabMode()).toBe('unified');
+  });
+
+  it('ignores invalid splitTabMode values', async () => {
+    localStorageMock.setItem(
+      'godly-terminal-settings',
+      JSON.stringify({ defaultShell: { type: 'windows' }, splitTabMode: 'bogus' }),
+    );
+
+    const store = await createStore();
+    expect(store.getSplitTabMode()).toBe('individual');
+  });
+
+  it('does not notify when splitTabMode is set to same value', async () => {
+    const store = await createStore();
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.setSplitTabMode('individual'); // same as default
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
