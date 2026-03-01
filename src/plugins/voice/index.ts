@@ -14,6 +14,7 @@ import {
   listGpuDevices,
   whisperListAudioDevices,
   whisperPlaybackRecording,
+  whisperSetVocabulary,
   type WhisperStatus,
 } from './whisper-service';
 import { WHISPER_MODEL_PRESETS } from './model-presets';
@@ -393,6 +394,52 @@ export class VoiceToTextPlugin implements GodlyPlugin {
 
     container.appendChild(langSection);
 
+    // ── Section: Custom Vocabulary ──
+    const vocabSection = document.createElement('div');
+    vocabSection.className = 'settings-section';
+    const vocabTitle = document.createElement('div');
+    vocabTitle.className = 'settings-section-title';
+    vocabTitle.textContent = 'Custom Vocabulary';
+    vocabSection.appendChild(vocabTitle);
+
+    const vocabHint = document.createElement('div');
+    vocabHint.style.cssText = 'padding: 0 12px 6px; font-size: 10px; color: var(--text-secondary);';
+    vocabHint.textContent = 'Add comma-separated terms to improve recognition of project-specific words. Built-in terms (Quick Claude, Shift+V, etc.) are always included.';
+    vocabSection.appendChild(vocabHint);
+
+    const vocabRow = document.createElement('div');
+    vocabRow.style.cssText = 'padding: 0 12px;';
+    const vocabInput = document.createElement('textarea');
+    vocabInput.className = 'dialog-input voice-vocab-input';
+    vocabInput.style.cssText = 'width: 100%; min-height: 60px; font-size: 12px; padding: 6px 8px; resize: vertical; font-family: monospace; box-sizing: border-box;';
+    vocabInput.placeholder = 'e.g. MyProject, APIGateway, kubectl, Terraform';
+    vocabRow.appendChild(vocabInput);
+    vocabSection.appendChild(vocabRow);
+
+    const vocabBtnRow = document.createElement('div');
+    vocabBtnRow.style.cssText = 'padding: 4px 12px;';
+    const vocabSaveBtn = document.createElement('button');
+    vocabSaveBtn.className = 'dialog-btn dialog-btn-secondary';
+    vocabSaveBtn.textContent = 'Save Vocabulary';
+    vocabSaveBtn.style.fontSize = '11px';
+    vocabSaveBtn.onclick = async () => {
+      vocabSaveBtn.disabled = true;
+      vocabSaveBtn.textContent = 'Saving...';
+      try {
+        await whisperSetVocabulary(vocabInput.value.trim());
+        vocabSaveBtn.textContent = 'Saved!';
+        setTimeout(() => { vocabSaveBtn.textContent = 'Save Vocabulary'; vocabSaveBtn.disabled = false; }, 2000);
+      } catch (e) {
+        vocabSaveBtn.textContent = 'Error';
+        console.warn('[VoiceToText] Save vocabulary failed:', e);
+        setTimeout(() => { vocabSaveBtn.textContent = 'Save Vocabulary'; vocabSaveBtn.disabled = false; }, 2000);
+      }
+    };
+    vocabBtnRow.appendChild(vocabSaveBtn);
+    vocabSection.appendChild(vocabBtnRow);
+
+    container.appendChild(vocabSection);
+
     // ── Section C2: Audio (Microphone) ──
     const audioSection = document.createElement('div');
     audioSection.className = 'settings-section';
@@ -440,6 +487,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
           useGpu: gpuCheckbox.checked,
           gpuDevice: parseInt(gpuDeviceSelect.value) || 0,
           microphoneDeviceId: micSelect.value || null,
+          customVocabulary: vocabInput.value.trim(),
         });
       } catch {
         // Config save failed silently
@@ -529,7 +577,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     container.appendChild(testSection);
 
     // Load current state from sidecar
-    this.refreshSettingsState(container, statusValue, modelSelect, gpuCheckbox, gpuDeviceSelect, langSelect, micSelect, availableRow);
+    this.refreshSettingsState(container, statusValue, modelSelect, gpuCheckbox, gpuDeviceSelect, langSelect, micSelect, vocabInput, availableRow);
 
     return container;
   }
@@ -602,6 +650,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
     gpuDeviceSelect: HTMLSelectElement,
     langSelect: HTMLSelectElement,
     micSelect: HTMLSelectElement,
+    vocabInput: HTMLTextAreaElement,
     availableRow: HTMLElement,
   ): Promise<void> {
     try {
@@ -620,6 +669,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
       gpuDeviceSelect.value = String(config.gpuDevice);
       langSelect.value = config.language;
       if (config.microphoneDeviceId) micSelect.value = config.microphoneDeviceId;
+      if (config.customVocabulary) vocabInput.value = config.customVocabulary;
 
       // Show available models
       if (models.length > 0) {

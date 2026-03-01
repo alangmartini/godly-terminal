@@ -3,3 +3,4 @@
 
 ### Added
 - **Voice vocabulary hints** — Added initial_prompt with domain-specific terms (Godly Terminal, Quick Claude, Claude Code, keyboard shortcuts, etc.) to bias Whisper toward correct transcription of technical vocabulary.
+- **Custom vocabulary editor** — New textarea in Voice plugin settings to add project-specific terms (comma-separated) that improve recognition without reloading the model. (refs #363)
