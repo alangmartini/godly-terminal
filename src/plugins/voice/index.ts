@@ -1,6 +1,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { GodlyPlugin, PluginContext } from '../types';
 import {
+  whisperIsAvailable,
   whisperGetStatus,
   whisperGetConfig,
   whisperSetConfig,
@@ -35,15 +36,32 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   version = '1.0.0';
 
   private status: WhisperStatus | null = null;
+  private binaryAvailable = false;
   private progressUnlisten: UnlistenFn | null = null;
   private statusElement: HTMLElement | null = null;
 
   async init(_ctx: PluginContext): Promise<void> {
     try {
+      this.binaryAvailable = await whisperIsAvailable();
+    } catch {
+      this.binaryAvailable = false;
+    }
+
+    if (!this.binaryAvailable) {
+      this.status = null;
+      return;
+    }
+
+    try {
       this.status = await whisperGetStatus();
     } catch {
       this.status = null;
     }
+  }
+
+  /** Whether the whisper binary is installed on this system. */
+  isAvailable(): boolean {
+    return this.binaryAvailable;
   }
 
   async enable(): Promise<void> {
@@ -156,6 +174,30 @@ export class VoiceToTextPlugin implements GodlyPlugin {
   renderSettings(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'voice-plugin-settings';
+
+    // If binary is not installed, show install prompt instead of full settings
+    if (!this.binaryAvailable) {
+      const noticeRow = document.createElement('div');
+      noticeRow.style.cssText = 'padding: 12px; text-align: center;';
+
+      const msg = document.createElement('p');
+      msg.style.cssText = 'margin: 0 0 12px; color: var(--text-secondary); font-size: 12px;';
+      msg.textContent = 'Godly Whisper is not installed. Download the standalone installer to enable voice-to-text.';
+      noticeRow.appendChild(msg);
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'dialog-btn dialog-btn-primary';
+      dlBtn.textContent = 'Download Godly Whisper';
+      dlBtn.style.fontSize = '12px';
+      dlBtn.onclick = async () => {
+        const { open } = await import('@tauri-apps/plugin-opener');
+        await open('https://github.com/alangmartini/godly-terminal/releases?q=whisper');
+      };
+      noticeRow.appendChild(dlBtn);
+
+      container.appendChild(noticeRow);
+      return container;
+    }
 
     // ── Status indicator ──
     const statusRow = this.createRow('Status');

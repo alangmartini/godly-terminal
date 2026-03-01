@@ -6,6 +6,13 @@ use tauri::{Emitter, State};
 
 use crate::whisper_state::{WhisperConfig, WhisperRecordingState, WhisperState, WhisperStatus};
 
+/// Check whether the whisper binary is available on this system.
+/// Returns true if `find_whisper_binary` finds the executable anywhere.
+#[tauri::command]
+pub async fn whisper_is_available(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(crate::sidecar::find_whisper_binary(&app).is_some())
+}
+
 /// Spawn the whisper sidecar binary, connect to its pipe, and verify with a ping.
 /// Shared by `whisper_start_sidecar` and `whisper_restart_sidecar`.
 fn start_sidecar_inner(

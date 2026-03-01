@@ -37,6 +37,16 @@ fn main() {
                     models_dir = args[i].clone();
                 }
             }
+            "--version" | "-V" => {
+                let version = env!("CARGO_PKG_VERSION");
+                println!(
+                    r#"{{"version":"{}","build":{},"cuda":{}}}"#,
+                    version,
+                    BUILD,
+                    cfg!(feature = "cuda"),
+                );
+                std::process::exit(0);
+            }
             "--help" | "-h" => {
                 eprintln!("godly-whisper — Whisper speech-to-text sidecar for Godly Terminal");
                 eprintln!();
@@ -47,6 +57,7 @@ fn main() {
                 eprintln!("    --pipe <NAME>        Named pipe path (default: auto from GODLY_INSTANCE)");
                 eprintln!("    --instance <NAME>    Instance name for pipe isolation");
                 eprintln!("    --models-dir <PATH>  Directory containing whisper model files");
+                eprintln!("    --version            Print version info as JSON and exit");
                 eprintln!("    --help               Show this help");
                 std::process::exit(0);
             }
