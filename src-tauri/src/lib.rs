@@ -201,6 +201,7 @@ pub fn run() {
             senders: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            // --- Terminal lifecycle ---
             commands::create_terminal,
             commands::close_terminal,
             commands::write_to_terminal,
@@ -213,11 +214,13 @@ pub fn run() {
             commands::pause_session,
             commands::resume_session,
             commands::detach_all_sessions,
+            // --- Workspace ---
             commands::create_workspace,
             commands::delete_workspace,
             commands::get_workspaces,
             commands::move_tab_to_workspace,
             commands::reorder_tabs,
+            // --- Split/Layout ---
             commands::set_split_view,
             commands::clear_split_view,
             commands::split_terminal,
@@ -226,17 +229,20 @@ pub fn run() {
             commands::swap_panes,
             commands::set_layout_tree,
             commands::prune_stale_terminal_ids,
+            // --- Shell/WSL ---
             commands::get_wsl_distributions,
             commands::is_wsl_available,
             commands::is_pwsh_available,
             commands::get_cmd_aliases_path,
             commands::ensure_cmd_autorun,
+            // --- Worktree ---
             commands::toggle_worktree_mode,
             commands::toggle_claude_code_mode,
             commands::is_git_repo,
             commands::list_worktrees,
             commands::remove_worktree,
             commands::cleanup_all_worktrees,
+            // --- Files/Plugins ---
             commands::list_skills,
             commands::list_directory,
             commands::read_file,
@@ -259,23 +265,28 @@ pub fn run() {
             commands::uninstall_plugin,
             commands::check_plugin_update,
             commands::fetch_plugin_registry,
+            // --- GPU rendering ---
             commands::gpu_render::gpu_renderer_available,
             commands::gpu_render::render_terminal_gpu,
             commands::gpu_render::get_gpu_cell_size,
+            // --- Grid/Scrollback ---
             commands::get_grid_snapshot,
             commands::get_grid_snapshot_diff,
             commands::get_grid_dimensions,
             commands::get_grid_text,
             commands::set_scrollback,
             commands::scroll_and_get_snapshot,
+            // --- Logging ---
             commands::write_frontend_log,
             commands::get_log_dir,
             commands::read_frontend_log,
+            // --- LLM ---
             commands::llm_has_api_key,
             commands::llm_set_api_key,
             commands::llm_set_model,
             commands::llm_get_model,
             commands::llm_generate_branch_name,
+            // --- Whisper ---
             commands::whisper_get_status,
             commands::whisper_start_recording,
             commands::whisper_stop_recording,
@@ -290,14 +301,18 @@ pub fn run() {
             commands::whisper_list_audio_devices,
             commands::whisper_playback_recording,
             commands::whisper_get_audio_level,
+            // --- Persistence ---
             persistence::save_layout,
             persistence::load_layout,
             persistence::save_scrollback,
             persistence::load_scrollback,
             persistence::delete_scrollback,
+            // --- Clipboard/Remote ---
             commands::save_clipboard_image,
             commands::write_remote_config,
+            // --- Window lifecycle ---
             window_lifecycle::scrollback_save_complete,
+            // --- MCP ---
             mcp_js_result,
         ])
         .setup(move |app| {
