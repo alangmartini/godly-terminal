@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-03-01
+
+### Fixed
+- **Terminal text invisible after typing (root cause)** — The `stream://` custom protocol URLs for real-time terminal updates never worked on Windows (WebView2 requires `http://{scheme}.localhost/` format). Changed `stream://localhost/` to `http://stream.localhost/` so diff and output streams actually connect. Also eliminated the 1s polling delay on successful responses and switched empty responses to 16ms polling for near-instant updates ([#486](https://github.com/alangmartini/godly-terminal/issues/486), [#492](https://github.com/alangmartini/godly-terminal/pull/492))
+- **Recovery fetch livelock under sustained diff traffic** — `fetchFullSnapshot()` unconditionally checked `diffSeqAtStart`, discarding every recovery snapshot when diffs arrived during the IPC roundtrip. The fix skips the staleness check for recovery fetches where `cachedSnapshot` is null ([#486](https://github.com/alangmartini/godly-terminal/issues/486), [#490](https://github.com/alangmartini/godly-terminal/pull/490))
+
 ## [0.11.0] - 2026-03-01
 
 ### Added
