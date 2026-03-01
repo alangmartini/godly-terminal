@@ -7,6 +7,7 @@ license = "BUSL-1.1"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+ts-rs = { version = "10", features = ["serde-compat"] }
 
 [dev-dependencies]
 criterion = "0.5"

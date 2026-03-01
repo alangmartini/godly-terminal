@@ -42,7 +42,8 @@
     "phone": "pwsh scripts/setup-phone.ps1",
     "demo:record": "node scripts/record-demo.mjs",
     "demo:phone-only": "node scripts/record-demo.mjs --phone-only",
-    "demo:dry-run": "node scripts/record-demo.mjs --dry-run"
+    "demo:dry-run": "node scripts/record-demo.mjs --dry-run",
+    "generate-types": "bash scripts/generate-types.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
