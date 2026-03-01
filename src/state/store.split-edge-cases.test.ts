@@ -8,11 +8,11 @@ import { store, Workspace } from './store';
 describe('split view edge cases', () => {
   const ws1: Workspace = {
     id: 'ws-1', name: 'WS 1', folderPath: 'C:\\ws1', tabOrder: [],
-    shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
   };
   const ws2: Workspace = {
     id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
-    shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
   };
 
   beforeEach(() => {

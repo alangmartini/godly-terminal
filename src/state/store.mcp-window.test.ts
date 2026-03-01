@@ -18,7 +18,7 @@ describe('Bug #204: MCP Agent workspace visibility', () => {
     tabOrder: [],
     shellType: { type: 'windows' },
     worktreeMode: false,
-    claudeCodeMode: false,
+    aiToolMode: 'none',
   };
 
   const agentWorkspace: Workspace = {
@@ -28,7 +28,7 @@ describe('Bug #204: MCP Agent workspace visibility', () => {
     tabOrder: [],
     shellType: { type: 'windows' },
     worktreeMode: false,
-    claudeCodeMode: false,
+    aiToolMode: 'none',
   };
 
   beforeEach(() => {

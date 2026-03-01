@@ -237,7 +237,7 @@ pub fn run() {
             commands::ensure_cmd_autorun,
             // --- Worktree ---
             commands::toggle_worktree_mode,
-            commands::toggle_claude_code_mode,
+            commands::set_ai_tool_mode,
             commands::is_git_repo,
             commands::list_worktrees,
             commands::remove_worktree,

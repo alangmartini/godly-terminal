@@ -22,6 +22,22 @@ pub enum ShellType {
     Custom { program: String, args: Option<Vec<String>> },
 }
 
+/// AI tool mode (mirrors state/models.rs).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiToolMode {
+    None,
+    Claude,
+    Codex,
+    Both,
+}
+
+impl Default for AiToolMode {
+    fn default() -> Self {
+        AiToolMode::None
+    }
+}
+
 impl ShellType {
     pub fn display_name(&self) -> String {
         match self {
@@ -59,7 +75,7 @@ pub struct Workspace {
     #[serde(default)]
     pub worktree_mode: bool,
     #[serde(default)]
-    pub claude_code_mode: bool,
+    pub ai_tool_mode: AiToolMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

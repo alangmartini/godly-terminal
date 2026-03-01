@@ -87,10 +87,10 @@ describe('KeybindingStore', () => {
       );
     });
 
-    it('matches Ctrl+Shift+E to workspace.toggleClaudeCodeMode', () => {
+    it('matches Ctrl+Shift+E to workspace.cycleAiToolMode', () => {
       const store = new KeybindingStore();
       expect(store.matchAction(keydown('E', { ctrlKey: true, shiftKey: true }))).toBe(
-        'workspace.toggleClaudeCodeMode'
+        'workspace.cycleAiToolMode'
       );
     });
 

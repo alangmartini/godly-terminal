@@ -229,9 +229,13 @@ export class WorktreePanel {
       order: 0,
     });
 
-    if (workspace.claudeCodeMode) {
+    if (workspace.aiToolMode === 'claude' || workspace.aiToolMode === 'both') {
       setTimeout(() => {
         terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
+      }, 500);
+    } else if (workspace.aiToolMode === 'codex') {
+      setTimeout(() => {
+        terminalService.writeToTerminal(result.id, 'codex --yolo\r');
       }, 500);
     }
   }

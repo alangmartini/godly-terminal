@@ -755,8 +755,8 @@ body.dragging-active * {
   border-color: #b9db7a;
 }
 
-/* Claude Code toggle button */
-.claude-code-toggle {
+/* AI tool mode toggle button */
+.ai-tool-toggle {
   font-size: 9px;
   background: none;
   color: var(--text-secondary);
@@ -768,21 +768,68 @@ body.dragging-active * {
   transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
 
-.claude-code-toggle:hover {
+.ai-tool-toggle:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border-color: var(--text-secondary);
 }
 
-.claude-code-toggle.active {
+.ai-tool-toggle.active {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
 }
 
-.claude-code-toggle.active:hover {
+.ai-tool-toggle.active:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+.ai-tool-toggle.mode-codex.active {
+  background: #10a37f;
+  border-color: #10a37f;
+}
+
+.ai-tool-toggle.mode-codex.active:hover {
+  background: #0d8a6a;
+  border-color: #0d8a6a;
+}
+
+.ai-tool-toggle.mode-both.active {
+  background: #8b5cf6;
+  border-color: #8b5cf6;
+}
+
+.ai-tool-toggle.mode-both.active:hover {
+  background: #7c3aed;
+  border-color: #7c3aed;
+}
+
+/* Context submenu for AI tool mode */
+.context-menu-submenu {
+  position: relative;
+}
+
+.context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 100px;
+  z-index: 1001;
+}
+
+.context-menu-submenu:hover > .context-submenu {
+  display: block;
+}
+
+.context-menu-item.selected {
+  color: var(--accent);
+  font-weight: bold;
 }
 
 /* Worktree panel */
