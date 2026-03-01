@@ -79,6 +79,9 @@ export class TerminalPane {
   // does a full fetch. Set after resume() because dirty tracking may be
   // unreliable after the output stream was disconnected.
   private forceFullFetch = false;
+  // If a full-recovery fetch is requested while a scheduled snapshot fetch is
+  // already in flight, queue one follow-up fetch after the in-flight one ends.
+  private snapshotRetryRequested = false;
 
   // Pending render scheduled via requestAnimationFrame (for pushed diffs).
   private renderRAF: number | null = null;
@@ -725,7 +728,15 @@ export class TerminalPane {
     // When the binary diff stream is active, the pull path is suppressed.
     // Exception: forceFullFetch (resume after pause, initial load).
     if (this.diffStreamActive && !this.forceFullFetch) return;
-    if (this.snapshotPending) return;
+    if (this.snapshotPending) {
+      // Bug #486 regression: if we need a full fetch while another scheduled
+      // fetch is in flight, queue a retry so staleness discard cannot strand
+      // us without a cached snapshot.
+      if (this.forceFullFetch) {
+        this.snapshotRetryRequested = true;
+      }
+      return;
+    }
     this.snapshotPending = true;
     perfTracer.mark('schedule_snapshot');
     if (this.snapshotTimer === null) {
@@ -739,6 +750,10 @@ export class TerminalPane {
           // Without this, events during the ~85ms fetch would schedule overlapping
           // IPC requests that saturate the Tauri thread pool.
           this.snapshotPending = false;
+          if (this.snapshotRetryRequested && !this.paused) {
+            this.snapshotRetryRequested = false;
+            this.scheduleSnapshotFetch();
+          }
         }
       }, TerminalPane.SNAPSHOT_MIN_INTERVAL_MS);
     }
@@ -1052,6 +1067,7 @@ export class TerminalPane {
       this.snapshotTimer = null;
     }
     this.snapshotPending = false;
+    this.snapshotRetryRequested = false;
     if (this.renderRAF !== null) {
       cancelAnimationFrame(this.renderRAF);
       this.renderRAF = null;
@@ -1212,6 +1228,8 @@ export class TerminalPane {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;
     }
+    this.snapshotPending = false;
+    this.snapshotRetryRequested = false;
     if (this.scrollRafId !== null) {
       cancelAnimationFrame(this.scrollRafId);
       this.scrollRafId = null;
