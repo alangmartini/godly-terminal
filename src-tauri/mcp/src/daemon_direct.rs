@@ -727,6 +727,14 @@ impl Backend for DaemonDirectBackend {
             McpRequest::CreateWorkspace { .. } => Ok(Self::app_only_error("create_workspace")),
             McpRequest::DeleteWorkspace { .. } => Ok(Self::app_only_error("delete_workspace")),
             McpRequest::SwitchWorkspace { .. } => Ok(Self::app_only_error("switch_workspace")),
+            McpRequest::RenameWorkspace { .. } => Ok(Self::app_only_error("rename_workspace")),
+            McpRequest::ReorderWorkspaces { .. } => {
+                Ok(Self::app_only_error("reorder_workspaces"))
+            }
+            McpRequest::GetWorkspaceDetails { .. } => {
+                Ok(Self::app_only_error("get_workspace_details"))
+            }
+            McpRequest::OpenInExplorer { .. } => Ok(Self::app_only_error("open_in_explorer")),
             McpRequest::GetActiveWorkspace => Ok(Self::app_only_error("get_active_workspace")),
             McpRequest::GetActiveTerminal => Ok(Self::app_only_error("get_active_terminal")),
             McpRequest::FocusTerminal { .. } => Ok(Self::app_only_error("focus_terminal")),

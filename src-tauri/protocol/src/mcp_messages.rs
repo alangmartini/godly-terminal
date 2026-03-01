@@ -56,6 +56,9 @@ pub enum McpRequest {
     CreateWorkspace { name: String, folder_path: String },
     DeleteWorkspace { workspace_id: String },
     SwitchWorkspace { workspace_id: String },
+    RenameWorkspace { workspace_id: String, name: String },
+    ReorderWorkspaces { workspace_ids: Vec<String> },
+    GetWorkspaceDetails { workspace_id: String },
     GetActiveWorkspace,
     GetActiveTerminal,
     MoveTerminalToWorkspace {
@@ -184,6 +187,9 @@ pub enum McpRequest {
         workspace_id: String,
         terminal_id: Option<String>,
     },
+
+    // OS integration
+    OpenInExplorer { path: String },
 
     // JS bridge (execute JavaScript in WebView, return result)
     ExecuteJs {
@@ -319,6 +325,13 @@ pub enum McpResponse {
     },
     NotificationStatus { enabled: bool, source: String },
     TerminalOutput { content: String },
+    WorkspaceDetails {
+        name: String,
+        folder_path: String,
+        worktree_mode: bool,
+        claude_code_mode: bool,
+        terminal_count: usize,
+    },
     ActiveWorkspace {
         workspace: Option<McpWorkspaceInfo>,
     },
