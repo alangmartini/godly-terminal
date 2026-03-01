@@ -993,13 +993,19 @@ pub fn list_tools() -> Value {
             {
 
 
+
                 "name": "next_tab",
                 "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
+
+                "name": "reorder_tabs",
+                "description": "Reorder the terminal tabs in a workspace. Provide the full list of terminal IDs in the desired order.",
+
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "workspace_id": {
                             "type": "string",
+
                             "description": "ID of the workspace (optional — defaults to active workspace)"
                         }
                     },
@@ -1123,6 +1129,60 @@ pub fn list_tools() -> Value {
 
 
                 }
+
+                            "description": "ID of the workspace whose tabs to reorder"
+                        },
+                        "terminal_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Ordered list of terminal IDs representing the new tab order"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_ids"]
+                }
+            },
+            {
+                "name": "get_tab_order",
+                "description": "Get the current tab order (list of terminal IDs) for a workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to query"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "copy_to_clipboard",
+                "description": "Copy text to the system clipboard.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Text to copy to the clipboard"
+                        }
+                    },
+                    "required": ["text"]
+                }
+            },
+            {
+                "name": "get_selected_text",
+                "description": "Get the currently selected text in the webview. Returns the browser's text selection (if any), or an empty string if nothing is selected.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to get selection from (optional — reads browser selection if omitted)"
+                        }
+                    },
+                    "required": []
+                }
+
             }
         ]
     })
@@ -1783,6 +1843,7 @@ pub fn call_tool(
 
 
 
+
         "next_tab" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::NextTab { workspace_id }
@@ -1843,6 +1904,41 @@ pub fn call_tool(
         "save_layout" => McpRequest::SaveLayout,
 
         "get_app_info" => McpRequest::GetAppInfo,
+
+
+
+        "reorder_tabs" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_ids: Vec<String> = args
+                .get("terminal_ids")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing terminal_ids array")?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            if terminal_ids.is_empty() {
+                return Err("terminal_ids array must not be empty".to_string());
+            }
+            McpRequest::ReorderTabs {
+                workspace_id,
+                terminal_ids,
+            }
+        }
+
+        "get_tab_order" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::GetTabOrder { workspace_id }
+        }
+
+        "copy_to_clipboard" => {
+            let text = args.get("text").and_then(|v| v.as_str()).ok_or("Missing text")?.to_string();
+            McpRequest::CopyToClipboard { text }
+        }
+
+        "get_selected_text" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::GetSelectedText { terminal_id }
+        }
 
 
         _ => return Err(format!("Unknown tool: {}", name)),
@@ -2035,6 +2131,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "path": path,
         })),
 
+
         McpResponse::NotificationConfig {
             enabled,
             sound_preset,
@@ -2057,6 +2154,13 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "workspace_count": workspace_count,
             "terminal_count": terminal_count,
             "daemon_connected": daemon_connected,
+
+
+        McpResponse::TabOrder { terminal_ids } => Ok(json!({
+            "terminal_ids": terminal_ids,
+        })),
+        McpResponse::SelectedText { text } => Ok(json!({
+            "text": text,
 
         })),
     }

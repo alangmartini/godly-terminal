@@ -264,6 +264,7 @@ pub enum McpRequest {
     },
 
 
+
     // Tab navigation
     NextTab {
         #[serde(default)]
@@ -286,6 +287,27 @@ pub enum McpRequest {
     },
     SaveLayout,
     GetAppInfo,
+
+
+    // Tab management
+    ReorderTabs {
+        workspace_id: String,
+        terminal_ids: Vec<String>,
+    },
+    GetTabOrder {
+        workspace_id: String,
+    },
+
+    // Clipboard
+    CopyToClipboard {
+        text: String,
+    },
+
+    // Selection
+    GetSelectedText {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
 
 
     // Notifications
@@ -426,6 +448,7 @@ pub enum McpResponse {
         path: String,
     },
 
+
     NotificationConfig {
         enabled: bool,
         sound_preset: String,
@@ -439,6 +462,13 @@ pub enum McpResponse {
         workspace_count: usize,
         terminal_count: usize,
         daemon_connected: bool,
+
+
+    TabOrder {
+        terminal_ids: Vec<String>,
+    },
+    SelectedText {
+        text: String,
 
     },
 }
