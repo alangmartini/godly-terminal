@@ -5,6 +5,9 @@ const STORAGE_KEY = 'godly-terminal-settings';
 /** Which rendering backend to use for terminal grid display. */
 export type RendererMode = 'gpu';
 
+/** How split-panel terminals appear in the tab bar. */
+export type SplitTabMode = 'individual' | 'unified';
+
 export interface TerminalSettings {
   defaultShell: ShellType;
   /** When true, new output snaps the view to bottom even when scrolled up. */
@@ -13,6 +16,8 @@ export interface TerminalSettings {
   fontSize: number;
   /** Rendering backend: 'gpu' (Rust-side wgpu renderer). */
   rendererMode: RendererMode;
+  /** How split-panel terminals appear in the tab bar. */
+  splitTabMode: SplitTabMode;
 }
 
 type Subscriber = () => void;
@@ -27,6 +32,7 @@ class TerminalSettingsStore {
     autoScrollOnOutput: false,
     fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
     rendererMode: 'gpu',
+    splitTabMode: 'individual',
   };
 
   private subscribers: Subscriber[] = [];
@@ -81,6 +87,17 @@ class TerminalSettingsStore {
     this.notify();
   }
 
+  getSplitTabMode(): SplitTabMode {
+    return this.settings.splitTabMode;
+  }
+
+  setSplitTabMode(mode: SplitTabMode): void {
+    if (mode === this.settings.splitTabMode) return;
+    this.settings.splitTabMode = mode;
+    this.saveToStorage();
+    this.notify();
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -114,6 +131,9 @@ class TerminalSettingsStore {
       // GPU is now the only renderer mode; ignore stored legacy values (canvas2d, webgl)
       if (data.rendererMode === 'gpu') {
         this.settings.rendererMode = data.rendererMode;
+      }
+      if (data.splitTabMode === 'individual' || data.splitTabMode === 'unified') {
+        this.settings.splitTabMode = data.splitTabMode;
       }
     } catch {
       // Corrupt data — use defaults

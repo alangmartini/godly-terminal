@@ -2,6 +2,8 @@ import { store, Terminal } from '../state/store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { notificationStore } from '../state/notification-store';
+import { terminalSettingsStore } from '../state/terminal-settings-store';
+import { terminalIds } from '../state/split-types';
 import {
   startDrag, endDrag,
   createGhost, moveGhost,
@@ -32,6 +34,8 @@ export function getDisplayName(terminal: Terminal): string {
 }
 
 const DRAG_THRESHOLD = 5; // px of movement before drag starts
+/** Synthetic key used for the unified split tab in tabElements map. */
+const UNIFIED_KEY = '__unified_split__';
 
 export class TabBar {
   private container: HTMLElement;
@@ -138,6 +142,7 @@ export class TabBar {
 
     store.subscribe(() => this.render());
     notificationStore.subscribe(() => this.render());
+    terminalSettingsStore.subscribe(() => this.render());
   }
 
   private async handleNewTab() {
@@ -292,13 +297,60 @@ export class TabBar {
     });
   }
 
+  /**
+   * Build the list of "render items" — in individual mode every terminal gets
+   * one entry; in unified mode terminals inside the active layout tree are
+   * collapsed into a single entry keyed by UNIFIED_KEY.
+   */
+  private buildRenderItems(
+    terminals: Terminal[],
+    wsId: string,
+  ): { id: string; terminals: Terminal[] }[] {
+    const isUnified = terminalSettingsStore.getSplitTabMode() === 'unified';
+    const tree = wsId ? store.getLayoutTree(wsId) : null;
+    const treeIdSet = tree ? new Set(terminalIds(tree)) : new Set<string>();
+
+    if (!isUnified || treeIdSet.size === 0) {
+      return terminals.map(t => ({ id: t.id, terminals: [t] }));
+    }
+
+    // Also check the suspended tree — if we navigated away from the split,
+    // we still want to show a unified tab for it.
+    const suspended = wsId ? store.getSuspendedLayoutTree(wsId) : undefined;
+    const suspendedIdSet = suspended
+      ? new Set(terminalIds(suspended.tree))
+      : new Set<string>();
+
+    const splitIds = treeIdSet.size > 0 ? treeIdSet : suspendedIdSet;
+    if (splitIds.size === 0) {
+      return terminals.map(t => ({ id: t.id, terminals: [t] }));
+    }
+
+    const items: { id: string; terminals: Terminal[] }[] = [];
+    let unifiedInserted = false;
+    const splitTerminals = terminals.filter(t => splitIds.has(t.id));
+
+    for (const t of terminals) {
+      if (splitIds.has(t.id)) {
+        if (!unifiedInserted) {
+          items.push({ id: UNIFIED_KEY, terminals: splitTerminals });
+          unifiedInserted = true;
+        }
+        // Skip individual entries for split members
+      } else {
+        items.push({ id: t.id, terminals: [t] });
+      }
+    }
+    return items;
+  }
+
   private render() {
     const state = store.getState();
-    const terminals = store.getWorkspaceTerminals(
-      state.activeWorkspaceId || ''
-    );
+    const wsId = state.activeWorkspaceId || '';
+    const terminals = store.getWorkspaceTerminals(wsId);
+    const items = this.buildRenderItems(terminals, wsId);
 
-    const currentIds = terminals.map(t => t.id);
+    const currentIds = items.map(item => item.id);
     const currentIdSet = new Set(currentIds);
 
     // Remove tabs that no longer exist
@@ -315,21 +367,32 @@ export class TabBar {
       currentIds.some((id, i) => this.lastRenderedOrder[i] !== id);
 
     // Update existing tabs in-place, create new ones
-    for (const terminal of terminals) {
-      const existing = this.tabElements.get(terminal.id);
-      if (existing) {
-        this.updateTabInPlace(existing, terminal, state.activeTerminalId);
+    for (const item of items) {
+      const existing = this.tabElements.get(item.id);
+      if (item.id === UNIFIED_KEY) {
+        if (existing) {
+          this.updateUnifiedTab(existing, item.terminals, state.activeTerminalId);
+        } else {
+          const tab = this.createUnifiedTab(item.terminals);
+          this.tabElements.set(UNIFIED_KEY, tab);
+          this.tabsContainer.appendChild(tab);
+        }
       } else {
-        const tab = this.createTab(terminal);
-        this.tabElements.set(terminal.id, tab);
-        this.tabsContainer.appendChild(tab);
+        const terminal = item.terminals[0];
+        if (existing) {
+          this.updateTabInPlace(existing, terminal, state.activeTerminalId);
+        } else {
+          const tab = this.createTab(terminal);
+          this.tabElements.set(terminal.id, tab);
+          this.tabsContainer.appendChild(tab);
+        }
       }
     }
 
     // Reorder DOM if needed
     if (orderChanged) {
-      for (const terminal of terminals) {
-        const el = this.tabElements.get(terminal.id);
+      for (const item of items) {
+        const el = this.tabElements.get(item.id);
         if (el) {
           this.tabsContainer.appendChild(el);
         }
@@ -463,6 +526,141 @@ export class TabBar {
     this.setupPointerDrag(tab, terminal.id);
 
     return tab;
+  }
+
+  private createUnifiedTab(terminals: Terminal[]): HTMLElement {
+    const state = store.getState();
+    const activeId = state.activeTerminalId;
+    const isActive = terminals.some(t => t.id === activeId);
+
+    const tab = document.createElement('div');
+    tab.className = `tab unified-split-tab${isActive ? ' active' : ''}`;
+    tab.dataset.terminalId = UNIFIED_KEY;
+
+    const title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = this.unifiedTabTitle(terminals);
+    tab.appendChild(title);
+
+    // Show badge if any member has a notification and the split isn't focused
+    const hasBadge = !isActive && terminals.some(t => notificationStore.hasBadge(t.id));
+    if (hasBadge) {
+      const badge = document.createElement('span');
+      badge.className = 'tab-notification-badge';
+      tab.appendChild(badge);
+    }
+
+    const closeBtn = document.createElement('span');
+    closeBtn.className = 'tab-close';
+    closeBtn.textContent = '\u00d7';
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      this.handleCloseUnifiedTab(terminals);
+    };
+    tab.appendChild(closeBtn);
+
+    // Click: activate the first terminal in the split (restores the split if suspended)
+    tab.onclick = (e) => {
+      if (Date.now() - this._lastDragEndTime < 100) return;
+      if ((e.target as HTMLElement).classList.contains('editing')) return;
+      store.setActiveTerminal(terminals[0].id);
+    };
+
+    // Double-click: unsplit
+    title.ondblclick = (e) => {
+      e.stopPropagation();
+      this.onUnsplitCallback?.();
+    };
+
+    // Context menu
+    tab.oncontextmenu = (e) => {
+      e.preventDefault();
+      this.showUnifiedContextMenu(e, terminals);
+    };
+
+    // Drag (use first terminal's ID for reorder purposes)
+    this.setupPointerDrag(tab, terminals[0].id);
+
+    return tab;
+  }
+
+  private updateUnifiedTab(tab: HTMLElement, terminals: Terminal[], activeTerminalId: string | null) {
+    const isActive = terminals.some(t => t.id === activeTerminalId);
+    tab.classList.toggle('active', isActive);
+    tab.classList.toggle('dead', terminals.every(t => t.exited));
+
+    const titleEl = tab.querySelector('.tab-title') as HTMLElement | null;
+    if (titleEl && titleEl.tagName !== 'INPUT') {
+      const newTitle = this.unifiedTabTitle(terminals);
+      if (titleEl.textContent !== newTitle) {
+        titleEl.textContent = newTitle;
+      }
+    }
+
+    const hasBadge = !isActive && terminals.some(t => notificationStore.hasBadge(t.id));
+    const existingBadge = tab.querySelector('.tab-notification-badge');
+    if (hasBadge && !existingBadge) {
+      const badge = document.createElement('span');
+      badge.className = 'tab-notification-badge';
+      const closeBtn = tab.querySelector('.tab-close');
+      if (closeBtn) tab.insertBefore(badge, closeBtn);
+      else tab.appendChild(badge);
+    } else if (!hasBadge && existingBadge) {
+      existingBadge.remove();
+    }
+  }
+
+  private unifiedTabTitle(terminals: Terminal[]): string {
+    return terminals.map(t => getDisplayName(t)).join(' | ');
+  }
+
+  private async handleCloseUnifiedTab(terminals: Terminal[]) {
+    for (const t of terminals) {
+      if (t.paneType !== 'figma') {
+        await terminalService.closeTerminal(t.id);
+      }
+      store.removeTerminal(t.id);
+    }
+  }
+
+  private showUnifiedContextMenu(e: MouseEvent, terminals: Terminal[]) {
+    document.querySelector('.context-menu')?.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+
+    // Unsplit option
+    const unsplitItem = document.createElement('div');
+    unsplitItem.className = 'context-menu-item';
+    unsplitItem.textContent = 'Unsplit';
+    unsplitItem.onclick = () => {
+      menu.remove();
+      this.onUnsplitCallback?.();
+    };
+    menu.appendChild(unsplitItem);
+
+    const sep = document.createElement('div');
+    sep.className = 'context-menu-separator';
+    menu.appendChild(sep);
+
+    // Close all
+    const closeItem = document.createElement('div');
+    closeItem.className = 'context-menu-item danger';
+    closeItem.textContent = 'Close All';
+    closeItem.onclick = () => {
+      menu.remove();
+      this.handleCloseUnifiedTab(terminals);
+    };
+    menu.appendChild(closeItem);
+
+    document.body.appendChild(menu);
+    const closeMenu = () => {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 0);
   }
 
   private setupPointerDrag(tab: HTMLElement, terminalId: string): void {
