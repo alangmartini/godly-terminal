@@ -281,6 +281,48 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "toggle_worktree_mode",
+                "description": "Toggle worktree mode on/off for a workspace. When enabled, new terminals created in the workspace automatically get a git worktree.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to toggle worktree mode for"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "toggle_claude_code_mode",
+                "description": "Toggle Claude Code mode on/off for a workspace. When enabled, new terminals in the workspace automatically launch Claude Code.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to toggle Claude Code mode for"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "get_workspace_modes",
+                "description": "Get the current worktree_mode and claude_code_mode flags for a workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to query"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
                 "name": "notify",
                 "description": "Send a sound notification to alert the user. Plays a chime and shows a badge on the terminal tab if the user isn't looking at it.",
                 "inputSchema": {
@@ -978,6 +1020,33 @@ pub fn call_tool(
             McpRequest::RemoveWorktree { worktree_path }
         }
 
+        "toggle_worktree_mode" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            McpRequest::ToggleWorktreeMode { workspace_id }
+        }
+
+        "toggle_claude_code_mode" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            McpRequest::ToggleClaudeCodeMode { workspace_id }
+        }
+
+        "get_workspace_modes" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            McpRequest::GetWorkspaceModes { workspace_id }
+        }
+
         "read_grid" => {
             let terminal_id = args
                 .get("terminal_id")
@@ -1413,6 +1482,13 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
                 }))
             }
         }
+        McpResponse::WorkspaceModes {
+            worktree_mode,
+            claude_code_mode,
+        } => Ok(json!({
+            "worktree_mode": worktree_mode,
+            "claude_code_mode": claude_code_mode,
+        })),
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
         })),
