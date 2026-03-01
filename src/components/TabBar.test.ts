@@ -197,14 +197,14 @@ describe('getDisplayName - process name autopick', () => {
   });
 });
 
-// Full flow: claudeCodeMode workspace -> terminal created -> process changes
-describe('claudeCodeMode tab naming flow', () => {
+// Full flow: aiToolMode workspace -> terminal created -> process changes
+describe('aiToolMode tab naming flow', () => {
   beforeEach(() => {
     store.reset();
     store.addWorkspace({
       id: 'ws-claude', name: 'Claude WS', folderPath: 'C:\\Projects',
       tabOrder: [], shellType: { type: 'windows' },
-      worktreeMode: false, claudeCodeMode: true,
+      worktreeMode: false, aiToolMode: 'claude',
     });
   });
 

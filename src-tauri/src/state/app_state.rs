@@ -117,10 +117,10 @@ impl AppState {
         }
     }
 
-    pub fn update_workspace_claude_code_mode(&self, id: &str, claude_code_mode: bool) {
+    pub fn update_workspace_ai_tool_mode(&self, id: &str, ai_tool_mode: super::models::AiToolMode) {
         let mut workspaces = self.workspaces.write();
         if let Some(workspace) = workspaces.get_mut(id) {
-            workspace.claude_code_mode = claude_code_mode;
+            workspace.ai_tool_mode = ai_tool_mode;
         }
     }
 
@@ -527,7 +527,7 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::models::ShellType;
+    use crate::state::models::{AiToolMode, ShellType};
 
     #[test]
     fn test_workspace_add_and_get() {
@@ -540,7 +540,7 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: false,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         };
 
         state.add_workspace(workspace.clone());
@@ -562,7 +562,7 @@ mod tests {
             tab_order: vec!["term-1".to_string()],
             shell_type: ShellType::Windows,
             worktree_mode: false,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         };
 
         state.add_workspace(workspace);
@@ -583,7 +583,7 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: false,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         });
 
         state.add_terminal(Terminal {
@@ -610,7 +610,7 @@ mod tests {
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
-                claude_code_mode: false,
+                ai_tool_mode: AiToolMode::None,
             },
             Workspace {
                 id: "ws-2".to_string(),
@@ -621,7 +621,7 @@ mod tests {
                     distribution: Some("Ubuntu".to_string()),
                 },
                 worktree_mode: false,
-                claude_code_mode: false,
+                ai_tool_mode: AiToolMode::None,
             },
         ];
 
@@ -782,7 +782,7 @@ mod tests {
             tab_order: vec!["t1".to_string(), "t_dead".to_string(), "t2".to_string()],
             shell_type: ShellType::Windows,
             worktree_mode: false,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         });
         state.add_terminal(Terminal {
             id: "t1".to_string(),

@@ -267,8 +267,8 @@ describe('App Persistence', () => {
     });
   });
 
-  describe('claude code mode persistence', () => {
-    it('should restore claudeCodeMode from layout', async () => {
+  describe('ai tool mode persistence', () => {
+    it('should restore aiToolMode from layout', async () => {
       const savedLayout = {
         workspaces: [
           {
@@ -277,7 +277,7 @@ describe('App Persistence', () => {
             folder_path: 'C:\\Projects',
             tab_order: [],
             shell_type: 'windows',
-            claude_code_mode: true,
+            ai_tool_mode: 'claude',
           },
         ],
         terminals: [],
@@ -297,16 +297,16 @@ describe('App Persistence', () => {
           tabOrder: w.tab_order,
           shellType: convertShellType(w.shell_type),
           worktreeMode: false,
-          claudeCodeMode: w.claude_code_mode ?? false,
+          aiToolMode: w.ai_tool_mode ?? 'none',
         });
       });
 
       const state = store.getState();
-      expect(state.workspaces[0].claudeCodeMode).toBe(true);
+      expect(state.workspaces[0].aiToolMode).toBe('claude');
     });
 
-    it('should default claudeCodeMode to false when missing from old layout', async () => {
-      // Simulate an old layout that doesn't have claude_code_mode field
+    it('should default aiToolMode to none when missing from old layout', async () => {
+      // Simulate an old layout that doesn't have ai_tool_mode field
       const oldLayout = {
         workspaces: [
           {
@@ -315,7 +315,7 @@ describe('App Persistence', () => {
             folder_path: 'C:\\Old',
             tab_order: [],
             shell_type: 'windows',
-            // no claude_code_mode field
+            // no ai_tool_mode field
           },
         ],
         terminals: [],
@@ -334,12 +334,12 @@ describe('App Persistence', () => {
           tabOrder: w.tab_order,
           shellType: convertShellType(w.shell_type),
           worktreeMode: false,
-          claudeCodeMode: (w as any).claude_code_mode ?? false,
+          aiToolMode: (w as any).ai_tool_mode ?? 'none',
         });
       });
 
       const state = store.getState();
-      expect(state.workspaces[0].claudeCodeMode).toBe(false);
+      expect(state.workspaces[0].aiToolMode).toBe('none');
     });
   });
 

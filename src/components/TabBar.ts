@@ -137,6 +137,13 @@ export class TabBar {
     if (!state.activeWorkspaceId) return;
 
     const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+    const aiMode = workspace?.aiToolMode ?? 'none';
+
+    if (aiMode === 'both') {
+      await this.handleNewTabBothMode(workspace!);
+      return;
+    }
+
     let worktreeName: string | undefined;
 
     if (workspace?.worktreeMode) {
@@ -158,11 +165,62 @@ export class TabBar {
       order: 0,
     });
 
-    if (workspace?.claudeCodeMode) {
+    if (aiMode === 'claude') {
       setTimeout(() => {
         terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
       }, 500);
+    } else if (aiMode === 'codex') {
+      setTimeout(() => {
+        terminalService.writeToTerminal(result.id, 'codex --yolo\r');
+      }, 500);
     }
+  }
+
+  private async handleNewTabBothMode(workspace: import('../state/store').Workspace) {
+    const wsId = workspace.id;
+    let worktreeNameClaude: string | undefined;
+    let worktreeNameCodex: string | undefined;
+
+    if (workspace.worktreeMode) {
+      const { showWorktreeNamePrompt } = await import('./dialogs');
+      const baseName = await showWorktreeNamePrompt('Enter worktree base name (suffixes -claude/-codex added)');
+      if (baseName === null) return; // user cancelled
+      if (baseName) {
+        worktreeNameClaude = `${baseName}-claude`;
+        worktreeNameCodex = `${baseName}-codex`;
+      }
+    }
+
+    // Create first terminal (Claude)
+    const result1 = await terminalService.createTerminal(wsId, { worktreeName: worktreeNameClaude });
+    store.addTerminal({
+      id: result1.id,
+      workspaceId: wsId,
+      name: result1.worktree_branch ?? 'Claude',
+      processName: 'powershell',
+      order: 0,
+    });
+
+    // Create second terminal (Codex)
+    const result2 = await terminalService.createTerminal(wsId, { worktreeName: worktreeNameCodex });
+    store.addTerminal({
+      id: result2.id,
+      workspaceId: wsId,
+      name: result2.worktree_branch ?? 'Codex',
+      processName: 'powershell',
+      order: 0,
+    }, { background: true });
+
+    // Split vertically (top=Claude, bottom=Codex)
+    store.splitTerminalAt(wsId, result1.id, result2.id, 'vertical', 0.5);
+
+    // Write commands after delay
+    setTimeout(() => {
+      terminalService.writeToTerminal(result1.id, 'claude --dangerously-skip-permissions\r');
+    }, 500);
+    setTimeout(() => {
+      terminalService.writeToTerminal(result2.id, 'codex --yolo\r');
+    }, 500);
   }
 
   private showNewTabMenu(e: MouseEvent) {

@@ -44,7 +44,7 @@ function setupTwoTerminalState() {
     tabOrder: [],
     shellType: { type: 'windows' },
     worktreeMode: false,
-    claudeCodeMode: false,
+    aiToolMode: 'none',
   });
   store.addTerminal({
     id: 'term-reading',
@@ -61,7 +61,7 @@ function setupTwoTerminalState() {
     tabOrder: [],
     shellType: { type: 'windows' },
     worktreeMode: false,
-    claudeCodeMode: false,
+    aiToolMode: 'none',
   });
   store.addTerminal({
     id: 'term-notify',

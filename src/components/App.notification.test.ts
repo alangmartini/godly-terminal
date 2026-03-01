@@ -41,7 +41,7 @@ describe('Notification improvements', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
       store.addTerminal({
         id: 'term-1',
@@ -63,7 +63,7 @@ describe('Notification improvements', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
       store.addTerminal({
         id: 'term-orphan',
@@ -88,7 +88,7 @@ describe('Notification improvements', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
       store.addTerminal({
         id: 'term-osc',
@@ -111,7 +111,7 @@ describe('Notification improvements', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
       store.addTerminal({
         id: 'term-renamed',

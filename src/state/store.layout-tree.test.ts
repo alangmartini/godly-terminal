@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 const ws: Workspace = {
   id: 'ws-1', name: 'WS', folderPath: 'C:\\ws', tabOrder: [],
-  shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+  shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
 };
 
 function addTerminals(ids: string[]) {
@@ -765,7 +765,7 @@ describe('layout tree state management', () => {
     it('should clear tree when moving a terminal from a 2-pane split', () => {
       store.addWorkspace({
         id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       addTerminals(['t1', 't2']);
       store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
