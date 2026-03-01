@@ -827,6 +827,9 @@ export class TerminalPane {
       // Bug #424: If we have no cached snapshot, the canvas is blank.
       // Schedule a retry so the user doesn't have to scroll to recover.
       if (!this.cachedSnapshot && !this.paused) {
+        // Bug #486: forceFullFetch was consumed at line 751; re-arm it so
+        // the retry can bypass the diffStreamActive guard.
+        this.forceFullFetch = true;
         this.scheduleSnapshotFetch();
       }
     }
@@ -882,6 +885,9 @@ export class TerminalPane {
     }
 
     if (!this.cachedSnapshot) {
+      // Bug #486: Without forceFullFetch, scheduleSnapshotFetch() returns
+      // early because diffStreamActive blocks the pull path.
+      this.forceFullFetch = true;
       this.scheduleSnapshotFetch();
       return;
     }
@@ -1015,6 +1021,9 @@ export class TerminalPane {
             (this.cachedSnapshot.dimensions.rows !== rows ||
              this.cachedSnapshot.dimensions.cols !== cols)) {
           this.cachedSnapshot = null;
+          // Bug #486: Ensure the next scheduleSnapshotFetch() bypasses the
+          // diffStreamActive guard so a resize doesn't permanently blank the terminal.
+          this.forceFullFetch = true;
         }
         terminalService.resizeTerminal(this.terminalId, rows, cols);
       }
