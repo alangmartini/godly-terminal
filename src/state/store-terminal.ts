@@ -37,6 +37,11 @@ export function addTerminalImpl(
       const { [terminal.workspaceId]: _t, ...restTrees } = layoutTrees;
       const { [terminal.workspaceId]: _s, ...restSplits } = splitViews;
       const { [terminal.workspaceId]: _z, ...restZoomed } = zoomedPanes;
+      store.setSuspendedLayoutTree(terminal.workspaceId, {
+        tree: _t,
+        splitView: _s,
+        zoomedPane: _z,
+      });
       layoutTrees = restTrees;
       splitViews = restSplits;
       zoomedPanes = restZoomed;
