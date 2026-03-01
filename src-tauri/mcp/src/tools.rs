@@ -743,6 +743,76 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "scroll_page_up",
+                "description": "Scroll a terminal up by one page (viewport height). If no terminal_id is provided, uses the active terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to scroll (optional — defaults to active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "scroll_page_down",
+                "description": "Scroll a terminal down by one page (viewport height). If no terminal_id is provided, uses the active terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to scroll (optional — defaults to active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "scroll_to_top",
+                "description": "Scroll a terminal to the top of its scrollback history. If no terminal_id is provided, uses the active terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to scroll (optional — defaults to active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "scroll_to_bottom",
+                "description": "Scroll a terminal to the bottom (live output). If no terminal_id is provided, uses the active terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to scroll (optional — defaults to active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "get_scroll_position",
+                "description": "Get the current scroll position of a terminal, including offset, total scrollback lines, and viewport rows. If no terminal_id is provided, uses the active terminal.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to query (optional — defaults to active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
                 "name": "capture_screenshot",
                 "description": "Capture a screenshot of a terminal's canvas as a PNG file. Returns the file path to the saved screenshot image. If no terminal_id is provided, captures the first visible canvas.",
                 "inputSchema": {
@@ -1451,6 +1521,31 @@ pub fn call_tool(
             McpRequest::ExecuteJs { script }
         }
 
+        "scroll_page_up" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollPageUp { terminal_id }
+        }
+
+        "scroll_page_down" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollPageDown { terminal_id }
+        }
+
+        "scroll_to_top" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollToTop { terminal_id }
+        }
+
+        "scroll_to_bottom" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollToBottom { terminal_id }
+        }
+
+        "get_scroll_position" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::GetScrollPosition { terminal_id }
+        }
+
         "capture_screenshot" => {
             let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::CaptureScreenshot { terminal_id }
@@ -1680,12 +1775,23 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
                 }))
             }
         }
+
         McpResponse::WorkspaceModes {
             worktree_mode,
             claude_code_mode,
         } => Ok(json!({
             "worktree_mode": worktree_mode,
             "claude_code_mode": claude_code_mode,
+
+        McpResponse::ScrollPosition {
+            offset,
+            total_scrollback,
+            viewport_rows,
+        } => Ok(json!({
+            "offset": offset,
+            "total_scrollback": total_scrollback,
+            "viewport_rows": viewport_rows,
+
         })),
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
