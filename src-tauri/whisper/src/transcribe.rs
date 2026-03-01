@@ -3,11 +3,17 @@ use std::time::Instant;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// Built-in vocabulary hints for domain-specific terms.
+const BUILTIN_VOCABULARY: &str = "Godly Terminal, Quick Claude, Claude Code, workspace, scrollback, \
+Shift+V, Ctrl+Shift, terminal, daemon, PTY, split pane, tab, \
+keybinding, shortcut, MCP, sidecar, whisper";
+
 pub struct Transcriber {
     ctx: Option<WhisperContext>,
     model_name: Option<String>,
     language: String,
     gpu_in_use: bool,
+    custom_vocabulary: String,
 }
 
 impl Transcriber {
@@ -21,6 +27,7 @@ impl Transcriber {
             model_name: None,
             language: String::new(),
             gpu_in_use: false,
+            custom_vocabulary: String::new(),
         }
     }
 
@@ -83,13 +90,13 @@ impl Transcriber {
         params.set_print_timestamps(false);
         // Single-segment mode for voice-to-text (no timestamps needed)
         params.set_single_segment(true);
-        // Vocabulary hints: bias Whisper toward domain-specific terms
-        // that are common in Godly Terminal / developer voice commands
-        params.set_initial_prompt(
-            "Godly Terminal, Quick Claude, Claude Code, workspace, scrollback, \
-             Shift+V, Ctrl+Shift, terminal, daemon, PTY, split pane, tab, \
-             keybinding, shortcut, MCP, sidecar, whisper"
-        );
+        // Vocabulary hints: combine built-in terms with user-defined custom vocabulary
+        let prompt = if self.custom_vocabulary.is_empty() {
+            BUILTIN_VOCABULARY.to_string()
+        } else {
+            format!("{}, {}", BUILTIN_VOCABULARY, self.custom_vocabulary)
+        };
+        params.set_initial_prompt(&prompt);
 
         let start = Instant::now();
 
@@ -124,6 +131,10 @@ impl Transcriber {
 
     pub fn gpu_in_use(&self) -> bool {
         self.gpu_in_use
+    }
+
+    pub fn set_custom_vocabulary(&mut self, terms: String) {
+        self.custom_vocabulary = terms;
     }
 
     pub fn cuda_available() -> bool {
