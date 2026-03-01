@@ -1,5 +1,6 @@
 import type { Store, SplitView } from './store';
 import type { LayoutNode } from './split-types';
+import type { LayoutNode } from './split-types';
 import {
   replaceLeaf,
   removeLeaf,
@@ -46,7 +47,19 @@ export function splitTerminalAtImpl(
   direction: 'horizontal' | 'vertical',
   ratio = 0.5,
 ): void {
-  const tree = store.getState().layoutTrees[workspaceId];
+  let tree: LayoutNode | undefined = store.getState().layoutTrees[workspaceId];
+
+  // Bug #493: If no active tree, check for a suspended tree that contains the
+  // target terminal. This happens when createSplitTerminal() calls addTerminal()
+  // (which suspends the tree) before calling splitTerminalAt().
+  if (!tree) {
+    const suspended = store.getSuspendedLayoutTree(workspaceId);
+    if (suspended && containsTerminal(suspended.tree, targetTerminalId)) {
+      tree = suspended.tree;
+      store.deleteSuspendedLayoutTree(workspaceId);
+    }
+  }
+
   const newSplit: LayoutNode = {
     type: 'split',
     direction,
