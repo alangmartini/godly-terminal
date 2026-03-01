@@ -634,6 +634,15 @@ impl Backend for DaemonDirectBackend {
             McpRequest::NextTab { .. } => Ok(Self::app_only_error("next_tab")),
             McpRequest::PreviousTab { .. } => Ok(Self::app_only_error("previous_tab")),
             McpRequest::GoToTab { .. } => Ok(Self::app_only_error("go_to_tab")),
+            McpRequest::ToggleWorktreeMode { .. } => {
+                Ok(Self::app_only_error("toggle_worktree_mode"))
+            }
+            McpRequest::ToggleClaudeCodeMode { .. } => {
+                Ok(Self::app_only_error("toggle_claude_code_mode"))
+            }
+            McpRequest::GetWorkspaceModes { .. } => {
+                Ok(Self::app_only_error("get_workspace_modes"))
+            }
         }
     }
 
