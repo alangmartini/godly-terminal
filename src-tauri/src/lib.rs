@@ -11,20 +11,19 @@ mod state;
 mod utils;
 mod whisper_client;
 mod whisper_state;
+mod window_lifecycle;
 mod worktree;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use parking_lot::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 use crate::daemon_client::bridge::OutputStreamRegistry;
 use crate::daemon_client::DaemonClient;
 use crate::gpu_renderer::GpuRendererManager;
 use crate::llm_state::LlmState;
-use crate::persistence::{save_on_exit, AutoSaveManager};
+use crate::persistence::AutoSaveManager;
 use crate::pty::ProcessMonitor;
 use crate::state::AppState;
 use crate::whisper_state::WhisperState;
@@ -33,18 +32,9 @@ use crate::whisper_state::WhisperState;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-/// Flag to signal that scrollback save is complete
-static SCROLLBACK_SAVED: AtomicBool = AtomicBool::new(false);
-
 /// Shared state for JS execution callback channels
 pub struct JsCallbackState {
     pub senders: Mutex<HashMap<String, std::sync::mpsc::Sender<(Option<String>, Option<String>)>>>,
-}
-
-#[tauri::command]
-fn scrollback_save_complete() {
-    eprintln!("[lib] Scrollback save complete signal received");
-    SCROLLBACK_SAVED.store(true, Ordering::SeqCst);
 }
 
 /// Callback from frontend JS execution — receives the result of execute_js
@@ -307,7 +297,7 @@ pub fn run() {
             persistence::delete_scrollback,
             commands::save_clipboard_image,
             commands::write_remote_config,
-            scrollback_save_complete,
+            window_lifecycle::scrollback_save_complete,
             mcp_js_result,
         ])
         .setup(move |app| {
@@ -386,61 +376,13 @@ pub fn run() {
                     }
                 });
             }
-            let state_for_close = state_clone.clone();
-            let handle_for_close = app_handle.clone();
-            let window_for_close = main_window.clone();
-            let daemon_for_close = daemon_client.clone();
 
-            main_window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    // Prevent immediate close
-                    api.prevent_close();
-
-                    // Reset the flag
-                    SCROLLBACK_SAVED.store(false, Ordering::SeqCst);
-
-                    // Request frontend to save scrollbacks
-                    eprintln!("[lib] Requesting frontend to save scrollbacks...");
-                    let _ = window_for_close.emit("request-scrollback-save", ());
-
-                    // Move the blocking wait to a background thread so the main
-                    // thread stays free to process the frontend's IPC callback
-                    // (scrollback_save_complete). Previously this busy-waited on
-                    // the main thread, deadlocking because the callback could
-                    // never be dispatched.
-                    let state = state_for_close.clone();
-                    let daemon = daemon_for_close.clone();
-                    let handle = handle_for_close.clone();
-                    let window = window_for_close.clone();
-                    std::thread::spawn(move || {
-                        // Wait for scrollback save to complete (max 3 seconds)
-                        let start = Instant::now();
-                        while !SCROLLBACK_SAVED.load(Ordering::SeqCst) {
-                            if start.elapsed() > Duration::from_secs(3) {
-                                eprintln!("[lib] Scrollback save timeout, proceeding with close");
-                                break;
-                            }
-                            std::thread::sleep(Duration::from_millis(50));
-                        }
-
-                        // Detach all sessions (they keep running in the daemon)
-                        eprintln!("[lib] Detaching all sessions...");
-                        let terminals = state.terminals.read();
-                        for terminal_id in terminals.keys() {
-                            let request = godly_protocol::Request::Detach {
-                                session_id: terminal_id.clone(),
-                            };
-                            let _ = daemon.send_request(&request);
-                        }
-                        drop(terminals);
-
-                        // Save layout and close
-                        save_on_exit(&handle, &state);
-                        eprintln!("[lib] Destroying window...");
-                        let _ = window.destroy();
-                    });
-                }
-            });
+            window_lifecycle::setup_window_close_handler(
+                &main_window,
+                state_clone.clone(),
+                daemon_client.clone(),
+                app_handle.clone(),
+            );
 
             Ok(())
         })
