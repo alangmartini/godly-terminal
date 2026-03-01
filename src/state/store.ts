@@ -63,7 +63,8 @@ export type ShellType =
   | { type: 'wsl'; distribution?: string }
   | { type: 'custom'; program: string; args?: string[] };
 
-export type AiToolMode = 'none' | 'claude' | 'codex' | 'both';
+/** Built-in modes plus custom tool IDs (e.g. 'custom-1234'). */
+export type AiToolMode = 'none' | 'claude' | 'codex' | 'both' | (string & {});
 
 export interface Workspace {
   id: string;

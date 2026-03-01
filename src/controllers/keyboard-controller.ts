@@ -1,5 +1,6 @@
 import { store } from '../state/store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
+import { aiToolsSettingsStore } from '../state/ai-tools-settings-store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { keybindingStore } from '../state/keybinding-store';
@@ -382,65 +383,80 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
 
+          // Determine which tools to launch
+          const toolsToLaunch: string[] = [];
           if (input.aiTool === 'both') {
-            // Both mode: resolve branch names, invoke twice in parallel, create split
-            let ccBranch: string | null = null;
-            let cBranch: string | null = null;
+            toolsToLaunch.push('claude', 'codex');
+          } else {
+            toolsToLaunch.push(input.aiTool ?? 'claude');
+          }
 
+          if (toolsToLaunch.length > 1) {
+            // Multi-tool mode: resolve branch names, invoke in parallel, create split layout
+            let baseName: string | null = null;
             if (!input.noWorktree) {
-              const baseName = input.branchName
+              baseName = input.branchName
                 ?? await (async () => {
                   const { llmGenerateBranchName } = await import('../plugins/smollm2/llm-service');
                   return llmGenerateBranchName(input.prompt);
                 })();
-              ccBranch = `${baseName}-cc`;
-              cBranch = `${baseName}-c`;
             }
 
-            const [claudeResult, codexResult] = await Promise.all([
-              invoke<{ terminal_id: string; worktree_branch: string | null }>(
-                'quick_claude',
-                {
-                  workspaceId: input.workspaceId,
-                  prompt: input.prompt,
-                  branchName: ccBranch,
-                  skipFetch: true,
-                  noWorktree: input.noWorktree ?? false,
-                  aiTool: 'claude',
-                }
+            const branches = toolsToLaunch.map(toolId => {
+              if (!baseName) return null;
+              const suffix = aiToolsSettingsStore.getBranchSuffix(toolId);
+              return suffix ? `${baseName}${suffix}` : baseName;
+            });
+
+            const results = await Promise.all(
+              toolsToLaunch.map((toolId, i) =>
+                invoke<{ terminal_id: string; worktree_branch: string | null }>(
+                  'quick_claude',
+                  {
+                    workspaceId: input.workspaceId,
+                    prompt: input.prompt,
+                    branchName: branches[i],
+                    skipFetch: true,
+                    noWorktree: input.noWorktree ?? false,
+                    aiTool: toolId,
+                  },
+                ),
               ),
-              invoke<{ terminal_id: string; worktree_branch: string | null }>(
-                'quick_claude',
-                {
-                  workspaceId: input.workspaceId,
-                  prompt: input.prompt,
-                  branchName: cBranch,
-                  skipFetch: true,
-                  noWorktree: input.noWorktree ?? false,
-                  aiTool: 'codex',
-                }
-              ),
-            ]);
+            );
 
             const processName = shellTypeToProcessName(terminalSettingsStore.getDefaultShell());
-            store.addTerminal({
-              id: claudeResult.terminal_id,
-              workspaceId: input.workspaceId,
-              name: claudeResult.worktree_branch ?? 'Claude',
-              processName,
-              order: 0,
-            });
-            store.addTerminal({
-              id: codexResult.terminal_id,
-              workspaceId: input.workspaceId,
-              name: codexResult.worktree_branch ?? 'Codex',
-              processName,
-              order: 0,
-            }, { background: true });
+            const toolNames: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
 
-            store.splitTerminalAt(input.workspaceId, claudeResult.terminal_id, codexResult.terminal_id, 'vertical', 0.5);
+            // Add all terminals to store
+            for (let i = 0; i < results.length; i++) {
+              const r = results[i];
+              const toolId = toolsToLaunch[i];
+              const customTool = aiToolsSettingsStore.getCustomTool(toolId);
+              const fallbackName = customTool?.name ?? toolNames[toolId] ?? toolId;
+              store.addTerminal({
+                id: r.terminal_id,
+                workspaceId: input.workspaceId,
+                name: r.worktree_branch ?? fallbackName,
+                processName,
+                order: 0,
+              }, i > 0 ? { background: true } : undefined);
+            }
+
+            // Build split layout: 2 tools = single split, 3-4 tools = 2x2 grid
+            if (results.length === 2) {
+              store.splitTerminalAt(input.workspaceId, results[0].terminal_id, results[1].terminal_id, 'vertical', 0.5);
+            } else if (results.length >= 3) {
+              // Create 2x2 grid: top row then bottom row
+              store.splitTerminalAt(input.workspaceId, results[0].terminal_id, results[1].terminal_id, 'vertical', 0.5);
+              if (results[2]) {
+                store.splitTerminalAt(input.workspaceId, results[0].terminal_id, results[2].terminal_id, 'horizontal', 0.5);
+              }
+              if (results[3]) {
+                store.splitTerminalAt(input.workspaceId, results[1].terminal_id, results[3].terminal_id, 'horizontal', 0.5);
+              }
+            }
           } else {
-            // Single tool mode (claude or codex)
+            // Single tool mode
             const result = await invoke<{ terminal_id: string; worktree_branch: string | null }>(
               'quick_claude',
               {
