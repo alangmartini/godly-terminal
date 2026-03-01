@@ -61,10 +61,13 @@ export interface SessionInfo {
   running: boolean;
 }
 
-/** Default delay before first reconnect attempt (ms). */
+/** Default delay before first reconnect attempt on error (ms). */
 export const STREAM_RECONNECT_BASE_MS = 1000;
-/** Maximum delay between reconnect attempts (ms). */
+/** Maximum delay between reconnect attempts on error (ms). */
 export const STREAM_RECONNECT_MAX_MS = 10_000;
+/** Poll interval for empty successful responses (ms). Short because the
+ *  custom protocol handler is lightweight (drain a buffer). */
+export const STREAM_POLL_INTERVAL_MS = 16;
 /** Number of consecutive failures before the circuit breaker opens. */
 export const CIRCUIT_BREAKER_THRESHOLD = 5;
 /** Probe interval when circuit breaker is open (ms). */
@@ -343,7 +346,7 @@ class TerminalService {
     while (!signal.aborted) {
       try {
         const response = await fetch(
-          `stream://localhost/terminal-diff/${sessionId}`,
+          `http://stream.localhost/terminal-diff/${sessionId}`,
           { signal },
         );
 
@@ -353,6 +356,7 @@ class TerminalService {
 
         delay = STREAM_RECONNECT_BASE_MS;
 
+        let gotData = false;
         const reader = response.body.getReader();
         const onAbort = () => reader.cancel();
         signal.addEventListener('abort', onAbort, { once: true });
@@ -361,6 +365,7 @@ class TerminalService {
             const { done, value } = await reader.read();
             if (done) break;
             if (value && value.length > 0) {
+              gotData = true;
               const diffs = decodeAllDiffs(value);
               for (const diff of diffs) {
                 onDiff(diff);
@@ -371,6 +376,18 @@ class TerminalService {
           signal.removeEventListener('abort', onAbort);
           reader.releaseLock();
         }
+
+        // Successful response with data — reconnect immediately for low latency.
+        if (gotData) continue;
+
+        // Empty successful response — short poll interval, no backoff.
+        if (signal.aborted) break;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, STREAM_POLL_INTERVAL_MS);
+          const cleanup = () => { clearTimeout(timer); resolve(); };
+          signal.addEventListener('abort', cleanup, { once: true });
+        });
+        continue;
       } catch (err: unknown) {
         if (signal.aborted) break;
 
@@ -382,7 +399,7 @@ class TerminalService {
 
       if (signal.aborted) break;
 
-      // Exponential backoff with jitter
+      // Exponential backoff with jitter (errors only)
       const waitTime = delay + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, waitTime);
@@ -436,7 +453,7 @@ class TerminalService {
     while (!signal.aborted) {
       try {
         const response = await fetch(
-          `stream://localhost/terminal-output/${sessionId}`,
+          `http://stream.localhost/terminal-output/${sessionId}`,
           { signal },
         );
 
@@ -454,6 +471,7 @@ class TerminalService {
         cb.failures = 0;
         cb.open = false;
 
+        let gotData = false;
         const reader = response.body.getReader();
         // Cancel the reader when abort fires so reader.read() resolves
         // instead of hanging forever on a long-lived stream.
@@ -464,6 +482,7 @@ class TerminalService {
             const { done, value } = await reader.read();
             if (done) break;
             if (value && value.length > 0) {
+              gotData = true;
               onData();
             }
           }
@@ -471,6 +490,18 @@ class TerminalService {
           signal.removeEventListener('abort', onAbort);
           reader.releaseLock();
         }
+
+        // Successful response with data — reconnect immediately for low latency.
+        if (gotData) continue;
+
+        // Empty successful response — short poll interval, no backoff.
+        if (signal.aborted) break;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, STREAM_POLL_INTERVAL_MS);
+          const cleanup = () => { clearTimeout(timer); resolve(); };
+          signal.addEventListener('abort', cleanup, { once: true });
+        });
+        continue;
       } catch (err: unknown) {
         if (signal.aborted) break;
 
@@ -491,9 +522,7 @@ class TerminalService {
         );
       }
 
-      // Always wait before reconnecting, whether stream ended cleanly or
-      // with an error. This prevents tight reconnect loops if the server
-      // is restarting or the session was closed.
+      // Error path: wait before reconnecting.
       if (signal.aborted) break;
 
       // In open state, use the probe interval (and support wakeup).
