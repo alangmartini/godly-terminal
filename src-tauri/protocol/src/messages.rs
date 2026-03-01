@@ -9,6 +9,7 @@ use crate::types::{SessionInfo, ShellType};
 #[ts(export)]
 #[serde(tag = "type")]
 pub enum Request {
+    // --- Session lifecycle ---
     CreateSession {
         id: String,
         shell_type: ShellType,
@@ -25,6 +26,11 @@ pub enum Request {
     Detach {
         session_id: String,
     },
+    CloseSession {
+        session_id: String,
+    },
+
+    // --- I/O ---
     Write {
         session_id: String,
         data: Vec<u8>,
@@ -34,19 +40,10 @@ pub enum Request {
         rows: u16,
         cols: u16,
     },
-    CloseSession {
-        session_id: String,
-    },
+
+    // --- Grid/Scrollback ---
     ReadBuffer {
         session_id: String,
-    },
-    GetLastOutputTime {
-        session_id: String,
-    },
-    SearchBuffer {
-        session_id: String,
-        text: String,
-        strip_ansi: bool,
     },
     /// Read the godly-vt grid (parsed terminal state) for a session.
     ReadGrid {
@@ -54,6 +51,10 @@ pub enum Request {
     },
     /// Read rich grid snapshot with per-cell attributes for Canvas2D rendering.
     ReadRichGrid {
+        session_id: String,
+    },
+    /// Read differential rich grid snapshot (only dirty rows since last read).
+    ReadRichGridDiff {
         session_id: String,
     },
     /// Read text between two grid positions (for selection/copy).
@@ -68,10 +69,6 @@ pub enum Request {
         end_col: u16,
         scrollback_offset: usize,
     },
-    /// Read differential rich grid snapshot (only dirty rows since last read).
-    ReadRichGridDiff {
-        session_id: String,
-    },
     /// Set the scrollback viewport offset for a session.
     /// offset=0 means live view, offset>0 scrolls into history.
     SetScrollback {
@@ -84,6 +81,16 @@ pub enum Request {
         session_id: String,
         offset: usize,
     },
+
+    // --- Session state ---
+    GetLastOutputTime {
+        session_id: String,
+    },
+    SearchBuffer {
+        session_id: String,
+        text: String,
+        strip_ansi: bool,
+    },
     /// Pause output streaming for a session (session stays alive, VT parser
     /// keeps running, but no Output/GridDiff events are sent to the client).
     PauseSession {
@@ -93,6 +100,8 @@ pub enum Request {
     ResumeSession {
         session_id: String,
     },
+
+    // --- System ---
     Ping,
 }
 
@@ -101,13 +110,27 @@ pub enum Request {
 #[ts(export)]
 #[serde(tag = "type")]
 pub enum Response {
+    // --- General ---
     Ok,
     Error { message: String },
+
+    // --- Session ---
     SessionCreated { session: SessionInfo },
     SessionList { sessions: Vec<SessionInfo> },
-    Pong,
+
+    // --- Buffer/Grid ---
     /// Initial buffer replay when attaching to a session
     Buffer { session_id: String, data: Vec<u8> },
+    /// Grid snapshot from the godly-vt terminal state engine.
+    Grid { grid: crate::types::GridData },
+    /// Rich grid snapshot with per-cell attributes for Canvas2D rendering.
+    RichGrid { grid: crate::types::RichGridData },
+    /// Differential rich grid snapshot (only changed rows).
+    RichGridDiff { diff: crate::types::RichGridDiff },
+    /// Text extracted from grid between two positions.
+    GridText { text: String },
+
+    // --- Query results ---
     LastOutputTime {
         epoch_ms: u64,
         running: bool,
@@ -117,14 +140,9 @@ pub enum Response {
         input_expected: Option<bool>,
     },
     SearchResult { found: bool, running: bool },
-    /// Grid snapshot from the godly-vt terminal state engine.
-    Grid { grid: crate::types::GridData },
-    /// Rich grid snapshot with per-cell attributes for Canvas2D rendering.
-    RichGrid { grid: crate::types::RichGridData },
-    /// Differential rich grid snapshot (only changed rows).
-    RichGridDiff { diff: crate::types::RichGridDiff },
-    /// Text extracted from grid between two positions.
-    GridText { text: String },
+
+    // --- System ---
+    Pong,
 }
 
 /// Asynchronous events pushed from the daemon to attached clients
