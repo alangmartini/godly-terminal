@@ -381,25 +381,86 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
 
         try {
           const { invoke } = await import('@tauri-apps/api/core');
-          const result = await invoke<{ terminal_id: string; worktree_branch: string | null }>(
-            'quick_claude',
-            {
-              workspaceId: input.workspaceId,
-              prompt: input.prompt,
-              branchName: input.branchName ?? null,
-              skipFetch: true,
-              noWorktree: input.noWorktree ?? false,
-              aiTool: input.aiTool ?? 'claude',
-            }
-          );
 
-          store.addTerminal({
-            id: result.terminal_id,
-            workspaceId: input.workspaceId,
-            name: result.worktree_branch ?? 'Quick Claude',
-            processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
-            order: 0,
-          }, { background: true });
+          if (input.aiTool === 'both') {
+            // Both mode: resolve branch names, invoke twice in parallel, create split
+            let ccBranch: string | null = null;
+            let cBranch: string | null = null;
+
+            if (!input.noWorktree) {
+              const baseName = input.branchName
+                ?? await (async () => {
+                  const { llmGenerateBranchName } = await import('../plugins/smollm2/llm-service');
+                  return llmGenerateBranchName(input.prompt);
+                })();
+              ccBranch = `${baseName}-cc`;
+              cBranch = `${baseName}-c`;
+            }
+
+            const [claudeResult, codexResult] = await Promise.all([
+              invoke<{ terminal_id: string; worktree_branch: string | null }>(
+                'quick_claude',
+                {
+                  workspaceId: input.workspaceId,
+                  prompt: input.prompt,
+                  branchName: ccBranch,
+                  skipFetch: true,
+                  noWorktree: input.noWorktree ?? false,
+                  aiTool: 'claude',
+                }
+              ),
+              invoke<{ terminal_id: string; worktree_branch: string | null }>(
+                'quick_claude',
+                {
+                  workspaceId: input.workspaceId,
+                  prompt: input.prompt,
+                  branchName: cBranch,
+                  skipFetch: true,
+                  noWorktree: input.noWorktree ?? false,
+                  aiTool: 'codex',
+                }
+              ),
+            ]);
+
+            const processName = shellTypeToProcessName(terminalSettingsStore.getDefaultShell());
+            store.addTerminal({
+              id: claudeResult.terminal_id,
+              workspaceId: input.workspaceId,
+              name: claudeResult.worktree_branch ?? 'Claude',
+              processName,
+              order: 0,
+            });
+            store.addTerminal({
+              id: codexResult.terminal_id,
+              workspaceId: input.workspaceId,
+              name: codexResult.worktree_branch ?? 'Codex',
+              processName,
+              order: 0,
+            }, { background: true });
+
+            store.splitTerminalAt(input.workspaceId, claudeResult.terminal_id, codexResult.terminal_id, 'vertical', 0.5);
+          } else {
+            // Single tool mode (claude or codex)
+            const result = await invoke<{ terminal_id: string; worktree_branch: string | null }>(
+              'quick_claude',
+              {
+                workspaceId: input.workspaceId,
+                prompt: input.prompt,
+                branchName: input.branchName ?? null,
+                skipFetch: true,
+                noWorktree: input.noWorktree ?? false,
+                aiTool: input.aiTool ?? 'claude',
+              }
+            );
+
+            store.addTerminal({
+              id: result.terminal_id,
+              workspaceId: input.workspaceId,
+              name: result.worktree_branch ?? 'Quick Claude',
+              processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
+              order: 0,
+            }, { background: true });
+          }
         } catch (error) {
           console.error('[App] Quick Claude failed:', error);
         }
