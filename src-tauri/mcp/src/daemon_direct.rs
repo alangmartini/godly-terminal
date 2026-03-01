@@ -596,6 +596,132 @@ impl Backend for DaemonDirectBackend {
                 })
             }
 
+            McpRequest::ScrollPageUp { terminal_id } => {
+                let tid = terminal_id.as_ref().ok_or(
+                    "terminal_id is required in daemon-direct mode (no active terminal available)",
+                )?;
+                let resp = self.daemon_request(&Request::ReadRichGrid {
+                    session_id: tid.clone(),
+                })?;
+                match resp {
+                    Response::RichGrid { grid } => {
+                        let viewport_rows = grid.dimensions.rows as usize;
+                        let new_offset =
+                            (grid.scrollback_offset + viewport_rows).min(grid.total_scrollback);
+                        let set_resp = self.daemon_request(&Request::SetScrollback {
+                            session_id: tid.clone(),
+                            offset: new_offset,
+                        })?;
+                        match set_resp {
+                            Response::Ok => Ok(McpResponse::Ok),
+                            Response::Error { message } => Ok(McpResponse::Error { message }),
+                            other => Ok(McpResponse::Error {
+                                message: format!("Unexpected response: {:?}", other),
+                            }),
+                        }
+                    }
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
+            McpRequest::ScrollPageDown { terminal_id } => {
+                let tid = terminal_id.as_ref().ok_or(
+                    "terminal_id is required in daemon-direct mode (no active terminal available)",
+                )?;
+                let resp = self.daemon_request(&Request::ReadRichGrid {
+                    session_id: tid.clone(),
+                })?;
+                match resp {
+                    Response::RichGrid { grid } => {
+                        let viewport_rows = grid.dimensions.rows as usize;
+                        let new_offset = grid.scrollback_offset.saturating_sub(viewport_rows);
+                        let set_resp = self.daemon_request(&Request::SetScrollback {
+                            session_id: tid.clone(),
+                            offset: new_offset,
+                        })?;
+                        match set_resp {
+                            Response::Ok => Ok(McpResponse::Ok),
+                            Response::Error { message } => Ok(McpResponse::Error { message }),
+                            other => Ok(McpResponse::Error {
+                                message: format!("Unexpected response: {:?}", other),
+                            }),
+                        }
+                    }
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
+            McpRequest::ScrollToTop { terminal_id } => {
+                let tid = terminal_id.as_ref().ok_or(
+                    "terminal_id is required in daemon-direct mode (no active terminal available)",
+                )?;
+                let resp = self.daemon_request(&Request::ReadRichGrid {
+                    session_id: tid.clone(),
+                })?;
+                match resp {
+                    Response::RichGrid { grid } => {
+                        let set_resp = self.daemon_request(&Request::SetScrollback {
+                            session_id: tid.clone(),
+                            offset: grid.total_scrollback,
+                        })?;
+                        match set_resp {
+                            Response::Ok => Ok(McpResponse::Ok),
+                            Response::Error { message } => Ok(McpResponse::Error { message }),
+                            other => Ok(McpResponse::Error {
+                                message: format!("Unexpected response: {:?}", other),
+                            }),
+                        }
+                    }
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
+            McpRequest::ScrollToBottom { terminal_id } => {
+                let tid = terminal_id.as_ref().ok_or(
+                    "terminal_id is required in daemon-direct mode (no active terminal available)",
+                )?;
+                let set_resp = self.daemon_request(&Request::SetScrollback {
+                    session_id: tid.clone(),
+                    offset: 0,
+                })?;
+                match set_resp {
+                    Response::Ok => Ok(McpResponse::Ok),
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
+            McpRequest::GetScrollPosition { terminal_id } => {
+                let tid = terminal_id.as_ref().ok_or(
+                    "terminal_id is required in daemon-direct mode (no active terminal available)",
+                )?;
+                let resp = self.daemon_request(&Request::ReadRichGrid {
+                    session_id: tid.clone(),
+                })?;
+                match resp {
+                    Response::RichGrid { grid } => Ok(McpResponse::ScrollPosition {
+                        offset: grid.scrollback_offset as u32,
+                        total_scrollback: grid.total_scrollback as u32,
+                        viewport_rows: grid.dimensions.rows as u32,
+                    }),
+                    Response::Error { message } => Ok(McpResponse::Error { message }),
+                    other => Ok(McpResponse::Error {
+                        message: format!("Unexpected response: {:?}", other),
+                    }),
+                }
+            }
+
             // App-only tools that require Tauri
             McpRequest::ListWorkspaces => Ok(Self::app_only_error("list_workspaces")),
             McpRequest::CreateWorkspace { .. } => Ok(Self::app_only_error("create_workspace")),

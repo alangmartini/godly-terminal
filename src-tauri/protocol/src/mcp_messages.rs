@@ -187,6 +187,28 @@ pub enum McpRequest {
         script: String,
     },
 
+    // Scrollback control
+    ScrollPageUp {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+    ScrollPageDown {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+    ScrollToTop {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+    ScrollToBottom {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+    GetScrollPosition {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+
     // Screenshot capture
     CaptureScreenshot {
         #[serde(default)]
@@ -301,6 +323,11 @@ pub enum McpResponse {
     JsResult {
         result: Option<String>,
         error: Option<String>,
+    },
+    ScrollPosition {
+        offset: u32,
+        total_scrollback: u32,
+        viewport_rows: u32,
     },
     Screenshot {
         path: String,
