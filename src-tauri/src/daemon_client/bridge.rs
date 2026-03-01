@@ -8,8 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter};
 
-use godly_protocol::{DaemonMessage, Event, Request, Response, read_daemon_message, write_request};
-use godly_protocol::binary_diff::encode_grid_diff_into;
+use godly_protocol::{DaemonMessage, Event, Request, Response, ReadResult, read_daemon_message_ext, write_request};
 
 // ── Per-session output stream registry ──────────────────────────────────
 //
@@ -712,8 +711,23 @@ impl DaemonBridge {
                                     PeekResult::Data => {
                                         update_phase(&health, PHASE_READ);
                                         let read_start = Instant::now();
-                                        match read_daemon_message(&mut reader) {
-                                            Ok(Some(DaemonMessage::Event(event))) => {
+                                        match read_daemon_message_ext(&mut reader) {
+                                            // Zero-copy GridDiff during response-wait
+                                            Ok(ReadResult::RawGridDiff { session_id, binary_diff }) => {
+                                                total_events += 1;
+                                                if let Some(ref diff_reg) = diff_registry {
+                                                    diff_reg.push(&session_id, &binary_diff);
+                                                }
+                                                update_phase(&health, PHASE_EMIT);
+                                                if !emitter.try_send(EmitPayload::TerminalOutput {
+                                                    terminal_id: session_id,
+                                                }) {
+                                                    dropped_events += 1;
+                                                    blog!("DROPPED EVENT (channel full, total dropped={})", dropped_events);
+                                                }
+                                                continue;
+                                            }
+                                            Ok(ReadResult::Message(DaemonMessage::Event(event))) => {
                                                 total_events += 1;
 
                                                 // Push to stream registries even during response-wait
@@ -723,10 +737,8 @@ impl DaemonBridge {
                                                     }
                                                 }
                                                 if let Some(ref diff_reg) = diff_registry {
-                                                    if let Event::GridDiff { ref session_id, ref diff } = event {
-                                                        let mut encode_buf = Vec::new();
-                                                        encode_grid_diff_into(diff, &mut encode_buf);
-                                                        diff_reg.push(session_id, &encode_buf);
+                                                    if let Event::SessionClosed { ref session_id, .. } = event {
+                                                        diff_reg.remove(session_id);
                                                     }
                                                 }
 
@@ -739,7 +751,7 @@ impl DaemonBridge {
                                                 // Keep reading — response hasn't arrived yet
                                                 continue;
                                             }
-                                            Ok(Some(DaemonMessage::Response(response))) => {
+                                            Ok(ReadResult::Message(DaemonMessage::Response(response))) => {
                                                 total_responses += 1;
                                                 if orphan_responses > 0 {
                                                     orphan_responses -= 1;
@@ -751,7 +763,7 @@ impl DaemonBridge {
                                                 }
                                                 break;
                                             }
-                                            Ok(None) => {
+                                            Ok(ReadResult::Eof) => {
                                                 eprintln!("[bridge] Daemon connection closed");
                                                 blog!("Daemon connection closed (EOF)");
                                                 running.store(false, Ordering::Relaxed);
@@ -826,8 +838,31 @@ impl DaemonBridge {
                         PeekResult::Data => {
                             update_phase(&health, PHASE_READ);
                             let read_start = Instant::now();
-                            match read_daemon_message(&mut reader) {
-                                Ok(Some(DaemonMessage::Event(event))) => {
+                            match read_daemon_message_ext(&mut reader) {
+                                // Zero-copy path: binary GridDiff arrives pre-encoded.
+                                // Push raw bytes directly to DiffStreamRegistry —
+                                // no deserialization, no re-encoding.
+                                Ok(ReadResult::RawGridDiff { session_id, binary_diff }) => {
+                                    total_events += 1;
+                                    events_this_iteration += 1;
+                                    did_work = true;
+
+                                    if let Some(ref diff_reg) = diff_registry {
+                                        diff_reg.push(&session_id, &binary_diff);
+                                    }
+
+                                    // Emit lightweight signal — no diff data.
+                                    // The binary diff stream is the primary rendering path;
+                                    // the Tauri event just triggers the fallback pull path.
+                                    update_phase(&health, PHASE_EMIT);
+                                    if !emitter.try_send(EmitPayload::TerminalOutput {
+                                        terminal_id: session_id,
+                                    }) {
+                                        dropped_events += 1;
+                                        blog!("DROPPED EVENT (channel full, total dropped={})", dropped_events);
+                                    }
+                                }
+                                Ok(ReadResult::Message(DaemonMessage::Event(event))) => {
                                     total_events += 1;
                                     events_this_iteration += 1;
                                     did_work = true;
@@ -847,19 +882,10 @@ impl DaemonBridge {
                                         }
                                     }
 
-                                    // Binary-encode grid diffs and push to the diff stream
-                                    // registry for the stream://localhost/terminal-diff/ protocol.
+                                    // Clean up diff stream registry on session close.
                                     if let Some(ref diff_reg) = diff_registry {
-                                        match &event {
-                                            Event::GridDiff { session_id, diff } => {
-                                                let mut encode_buf = Vec::new();
-                                                encode_grid_diff_into(diff, &mut encode_buf);
-                                                diff_reg.push(session_id, &encode_buf);
-                                            }
-                                            Event::SessionClosed { session_id, .. } => {
-                                                diff_reg.remove(session_id);
-                                            }
-                                            _ => {}
+                                        if let Event::SessionClosed { session_id, .. } = &event {
+                                            diff_reg.remove(session_id);
                                         }
                                     }
 
@@ -870,7 +896,7 @@ impl DaemonBridge {
                                         blog!("DROPPED EVENT (channel full, total dropped={})", dropped_events);
                                     }
                                 }
-                                Ok(Some(DaemonMessage::Response(response))) => {
+                                Ok(ReadResult::Message(DaemonMessage::Response(response))) => {
                                     total_responses += 1;
                                     did_work = true;
                                     if orphan_responses > 0 {
@@ -885,7 +911,7 @@ impl DaemonBridge {
                                     }
                                     break;
                                 }
-                                Ok(None) => {
+                                Ok(ReadResult::Eof) => {
                                     eprintln!("[bridge] Daemon connection closed");
                                     blog!("Daemon connection closed (EOF)");
                                     running.store(false, Ordering::Relaxed);

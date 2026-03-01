@@ -2,6 +2,7 @@ use std::io;
 
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::binary_diff::{decode_grid_diff, encode_grid_diff_into};
 use crate::messages::{DaemonMessage, Event, Request, Response};
 
 // ── Binary frame type tags ──────────────────────────────────────────────
@@ -11,6 +12,7 @@ use crate::messages::{DaemonMessage, Event, Request, Response};
 const TAG_EVENT_OUTPUT: u8 = 0x01;
 const TAG_REQUEST_WRITE: u8 = 0x02;
 const TAG_RESPONSE_BUFFER: u8 = 0x03;
+const TAG_EVENT_GRID_DIFF: u8 = 0x04;
 
 // ── Shim binary frame tags ──────────────────────────────────────────────
 // Used for daemon <-> pty-shim communication. Different tag range (0x1x)
@@ -116,11 +118,19 @@ pub fn read_message<R: io::Read, T: DeserializeOwned>(reader: &mut R) -> io::Res
 ///
 /// - `Event::Output` → binary (tag 0x01)
 /// - `Response::Buffer` → binary (tag 0x03)
+/// - `Event::GridDiff` → binary (tag 0x04) — compact binary diff, ~10x smaller than JSON
 /// - Everything else → JSON
 pub fn write_daemon_message<W: io::Write>(writer: &mut W, msg: &DaemonMessage) -> io::Result<()> {
     match msg {
         DaemonMessage::Event(Event::Output { session_id, data }) => {
             let frame = encode_binary_frame(TAG_EVENT_OUTPUT, session_id, data);
+            write_length_prefixed(writer, &frame)
+        }
+        DaemonMessage::Event(Event::GridDiff { session_id, diff }) => {
+            // Binary-encode the diff, then wrap in our binary frame format.
+            let mut diff_bytes = Vec::new();
+            encode_grid_diff_into(diff, &mut diff_bytes);
+            let frame = encode_binary_frame(TAG_EVENT_GRID_DIFF, session_id, &diff_bytes);
             write_length_prefixed(writer, &frame)
         }
         DaemonMessage::Response(Response::Buffer { session_id, data }) => {
@@ -131,14 +141,36 @@ pub fn write_daemon_message<W: io::Write>(writer: &mut W, msg: &DaemonMessage) -
     }
 }
 
-/// Read a DaemonMessage, auto-detecting binary vs JSON by first byte.
+/// Result of reading a daemon message with zero-copy support for binary diffs.
 ///
-/// - First byte == 0x7B ('{') → JSON
-/// - First byte is a type tag → binary frame
-pub fn read_daemon_message<R: io::Read>(reader: &mut R) -> io::Result<Option<DaemonMessage>> {
+/// The bridge uses this to forward binary-encoded GridDiff frames directly
+/// to the DiffStreamRegistry without deserializing + re-encoding.
+#[derive(Debug)]
+pub enum ReadResult {
+    /// A fully parsed DaemonMessage.
+    Message(DaemonMessage),
+    /// A binary-encoded GridDiff frame. Contains the session_id and raw binary
+    /// diff bytes (already in the compact `encode_grid_diff` format) that can
+    /// be pushed directly to the diff stream registry.
+    RawGridDiff {
+        session_id: String,
+        binary_diff: Vec<u8>,
+    },
+    /// End of stream.
+    Eof,
+}
+
+/// Read a DaemonMessage with zero-copy support for binary GridDiff frames.
+///
+/// Returns `ReadResult::RawGridDiff` for GridDiff events so the bridge can
+/// push the pre-encoded bytes directly to the DiffStreamRegistry without
+/// deserializing and re-encoding.
+///
+/// For all other message types, returns `ReadResult::Message`.
+pub fn read_daemon_message_ext<R: io::Read>(reader: &mut R) -> io::Result<ReadResult> {
     let buf = match read_length_prefixed(reader)? {
         Some(buf) => buf,
-        None => return Ok(None),
+        None => return Ok(ReadResult::Eof),
     };
 
     if buf.is_empty() {
@@ -152,24 +184,63 @@ pub fn read_daemon_message<R: io::Read>(reader: &mut R) -> io::Result<Option<Dae
         // JSON message
         let msg = serde_json::from_slice(&buf)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        Ok(Some(msg))
+        Ok(ReadResult::Message(msg))
     } else {
         // Binary frame
         let (tag, session_id, data) = decode_binary_frame(&buf)?;
         match tag {
-            TAG_EVENT_OUTPUT => Ok(Some(DaemonMessage::Event(Event::Output {
+            TAG_EVENT_OUTPUT => Ok(ReadResult::Message(DaemonMessage::Event(Event::Output {
                 session_id: session_id.to_string(),
                 data: data.to_vec(),
             }))),
-            TAG_RESPONSE_BUFFER => Ok(Some(DaemonMessage::Response(Response::Buffer {
-                session_id: session_id.to_string(),
-                data: data.to_vec(),
-            }))),
+            TAG_EVENT_GRID_DIFF => {
+                // Return raw binary diff bytes for zero-copy forwarding
+                Ok(ReadResult::RawGridDiff {
+                    session_id: session_id.to_string(),
+                    binary_diff: data.to_vec(),
+                })
+            }
+            TAG_RESPONSE_BUFFER => Ok(ReadResult::Message(DaemonMessage::Response(
+                Response::Buffer {
+                    session_id: session_id.to_string(),
+                    data: data.to_vec(),
+                },
+            ))),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Unknown daemon binary frame tag: 0x{:02X}", tag),
             )),
         }
+    }
+}
+
+/// Read a DaemonMessage, auto-detecting binary vs JSON by first byte.
+///
+/// - First byte == 0x7B ('{') → JSON
+/// - First byte is a type tag → binary frame
+///
+/// For GridDiff events (tag 0x04), this fully decodes the binary diff.
+/// Use `read_daemon_message_ext` instead if you need zero-copy forwarding.
+pub fn read_daemon_message<R: io::Read>(reader: &mut R) -> io::Result<Option<DaemonMessage>> {
+    match read_daemon_message_ext(reader)? {
+        ReadResult::Message(msg) => Ok(Some(msg)),
+        ReadResult::RawGridDiff {
+            session_id,
+            binary_diff,
+        } => {
+            // Decode the binary diff into a full RichGridDiff
+            let (diff, _) = decode_grid_diff(&binary_diff).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to decode binary GridDiff: {}", e),
+                )
+            })?;
+            Ok(Some(DaemonMessage::Event(Event::GridDiff {
+                session_id,
+                diff,
+            })))
+        }
+        ReadResult::Eof => Ok(None),
     }
 }
 
@@ -332,6 +403,158 @@ mod tests {
             }
             other => panic!("Expected Event::Output, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn binary_grid_diff_roundtrip() {
+        use crate::types::{CursorState, GridDimensions, RichGridCell, RichGridDiff, RichGridRow};
+
+        let diff = RichGridDiff {
+            dirty_rows: vec![(
+                3,
+                RichGridRow {
+                    cells: vec![
+                        RichGridCell {
+                            content: "A".into(),
+                            fg: "#cd3131".into(),
+                            bg: "default".into(),
+                            bold: true,
+                            dim: false,
+                            italic: false,
+                            underline: false,
+                            inverse: false,
+                            wide: false,
+                            wide_continuation: false,
+                        },
+                        RichGridCell {
+                            content: " ".into(),
+                            fg: "default".into(),
+                            bg: "#1e1e1e".into(),
+                            bold: false,
+                            dim: false,
+                            italic: true,
+                            underline: false,
+                            inverse: false,
+                            wide: false,
+                            wide_continuation: false,
+                        },
+                    ],
+                    wrapped: false,
+                },
+            )],
+            cursor: CursorState { row: 3, col: 1 },
+            dimensions: GridDimensions { rows: 24, cols: 80 },
+            alternate_screen: false,
+            cursor_hidden: false,
+            title: "test".into(),
+            scrollback_offset: 10,
+            total_scrollback: 500,
+            full_repaint: false,
+        };
+        let msg = DaemonMessage::Event(Event::GridDiff {
+            session_id: "sess-diff".into(),
+            diff: diff.clone(),
+        });
+
+        let mut buf = Vec::new();
+        write_daemon_message(&mut buf, &msg).unwrap();
+
+        // Verify it's using binary framing (first byte after length prefix is NOT '{')
+        assert_ne!(buf[4], 0x7B, "GridDiff should use binary framing, not JSON");
+
+        // Test read_daemon_message (full decode)
+        let mut cursor = Cursor::new(buf.clone());
+        let result = read_daemon_message(&mut cursor).unwrap().unwrap();
+        match result {
+            DaemonMessage::Event(Event::GridDiff { session_id, diff: decoded }) => {
+                assert_eq!(session_id, "sess-diff");
+                assert_eq!(decoded.dirty_rows.len(), 1);
+                assert_eq!(decoded.dirty_rows[0].0, 3);
+                assert_eq!(decoded.dirty_rows[0].1.cells.len(), 2);
+                assert_eq!(decoded.dirty_rows[0].1.cells[0].content, "A");
+                assert!(decoded.dirty_rows[0].1.cells[0].bold);
+                assert_eq!(decoded.cursor.row, 3);
+                assert_eq!(decoded.cursor.col, 1);
+                assert_eq!(decoded.title, "test");
+                assert_eq!(decoded.scrollback_offset, 10);
+                assert_eq!(decoded.total_scrollback, 500);
+            }
+            other => panic!("Expected Event::GridDiff, got {:?}", other),
+        }
+
+        // Test read_daemon_message_ext (raw bytes for zero-copy)
+        let mut cursor = Cursor::new(buf.clone());
+        match read_daemon_message_ext(&mut cursor).unwrap() {
+            ReadResult::RawGridDiff { session_id, binary_diff } => {
+                assert_eq!(session_id, "sess-diff");
+                assert!(!binary_diff.is_empty());
+                // Verify the binary diff can be decoded
+                let (decoded, _) = decode_grid_diff(&binary_diff).unwrap();
+                assert_eq!(decoded.dirty_rows.len(), 1);
+            }
+            other => panic!("Expected RawGridDiff, got {:?}", other),
+        }
+
+        // Verify binary is much smaller than JSON would be
+        let mut json_buf = Vec::new();
+        write_message(&mut json_buf, &DaemonMessage::Event(Event::GridDiff {
+            session_id: "sess-diff".into(),
+            diff,
+        })).unwrap();
+        assert!(
+            buf.len() < json_buf.len(),
+            "Binary ({} bytes) should be smaller than JSON ({} bytes)",
+            buf.len(),
+            json_buf.len()
+        );
+    }
+
+    #[test]
+    fn binary_grid_diff_in_mixed_sequence() {
+        use crate::types::{CursorState, GridDimensions, RichGridDiff};
+
+        let diff = RichGridDiff {
+            dirty_rows: vec![],
+            cursor: CursorState { row: 0, col: 0 },
+            dimensions: GridDimensions { rows: 24, cols: 80 },
+            alternate_screen: false,
+            cursor_hidden: false,
+            title: String::new(),
+            scrollback_offset: 0,
+            total_scrollback: 0,
+            full_repaint: false,
+        };
+
+        let mut buf = Vec::new();
+        // Output (binary tag 0x01)
+        write_daemon_message(&mut buf, &DaemonMessage::Event(Event::Output {
+            session_id: "s1".into(),
+            data: vec![65],
+        })).unwrap();
+        // GridDiff (binary tag 0x04)
+        write_daemon_message(&mut buf, &DaemonMessage::Event(Event::GridDiff {
+            session_id: "s1".into(),
+            diff: diff.clone(),
+        })).unwrap();
+        // JSON (Pong)
+        write_daemon_message(&mut buf, &DaemonMessage::Response(Response::Pong)).unwrap();
+
+        let mut cursor = Cursor::new(buf);
+
+        // Read Output
+        let m1 = read_daemon_message(&mut cursor).unwrap().unwrap();
+        assert!(matches!(m1, DaemonMessage::Event(Event::Output { .. })));
+
+        // Read GridDiff
+        let m2 = read_daemon_message(&mut cursor).unwrap().unwrap();
+        assert!(matches!(m2, DaemonMessage::Event(Event::GridDiff { .. })));
+
+        // Read Pong
+        let m3 = read_daemon_message(&mut cursor).unwrap().unwrap();
+        assert!(matches!(m3, DaemonMessage::Response(Response::Pong)));
+
+        // EOF
+        assert!(read_daemon_message(&mut cursor).unwrap().is_none());
     }
 
     #[test]
