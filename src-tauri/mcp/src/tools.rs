@@ -144,6 +144,67 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "rename_workspace",
+                "description": "Rename a workspace",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to rename"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "New name for the workspace"
+                        }
+                    },
+                    "required": ["workspace_id", "name"]
+                }
+            },
+            {
+                "name": "reorder_workspaces",
+                "description": "Reorder workspaces in the sidebar. Pass the full list of workspace IDs in the desired order. Unknown IDs are ignored; any existing workspaces not in the list are appended at the end.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Ordered list of workspace IDs"
+                        }
+                    },
+                    "required": ["workspace_ids"]
+                }
+            },
+            {
+                "name": "get_workspace_details",
+                "description": "Get detailed information about a workspace including name, folder path, worktree mode, claude code mode, and terminal count.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to query"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "open_in_explorer",
+                "description": "Open a file or folder path in Windows Explorer.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "File or folder path to open in Explorer"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            },
+            {
                 "name": "move_terminal_to_workspace",
                 "description": "Move a terminal to a different workspace",
                 "inputSchema": {
@@ -1077,6 +1138,52 @@ pub fn call_tool(
             McpRequest::SwitchWorkspace { workspace_id }
         }
 
+        "rename_workspace" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            let name = args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing name")?
+                .to_string();
+            McpRequest::RenameWorkspace { workspace_id, name }
+        }
+
+        "reorder_workspaces" => {
+            let workspace_ids: Vec<String> = args
+                .get("workspace_ids")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing workspace_ids array")?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            if workspace_ids.is_empty() {
+                return Err("workspace_ids array must not be empty".to_string());
+            }
+            McpRequest::ReorderWorkspaces { workspace_ids }
+        }
+
+        "get_workspace_details" => {
+            let workspace_id = args
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing workspace_id")?
+                .to_string();
+            McpRequest::GetWorkspaceDetails { workspace_id }
+        }
+
+        "open_in_explorer" => {
+            let path = args
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing path")?
+                .to_string();
+            McpRequest::OpenInExplorer { path }
+        }
+
         "move_terminal_to_workspace" => {
             let terminal_id = args
                 .get("terminal_id")
@@ -1675,6 +1782,19 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
         McpResponse::TerminalOutput { content } => Ok(json!({
             "content": content,
+        })),
+        McpResponse::WorkspaceDetails {
+            name,
+            folder_path,
+            worktree_mode,
+            claude_code_mode,
+            terminal_count,
+        } => Ok(json!({
+            "name": name,
+            "folder_path": folder_path,
+            "worktree_mode": worktree_mode,
+            "claude_code_mode": claude_code_mode,
+            "terminal_count": terminal_count,
         })),
         McpResponse::ActiveWorkspace { workspace } => match workspace {
             Some(w) => Ok(json!({
