@@ -47,7 +47,7 @@ describe('TabBar add-button overlap with many tabs', () => {
       tabOrder: [],
       shellType: { type: 'windows' },
       worktreeMode: false,
-      claudeCodeMode: false,
+      aiToolMode: 'none',
     });
 
     store.setActiveWorkspace('ws-1');

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
 #[allow(deprecated)]
-use crate::state::{AppState, ShellType, SplitView, Workspace};
+use crate::state::{AiToolMode, AppState, ShellType, SplitView, Workspace};
 
 #[tauri::command]
 pub fn create_workspace(
@@ -26,7 +26,7 @@ pub fn create_workspace(
         tab_order: Vec::new(),
         shell_type: shell_type.unwrap_or_default(),
         worktree_mode: false,
-        claude_code_mode: false,
+        ai_tool_mode: AiToolMode::None,
     };
 
     state.add_workspace(workspace);

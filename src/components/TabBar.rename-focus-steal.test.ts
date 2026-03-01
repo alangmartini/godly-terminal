@@ -48,7 +48,7 @@ describe('TabBar rename focus stealing', () => {
       tabOrder: [],
       shellType: { type: 'windows' },
       worktreeMode: false,
-      claudeCodeMode: false,
+      aiToolMode: 'none',
     });
 
     store.setActiveWorkspace('ws-1');

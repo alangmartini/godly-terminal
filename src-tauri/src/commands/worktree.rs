@@ -18,13 +18,13 @@ pub fn toggle_worktree_mode(
 }
 
 #[tauri::command]
-pub fn toggle_claude_code_mode(
+pub fn set_ai_tool_mode(
     workspace_id: String,
-    enabled: bool,
+    mode: crate::state::AiToolMode,
     state: State<Arc<AppState>>,
     auto_save: State<Arc<AutoSaveManager>>,
 ) -> Result<(), String> {
-    state.update_workspace_claude_code_mode(&workspace_id, enabled);
+    state.update_workspace_ai_tool_mode(&workspace_id, mode);
     auto_save.mark_dirty();
     Ok(())
 }
