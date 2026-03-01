@@ -1,5 +1,6 @@
 import { App } from './components/App';
 import { store } from './state/store';
+import { themeStore } from './state/theme-store';
 import { initLogger } from './utils/Logger';
 import { initPlugins } from './plugins/index';
 
@@ -7,6 +8,7 @@ initLogger();
 
 // Expose store globally for MCP execute_js tool
 (window as any).__STORE__ = store;
+(window as any).__THEME_STORE__ = themeStore;
 
 // Prevent WebView2 native zoom on Ctrl+scroll/keyboard everywhere in the app.
 // The terminal canvas has its own Ctrl+scroll handler for font-size zoom, but

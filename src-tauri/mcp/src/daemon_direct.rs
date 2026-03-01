@@ -631,6 +631,9 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::ListThemes => Ok(Self::app_only_error("list_themes")),
+            McpRequest::GetActiveTheme => Ok(Self::app_only_error("get_active_theme")),
+            McpRequest::SetTheme { .. } => Ok(Self::app_only_error("set_theme")),
         }
     }
 

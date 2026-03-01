@@ -1798,6 +1798,108 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        // === Theme management ===
+
+        McpRequest::ListThemes => {
+            let js_req = McpRequest::ExecuteJs {
+                script: r#"
+                    const store = window.__THEME_STORE__;
+                    if (!store) return JSON.stringify({ error: '__THEME_STORE__ not found' });
+                    const all = store.getAllThemes();
+                    const active = store.getActiveTheme();
+                    return JSON.stringify({
+                        themes: all.map(t => t.name),
+                        active: active.name,
+                    });
+                "#.to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result: Some(json_str), .. } => {
+                    match serde_json::from_str::<serde_json::Value>(&json_str) {
+                        Ok(val) => {
+                            if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                                return McpResponse::Error { message: err.to_string() };
+                            }
+                            let themes = val.get("themes")
+                                .and_then(|t| t.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                .unwrap_or_default();
+                            let active = val.get("active")
+                                .and_then(|a| a.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            McpResponse::ThemeList { themes, active }
+                        }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse theme list: {}", e),
+                        },
+                    }
+                }
+                McpResponse::JsResult { result: None, .. } => McpResponse::Error {
+                    message: "Theme list returned no result".to_string(),
+                },
+                other => other,
+            }
+        }
+
+        McpRequest::GetActiveTheme => {
+            let js_req = McpRequest::ExecuteJs {
+                script: r#"
+                    const store = window.__THEME_STORE__;
+                    if (!store) return JSON.stringify({ error: '__THEME_STORE__ not found' });
+                    const active = store.getActiveTheme();
+                    return JSON.stringify({ id: active.id, name: active.name });
+                "#.to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result, .. } => {
+                    McpResponse::JsResult { result, error: None }
+                }
+                other => other,
+            }
+        }
+
+        McpRequest::SetTheme { theme_name } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    r#"
+                    const store = window.__THEME_STORE__;
+                    if (!store) return JSON.stringify({{ error: '__THEME_STORE__ not found' }});
+                    const all = store.getAllThemes();
+                    const match = all.find(t => t.name === '{}' || t.id === '{}');
+                    if (!match) return JSON.stringify({{ error: 'Theme not found: {}' }});
+                    store.setActiveTheme(match.id);
+                    return JSON.stringify({{ success: true, active: match.name }});
+                    "#,
+                    theme_name.replace('\'', "\\'"),
+                    theme_name.replace('\'', "\\'"),
+                    theme_name.replace('\'', "\\'"),
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result: Some(json_str), .. } => {
+                    match serde_json::from_str::<serde_json::Value>(&json_str) {
+                        Ok(val) => {
+                            if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                                return McpResponse::Error { message: err.to_string() };
+                            }
+                            McpResponse::Ok
+                        }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse set_theme result: {}", e),
+                        },
+                    }
+                }
+                McpResponse::JsResult { result: None, .. } => McpResponse::Error {
+                    message: "set_theme returned no result".to_string(),
+                },
+                other => other,
+            }
+        }
+
         // === JS bridge ===
 
         McpRequest::ExecuteJs { script } => {
