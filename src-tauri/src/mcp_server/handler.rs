@@ -2131,6 +2131,7 @@ pub fn handle_mcp_request(
             }
         }
 
+
         McpRequest::NextTab { workspace_id } => {
             let ws_id = workspace_id
                 .clone()
@@ -2140,9 +2141,20 @@ pub fn handle_mcp_request(
                 None => {
                     return McpResponse::Error {
                         message: "No workspace_id provided and no active workspace".to_string(),
+
+        McpRequest::OpenSettings { tab } => {
+            use tauri::Manager;
+
+            let window = match app_handle.get_webview_window("main") {
+                Some(w) => w,
+                None => {
+                    return McpResponse::Error {
+                        message: "Main window not found".to_string(),
+
                     };
                 }
             };
+
 
             let js_req = McpRequest::ExecuteJs {
                 script: format!(
@@ -2242,6 +2254,60 @@ pub fn handle_mcp_request(
                     error: Some(e), ..
                 } => McpResponse::Error { message: e },
                 _ => McpResponse::Ok,
+
+            // Build JS to open the settings dialog, optionally selecting a tab
+            let tab_js = if let Some(tab_name) = tab {
+                format!(
+                    r#"
+                    // Set the tab in localStorage so the dialog opens to it
+                    try {{
+                        const key = 'godly-settings-tab-order';
+                        const raw = localStorage.getItem(key);
+                        if (raw) {{
+                            const order = JSON.parse(raw);
+                            const idx = order.indexOf('{tab_name}');
+                            if (idx > 0) {{
+                                order.splice(idx, 1);
+                                order.unshift('{tab_name}');
+                                localStorage.setItem(key, JSON.stringify(order));
+                            }}
+                        }}
+                    }} catch (e) {{}}
+                    "#
+                )
+            } else {
+                String::new()
+            };
+
+            let script = format!(
+                r#"(async () => {{
+                    {tab_js}
+                    const {{ showSettingsDialog }} = await import('/src/components/SettingsDialog.ts');
+                    showSettingsDialog();
+                }})();"#
+            );
+
+            let _ = window.eval(&script);
+            McpResponse::Ok
+        }
+
+        McpRequest::SaveLayout => {
+            auto_save.mark_dirty();
+            McpResponse::Ok
+        }
+
+        McpRequest::GetAppInfo => {
+            let version = env!("CARGO_PKG_VERSION").to_string();
+            let workspace_count = app_state.workspaces.read().len();
+            let terminal_count = app_state.terminals.read().len();
+            let daemon_connected = daemon.ping().is_ok();
+
+            McpResponse::AppInfo {
+                version,
+                workspace_count,
+                terminal_count,
+                daemon_connected,
+
             }
         }
 

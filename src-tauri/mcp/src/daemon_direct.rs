@@ -631,6 +631,7 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+
             McpRequest::NextTab { .. } => Ok(Self::app_only_error("next_tab")),
             McpRequest::PreviousTab { .. } => Ok(Self::app_only_error("previous_tab")),
             McpRequest::GoToTab { .. } => Ok(Self::app_only_error("go_to_tab")),
@@ -658,6 +659,11 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ListMutePatterns => {
                 Ok(Self::app_only_error("list_mute_patterns"))
             }
+
+            McpRequest::OpenSettings { .. } => Ok(Self::app_only_error("open_settings")),
+            McpRequest::SaveLayout => Ok(Self::app_only_error("save_layout")),
+            McpRequest::GetAppInfo => Ok(Self::app_only_error("get_app_info")),
+
         }
     }
 
