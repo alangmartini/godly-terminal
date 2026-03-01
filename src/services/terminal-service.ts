@@ -343,7 +343,7 @@ class TerminalService {
     while (!signal.aborted) {
       try {
         const response = await fetch(
-          `stream://localhost/terminal-diff/${sessionId}`,
+          `http://stream.localhost/terminal-diff/${sessionId}`,
           { signal },
         );
 
@@ -436,7 +436,7 @@ class TerminalService {
     while (!signal.aborted) {
       try {
         const response = await fetch(
-          `stream://localhost/terminal-output/${sessionId}`,
+          `http://stream.localhost/terminal-output/${sessionId}`,
           { signal },
         );
 

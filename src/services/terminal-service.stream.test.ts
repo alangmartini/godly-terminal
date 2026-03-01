@@ -245,7 +245,7 @@ describe('TerminalService stream consumer', () => {
     await promise;
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'stream://localhost/terminal-output/my-session-123',
+      'http://stream.localhost/terminal-output/my-session-123',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
