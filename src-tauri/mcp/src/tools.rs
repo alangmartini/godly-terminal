@@ -727,6 +727,52 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "next_tab",
+                "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "previous_tab",
+                "description": "Switch to the previous tab in tab order (wraps around to last tab before first)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "go_to_tab",
+                "description": "Switch to a specific tab by its 0-based index in the tab order",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        },
+                        "index": {
+                            "type": "number",
+                            "description": "0-based index of the tab to switch to"
+                        }
+                    },
+                    "required": ["index"]
+                }
             }
         ]
     })
@@ -1256,6 +1302,25 @@ pub fn call_tool(
         "export_terminal_info" => {
             let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::ExportTerminalInfo { terminal_id }
+        }
+
+        "next_tab" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::NextTab { workspace_id }
+        }
+
+        "previous_tab" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::PreviousTab { workspace_id }
+        }
+
+        "go_to_tab" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let index = args
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .ok_or("Missing index")? as u32;
+            McpRequest::GoToTab { workspace_id, index }
         }
 
         _ => return Err(format!("Unknown tool: {}", name)),
