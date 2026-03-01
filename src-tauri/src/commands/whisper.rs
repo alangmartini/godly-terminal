@@ -12,7 +12,7 @@ fn start_sidecar_inner(
     app: &tauri::AppHandle,
     whisper: &WhisperState,
 ) -> Result<String, String> {
-    let binary = crate::find_whisper_binary(app).ok_or_else(|| {
+    let binary = crate::sidecar::find_whisper_binary(app).ok_or_else(|| {
         "godly-whisper binary not found. Place godly-whisper.exe next to the app binary.".to_string()
     })?;
 
