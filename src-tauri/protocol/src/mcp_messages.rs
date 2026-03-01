@@ -199,6 +199,21 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+    // Tab navigation
+    NextTab {
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
+    PreviousTab {
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
+    GoToTab {
+        #[serde(default)]
+        workspace_id: Option<String>,
+        index: u32,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,
