@@ -1,4 +1,4 @@
-import { store, ShellType } from '../state/store';
+import { store } from '../state/store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
@@ -9,8 +9,16 @@ import { getPluginRegistry } from '../plugins/index';
 import { IdleNotificationService } from '../services/idle-notification-service';
 import { quotePath } from '../utils/quote-path';
 import { perfTracer } from '../utils/PerfTracer';
+import {
+  shellTypeToProcessName,
+  buildNotificationTitle,
+  isWorkspaceNotificationSuppressed,
+} from '../utils/shell-type-utils';
+import { setupKeyboardShortcuts } from '../controllers/keyboard-controller';
+import { restoreLayout, syncSplitToBackend } from '../controllers/reconnection-controller';
+import { handleVoiceToggle } from '../controllers/voice-controller';
 import { WorkspaceSidebar } from './WorkspaceSidebar';
-import { TabBar, getDisplayName } from './TabBar';
+import { TabBar } from './TabBar';
 import { TerminalPane } from './TerminalPane';
 import { FigmaPane } from './FigmaPane';
 import { ToastContainer } from './ToastContainer';
@@ -19,64 +27,8 @@ import { onDragMove, onDragDrop } from '../state/drag-state';
 import { SplitContainer } from './SplitContainer';
 import { terminalIds, fromLegacySplitView, swapTerminals } from '../state/split-types';
 
-type BackendShellType =
-  | 'windows'
-  | 'pwsh'
-  | 'cmd'
-  | { wsl: { distribution: string | null } }
-  | { custom: { program: string; args: string[] | null } };
-
-function convertShellType(backendType?: BackendShellType): ShellType {
-  if (!backendType || backendType === 'windows') return { type: 'windows' };
-  if (backendType === 'pwsh') return { type: 'pwsh' };
-  if (backendType === 'cmd') return { type: 'cmd' };
-  if (typeof backendType === 'object' && 'wsl' in backendType) {
-    return {
-      type: 'wsl',
-      distribution: backendType.wsl.distribution ?? undefined,
-    };
-  }
-  if (typeof backendType === 'object' && 'custom' in backendType) {
-    return {
-      type: 'custom',
-      program: backendType.custom.program,
-      args: backendType.custom.args ?? undefined,
-    };
-  }
-  return { type: 'windows' };
-}
-
-function shellTypeToProcessName(shellType: ShellType): string {
-  switch (shellType.type) {
-    case 'windows': return 'powershell';
-    case 'pwsh': return 'pwsh';
-    case 'cmd': return 'cmd';
-    case 'wsl': return shellType.distribution ?? 'wsl';
-    case 'custom': {
-      const name = shellType.program.replace(/\\/g, '/').split('/').pop() ?? shellType.program;
-      return name.replace(/\.exe$/i, '') || shellType.program;
-    }
-  }
-}
-
-export function buildNotificationTitle(terminalId: string): string {
-  const state = store.getState();
-  const terminal = state.terminals.find(t => t.id === terminalId);
-  if (!terminal) return 'Godly Terminal';
-  const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
-  const terminalName = getDisplayName(terminal);
-  return workspace ? `${workspace.name} › ${terminalName}` : terminalName;
-}
-
-/** Check if notifications for a terminal's workspace are suppressed. */
-function isWorkspaceNotificationSuppressed(terminalId: string): boolean {
-  const state = store.getState();
-  const terminal = state.terminals.find(t => t.id === terminalId);
-  if (!terminal) return false;
-  const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
-  if (!workspace) return false;
-  return !notificationStore.isWorkspaceNotificationEnabled(workspace.id, workspace.name);
-}
+// Re-export for backward compatibility (used by test files)
+export { buildNotificationTitle } from '../utils/shell-type-utils';
 
 export class App {
   private container: HTMLElement;
@@ -97,8 +49,6 @@ export class App {
   private zoomedPaneId: string | null = null;
   /** Stores the split ratio before zoom, so it can be restored on unzoom. */
   private preZoomRatio: number | null = null;
-  private voicePollInterval: ReturnType<typeof setInterval> | null = null;
-
   constructor(container: HTMLElement) {
     this.container = container;
 
@@ -341,381 +291,19 @@ export class App {
   }
 
   private setupKeyboardShortcuts() {
-    document.addEventListener('keydown', async (e) => {
-      const state = store.getState();
-
-      // ── Hardcoded shortcuts (not customisable) ───────────────────
-
-      // Ctrl+Shift+S: Manual save (for debugging)
-      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
-        e.preventDefault();
-        console.log('[App] Manual save triggered...');
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('save_layout');
-          console.log('[App] Manual save complete!');
-        } catch (error) {
-          console.error('[App] Manual save failed:', error);
-        }
-        return;
-      }
-
-      // Ctrl+Shift+L: Manual load (for debugging)
-      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
-        e.preventDefault();
-        console.log('[App] Manual load triggered...');
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          const layout = await invoke('load_layout');
-          console.log('[App] Manual load result:', JSON.stringify(layout, null, 2));
-        } catch (error) {
-          console.error('[App] Manual load failed:', error);
-        }
-        return;
-      }
-
-      // Ctrl+, : Open settings dialog
-      if (e.ctrlKey && !e.shiftKey && e.key === ',') {
-        e.preventDefault();
-        const { showSettingsDialog } = await import('./SettingsDialog');
-        await showSettingsDialog();
-        return;
-      }
-
-      // ── Dynamic shortcuts (customisable via settings) ────────────
-
-      const action = keybindingStore.matchAction(e);
-      if (!action) return;
-
-      switch (action) {
-        case 'debug.togglePerfOverlay': {
-          e.preventDefault();
-          if (this.perfOverlay) {
-            this.perfOverlay.destroy();
-            this.perfOverlay = null;
-          } else {
-            this.perfOverlay = new PerfOverlay();
-            this.perfOverlay.mount(document.body);
-          }
-          break;
-        }
-
-        case 'tabs.newTerminal': {
-          e.preventDefault();
-          await this.createNewTerminal();
-          break;
-        }
-
-        case 'tabs.closeTerminal': {
-          e.preventDefault();
-          if (state.activeTerminalId) {
-            const terminal = state.terminals.find(t => t.id === state.activeTerminalId);
-            if (terminal?.paneType !== 'figma') {
-              await terminalService.closeTerminal(state.activeTerminalId);
-            }
-            store.removeTerminal(state.activeTerminalId);
-          }
-          break;
-        }
-
-        case 'tabs.nextTab': {
-          e.preventDefault();
-          perfTracer.mark('tab_switch_start');
-          const terminals = store.getWorkspaceTerminals(
-            state.activeWorkspaceId || ''
-          );
-          if (terminals.length > 1 && state.activeTerminalId) {
-            const currentIndex = terminals.findIndex(
-              (t) => t.id === state.activeTerminalId
-            );
-            const nextIndex = (currentIndex + 1) % terminals.length;
-            store.setActiveTerminal(terminals[nextIndex].id);
-            perfTracer.measure('tab_switch', 'tab_switch_start');
-          }
-          break;
-        }
-
-        case 'tabs.previousTab': {
-          e.preventDefault();
-          perfTracer.mark('tab_switch_start');
-          const terminals = store.getWorkspaceTerminals(
-            state.activeWorkspaceId || ''
-          );
-          if (terminals.length > 1 && state.activeTerminalId) {
-            const currentIndex = terminals.findIndex(
-              (t) => t.id === state.activeTerminalId
-            );
-            const nextIndex = (currentIndex - 1 + terminals.length) % terminals.length;
-            store.setActiveTerminal(terminals[nextIndex].id);
-            perfTracer.measure('tab_switch', 'tab_switch_start');
-          }
-          break;
-        }
-
-        case 'tabs.renameTerminal': {
-          e.preventDefault();
-          this.tabBar.startRenameActive();
-          break;
-        }
-
-        case 'split.focusOtherPane': {
-          e.preventDefault();
-          if (state.activeWorkspaceId && state.activeTerminalId) {
-            // Layout tree: cycle through panes in tree order
-            const tree = store.getLayoutTree(state.activeWorkspaceId);
-            if (tree) {
-              const ids = terminalIds(tree);
-              const currentIdx = ids.indexOf(state.activeTerminalId);
-              if (currentIdx >= 0 && ids.length > 1) {
-                const nextIdx = (currentIdx + 1) % ids.length;
-                store.setActiveTerminal(ids[nextIdx]);
-              }
-            } else {
-              // Legacy split
-              const activeSplit = store.getSplitView(state.activeWorkspaceId);
-              if (activeSplit) {
-                const otherId = state.activeTerminalId === activeSplit.leftTerminalId
-                  ? activeSplit.rightTerminalId
-                  : activeSplit.leftTerminalId;
-                store.setActiveTerminal(otherId);
-              }
-            }
-          }
-          break;
-        }
-
-        case 'split.splitRight': {
-          e.preventDefault();
-          await this.createSplitTerminal('horizontal');
-          break;
-        }
-
-        case 'split.splitDown': {
-          e.preventDefault();
-          await this.createSplitTerminal('vertical');
-          break;
-        }
-
-        case 'split.unsplit': {
-          e.preventDefault();
-          this.handleUnsplitRequest();
-          break;
-        }
-
-        case 'split.focusLeft':
-        case 'split.focusRight':
-        case 'split.focusUp':
-        case 'split.focusDown': {
-          e.preventDefault();
-          if (state.activeWorkspaceId && state.activeTerminalId) {
-            const direction = (action === 'split.focusLeft' || action === 'split.focusRight')
-              ? 'horizontal' : 'vertical';
-            const goSecond = action === 'split.focusRight' || action === 'split.focusDown';
-
-            // Try layout tree first (supports arbitrary nesting)
-            const adjacent = store.getAdjacentPane(
-              state.activeWorkspaceId, state.activeTerminalId, direction, goSecond,
-            );
-            if (adjacent) {
-              store.setActiveTerminal(adjacent);
-            } else {
-              // Fallback to legacy 2-pane split
-              const split = store.getSplitView(state.activeWorkspaceId);
-              if (split) {
-                const isMatch = (direction === 'horizontal' && split.direction === 'horizontal')
-                  || (direction === 'vertical' && split.direction === 'vertical');
-                const targetId = isMatch
-                  ? (goSecond ? split.rightTerminalId : split.leftTerminalId)
-                  : null;
-                if (targetId && targetId !== state.activeTerminalId) {
-                  store.setActiveTerminal(targetId);
-                }
-              }
-            }
-          }
-          break;
-        }
-
-        case 'split.resizeLeft':
-        case 'split.resizeRight':
-        case 'split.resizeUp':
-        case 'split.resizeDown': {
-          e.preventDefault();
-          if (state.activeWorkspaceId) {
-            const split = store.getSplitView(state.activeWorkspaceId);
-            if (split) {
-              const isHorizontal = split.direction === 'horizontal';
-              const isVertical = split.direction === 'vertical';
-              const RESIZE_STEP = 0.05;
-              let delta = 0;
-
-              if (action === 'split.resizeLeft' && isHorizontal) delta = -RESIZE_STEP;
-              else if (action === 'split.resizeRight' && isHorizontal) delta = RESIZE_STEP;
-              else if (action === 'split.resizeUp' && isVertical) delta = -RESIZE_STEP;
-              else if (action === 'split.resizeDown' && isVertical) delta = RESIZE_STEP;
-
-              if (delta !== 0) {
-                const newRatio = Math.max(0.1, Math.min(0.9, split.ratio + delta));
-                store.updateSplitRatio(state.activeWorkspaceId, newRatio);
-              }
-            }
-          }
-          break;
-        }
-
-        case 'split.zoom': {
-          e.preventDefault();
-          if (state.activeWorkspaceId && state.activeTerminalId) {
-            const split = store.getSplitView(state.activeWorkspaceId);
-            if (split) {
-              if (this.zoomedPaneId) {
-                // Unzoom: restore split ratio
-                store.updateSplitRatio(state.activeWorkspaceId, this.preZoomRatio ?? 0.5);
-                this.zoomedPaneId = null;
-                this.preZoomRatio = null;
-              } else {
-                // Zoom: save ratio, then push active pane to near-full width
-                this.preZoomRatio = split.ratio;
-                this.zoomedPaneId = state.activeTerminalId;
-                const isLeft = state.activeTerminalId === split.leftTerminalId;
-                store.updateSplitRatio(state.activeWorkspaceId, isLeft ? 0.95 : 0.05);
-              }
-            }
-          }
-          break;
-        }
-
-        case 'split.swapPanes': {
-          e.preventDefault();
-          if (state.activeWorkspaceId) {
-            const split = store.getSplitView(state.activeWorkspaceId);
-            if (split) {
-              store.setSplitView(
-                state.activeWorkspaceId,
-                split.rightTerminalId,
-                split.leftTerminalId,
-                split.direction,
-                1 - split.ratio,
-              );
-            }
-          }
-          break;
-        }
-
-        case 'split.rotateSplit': {
-          e.preventDefault();
-          if (state.activeWorkspaceId) {
-            const split = store.getSplitView(state.activeWorkspaceId);
-            if (split) {
-              const newDirection = split.direction === 'horizontal' ? 'vertical' : 'horizontal';
-              store.setSplitView(
-                state.activeWorkspaceId,
-                split.leftTerminalId,
-                split.rightTerminalId,
-                newDirection,
-                split.ratio,
-              );
-            }
-          }
-          break;
-        }
-
-        case 'workspace.toggleWorktreeMode': {
-          e.preventDefault();
-          if (state.activeWorkspaceId) {
-            const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
-            if (workspace) {
-              if (!workspace.worktreeMode) {
-                const isGit = await workspaceService.isGitRepo(workspace.folderPath).catch(() => false);
-                if (!isGit) {
-                  console.warn('[App] Cannot enable worktree mode: not a git repository');
-                  break;
-                }
-              }
-              await workspaceService.toggleWorktreeMode(workspace.id, !workspace.worktreeMode);
-            }
-          }
-          break;
-        }
-
-        case 'workspace.toggleClaudeCodeMode': {
-          e.preventDefault();
-          if (state.activeWorkspaceId) {
-            const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
-            if (workspace) {
-              await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
-            }
-          }
-          break;
-        }
-
-        case 'zoom.in': {
-          e.preventDefault();
-          const current = terminalSettingsStore.getFontSize();
-          terminalSettingsStore.setFontSize(current + 1);
-          break;
-        }
-
-        case 'zoom.out': {
-          e.preventDefault();
-          const current = terminalSettingsStore.getFontSize();
-          terminalSettingsStore.setFontSize(current - 1);
-          break;
-        }
-
-        case 'zoom.reset': {
-          e.preventDefault();
-          terminalSettingsStore.setFontSize(13);
-          break;
-        }
-
-        case 'voice.toggleRecording': {
-          e.preventDefault();
-          this.handleVoiceToggle();
-          break;
-        }
-
-        case 'tabs.quickClaude': {
-          e.preventDefault();
-          if (!state.activeWorkspaceId) break;
-
-          const { showQuickClaudeDialog } = await import('./dialogs');
-          const input = await showQuickClaudeDialog({
-            workspaces: state.workspaces.map(w => ({ id: w.id, name: w.name, folderPath: w.folderPath })),
-            activeWorkspaceId: state.activeWorkspaceId,
-          });
-          if (!input) break;
-
-          try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const result = await invoke<{ terminal_id: string; worktree_branch: string | null }>(
-              'quick_claude',
-              {
-                workspaceId: input.workspaceId,
-                prompt: input.prompt,
-                branchName: input.branchName ?? null,
-                skipFetch: true,
-                noWorktree: input.noWorktree ?? false,
-              }
-            );
-
-            store.addTerminal({
-              id: result.terminal_id,
-              workspaceId: input.workspaceId,
-              name: result.worktree_branch ?? 'Quick Claude',
-              processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
-              order: 0,
-            }, { background: true });
-          } catch (error) {
-            console.error('[App] Quick Claude failed:', error);
-          }
-          break;
-        }
-      }
+    setupKeyboardShortcuts({
+      getPerfOverlay: () => this.perfOverlay,
+      setPerfOverlay: (overlay) => { this.perfOverlay = overlay; },
+      startRenameActive: () => this.tabBar.startRenameActive(),
+      createNewTerminal: () => this.createNewTerminal(),
+      createSplitTerminal: (dir) => this.createSplitTerminal(dir),
+      handleUnsplitRequest: () => this.handleUnsplitRequest(),
+      handleVoiceToggle: () => handleVoiceToggle(),
+      getZoomedPaneId: () => this.zoomedPaneId,
+      setZoomedPaneId: (id) => { this.zoomedPaneId = id; },
+      getPreZoomRatio: () => this.preZoomRatio,
+      setPreZoomRatio: (ratio) => { this.preZoomRatio = ratio; },
     });
-
-    // Listen for voice toggle events from the mic button in TabBar
-    document.addEventListener('voice-toggle-recording', () => this.handleVoiceToggle());
   }
 
   async init() {
@@ -732,247 +320,13 @@ export class App {
     // Listen for MCP-triggered UI events
     await this.setupMcpEventListeners();
 
-    // Load persisted state
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      console.log('[App] Loading layout...');
-      const layout = await invoke<{
-        workspaces: Array<{
-          id: string;
-          name: string;
-          folder_path: string;
-          tab_order: string[];
-          shell_type?: BackendShellType;
-          worktree_mode?: boolean;
-          claude_code_mode?: boolean;
-        }>;
-        terminals: Array<{
-          id: string;
-          workspace_id: string;
-          name: string;
-          shell_type?: BackendShellType;
-          cwd?: string | null;
-          worktree_path?: string | null;
-          worktree_branch?: string | null;
-        }>;
-        active_workspace_id: string | null;
-        split_views?: Record<string, {
-          left_terminal_id: string;
-          right_terminal_id: string;
-          direction: string;
-          ratio: number;
-        }>;
-      }>('load_layout');
-
-      console.log('[App] Layout loaded:', JSON.stringify(layout, null, 2));
-      console.log('[App] Workspaces count:', layout.workspaces.length);
-      console.log('[App] Terminals count:', layout.terminals.length);
-
-      if (layout.workspaces.length > 0) {
-        console.log('[App] Restoring workspaces...');
-        // Restore workspaces
-        layout.workspaces.forEach((w) => {
-          console.log('[App] Adding workspace:', w.id, w.name);
-          store.addWorkspace({
-            id: w.id,
-            name: w.name,
-            folderPath: w.folder_path,
-            tabOrder: w.tab_order,
-            shellType: convertShellType(w.shell_type),
-            worktreeMode: w.worktree_mode ?? false,
-            claudeCodeMode: w.claude_code_mode ?? false,
-          });
-        });
-
-        // Set active workspace
-        const activeWsId = layout.active_workspace_id || layout.workspaces[0].id;
-        console.log('[App] Setting active workspace:', activeWsId);
-        store.setActiveWorkspace(activeWsId);
-
-        // Check daemon for live sessions that can be reattached
-        const liveSessions = await terminalService.reconnectSessions();
-        // Filter out dead sessions (PTY exited but session still in daemon HashMap)
-        const liveSessionIds = new Set(
-          liveSessions.filter((s) => s.running).map((s) => s.id)
-        );
-        console.log('[App] Live daemon sessions:', liveSessionIds.size);
-
-        // Restore terminals: reattach if alive, or create fresh with scrollback
-        console.log('[App] Restoring terminals...');
-        for (const t of layout.terminals) {
-          const shellType = convertShellType(t.shell_type);
-          const processName = shellTypeToProcessName(shellType);
-
-          const tabName = t.worktree_branch || t.name;
-
-          if (liveSessionIds.has(t.id)) {
-            // Session is still alive in daemon - reattach
-            console.log('[App] Reattaching to live session:', t.id);
-            try {
-              await terminalService.attachSession(t.id, t.workspace_id, tabName);
-              this.reattachedTerminalIds.add(t.id);
-
-              store.addTerminal({
-                id: t.id,
-                workspaceId: t.workspace_id,
-                name: tabName,
-                processName,
-                order: 0,
-              });
-              continue;
-            } catch (error) {
-              console.warn('[App] Failed to reattach session:', t.id, error);
-              // Fall through to create fresh terminal
-            }
-          }
-
-          // Session is dead or reattach failed - create fresh terminal with saved CWD
-          console.log('[App] Creating fresh terminal:', t.id, 'in workspace:', t.workspace_id);
-          const result = await terminalService.createTerminal(t.workspace_id, {
-            cwdOverride: t.cwd ?? undefined,
-            shellTypeOverride: shellType,
-            idOverride: t.id,
-            nameOverride: tabName,
-          });
-
-          console.log('[App] Terminal created with ID:', result.id, '(requested:', t.id, ')');
-
-          // Mark for scrollback restoration (only for fresh terminals, not reattached ones)
-          this.restoredTerminalIds.add(result.id);
-
-          store.addTerminal({
-            id: result.id,
-            workspaceId: t.workspace_id,
-            name: tabName,
-            processName,
-            order: 0,
-          });
-        }
-
-        // Prune stale terminal IDs from backend layout trees, tab orders,
-        // split views, and zoomed panes. This handles the case where persisted
-        // data references terminals that failed to restore (crash, dead sessions).
-        const liveTerminalIds = store.getState().terminals.map((t) => t.id);
-        await invoke('prune_stale_terminal_ids', {
-          liveTerminalIds,
-        });
-        console.log('[App] Pruned stale terminal IDs from backend state');
-
-        // Clean up orphaned daemon sessions not in the saved layout.
-        // These accumulate when the app crashes before autosave.
-        const layoutTerminalIds = new Set(layout.terminals.map((t) => t.id));
-        const orphanSessions = liveSessions.filter((s) => !layoutTerminalIds.has(s.id));
-        if (orphanSessions.length > 0) {
-          console.log(
-            '[App] Closing',
-            orphanSessions.length,
-            'orphaned daemon sessions:',
-            orphanSessions.map((s) => s.id),
-          );
-          for (const orphan of orphanSessions) {
-            try {
-              await terminalService.closeTerminal(orphan.id);
-            } catch {
-              // Session may already be gone — ignore
-            }
-          }
-        }
-
-        // Restore split views (create layout trees from persisted flat splits)
-        if (layout.split_views) {
-          const knownTerminalIds = new Set(liveTerminalIds);
-          for (const [wsId, sv] of Object.entries(layout.split_views)) {
-            if (knownTerminalIds.has(sv.left_terminal_id) && knownTerminalIds.has(sv.right_terminal_id)) {
-              const dir = sv.direction === 'vertical' ? 'vertical' : 'horizontal';
-              // Create layout tree from legacy split
-              const tree = fromLegacySplitView({
-                leftTerminalId: sv.left_terminal_id,
-                rightTerminalId: sv.right_terminal_id,
-                direction: dir,
-                ratio: sv.ratio,
-              });
-              store.setLayoutTree(wsId, tree);
-              // Also set legacy split for backend persistence
-              store.setSplitView(wsId, sv.left_terminal_id, sv.right_terminal_id, dir, sv.ratio);
-              await this.syncSplitToBackend(wsId, {
-                leftTerminalId: sv.left_terminal_id,
-                rightTerminalId: sv.right_terminal_id,
-                direction: dir,
-                ratio: sv.ratio,
-              });
-            }
-          }
-          console.log('[App] Split views restored:', Object.keys(layout.split_views).length);
-        }
-
-        console.log('[App] Restore complete!');
-      } else {
-        console.log('[App] No workspaces in layout, creating default...');
-        // No layout — close all stale daemon sessions from previous runs
-        await this.closeAllDaemonSessions();
-        await this.createDefaultWorkspace();
-      }
-    } catch (error) {
-      console.error('[App] Error loading layout:', error);
-      (window as any).__app_init_error = String(error);
-
-      // Layout failed — close all daemon sessions since none are in use
-      await this.closeAllDaemonSessions();
-
-      try {
-        await this.createDefaultWorkspace();
-      } catch (e2) {
-        console.error('[App] Error creating default workspace:', e2);
-        (window as any).__app_init_error2 = String(e2);
-      }
-    }
-    perfTracer.measure('app_startup', 'app_init_start');
-  }
-
-  /** Close all daemon sessions. Used when no layout is loaded. */
-  private async closeAllDaemonSessions() {
-    try {
-      const sessions = await terminalService.reconnectSessions();
-      if (sessions.length > 0) {
-        console.log('[App] Closing', sessions.length, 'stale daemon sessions');
-        for (const s of sessions) {
-          try {
-            await terminalService.closeTerminal(s.id);
-          } catch {
-            // Ignore — session may already be gone
-          }
-        }
-      }
-    } catch {
-      // Daemon may not be reachable — nothing to clean up
-    }
-  }
-
-  private async createDefaultWorkspace() {
-    // Get user home directory via Tauri
-    const { homeDir } = await import('@tauri-apps/api/path');
-    const homePath = await homeDir().catch(() => 'C:\\');
-    console.log('[App] Home path:', homePath);
-
-    const workspaceId = await workspaceService.createWorkspace(
-      'Default',
-      homePath
-    );
-    console.log('[App] Workspace created:', workspaceId);
-    store.setActiveWorkspace(workspaceId);
-
-    // Create initial terminal
-    console.log('[App] Creating terminal in workspace:', workspaceId);
-    const result = await terminalService.createTerminal(workspaceId);
-    console.log('[App] Terminal created:', result.id);
-    store.addTerminal({
-      id: result.id,
-      workspaceId,
-      name: result.worktree_branch ?? 'Terminal',
-      processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
-      order: 0,
+    // Load persisted state and reconnect sessions
+    await restoreLayout({
+      markRestoredTerminal: (id) => this.restoredTerminalIds.add(id),
+      markReattachedTerminal: (id) => this.reattachedTerminalIds.add(id),
     });
-    console.log('[App] Terminal added to store');
+
+    perfTracer.measure('app_startup', 'app_init_start');
   }
 
   private ensureSplitDivider(direction: string) {
@@ -1015,7 +369,7 @@ export class App {
         // Sync final ratio to backend
         const currentSplit = store.getSplitView(state.activeWorkspaceId!);
         if (currentSplit) {
-          await this.syncSplitToBackend(state.activeWorkspaceId!, currentSplit);
+          await syncSplitToBackend(state.activeWorkspaceId!, currentSplit);
         }
       };
 
@@ -1142,109 +496,11 @@ export class App {
     });
   }
 
-  private async syncSplitToBackend(workspaceId: string, split: { leftTerminalId: string; rightTerminalId: string; direction: string; ratio: number }) {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('set_split_view', {
-        workspaceId,
-        leftTerminalId: split.leftTerminalId,
-        rightTerminalId: split.rightTerminalId,
-        direction: split.direction,
-        ratio: split.ratio,
-      });
-    } catch (error) {
-      console.error('[App] Failed to sync split view to backend:', error);
-    }
-  }
 
   /**
    * Create a new terminal in the active workspace. Returns the new terminal ID,
    * or null if creation was cancelled (e.g. worktree prompt dismissed).
    */
-  private async handleVoiceToggle(): Promise<void> {
-    try {
-      const { whisperGetStatus, whisperStartRecording, whisperStopRecording, whisperGetAudioLevel } = await import('../plugins/voice/whisper-service');
-      const status = await whisperGetStatus();
-
-      if (status.state === 'idle') {
-        await whisperStartRecording();
-        this.updateMicButtonState('recording');
-        // Start polling audio levels every 60ms
-        this.voicePollInterval = setInterval(async () => {
-          try {
-            const level = await whisperGetAudioLevel();
-            this.updateMicLevel(level.rms, level.durationMs);
-          } catch {
-            // ignore polling errors
-          }
-        }, 60);
-      } else if (status.state === 'recording') {
-        // Stop polling
-        if (this.voicePollInterval) {
-          clearInterval(this.voicePollInterval);
-          this.voicePollInterval = null;
-        }
-        this.updateMicButtonState('transcribing');
-        const result = await whisperStopRecording();
-        this.updateMicButtonState('idle');
-        if (result.text && store.getState().activeTerminalId) {
-          await terminalService.writeToTerminal(store.getState().activeTerminalId!, result.text);
-        }
-        this.showTranscriptionToast(result.text, result.durationMs);
-      }
-    } catch (err) {
-      console.error('Voice toggle failed:', err);
-      if (this.voicePollInterval) {
-        clearInterval(this.voicePollInterval);
-        this.voicePollInterval = null;
-      }
-      this.updateMicButtonState('idle');
-    }
-  }
-
-  private updateMicButtonState(state: 'idle' | 'recording' | 'transcribing'): void {
-    const micBtn = document.querySelector('.mic-btn');
-    if (!micBtn) return;
-    micBtn.className = `mic-btn mic-${state}`;
-    micBtn.setAttribute('title',
-      state === 'idle' ? 'Voice input (Ctrl+Shift+M)' :
-      state === 'recording' ? 'Stop recording (Ctrl+Shift+M)' :
-      'Transcribing...'
-    );
-  }
-
-  private updateMicLevel(rms: number, durationMs: number): void {
-    const levelBar = document.querySelector('.mic-level-bar') as HTMLElement;
-    const timer = document.querySelector('.mic-timer') as HTMLElement;
-    if (levelBar) {
-      // Scale RMS (typically 0-0.3) to height percentage
-      const height = Math.min(100, rms * 300);
-      levelBar.style.height = `${height}%`;
-    }
-    if (timer) {
-      const secs = Math.floor(durationMs / 1000);
-      const mins = Math.floor(secs / 60);
-      const remainder = secs % 60;
-      timer.textContent = `${mins}:${String(remainder).padStart(2, '0')}`;
-    }
-  }
-
-  private showTranscriptionToast(text: string, durationMs: number): void {
-    // Remove any existing toast
-    document.querySelector('.mic-toast')?.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'mic-toast';
-    const speed = durationMs > 0 ? `${durationMs}ms` : '';
-    toast.textContent = text ? `"${text.slice(0, 50)}${text.length > 50 ? '...' : ''}" ${speed}` : '(no speech detected)';
-
-    const micBtn = document.querySelector('.mic-btn');
-    if (micBtn) {
-      micBtn.parentElement?.appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
-    }
-  }
-
   private async createNewTerminal(): Promise<string | null> {
     const state = store.getState();
     if (!state.activeWorkspaceId) return null;
