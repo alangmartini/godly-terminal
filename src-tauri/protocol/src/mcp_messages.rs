@@ -187,6 +187,12 @@ pub enum McpRequest {
         script: String,
     },
 
+    // Font/zoom controls
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    GetFontSize,
+
     // Screenshot capture
     CaptureScreenshot {
         #[serde(default)]
@@ -304,5 +310,8 @@ pub enum McpResponse {
     },
     Screenshot {
         path: String,
+    },
+    FontSize {
+        size: u32,
     },
 }

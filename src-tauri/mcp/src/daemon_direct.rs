@@ -631,6 +631,10 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::ZoomIn => Ok(Self::app_only_error("zoom_in")),
+            McpRequest::ZoomOut => Ok(Self::app_only_error("zoom_out")),
+            McpRequest::ZoomReset => Ok(Self::app_only_error("zoom_reset")),
+            McpRequest::GetFontSize => Ok(Self::app_only_error("get_font_size")),
         }
     }
 

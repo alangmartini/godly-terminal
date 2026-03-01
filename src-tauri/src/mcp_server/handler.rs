@@ -1801,69 +1801,55 @@ pub fn handle_mcp_request(
         // === JS bridge ===
 
         McpRequest::ExecuteJs { script } => {
-            use tauri::Manager;
+            execute_js_bridge(script, app_handle)
+        }
 
-            let window = match app_handle.get_webview_window("main") {
-                Some(w) => w,
-                None => {
-                    return McpResponse::Error {
-                        message: "Main window not found".to_string(),
-                    };
-                }
-            };
+        // === Font/zoom controls ===
 
-            // Generate unique request ID
-            let request_id = uuid::Uuid::new_v4().to_string();
-            let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
-
-            // Store the sender in the shared state
-            {
-                let js_state: tauri::State<'_, crate::JsCallbackState> =
-                    app_handle.state::<crate::JsCallbackState>();
-                js_state.senders.lock().insert(request_id.clone(), tx);
+        McpRequest::ZoomIn => {
+            let script = "const s = window.__TERMINAL_SETTINGS_STORE__; s.setFontSize(s.getFontSize() + 1); return 'ok'";
+            let res = execute_js_bridge(script, app_handle);
+            match res {
+                McpResponse::JsResult { error: None, .. } => McpResponse::Ok,
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                other => other,
             }
+        }
 
-            // Wrap the user's script: execute it, then invoke the callback command
-            let wrapped = format!(
-                r#"(async () => {{
-    try {{
-        const __result = await (async () => {{ {script} }})();
-        await window.__TAURI__.core.invoke('mcp_js_result', {{
-            id: '{request_id}',
-            result: JSON.stringify(__result) ?? 'undefined',
-            error: null,
-        }});
-    }} catch (e) {{
-        await window.__TAURI__.core.invoke('mcp_js_result', {{
-            id: '{request_id}',
-            result: null,
-            error: e.message || String(e),
-        }});
-    }}
-}})();"#,
-            );
-
-            if let Err(e) = window.eval(&wrapped) {
-                // Clean up sender
-                let js_state: tauri::State<'_, crate::JsCallbackState> =
-                    app_handle.state::<crate::JsCallbackState>();
-                js_state.senders.lock().remove(&request_id);
-                return McpResponse::Error {
-                    message: format!("Failed to eval JS: {}", e),
-                };
+        McpRequest::ZoomOut => {
+            let script = "const s = window.__TERMINAL_SETTINGS_STORE__; s.setFontSize(s.getFontSize() - 1); return 'ok'";
+            let res = execute_js_bridge(script, app_handle);
+            match res {
+                McpResponse::JsResult { error: None, .. } => McpResponse::Ok,
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                other => other,
             }
+        }
 
-            // Wait for the callback with 10s timeout
-            match rx.recv_timeout(std::time::Duration::from_secs(10)) {
-                Ok((result, error)) => McpResponse::JsResult { result, error },
-                Err(_) => {
-                    let js_state: tauri::State<'_, crate::JsCallbackState> =
-                        app_handle.state::<crate::JsCallbackState>();
-                    js_state.senders.lock().remove(&request_id);
-                    McpResponse::Error {
-                        message: "JS execution timed out after 10s".to_string(),
+        McpRequest::ZoomReset => {
+            let script = "const s = window.__TERMINAL_SETTINGS_STORE__; s.setFontSize(13); return 'ok'";
+            let res = execute_js_bridge(script, app_handle);
+            match res {
+                McpResponse::JsResult { error: None, .. } => McpResponse::Ok,
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                other => other,
+            }
+        }
+
+        McpRequest::GetFontSize => {
+            let script = "return window.__TERMINAL_SETTINGS_STORE__.getFontSize()";
+            let res = execute_js_bridge(script, app_handle);
+            match res {
+                McpResponse::JsResult { result: Some(val), error: None } => {
+                    match val.trim().parse::<u32>() {
+                        Ok(size) => McpResponse::FontSize { size },
+                        Err(_) => McpResponse::Error {
+                            message: format!("Failed to parse font size from: {}", val),
+                        },
                     }
                 }
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                other => other,
             }
         }
 
@@ -2053,6 +2039,74 @@ pub fn handle_mcp_request(
             );
 
             McpResponse::TerminalOutput { content: snippet }
+        }
+    }
+}
+
+/// Execute a JavaScript snippet in the main webview and return the result.
+///
+/// Shared helper used by `ExecuteJs`, `ZoomIn`, `ZoomOut`, `ZoomReset`, and `GetFontSize`.
+fn execute_js_bridge(
+    script: &str,
+    app_handle: &AppHandle,
+) -> McpResponse {
+    use tauri::Manager;
+
+    let window = match app_handle.get_webview_window("main") {
+        Some(w) => w,
+        None => {
+            return McpResponse::Error {
+                message: "Main window not found".to_string(),
+            };
+        }
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
+
+    {
+        let js_state: tauri::State<'_, crate::JsCallbackState> =
+            app_handle.state::<crate::JsCallbackState>();
+        js_state.senders.lock().insert(request_id.clone(), tx);
+    }
+
+    let wrapped = format!(
+        r#"(async () => {{
+    try {{
+        const __result = await (async () => {{ {script} }})();
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: JSON.stringify(__result) ?? 'undefined',
+            error: null,
+        }});
+    }} catch (e) {{
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: null,
+            error: e.message || String(e),
+        }});
+    }}
+}})();"#,
+    );
+
+    if let Err(e) = window.eval(&wrapped) {
+        let js_state: tauri::State<'_, crate::JsCallbackState> =
+            app_handle.state::<crate::JsCallbackState>();
+        js_state.senders.lock().remove(&request_id);
+        return McpResponse::Error {
+            message: format!("Failed to eval JS: {}", e),
+        };
+    }
+
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok((result, error)) => McpResponse::JsResult { result, error },
+        Err(_) => {
+            let js_state: tauri::State<'_, crate::JsCallbackState> =
+                app_handle.state::<crate::JsCallbackState>();
+            js_state.senders.lock().remove(&request_id);
+            McpResponse::Error {
+                message: "JS execution timed out after 10s".to_string(),
+            }
         }
     }
 }
