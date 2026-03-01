@@ -156,6 +156,7 @@ class Store {
 
   removeWorkspace(id: string) {
     this.lastActiveTerminalByWorkspace.delete(id);
+    this.suspendedLayoutTrees.delete(id);
     const { [id]: _s, ...remainingSplitViews } = this.state.splitViews;
     const { [id]: _t, ...remainingTrees } = this.state.layoutTrees;
     const { [id]: _z, ...remainingZoomed } = this.state.zoomedPanes;
@@ -502,7 +503,7 @@ class Store {
     this.enforceSplitAdjacency(workspaceId);
   }
 
-  /** Clear the layout tree for a workspace. */
+  /** Clear the active layout tree for a workspace. Does not affect suspended splits. */
   clearLayoutTree(workspaceId: string): void {
     const { [workspaceId]: _t, ...restTrees } = this.state.layoutTrees;
     const { [workspaceId]: _s, ...restSplits } = this.state.splitViews;
