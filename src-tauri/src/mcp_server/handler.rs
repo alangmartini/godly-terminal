@@ -708,6 +708,93 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        McpRequest::RenameWorkspace { workspace_id, name } => {
+            // Validate workspace exists
+            if !app_state.workspaces.read().contains_key(workspace_id) {
+                return McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                };
+            }
+
+            app_state.update_workspace_name(workspace_id, name.clone());
+            auto_save.mark_dirty();
+
+            // Sync frontend via execute_js
+            let escaped_name = name.replace('\\', "\\\\").replace('\'', "\\'");
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__STORE__.updateWorkspace('{}', {{name: '{}'}})",
+                    workspace_id, escaped_name
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                _ => McpResponse::Ok,
+            }
+        }
+
+        McpRequest::ReorderWorkspaces { workspace_ids } => {
+            // Validate that at least some workspace IDs are valid
+            {
+                let workspaces = app_state.workspaces.read();
+                let any_valid = workspace_ids.iter().any(|id| workspaces.contains_key(id));
+                if !any_valid {
+                    return McpResponse::Error {
+                        message: "None of the provided workspace IDs are valid".to_string(),
+                    };
+                }
+            }
+
+            // Sync frontend via execute_js — the store handles unknown IDs gracefully
+            let ids_json = serde_json::to_string(workspace_ids).unwrap_or_else(|_| "[]".to_string());
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__STORE__.reorderWorkspaces({})",
+                    ids_json
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                _ => {
+                    auto_save.mark_dirty();
+                    McpResponse::Ok
+                }
+            }
+        }
+
+        McpRequest::GetWorkspaceDetails { workspace_id } => {
+            let workspace = match app_state.get_workspace(workspace_id) {
+                Some(ws) => ws,
+                None => {
+                    return McpResponse::Error {
+                        message: format!("Workspace {} not found", workspace_id),
+                    };
+                }
+            };
+
+            let terminal_count = app_state.get_workspace_terminals(workspace_id).len();
+
+            McpResponse::WorkspaceDetails {
+                name: workspace.name,
+                folder_path: workspace.folder_path,
+                worktree_mode: workspace.worktree_mode,
+                claude_code_mode: workspace.claude_code_mode,
+                terminal_count,
+            }
+        }
+
+        McpRequest::OpenInExplorer { path } => {
+            match std::process::Command::new("explorer")
+                .arg(path)
+                .spawn()
+            {
+                Ok(_) => McpResponse::Ok,
+                Err(e) => McpResponse::Error {
+                    message: format!("Failed to open explorer: {}", e),
+                },
+            }
+        }
+
         McpRequest::MoveTerminalToWorkspace {
             terminal_id,
             workspace_id,
