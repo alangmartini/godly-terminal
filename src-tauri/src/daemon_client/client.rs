@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{Request, Response};
 
-use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge, EmitPayload, EventEmitter, OutputStreamRegistry, WakeEvent};
+use super::bridge::{self, BridgeHealth, BridgeRequest, DaemonBridge, DiffStreamRegistry, EmitPayload, EventEmitter, OutputStreamRegistry, WakeEvent};
 
 /// Client that communicates with the godly-daemon process via named pipes.
 ///
@@ -42,6 +42,9 @@ pub struct DaemonClient {
     /// Per-session raw output byte registry for the Tauri custom protocol stream.
     /// Set via `set_output_registry()` before `setup_bridge()`.
     output_registry: Mutex<Option<Arc<OutputStreamRegistry>>>,
+    /// Per-session binary-encoded grid diff registry for stream://localhost/terminal-diff/.
+    /// Set via `set_diff_registry()` before `setup_bridge()`.
+    diff_registry: Mutex<Option<Arc<DiffStreamRegistry>>>,
 }
 
 impl DaemonClient {
@@ -188,6 +191,7 @@ impl DaemonClient {
             event_emitter: Mutex::new(None),
             wake_event: Mutex::new(None),
             output_registry: Mutex::new(None),
+            diff_registry: Mutex::new(None),
         })
     }
 
@@ -350,6 +354,12 @@ impl DaemonClient {
         *self.output_registry.lock() = Some(registry);
     }
 
+    /// Store the diff stream registry for use by the bridge I/O thread.
+    /// Must be called before `setup_bridge()`.
+    pub fn set_diff_registry(&self, registry: Arc<DiffStreamRegistry>) {
+        *self.diff_registry.lock() = Some(registry);
+    }
+
     /// Set up the bridge: creates channels, starts the bridge I/O thread, and
     /// stores the request sender. Also stores the app_handle for future reconnections.
     pub fn setup_bridge(&self, app_handle: AppHandle) -> Result<(), String> {
@@ -377,9 +387,10 @@ impl DaemonClient {
         *self.wake_event.lock() = Some(Arc::clone(&wake));
 
         let output_registry = self.output_registry.lock().clone();
+        let diff_registry = self.diff_registry.lock().clone();
 
         let bridge = DaemonBridge::new();
-        bridge.start(reader, writer, request_rx, emitter, health, wake, output_registry);
+        bridge.start(reader, writer, request_rx, emitter, health, wake, output_registry, diff_registry);
 
         *self.app_handle.lock() = Some(app_handle);
 
