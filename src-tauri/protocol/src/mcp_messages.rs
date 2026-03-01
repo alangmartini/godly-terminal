@@ -218,6 +218,19 @@ pub enum McpRequest {
         #[serde(default)]
         workspace_id: Option<String>,
     },
+
+    // Notification settings (via execute_js bridge)
+    GetNotificationConfig,
+    SetNotificationSound {
+        preset: String,
+    },
+    AddMutePattern {
+        pattern: String,
+    },
+    RemoveMutePattern {
+        pattern: String,
+    },
+    ListMutePatterns,
 }
 
 /// Terminal info returned by MCP queries
@@ -304,5 +317,13 @@ pub enum McpResponse {
     },
     Screenshot {
         path: String,
+    },
+    NotificationConfig {
+        enabled: bool,
+        sound_preset: String,
+        volume: f64,
+    },
+    MutePatterns {
+        patterns: Vec<String>,
     },
 }
