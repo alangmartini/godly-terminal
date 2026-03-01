@@ -59,9 +59,10 @@ export class TabBar {
       e.preventDefault();
     }, { passive: false });
 
-    // Create mic button for voice input
+    // Create mic button for voice input (hidden until whisper binary is confirmed available)
     const micBtn = document.createElement('div');
     micBtn.className = 'mic-btn mic-idle';
+    micBtn.style.display = 'none';
     micBtn.title = 'Voice input (Ctrl+Shift+M)';
     micBtn.setAttribute('role', 'button');
     micBtn.setAttribute('aria-label', 'Toggle voice recording');
@@ -82,6 +83,13 @@ export class TabBar {
       document.dispatchEvent(new CustomEvent('voice-toggle-recording'));
     });
     this.container.appendChild(micBtn);
+
+    // Show mic button only when whisper binary is installed
+    import('../plugins/voice/whisper-service').then(({ whisperIsAvailable }) => {
+      whisperIsAvailable().then(available => {
+        if (available) micBtn.style.display = '';
+      }).catch(() => {});
+    }).catch(() => {});
 
     const addBtn = document.createElement('div');
     addBtn.className = 'add-tab-btn';

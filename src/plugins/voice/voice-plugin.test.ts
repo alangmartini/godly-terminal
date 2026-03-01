@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock all whisper-service functions
 vi.mock('./whisper-service', () => ({
+  whisperIsAvailable: vi.fn().mockResolvedValue(true),
   whisperGetStatus: vi.fn().mockResolvedValue({
     state: 'idle',
     modelLoaded: false,
@@ -41,8 +42,10 @@ import { VoiceToTextPlugin } from './index';
 describe('VoiceToTextPlugin', () => {
   let plugin: VoiceToTextPlugin;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     plugin = new VoiceToTextPlugin();
+    // init() sets binaryAvailable from whisperIsAvailable() mock
+    await plugin.init({} as any);
   });
 
   it('has correct metadata', () => {
@@ -91,6 +94,18 @@ describe('VoiceToTextPlugin', () => {
     plugin.destroy();
     expect(mockUnlisten).toHaveBeenCalled();
     expect((plugin as any).progressUnlisten).toBeNull();
+  });
+
+  it('renderSettings shows install prompt when binary is not available', async () => {
+    const { whisperIsAvailable } = await import('./whisper-service');
+    (whisperIsAvailable as any).mockResolvedValueOnce(false);
+
+    const unavailablePlugin = new VoiceToTextPlugin();
+    await unavailablePlugin.init({} as any);
+
+    const el = unavailablePlugin.renderSettings();
+    expect(el.textContent).toContain('not installed');
+    expect(el.querySelector('button')!.textContent).toContain('Download');
   });
 
   it('test recording button displays transcription text, not [object Object]', async () => {

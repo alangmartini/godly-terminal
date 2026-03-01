@@ -17,7 +17,6 @@ pub(crate) fn cleanup_old_binaries(app_handle: &tauri::AppHandle) {
         "godly-mcp.exe.old",
         "godly-notify.exe.old",
         "godly-remote.exe.old",
-        "godly-whisper.exe.old",
     ] {
         let path = resource_dir.join(name);
         if path.exists() {
@@ -176,9 +175,13 @@ pub(crate) fn find_remote_binary(app_handle: &tauri::AppHandle) -> Option<std::p
     None
 }
 
-/// Find the godly-whisper binary: resource dir (installed) > exe dir > target/debug (dev).
+/// Find the godly-whisper binary:
+///   1. Resource dir (Tauri bundle — backwards compat)
+///   2. %LOCALAPPDATA%/godly-whisper/ (standalone installer)
+///   3. Same dir as current exe
+///   4. target/debug (dev builds)
 pub(crate) fn find_whisper_binary(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    // 1. Resource dir (Tauri bundle)
+    // 1. Resource dir (Tauri bundle — backwards compat for manual copies)
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
         let p = resource_dir.join("godly-whisper.exe");
         if p.exists() {
@@ -186,7 +189,17 @@ pub(crate) fn find_whisper_binary(app_handle: &tauri::AppHandle) -> Option<std::
         }
     }
 
-    // 2. Same dir as current exe
+    // 2. Standalone install location (%LOCALAPPDATA%/godly-whisper/)
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let p = std::path::PathBuf::from(local_app_data)
+            .join("godly-whisper")
+            .join("godly-whisper.exe");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    // 3. Same dir as current exe
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let p = dir.join("godly-whisper.exe");
@@ -196,7 +209,7 @@ pub(crate) fn find_whisper_binary(app_handle: &tauri::AppHandle) -> Option<std::
         }
     }
 
-    // 3. target/debug (dev builds)
+    // 4. target/debug (dev builds)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let p = dir.join("../godly-whisper.exe");
