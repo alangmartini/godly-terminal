@@ -260,8 +260,7 @@ pub async fn whisper_load_model(
     match resp {
         WhisperResponse::ModelLoaded { model_name: name, gpu_in_use } => {
             whisper.set_model_loaded(true, Some(name));
-            let mut status = whisper.get_status();
-            status.gpu_in_use = gpu_in_use;
+            whisper.set_gpu_in_use(gpu_in_use);
             // Push custom vocabulary to sidecar after model load
             if !prev_config.custom_vocabulary.is_empty() {
                 let _ = whisper.client().send_request(&WhisperRequest::SetVocabulary {

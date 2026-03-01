@@ -130,6 +130,10 @@ impl WhisperState {
         self.status.write().gpu_available = available;
     }
 
+    pub fn set_gpu_in_use(&self, in_use: bool) {
+        self.status.write().gpu_in_use = in_use;
+    }
+
     pub fn get_sidecar_pid(&self) -> Option<u32> {
         *self.sidecar_pid.read()
     }
