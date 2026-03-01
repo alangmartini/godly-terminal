@@ -1011,6 +1011,90 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::GetNotificationConfig => {
+            let js_req = McpRequest::ExecuteJs {
+                script: "const s = window.__NOTIFICATION_STORE__.getSettings(); return { enabled: s.globalEnabled, sound_preset: s.soundPreset, volume: s.volume };".to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result, .. } => {
+                    let json_str = result.unwrap_or_else(|| "{}".to_string());
+                    match serde_json::from_str::<serde_json::Value>(&json_str) {
+                        Ok(val) => McpResponse::NotificationConfig {
+                            enabled: val.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                            sound_preset: val.get("sound_preset").and_then(|v| v.as_str()).unwrap_or("chime").to_string(),
+                            volume: val.get("volume").and_then(|v| v.as_f64()).unwrap_or(0.5),
+                        },
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse notification config: {}", e),
+                        },
+                    }
+                }
+                other => other,
+            }
+        }
+
+        McpRequest::SetNotificationSound { preset } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__NOTIFICATION_STORE__.setSoundPreset('{}'); return 'ok';",
+                    preset.replace('\\', "\\\\").replace('\'', "\\'")
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { .. } => McpResponse::Ok,
+                other => other,
+            }
+        }
+
+        McpRequest::AddMutePattern { pattern } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__NOTIFICATION_STORE__.addMutedPattern('{}'); return 'ok';",
+                    pattern.replace('\\', "\\\\").replace('\'', "\\'")
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { .. } => McpResponse::Ok,
+                other => other,
+            }
+        }
+
+        McpRequest::RemoveMutePattern { pattern } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__NOTIFICATION_STORE__.removeMutedPattern('{}'); return 'ok';",
+                    pattern.replace('\\', "\\\\").replace('\'', "\\'")
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { .. } => McpResponse::Ok,
+                other => other,
+            }
+        }
+
+        McpRequest::ListMutePatterns => {
+            let js_req = McpRequest::ExecuteJs {
+                script: "return window.__NOTIFICATION_STORE__.getMutedPatterns();".to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result, .. } => {
+                    let json_str = result.unwrap_or_else(|| "[]".to_string());
+                    match serde_json::from_str::<Vec<String>>(&json_str) {
+                        Ok(patterns) => McpResponse::MutePatterns { patterns },
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse mute patterns: {}", e),
+                        },
+                    }
+                }
+                other => other,
+            }
+        }
+
         McpRequest::SendKeys { terminal_id, keys } => {
             // Validate terminal exists
             if !app_state.terminals.read().contains_key(terminal_id) {
