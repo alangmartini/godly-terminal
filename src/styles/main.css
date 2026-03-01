@@ -218,6 +218,14 @@ html, body {
   border-bottom: 2px solid var(--accent);
 }
 
+.tab.unified-split-tab {
+  border-bottom: 2px solid var(--accent);
+}
+
+.tab.unified-split-tab .tab-title {
+  max-width: 260px;
+}
+
 .tab.dragging {
   opacity: 0.5;
 }
