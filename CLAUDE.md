@@ -487,6 +487,29 @@ All keyboard shortcuts defined in `DEFAULT_SHORTCUTS` (`src/state/keybinding-sto
 3. Add client method in `src/daemon_client/client.rs`
 4. Add Tauri command wrapper in `src/commands/terminal.rs`
 
+### Crate Dependency Graph
+
+```
+godly-protocol (hub) → daemon, mcp, notify, whisper, remote
+godly-vt (leaf) → daemon
+Independent: godly-llm, godly-renderer, godly-pty-shim
+```
+
+### Parallel Agent Rules
+
+- **Protocol changes**: Serialize — one agent at a time, merge before others rebase
+- **lib.rs / App.ts**: After decomposition, each agent works in its domain module — conflicts rare
+- **Independent crates** (vt, llm, renderer): Fully parallelizable
+- **Different frontend controllers**: Fully parallelizable
+- **Different store domains**: Fully parallelizable
+
+### Conventions for New Code
+
+- **New Tauri command**: Add to the relevant domain section in `lib.rs` invoke_handler, implement in the appropriate `commands/` submodule
+- **New App.ts feature**: Create a controller in `src/controllers/`, import from `App.ts`
+- **New store operation**: Add to the relevant domain module (`store-workspace.ts`, `store-terminal.ts`, or `store-layout.ts`), add delegation method in `store.ts`
+- **New shared type (Rust↔TS)**: Add to protocol crate with `#[derive(ts_rs::TS)]`, run `npm run generate-types`
+
 ### Modifying godly-mcp
 
 When changing any code in `src-tauri/mcp/`, bump the `BUILD` constant in `src-tauri/mcp/src/main.rs` so the log shows which binary is running. The log line `=== godly-mcp starting === build=N` makes it easy to confirm a rebuilt binary is actually in use.
