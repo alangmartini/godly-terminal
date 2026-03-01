@@ -83,6 +83,13 @@ impl Transcriber {
         params.set_print_timestamps(false);
         // Single-segment mode for voice-to-text (no timestamps needed)
         params.set_single_segment(true);
+        // Vocabulary hints: bias Whisper toward domain-specific terms
+        // that are common in Godly Terminal / developer voice commands
+        params.set_initial_prompt(
+            "Godly Terminal, Quick Claude, Claude Code, workspace, scrollback, \
+             Shift+V, Ctrl+Shift, terminal, daemon, PTY, split pane, tab, \
+             keybinding, shortcut, MCP, sidecar, whisper"
+        );
 
         let start = Instant::now();
 

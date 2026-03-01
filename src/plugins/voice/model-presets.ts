@@ -18,8 +18,8 @@ export const WHISPER_MODEL_PRESETS: WhisperModelPreset[] = [
     name: 'Base',
     fileName: 'ggml-base.bin',
     size: '142 MB',
-    description: 'Good balance of speed and accuracy. Recommended for most users.',
-    recommended: true,
+    description: 'Fast but lower accuracy. May struggle with technical terms.',
+    recommended: false,
   },
   {
     name: 'Small',
@@ -39,7 +39,7 @@ export const WHISPER_MODEL_PRESETS: WhisperModelPreset[] = [
     name: 'Large v3 Turbo',
     fileName: 'ggml-large-v3-turbo.bin',
     size: '1.5 GB',
-    description: 'Best accuracy with optimized speed. Requires GPU.',
-    recommended: false,
+    description: 'Best accuracy with optimized speed. Recommended for reliable transcription.',
+    recommended: true,
   },
 ];
