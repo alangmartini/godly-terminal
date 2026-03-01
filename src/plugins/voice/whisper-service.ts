@@ -29,6 +29,10 @@ export interface AudioDeviceInfo {
   isDefault: boolean;
 }
 
+export async function whisperIsAvailable(): Promise<boolean> {
+  return invoke<boolean>('whisper_is_available');
+}
+
 export async function whisperGetStatus(): Promise<WhisperStatus> {
   return invoke<WhisperStatus>('whisper_get_status');
 }
