@@ -1798,6 +1798,87 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        // === Tab management ===
+
+        McpRequest::ReorderTabs {
+            workspace_id,
+            terminal_ids,
+        } => {
+            // Validate workspace exists
+            let mut workspaces = app_state.workspaces.write();
+            match workspaces.get_mut(workspace_id) {
+                Some(ws) => {
+                    ws.tab_order = terminal_ids.clone();
+                }
+                None => {
+                    return McpResponse::Error {
+                        message: format!("Workspace {} not found", workspace_id),
+                    };
+                }
+            }
+            drop(workspaces);
+
+            auto_save.mark_dirty();
+
+            // Sync frontend
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__STORE__.reorderTerminals('{}', {})",
+                    workspace_id,
+                    serde_json::to_string(terminal_ids).unwrap_or_else(|_| "[]".to_string()),
+                ),
+            };
+            let _ = handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state);
+
+            McpResponse::Ok
+        }
+
+        McpRequest::GetTabOrder { workspace_id } => {
+            match app_state.get_workspace(workspace_id) {
+                Some(ws) => McpResponse::TabOrder {
+                    terminal_ids: ws.tab_order,
+                },
+                None => McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                },
+            }
+        }
+
+        // === Clipboard ===
+
+        McpRequest::CopyToClipboard { text } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "await navigator.clipboard.writeText({}); return 'ok';",
+                    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string()),
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { .. } => McpResponse::Ok,
+                other => other,
+            }
+        }
+
+        // === Selection ===
+
+        McpRequest::GetSelectedText { terminal_id: _ } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: "return window.getSelection()?.toString() || '';".to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result, .. } => {
+                    // Result is JSON-stringified, so parse it
+                    let text = result
+                        .and_then(|r| serde_json::from_str::<String>(&r).ok())
+                        .unwrap_or_default();
+                    McpResponse::SelectedText { text }
+                }
+                other => other,
+            }
+        }
+
         // === JS bridge ===
 
         McpRequest::ExecuteJs { script } => {
