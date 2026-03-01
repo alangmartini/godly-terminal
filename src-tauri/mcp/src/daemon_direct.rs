@@ -631,6 +631,15 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::ToggleWorktreeMode { .. } => {
+                Ok(Self::app_only_error("toggle_worktree_mode"))
+            }
+            McpRequest::ToggleClaudeCodeMode { .. } => {
+                Ok(Self::app_only_error("toggle_claude_code_mode"))
+            }
+            McpRequest::GetWorkspaceModes { .. } => {
+                Ok(Self::app_only_error("get_workspace_modes"))
+            }
         }
     }
 
