@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
 use godly_protocol::{DaemonMessage, Event, Request, Response, read_daemon_message, write_request};
+use godly_protocol::binary_diff::encode_grid_diff_into;
 
 // ── Per-session output stream registry ──────────────────────────────────
 //
@@ -102,6 +103,71 @@ impl OutputStreamRegistry {
     #[cfg(test)]
     pub fn session_count(&self) -> usize {
         self.buffers.len()
+    }
+}
+
+// ── Per-session binary diff stream registry ─────────────────────────────
+//
+// Mirrors OutputStreamRegistry but stores binary-encoded RichGridDiff frames.
+// The bridge I/O thread encodes diffs on Event::GridDiff and pushes them here.
+// The Tauri custom protocol handler drains them via stream://localhost/terminal-diff/{id}.
+
+/// Maximum buffer size per session for binary diffs (2MB).
+const MAX_DIFF_STREAM_BUFFER_SIZE: usize = 2 * 1024 * 1024;
+
+/// Registry of per-session binary-encoded grid diff buffers.
+pub struct DiffStreamRegistry {
+    buffers: dashmap::DashMap<String, Vec<u8>>,
+}
+
+impl DiffStreamRegistry {
+    pub fn new() -> Self {
+        Self {
+            buffers: dashmap::DashMap::new(),
+        }
+    }
+
+    /// Append binary-encoded diff bytes for a session.
+    pub fn push(&self, session_id: &str, data: &[u8]) {
+        if data.is_empty() {
+            return;
+        }
+        let mut buf = self.buffers.entry(session_id.to_string()).or_default();
+        if buf.len() + data.len() > MAX_DIFF_STREAM_BUFFER_SIZE {
+            // Drop everything and only keep the latest data.
+            // Unlike raw output, diffs are self-contained frames —
+            // partial old diffs are useless, so we drop the whole buffer.
+            buf.clear();
+            if data.len() > MAX_DIFF_STREAM_BUFFER_SIZE {
+                buf.extend_from_slice(&data[data.len() - MAX_DIFF_STREAM_BUFFER_SIZE..]);
+                return;
+            }
+        }
+        buf.extend_from_slice(data);
+    }
+
+    /// Drain all accumulated bytes for a session, returning them.
+    pub fn drain(&self, session_id: &str) -> Vec<u8> {
+        match self.buffers.get_mut(session_id) {
+            Some(mut buf) => std::mem::take(buf.value_mut()),
+            None => Vec::new(),
+        }
+    }
+
+    /// Non-blocking drain: returns None if the shard is currently locked.
+    pub fn try_drain(&self, session_id: &str) -> Option<Vec<u8>> {
+        match self.buffers.try_get_mut(session_id) {
+            dashmap::try_result::TryResult::Present(mut buf) => {
+                Some(std::mem::take(buf.value_mut()))
+            }
+            dashmap::try_result::TryResult::Absent => Some(Vec::new()),
+            dashmap::try_result::TryResult::Locked => None,
+        }
+    }
+
+    /// Remove a session's buffer entirely (on session close).
+    pub fn remove(&self, session_id: &str) {
+        self.buffers.remove(session_id);
     }
 }
 
@@ -539,6 +605,9 @@ impl DaemonBridge {
     ///
     /// If `output_registry` is provided, raw PTY bytes from Event::Output are
     /// pushed into the registry for the Tauri custom protocol stream handler.
+    ///
+    /// If `diff_registry` is provided, binary-encoded grid diffs from Event::GridDiff
+    /// are pushed for the stream://localhost/terminal-diff/ protocol handler.
     pub fn start(
         &self,
         mut reader: Box<dyn Read + Send>,
@@ -548,6 +617,7 @@ impl DaemonBridge {
         health: Arc<BridgeHealth>,
         wake_event: Arc<WakeEvent>,
         output_registry: Option<Arc<OutputStreamRegistry>>,
+        diff_registry: Option<Arc<DiffStreamRegistry>>,
     ) {
         if self.running.swap(true, Ordering::Relaxed) {
             return;
@@ -645,6 +715,21 @@ impl DaemonBridge {
                                         match read_daemon_message(&mut reader) {
                                             Ok(Some(DaemonMessage::Event(event))) => {
                                                 total_events += 1;
+
+                                                // Push to stream registries even during response-wait
+                                                if let Some(ref registry) = output_registry {
+                                                    if let Event::Output { ref session_id, ref data } = event {
+                                                        registry.push(session_id, data);
+                                                    }
+                                                }
+                                                if let Some(ref diff_reg) = diff_registry {
+                                                    if let Event::GridDiff { ref session_id, ref diff } = event {
+                                                        let mut encode_buf = Vec::new();
+                                                        encode_grid_diff_into(diff, &mut encode_buf);
+                                                        diff_reg.push(session_id, &encode_buf);
+                                                    }
+                                                }
+
                                                 update_phase(&health, PHASE_EMIT);
                                                 let payload = event_to_payload(event);
                                                 if !emitter.try_send(payload) {
@@ -757,6 +842,22 @@ impl DaemonBridge {
                                             }
                                             Event::SessionClosed { session_id, .. } => {
                                                 registry.remove(session_id);
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+
+                                    // Binary-encode grid diffs and push to the diff stream
+                                    // registry for the stream://localhost/terminal-diff/ protocol.
+                                    if let Some(ref diff_reg) = diff_registry {
+                                        match &event {
+                                            Event::GridDiff { session_id, diff } => {
+                                                let mut encode_buf = Vec::new();
+                                                encode_grid_diff_into(diff, &mut encode_buf);
+                                                diff_reg.push(session_id, &encode_buf);
+                                            }
+                                            Event::SessionClosed { session_id, .. } => {
+                                                diff_reg.remove(session_id);
                                             }
                                             _ => {}
                                         }

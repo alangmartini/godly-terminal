@@ -640,7 +640,11 @@ impl DaemonSession {
             let mut coalesced_flushes: u64 = 0;
             let mut last_stats = Instant::now();
             let mut last_diff_time = Instant::now();
-            const DIFF_INTERVAL: Duration = Duration::from_millis(16);
+            // Diff interval adapts to output mode:
+            // - Interactive (typing): 3ms (~333fps) for minimal keypress→paint latency
+            // - Bulk (heavy output): 16ms (~60fps) to avoid flooding the bridge
+            const DIFF_INTERVAL_INTERACTIVE: Duration = Duration::from_millis(3);
+            const DIFF_INTERVAL_BULK: Duration = Duration::from_millis(16);
 
             // Adaptive output batching state
             let mut mode_detector = ModeDetector::new();
@@ -727,13 +731,17 @@ impl DaemonSession {
 
                     // Drain point: pipe has no data. Send diff now so it
                     // captures the final state after all available output.
+                    let diff_interval = match mode_detector.check_quiet() {
+                        OutputMode::Interactive => DIFF_INTERVAL_INTERACTIVE,
+                        OutputMode::Bulk => DIFF_INTERVAL_BULK,
+                    };
                     maybe_send_diff(
                         &session_id,
                         &reader_tx,
                         &reader_attached,
                         &reader_vt,
                         &mut last_diff_time,
-                        DIFF_INTERVAL,
+                        diff_interval,
                         &reader_paused,
                     );
 
@@ -931,14 +939,15 @@ impl DaemonSession {
                 );
             }
 
-            // Final diff before exit so the frontend sees the last state
+            // Final diff before exit so the frontend sees the last state.
+            // Use interactive interval for fastest delivery.
             maybe_send_diff(
                 &session_id,
                 &reader_tx,
                 &reader_attached,
                 &reader_vt,
                 &mut last_diff_time,
-                DIFF_INTERVAL,
+                DIFF_INTERVAL_INTERACTIVE,
                 &reader_paused,
             );
 
