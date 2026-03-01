@@ -19,7 +19,7 @@ const TERMINAL_ID = 'tab-title-bug';
 function setupTerminal(processName = 'powershell') {
   store.addWorkspace({
     id: 'ws-1', name: 'Test', folderPath: 'C:\\', tabOrder: [],
-    shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
   });
   store.addTerminal({
     id: TERMINAL_ID, workspaceId: 'ws-1',
@@ -119,7 +119,7 @@ describe('Bug: tabs all named "pa-mcp" in Claude Code workspace', () => {
     store.addWorkspace({
       id: 'ws-claude', name: 'Claude WS', folderPath: 'C:\\Projects',
       tabOrder: [], shellType: { type: 'windows' },
-      worktreeMode: false, claudeCodeMode: true,
+      worktreeMode: false, aiToolMode: 'claude',
     });
   });
 

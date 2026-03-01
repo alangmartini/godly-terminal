@@ -390,15 +390,20 @@ export class WorkspaceSidebar {
     };
     nameContainer.appendChild(wtToggle);
 
-    const ccToggle = document.createElement('button');
-    ccToggle.className = `claude-code-toggle${workspace.claudeCodeMode ? ' active' : ''}`;
-    ccToggle.textContent = 'CC';
-    ccToggle.title = workspace.claudeCodeMode ? 'Claude Code mode: ON' : 'Claude Code mode: OFF';
-    ccToggle.onclick = async (e) => {
+    const aiToggle = document.createElement('button');
+    const aiLabel = workspace.aiToolMode === 'claude' ? 'CC'
+      : workspace.aiToolMode === 'codex' ? 'CX'
+      : workspace.aiToolMode === 'both' ? '2x'
+      : '--';
+    aiToggle.className = `ai-tool-toggle${workspace.aiToolMode !== 'none' ? ' active' : ''} mode-${workspace.aiToolMode}`;
+    aiToggle.textContent = aiLabel;
+    aiToggle.title = `AI tool mode: ${workspace.aiToolMode}`;
+    aiToggle.onclick = async (e) => {
       e.stopPropagation();
-      await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
+      const nextMode = workspaceService.cycleAiToolMode(workspace.aiToolMode);
+      await workspaceService.setAiToolMode(workspace.id, nextMode);
     };
-    nameContainer.appendChild(ccToggle);
+    nameContainer.appendChild(aiToggle);
 
     item.appendChild(nameContainer);
 
@@ -542,16 +547,25 @@ export class WorkspaceSidebar {
     };
     menu.appendChild(worktreeItem);
 
-    const claudeCodeItem = document.createElement('div');
-    claudeCodeItem.className = 'context-menu-item';
-    claudeCodeItem.textContent = workspace.claudeCodeMode
-      ? 'Disable Claude Code Mode'
-      : 'Enable Claude Code Mode';
-    claudeCodeItem.onclick = async () => {
-      menu.remove();
-      await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
-    };
-    menu.appendChild(claudeCodeItem);
+    // AI Tool Mode submenu
+    const aiModeItem = document.createElement('div');
+    aiModeItem.className = 'context-menu-item context-menu-submenu';
+    aiModeItem.textContent = `AI Tool: ${workspace.aiToolMode}`;
+
+    const aiSubmenu = document.createElement('div');
+    aiSubmenu.className = 'context-submenu';
+    for (const mode of ['none', 'claude', 'codex', 'both'] as const) {
+      const opt = document.createElement('div');
+      opt.className = `context-menu-item${workspace.aiToolMode === mode ? ' selected' : ''}`;
+      opt.textContent = mode === 'none' ? 'None' : mode === 'claude' ? 'Claude' : mode === 'codex' ? 'Codex' : 'Both';
+      opt.onclick = async () => {
+        menu.remove();
+        await workspaceService.setAiToolMode(workspace.id, mode);
+      };
+      aiSubmenu.appendChild(opt);
+    }
+    aiModeItem.appendChild(aiSubmenu);
+    menu.appendChild(aiModeItem);
 
     const isMuted = !notificationStore.isWorkspaceNotificationEnabled(workspace.id, workspace.name);
     const notifItem = document.createElement('div');

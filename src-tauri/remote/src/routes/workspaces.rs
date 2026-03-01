@@ -15,7 +15,7 @@ pub struct WorkspaceItem {
     /// Redacted to folder name only (not full path) to prevent information disclosure.
     pub folder_path: String,
     pub shell_type: String,
-    pub claude_code_mode: bool,
+    pub ai_tool_mode: String,
     pub terminals: Vec<WorkspaceTerminal>,
 }
 
@@ -104,7 +104,7 @@ pub async fn list_workspaces(
                 name: ws.name.clone(),
                 folder_path: redact_path(&ws.folder_path),
                 shell_type: ws.shell_type.display_name(),
-                claude_code_mode: ws.claude_code_mode,
+                ai_tool_mode: serde_json::to_string(&ws.ai_tool_mode).unwrap_or_else(|_| "\"none\"".to_string()).trim_matches('"').to_string(),
                 terminals,
             }
         })

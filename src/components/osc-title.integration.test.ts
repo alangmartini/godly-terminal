@@ -19,7 +19,7 @@ describe('OSC title integration (godly-vt pipeline)', () => {
     store.reset();
     store.addWorkspace({
       id: 'ws-1', name: 'Test', folderPath: 'C:\\', tabOrder: [],
-      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
     });
     store.addTerminal({
       id: TERMINAL_ID, workspaceId: 'ws-1',

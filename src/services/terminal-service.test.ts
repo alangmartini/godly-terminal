@@ -37,7 +37,7 @@ describe('TerminalService', () => {
           tabOrder: ['t1', 't2'],
           shellType: { type: 'windows' },
           worktreeMode: false,
-          claudeCodeMode: false,
+          aiToolMode: 'none',
         },
       ],
       terminals: [
