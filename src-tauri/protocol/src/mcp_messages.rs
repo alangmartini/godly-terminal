@@ -490,26 +490,23 @@ pub enum McpResponse {
     },
     MutePatterns {
         patterns: Vec<String>,
-
+    },
     AppInfo {
         version: String,
         workspace_count: usize,
         terminal_count: usize,
         daemon_connected: bool,
-
-
+    },
     TabOrder {
         terminal_ids: Vec<String>,
     },
     SelectedText {
         text: String,
-
-
+    },
     ThemeList {
         themes: Vec<String>,
         active: String,
-
-
+    },
     AvailableShells {
         shells: Vec<String>,
     },
@@ -521,10 +518,8 @@ pub enum McpResponse {
         custom_program: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         custom_args: Option<Vec<String>>,
-
-
+    },
     FontSize {
         size: u32,
-
     },
 }

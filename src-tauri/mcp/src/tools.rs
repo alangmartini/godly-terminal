@@ -991,47 +991,20 @@ pub fn list_tools() -> Value {
                 }
             },
             {
-
-
-
-
-
-
                 "name": "next_tab",
                 "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
-
-                "name": "reorder_tabs",
-                "description": "Reorder the terminal tabs in a workspace. Provide the full list of terminal IDs in the desired order.",
-
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "workspace_id": {
                             "type": "string",
-
                             "description": "ID of the workspace (optional — defaults to active workspace)"
                         }
                     },
-
-                "name": "get_notification_config",
-                "description": "Get the current notification settings: enabled state, sound preset, and volume level.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-
-
-                "name": "list_available_shells",
-                "description": "List all supported shell types that can be used as the default shell.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-
                     "required": []
                 }
             },
             {
-
-
                 "name": "previous_tab",
                 "description": "Switch to the previous tab in tab order (wraps around to last tab before first)",
                 "inputSchema": {
@@ -1040,32 +1013,12 @@ pub fn list_tools() -> Value {
                         "workspace_id": {
                             "type": "string",
                             "description": "ID of the workspace (optional — defaults to active workspace)"
-
-                "name": "open_settings",
-                "description": "Open the Godly Terminal settings dialog. Optionally open to a specific tab.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "tab": {
-                            "type": "string",
-                            "enum": ["themes", "terminal", "notifications", "plugins", "shortcuts", "remote"],
-                            "description": "Settings tab to open to (optional — defaults to the first tab)"
-
                         }
                     },
-
-                "name": "get_default_shell",
-                "description": "Get the current default shell configuration used for new terminals.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-
                     "required": []
                 }
             },
             {
-
-
                 "name": "go_to_tab",
                 "description": "Switch to a specific tab by its 0-based index in the tab order",
                 "inputSchema": {
@@ -1081,7 +1034,51 @@ pub fn list_tools() -> Value {
                         }
                     },
                     "required": ["index"]
-
+                }
+            },
+            {
+                "name": "reorder_tabs",
+                "description": "Reorder the terminal tabs in a workspace. Provide the full list of terminal IDs in the desired order.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace whose tabs to reorder"
+                        },
+                        "terminal_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Ordered list of terminal IDs representing the new tab order"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_ids"]
+                }
+            },
+            {
+                "name": "get_tab_order",
+                "description": "Get the current tab order (list of terminal IDs) for a workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to query"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "get_notification_config",
+                "description": "Get the current notification settings: enabled state, sound preset, and volume level.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
                 "name": "set_notification_sound",
                 "description": "Set the notification sound preset (e.g., 'chime', 'bell', 'ping', 'none').",
                 "inputSchema": {
@@ -1126,17 +1123,6 @@ pub fn list_tools() -> Value {
             {
                 "name": "list_mute_patterns",
                 "description": "List all glob patterns currently used to mute notifications for matching workspaces.",
-
-                "name": "save_layout",
-                "description": "Force-save the current workspace and terminal layout to disk immediately. Useful after making bulk changes via MCP to ensure they persist.",
-
-                "name": "list_themes",
-                "description": "List all available terminal themes and the currently active theme.",
-
-
-                "name": "zoom_in",
-                "description": "Increase the terminal font size by 1 pixel",
-
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -1144,54 +1130,36 @@ pub fn list_tools() -> Value {
                 }
             },
             {
-
-
-                "name": "get_app_info",
-                "description": "Get information about the Godly Terminal app: version, workspace count, terminal count, and daemon connection status.",
-
-
-                "name": "get_active_theme",
-                "description": "Get the name and ID of the currently active terminal theme.",
-
-
-                "name": "zoom_out",
-                "description": "Decrease the terminal font size by 1 pixel",
-
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-
-
-
-
-
-
-                }
-
-                            "description": "ID of the workspace whose tabs to reorder"
-                        },
-                        "terminal_ids": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Ordered list of terminal IDs representing the new tab order"
-                        }
-                    },
-                    "required": ["workspace_id", "terminal_ids"]
-                }
-            },
-            {
-                "name": "get_tab_order",
-                "description": "Get the current tab order (list of terminal IDs) for a workspace.",
+                "name": "open_settings",
+                "description": "Open the Godly Terminal settings dialog. Optionally open to a specific tab.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "workspace_id": {
+                        "tab": {
                             "type": "string",
-                            "description": "ID of the workspace to query"
+                            "enum": ["themes", "terminal", "notifications", "plugins", "shortcuts", "remote"],
+                            "description": "Settings tab to open to (optional — defaults to the first tab)"
                         }
                     },
-                    "required": ["workspace_id"]
+                    "required": []
+                }
+            },
+            {
+                "name": "save_layout",
+                "description": "Force-save the current workspace and terminal layout to disk immediately. Useful after making bulk changes via MCP to ensure they persist.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_app_info",
+                "description": "Get information about the Godly Terminal app: version, workspace count, terminal count, and daemon connection status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             },
             {
@@ -1221,8 +1189,23 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
-
-
+            },
+            {
+                "name": "list_themes",
+                "description": "List all available terminal themes and the currently active theme.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_active_theme",
+                "description": "Get the name and ID of the currently active terminal theme.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             },
             {
@@ -1238,8 +1221,26 @@ pub fn list_tools() -> Value {
                     },
                     "required": ["theme_name"]
                 }
-
-
+            },
+            {
+                "name": "list_available_shells",
+                "description": "List all supported shell types that can be used as the default shell.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_default_shell",
+                "description": "Get the current default shell configuration used for new terminals.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
                 "name": "set_default_shell",
                 "description": "Set the default shell for new terminals. Use list_available_shells to see valid shell_type values. For 'wsl', optionally specify a distribution. For 'custom', provide the program path and optional args.",
                 "inputSchema": {
@@ -1265,8 +1266,23 @@ pub fn list_tools() -> Value {
                     },
                     "required": ["shell_type"]
                 }
-
-
+            },
+            {
+                "name": "zoom_in",
+                "description": "Increase the terminal font size by 1 pixel",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "zoom_out",
+                "description": "Decrease the terminal font size by 1 pixel",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             },
             {
@@ -1286,7 +1302,6 @@ pub fn list_tools() -> Value {
                     "properties": {},
                     "required": []
                 }
-
             }
         ]
     })
@@ -2269,7 +2284,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         } => Ok(json!({
             "worktree_mode": worktree_mode,
             "claude_code_mode": claude_code_mode,
-
+        })),
         McpResponse::ScrollPosition {
             offset,
             total_scrollback,
@@ -2278,16 +2293,10 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "offset": offset,
             "total_scrollback": total_scrollback,
             "viewport_rows": viewport_rows,
-
         })),
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
         })),
-
-
-
-
-
         McpResponse::NotificationConfig {
             enabled,
             sound_preset,
@@ -2299,7 +2308,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
         McpResponse::MutePatterns { patterns } => Ok(json!({
             "patterns": patterns,
-
+        })),
         McpResponse::AppInfo {
             version,
             workspace_count,
@@ -2310,21 +2319,17 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "workspace_count": workspace_count,
             "terminal_count": terminal_count,
             "daemon_connected": daemon_connected,
-
-
+        })),
         McpResponse::TabOrder { terminal_ids } => Ok(json!({
             "terminal_ids": terminal_ids,
         })),
         McpResponse::SelectedText { text } => Ok(json!({
             "text": text,
-
-
+        })),
         McpResponse::ThemeList { themes, active } => Ok(json!({
             "themes": themes,
             "active": active,
-
         })),
-
         McpResponse::AvailableShells { shells } => Ok(json!({
             "shells": shells,
         })),
@@ -2346,12 +2351,9 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             }
             Ok(obj)
         }
-
-
         McpResponse::FontSize { size } => Ok(json!({
             "font_size": size,
         })),
-
     }
 }
 
