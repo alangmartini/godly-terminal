@@ -1,6 +1,6 @@
 {
   "name": "godly-terminal",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
@@ -46,7 +46,11 @@
     "demo:record": "node scripts/record-demo.mjs",
     "demo:phone-only": "node scripts/record-demo.mjs --phone-only",
     "demo:dry-run": "node scripts/record-demo.mjs --dry-run",
-    "generate-types": "bash scripts/generate-types.sh"
+    "generate-types": "bash scripts/generate-types.sh",
+    "production:build": "pwsh scripts/production-build.ps1",
+    "production:install": "pwsh scripts/production-install.ps1",
+    "staging:build": "pwsh scripts/staging-build.ps1",
+    "staging:install": "pwsh scripts/staging-install.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
