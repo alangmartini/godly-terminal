@@ -16,38 +16,6 @@ pub struct CreateTerminalResult {
     pub worktree_branch: Option<String>,
 }
 
-/// Convert app ShellType to protocol ShellType
-fn to_protocol_shell_type(st: &ShellType) -> godly_protocol::ShellType {
-    match st {
-        ShellType::Windows => godly_protocol::ShellType::Windows,
-        ShellType::Pwsh => godly_protocol::ShellType::Pwsh,
-        ShellType::Cmd => godly_protocol::ShellType::Cmd,
-        ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
-            distribution: distribution.clone(),
-        },
-        ShellType::Custom { program, args } => godly_protocol::ShellType::Custom {
-            program: program.clone(),
-            args: args.clone(),
-        },
-    }
-}
-
-/// Convert protocol ShellType to app ShellType
-fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> ShellType {
-    match st {
-        godly_protocol::ShellType::Windows => ShellType::Windows,
-        godly_protocol::ShellType::Pwsh => ShellType::Pwsh,
-        godly_protocol::ShellType::Cmd => ShellType::Cmd,
-        godly_protocol::ShellType::Wsl { distribution } => ShellType::Wsl {
-            distribution: distribution.clone(),
-        },
-        godly_protocol::ShellType::Custom { program, args } => ShellType::Custom {
-            program: program.clone(),
-            args: args.clone(),
-        },
-    }
-}
-
 #[tauri::command]
 pub fn create_terminal(
     workspace_id: String,
@@ -139,7 +107,7 @@ pub fn create_terminal(
     // Create session via daemon
     let request = Request::CreateSession {
         id: terminal_id.clone(),
-        shell_type: to_protocol_shell_type(&shell_type),
+        shell_type: shell_type.clone(),
         cwd: working_dir.clone(),
         rows: 24,
         cols: 80,
@@ -322,7 +290,7 @@ pub fn attach_session(
     let sessions_response = daemon.send_request(&Request::ListSessions)?;
     if let Response::SessionList { sessions } = sessions_response {
         if let Some(info) = sessions.iter().find(|s| s.id == session_id) {
-            let shell_type = from_protocol_shell_type(&info.shell_type);
+            let shell_type = info.shell_type.clone();
             let process_name = shell_type.display_name();
 
             state.add_session_metadata(
@@ -471,7 +439,7 @@ pub async fn quick_claude(
     // Create session via daemon
     let request = Request::CreateSession {
         id: terminal_id.clone(),
-        shell_type: to_protocol_shell_type(&shell_type),
+        shell_type: shell_type.clone(),
         cwd: working_dir.clone(),
         rows: 24,
         cols: 80,
