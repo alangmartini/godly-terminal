@@ -245,6 +245,7 @@ pub enum McpRequest {
         script: String,
     },
 
+
     // Scrollback control
     ScrollPageUp {
         #[serde(default)]
@@ -266,6 +267,13 @@ pub enum McpRequest {
         #[serde(default)]
         terminal_id: Option<String>,
     },
+
+    // Font/zoom controls
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    GetFontSize,
+
 
     // Screenshot capture
     CaptureScreenshot {
@@ -474,6 +482,7 @@ pub enum McpResponse {
 
 
 
+
     NotificationConfig {
         enabled: bool,
         sound_preset: String,
@@ -512,6 +521,10 @@ pub enum McpResponse {
         custom_program: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         custom_args: Option<Vec<String>>,
+
+
+    FontSize {
+        size: u32,
 
     },
 }

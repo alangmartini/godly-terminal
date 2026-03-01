@@ -774,6 +774,7 @@ impl Backend for DaemonDirectBackend {
 
 
 
+
             McpRequest::NextTab { .. } => Ok(Self::app_only_error("next_tab")),
             McpRequest::PreviousTab { .. } => Ok(Self::app_only_error("previous_tab")),
             McpRequest::GoToTab { .. } => Ok(Self::app_only_error("go_to_tab")),
@@ -832,6 +833,12 @@ impl Backend for DaemonDirectBackend {
             }
             McpRequest::GetDefaultShell => Ok(Self::app_only_error("get_default_shell")),
             McpRequest::SetDefaultShell { .. } => Ok(Self::app_only_error("set_default_shell")),
+
+
+            McpRequest::ZoomIn => Ok(Self::app_only_error("zoom_in")),
+            McpRequest::ZoomOut => Ok(Self::app_only_error("zoom_out")),
+            McpRequest::ZoomReset => Ok(Self::app_only_error("zoom_reset")),
+            McpRequest::GetFontSize => Ok(Self::app_only_error("get_font_size")),
 
         }
     }
