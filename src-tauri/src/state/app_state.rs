@@ -103,6 +103,13 @@ impl AppState {
         }
     }
 
+    pub fn update_workspace_name(&self, id: &str, name: String) {
+        let mut workspaces = self.workspaces.write();
+        if let Some(workspace) = workspaces.get_mut(id) {
+            workspace.name = name;
+        }
+    }
+
     pub fn update_workspace_worktree_mode(&self, id: &str, worktree_mode: bool) {
         let mut workspaces = self.workspaces.write();
         if let Some(workspace) = workspaces.get_mut(id) {
