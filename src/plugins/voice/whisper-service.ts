@@ -15,6 +15,7 @@ export interface WhisperConfig {
   useGpu: boolean;
   gpuDevice: number;
   microphoneDeviceId: string | null;
+  customVocabulary: string;
 }
 
 export interface GpuDeviceInfo {
@@ -98,4 +99,8 @@ export async function whisperListAudioDevices(): Promise<AudioDeviceInfo[]> {
 
 export async function whisperPlaybackRecording(): Promise<void> {
   return invoke<void>('whisper_playback_recording');
+}
+
+export async function whisperSetVocabulary(terms: string): Promise<void> {
+  return invoke<void>('whisper_set_vocabulary', { terms });
 }
