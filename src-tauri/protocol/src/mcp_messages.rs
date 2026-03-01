@@ -265,6 +265,7 @@ pub enum McpRequest {
 
 
 
+
     // Tab navigation
     NextTab {
         #[serde(default)]
@@ -308,6 +309,12 @@ pub enum McpRequest {
         #[serde(default)]
         terminal_id: Option<String>,
     },
+
+
+    // Theme management
+    ListThemes,
+    GetActiveTheme,
+    SetTheme { theme_name: String },
 
 
     // Notifications
@@ -449,6 +456,7 @@ pub enum McpResponse {
     },
 
 
+
     NotificationConfig {
         enabled: bool,
         sound_preset: String,
@@ -469,6 +477,11 @@ pub enum McpResponse {
     },
     SelectedText {
         text: String,
+
+
+    ThemeList {
+        themes: Vec<String>,
+        active: String,
 
     },
 }
