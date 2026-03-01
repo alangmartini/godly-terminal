@@ -2,9 +2,13 @@ import { App } from './components/App';
 import { store } from './state/store';
 
 
+
 import { notificationStore } from './state/notification-store';
 
 import { themeStore } from './state/theme-store';
+
+
+import { terminalSettingsStore } from './state/terminal-settings-store';
 
 
 import { terminalSettingsStore } from './state/terminal-settings-store';
@@ -19,9 +23,12 @@ initLogger();
 (window as any).__STORE__ = store;
 (window as any).__TERMINAL_SETTINGS_STORE__ = terminalSettingsStore;
 
+
 (window as any).__NOTIFICATION_STORE__ = notificationStore;
 
 (window as any).__THEME_STORE__ = themeStore;
+
+
 
 
 // Prevent WebView2 native zoom on Ctrl+scroll/keyboard everywhere in the app.

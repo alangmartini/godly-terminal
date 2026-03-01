@@ -996,6 +996,7 @@ pub fn list_tools() -> Value {
 
 
 
+
                 "name": "next_tab",
                 "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
 
@@ -1132,6 +1133,10 @@ pub fn list_tools() -> Value {
                 "name": "list_themes",
                 "description": "List all available terminal themes and the currently active theme.",
 
+
+                "name": "zoom_in",
+                "description": "Increase the terminal font size by 1 pixel",
+
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -1140,6 +1145,7 @@ pub fn list_tools() -> Value {
             },
             {
 
+
                 "name": "get_app_info",
                 "description": "Get information about the Godly Terminal app: version, workspace count, terminal count, and daemon connection status.",
 
@@ -1147,10 +1153,15 @@ pub fn list_tools() -> Value {
                 "name": "get_active_theme",
                 "description": "Get the name and ID of the currently active terminal theme.",
 
+
+                "name": "zoom_out",
+                "description": "Decrease the terminal font size by 1 pixel",
+
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
                     "required": []
+
 
 
 
@@ -1253,6 +1264,27 @@ pub fn list_tools() -> Value {
                         }
                     },
                     "required": ["shell_type"]
+                }
+
+
+                }
+            },
+            {
+                "name": "zoom_reset",
+                "description": "Reset the terminal font size to the default (13px)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_font_size",
+                "description": "Get the current terminal font size in pixels",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
 
             }
@@ -1918,6 +1950,7 @@ pub fn call_tool(
 
 
 
+
         "next_tab" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::NextTab { workspace_id }
@@ -2053,6 +2086,12 @@ pub fn call_tool(
                 custom_args,
             }
         }
+
+
+        "zoom_in" => McpRequest::ZoomIn,
+        "zoom_out" => McpRequest::ZoomOut,
+        "zoom_reset" => McpRequest::ZoomReset,
+        "get_font_size" => McpRequest::GetFontSize,
 
 
         _ => return Err(format!("Unknown tool: {}", name)),
@@ -2248,6 +2287,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
 
 
 
+
         McpResponse::NotificationConfig {
             enabled,
             sound_preset,
@@ -2306,6 +2346,11 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             }
             Ok(obj)
         }
+
+
+        McpResponse::FontSize { size } => Ok(json!({
+            "font_size": size,
+        })),
 
     }
 }
