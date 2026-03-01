@@ -353,6 +353,7 @@ class TerminalService {
 
         delay = STREAM_RECONNECT_BASE_MS;
 
+        let gotData = false;
         const reader = response.body.getReader();
         const onAbort = () => reader.cancel();
         signal.addEventListener('abort', onAbort, { once: true });
@@ -361,6 +362,7 @@ class TerminalService {
             const { done, value } = await reader.read();
             if (done) break;
             if (value && value.length > 0) {
+              gotData = true;
               const diffs = decodeAllDiffs(value);
               for (const diff of diffs) {
                 onDiff(diff);
@@ -371,6 +373,11 @@ class TerminalService {
           signal.removeEventListener('abort', onAbort);
           reader.releaseLock();
         }
+
+        // Successful response with data — reconnect immediately for low latency.
+        // The protocol returns a complete response (not a true stream), so each
+        // fetch is a single poll. Delay only on empty responses to avoid busy loop.
+        if (gotData) continue;
       } catch (err: unknown) {
         if (signal.aborted) break;
 
@@ -382,7 +389,7 @@ class TerminalService {
 
       if (signal.aborted) break;
 
-      // Exponential backoff with jitter
+      // Exponential backoff with jitter (errors and empty responses only)
       const waitTime = delay + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, waitTime);
@@ -454,6 +461,7 @@ class TerminalService {
         cb.failures = 0;
         cb.open = false;
 
+        let gotData = false;
         const reader = response.body.getReader();
         // Cancel the reader when abort fires so reader.read() resolves
         // instead of hanging forever on a long-lived stream.
@@ -464,6 +472,7 @@ class TerminalService {
             const { done, value } = await reader.read();
             if (done) break;
             if (value && value.length > 0) {
+              gotData = true;
               onData();
             }
           }
@@ -471,6 +480,9 @@ class TerminalService {
           signal.removeEventListener('abort', onAbort);
           reader.releaseLock();
         }
+
+        // Successful response with data — reconnect immediately for low latency.
+        if (gotData) continue;
       } catch (err: unknown) {
         if (signal.aborted) break;
 
