@@ -202,6 +202,7 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+
     // Tab navigation
     NextTab {
         #[serde(default)]
@@ -216,6 +217,15 @@ pub enum McpRequest {
         workspace_id: Option<String>,
         index: u32,
     },
+
+    // App control
+    OpenSettings {
+        #[serde(default)]
+        tab: Option<String>,
+    },
+    SaveLayout,
+    GetAppInfo,
+
 
     // Notifications
     Notify {
@@ -342,6 +352,7 @@ pub enum McpResponse {
     Screenshot {
         path: String,
     },
+
     NotificationConfig {
         enabled: bool,
         sound_preset: String,
@@ -349,5 +360,12 @@ pub enum McpResponse {
     },
     MutePatterns {
         patterns: Vec<String>,
+
+    AppInfo {
+        version: String,
+        workspace_count: usize,
+        terminal_count: usize,
+        daemon_connected: bool,
+
     },
 }

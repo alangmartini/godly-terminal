@@ -772,6 +772,7 @@ pub fn list_tools() -> Value {
             },
             {
 
+
                 "name": "next_tab",
                 "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
                 "inputSchema": {
@@ -802,12 +803,24 @@ pub fn list_tools() -> Value {
                         "workspace_id": {
                             "type": "string",
                             "description": "ID of the workspace (optional — defaults to active workspace)"
+
+                "name": "open_settings",
+                "description": "Open the Godly Terminal settings dialog. Optionally open to a specific tab.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "tab": {
+                            "type": "string",
+                            "enum": ["themes", "terminal", "notifications", "plugins", "shortcuts", "remote"],
+                            "description": "Settings tab to open to (optional — defaults to the first tab)"
+
                         }
                     },
                     "required": []
                 }
             },
             {
+
                 "name": "go_to_tab",
                 "description": "Switch to a specific tab by its 0-based index in the tab order",
                 "inputSchema": {
@@ -868,10 +881,26 @@ pub fn list_tools() -> Value {
             {
                 "name": "list_mute_patterns",
                 "description": "List all glob patterns currently used to mute notifications for matching workspaces.",
+
+                "name": "save_layout",
+                "description": "Force-save the current workspace and terminal layout to disk immediately. Useful after making bulk changes via MCP to ensure they persist.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
                     "required": []
+                }
+            },
+            {
+                "name": "get_app_info",
+                "description": "Get information about the Godly Terminal app: version, workspace count, terminal count, and daemon connection status.",
+
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+
+
+
 
                 }
             }
@@ -1433,6 +1462,7 @@ pub fn call_tool(
         }
 
 
+
         "next_tab" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::NextTab { workspace_id }
@@ -1483,6 +1513,16 @@ pub fn call_tool(
         }
 
         "list_mute_patterns" => McpRequest::ListMutePatterns,
+
+
+        "open_settings" => {
+            let tab = args.get("tab").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::OpenSettings { tab }
+        }
+
+        "save_layout" => McpRequest::SaveLayout,
+
+        "get_app_info" => McpRequest::GetAppInfo,
 
 
         _ => return Err(format!("Unknown tool: {}", name)),
@@ -1650,6 +1690,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
         })),
+
         McpResponse::NotificationConfig {
             enabled,
             sound_preset,
@@ -1661,6 +1702,18 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
         McpResponse::MutePatterns { patterns } => Ok(json!({
             "patterns": patterns,
+
+        McpResponse::AppInfo {
+            version,
+            workspace_count,
+            terminal_count,
+            daemon_connected,
+        } => Ok(json!({
+            "version": version,
+            "workspace_count": workspace_count,
+            "terminal_count": terminal_count,
+            "daemon_connected": daemon_connected,
+
         })),
     }
 }
