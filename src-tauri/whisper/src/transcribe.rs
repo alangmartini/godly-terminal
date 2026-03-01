@@ -91,12 +91,14 @@ impl Transcriber {
         // Single-segment mode for voice-to-text (no timestamps needed)
         params.set_single_segment(true);
         // Vocabulary hints: combine built-in terms with user-defined custom vocabulary
-        let prompt = if self.custom_vocabulary.is_empty() {
-            BUILTIN_VOCABULARY.to_string()
+        let combined;
+        let prompt: &str = if self.custom_vocabulary.is_empty() {
+            BUILTIN_VOCABULARY
         } else {
-            format!("{}, {}", BUILTIN_VOCABULARY, self.custom_vocabulary)
+            combined = format!("{}, {}", BUILTIN_VOCABULARY, self.custom_vocabulary);
+            &combined
         };
-        params.set_initial_prompt(&prompt);
+        params.set_initial_prompt(prompt);
 
         let start = Instant::now();
 
