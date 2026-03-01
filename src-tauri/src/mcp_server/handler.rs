@@ -2102,6 +2102,7 @@ pub fn handle_mcp_request(
 
 
 
+
         // === Scrollback control ===
 
         McpRequest::ScrollPageUp { terminal_id } => {
@@ -2585,6 +2586,29 @@ pub fn handle_mcp_request(
                         themes: all.map(t => t.name),
                         active: active.name,
                     });
+
+        // === Shell settings ===
+
+        McpRequest::ListAvailableShells => {
+            McpResponse::AvailableShells {
+                shells: vec![
+                    "windows".to_string(),
+                    "pwsh".to_string(),
+                    "cmd".to_string(),
+                    "wsl".to_string(),
+                    "custom".to_string(),
+                ],
+            }
+        }
+
+        McpRequest::GetDefaultShell => {
+            let js_req = McpRequest::ExecuteJs {
+                script: r#"
+                    const store = window.__TERMINAL_SETTINGS_STORE__;
+                    if (!store) return JSON.stringify({ error: '__TERMINAL_SETTINGS_STORE__ not found' });
+                    const shell = store.getDefaultShell();
+                    return JSON.stringify(shell);
+
                 "#.to_string(),
             };
             match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
@@ -2595,6 +2619,7 @@ pub fn handle_mcp_request(
                             if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
                                 return McpResponse::Error { message: err.to_string() };
                             }
+
                             let themes = val.get("themes")
                                 .and_then(|t| t.as_array())
                                 .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
@@ -2607,16 +2632,46 @@ pub fn handle_mcp_request(
                         }
                         Err(e) => McpResponse::Error {
                             message: format!("Failed to parse theme list: {}", e),
+
+                            let shell_type = val.get("type")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            let wsl_distribution = val.get("distribution")
+                                .and_then(|d| d.as_str())
+                                .map(String::from);
+                            let custom_program = val.get("program")
+                                .and_then(|p| p.as_str())
+                                .map(String::from);
+                            let custom_args = val.get("args")
+                                .and_then(|a| a.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+                            McpResponse::ShellInfo {
+                                shell_type,
+                                wsl_distribution,
+                                custom_program,
+                                custom_args,
+                            }
+                        }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse shell info: {}", e),
+
                         },
                     }
                 }
                 McpResponse::JsResult { result: None, .. } => McpResponse::Error {
+
                     message: "Theme list returned no result".to_string(),
+                },
+
+
+                    message: "get_default_shell returned no result".to_string(),
                 },
 
                 other => other,
             }
         }
+
 
 
         // === Selection ===
@@ -2670,6 +2725,70 @@ pub fn handle_mcp_request(
                     theme_name.replace('\'', "\\'"),
                     theme_name.replace('\'', "\\'"),
                     theme_name.replace('\'', "\\'"),
+
+        McpRequest::SetDefaultShell {
+            shell_type,
+            wsl_distribution,
+            custom_program,
+            custom_args,
+        } => {
+            // Validate and build the JS shell object
+            let shell_js = match shell_type.as_str() {
+                "windows" | "pwsh" | "cmd" => {
+                    format!("{{ type: '{}' }}", shell_type)
+                }
+                "wsl" => {
+                    match &wsl_distribution {
+                        Some(dist) => format!(
+                            "{{ type: 'wsl', distribution: '{}' }}",
+                            dist.replace('\'', "\\'")
+                        ),
+                        None => "{ type: 'wsl' }".to_string(),
+                    }
+                }
+                "custom" => {
+                    let program = match &custom_program {
+                        Some(p) => p.replace('\'', "\\'"),
+                        None => {
+                            return McpResponse::Error {
+                                message: "custom_program is required for shell_type='custom'".to_string(),
+                            };
+                        }
+                    };
+                    match &custom_args {
+                        Some(args) => {
+                            let args_js: Vec<String> = args.iter()
+                                .map(|a| format!("'{}'", a.replace('\'', "\\'")))
+                                .collect();
+                            format!(
+                                "{{ type: 'custom', program: '{}', args: [{}] }}",
+                                program,
+                                args_js.join(", ")
+                            )
+                        }
+                        None => format!("{{ type: 'custom', program: '{}' }}", program),
+                    }
+                }
+                other => {
+                    return McpResponse::Error {
+                        message: format!(
+                            "Invalid shell_type: '{}'. Valid values: windows, pwsh, cmd, wsl, custom",
+                            other
+                        ),
+                    };
+                }
+            };
+
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    r#"
+                    const store = window.__TERMINAL_SETTINGS_STORE__;
+                    if (!store) return JSON.stringify({{ error: '__TERMINAL_SETTINGS_STORE__ not found' }});
+                    store.setDefaultShell({});
+                    return JSON.stringify({{ success: true }});
+                    "#,
+                    shell_js,
+
                 ),
             };
             match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
@@ -2683,12 +2802,23 @@ pub fn handle_mcp_request(
                             McpResponse::Ok
                         }
                         Err(e) => McpResponse::Error {
+
                             message: format!("Failed to parse set_theme result: {}", e),
+
+                            message: format!("Failed to parse set_default_shell result: {}", e),
+
                         },
                     }
                 }
                 McpResponse::JsResult { result: None, .. } => McpResponse::Error {
+
                     message: "set_theme returned no result".to_string(),
+                },
+                other => other,
+            }
+
+
+                    message: "set_default_shell returned no result".to_string(),
                 },
                 other => other,
             }
