@@ -771,6 +771,7 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+
                 "name": "next_tab",
                 "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
                 "inputSchema": {
@@ -781,10 +782,18 @@ pub fn list_tools() -> Value {
                             "description": "ID of the workspace (optional — defaults to active workspace)"
                         }
                     },
+
+                "name": "get_notification_config",
+                "description": "Get the current notification settings: enabled state, sound preset, and volume level.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+
                     "required": []
                 }
             },
             {
+
                 "name": "previous_tab",
                 "description": "Switch to the previous tab in tab order (wraps around to last tab before first)",
                 "inputSchema": {
@@ -814,6 +823,56 @@ pub fn list_tools() -> Value {
                         }
                     },
                     "required": ["index"]
+
+                "name": "set_notification_sound",
+                "description": "Set the notification sound preset (e.g., 'chime', 'bell', 'ping', 'none').",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "preset": {
+                            "type": "string",
+                            "description": "Sound preset name to use for notifications"
+                        }
+                    },
+                    "required": ["preset"]
+                }
+            },
+            {
+                "name": "add_mute_pattern",
+                "description": "Add a glob pattern to mute notifications for matching workspace names (e.g., 'test-*', '*-staging').",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern to match workspace names for muting"
+                        }
+                    },
+                    "required": ["pattern"]
+                }
+            },
+            {
+                "name": "remove_mute_pattern",
+                "description": "Remove a glob pattern from the notification mute list.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "The exact glob pattern to remove"
+                        }
+                    },
+                    "required": ["pattern"]
+                }
+            },
+            {
+                "name": "list_mute_patterns",
+                "description": "List all glob patterns currently used to mute notifications for matching workspaces.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+
                 }
             }
         ]
@@ -1373,6 +1432,7 @@ pub fn call_tool(
             McpRequest::ExportTerminalInfo { terminal_id }
         }
 
+
         "next_tab" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::NextTab { workspace_id }
@@ -1391,6 +1451,39 @@ pub fn call_tool(
                 .ok_or("Missing index")? as u32;
             McpRequest::GoToTab { workspace_id, index }
         }
+
+
+        "get_notification_config" => McpRequest::GetNotificationConfig,
+
+        "set_notification_sound" => {
+            let preset = args
+                .get("preset")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing preset")?
+                .to_string();
+            McpRequest::SetNotificationSound { preset }
+        }
+
+        "add_mute_pattern" => {
+            let pattern = args
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing pattern")?
+                .to_string();
+            McpRequest::AddMutePattern { pattern }
+        }
+
+        "remove_mute_pattern" => {
+            let pattern = args
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing pattern")?
+                .to_string();
+            McpRequest::RemoveMutePattern { pattern }
+        }
+
+        "list_mute_patterns" => McpRequest::ListMutePatterns,
+
 
         _ => return Err(format!("Unknown tool: {}", name)),
     };
@@ -1556,6 +1649,18 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
+        })),
+        McpResponse::NotificationConfig {
+            enabled,
+            sound_preset,
+            volume,
+        } => Ok(json!({
+            "enabled": enabled,
+            "sound_preset": sound_preset,
+            "volume": volume,
+        })),
+        McpResponse::MutePatterns { patterns } => Ok(json!({
+            "patterns": patterns,
         })),
     }
 }
