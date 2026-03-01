@@ -44,6 +44,9 @@ export class TerminalPane {
   // within the interval collapse into a single IPC call, capping snapshot
   // fetches to ~60fps under sustained output.
   private static readonly SNAPSHOT_MIN_INTERVAL_MS = 16;
+  // If output notifications arrive but no diff follows within this window,
+  // treat the diff stream as stalled and recover via full snapshot pull.
+  private static readonly DIFF_STALL_FALLBACK_MS = 250;
   private snapshotPending = false;
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -94,6 +97,10 @@ export class TerminalPane {
   // When true, binary diff stream is delivering diffs directly — suppresses
   // the pull path (scheduleSnapshotFetch) and output stream notifications.
   private diffStreamActive = false;
+  // Recovery watchdog: when output arrives while diffStreamActive is true,
+  // wait briefly for a diff frame. If none arrives, drop diff mode and
+  // schedule a pull-based recovery fetch.
+  private diffStallFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Hidden textarea for keyboard input (handles dead keys, IME composition).
   // Canvas elements don't support text composition, so dead keys (e.g. quote
@@ -314,7 +321,10 @@ export class TerminalPane {
       this.terminalId,
       () => {
         if (this.paused) return;
-        if (this.diffStreamActive) return;
+        if (this.diffStreamActive) {
+          this.armDiffStallFallback();
+          return;
+        }
         perfTracer.mark('terminal_output_event');
         perfTracer.measure('keydown_to_output', 'keydown');
         if (this.renderer.isActivelySelecting()) return;
@@ -331,7 +341,10 @@ export class TerminalPane {
     // When the binary diff stream is active, this becomes a no-op.
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
-      if (this.diffStreamActive) return;
+      if (this.diffStreamActive) {
+        this.armDiffStallFallback();
+        return;
+      }
       if (this.renderer.isActivelySelecting()) return;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
@@ -347,6 +360,7 @@ export class TerminalPane {
     terminalService.connectDiffStream(this.terminalId, (diff) => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
+      this.clearDiffStallFallback();
       this.diffStreamActive = true;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
@@ -761,6 +775,25 @@ export class TerminalPane {
 
   private useDiffSnapshots = true;
 
+  private clearDiffStallFallback() {
+    if (this.diffStallFallbackTimer !== null) {
+      clearTimeout(this.diffStallFallbackTimer);
+      this.diffStallFallbackTimer = null;
+    }
+  }
+
+  private armDiffStallFallback() {
+    if (this.diffStallFallbackTimer !== null) return;
+    this.diffStallFallbackTimer = setTimeout(() => {
+      this.diffStallFallbackTimer = null;
+      if (this.paused) return;
+      if (!this.diffStreamActive) return;
+      this.diffStreamActive = false;
+      this.forceFullFetch = true;
+      this.scheduleSnapshotFetch();
+    }, TerminalPane.DIFF_STALL_FALLBACK_MS);
+  }
+
   private async fetchAndRenderSnapshot() {
     const forceFull = this.forceFullFetch;
     if (forceFull) this.forceFullFetch = false;
@@ -1060,6 +1093,7 @@ export class TerminalPane {
     if (this.paused) return;
     this.paused = true;
     this.diffStreamActive = false;
+    this.clearDiffStallFallback();
     terminalService.disconnectDiffStream(this.terminalId);
     terminalService.disconnectOutputStream(this.terminalId);
     if (this.snapshotTimer !== null) {
@@ -1120,6 +1154,7 @@ export class TerminalPane {
     terminalService.connectDiffStream(this.terminalId, (diff) => {
       if (this.paused) return;
       if (this.renderer.isActivelySelecting()) return;
+      this.clearDiffStallFallback();
       this.diffStreamActive = true;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
@@ -1228,6 +1263,7 @@ export class TerminalPane {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;
     }
+    this.clearDiffStallFallback();
     this.snapshotPending = false;
     this.snapshotRetryRequested = false;
     if (this.scrollRafId !== null) {
