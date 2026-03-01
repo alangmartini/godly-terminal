@@ -178,13 +178,9 @@ describe('TerminalService stream consumer', () => {
     const controller = new AbortController();
     const promise = terminalService._consumeStream('s1', controller.signal, onData);
 
-    // First stream delivers chunk and closes.
+    // First stream delivers chunk, closes, and immediately reconnects (no delay).
     await vi.advanceTimersByTimeAsync(0);
     expect(onData).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    // Reconnect delay after clean close (reset to base = 1000ms).
-    await vi.advanceTimersByTimeAsync(1000);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
 
     controller.abort();
@@ -245,7 +241,7 @@ describe('TerminalService stream consumer', () => {
     await promise;
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      'stream://localhost/terminal-output/my-session-123',
+      'http://stream.localhost/terminal-output/my-session-123',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -473,23 +469,14 @@ describe('TerminalService circuit breaker', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
 
     // Wait 2000ms (doubled) for attempt 3 (success).
+    // Successful response with data → immediate reconnect → attempt 4 fires too.
     await vi.advanceTimersByTimeAsync(2000);
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-    // Let the stream read microtasks complete.
+    // Let microtasks complete: attempt 3 succeeds + stream read + immediate reconnect → attempt 4.
     await vi.advanceTimersByTimeAsync(0);
     expect(onData).toHaveBeenCalledTimes(1);
-
-    // Stream closed cleanly. Delay was reset to STREAM_RECONNECT_BASE_MS on success.
-    // Wait base delay (1000ms) for attempt 4 (fail).
-    await vi.advanceTimersByTimeAsync(STREAM_RECONNECT_BASE_MS);
     expect(fetchSpy).toHaveBeenCalledTimes(4);
 
-    // After attempt 4 fails with delay=base, the delay doubles to 2000ms.
-    // Wait base delay — should NOT trigger attempt 5 yet (delay is now 2000ms).
-    await vi.advanceTimersByTimeAsync(STREAM_RECONNECT_BASE_MS);
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
-
-    // Wait the remaining 1000ms to hit 2000ms total — triggers attempt 5.
+    // After attempt 4 fails with delay=base (1000ms), wait for attempt 5.
     await vi.advanceTimersByTimeAsync(STREAM_RECONNECT_BASE_MS);
     expect(fetchSpy).toHaveBeenCalledTimes(5);
 

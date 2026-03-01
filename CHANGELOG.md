@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-01
+
+### Added
+- **Quick Claude AI tool selector** — Quick Claude dialog now includes a dropdown to choose between Claude Code and Codex, defaulting to the workspace's AI tool mode (#480)
+- **Quick Claude "Both" mode** — New "Both (Claude + Codex)" option in the Quick Claude dialog (Ctrl+Shift+Q) that creates a vertical split with both tools side-by-side, sending the same prompt to each. Worktree branches use `-cc` / `-c` suffixes (#487)
+
+### Fixed
+- **AI Tool Mode via Ctrl+T** — Codex mode now executes `codex --yolo` and Both mode creates a vertical split with Claude + Codex when using the Ctrl+T keyboard shortcut (#480)
+- **Binary framing for GridDiff on daemon→bridge pipe** — GridDiff events now use compact binary encoding (tag 0x04) instead of JSON serialization on the daemon→bridge named pipe, reducing per-diff payload by ~10x. Fixes low FPS (~18) and high input latency caused by JSON serialization saturating the bridge I/O loop (#481)
+- **Terminal text invisible until tab switch** — Fixed a race condition where binary diff stream data arriving during the initial snapshot fetch created a deadlock, leaving `cachedSnapshot` permanently null (#486)
+
+### Changed
+- **Voice/Whisper decoupled from main installer** — godly-whisper is no longer built or bundled with the main app. Users who want voice-to-text can download a separate standalone installer from GitHub Releases (#484)
+
 ## [0.10.0] - 2026-03-01
 
 ### Added
