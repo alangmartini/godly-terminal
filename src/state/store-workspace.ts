@@ -20,6 +20,7 @@ export function updateWorkspaceImpl(store: Store, id: string, updates: Partial<W
 
 export function removeWorkspaceImpl(store: Store, id: string): void {
   store.deleteLastActiveTerminal(id);
+  store.deleteSuspendedLayoutTree(id);
   const { [id]: _s, ...remainingSplitViews } = store.getState().splitViews;
   const { [id]: _t, ...remainingTrees } = store.getState().layoutTrees;
   const { [id]: _z, ...remainingZoomed } = store.getState().zoomedPanes;

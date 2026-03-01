@@ -81,16 +81,16 @@ describe('Bug #391: new terminal during active split creates inconsistent state'
     expect(terminalIds(tree!)).toEqual(['t1', 't2']);
   });
 
-  it('should clear split and not restore it when navigating back to former split terminal', () => {
-    // Bug #391 part 2: After split is cleared by adding t3, clicking t3 then
-    // clicking back to t2 should stay in single-pane mode.
+  it('should suspend split when adding a new terminal, and restore on navigation back (Bug #426)', () => {
+    // Bug #426 supersedes Bug #391 part 2: addTerminal now suspends the split
+    // so it can be restored when the user navigates back to a split member.
     store.addTerminal({ id: 't1', workspaceId: 'ws-1', name: 'Tab 1', processName: 'cmd', order: 0 });
     store.addTerminal({ id: 't2', workspaceId: 'ws-1', name: 'Tab 2', processName: 'cmd', order: 0 });
     store.setActiveWorkspace('ws-1');
     store.setActiveTerminal('t1');
     store.splitTerminalAt('ws-1', 't1', 't2', 'horizontal');
 
-    // Add t3 (simulates Ctrl+T) — should clear the split
+    // Add t3 (simulates Ctrl+T) — should clear the active split but suspend it
     store.addTerminal({ id: 't3', workspaceId: 'ws-1', name: 'Tab 3', processName: 'cmd', order: 0 });
 
     // Click t3 tab
@@ -98,14 +98,14 @@ describe('Bug #391: new terminal during active split creates inconsistent state'
     expect(store.getLayoutTree('ws-1')).toBeNull();
     expect(store.getState().activeTerminalId).toBe('t3');
 
-    // Click back on t2 — split should remain cleared
+    // Click back on t2 — split should be restored
     store.setActiveTerminal('t2');
-    expect(store.getLayoutTree('ws-1')).toBeNull();
+    expect(store.getLayoutTree('ws-1')).not.toBeNull();
     expect(store.getState().activeTerminalId).toBe('t2');
 
-    // Click back on t1 — split should remain cleared
+    // Click back on t1 — split should still be active
     store.setActiveTerminal('t1');
-    expect(store.getLayoutTree('ws-1')).toBeNull();
+    expect(store.getLayoutTree('ws-1')).not.toBeNull();
     expect(store.getState().activeTerminalId).toBe('t1');
   });
 
