@@ -190,8 +190,8 @@ export class VoiceToTextPlugin implements GodlyPlugin {
       dlBtn.textContent = 'Download Godly Whisper';
       dlBtn.style.fontSize = '12px';
       dlBtn.onclick = async () => {
-        const { open } = await import('@tauri-apps/plugin-opener');
-        await open('https://github.com/alangmartini/godly-terminal/releases?q=whisper');
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl('https://github.com/alangmartini/godly-terminal/releases?q=whisper');
       };
       noticeRow.appendChild(dlBtn);
 
