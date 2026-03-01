@@ -727,6 +727,39 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "open_settings",
+                "description": "Open the Godly Terminal settings dialog. Optionally open to a specific tab.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "tab": {
+                            "type": "string",
+                            "enum": ["themes", "terminal", "notifications", "plugins", "shortcuts", "remote"],
+                            "description": "Settings tab to open to (optional — defaults to the first tab)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "save_layout",
+                "description": "Force-save the current workspace and terminal layout to disk immediately. Useful after making bulk changes via MCP to ensure they persist.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_app_info",
+                "description": "Get information about the Godly Terminal app: version, workspace count, terminal count, and daemon connection status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
             }
         ]
     })
@@ -1258,6 +1291,15 @@ pub fn call_tool(
             McpRequest::ExportTerminalInfo { terminal_id }
         }
 
+        "open_settings" => {
+            let tab = args.get("tab").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::OpenSettings { tab }
+        }
+
+        "save_layout" => McpRequest::SaveLayout,
+
+        "get_app_info" => McpRequest::GetAppInfo,
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -1415,6 +1457,17 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         }
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
+        })),
+        McpResponse::AppInfo {
+            version,
+            workspace_count,
+            terminal_count,
+            daemon_connected,
+        } => Ok(json!({
+            "version": version,
+            "workspace_count": workspace_count,
+            "terminal_count": terminal_count,
+            "daemon_connected": daemon_connected,
         })),
     }
 }

@@ -631,6 +631,9 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::OpenSettings { .. } => Ok(Self::app_only_error("open_settings")),
+            McpRequest::SaveLayout => Ok(Self::app_only_error("save_layout")),
+            McpRequest::GetAppInfo => Ok(Self::app_only_error("get_app_info")),
         }
     }
 

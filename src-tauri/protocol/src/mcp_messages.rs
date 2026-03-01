@@ -199,6 +199,14 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+    // App control
+    OpenSettings {
+        #[serde(default)]
+        tab: Option<String>,
+    },
+    SaveLayout,
+    GetAppInfo,
+
     // Notifications
     Notify {
         terminal_id: String,
@@ -304,5 +312,11 @@ pub enum McpResponse {
     },
     Screenshot {
         path: String,
+    },
+    AppInfo {
+        version: String,
+        workspace_count: usize,
+        terminal_count: usize,
+        daemon_connected: bool,
     },
 }
