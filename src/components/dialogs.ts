@@ -229,10 +229,11 @@ export interface QuickClaudeInput {
   branchName?: string;
   workspaceId: string;
   noWorktree?: boolean;
+  aiTool?: 'claude' | 'codex';
 }
 
 export interface QuickClaudeOptions {
-  workspaces: { id: string; name: string; folderPath: string }[];
+  workspaces: { id: string; name: string; folderPath: string; aiToolMode?: string }[];
   activeWorkspaceId: string;
 }
 
@@ -309,6 +310,31 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     workspaceSelect.tabIndex = 1;
     workspaceSelect.addEventListener('focus', () => setActiveStep(1));
     dialog.appendChild(workspaceSelect);
+
+    // -- AI tool selector --
+    const aiToolSelect = document.createElement('select');
+    aiToolSelect.className = 'dialog-input ai-tool-mode-select';
+    aiToolSelect.dataset.testid = 'ai-tool-mode';
+    aiToolSelect.style.marginBottom = '8px';
+    const claudeOpt = document.createElement('option');
+    claudeOpt.value = 'claude';
+    claudeOpt.textContent = 'Claude Code';
+    const codexOpt = document.createElement('option');
+    codexOpt.value = 'codex';
+    codexOpt.textContent = 'Codex';
+    aiToolSelect.append(claudeOpt, codexOpt);
+
+    // Default from selected workspace's aiToolMode
+    const getWsAiMode = (wsId: string) => {
+      const ws = options.workspaces.find(w => w.id === wsId);
+      const mode = ws?.aiToolMode;
+      return mode === 'codex' ? 'codex' : 'claude';
+    };
+    aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+    workspaceSelect.addEventListener('change', () => {
+      aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+    });
+    dialog.appendChild(aiToolSelect);
 
     // -- Prompt textarea with skill dropdown wrapper --
     const promptWrapper = document.createElement('div');
@@ -837,6 +863,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         branchName: noWorktreeCheckbox.checked ? undefined : (branchInput.value.trim() || undefined),
         workspaceId: workspaceSelect.value,
         noWorktree: noWorktreeCheckbox.checked || undefined,
+        aiTool: aiToolSelect.value as 'claude' | 'codex',
       });
     };
 
