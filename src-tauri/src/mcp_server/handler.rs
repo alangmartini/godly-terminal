@@ -1983,6 +1983,120 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::NextTab { workspace_id } => {
+            let ws_id = workspace_id
+                .clone()
+                .or_else(|| app_state.active_workspace_id.read().clone());
+            let ws_id = match ws_id {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No workspace_id provided and no active workspace".to_string(),
+                    };
+                }
+            };
+
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    r#"
+                    const state = window.__STORE__.getState();
+                    const ws = state.workspaces.find(w => w.id === '{}');
+                    if (!ws || ws.tabOrder.length === 0) return 'no tabs';
+                    const currentIdx = ws.tabOrder.indexOf(state.activeTerminalId);
+                    const nextIdx = (currentIdx + 1) % ws.tabOrder.length;
+                    const nextId = ws.tabOrder[nextIdx];
+                    window.__STORE__.setActiveTerminal(nextId);
+                    return nextId;
+                    "#,
+                    ws_id
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state)
+            {
+                McpResponse::JsResult {
+                    error: Some(e), ..
+                } => McpResponse::Error { message: e },
+                _ => McpResponse::Ok,
+            }
+        }
+
+        McpRequest::PreviousTab { workspace_id } => {
+            let ws_id = workspace_id
+                .clone()
+                .or_else(|| app_state.active_workspace_id.read().clone());
+            let ws_id = match ws_id {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No workspace_id provided and no active workspace".to_string(),
+                    };
+                }
+            };
+
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    r#"
+                    const state = window.__STORE__.getState();
+                    const ws = state.workspaces.find(w => w.id === '{}');
+                    if (!ws || ws.tabOrder.length === 0) return 'no tabs';
+                    const currentIdx = ws.tabOrder.indexOf(state.activeTerminalId);
+                    const prevIdx = (currentIdx - 1 + ws.tabOrder.length) % ws.tabOrder.length;
+                    const prevId = ws.tabOrder[prevIdx];
+                    window.__STORE__.setActiveTerminal(prevId);
+                    return prevId;
+                    "#,
+                    ws_id
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state)
+            {
+                McpResponse::JsResult {
+                    error: Some(e), ..
+                } => McpResponse::Error { message: e },
+                _ => McpResponse::Ok,
+            }
+        }
+
+        McpRequest::GoToTab {
+            workspace_id,
+            index,
+        } => {
+            let ws_id = workspace_id
+                .clone()
+                .or_else(|| app_state.active_workspace_id.read().clone());
+            let ws_id = match ws_id {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No workspace_id provided and no active workspace".to_string(),
+                    };
+                }
+            };
+
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    r#"
+                    const state = window.__STORE__.getState();
+                    const ws = state.workspaces.find(w => w.id === '{}');
+                    if (!ws || ws.tabOrder.length === 0) return 'no tabs';
+                    const idx = {};
+                    if (idx < 0 || idx >= ws.tabOrder.length) throw new Error('Tab index ' + idx + ' out of range (0-' + (ws.tabOrder.length - 1) + ')');
+                    const targetId = ws.tabOrder[idx];
+                    window.__STORE__.setActiveTerminal(targetId);
+                    return targetId;
+                    "#,
+                    ws_id, index
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state)
+            {
+                McpResponse::JsResult {
+                    error: Some(e), ..
+                } => McpResponse::Error { message: e },
+                _ => McpResponse::Ok,
+            }
+        }
+
         McpRequest::ExportTerminalInfo { terminal_id } => {
             // Resolve terminal: use provided ID or fall back to active terminal
             let tid = terminal_id
