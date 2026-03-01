@@ -4,42 +4,8 @@ use serde::{Deserialize, Serialize};
 // Re-export layout tree types from protocol
 pub use godly_protocol::LayoutNode;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ShellType {
-    Windows,
-    Pwsh,
-    Cmd,
-    Wsl { distribution: Option<String> },
-    Custom { program: String, args: Option<Vec<String>> },
-}
-
-impl ShellType {
-    /// Human-readable display name (extracts basename for Custom).
-    pub fn display_name(&self) -> String {
-        match self {
-            ShellType::Windows => "powershell".to_string(),
-            ShellType::Pwsh => "pwsh".to_string(),
-            ShellType::Cmd => "cmd".to_string(),
-            ShellType::Wsl { distribution } => {
-                distribution.clone().unwrap_or_else(|| "wsl".to_string())
-            }
-            ShellType::Custom { program, .. } => {
-                std::path::Path::new(program)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(program)
-                    .to_string()
-            }
-        }
-    }
-}
-
-impl Default for ShellType {
-    fn default() -> Self {
-        ShellType::Windows
-    }
-}
+// Re-export ShellType from protocol — single source of truth for both crates
+pub use godly_protocol::ShellType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Terminal {
