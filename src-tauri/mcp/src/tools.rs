@@ -1162,7 +1162,7 @@ pub fn call_tool(
             };
 
             let tree_json = match tree_resp {
-                McpResponse::LayoutTree(tree) => tree
+                McpResponse::LayoutTree { tree } => tree
                     .map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null))
                     .unwrap_or(serde_json::Value::Null),
                 _ => serde_json::Value::Null,
@@ -1403,7 +1403,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "direction": direction,
             "ratio": ratio,
         })),
-        McpResponse::LayoutTree(tree) => Ok(json!({ "layout_tree": tree })),
+        McpResponse::LayoutTree { tree } => Ok(json!({ "layout_tree": tree })),
         McpResponse::JsResult { result, error } => {
             if let Some(err) = error {
                 Err(err)

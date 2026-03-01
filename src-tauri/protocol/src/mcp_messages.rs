@@ -297,7 +297,9 @@ pub enum McpResponse {
         direction: String,
         ratio: f64,
     },
-    LayoutTree(Option<crate::layout_tree::LayoutNode>),
+    LayoutTree {
+        tree: Option<crate::layout_tree::LayoutNode>,
+    },
     JsResult {
         result: Option<String>,
         error: Option<String>,
