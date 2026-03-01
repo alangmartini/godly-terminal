@@ -10,7 +10,7 @@ import { store, Workspace } from './store';
 describe('split tab grouping (#309)', () => {
   const ws: Workspace = {
     id: 'ws-1', name: 'WS', folderPath: 'C:\\ws', tabOrder: [],
-    shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+    shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
   };
 
   beforeEach(() => {

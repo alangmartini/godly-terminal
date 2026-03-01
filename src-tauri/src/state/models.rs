@@ -7,6 +7,22 @@ pub use godly_protocol::LayoutNode;
 // Re-export ShellType from protocol — single source of truth for both crates
 pub use godly_protocol::ShellType;
 
+/// AI tool mode for a workspace — which AI tool(s) to auto-launch in new terminals.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiToolMode {
+    None,
+    Claude,
+    Codex,
+    Both,
+}
+
+impl Default for AiToolMode {
+    fn default() -> Self {
+        AiToolMode::None
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Terminal {
     pub id: String,
@@ -15,18 +31,93 @@ pub struct Terminal {
     pub process_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Raw deserialization helper that handles both old (`claude_code_mode: bool`)
+/// and new (`ai_tool_mode: AiToolMode`) JSON formats.
+#[derive(Deserialize)]
+struct WorkspaceRaw {
+    id: String,
+    name: String,
+    folder_path: String,
+    tab_order: Vec<String>,
+    #[serde(default)]
+    shell_type: ShellType,
+    #[serde(default)]
+    worktree_mode: bool,
+    /// New field — present in new-format JSON.
+    #[serde(default)]
+    ai_tool_mode: Option<AiToolMode>,
+    /// Legacy field — present in old-format JSON.
+    #[serde(default)]
+    claude_code_mode: Option<bool>,
+}
+
+impl From<WorkspaceRaw> for Workspace {
+    fn from(raw: WorkspaceRaw) -> Self {
+        let ai_tool_mode = match raw.ai_tool_mode {
+            Some(mode) => mode,
+            None => match raw.claude_code_mode {
+                Some(true) => AiToolMode::Claude,
+                _ => AiToolMode::None,
+            },
+        };
+        Workspace {
+            id: raw.id,
+            name: raw.name,
+            folder_path: raw.folder_path,
+            tab_order: raw.tab_order,
+            shell_type: raw.shell_type,
+            worktree_mode: raw.worktree_mode,
+            ai_tool_mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(into = "WorkspaceSer")]
 pub struct Workspace {
     pub id: String,
     pub name: String,
     pub folder_path: String,
     pub tab_order: Vec<String>,
-    #[serde(default)]
     pub shell_type: ShellType,
-    #[serde(default)]
     pub worktree_mode: bool,
-    #[serde(default)]
-    pub claude_code_mode: bool,
+    pub ai_tool_mode: AiToolMode,
+}
+
+/// Serialization helper — writes the new `ai_tool_mode` field only.
+#[derive(Serialize)]
+struct WorkspaceSer {
+    id: String,
+    name: String,
+    folder_path: String,
+    tab_order: Vec<String>,
+    shell_type: ShellType,
+    worktree_mode: bool,
+    ai_tool_mode: AiToolMode,
+}
+
+impl From<Workspace> for WorkspaceSer {
+    fn from(ws: Workspace) -> Self {
+        WorkspaceSer {
+            id: ws.id,
+            name: ws.name,
+            folder_path: ws.folder_path,
+            tab_order: ws.tab_order,
+            shell_type: ws.shell_type,
+            worktree_mode: ws.worktree_mode,
+            ai_tool_mode: ws.ai_tool_mode,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Workspace {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = WorkspaceRaw::deserialize(deserializer)?;
+        Ok(Workspace::from(raw))
+    }
 }
 
 #[deprecated(note = "Use LayoutNode tree instead for recursive split pane support")]
@@ -175,7 +266,7 @@ mod tests {
                 distribution: Some("Debian".to_string()),
             },
             worktree_mode: false,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();
@@ -201,7 +292,7 @@ mod tests {
         let workspace: Workspace = serde_json::from_str(json).unwrap();
         assert_eq!(workspace.shell_type, ShellType::Windows);
         assert!(!workspace.worktree_mode);
-        assert!(!workspace.claude_code_mode);
+        assert_eq!(workspace.ai_tool_mode, AiToolMode::None);
     }
 
     #[test]
@@ -237,7 +328,7 @@ mod tests {
                     tab_order: vec![],
                     shell_type: ShellType::Windows,
                     worktree_mode: false,
-                    claude_code_mode: false,
+                    ai_tool_mode: AiToolMode::None,
                 },
                 Workspace {
                     id: "ws-2".to_string(),
@@ -248,7 +339,7 @@ mod tests {
                         distribution: Some("Alpine".to_string()),
                     },
                     worktree_mode: false,
-                    claude_code_mode: false,
+                    ai_tool_mode: AiToolMode::None,
                 },
             ],
             terminals: vec![],
@@ -281,7 +372,7 @@ mod tests {
                 tab_order: vec!["term-1".to_string(), "term-2".to_string()],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
-                claude_code_mode: false,
+                ai_tool_mode: AiToolMode::None,
             }],
             terminals: vec![
                 TerminalInfo {
@@ -348,7 +439,7 @@ mod tests {
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
-                claude_code_mode: false,
+                ai_tool_mode: AiToolMode::None,
             }],
             terminals: vec![TerminalInfo {
                 id: original_id.to_string(),
@@ -394,7 +485,7 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: true,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();
@@ -416,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn test_workspace_default_claude_code_mode_on_missing_field() {
+    fn test_workspace_default_ai_tool_mode_on_missing_field() {
         let json = r#"{
             "id": "ws-1",
             "name": "Test",
@@ -426,11 +517,11 @@ mod tests {
         }"#;
 
         let workspace: Workspace = serde_json::from_str(json).unwrap();
-        assert!(!workspace.claude_code_mode);
+        assert_eq!(workspace.ai_tool_mode, AiToolMode::None);
     }
 
     #[test]
-    fn test_workspace_roundtrip_with_claude_code_mode() {
+    fn test_workspace_roundtrip_with_ai_tool_mode() {
         let workspace = Workspace {
             id: "ws-1".to_string(),
             name: "Claude WS".to_string(),
@@ -438,12 +529,51 @@ mod tests {
             tab_order: vec![],
             shell_type: ShellType::Windows,
             worktree_mode: false,
-            claude_code_mode: true,
+            ai_tool_mode: AiToolMode::Claude,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();
         let deserialized: Workspace = serde_json::from_str(&json).unwrap();
-        assert!(deserialized.claude_code_mode);
+        assert_eq!(deserialized.ai_tool_mode, AiToolMode::Claude);
+    }
+
+    #[test]
+    fn test_workspace_backward_compat_claude_code_mode_true() {
+        // Old JSON with "claude_code_mode": true should migrate to AiToolMode::Claude
+        let json = r#"{
+            "id": "ws-1",
+            "name": "Old WS",
+            "folder_path": "C:\\repo",
+            "tab_order": [],
+            "shell_type": "windows",
+            "claude_code_mode": true
+        }"#;
+
+        let workspace: Workspace = serde_json::from_str(json).unwrap();
+        assert_eq!(workspace.ai_tool_mode, AiToolMode::Claude);
+    }
+
+    #[test]
+    fn test_workspace_backward_compat_claude_code_mode_false() {
+        let json = r#"{
+            "id": "ws-1",
+            "name": "Old WS",
+            "folder_path": "C:\\repo",
+            "tab_order": [],
+            "claude_code_mode": false
+        }"#;
+
+        let workspace: Workspace = serde_json::from_str(json).unwrap();
+        assert_eq!(workspace.ai_tool_mode, AiToolMode::None);
+    }
+
+    #[test]
+    fn test_ai_tool_mode_serialization_roundtrip() {
+        for mode in &[AiToolMode::None, AiToolMode::Claude, AiToolMode::Codex, AiToolMode::Both] {
+            let json = serde_json::to_string(mode).unwrap();
+            let deserialized: AiToolMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, *mode);
+        }
     }
 
     #[test]
@@ -485,7 +615,7 @@ mod tests {
                 tab_order: vec![],
                 shell_type: ShellType::Windows,
                 worktree_mode: false,
-                claude_code_mode: false,
+                ai_tool_mode: AiToolMode::None,
             }],
             terminals: vec![],
             active_workspace_id: Some("ws-1".to_string()),
@@ -559,7 +689,7 @@ mod tests {
                 args: Some(vec!["-l".to_string()]),
             },
             worktree_mode: false,
-            claude_code_mode: false,
+            ai_tool_mode: AiToolMode::None,
         };
 
         let json = serde_json::to_string(&workspace).unwrap();

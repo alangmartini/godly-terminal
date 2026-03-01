@@ -44,7 +44,7 @@ describe('TabBar rename', () => {
       tabOrder: [],
       shellType: { type: 'windows' },
       worktreeMode: false,
-      claudeCodeMode: false,
+      aiToolMode: 'none',
     });
 
     store.setActiveWorkspace('ws-1');

@@ -44,7 +44,7 @@ fn ensure_mcp_workspace(
         tab_order: Vec::new(),
         shell_type: crate::state::ShellType::default(),
         worktree_mode: false,
-        claude_code_mode: false,
+        ai_tool_mode: crate::state::AiToolMode::None,
     };
 
     app_state.add_workspace(workspace);

@@ -286,7 +286,7 @@ describe('Store', () => {
     it('should store oscTitle via updateTerminal', () => {
       store.addWorkspace({
         id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.addTerminal({
         id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
@@ -301,7 +301,7 @@ describe('Store', () => {
     it('should clear oscTitle by setting undefined', () => {
       store.addWorkspace({
         id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.addTerminal({
         id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
@@ -317,7 +317,7 @@ describe('Store', () => {
     it('should store userRenamed via updateTerminal', () => {
       store.addWorkspace({
         id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.addTerminal({
         id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
@@ -332,7 +332,7 @@ describe('Store', () => {
     it('should default oscTitle and userRenamed to undefined on new terminals', () => {
       store.addWorkspace({
         id: 'ws-1', name: 'WS', folderPath: 'C:\\', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.addTerminal({
         id: 't-1', workspaceId: 'ws-1', name: 'Terminal', processName: 'powershell', order: 0,
@@ -344,8 +344,8 @@ describe('Store', () => {
     });
   });
 
-  describe('claude code mode', () => {
-    it('should store claudeCodeMode on workspace', () => {
+  describe('ai tool mode', () => {
+    it('should store aiToolMode on workspace', () => {
       const workspace: Workspace = {
         id: 'ws-cc',
         name: 'Claude Code Workspace',
@@ -353,16 +353,16 @@ describe('Store', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: true,
+        aiToolMode: 'claude',
       };
 
       store.addWorkspace(workspace);
 
       const state = store.getState();
-      expect(state.workspaces[0].claudeCodeMode).toBe(true);
+      expect(state.workspaces[0].aiToolMode).toBe('claude');
     });
 
-    it('should toggle claudeCodeMode via updateWorkspace', () => {
+    it('should update aiToolMode via updateWorkspace', () => {
       store.addWorkspace({
         id: 'ws-cc-toggle',
         name: 'Toggle Test',
@@ -370,21 +370,21 @@ describe('Store', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
 
-      expect(store.getState().workspaces[0].claudeCodeMode).toBe(false);
+      expect(store.getState().workspaces[0].aiToolMode).toBe('none');
 
-      store.updateWorkspace('ws-cc-toggle', { claudeCodeMode: true });
+      store.updateWorkspace('ws-cc-toggle', { aiToolMode: 'claude' });
 
-      expect(store.getState().workspaces[0].claudeCodeMode).toBe(true);
+      expect(store.getState().workspaces[0].aiToolMode).toBe('claude');
 
-      store.updateWorkspace('ws-cc-toggle', { claudeCodeMode: false });
+      store.updateWorkspace('ws-cc-toggle', { aiToolMode: 'none' });
 
-      expect(store.getState().workspaces[0].claudeCodeMode).toBe(false);
+      expect(store.getState().workspaces[0].aiToolMode).toBe('none');
     });
 
-    it('should not affect other workspaces when toggling claudeCodeMode', () => {
+    it('should not affect other workspaces when updating aiToolMode', () => {
       store.addWorkspace({
         id: 'ws-a',
         name: 'A',
@@ -392,7 +392,7 @@ describe('Store', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
       store.addWorkspace({
         id: 'ws-b',
@@ -401,14 +401,14 @@ describe('Store', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
 
-      store.updateWorkspace('ws-a', { claudeCodeMode: true });
+      store.updateWorkspace('ws-a', { aiToolMode: 'claude' });
 
       const state = store.getState();
-      expect(state.workspaces.find(w => w.id === 'ws-a')?.claudeCodeMode).toBe(true);
-      expect(state.workspaces.find(w => w.id === 'ws-b')?.claudeCodeMode).toBe(false);
+      expect(state.workspaces.find(w => w.id === 'ws-a')?.aiToolMode).toBe('claude');
+      expect(state.workspaces.find(w => w.id === 'ws-b')?.aiToolMode).toBe('none');
     });
   });
 
@@ -417,11 +417,11 @@ describe('Store', () => {
     // instead of restoring the previously active tab
     const ws1: Workspace = {
       id: 'ws-1', name: 'WS 1', folderPath: 'C:\\ws1', tabOrder: [],
-      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
     };
     const ws2: Workspace = {
       id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
-      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
     };
 
     beforeEach(() => {
@@ -495,7 +495,7 @@ describe('Store', () => {
     beforeEach(() => {
       store.addWorkspace({
         id: 'ws-1', name: 'Test', folderPath: 'C:\\', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.addTerminal({
         id: 'term-1', workspaceId: 'ws-1', name: '', processName: 'powershell', order: 0,
@@ -598,7 +598,7 @@ describe('Store', () => {
   describe('split view operations', () => {
     const ws1: Workspace = {
       id: 'ws-1', name: 'WS 1', folderPath: 'C:\\ws1', tabOrder: [],
-      shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+      shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
     };
 
     beforeEach(() => {
@@ -677,7 +677,7 @@ describe('Store', () => {
     it('should auto-clear split when moving a split terminal to another workspace', () => {
       store.addWorkspace({
         id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.setSplitView('ws-1', 't1', 't2', 'horizontal');
       store.moveTerminalToWorkspace('t1', 'ws-2');
@@ -696,7 +696,7 @@ describe('Store', () => {
     it('should support independent splits per workspace', () => {
       store.addWorkspace({
         id: 'ws-2', name: 'WS 2', folderPath: 'C:\\ws2', tabOrder: [],
-        shellType: { type: 'windows' }, worktreeMode: false, claudeCodeMode: false,
+        shellType: { type: 'windows' }, worktreeMode: false, aiToolMode: 'none',
       });
       store.addTerminal({ id: 't4', workspaceId: 'ws-2', name: 'Tab 4', processName: 'cmd', order: 0 });
       store.addTerminal({ id: 't5', workspaceId: 'ws-2', name: 'Tab 5', processName: 'cmd', order: 0 });

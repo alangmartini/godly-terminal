@@ -1,0 +1,2 @@
+### Added
+- **AI Tool Mode** — Workspaces now support multiple AI tool modes: None, Claude, Codex, and Both. Replaces the binary Claude Code toggle with a cycle button (left-click: `--` → `CC` → `CX` → `2x`) and right-click submenu. "Both" mode creates a vertical split with Claude and Codex terminals side by side, with worktree suffix naming (`-claude`/`-codex`). Backward-compatible with existing `claude_code_mode` persisted data. (refs #467)

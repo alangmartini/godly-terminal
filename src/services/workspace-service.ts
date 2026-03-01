@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { store, Workspace, ShellType } from '../state/store';
+import { store, Workspace, ShellType, AiToolMode } from '../state/store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { notificationStore } from '../state/notification-store';
 
@@ -10,6 +10,8 @@ export interface WorkspaceData {
   tab_order: string[];
   shell_type?: 'windows' | 'pwsh' | 'cmd' | { wsl: { distribution: string | null } } | { custom: { program: string; args: string[] | null } };
   worktree_mode?: boolean;
+  ai_tool_mode?: AiToolMode;
+  /** Legacy field — old persisted data may have this instead of ai_tool_mode */
   claude_code_mode?: boolean;
 }
 
@@ -50,7 +52,7 @@ class WorkspaceService {
       tabOrder: [],
       shellType,
       worktreeMode: false,
-      claudeCodeMode: false,
+      aiToolMode: 'none',
     };
     store.addWorkspace(workspace);
 
@@ -104,7 +106,7 @@ class WorkspaceService {
       tabOrder: w.tab_order,
       shellType: this.convertShellType(w.shell_type),
       worktreeMode: w.worktree_mode ?? false,
-      claudeCodeMode: w.claude_code_mode ?? false,
+      aiToolMode: w.ai_tool_mode ?? (w.claude_code_mode ? 'claude' : 'none'),
     }));
   }
 
@@ -113,9 +115,16 @@ class WorkspaceService {
     store.updateWorkspace(workspaceId, { worktreeMode: enabled });
   }
 
-  async toggleClaudeCodeMode(workspaceId: string, enabled: boolean): Promise<void> {
-    await invoke('toggle_claude_code_mode', { workspaceId, enabled });
-    store.updateWorkspace(workspaceId, { claudeCodeMode: enabled });
+  async setAiToolMode(workspaceId: string, mode: AiToolMode): Promise<void> {
+    await invoke('set_ai_tool_mode', { workspaceId, mode });
+    store.updateWorkspace(workspaceId, { aiToolMode: mode });
+  }
+
+  /** Cycle AI tool mode: none -> claude -> codex -> both -> none */
+  cycleAiToolMode(current: AiToolMode): AiToolMode {
+    const cycle: AiToolMode[] = ['none', 'claude', 'codex', 'both'];
+    const idx = cycle.indexOf(current);
+    return cycle[(idx + 1) % cycle.length];
   }
 
   async isGitRepo(folderPath: string): Promise<boolean> {

@@ -108,7 +108,7 @@ describe('TabBar drag-and-drop reorder', () => {
       tabOrder: [],
       shellType: { type: 'windows' },
       worktreeMode: false,
-      claudeCodeMode: false,
+      aiToolMode: 'none',
     });
 
     store.setActiveWorkspace('ws-1');
