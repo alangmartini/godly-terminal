@@ -330,12 +330,13 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
         break;
       }
 
-      case 'workspace.toggleClaudeCodeMode': {
+      case 'workspace.cycleAiToolMode': {
         e.preventDefault();
         if (state.activeWorkspaceId) {
           const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
           if (workspace) {
-            await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
+            const nextMode = workspaceService.cycleAiToolMode(workspace.aiToolMode);
+            await workspaceService.setAiToolMode(workspace.id, nextMode);
           }
         }
         break;
@@ -373,7 +374,7 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
 
         const { showQuickClaudeDialog } = await import('../components/dialogs');
         const input = await showQuickClaudeDialog({
-          workspaces: state.workspaces.map(w => ({ id: w.id, name: w.name, folderPath: w.folderPath })),
+          workspaces: state.workspaces.map(w => ({ id: w.id, name: w.name, folderPath: w.folderPath, aiToolMode: w.aiToolMode })),
           activeWorkspaceId: state.activeWorkspaceId,
         });
         if (!input) break;
@@ -388,6 +389,7 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
               branchName: input.branchName ?? null,
               skipFetch: true,
               noWorktree: input.noWorktree ?? false,
+              aiTool: input.aiTool ?? 'claude',
             }
           );
 
