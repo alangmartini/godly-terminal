@@ -2,6 +2,7 @@ import { App } from './components/App';
 import { store } from './state/store';
 import { initLogger } from './utils/Logger';
 import { initPlugins } from './plugins/index';
+import { initFlowEngine } from './flow-engine/index';
 
 initLogger();
 
@@ -31,4 +32,5 @@ if (!container) {
 const app = new App(container);
 app.init().then(async () => {
   await initPlugins();
+  initFlowEngine();
 }).catch(console.error);
