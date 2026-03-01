@@ -199,6 +199,11 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+    // Theme management
+    ListThemes,
+    GetActiveTheme,
+    SetTheme { theme_name: String },
+
     // Notifications
     Notify {
         terminal_id: String,
@@ -304,5 +309,9 @@ pub enum McpResponse {
     },
     Screenshot {
         path: String,
+    },
+    ThemeList {
+        themes: Vec<String>,
+        active: String,
     },
 }

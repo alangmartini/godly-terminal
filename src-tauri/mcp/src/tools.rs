@@ -727,6 +727,38 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "list_themes",
+                "description": "List all available terminal themes and the currently active theme.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_active_theme",
+                "description": "Get the name and ID of the currently active terminal theme.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "set_theme",
+                "description": "Set the active terminal theme by name or ID.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "theme_name": {
+                            "type": "string",
+                            "description": "Name or ID of the theme to activate"
+                        }
+                    },
+                    "required": ["theme_name"]
+                }
             }
         ]
     })
@@ -1258,6 +1290,19 @@ pub fn call_tool(
             McpRequest::ExportTerminalInfo { terminal_id }
         }
 
+        "list_themes" => McpRequest::ListThemes,
+
+        "get_active_theme" => McpRequest::GetActiveTheme,
+
+        "set_theme" => {
+            let theme_name = args
+                .get("theme_name")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing theme_name")?
+                .to_string();
+            McpRequest::SetTheme { theme_name }
+        }
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -1415,6 +1460,10 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         }
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
+        })),
+        McpResponse::ThemeList { themes, active } => Ok(json!({
+            "themes": themes,
+            "active": active,
         })),
     }
 }
