@@ -1946,6 +1946,220 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+        // === Scrollback control ===
+
+        McpRequest::ScrollPageUp { terminal_id } => {
+            let tid = terminal_id
+                .clone()
+                .or_else(|| app_state.get_active_terminal_id());
+            let tid = match tid {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No terminal_id provided and no active terminal".to_string(),
+                    };
+                }
+            };
+            // Get current scroll state from the daemon
+            let request = godly_protocol::Request::ReadRichGrid {
+                session_id: tid.clone(),
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::RichGrid { grid }) => {
+                    let viewport_rows = grid.dimensions.rows as usize;
+                    let new_offset = grid.scrollback_offset + viewport_rows;
+                    // Clamp to total_scrollback
+                    let new_offset = new_offset.min(grid.total_scrollback);
+                    let set_req = godly_protocol::Request::SetScrollback {
+                        session_id: tid,
+                        offset: new_offset,
+                    };
+                    match daemon.send_request(&set_req) {
+                        Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                        Ok(godly_protocol::Response::Error { message }) => {
+                            McpResponse::Error { message }
+                        }
+                        Ok(other) => McpResponse::Error {
+                            message: format!("Unexpected response: {:?}", other),
+                        },
+                        Err(e) => McpResponse::Error {
+                            message: format!("Daemon error: {}", e),
+                        },
+                    }
+                }
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error {
+                    message: format!("Daemon error: {}", e),
+                },
+            }
+        }
+
+        McpRequest::ScrollPageDown { terminal_id } => {
+            let tid = terminal_id
+                .clone()
+                .or_else(|| app_state.get_active_terminal_id());
+            let tid = match tid {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No terminal_id provided and no active terminal".to_string(),
+                    };
+                }
+            };
+            let request = godly_protocol::Request::ReadRichGrid {
+                session_id: tid.clone(),
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::RichGrid { grid }) => {
+                    let viewport_rows = grid.dimensions.rows as usize;
+                    let new_offset = grid.scrollback_offset.saturating_sub(viewport_rows);
+                    let set_req = godly_protocol::Request::SetScrollback {
+                        session_id: tid,
+                        offset: new_offset,
+                    };
+                    match daemon.send_request(&set_req) {
+                        Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                        Ok(godly_protocol::Response::Error { message }) => {
+                            McpResponse::Error { message }
+                        }
+                        Ok(other) => McpResponse::Error {
+                            message: format!("Unexpected response: {:?}", other),
+                        },
+                        Err(e) => McpResponse::Error {
+                            message: format!("Daemon error: {}", e),
+                        },
+                    }
+                }
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error {
+                    message: format!("Daemon error: {}", e),
+                },
+            }
+        }
+
+        McpRequest::ScrollToTop { terminal_id } => {
+            let tid = terminal_id
+                .clone()
+                .or_else(|| app_state.get_active_terminal_id());
+            let tid = match tid {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No terminal_id provided and no active terminal".to_string(),
+                    };
+                }
+            };
+            // Get total_scrollback from the daemon, then set offset to that value
+            let request = godly_protocol::Request::ReadRichGrid {
+                session_id: tid.clone(),
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::RichGrid { grid }) => {
+                    let set_req = godly_protocol::Request::SetScrollback {
+                        session_id: tid,
+                        offset: grid.total_scrollback,
+                    };
+                    match daemon.send_request(&set_req) {
+                        Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                        Ok(godly_protocol::Response::Error { message }) => {
+                            McpResponse::Error { message }
+                        }
+                        Ok(other) => McpResponse::Error {
+                            message: format!("Unexpected response: {:?}", other),
+                        },
+                        Err(e) => McpResponse::Error {
+                            message: format!("Daemon error: {}", e),
+                        },
+                    }
+                }
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error {
+                    message: format!("Daemon error: {}", e),
+                },
+            }
+        }
+
+        McpRequest::ScrollToBottom { terminal_id } => {
+            let tid = terminal_id
+                .clone()
+                .or_else(|| app_state.get_active_terminal_id());
+            let tid = match tid {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No terminal_id provided and no active terminal".to_string(),
+                    };
+                }
+            };
+            // Offset 0 = live view (bottom)
+            let set_req = godly_protocol::Request::SetScrollback {
+                session_id: tid,
+                offset: 0,
+            };
+            match daemon.send_request(&set_req) {
+                Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error {
+                    message: format!("Daemon error: {}", e),
+                },
+            }
+        }
+
+        McpRequest::GetScrollPosition { terminal_id } => {
+            let tid = terminal_id
+                .clone()
+                .or_else(|| app_state.get_active_terminal_id());
+            let tid = match tid {
+                Some(id) => id,
+                None => {
+                    return McpResponse::Error {
+                        message: "No terminal_id provided and no active terminal".to_string(),
+                    };
+                }
+            };
+            let request = godly_protocol::Request::ReadRichGrid {
+                session_id: tid,
+            };
+            match daemon.send_request(&request) {
+                Ok(godly_protocol::Response::RichGrid { grid }) => {
+                    McpResponse::ScrollPosition {
+                        offset: grid.scrollback_offset as u32,
+                        total_scrollback: grid.total_scrollback as u32,
+                        viewport_rows: grid.dimensions.rows as u32,
+                    }
+                }
+                Ok(godly_protocol::Response::Error { message }) => {
+                    McpResponse::Error { message }
+                }
+                Ok(other) => McpResponse::Error {
+                    message: format!("Unexpected response: {:?}", other),
+                },
+                Err(e) => McpResponse::Error {
+                    message: format!("Daemon error: {}", e),
+                },
+            }
+        }
+
         // === JS bridge ===
 
         McpRequest::ExecuteJs { script } => {
