@@ -63,6 +63,9 @@ pub enum McpRequest {
         workspace_id: String,
     },
     RemoveWorktree { worktree_path: String },
+    ToggleWorktreeMode { workspace_id: String },
+    ToggleClaudeCodeMode { workspace_id: String },
+    GetWorkspaceModes { workspace_id: String },
 
     // Terminal I/O
     WriteToTerminal { terminal_id: String, data: String },
@@ -261,6 +264,10 @@ pub enum McpResponse {
     },
     ActiveTerminal {
         terminal: Option<McpTerminalInfo>,
+    },
+    WorkspaceModes {
+        worktree_mode: bool,
+        claude_code_mode: bool,
     },
     WaitResult {
         completed: bool,

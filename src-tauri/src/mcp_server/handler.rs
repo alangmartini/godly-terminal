@@ -801,6 +801,70 @@ pub fn handle_mcp_request(
             }
         }
 
+        McpRequest::ToggleWorktreeMode { workspace_id } => {
+            let current = match app_state.get_workspace(workspace_id) {
+                Some(ws) => ws.worktree_mode,
+                None => {
+                    return McpResponse::Error {
+                        message: format!("Workspace {} not found", workspace_id),
+                    };
+                }
+            };
+            let new_val = !current;
+            app_state.update_workspace_worktree_mode(workspace_id, new_val);
+            auto_save.mark_dirty();
+
+            // Sync frontend via execute_js
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__STORE__.updateWorkspace('{}', {{worktree_mode: {}}})",
+                    workspace_id, new_val
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                _ => McpResponse::Ok,
+            }
+        }
+
+        McpRequest::ToggleClaudeCodeMode { workspace_id } => {
+            let current = match app_state.get_workspace(workspace_id) {
+                Some(ws) => ws.claude_code_mode,
+                None => {
+                    return McpResponse::Error {
+                        message: format!("Workspace {} not found", workspace_id),
+                    };
+                }
+            };
+            let new_val = !current;
+            app_state.update_workspace_claude_code_mode(workspace_id, new_val);
+            auto_save.mark_dirty();
+
+            // Sync frontend via execute_js
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    "window.__STORE__.updateWorkspace('{}', {{claude_code_mode: {}}})",
+                    workspace_id, new_val
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                _ => McpResponse::Ok,
+            }
+        }
+
+        McpRequest::GetWorkspaceModes { workspace_id } => {
+            match app_state.get_workspace(workspace_id) {
+                Some(ws) => McpResponse::WorkspaceModes {
+                    worktree_mode: ws.worktree_mode,
+                    claude_code_mode: ws.claude_code_mode,
+                },
+                None => McpResponse::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                },
+            }
+        }
+
         McpRequest::ReadGrid { terminal_id } => {
             let request = godly_protocol::Request::ReadGrid {
                 session_id: terminal_id.clone(),
