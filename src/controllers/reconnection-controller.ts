@@ -8,6 +8,7 @@ import {
   shellTypeToProcessName,
 } from '../utils/shell-type-utils';
 import { fromLegacySplitView } from '../state/split-types';
+import type { LayoutNode } from '../state/split-types';
 
 export interface ReconnectionDeps {
   /** Marks a terminal ID for scrollback restoration. */
@@ -50,6 +51,7 @@ export async function restoreLayout(deps: ReconnectionDeps): Promise<void> {
         direction: string;
         ratio: number;
       }>;
+      layout_trees?: Record<string, LayoutNode>;
     }>('load_layout');
 
     console.log('[App] Layout loaded:', JSON.stringify(layout, null, 2));
@@ -166,13 +168,21 @@ export async function restoreLayout(deps: ReconnectionDeps): Promise<void> {
         }
       }
 
-      // Restore split views (create layout trees from persisted flat splits)
-      if (layout.split_views) {
-        const knownTerminalIds = new Set(liveTerminalIds);
+      // Restore layout trees (preferred) or fall back to legacy split_views
+      const knownTerminalIds = new Set(liveTerminalIds);
+      if (layout.layout_trees && Object.keys(layout.layout_trees).length > 0) {
+        // New format: recursive layout trees (supports nested splits)
+        for (const [wsId, tree] of Object.entries(layout.layout_trees)) {
+          if (hasAllTerminals(tree, knownTerminalIds)) {
+            store.setLayoutTree(wsId, tree);
+          }
+        }
+        console.log('[App] Layout trees restored:', Object.keys(layout.layout_trees).length);
+      } else if (layout.split_views) {
+        // Legacy fallback: flat 2-pane split_views
         for (const [wsId, sv] of Object.entries(layout.split_views)) {
           if (knownTerminalIds.has(sv.left_terminal_id) && knownTerminalIds.has(sv.right_terminal_id)) {
             const dir = sv.direction === 'vertical' ? 'vertical' : 'horizontal';
-            // Create layout tree from legacy split
             const tree = fromLegacySplitView({
               leftTerminalId: sv.left_terminal_id,
               rightTerminalId: sv.right_terminal_id,
@@ -180,7 +190,6 @@ export async function restoreLayout(deps: ReconnectionDeps): Promise<void> {
               ratio: sv.ratio,
             });
             store.setLayoutTree(wsId, tree);
-            // Also set legacy split for backend persistence
             store.setSplitView(wsId, sv.left_terminal_id, sv.right_terminal_id, dir, sv.ratio);
             await syncSplitToBackend(wsId, {
               leftTerminalId: sv.left_terminal_id,
@@ -261,6 +270,23 @@ export async function createDefaultWorkspace(): Promise<void> {
     order: 0,
   });
   console.log('[App] Terminal added to store');
+}
+
+/** Check whether all terminal IDs in a layout tree exist in the live set. */
+function hasAllTerminals(node: LayoutNode, liveIds: Set<string>): boolean {
+  if (node.type === 'leaf') return liveIds.has(node.terminal_id);
+  return hasAllTerminals(node.first, liveIds) && hasAllTerminals(node.second, liveIds);
+}
+
+/** Sync a layout tree to the backend for persistence. Fire-and-forget. */
+export function syncLayoutTreeToBackend(workspaceId: string, tree: LayoutNode): void {
+  import('@tauri-apps/api/core').then(({ invoke }) => {
+    invoke('set_layout_tree', { workspaceId, tree }).catch((error: unknown) => {
+      console.error('[App] Failed to sync layout tree to backend:', error);
+    });
+  }).catch(() => {
+    // Dynamic import failed (e.g., running in test environment) — ignore
+  });
 }
 
 /** Sync a split view to the backend for persistence. */
