@@ -766,6 +766,11 @@ export class TerminalPane {
     if (forceFull) this.forceFullFetch = false;
     const seqBefore = this.scrollSeq;
     const diffSeqBefore = this.diffSeq;
+    // Bug #486: Track whether this is a recovery fetch (no cached snapshot).
+    // Recovery fetches must skip the diffSeq staleness check — there's nothing
+    // to "roll back" to, and discarding them causes a livelock under sustained
+    // diff traffic (every retry is equally vulnerable to diffSeq incrementing).
+    const isRecovery = this.cachedSnapshot === null;
     try {
       // Use diff snapshots when we have a cached full snapshot and diff is supported.
       // Skip diff path after resume (forceFull) since dirty tracking is unreliable
@@ -835,8 +840,11 @@ export class TerminalPane {
           this.useDiffSnapshots = false;
         }
       }
-      // Full snapshot path (initial render, after scroll, or diff not supported)
-      await this.fetchFullSnapshot(seqBefore, diffSeqBefore);
+      // Full snapshot path (initial render, after scroll, or diff not supported).
+      // Bug #486: Skip diffSeq staleness check for recovery fetches (cachedSnapshot
+      // was null). The check prevents Bug #218 typing rollback, but recovery fetches
+      // have nothing to roll back — they NEED the snapshot to escape the livelock.
+      await this.fetchFullSnapshot(seqBefore, isRecovery ? undefined : diffSeqBefore);
     } catch (error) {
       console.debug('Grid snapshot fetch failed:', error);
       // Bug #424: If we have no cached snapshot, the canvas is blank.
