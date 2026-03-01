@@ -772,6 +772,7 @@ impl Backend for DaemonDirectBackend {
             }
 
 
+
             McpRequest::NextTab { .. } => Ok(Self::app_only_error("next_tab")),
             McpRequest::PreviousTab { .. } => Ok(Self::app_only_error("previous_tab")),
             McpRequest::GoToTab { .. } => Ok(Self::app_only_error("go_to_tab")),
@@ -809,6 +810,11 @@ impl Backend for DaemonDirectBackend {
             McpRequest::GetTabOrder { .. } => Ok(Self::app_only_error("get_tab_order")),
             McpRequest::CopyToClipboard { .. } => Ok(Self::app_only_error("copy_to_clipboard")),
             McpRequest::GetSelectedText { .. } => Ok(Self::app_only_error("get_selected_text")),
+
+
+            McpRequest::ListThemes => Ok(Self::app_only_error("list_themes")),
+            McpRequest::GetActiveTheme => Ok(Self::app_only_error("get_active_theme")),
+            McpRequest::SetTheme { .. } => Ok(Self::app_only_error("set_theme")),
 
         }
     }

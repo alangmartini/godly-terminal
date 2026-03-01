@@ -994,6 +994,7 @@ pub fn list_tools() -> Value {
 
 
 
+
                 "name": "next_tab",
                 "description": "Switch to the next tab in tab order (wraps around to first tab after last)",
 
@@ -1110,6 +1111,10 @@ pub fn list_tools() -> Value {
 
                 "name": "save_layout",
                 "description": "Force-save the current workspace and terminal layout to disk immediately. Useful after making bulk changes via MCP to ensure they persist.",
+
+                "name": "list_themes",
+                "description": "List all available terminal themes and the currently active theme.",
+
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -1117,13 +1122,19 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+
                 "name": "get_app_info",
                 "description": "Get information about the Godly Terminal app: version, workspace count, terminal count, and daemon connection status.",
+
+
+                "name": "get_active_theme",
+                "description": "Get the name and ID of the currently active terminal theme.",
 
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
                     "required": []
+
 
 
 
@@ -1181,6 +1192,23 @@ pub fn list_tools() -> Value {
                         }
                     },
                     "required": []
+                }
+
+
+                }
+            },
+            {
+                "name": "set_theme",
+                "description": "Set the active terminal theme by name or ID.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "theme_name": {
+                            "type": "string",
+                            "description": "Name or ID of the theme to activate"
+                        }
+                    },
+                    "required": ["theme_name"]
                 }
 
             }
@@ -1844,6 +1872,7 @@ pub fn call_tool(
 
 
 
+
         "next_tab" => {
             let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::NextTab { workspace_id }
@@ -1938,6 +1967,21 @@ pub fn call_tool(
         "get_selected_text" => {
             let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
             McpRequest::GetSelectedText { terminal_id }
+        }
+
+
+
+        "list_themes" => McpRequest::ListThemes,
+
+        "get_active_theme" => McpRequest::GetActiveTheme,
+
+        "set_theme" => {
+            let theme_name = args
+                .get("theme_name")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing theme_name")?
+                .to_string();
+            McpRequest::SetTheme { theme_name }
         }
 
 
@@ -2132,6 +2176,7 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
 
 
+
         McpResponse::NotificationConfig {
             enabled,
             sound_preset,
@@ -2161,6 +2206,11 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
         McpResponse::SelectedText { text } => Ok(json!({
             "text": text,
+
+
+        McpResponse::ThemeList { themes, active } => Ok(json!({
+            "themes": themes,
+            "active": active,
 
         })),
     }
