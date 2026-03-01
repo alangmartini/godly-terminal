@@ -6,8 +6,8 @@
 ## Problem
 
 Development iteration speed was bottlenecked by:
-1. Sequential binary builds in `npm run dev` (daemon, mcp, notify built one-by-one)
-2. TypeScript check (`tsc`) running on every `npm run build` (~30s)
+1. Sequential binary builds in `pnpm dev` (daemon, mcp, notify built one-by-one)
+2. TypeScript check (`tsc`) running on every `pnpm build` (~30s)
 3. `tokio = "full"` compiling all tokio features when only a subset is used
 4. Redundant `winapi` feature sets across 4 crates causing unnecessary recompilation
 5. No dev profile optimization (default debug settings)
@@ -30,9 +30,9 @@ Top compile-time crates: tauri-utils (34s), tauri (23s), webview2-com-sys (22s),
 
 ### Tier 1: Quick Wins
 
-1. **Parallel binary builds** (`package.json`): Changed `npm run dev` from 3 sequential `npm run build:*` calls to a single `cargo build -p godly-daemon -p godly-mcp -p godly-notify` invocation. Cargo handles internal parallelism.
+1. **Parallel binary builds** (`package.json`): Changed `pnpm dev` from 3 sequential `pnpm build:*` calls to a single `cargo build -p godly-daemon -p godly-mcp -p godly-notify` invocation. Cargo handles internal parallelism.
 
-2. **Removed tsc from npm run build** (`package.json`): `build` now runs `vite build` only. Added `typecheck` for standalone checks and `build:check` for CI/production that includes tsc.
+2. **Removed tsc from pnpm build** (`package.json`): `build` now runs `vite build` only. Added `typecheck` for standalone checks and `build:check` for CI/production that includes tsc.
 
 3. **Pinned tokio features**:
    - Main app: `["rt"]` (only uses `spawn_blocking`)
@@ -56,11 +56,11 @@ Top compile-time crates: tauri-utils (34s), tauri (23s), webview2-com-sys (22s),
 
 | Scenario | Before | After |
 |----------|--------|-------|
-| `npm run dev` cold start | ~60s (3 sequential builds) | ~20s (1 parallel build) |
-| `npm run build` (frontend) | ~31s (tsc 30s + vite 1s) | ~1s (vite only) |
+| `pnpm dev` cold start | ~60s (3 sequential builds) | ~20s (1 parallel build) |
+| `pnpm build` (frontend) | ~31s (tsc 30s + vite 1s) | ~1s (vite only) |
 | Daemon incremental rebuild | ~1s | ~1s (same, but auto-triggered by watcher) |
 
 ## Regression Risk
 
 - **tokio feature pinning**: If new code uses tokio features not in the pinned set, compile will fail with a clear error. Fix: add the needed feature.
-- **tsc removal from build**: Type errors won't be caught by `npm run build`. Mitigated by `build:check` in tauri.conf.json for production, and editor IDE checks during dev.
+- **tsc removal from build**: Type errors won't be caught by `pnpm build`. Mitigated by `build:check` in tauri.conf.json for production, and editor IDE checks during dev.

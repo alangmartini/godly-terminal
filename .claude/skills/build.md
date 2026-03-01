@@ -20,7 +20,7 @@ Where `mode` is one of:
 Run the Tauri development server with hot reload:
 
 ```bash
-cd godly-terminal && npm run tauri dev
+cd godly-terminal && pnpm tauri dev
 ```
 
 This starts:
@@ -32,7 +32,7 @@ This starts:
 Build the application for release:
 
 ```bash
-cd godly-terminal && npm run tauri build
+cd godly-terminal && pnpm tauri build
 ```
 
 This will:
@@ -48,13 +48,13 @@ The built executable will be in `godly-terminal/src-tauri/target/release/`.
 Preview the production frontend build (without Tauri):
 
 ```bash
-cd godly-terminal && npm run preview
+cd godly-terminal && pnpm preview
 ```
 
 ## Troubleshooting
 
 If the build fails:
 
-1. **TypeScript errors**: Run `cd godly-terminal && npx tsc --noEmit` to see type errors
+1. **TypeScript errors**: Run `cd godly-terminal && pnpm exec tsc --noEmit` to see type errors
 2. **Rust errors**: Run `cd godly-terminal/src-tauri && cargo check` to see Rust errors
-3. **Missing dependencies**: Run `cd godly-terminal && npm install` and `cd godly-terminal/src-tauri && cargo build`
+3. **Missing dependencies**: Run `cd godly-terminal && pnpm install` and `cd godly-terminal/src-tauri && cargo build`

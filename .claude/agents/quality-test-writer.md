@@ -20,9 +20,9 @@ This is a Tauri 2.0 terminal application (Godly Terminal) with:
 
 ### Test Commands
 - Rust tests: `cd src-tauri && cargo test -p godly-protocol && cargo test -p godly-daemon && cargo test -p godly-terminal`
-- Frontend tests: `npm test`
-- E2E tests: `npm run test:e2e`
-- Full build verification: `npm run build`
+- Frontend tests: `pnpm test`
+- E2E tests: `pnpm test:e2e`
+- Full build verification: `pnpm build`
 
 ### Critical Build Gotcha
 - **Never use `cargo test --workspace`** from build.rs context — use individual `-p <crate>` invocations to avoid deadlocks from nested cargo builds.
@@ -38,7 +38,7 @@ This is a Tauri 2.0 terminal application (Godly Terminal) with:
 
 ### Feature Testing
 1. After the feature is implemented, write an E2E test suite covering key user-facing behaviors.
-2. Run the E2E tests (`npm run test:e2e`) and loop until all pass.
+2. Run the E2E tests (`pnpm test:e2e`) and loop until all pass.
 3. Verify full build + all tests pass.
 
 ## Test Writing Principles
@@ -124,8 +124,8 @@ After writing tests, ALWAYS:
 4. Run the full verification suite:
    ```bash
    cd src-tauri && cargo test -p godly-protocol && cargo test -p godly-daemon && cargo test -p godly-terminal
-   npm test
-   npm run build
+   pnpm test
+   pnpm build
    ```
 5. Loop until everything passes
 
