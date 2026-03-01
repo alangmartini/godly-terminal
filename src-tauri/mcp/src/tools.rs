@@ -790,6 +790,95 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "focus_pane",
+                "description": "Focus the adjacent pane in a split layout by direction. Moves focus left, right, up, or down from the currently active pane.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["left", "right", "up", "down"],
+                            "description": "Direction to move focus: 'left', 'right', 'up', or 'down'"
+                        }
+                    },
+                    "required": ["direction"]
+                }
+            },
+            {
+                "name": "focus_other_pane",
+                "description": "Focus the other pane in a 2-pane split layout. Toggles focus between the two panes. Convenient shortcut when you have exactly two panes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "resize_pane",
+                "description": "Resize a split pane by adjusting the split ratio in a given direction. Moves the divider left/right or up/down by a delta amount.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["left", "right", "up", "down"],
+                            "description": "Direction to resize: 'left'/'right' adjusts horizontal splits, 'up'/'down' adjusts vertical splits"
+                        },
+                        "delta": {
+                            "type": "number",
+                            "default": 0.05,
+                            "description": "Amount to adjust the ratio (default: 0.05 = 5%). Positive values move the divider in the specified direction."
+                        }
+                    },
+                    "required": ["direction"]
+                }
+            },
+            {
+                "name": "set_split_ratio",
+                "description": "Set the exact split ratio for the root split in a workspace. The ratio controls how space is divided between the two panes (0.0 = all first pane, 1.0 = all second pane).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "description": "Split ratio between 0.0 and 1.0 (clamped to 0.15–0.85)"
+                        }
+                    },
+                    "required": ["ratio"]
+                }
+            },
+            {
+                "name": "rotate_split",
+                "description": "Toggle the split direction between horizontal (left/right) and vertical (top/bottom) for the root split in a workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — defaults to active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
                 "name": "execute_js",
                 "description": "Execute JavaScript in the Godly Terminal webview and return the result. The script runs in the main webview context with access to the DOM, store, and all frontend APIs. The return value is JSON-stringified. Use for DOM inspection, state queries, and UI manipulation.\n\nExamples:\n- Query store state: `return window.__STORE__.getState().splitViews`\n- Get element rect: `return document.querySelector('.split-divider')?.getBoundingClientRect()`\n- Check CSS classes: `return document.querySelector('.terminal-pane')?.className`",
                 "inputSchema": {
@@ -1621,6 +1710,35 @@ pub fn call_tool(
                 workspace_id,
                 terminal_id,
             }
+        }
+
+        "focus_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let direction = args.get("direction").and_then(|v| v.as_str()).ok_or("Missing direction")?.to_string();
+            McpRequest::FocusPane { workspace_id, direction }
+        }
+
+        "focus_other_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::FocusOtherPane { workspace_id }
+        }
+
+        "resize_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let direction = args.get("direction").and_then(|v| v.as_str()).ok_or("Missing direction")?.to_string();
+            let delta = args.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.05);
+            McpRequest::ResizePane { workspace_id, direction, delta }
+        }
+
+        "set_split_ratio" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).ok_or("Missing ratio")?;
+            McpRequest::SetSplitRatio { workspace_id, ratio }
+        }
+
+        "rotate_split" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::RotateSplit { workspace_id }
         }
 
         "execute_js" => {

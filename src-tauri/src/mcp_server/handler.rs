@@ -76,6 +76,72 @@ fn auto_focus_terminal(
     let _ = app_handle.emit("focus-terminal", terminal_id.to_string());
 }
 
+/// Execute a JavaScript snippet in the main webview via the JS callback bridge.
+/// Returns McpResponse::Ok on success (the JS result is logged but not returned
+/// as structured data — these tools are fire-and-forget commands).
+fn execute_js_bridge(app_handle: &AppHandle, script: &str) -> McpResponse {
+    use tauri::Manager;
+
+    let window = match app_handle.get_webview_window("main") {
+        Some(w) => w,
+        None => {
+            return McpResponse::Error {
+                message: "Main window not found".to_string(),
+            };
+        }
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = std::sync::mpsc::channel::<(Option<String>, Option<String>)>();
+
+    {
+        let js_state: tauri::State<'_, crate::JsCallbackState> =
+            app_handle.state::<crate::JsCallbackState>();
+        js_state.senders.lock().insert(request_id.clone(), tx);
+    }
+
+    let wrapped = format!(
+        r#"(async () => {{
+    try {{
+        const __result = await (async () => {{ {script} }})();
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: JSON.stringify(__result) ?? 'undefined',
+            error: null,
+        }});
+    }} catch (e) {{
+        await window.__TAURI__.core.invoke('mcp_js_result', {{
+            id: '{request_id}',
+            result: null,
+            error: e.message || String(e),
+        }});
+    }}
+}})();"#,
+    );
+
+    if let Err(e) = window.eval(&wrapped) {
+        let js_state: tauri::State<'_, crate::JsCallbackState> =
+            app_handle.state::<crate::JsCallbackState>();
+        js_state.senders.lock().remove(&request_id);
+        return McpResponse::Error {
+            message: format!("Failed to eval JS: {}", e),
+        };
+    }
+
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok((_, Some(error))) => McpResponse::Error { message: error },
+        Ok(_) => McpResponse::Ok,
+        Err(_) => {
+            let js_state: tauri::State<'_, crate::JsCallbackState> =
+                app_handle.state::<crate::JsCallbackState>();
+            js_state.senders.lock().remove(&request_id);
+            McpResponse::Error {
+                message: "JS execution timed out after 10s".to_string(),
+            }
+        }
+    }
+}
+
 /// Handle an MCP request by delegating to AppState and DaemonClient.
 #[allow(deprecated)]
 pub fn handle_mcp_request(
@@ -2033,6 +2099,7 @@ pub fn handle_mcp_request(
             McpResponse::Ok
         }
 
+
         // === Scrollback control ===
 
         McpRequest::ScrollPageUp { terminal_id } => {
@@ -2245,6 +2312,204 @@ pub fn handle_mcp_request(
                     message: format!("Daemon error: {}", e),
                 },
             }
+
+        // === Split pane focus and resize (Pattern C — execute_js bridge) ===
+
+        McpRequest::FocusPane {
+            workspace_id,
+            direction,
+        } => {
+            // Map direction to (splitDirection, goSecond) for getAdjacentPane
+            let (split_dir, go_second) = match direction.as_str() {
+                "right" => ("horizontal", true),
+                "left" => ("horizontal", false),
+                "down" => ("vertical", true),
+                "up" => ("vertical", false),
+                _ => {
+                    return McpResponse::Error {
+                        message: format!(
+                            "Invalid direction '{}', must be 'left', 'right', 'up', or 'down'",
+                            direction
+                        ),
+                    };
+                }
+            };
+
+            let ws_resolve = match workspace_id {
+                Some(ref id) => format!("'{}'", id),
+                None => "window.__STORE__.getState().activeWorkspaceId".to_string(),
+            };
+
+            let script = format!(
+                r#"
+                const wsId = {ws_resolve};
+                if (!wsId) return 'No active workspace';
+                const currentId = window.__STORE__.getState().activeTerminalId;
+                if (!currentId) return 'No active terminal';
+                const adjId = window.__STORE__.getAdjacentPane(wsId, currentId, '{split_dir}', {go_second});
+                if (!adjId) return 'No adjacent pane in direction {direction}';
+                window.__STORE__.setActiveTerminal(adjId);
+                return 'Focused ' + adjId;
+                "#,
+            );
+
+            return execute_js_bridge(app_handle, &script);
+        }
+
+        McpRequest::FocusOtherPane { workspace_id } => {
+            let ws_resolve = match workspace_id {
+                Some(ref id) => format!("'{}'", id),
+                None => "window.__STORE__.getState().activeWorkspaceId".to_string(),
+            };
+
+            let script = format!(
+                r#"
+                const wsId = {ws_resolve};
+                if (!wsId) return 'No active workspace';
+                const state = window.__STORE__.getState();
+                const tree = state.layoutTrees[wsId];
+                if (!tree || tree.type !== 'split') return 'No split layout in workspace';
+                const currentId = state.activeTerminalId;
+                if (!currentId) return 'No active terminal';
+
+                // Collect all leaf terminal IDs
+                function collectLeaves(node) {{
+                    if (node.type === 'leaf') return [node.terminal_id];
+                    return [...collectLeaves(node.first), ...collectLeaves(node.second)];
+                }}
+                const leaves = collectLeaves(tree);
+                const other = leaves.find(id => id !== currentId);
+                if (!other) return 'No other pane found';
+                window.__STORE__.setActiveTerminal(other);
+                return 'Focused ' + other;
+                "#,
+            );
+
+            return execute_js_bridge(app_handle, &script);
+        }
+
+        McpRequest::ResizePane {
+            workspace_id,
+            direction,
+            delta,
+        } => {
+            // Map direction to (splitDirection, sign)
+            // "right" or "down" = increase ratio, "left" or "up" = decrease ratio
+            let (split_dir, sign) = match direction.as_str() {
+                "right" => ("horizontal", 1.0),
+                "left" => ("horizontal", -1.0),
+                "down" => ("vertical", 1.0),
+                "up" => ("vertical", -1.0),
+                _ => {
+                    return McpResponse::Error {
+                        message: format!(
+                            "Invalid direction '{}', must be 'left', 'right', 'up', or 'down'",
+                            direction
+                        ),
+                    };
+                }
+            };
+
+            let actual_delta = delta * sign;
+
+            let ws_resolve = match workspace_id {
+                Some(ref id) => format!("'{}'", id),
+                None => "window.__STORE__.getState().activeWorkspaceId".to_string(),
+            };
+
+            let script = format!(
+                r#"
+                const wsId = {ws_resolve};
+                if (!wsId) return 'No active workspace';
+                const currentId = window.__STORE__.getState().activeTerminalId;
+                if (!currentId) return 'No active terminal';
+                const tree = window.__STORE__.getState().layoutTrees[wsId];
+                if (!tree || tree.type !== 'split') return 'No split layout in workspace';
+
+                // Use the updateRatio helper from split-types (exposed on store)
+                // We need to find the nearest ancestor split matching the direction
+                // and adjust its ratio
+                function findTerminal(node, id) {{
+                    if (node.type === 'leaf') return node.terminal_id === id;
+                    return findTerminal(node.first, id) || findTerminal(node.second, id);
+                }}
+                function updateRatio(node, targetId, dir, delta) {{
+                    if (node.type === 'leaf') return node;
+                    const inFirst = findTerminal(node.first, targetId);
+                    const inSecond = findTerminal(node.second, targetId);
+                    if ((inFirst || inSecond) && node.direction === dir) {{
+                        const newRatio = Math.max(0.15, Math.min(0.85, node.ratio + delta));
+                        return {{ ...node, ratio: newRatio }};
+                    }}
+                    if (inFirst) {{
+                        const nf = updateRatio(node.first, targetId, dir, delta);
+                        if (nf !== node.first) return {{ ...node, first: nf }};
+                    }}
+                    if (inSecond) {{
+                        const ns = updateRatio(node.second, targetId, dir, delta);
+                        if (ns !== node.second) return {{ ...node, second: ns }};
+                    }}
+                    return node;
+                }}
+                const updated = updateRatio(tree, currentId, '{split_dir}', {actual_delta});
+                if (updated === tree) return 'No matching split to resize in direction {direction}';
+                window.__STORE__.setState({{
+                    layoutTrees: {{ ...window.__STORE__.getState().layoutTrees, [wsId]: updated }},
+                }});
+                return 'Resized';
+                "#,
+            );
+
+            return execute_js_bridge(app_handle, &script);
+        }
+
+        McpRequest::SetSplitRatio {
+            workspace_id,
+            ratio,
+        } => {
+            let clamped = ratio.clamp(0.15, 0.85);
+
+            let ws_resolve = match workspace_id {
+                Some(ref id) => format!("'{}'", id),
+                None => "window.__STORE__.getState().activeWorkspaceId".to_string(),
+            };
+
+            let script = format!(
+                r#"
+                const wsId = {ws_resolve};
+                if (!wsId) return 'No active workspace';
+                window.__STORE__.updateTreeRatio(wsId, [], {clamped});
+                return 'Set ratio to {clamped}';
+                "#,
+            );
+
+            return execute_js_bridge(app_handle, &script);
+        }
+
+        McpRequest::RotateSplit { workspace_id } => {
+            let ws_resolve = match workspace_id {
+                Some(ref id) => format!("'{}'", id),
+                None => "window.__STORE__.getState().activeWorkspaceId".to_string(),
+            };
+
+            let script = format!(
+                r#"
+                const wsId = {ws_resolve};
+                if (!wsId) return 'No active workspace';
+                const state = window.__STORE__.getState();
+                const tree = state.layoutTrees[wsId];
+                if (!tree || tree.type !== 'split') return 'No split layout in workspace';
+                const newDir = tree.direction === 'horizontal' ? 'vertical' : 'horizontal';
+                const rotated = {{ ...tree, direction: newDir }};
+                window.__STORE__.setState({{
+                    layoutTrees: {{ ...state.layoutTrees, [wsId]: rotated }},
+                }});
+                return 'Rotated to ' + newDir;
+                "#,
+            );
+
+            return execute_js_bridge(app_handle, &script);
+
         }
 
         // === JS bridge ===
