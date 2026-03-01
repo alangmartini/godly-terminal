@@ -217,6 +217,11 @@ class Store {
         const { [terminal.workspaceId]: _t, ...restTrees } = layoutTrees;
         const { [terminal.workspaceId]: _s, ...restSplits } = splitViews;
         const { [terminal.workspaceId]: _z, ...restZoomed } = zoomedPanes;
+        this.suspendedLayoutTrees.set(terminal.workspaceId, {
+          tree: _t,
+          splitView: _s,
+          zoomedPane: _z,
+        });
         layoutTrees = restTrees;
         splitViews = restSplits;
         zoomedPanes = restZoomed;
@@ -502,7 +507,6 @@ class Store {
     const { [workspaceId]: _t, ...restTrees } = this.state.layoutTrees;
     const { [workspaceId]: _s, ...restSplits } = this.state.splitViews;
     const { [workspaceId]: _z, ...restZoomed } = this.state.zoomedPanes;
-    this.suspendedLayoutTrees.delete(workspaceId);
     this.setState({
       layoutTrees: restTrees,
       splitViews: restSplits,
