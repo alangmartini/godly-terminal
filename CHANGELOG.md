@@ -7,15 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-01
+
+### Added
+- **Godly Flows — Visual Node-Graph Automation System (Phase 1)** — A flow engine that lets users compose terminal operations into reusable, triggerable workflows without writing code. Includes flow store with persistence, DAG-based execution engine, 12 built-in node types, hotkey triggers, settings tab UI, and MCP integration via `window.__FLOW_ENGINE__` (#459)
+- **AI Tool Mode** — Workspaces now support multiple AI tool modes: None, Claude, Codex, and Both. Replaces the binary Claude Code toggle with a cycle button and right-click submenu. "Both" mode creates a vertical split with Claude and Codex terminals side by side (#467)
+- **Binary GridDiff streaming** — Stream binary-encoded grid diffs via `stream://` custom protocol, eliminating Tauri JSON serialization overhead. Binary payload is ~10x smaller than JSON, with adaptive diff rate (3ms interactive / 16ms bulk) (#477)
+- **Voice vocabulary hints** — Added initial_prompt with domain-specific terms and a custom vocabulary editor in settings to improve Whisper recognition of technical terms (#363)
+- **MCP tab navigation tools** — `next_tab`, `previous_tab`, and `go_to_tab` for programmatic tab switching (#462)
+- **MCP workspace mode tools** — `toggle_worktree_mode`, `toggle_claude_code_mode`, and `get_workspace_modes` (#463)
+- **MCP notification settings tools** — `get_notification_config`, `set_notification_sound`, `add_mute_pattern`, `remove_mute_pattern`, and `list_mute_patterns` (#464)
+- **MCP font/zoom tools** — `zoom_in`, `zoom_out`, `zoom_reset`, and `get_font_size` (#465)
+- **MCP app control tools** — `open_settings`, `save_layout`, and `get_app_info` (#466)
+- **MCP scrollback control tools** — `scroll_page_up`, `scroll_page_down`, `scroll_to_top`, `scroll_to_bottom`, and `get_scroll_position` (#468)
+- **MCP workspace management tools** — `rename_workspace`, `reorder_workspaces`, `get_workspace_details`, and `open_in_explorer` (#469)
+- **MCP split pane tools** — `focus_pane`, `focus_other_pane`, `resize_pane`, `set_split_ratio`, and `rotate_split` (#470)
+- **MCP tab reorder and clipboard tools** — `reorder_tabs`, `get_tab_order`, `copy_to_clipboard`, and `get_selected_text` (#472)
+- **MCP theme management tools** — `list_themes`, `get_active_theme`, and `set_theme` (#473)
+- **MCP shell settings tools** — `list_available_shells`, `get_default_shell`, and `set_default_shell` (#474)
+
 ### Fixed
-- **Whisper test recording shows [object Object]** — The "Test Recording" button in settings and the Quick Claude voice input displayed `[object Object]` instead of the transcribed text because `whisperStopRecording()` returns a `TranscriptionResult` object, not a string (#443)
-- **Scrollback dirty-flag row-index mismatch** — diff snapshots no longer send garbled data when scrolled into history; `set_scrollback()` now marks all rows dirty and diff extraction forces full repaint when scrollback offset is active (#448)
-- **Gemini 3 Flash Preview response parsing** — branch name AI no longer fails with "Failed to parse Gemini response" when using gemini-3-flash-preview. Handles optional candidate content, thinking parts, string error responses, and non-JSON HTTP errors (#449)
-- **Stale terminal IDs in persisted layout** — Layout trees, tab orders, split views, and zoomed panes could hold terminal IDs that become invalid after app crash or dirty exit, causing phantom panes and `self_split` failures. Added centralized pruning after terminal restoration (#450)
+- **Split view lost on tab switch** — split views are now suspended (not destroyed) when `addTerminal()` clears the active layout, and `clearLayoutTree()` no longer deletes suspended splits (#426)
+- **Gemini 3 empty content parse failure** — Branch Name AI no longer fails when gemini-3-flash-preview returns empty content after spending all tokens on thinking (#457)
+- **MCP split panel tools don't update UI** — Added missing event listeners for split/unsplit/swap/zoom MCP tools (#455)
+- **MCP `get_split_state` fails with "Pipe closed"** — Fixed serde tag collision between `McpResponse` and `LayoutNode` (#455)
+- **Whisper test recording shows [object Object]** — The "Test Recording" button displayed `[object Object]` instead of transcribed text (#443)
+- **Scrollback dirty-flag row-index mismatch** — diff snapshots no longer send garbled data when scrolled into history (#448)
+- **Gemini 3 Flash Preview response parsing** — branch name AI handles optional candidate content, thinking parts, and non-JSON errors (#449)
+- **Stale terminal IDs in persisted layout** — Added centralized pruning after terminal restoration (#450)
 
 ### Changed
-- **Refactored daemon handlers** — Extracted 19 request handlers from `server.rs` into individual files with `HandlerContext` for better code organization (#453)
-- **Refactored settings dialog** — Extracted 6 settings tabs into separate files with a registry pattern for easier extensibility (#451)
+- **Voice default model upgraded to Large v3 Turbo** — Switched from Base (142 MB) to Large v3 Turbo (1.5 GB) for significantly better transcription accuracy (#454)
+- **Refactored daemon handlers** — Extracted 19 request handlers from `server.rs` into individual files (#453)
+- **Refactored settings dialog** — Extracted 6 settings tabs into separate files with a registry pattern (#451)
 
 ## [0.9.0] - 2026-02-25
 
