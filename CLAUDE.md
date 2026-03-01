@@ -46,6 +46,20 @@ npm run test:browser:headed
 npm run build:daemon && npm run test:integration
 ```
 
+### Voice/Whisper (Optional)
+
+Voice-to-text (`godly-whisper`) is **not** built or bundled with the main app. It ships as a separate optional installer. To enable during development:
+
+```bash
+# Build whisper (CPU-only) and install to %LOCALAPPDATA%/godly-whisper/
+npm run build:whisper:release && npm run install:whisper
+
+# Build with CUDA support
+npm run build:whisper:release:cuda && npm run install:whisper -- --release
+```
+
+The main app discovers the binary at `%LOCALAPPDATA%/godly-whisper/godly-whisper.exe`. The mic button in the tab bar is hidden unless the binary is found.
+
 ## Git Workflow
 
 Always commit all staged and unstaged changes when making a commit. Do not leave uncommitted changes behind.

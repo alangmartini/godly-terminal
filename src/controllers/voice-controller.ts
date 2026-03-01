@@ -6,7 +6,15 @@ let voicePollInterval: ReturnType<typeof setInterval> | null = null;
 /** Toggle voice recording on/off and handle transcription. */
 export async function handleVoiceToggle(): Promise<void> {
   try {
-    const { whisperGetStatus, whisperStartRecording, whisperStopRecording, whisperGetAudioLevel } = await import('../plugins/voice/whisper-service');
+    const { whisperIsAvailable, whisperGetStatus, whisperStartRecording, whisperStopRecording, whisperGetAudioLevel } = await import('../plugins/voice/whisper-service');
+
+    // Check if whisper binary is installed
+    const available = await whisperIsAvailable();
+    if (!available) {
+      showTranscriptionToast('Voice input not installed. Install Godly Whisper from Settings.', 0);
+      return;
+    }
+
     const status = await whisperGetStatus();
 
     if (status.state === 'idle') {

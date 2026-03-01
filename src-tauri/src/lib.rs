@@ -310,6 +310,7 @@ pub fn run() {
             commands::llm_get_model,
             commands::llm_generate_branch_name,
             // --- Whisper ---
+            commands::whisper_is_available,
             commands::whisper_get_status,
             commands::whisper_start_recording,
             commands::whisper_stop_recording,
