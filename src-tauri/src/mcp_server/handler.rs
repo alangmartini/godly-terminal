@@ -1706,7 +1706,7 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::GetLayoutTree { workspace_id } => {
-            McpResponse::LayoutTree(app_state.get_layout_tree(workspace_id))
+            McpResponse::LayoutTree { tree: app_state.get_layout_tree(workspace_id) }
         }
 
         McpRequest::SwapPanes {
