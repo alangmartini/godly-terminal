@@ -79,7 +79,7 @@ fn auto_focus_terminal(
 /// Execute a JavaScript snippet in the main webview via the JS callback bridge.
 /// Returns McpResponse::Ok on success (the JS result is logged but not returned
 /// as structured data — these tools are fire-and-forget commands).
-fn execute_js_bridge(app_handle: &AppHandle, script: &str) -> McpResponse {
+fn execute_js_fire_and_forget(app_handle: &AppHandle, script: &str) -> McpResponse {
     use tauri::Manager;
 
     let window = match app_handle.get_webview_window("main") {
@@ -681,7 +681,7 @@ pub fn handle_mcp_request(
                 tab_order: Vec::new(),
                 shell_type: crate::state::ShellType::default(),
                 worktree_mode: false,
-                claude_code_mode: false,
+                ai_tool_mode: crate::state::models::AiToolMode::None,
             };
 
             app_state.add_workspace(workspace);
@@ -844,7 +844,7 @@ pub fn handle_mcp_request(
                 name: workspace.name,
                 folder_path: workspace.folder_path,
                 worktree_mode: workspace.worktree_mode,
-                claude_code_mode: workspace.claude_code_mode,
+                claude_code_mode: !matches!(workspace.ai_tool_mode, crate::state::models::AiToolMode::None),
                 terminal_count,
             }
         }
@@ -982,22 +982,27 @@ pub fn handle_mcp_request(
 
         McpRequest::ToggleClaudeCodeMode { workspace_id } => {
             let current = match app_state.get_workspace(workspace_id) {
-                Some(ws) => ws.claude_code_mode,
+                Some(ws) => ws.ai_tool_mode.clone(),
                 None => {
                     return McpResponse::Error {
                         message: format!("Workspace {} not found", workspace_id),
                     };
                 }
             };
-            let new_val = !current;
-            app_state.update_workspace_claude_code_mode(workspace_id, new_val);
+            let new_val = if matches!(current, crate::state::models::AiToolMode::None) {
+                crate::state::models::AiToolMode::Claude
+            } else {
+                crate::state::models::AiToolMode::None
+            };
+            let new_bool = !matches!(new_val, crate::state::models::AiToolMode::None);
+            app_state.update_workspace_ai_tool_mode(workspace_id, new_val);
             auto_save.mark_dirty();
 
             // Sync frontend via execute_js
             let js_req = McpRequest::ExecuteJs {
                 script: format!(
-                    "window.__STORE__.updateWorkspace('{}', {{claude_code_mode: {}}})",
-                    workspace_id, new_val
+                    "window.__STORE__.updateWorkspace('{}', {{ai_tool_mode: {}}})",
+                    workspace_id, new_bool
                 ),
             };
             match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
@@ -1010,7 +1015,7 @@ pub fn handle_mcp_request(
             match app_state.get_workspace(workspace_id) {
                 Some(ws) => McpResponse::WorkspaceModes {
                     worktree_mode: ws.worktree_mode,
-                    claude_code_mode: ws.claude_code_mode,
+                    claude_code_mode: !matches!(ws.ai_tool_mode, crate::state::models::AiToolMode::None),
                 },
                 None => McpResponse::Error {
                     message: format!("Workspace {} not found", workspace_id),
@@ -2315,6 +2320,7 @@ pub fn handle_mcp_request(
                     message: format!("Daemon error: {}", e),
                 },
             }
+        }
 
         // === Split pane focus and resize (Pattern C — execute_js bridge) ===
 
@@ -2356,7 +2362,7 @@ pub fn handle_mcp_request(
                 "#,
             );
 
-            return execute_js_bridge(app_handle, &script);
+            return execute_js_fire_and_forget(app_handle, &script);
         }
 
         McpRequest::FocusOtherPane { workspace_id } => {
@@ -2388,7 +2394,7 @@ pub fn handle_mcp_request(
                 "#,
             );
 
-            return execute_js_bridge(app_handle, &script);
+            return execute_js_fire_and_forget(app_handle, &script);
         }
 
         McpRequest::ResizePane {
@@ -2463,7 +2469,7 @@ pub fn handle_mcp_request(
                 "#,
             );
 
-            return execute_js_bridge(app_handle, &script);
+            return execute_js_fire_and_forget(app_handle, &script);
         }
 
         McpRequest::SetSplitRatio {
@@ -2486,7 +2492,7 @@ pub fn handle_mcp_request(
                 "#,
             );
 
-            return execute_js_bridge(app_handle, &script);
+            return execute_js_fire_and_forget(app_handle, &script);
         }
 
         McpRequest::RotateSplit { workspace_id } => {
@@ -2511,8 +2517,8 @@ pub fn handle_mcp_request(
                 "#,
             );
 
-            return execute_js_bridge(app_handle, &script);
-
+            return execute_js_fire_and_forget(app_handle, &script);
+        }
 
         // === Tab management ===
 
@@ -2572,6 +2578,28 @@ pub fn handle_mcp_request(
             match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
                 McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
                 McpResponse::JsResult { .. } => McpResponse::Ok,
+                other => other,
+            }
+        }
+
+        // === Selection ===
+
+        McpRequest::GetSelectedText { terminal_id: _ } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: "return window.getSelection()?.toString() || '';".to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result, .. } => {
+                    // Result is JSON-stringified, so parse it
+                    let text = result
+                        .and_then(|r| serde_json::from_str::<String>(&r).ok())
+                        .unwrap_or_default();
+                    McpResponse::SelectedText { text }
+                }
+                other => other,
+            }
+        }
 
         // === Theme management ===
 
@@ -2586,6 +2614,94 @@ pub fn handle_mcp_request(
                         themes: all.map(t => t.name),
                         active: active.name,
                     });
+                "#.to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result: Some(json_str), .. } => {
+                    match serde_json::from_str::<serde_json::Value>(&json_str) {
+                        Ok(val) => {
+                            if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                                return McpResponse::Error { message: err.to_string() };
+                            }
+                            let themes = val.get("themes")
+                                .and_then(|t| t.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                .unwrap_or_default();
+                            let active = val.get("active")
+                                .and_then(|a| a.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            McpResponse::ThemeList { themes, active }
+                        }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse theme list: {}", e),
+                        },
+                    }
+                }
+                McpResponse::JsResult { result: None, .. } => McpResponse::Error {
+                    message: "Theme list returned no result".to_string(),
+                },
+                other => other,
+            }
+        }
+
+        McpRequest::GetActiveTheme => {
+            let js_req = McpRequest::ExecuteJs {
+                script: r#"
+                    const store = window.__THEME_STORE__;
+                    if (!store) return JSON.stringify({ error: '__THEME_STORE__ not found' });
+                    const active = store.getActiveTheme();
+                    return JSON.stringify({ id: active.id, name: active.name });
+                "#.to_string(),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result, error: None } => {
+                    McpResponse::JsResult { result, error: None }
+                }
+                other => other,
+            }
+        }
+
+        McpRequest::SetTheme { theme_name } => {
+            let js_req = McpRequest::ExecuteJs {
+                script: format!(
+                    r#"
+                    const store = window.__THEME_STORE__;
+                    if (!store) return JSON.stringify({{ error: '__THEME_STORE__ not found' }});
+                    const all = store.getAllThemes();
+                    const match = all.find(t => t.name === '{}' || t.id === '{}');
+                    if (!match) return JSON.stringify({{ error: 'Theme not found: {}' }});
+                    store.setActiveTheme(match.id);
+                    return JSON.stringify({{ success: true, active: match.name }});
+                    "#,
+                    theme_name.replace('\'', "\\'"),
+                    theme_name.replace('\'', "\\'"),
+                    theme_name.replace('\'', "\\'"),
+                ),
+            };
+            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
+                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
+                McpResponse::JsResult { result: Some(json_str), .. } => {
+                    match serde_json::from_str::<serde_json::Value>(&json_str) {
+                        Ok(val) => {
+                            if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                                return McpResponse::Error { message: err.to_string() };
+                            }
+                            McpResponse::Ok
+                        }
+                        Err(e) => McpResponse::Error {
+                            message: format!("Failed to parse set_theme result: {}", e),
+                        },
+                    }
+                }
+                McpResponse::JsResult { result: None, .. } => McpResponse::Error {
+                    message: "set_theme returned no result".to_string(),
+                },
+                other => other,
+            }
+        }
 
         // === Shell settings ===
 
@@ -2608,7 +2724,6 @@ pub fn handle_mcp_request(
                     if (!store) return JSON.stringify({ error: '__TERMINAL_SETTINGS_STORE__ not found' });
                     const shell = store.getDefaultShell();
                     return JSON.stringify(shell);
-
                 "#.to_string(),
             };
             match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
@@ -2619,20 +2734,6 @@ pub fn handle_mcp_request(
                             if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
                                 return McpResponse::Error { message: err.to_string() };
                             }
-
-                            let themes = val.get("themes")
-                                .and_then(|t| t.as_array())
-                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                                .unwrap_or_default();
-                            let active = val.get("active")
-                                .and_then(|a| a.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            McpResponse::ThemeList { themes, active }
-                        }
-                        Err(e) => McpResponse::Error {
-                            message: format!("Failed to parse theme list: {}", e),
-
                             let shell_type = val.get("type")
                                 .and_then(|t| t.as_str())
                                 .unwrap_or("unknown")
@@ -2655,76 +2756,15 @@ pub fn handle_mcp_request(
                         }
                         Err(e) => McpResponse::Error {
                             message: format!("Failed to parse shell info: {}", e),
-
                         },
                     }
                 }
                 McpResponse::JsResult { result: None, .. } => McpResponse::Error {
-
-                    message: "Theme list returned no result".to_string(),
-                },
-
-
                     message: "get_default_shell returned no result".to_string(),
                 },
-
                 other => other,
             }
         }
-
-
-
-        // === Selection ===
-
-        McpRequest::GetSelectedText { terminal_id: _ } => {
-            let js_req = McpRequest::ExecuteJs {
-                script: "return window.getSelection()?.toString() || '';".to_string(),
-
-        McpRequest::GetActiveTheme => {
-            let js_req = McpRequest::ExecuteJs {
-                script: r#"
-                    const store = window.__THEME_STORE__;
-                    if (!store) return JSON.stringify({ error: '__THEME_STORE__ not found' });
-                    const active = store.getActiveTheme();
-                    return JSON.stringify({ id: active.id, name: active.name });
-                "#.to_string(),
-
-            };
-            match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
-                McpResponse::JsResult { error: Some(e), .. } => McpResponse::Error { message: e },
-                McpResponse::JsResult { result, .. } => {
-
-                    // Result is JSON-stringified, so parse it
-                    let text = result
-                        .and_then(|r| serde_json::from_str::<String>(&r).ok())
-                        .unwrap_or_default();
-                    McpResponse::SelectedText { text }
-                }
-                other => other,
-            }
-
-
-                    McpResponse::JsResult { result, error: None }
-                }
-                other => other,
-            }
-        }
-
-        McpRequest::SetTheme { theme_name } => {
-            let js_req = McpRequest::ExecuteJs {
-                script: format!(
-                    r#"
-                    const store = window.__THEME_STORE__;
-                    if (!store) return JSON.stringify({{ error: '__THEME_STORE__ not found' }});
-                    const all = store.getAllThemes();
-                    const match = all.find(t => t.name === '{}' || t.id === '{}');
-                    if (!match) return JSON.stringify({{ error: 'Theme not found: {}' }});
-                    store.setActiveTheme(match.id);
-                    return JSON.stringify({{ success: true, active: match.name }});
-                    "#,
-                    theme_name.replace('\'', "\\'"),
-                    theme_name.replace('\'', "\\'"),
-                    theme_name.replace('\'', "\\'"),
 
         McpRequest::SetDefaultShell {
             shell_type,
@@ -2788,7 +2828,6 @@ pub fn handle_mcp_request(
                     return JSON.stringify({{ success: true }});
                     "#,
                     shell_js,
-
                 ),
             };
             match handle_mcp_request(&js_req, app_state, daemon, auto_save, app_handle, llm_state) {
@@ -2802,27 +2841,15 @@ pub fn handle_mcp_request(
                             McpResponse::Ok
                         }
                         Err(e) => McpResponse::Error {
-
-                            message: format!("Failed to parse set_theme result: {}", e),
-
                             message: format!("Failed to parse set_default_shell result: {}", e),
-
                         },
                     }
                 }
                 McpResponse::JsResult { result: None, .. } => McpResponse::Error {
-
-                    message: "set_theme returned no result".to_string(),
-                },
-                other => other,
-            }
-
-
                     message: "set_default_shell returned no result".to_string(),
                 },
                 other => other,
             }
-
         }
 
         // === JS bridge ===
@@ -3006,20 +3033,9 @@ pub fn handle_mcp_request(
                 None => {
                     return McpResponse::Error {
                         message: "No workspace_id provided and no active workspace".to_string(),
-
-        McpRequest::OpenSettings { tab } => {
-            use tauri::Manager;
-
-            let window = match app_handle.get_webview_window("main") {
-                Some(w) => w,
-                None => {
-                    return McpResponse::Error {
-                        message: "Main window not found".to_string(),
-
                     };
                 }
             };
-
 
             let js_req = McpRequest::ExecuteJs {
                 script: format!(
@@ -3119,6 +3135,20 @@ pub fn handle_mcp_request(
                     error: Some(e), ..
                 } => McpResponse::Error { message: e },
                 _ => McpResponse::Ok,
+            }
+        }
+
+        McpRequest::OpenSettings { tab } => {
+            use tauri::Manager;
+
+            let window = match app_handle.get_webview_window("main") {
+                Some(w) => w,
+                None => {
+                    return McpResponse::Error {
+                        message: "Main window not found".to_string(),
+                    };
+                }
+            };
 
             // Build JS to open the settings dialog, optionally selecting a tab
             let tab_js = if let Some(tab_name) = tab {
