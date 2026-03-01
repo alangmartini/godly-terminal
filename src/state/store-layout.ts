@@ -1,7 +1,6 @@
 import type { Store, SplitView } from './store';
 import type { LayoutNode } from './split-types';
 import {
-  terminalIds,
   replaceLeaf,
   removeLeaf,
   containsTerminal,
