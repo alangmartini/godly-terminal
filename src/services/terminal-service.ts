@@ -3,6 +3,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { store, ShellType } from '../state/store';
 import { perfTracer } from '../utils/PerfTracer';
 import type { RichGridData, RichGridDiff } from '../components/TerminalRenderer';
+import { decodeAllDiffs } from '../utils/binary-diff-decoder';
 
 
 // Backend shell type format - matches Rust serde externally tagged enum
@@ -94,8 +95,10 @@ class TerminalService {
   private outputListeners: Map<string, () => void> = new Map();
   private gridDiffListeners: Map<string, (diff: RichGridDiff) => void> = new Map();
   private unlistenFns: UnlistenFn[] = [];
-  /** AbortControllers for active stream connections (keyed by session ID). */
+  /** AbortControllers for active output stream connections (keyed by session ID). */
   private streamControllers: Map<string, AbortController> = new Map();
+  /** AbortControllers for active diff stream connections (keyed by session ID). */
+  private diffStreamControllers: Map<string, AbortController> = new Map();
   /** Circuit breaker state per session. @internal — visible for testing. */
   _circuitBreakers: Map<string, CircuitBreakerState> = new Map();
   /**
@@ -304,6 +307,94 @@ class TerminalService {
   }
 
   /**
+   * Connect to the binary diff stream via Tauri custom protocol.
+   * Binary-encoded RichGridDiff frames arrive as ReadableStream chunks,
+   * decoded in-place and delivered to the onDiff callback. This eliminates
+   * both JSON serialization and the IPC round-trip for grid snapshots.
+   */
+  connectDiffStream(sessionId: string, onDiff: (diff: RichGridDiff) => void): void {
+    this.disconnectDiffStream(sessionId);
+
+    const controller = new AbortController();
+    this.diffStreamControllers.set(sessionId, controller);
+
+    this._consumeDiffStream(sessionId, controller.signal, onDiff);
+  }
+
+  /**
+   * Disconnect from the binary diff stream for a session.
+   */
+  disconnectDiffStream(sessionId: string): void {
+    const controller = this.diffStreamControllers.get(sessionId);
+    if (controller) {
+      controller.abort();
+      this.diffStreamControllers.delete(sessionId);
+    }
+  }
+
+  /** @internal */
+  async _consumeDiffStream(
+    sessionId: string,
+    signal: AbortSignal,
+    onDiff: (diff: RichGridDiff) => void,
+  ): Promise<void> {
+    let delay = STREAM_RECONNECT_BASE_MS;
+
+    while (!signal.aborted) {
+      try {
+        const response = await fetch(
+          `stream://localhost/terminal-diff/${sessionId}`,
+          { signal },
+        );
+
+        if (!response.ok || !response.body) {
+          throw new Error(`Diff stream error: ${response.status}`);
+        }
+
+        delay = STREAM_RECONNECT_BASE_MS;
+
+        const reader = response.body.getReader();
+        const onAbort = () => reader.cancel();
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          while (!signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.length > 0) {
+              const diffs = decodeAllDiffs(value);
+              for (const diff of diffs) {
+                onDiff(diff);
+              }
+            }
+          }
+        } finally {
+          signal.removeEventListener('abort', onAbort);
+          reader.releaseLock();
+        }
+      } catch (err: unknown) {
+        if (signal.aborted) break;
+
+        console.debug(
+          `[TerminalService] Diff stream error for ${sessionId}, reconnecting in ~${delay}ms`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+
+      if (signal.aborted) break;
+
+      // Exponential backoff with jitter
+      const waitTime = delay + Math.floor(jitterRng() * STREAM_RECONNECT_BASE_MS);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, waitTime);
+        const cleanup = () => { clearTimeout(timer); resolve(); };
+        signal.addEventListener('abort', cleanup, { once: true });
+      });
+
+      delay = Math.min(delay * 2, STREAM_RECONNECT_MAX_MS);
+    }
+  }
+
+  /**
    * Get the circuit breaker state for a session, or null if none exists.
    * @internal — visible for testing.
    */
@@ -442,6 +533,9 @@ class TerminalService {
     // Disconnect all active streams.
     for (const [sessionId] of this.streamControllers) {
       this.disconnectOutputStream(sessionId);
+    }
+    for (const [sessionId] of this.diffStreamControllers) {
+      this.disconnectDiffStream(sessionId);
     }
     this.unlistenFns.forEach(fn => fn());
     this.outputListeners.clear();

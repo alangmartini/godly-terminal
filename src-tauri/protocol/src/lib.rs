@@ -1,4 +1,5 @@
 pub mod ansi;
+pub mod binary_diff;
 pub mod frame;
 pub mod keys;
 pub mod layout_tree;

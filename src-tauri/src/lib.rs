@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use tauri::{Emitter, Manager};
 
-use crate::daemon_client::bridge::OutputStreamRegistry;
+use crate::daemon_client::bridge::{DiffStreamRegistry, OutputStreamRegistry};
 use crate::daemon_client::DaemonClient;
 use crate::gpu_renderer::GpuRendererManager;
 use crate::llm_state::LlmState;
@@ -462,8 +462,15 @@ pub fn run() {
     let output_registry = Arc::new(OutputStreamRegistry::new());
     daemon_client.set_output_registry(output_registry.clone());
 
+    // Create per-session binary diff stream registry for the custom protocol.
+    // Binary-encoded grid diffs flow: daemon → bridge I/O thread → registry → stream:// fetch.
+    // This bypasses both Tauri JSON serialization AND the IPC round-trip for grid snapshots.
+    let diff_registry = Arc::new(DiffStreamRegistry::new());
+    daemon_client.set_diff_registry(diff_registry.clone());
+
     // Clone for the custom protocol closure (captured by move)
     let registry_for_protocol = output_registry.clone();
+    let diff_registry_for_protocol = diff_registry.clone();
 
     // Dedicated worker pool for stream:// protocol responses (2 threads).
     // The WebView2 WebResourceRequested callback runs on the main thread, so
@@ -517,9 +524,9 @@ pub fn run() {
         // Returns accumulated raw PTY bytes since last fetch (application/octet-stream).
         .register_asynchronous_uri_scheme_protocol("stream", move |_ctx, request, responder| {
             let registry = registry_for_protocol.clone();
+            let diff_reg = diff_registry_for_protocol.clone();
             let path = request.uri().path().to_string();
             let _ = stream_tx.try_send(Box::new(move || {
-                // Expected path: /terminal-output/{session_id}
                 let response = if let Some(session_id) = path.strip_prefix("/terminal-output/") {
                     if session_id.is_empty() {
                         tauri::http::Response::builder()
@@ -536,11 +543,27 @@ pub fn run() {
                             .body(bytes)
                             .unwrap()
                     }
+                } else if let Some(session_id) = path.strip_prefix("/terminal-diff/") {
+                    if session_id.is_empty() {
+                        tauri::http::Response::builder()
+                            .status(400)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(b"Missing session_id".to_vec())
+                            .unwrap()
+                    } else {
+                        let bytes = diff_reg.drain(session_id);
+                        tauri::http::Response::builder()
+                            .status(200)
+                            .header("Content-Type", "application/octet-stream")
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(bytes)
+                            .unwrap()
+                    }
                 } else {
                     tauri::http::Response::builder()
                         .status(404)
                         .header("Access-Control-Allow-Origin", "*")
-                        .body(b"Not found. Use /terminal-output/{session_id}".to_vec())
+                        .body(b"Not found".to_vec())
                         .unwrap()
                 };
                 responder.respond(response);
