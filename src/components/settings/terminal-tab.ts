@@ -313,6 +313,71 @@ export class TerminalTab implements SettingsTabProvider {
 
     content.appendChild(scrollSection);
 
+    // ── Split Tabs section ─────────────────────────────────────
+    const splitSection = document.createElement('div');
+    splitSection.className = 'settings-section';
+
+    const splitTitle = document.createElement('div');
+    splitTitle.className = 'settings-section-title';
+    splitTitle.textContent = 'Split Tabs';
+    splitSection.appendChild(splitTitle);
+
+    const splitDesc = document.createElement('div');
+    splitDesc.className = 'settings-description';
+    splitDesc.textContent = 'Choose how terminals in a split view appear in the tab bar.';
+    splitSection.appendChild(splitDesc);
+
+    const splitRadioGroup = document.createElement('div');
+    splitRadioGroup.className = 'shell-radio-group';
+
+    const currentSplitMode = terminalSettingsStore.getSplitTabMode();
+
+    const splitModeOptions: { id: string; label: string; desc: string }[] = [
+      { id: 'individual', label: 'Individual tabs', desc: 'Each terminal in a split gets its own tab.' },
+      { id: 'unified', label: 'Unified tab', desc: 'Terminals in a split share a single tab.' },
+    ];
+
+    for (const opt of splitModeOptions) {
+      const row = document.createElement('div');
+      row.className = 'shell-option-row';
+
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'split-tab-mode';
+      radio.id = `split-tab-${opt.id}`;
+      radio.value = opt.id;
+      radio.checked = currentSplitMode === opt.id;
+      row.appendChild(radio);
+
+      const label = document.createElement('label');
+      label.htmlFor = `split-tab-${opt.id}`;
+      label.className = 'shell-option-label';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'shell-option-name';
+      nameSpan.textContent = opt.label;
+      label.appendChild(nameSpan);
+
+      const infoIcon = document.createElement('span');
+      infoIcon.className = 'shell-info-icon';
+      infoIcon.textContent = '\u24D8';
+      infoIcon.title = opt.desc;
+      label.appendChild(infoIcon);
+
+      row.appendChild(label);
+
+      radio.onchange = () => {
+        if (radio.checked) {
+          terminalSettingsStore.setSplitTabMode(opt.id as 'individual' | 'unified');
+        }
+      };
+
+      splitRadioGroup.appendChild(row);
+    }
+
+    splitSection.appendChild(splitRadioGroup);
+    content.appendChild(splitSection);
+
     // ── CMD Aliases section ────────────────────────────────────
     const aliasSection = document.createElement('div');
     aliasSection.className = 'settings-section';
