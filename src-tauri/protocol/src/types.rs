@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Shell type matching the existing Tauri app's ShellType
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ShellType {
     Windows,
@@ -39,7 +40,8 @@ impl Default for ShellType {
 }
 
 /// Information about a daemon-managed session
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SessionInfo {
     pub id: String,
     pub shell_type: ShellType,
@@ -63,7 +65,8 @@ pub struct SessionInfo {
 
 /// Grid snapshot from the godly-vt terminal state engine.
 /// Contains the visible terminal content as plain-text rows plus cursor info.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct GridData {
     /// Each element is one row of plain text (no ANSI escapes).
     pub rows: Vec<String>,
@@ -81,7 +84,8 @@ pub struct GridData {
 
 /// Rich grid snapshot with per-cell attributes for Canvas2D rendering.
 /// Serialized as JSON over Tauri IPC to the frontend renderer.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RichGridData {
     /// Per-row cell data with attributes.
     pub rows: Vec<RichGridRow>,
@@ -104,7 +108,8 @@ pub struct RichGridData {
 }
 
 /// A single row in the rich grid.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RichGridRow {
     /// Cells in this row.
     pub cells: Vec<RichGridCell>,
@@ -113,7 +118,8 @@ pub struct RichGridRow {
 }
 
 /// A single cell with full attribute information for rendering.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RichGridCell {
     /// The text content (character(s), may include combining chars).
     pub content: String,
@@ -138,7 +144,8 @@ pub struct RichGridCell {
 }
 
 /// Cursor state for rendering.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CursorState {
     /// Cursor row (0-based, relative to visible area).
     pub row: u16,
@@ -147,7 +154,8 @@ pub struct CursorState {
 }
 
 /// Terminal grid dimensions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct GridDimensions {
     /// Number of visible rows.
     pub rows: u16,
@@ -157,7 +165,8 @@ pub struct GridDimensions {
 
 /// Differential grid snapshot: only contains rows that changed since last read.
 /// When `full_repaint` is true, `dirty_rows` contains ALL rows (same as a full snapshot).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RichGridDiff {
     /// Only the rows that changed, as (row_index, row_data) pairs.
     pub dirty_rows: Vec<(u16, RichGridRow)>,
@@ -184,7 +193,8 @@ pub struct RichGridDiff {
 
 /// Metadata about a running pty-shim process.
 /// Persisted as JSON in %APPDATA%/com.godly.terminal/shims/{session-id}.json
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ShimMetadata {
     pub session_id: String,
     pub shim_pid: u32,
