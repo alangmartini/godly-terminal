@@ -193,6 +193,7 @@ pub enum McpRequest {
     },
 
 
+
     // OS integration
     OpenInExplorer { path: String },
 
@@ -221,6 +222,21 @@ pub enum McpRequest {
     RotateSplit {
         #[serde(default)]
         workspace_id: Option<String>,
+    },
+
+
+
+    // Shell settings
+    ListAvailableShells,
+    GetDefaultShell,
+    SetDefaultShell {
+        shell_type: String,
+        #[serde(default)]
+        wsl_distribution: Option<String>,
+        #[serde(default)]
+        custom_program: Option<String>,
+        #[serde(default)]
+        custom_args: Option<Vec<String>>,
     },
 
 
@@ -457,6 +473,7 @@ pub enum McpResponse {
 
 
 
+
     NotificationConfig {
         enabled: bool,
         sound_preset: String,
@@ -482,6 +499,19 @@ pub enum McpResponse {
     ThemeList {
         themes: Vec<String>,
         active: String,
+
+
+    AvailableShells {
+        shells: Vec<String>,
+    },
+    ShellInfo {
+        shell_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wsl_distribution: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_program: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_args: Option<Vec<String>>,
 
     },
 }

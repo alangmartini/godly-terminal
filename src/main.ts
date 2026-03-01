@@ -1,9 +1,13 @@
 import { App } from './components/App';
 import { store } from './state/store';
 
+
 import { notificationStore } from './state/notification-store';
 
 import { themeStore } from './state/theme-store';
+
+
+import { terminalSettingsStore } from './state/terminal-settings-store';
 
 import { initLogger } from './utils/Logger';
 import { initPlugins } from './plugins/index';
@@ -13,6 +17,7 @@ initLogger();
 
 // Expose store globally for MCP execute_js tool
 (window as any).__STORE__ = store;
+(window as any).__TERMINAL_SETTINGS_STORE__ = terminalSettingsStore;
 
 (window as any).__NOTIFICATION_STORE__ = notificationStore;
 
