@@ -20,6 +20,9 @@ pub enum WhisperRequest {
     ListAudioDevices,
     PlaybackLastRecording,
     GetAudioLevel,
+    SetVocabulary {
+        terms: String,
+    },
 }
 
 /// Info about an available audio input device.
@@ -54,6 +57,7 @@ pub enum WhisperResponse {
         devices: Vec<AudioDeviceInfo>,
     },
     PlaybackComplete,
+    VocabularyUpdated,
     AudioLevel {
         rms: f32,
         peak: f32,

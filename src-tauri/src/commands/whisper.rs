@@ -233,12 +233,14 @@ pub async fn whisper_load_model(
     gpu_device: i32,
     language: String,
 ) -> Result<(), String> {
+    let prev_config = whisper.get_config();
     let config = WhisperConfig {
         model_name: model_name.clone(),
         use_gpu,
         gpu_device,
         language: language.clone(),
-        microphone_device_id: None,
+        microphone_device_id: prev_config.microphone_device_id,
+        custom_vocabulary: prev_config.custom_vocabulary.clone(),
     };
     whisper.set_config(config);
 
@@ -258,8 +260,13 @@ pub async fn whisper_load_model(
     match resp {
         WhisperResponse::ModelLoaded { model_name: name, gpu_in_use } => {
             whisper.set_model_loaded(true, Some(name));
-            let mut status = whisper.get_status();
-            status.gpu_in_use = gpu_in_use;
+            whisper.set_gpu_in_use(gpu_in_use);
+            // Push custom vocabulary to sidecar after model load
+            if !prev_config.custom_vocabulary.is_empty() {
+                let _ = whisper.client().send_request(&WhisperRequest::SetVocabulary {
+                    terms: prev_config.custom_vocabulary,
+                });
+            }
             Ok(())
         }
         WhisperResponse::Error { message } => Err(message),
@@ -306,6 +313,30 @@ pub async fn whisper_set_config(
 ) -> Result<(), String> {
     whisper.set_config(config);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn whisper_set_vocabulary(
+    whisper: State<'_, Arc<WhisperState>>,
+    terms: String,
+) -> Result<(), String> {
+    // Update config
+    let mut config = whisper.get_config();
+    config.custom_vocabulary = terms.clone();
+    whisper.set_config(config);
+
+    // Push to sidecar if connected
+    if whisper.get_status().sidecar_running {
+        let resp = whisper.client().send_request(&WhisperRequest::SetVocabulary { terms })
+            .map_err(|e| format!("Failed to send SetVocabulary: {}", e))?;
+        match resp {
+            WhisperResponse::VocabularyUpdated => Ok(()),
+            WhisperResponse::Error { message } => Err(message),
+            other => Err(format!("Unexpected response: {:?}", other)),
+        }
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]

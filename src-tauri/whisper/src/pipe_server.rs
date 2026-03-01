@@ -176,6 +176,12 @@ pub(crate) fn handle_request(
             WhisperResponse::AudioLevel { rms, peak, duration_ms }
         }
 
+        WhisperRequest::SetVocabulary { terms } => {
+            transcriber.set_custom_vocabulary(terms);
+            eprintln!("[whisper] Custom vocabulary updated");
+            WhisperResponse::VocabularyUpdated
+        }
+
         WhisperRequest::StopRecording => {
             let samples = match recorder.stop() {
                 Ok(s) => s,
