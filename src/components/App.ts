@@ -809,6 +809,51 @@ export class App {
       store.clearSplitView(workspaceId);
     });
 
+    // MCP: split terminal (layout tree split)
+    await listen<{
+      workspace_id: string;
+      target_terminal_id: string;
+      new_terminal_id: string;
+      direction: string;
+      ratio: number;
+    }>('mcp-split-terminal', (event) => {
+      const { workspace_id, target_terminal_id, new_terminal_id, direction, ratio } = event.payload;
+      console.log('[App] MCP split terminal:', workspace_id, target_terminal_id, direction);
+      const dir = direction === 'vertical' ? 'vertical' : 'horizontal';
+      store.splitTerminalAt(workspace_id, target_terminal_id, new_terminal_id, dir, ratio);
+    });
+
+    // MCP: unsplit terminal
+    await listen<{
+      workspace_id: string;
+      terminal_id: string;
+    }>('mcp-unsplit-terminal', (event) => {
+      const { workspace_id, terminal_id } = event.payload;
+      console.log('[App] MCP unsplit terminal:', workspace_id, terminal_id);
+      store.unsplitTerminal(workspace_id, terminal_id);
+    });
+
+    // MCP: swap panes
+    await listen<{
+      workspace_id: string;
+      terminal_id_a: string;
+      terminal_id_b: string;
+    }>('mcp-swap-panes', (event) => {
+      const { workspace_id, terminal_id_a, terminal_id_b } = event.payload;
+      console.log('[App] MCP swap panes:', workspace_id, terminal_id_a, terminal_id_b);
+      store.swapPanes(workspace_id, terminal_id_a, terminal_id_b);
+    });
+
+    // MCP: zoom pane
+    await listen<{
+      workspace_id: string;
+      terminal_id: string | null;
+    }>('mcp-zoom-pane', (event) => {
+      const { workspace_id, terminal_id } = event.payload;
+      console.log('[App] MCP zoom pane:', workspace_id, terminal_id);
+      store.setZoomedPane(workspace_id, terminal_id);
+    });
+
     // Terminal bell (BEL character, 0x07) — triggers notification pipeline
     await listen<{ terminal_id: string }>('terminal-bell', async (event) => {
       const { terminal_id } = event.payload;
