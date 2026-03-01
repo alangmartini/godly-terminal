@@ -25,12 +25,12 @@ export function setLayoutTreeImpl(store: Store, workspaceId: string, tree: Layou
   store.enforceSplitAdjacency(workspaceId);
 }
 
+/** Clear the active layout tree for a workspace. Does not affect suspended splits. */
 export function clearLayoutTreeImpl(store: Store, workspaceId: string): void {
   const state = store.getState();
   const { [workspaceId]: _t, ...restTrees } = state.layoutTrees;
   const { [workspaceId]: _s, ...restSplits } = state.splitViews;
   const { [workspaceId]: _z, ...restZoomed } = state.zoomedPanes;
-  store.deleteSuspendedLayoutTree(workspaceId);
   store.setState({
     layoutTrees: restTrees,
     splitViews: restSplits,
