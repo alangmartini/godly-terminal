@@ -199,6 +199,26 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+    // Tab management
+    ReorderTabs {
+        workspace_id: String,
+        terminal_ids: Vec<String>,
+    },
+    GetTabOrder {
+        workspace_id: String,
+    },
+
+    // Clipboard
+    CopyToClipboard {
+        text: String,
+    },
+
+    // Selection
+    GetSelectedText {
+        #[serde(default)]
+        terminal_id: Option<String>,
+    },
+
     // Notifications
     Notify {
         terminal_id: String,
@@ -304,5 +324,11 @@ pub enum McpResponse {
     },
     Screenshot {
         path: String,
+    },
+    TabOrder {
+        terminal_ids: Vec<String>,
+    },
+    SelectedText {
+        text: String,
     },
 }

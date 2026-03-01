@@ -631,6 +631,10 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::ReorderTabs { .. } => Ok(Self::app_only_error("reorder_tabs")),
+            McpRequest::GetTabOrder { .. } => Ok(Self::app_only_error("get_tab_order")),
+            McpRequest::CopyToClipboard { .. } => Ok(Self::app_only_error("copy_to_clipboard")),
+            McpRequest::GetSelectedText { .. } => Ok(Self::app_only_error("get_selected_text")),
         }
     }
 
