@@ -727,6 +727,42 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "zoom_in",
+                "description": "Increase the terminal font size by 1 pixel",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "zoom_out",
+                "description": "Decrease the terminal font size by 1 pixel",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "zoom_reset",
+                "description": "Reset the terminal font size to the default (13px)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_font_size",
+                "description": "Get the current terminal font size in pixels",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
             }
         ]
     })
@@ -1258,6 +1294,11 @@ pub fn call_tool(
             McpRequest::ExportTerminalInfo { terminal_id }
         }
 
+        "zoom_in" => McpRequest::ZoomIn,
+        "zoom_out" => McpRequest::ZoomOut,
+        "zoom_reset" => McpRequest::ZoomReset,
+        "get_font_size" => McpRequest::GetFontSize,
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -1415,6 +1456,9 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         }
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
+        })),
+        McpResponse::FontSize { size } => Ok(json!({
+            "font_size": size,
         })),
     }
 }
