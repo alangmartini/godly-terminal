@@ -182,6 +182,19 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
+    // Shell settings
+    ListAvailableShells,
+    GetDefaultShell,
+    SetDefaultShell {
+        shell_type: String,
+        #[serde(default)]
+        wsl_distribution: Option<String>,
+        #[serde(default)]
+        custom_program: Option<String>,
+        #[serde(default)]
+        custom_args: Option<Vec<String>>,
+    },
+
     // JS bridge (execute JavaScript in WebView, return result)
     ExecuteJs {
         script: String,
@@ -304,5 +317,17 @@ pub enum McpResponse {
     },
     Screenshot {
         path: String,
+    },
+    AvailableShells {
+        shells: Vec<String>,
+    },
+    ShellInfo {
+        shell_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wsl_distribution: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_program: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_args: Option<Vec<String>>,
     },
 }

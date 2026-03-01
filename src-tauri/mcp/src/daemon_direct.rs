@@ -631,6 +631,20 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::ListAvailableShells => {
+                // Pure data — can be handled without the app
+                Ok(McpResponse::AvailableShells {
+                    shells: vec![
+                        "windows".to_string(),
+                        "pwsh".to_string(),
+                        "cmd".to_string(),
+                        "wsl".to_string(),
+                        "custom".to_string(),
+                    ],
+                })
+            }
+            McpRequest::GetDefaultShell => Ok(Self::app_only_error("get_default_shell")),
+            McpRequest::SetDefaultShell { .. } => Ok(Self::app_only_error("set_default_shell")),
         }
     }
 

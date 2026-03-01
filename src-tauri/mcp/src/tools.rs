@@ -727,6 +727,51 @@ pub fn list_tools() -> Value {
                     },
                     "required": []
                 }
+            },
+            {
+                "name": "list_available_shells",
+                "description": "List all supported shell types that can be used as the default shell.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_default_shell",
+                "description": "Get the current default shell configuration used for new terminals.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "set_default_shell",
+                "description": "Set the default shell for new terminals. Use list_available_shells to see valid shell_type values. For 'wsl', optionally specify a distribution. For 'custom', provide the program path and optional args.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "shell_type": {
+                            "type": "string",
+                            "description": "Shell type: 'windows', 'pwsh', 'cmd', 'wsl', or 'custom'"
+                        },
+                        "wsl_distribution": {
+                            "type": "string",
+                            "description": "WSL distribution name (only for shell_type='wsl')"
+                        },
+                        "custom_program": {
+                            "type": "string",
+                            "description": "Path to shell executable (required for shell_type='custom')"
+                        },
+                        "custom_args": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Arguments for the custom shell program (only for shell_type='custom')"
+                        }
+                    },
+                    "required": ["shell_type"]
+                }
             }
         ]
     })
@@ -1258,6 +1303,29 @@ pub fn call_tool(
             McpRequest::ExportTerminalInfo { terminal_id }
         }
 
+        "list_available_shells" => McpRequest::ListAvailableShells,
+
+        "get_default_shell" => McpRequest::GetDefaultShell,
+
+        "set_default_shell" => {
+            let shell_type = args
+                .get("shell_type")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing shell_type")?
+                .to_string();
+            let wsl_distribution = args.get("wsl_distribution").and_then(|v| v.as_str()).map(String::from);
+            let custom_program = args.get("custom_program").and_then(|v| v.as_str()).map(String::from);
+            let custom_args = args.get("custom_args").and_then(|v| v.as_array()).map(|arr| {
+                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+            });
+            McpRequest::SetDefaultShell {
+                shell_type,
+                wsl_distribution,
+                custom_program,
+                custom_args,
+            }
+        }
+
         _ => return Err(format!("Unknown tool: {}", name)),
     };
 
@@ -1416,6 +1484,27 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         McpResponse::Screenshot { path } => Ok(json!({
             "path": path,
         })),
+        McpResponse::AvailableShells { shells } => Ok(json!({
+            "shells": shells,
+        })),
+        McpResponse::ShellInfo {
+            shell_type,
+            wsl_distribution,
+            custom_program,
+            custom_args,
+        } => {
+            let mut obj = json!({ "shell_type": shell_type });
+            if let Some(dist) = wsl_distribution {
+                obj["wsl_distribution"] = json!(dist);
+            }
+            if let Some(prog) = custom_program {
+                obj["custom_program"] = json!(prog);
+            }
+            if let Some(args) = custom_args {
+                obj["custom_args"] = json!(args);
+            }
+            Ok(obj)
+        }
     }
 }
 
