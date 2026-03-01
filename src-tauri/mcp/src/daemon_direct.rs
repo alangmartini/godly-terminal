@@ -771,6 +771,7 @@ impl Backend for DaemonDirectBackend {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
 
+
             McpRequest::NextTab { .. } => Ok(Self::app_only_error("next_tab")),
             McpRequest::PreviousTab { .. } => Ok(Self::app_only_error("previous_tab")),
             McpRequest::GoToTab { .. } => Ok(Self::app_only_error("go_to_tab")),
@@ -802,6 +803,12 @@ impl Backend for DaemonDirectBackend {
             McpRequest::OpenSettings { .. } => Ok(Self::app_only_error("open_settings")),
             McpRequest::SaveLayout => Ok(Self::app_only_error("save_layout")),
             McpRequest::GetAppInfo => Ok(Self::app_only_error("get_app_info")),
+
+
+            McpRequest::ReorderTabs { .. } => Ok(Self::app_only_error("reorder_tabs")),
+            McpRequest::GetTabOrder { .. } => Ok(Self::app_only_error("get_tab_order")),
+            McpRequest::CopyToClipboard { .. } => Ok(Self::app_only_error("copy_to_clipboard")),
+            McpRequest::GetSelectedText { .. } => Ok(Self::app_only_error("get_selected_text")),
 
         }
     }
