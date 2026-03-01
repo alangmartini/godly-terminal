@@ -62,6 +62,7 @@ struct Candidate {
 
 #[derive(Deserialize)]
 struct CandidateContent {
+    #[serde(default)]
     parts: Vec<ResponsePart>,
 }
 
@@ -114,7 +115,7 @@ pub async fn generate_branch_name_gemini(
         }],
         generation_config: GenerationConfig {
             temperature: 0.3,
-            max_output_tokens: 30,
+            max_output_tokens: 200,
         },
     };
 
@@ -167,8 +168,9 @@ pub async fn generate_branch_name_gemini(
                     content
                         .parts
                         .into_iter()
-                        .find(|p| p.thought != Some(true))
-                        .and_then(|p| p.text)
+                        .find_map(|p| {
+                            if p.thought != Some(true) { p.text } else { None }
+                        })
                 })
             })
             .ok_or_else(|| anyhow::anyhow!("No text in Gemini response"))?;
@@ -196,8 +198,9 @@ mod tests {
                 content
                     .parts
                     .iter()
-                    .find(|p| p.thought != Some(true))
-                    .and_then(|p| p.text.clone())
+                    .find_map(|p| {
+                        if p.thought != Some(true) { p.text.clone() } else { None }
+                    })
             })
     }
 
