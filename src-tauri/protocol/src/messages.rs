@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::types::{SessionInfo, ShellType};
 
 /// Requests sent from the Tauri app to the daemon
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum Request {
     CreateSession {
@@ -96,7 +97,8 @@ pub enum Request {
 }
 
 /// Responses sent from the daemon to the Tauri app (one per request)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum Response {
     Ok,
@@ -126,7 +128,8 @@ pub enum Response {
 }
 
 /// Asynchronous events pushed from the daemon to attached clients
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum Event {
     Output { session_id: String, data: Vec<u8> },
@@ -143,7 +146,8 @@ pub enum Event {
 }
 
 /// Top-level message from daemon to client (can be a response or async event)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "kind")]
 pub enum DaemonMessage {
     Response(Response),
