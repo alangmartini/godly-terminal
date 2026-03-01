@@ -345,6 +345,7 @@ pub async fn quick_claude(
     branch_name: Option<String>,
     skip_fetch: Option<bool>,
     no_worktree: Option<bool>,
+    ai_tool: Option<String>,
     state: State<'_, Arc<AppState>>,
     daemon: State<'_, Arc<DaemonClient>>,
     auto_save: State<'_, Arc<AutoSaveManager>>,
@@ -490,12 +491,17 @@ pub async fn quick_claude(
 
     auto_save.mark_dirty();
 
-    // Spawn background thread: start dclaude → wait for ready → write prompt
+    // Spawn background thread: start AI tool → wait for ready → write prompt
     let daemon_bg = daemon.inner().clone();
     let app_handle_bg = app_handle.clone();
     let terminal_id_bg = terminal_id.clone();
+    let use_codex = ai_tool.as_deref() == Some("codex");
     std::thread::spawn(move || {
-        quick_claude_background(daemon_bg, app_handle_bg, terminal_id_bg, prompt, terminal_name);
+        if use_codex {
+            quick_codex_background(daemon_bg, app_handle_bg, terminal_id_bg, prompt, terminal_name);
+        } else {
+            quick_claude_background(daemon_bg, app_handle_bg, terminal_id_bg, prompt, terminal_name);
+        }
     });
 
     Ok(QuickClaudeResult {
@@ -593,6 +599,50 @@ pub(crate) fn quick_claude_background(
     eprintln!("[quick_claude] Prompt delivered to {}", display_name);
 
     // Step 6: Emit toast notification
+    #[derive(serde::Serialize, Clone)]
+    struct QuickClaudeReadyPayload {
+        terminal_id: String,
+        display_name: String,
+    }
+    let _ = app_handle.emit(
+        "quick-claude-ready",
+        QuickClaudeReadyPayload {
+            terminal_id,
+            display_name,
+        },
+    );
+}
+
+/// Background task for Codex: waits for shell idle, then writes `codex --yolo "prompt"`.
+/// Codex takes the prompt as a CLI argument, so no ink TUI polling is needed.
+fn quick_codex_background(
+    daemon: Arc<DaemonClient>,
+    app_handle: tauri::AppHandle,
+    terminal_id: String,
+    prompt: String,
+    display_name: String,
+) {
+    // Step 1: Wait for shell to be ready
+    let shell_ready = poll_idle(&daemon, &terminal_id, 500, 5_000);
+    if !shell_ready {
+        eprintln!("[quick_codex] Shell did not become idle in time, writing codex command anyway");
+    }
+
+    // Step 2: Escape the prompt for shell argument and write codex command
+    let escaped = prompt.replace('\\', "\\\\").replace('"', "\\\"");
+    let codex_cmd = format!("codex --yolo \"{}\"\r", escaped);
+    let write_req = Request::Write {
+        session_id: terminal_id.clone(),
+        data: codex_cmd.into_bytes(),
+    };
+    if let Err(e) = daemon.send_request(&write_req) {
+        eprintln!("[quick_codex] Failed to write codex command: {}", e);
+        return;
+    }
+
+    eprintln!("[quick_codex] Prompt delivered to {}", display_name);
+
+    // Step 3: Emit toast notification
     #[derive(serde::Serialize, Clone)]
     struct QuickClaudeReadyPayload {
         terminal_id: String,

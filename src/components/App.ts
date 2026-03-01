@@ -529,22 +529,89 @@ export class App {
     });
     perfTracer.measure('create_terminal', 'create_terminal_start');
 
-    if (workspace?.claudeCodeMode) {
+    const aiMode = workspace?.aiToolMode;
+    if (aiMode === 'both') {
+      // Both mode: delegate to dedicated method that creates 2 terminals + split
+      return this.createNewTerminalBothMode(workspace!);
+    }
+
+    if (aiMode === 'claude') {
       setTimeout(() => {
         terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
+      }, 500);
+    } else if (aiMode === 'codex') {
+      setTimeout(() => {
+        terminalService.writeToTerminal(result.id, 'codex --yolo\r');
       }, 500);
     }
 
     return result.id;
   }
 
+  /**
+   * Both mode: create two terminals (Claude + Codex) in a vertical split.
+   * Mirrors TabBar.handleNewTabBothMode().
+   */
+  private async createNewTerminalBothMode(workspace: import('../state/store').Workspace): Promise<string> {
+    const wsId = workspace.id;
+    let worktreeNameClaude: string | undefined;
+    let worktreeNameCodex: string | undefined;
+
+    if (workspace.worktreeMode) {
+      const { showWorktreeNamePrompt } = await import('./dialogs');
+      const baseName = await showWorktreeNamePrompt('Enter worktree base name (suffixes -claude/-codex added)');
+      if (baseName === null) return wsId; // user cancelled — return workspace ID as fallback
+      if (baseName) {
+        worktreeNameClaude = `${baseName}-claude`;
+        worktreeNameCodex = `${baseName}-codex`;
+      }
+    }
+
+    // Create first terminal (Claude)
+    const result1 = await terminalService.createTerminal(wsId, { worktreeName: worktreeNameClaude });
+    store.addTerminal({
+      id: result1.id,
+      workspaceId: wsId,
+      name: result1.worktree_branch ?? 'Claude',
+      processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
+      order: 0,
+    });
+
+    // Create second terminal (Codex)
+    const result2 = await terminalService.createTerminal(wsId, { worktreeName: worktreeNameCodex });
+    store.addTerminal({
+      id: result2.id,
+      workspaceId: wsId,
+      name: result2.worktree_branch ?? 'Codex',
+      processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
+      order: 0,
+    }, { background: true });
+
+    // Split vertically
+    store.splitTerminalAt(wsId, result1.id, result2.id, 'vertical', 0.5);
+
+    // Write commands after delay
+    setTimeout(() => {
+      terminalService.writeToTerminal(result1.id, 'claude --dangerously-skip-permissions\r');
+    }, 500);
+    setTimeout(() => {
+      terminalService.writeToTerminal(result2.id, 'codex --yolo\r');
+    }, 500);
+
+    return result1.id;
+  }
+
   private async createSplitTerminal(direction: 'horizontal' | 'vertical') {
     const state = store.getState();
     if (!state.activeWorkspaceId || !state.activeTerminalId) return;
 
+    const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
     const currentActiveId = state.activeTerminalId;
     const newId = await this.createNewTerminal();
     if (!newId) return;
+
+    // Both mode already creates a split in createNewTerminalBothMode()
+    if (workspace?.aiToolMode === 'both') return;
 
     // Use layout tree model
     store.splitTerminalAt(state.activeWorkspaceId, currentActiveId, newId, direction);
@@ -674,7 +741,7 @@ export class App {
             tabOrder: [],
             shellType: { type: 'windows' },
             worktreeMode: false,
-            claudeCodeMode: false,
+            aiToolMode: 'none',
           });
         }
         store.addTerminal({
