@@ -88,6 +88,10 @@ export class TerminalPane {
   // parser keeps state current, so a single snapshot fetch on resume catches up.
   private paused = false;
 
+  // When true, binary diff stream is delivering diffs directly — suppresses
+  // the pull path (scheduleSnapshotFetch) and output stream notifications.
+  private diffStreamActive = false;
+
   // Hidden textarea for keyboard input (handles dead keys, IME composition).
   // Canvas elements don't support text composition, so dead keys (e.g. quote
   // on ABNT2 keyboards) produce event.key="Dead" and the composed character
@@ -283,13 +287,13 @@ export class TerminalPane {
       }
     });
 
-    // Listen for pushed grid diffs from the daemon.
-    // When a diff arrives, apply it directly to the cached snapshot and render
-    // without an IPC round-trip. Falls back to pull path if no cache exists.
+    // Listen for pushed grid diffs from the daemon (Tauri event fallback).
+    // When the binary diff stream is active, these events are redundant.
     this.unsubscribeGridDiff = terminalService.onTerminalGridDiff(
       this.terminalId,
       (diff) => {
         if (this.paused) return;
+        if (this.diffStreamActive) return;
         perfTracer.mark('terminal_grid_diff_event');
         perfTracer.measure('keydown_to_diff', 'keydown');
         if (this.renderer.isActivelySelecting()) return;
@@ -302,16 +306,14 @@ export class TerminalPane {
     );
 
     // Listen for terminal output events (fallback pull path).
-    // When new PTY output arrives without a pushed diff, schedule a grid snapshot fetch.
-    // If the user has scrolled up and auto-scroll is enabled, snap back first.
+    // When the binary diff stream is active, these events are redundant.
     this.unsubscribeOutput = terminalService.onTerminalOutput(
       this.terminalId,
       () => {
         if (this.paused) return;
+        if (this.diffStreamActive) return;
         perfTracer.mark('terminal_output_event');
         perfTracer.measure('keydown_to_output', 'keydown');
-        // Freeze display while the user is dragging to select text.
-        // Output is still received by the daemon; we catch up on mouseup.
         if (this.renderer.isActivelySelecting()) return;
         if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
           this.snapToBottom();
@@ -322,17 +324,32 @@ export class TerminalPane {
     );
 
     // Connect to the direct byte stream (custom protocol).
-    // This is the primary output notification channel — lower latency than
-    // Tauri events because it skips JSON serialization. The terminal-output
-    // event listener above remains as a fallback.
+    // This is the output notification channel — triggers snapshot fetches.
+    // When the binary diff stream is active, this becomes a no-op.
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
+      if (this.diffStreamActive) return;
       if (this.renderer.isActivelySelecting()) return;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
         return;
       }
       this.scheduleSnapshotFetch();
+    });
+
+    // Connect to the binary diff stream (custom protocol).
+    // This is the primary rendering path — binary-encoded diffs arrive directly
+    // from the bridge, eliminating both JSON serialization and the IPC round-trip.
+    // When active, the output stream and terminal-output event become fallbacks.
+    terminalService.connectDiffStream(this.terminalId, (diff) => {
+      if (this.paused) return;
+      if (this.renderer.isActivelySelecting()) return;
+      this.diffStreamActive = true;
+      if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+        this.snapToBottom();
+        return;
+      }
+      this.applyPushedDiff(diff);
     });
 
     // Start periodic scrollback saving (every 5 minutes)
@@ -705,6 +722,9 @@ export class TerminalPane {
 
   private scheduleSnapshotFetch() {
     if (this.paused) return;
+    // When the binary diff stream is active, the pull path is suppressed.
+    // Exception: forceFullFetch (resume after pause, initial load).
+    if (this.diffStreamActive && !this.forceFullFetch) return;
     if (this.snapshotPending) return;
     this.snapshotPending = true;
     perfTracer.mark('schedule_snapshot');
@@ -1015,6 +1035,8 @@ export class TerminalPane {
   pause() {
     if (this.paused) return;
     this.paused = true;
+    this.diffStreamActive = false;
+    terminalService.disconnectDiffStream(this.terminalId);
     terminalService.disconnectOutputStream(this.terminalId);
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
@@ -1061,12 +1083,24 @@ export class TerminalPane {
     terminalService.triggerProbe(this.terminalId);
     terminalService.connectOutputStream(this.terminalId, () => {
       if (this.paused) return;
+      if (this.diffStreamActive) return;
       if (this.renderer.isActivelySelecting()) return;
       if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
         this.snapToBottom();
         return;
       }
       this.scheduleSnapshotFetch();
+    });
+    // Reconnect binary diff stream.
+    terminalService.connectDiffStream(this.terminalId, (diff) => {
+      if (this.paused) return;
+      if (this.renderer.isActivelySelecting()) return;
+      this.diffStreamActive = true;
+      if (this.isUserScrolled && terminalSettingsStore.getAutoScrollOnOutput()) {
+        this.snapToBottom();
+        return;
+      }
+      this.applyPushedDiff(diff);
     });
     // No fetchAndRenderSnapshot() here — the single fetch in setActive/setSplitVisible's
     // RAF callback handles it, avoiding a redundant double-fetch.
@@ -1161,7 +1195,8 @@ export class TerminalPane {
   async destroy() {
     await this.saveScrollback();
 
-    // Disconnect from the direct byte stream.
+    // Disconnect from the direct byte streams.
+    terminalService.disconnectDiffStream(this.terminalId);
     terminalService.disconnectOutputStream(this.terminalId);
 
     if (this.snapshotTimer !== null) {
