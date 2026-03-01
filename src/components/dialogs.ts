@@ -240,6 +240,7 @@ export interface QuickClaudeOptions {
 const QUICK_CLAUDE_WORKSPACE_KEY = 'quick-claude-last-workspace';
 const QUICK_CLAUDE_NO_WORKTREE_KEY = 'quick-claude-no-worktree';
 const QUICK_CLAUDE_AUTO_SUGGEST_KEY = 'quick-claude-auto-suggest';
+const QUICK_CLAUDE_AI_TOOL_KEY = 'quick-claude-ai-tool';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.ico',
@@ -335,8 +336,14 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       return mode === 'codex' ? 'codex' : 'claude';
     };
     aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+    const savedAiTool = localStorage.getItem(QUICK_CLAUDE_AI_TOOL_KEY);
+    if (savedAiTool && ['claude', 'codex', 'both'].includes(savedAiTool)) {
+      aiToolSelect.value = savedAiTool;
+    }
     workspaceSelect.addEventListener('change', () => {
-      aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+      if (!localStorage.getItem(QUICK_CLAUDE_AI_TOOL_KEY)) {
+        aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+      }
     });
     dialog.appendChild(aiToolSelect);
 
@@ -852,6 +859,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       if (!promptText && attachedImages.length === 0) return;
       localStorage.setItem(QUICK_CLAUDE_WORKSPACE_KEY, workspaceSelect.value);
       localStorage.setItem(QUICK_CLAUDE_NO_WORKTREE_KEY, String(noWorktreeCheckbox.checked));
+      localStorage.setItem(QUICK_CLAUDE_AI_TOOL_KEY, aiToolSelect.value);
 
       // Prepend image paths to the prompt so Claude Code auto-loads them
       let prompt = promptText;
