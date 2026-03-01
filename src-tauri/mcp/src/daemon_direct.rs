@@ -626,6 +626,11 @@ impl Backend for DaemonDirectBackend {
             McpRequest::GetLayoutTree { .. } => Ok(Self::app_only_error("get_layout_tree")),
             McpRequest::SwapPanes { .. } => Ok(Self::app_only_error("swap_panes")),
             McpRequest::ZoomPane { .. } => Ok(Self::app_only_error("zoom_pane")),
+            McpRequest::FocusPane { .. } => Ok(Self::app_only_error("focus_pane")),
+            McpRequest::FocusOtherPane { .. } => Ok(Self::app_only_error("focus_other_pane")),
+            McpRequest::ResizePane { .. } => Ok(Self::app_only_error("resize_pane")),
+            McpRequest::SetSplitRatio { .. } => Ok(Self::app_only_error("set_split_ratio")),
+            McpRequest::RotateSplit { .. } => Ok(Self::app_only_error("rotate_split")),
             McpRequest::ExecuteJs { .. } => Ok(Self::app_only_error("execute_js")),
             McpRequest::CaptureScreenshot { .. } => Ok(Self::app_only_error("capture_screenshot")),
             McpRequest::ExportTerminalInfo { .. } => {

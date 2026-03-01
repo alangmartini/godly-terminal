@@ -18,6 +18,10 @@ fn default_split_direction() -> String {
     "horizontal".to_string()
 }
 
+fn default_resize_delta() -> f64 {
+    0.05
+}
+
 fn default_split_ratio() -> f64 {
     0.5
 }
@@ -180,6 +184,33 @@ pub enum McpRequest {
     ZoomPane {
         workspace_id: String,
         terminal_id: Option<String>,
+    },
+
+    // Split pane focus and resize (Pattern C — execute_js bridge)
+    FocusPane {
+        #[serde(default)]
+        workspace_id: Option<String>,
+        direction: String,
+    },
+    FocusOtherPane {
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
+    ResizePane {
+        #[serde(default)]
+        workspace_id: Option<String>,
+        direction: String,
+        #[serde(default = "default_resize_delta")]
+        delta: f64,
+    },
+    SetSplitRatio {
+        #[serde(default)]
+        workspace_id: Option<String>,
+        ratio: f64,
+    },
+    RotateSplit {
+        #[serde(default)]
+        workspace_id: Option<String>,
     },
 
     // JS bridge (execute JavaScript in WebView, return result)
