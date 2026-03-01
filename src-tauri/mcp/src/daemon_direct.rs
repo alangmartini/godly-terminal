@@ -631,6 +631,21 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ExportTerminalInfo { .. } => {
                 Ok(Self::app_only_error("export_terminal_info"))
             }
+            McpRequest::GetNotificationConfig => {
+                Ok(Self::app_only_error("get_notification_config"))
+            }
+            McpRequest::SetNotificationSound { .. } => {
+                Ok(Self::app_only_error("set_notification_sound"))
+            }
+            McpRequest::AddMutePattern { .. } => {
+                Ok(Self::app_only_error("add_mute_pattern"))
+            }
+            McpRequest::RemoveMutePattern { .. } => {
+                Ok(Self::app_only_error("remove_mute_pattern"))
+            }
+            McpRequest::ListMutePatterns => {
+                Ok(Self::app_only_error("list_mute_patterns"))
+            }
         }
     }
 
