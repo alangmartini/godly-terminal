@@ -225,7 +225,7 @@ pub fn handle_mcp_request(
                 .or_else(|| {
                     app_state
                         .get_workspace(workspace_id)
-                        .map(|ws| to_protocol_shell_type(&ws.shell_type))
+                        .map(|ws| ws.shell_type.clone())
                 })
                 .unwrap_or(godly_protocol::ShellType::Windows);
 
@@ -282,7 +282,7 @@ pub fn handle_mcp_request(
             }
 
             // Store metadata
-            let app_shell = from_protocol_shell_type(&shell);
+            let app_shell = shell.clone();
             app_state.add_session_metadata(
                 terminal_id.clone(),
                 crate::state::SessionMetadata {
@@ -416,7 +416,7 @@ pub fn handle_mcp_request(
             // Determine shell type
             let shell = app_state
                 .get_workspace(workspace_id)
-                .map(|ws| to_protocol_shell_type(&ws.shell_type))
+                .map(|ws| ws.shell_type.clone())
                 .unwrap_or(godly_protocol::ShellType::Windows);
 
             let process_name = shell.display_name();
@@ -463,7 +463,7 @@ pub fn handle_mcp_request(
             }
 
             // Store metadata
-            let app_shell = from_protocol_shell_type(&shell);
+            let app_shell = shell.clone();
             app_state.add_session_metadata(
                 terminal_id.clone(),
                 crate::state::SessionMetadata {
@@ -1522,7 +1522,7 @@ pub fn handle_mcp_request(
 
             let shell = app_state
                 .get_workspace(&workspace_id)
-                .map(|ws| to_protocol_shell_type(&ws.shell_type))
+                .map(|ws| ws.shell_type.clone())
                 .unwrap_or(godly_protocol::ShellType::Windows);
 
             let working_dir = if let Some(dir) = cwd {
@@ -1585,7 +1585,7 @@ pub fn handle_mcp_request(
             }
 
             // Store metadata
-            let app_shell = from_protocol_shell_type(&shell);
+            let app_shell = shell.clone();
             app_state.add_session_metadata(
                 new_terminal_id.clone(),
                 crate::state::SessionMetadata {
@@ -2057,42 +2057,12 @@ pub fn handle_mcp_request(
     }
 }
 
-/// Convert app ShellType to protocol ShellType
-fn to_protocol_shell_type(st: &crate::state::ShellType) -> godly_protocol::ShellType {
-    match st {
-        crate::state::ShellType::Windows => godly_protocol::ShellType::Windows,
-        crate::state::ShellType::Pwsh => godly_protocol::ShellType::Pwsh,
-        crate::state::ShellType::Cmd => godly_protocol::ShellType::Cmd,
-        crate::state::ShellType::Wsl { distribution } => godly_protocol::ShellType::Wsl {
-            distribution: distribution.clone(),
-        },
-        crate::state::ShellType::Custom { program, args } => godly_protocol::ShellType::Custom {
-            program: program.clone(),
-            args: args.clone(),
-        },
-    }
-}
 
 /// Re-export truncate_output from the shared protocol crate.
 fn truncate_output(text: &str, mode: Option<&str>, lines: Option<usize>) -> String {
     godly_protocol::ansi::truncate_output(text, mode, lines)
 }
 
-/// Convert protocol ShellType to app ShellType
-fn from_protocol_shell_type(st: &godly_protocol::ShellType) -> crate::state::ShellType {
-    match st {
-        godly_protocol::ShellType::Windows => crate::state::ShellType::Windows,
-        godly_protocol::ShellType::Pwsh => crate::state::ShellType::Pwsh,
-        godly_protocol::ShellType::Cmd => crate::state::ShellType::Cmd,
-        godly_protocol::ShellType::Wsl { distribution } => crate::state::ShellType::Wsl {
-            distribution: distribution.clone(),
-        },
-        godly_protocol::ShellType::Custom { program, args } => crate::state::ShellType::Custom {
-            program: program.clone(),
-            args: args.clone(),
-        },
-    }
-}
 
 /// Re-export strip_ansi from the shared protocol crate.
 fn strip_ansi(input: &str) -> String {
