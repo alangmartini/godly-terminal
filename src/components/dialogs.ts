@@ -229,7 +229,7 @@ export interface QuickClaudeInput {
   branchName?: string;
   workspaceId: string;
   noWorktree?: boolean;
-  aiTool?: 'claude' | 'codex';
+  aiTool?: 'claude' | 'codex' | 'both';
 }
 
 export interface QuickClaudeOptions {
@@ -322,12 +322,16 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     const codexOpt = document.createElement('option');
     codexOpt.value = 'codex';
     codexOpt.textContent = 'Codex';
-    aiToolSelect.append(claudeOpt, codexOpt);
+    const bothOpt = document.createElement('option');
+    bothOpt.value = 'both';
+    bothOpt.textContent = 'Both (Claude + Codex)';
+    aiToolSelect.append(claudeOpt, codexOpt, bothOpt);
 
     // Default from selected workspace's aiToolMode
     const getWsAiMode = (wsId: string) => {
       const ws = options.workspaces.find(w => w.id === wsId);
       const mode = ws?.aiToolMode;
+      if (mode === 'both') return 'both';
       return mode === 'codex' ? 'codex' : 'claude';
     };
     aiToolSelect.value = getWsAiMode(workspaceSelect.value);
@@ -863,7 +867,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         branchName: noWorktreeCheckbox.checked ? undefined : (branchInput.value.trim() || undefined),
         workspaceId: workspaceSelect.value,
         noWorktree: noWorktreeCheckbox.checked || undefined,
-        aiTool: aiToolSelect.value as 'claude' | 'codex',
+        aiTool: aiToolSelect.value as 'claude' | 'codex' | 'both',
       });
     };
 
