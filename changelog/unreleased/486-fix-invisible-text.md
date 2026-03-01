@@ -1,3 +1,0 @@
-### Fixed
-
-- **Terminal text invisible until tab switch** — Fixed a recovery fetch livelock where `fetchFullSnapshot()` unconditionally checked `diffSeqAtStart` (Bug #218 typing rollback guard), discarding every recovery snapshot when diffs arrived during the async IPC roundtrip. Under sustained diff traffic (typing echo, shell output), `cachedSnapshot` stayed null permanently. The fix skips the `diffSeq` staleness check for recovery fetches (where `cachedSnapshot` is null at fetch start) since there is nothing to "roll back" to. ([#486](https://github.com/alangmartini/godly-terminal/issues/486))
