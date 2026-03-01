@@ -35,6 +35,8 @@ export type ShellType =
   | { type: 'wsl'; distribution?: string }
   | { type: 'custom'; program: string; args?: string[] };
 
+export type AiToolMode = 'none' | 'claude' | 'codex' | 'both';
+
 export interface Workspace {
   id: string;
   name: string;
@@ -42,7 +44,7 @@ export interface Workspace {
   tabOrder: string[];
   shellType: ShellType;
   worktreeMode: boolean;
-  claudeCodeMode: boolean;
+  aiToolMode: AiToolMode;
 }
 
 /** Legacy flat split view — kept for backward compatibility. */

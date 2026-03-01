@@ -609,7 +609,7 @@ pub fn run() {
             commands::get_cmd_aliases_path,
             commands::ensure_cmd_autorun,
             commands::toggle_worktree_mode,
-            commands::toggle_claude_code_mode,
+            commands::set_ai_tool_mode,
             commands::is_git_repo,
             commands::list_worktrees,
             commands::remove_worktree,

@@ -32,22 +32,22 @@ async function invokeCommand<T>(cmd: string, args: Record<string, unknown> = {})
 }
 
 /**
- * Toggle Claude Code mode for a workspace via IPC and update the frontend store.
+ * Set AI tool mode for a workspace via IPC and update the frontend store.
  */
-async function toggleClaudeCodeMode(workspaceId: string, enabled: boolean): Promise<void> {
-  await invokeCommand('toggle_claude_code_mode', {
+async function setAiToolMode(workspaceId: string, mode: string): Promise<void> {
+  await invokeCommand('set_ai_tool_mode', {
     workspaceId,
-    enabled,
+    mode,
   });
   await browser.execute(
-    (wsId: string, mode: boolean) => {
+    (wsId: string, aiMode: string) => {
       const appStore = (window as any).__store;
       if (appStore) {
-        appStore.updateWorkspace(wsId, { claudeCodeMode: mode });
+        appStore.updateWorkspace(wsId, { aiToolMode: aiMode });
       }
     },
     workspaceId,
-    enabled
+    mode
   );
   await browser.pause(500);
 }
@@ -63,18 +63,18 @@ async function getActiveWorkspaceId(): Promise<string | null> {
 }
 
 /**
- * Get the claudeCodeMode flag for a workspace from the store.
+ * Get the aiToolMode flag for a workspace from the store.
  */
-async function getClaudeCodeMode(workspaceId: string): Promise<boolean> {
+async function getAiToolMode(workspaceId: string): Promise<string> {
   return browser.execute((wsId: string) => {
     const appStore = (window as any).__store;
-    if (!appStore) return false;
+    if (!appStore) return 'none';
     const ws = appStore.getState().workspaces.find((w: any) => w.id === wsId);
-    return ws ? ws.claudeCodeMode : false;
+    return ws ? ws.aiToolMode : 'none';
   }, workspaceId);
 }
 
-describe('Claude Code Mode', () => {
+describe('AI Tool Mode (Claude Code)', () => {
   let workspaceId: string;
 
   before(async () => {
@@ -86,24 +86,24 @@ describe('Claude Code Mode', () => {
   });
 
   after(async () => {
-    // Ensure CC mode is off after tests
-    await toggleClaudeCodeMode(workspaceId, false);
+    // Ensure AI tool mode is off after tests
+    await setAiToolMode(workspaceId, 'none');
   });
 
-  it('should toggle Claude Code mode on via IPC and show CC toggle active', async () => {
-    await toggleClaudeCodeMode(workspaceId, true);
+  it('should set AI tool mode to claude via IPC and show AI tool toggle active', async () => {
+    await setAiToolMode(workspaceId, 'claude');
 
-    const hasToggle = await elementExists('.claude-code-toggle.active');
+    const hasToggle = await elementExists('.ai-tool-toggle.active');
     expect(hasToggle).toBe(true);
   });
 
   it('should reflect enabled state in the store', async () => {
-    const mode = await getClaudeCodeMode(workspaceId);
-    expect(mode).toBe(true);
+    const mode = await getAiToolMode(workspaceId);
+    expect(mode).toBe('claude');
   });
 
-  it('should auto-execute claude command when creating a terminal with CC mode on', async () => {
-    // CC mode is still on from prior test
+  it('should auto-execute claude command when creating a terminal with AI tool mode claude', async () => {
+    // AI tool mode is still claude from prior test
     const countBefore = await getElementCount('.tab');
     await createNewTerminalTab();
 
@@ -116,18 +116,18 @@ describe('Claude Code Mode', () => {
     await waitForTerminalText('claude', 30000);
   });
 
-  it('should toggle Claude Code mode off and deactivate CC toggle', async () => {
-    await toggleClaudeCodeMode(workspaceId, false);
+  it('should set AI tool mode to none and deactivate AI tool toggle', async () => {
+    await setAiToolMode(workspaceId, 'none');
 
-    const hasActiveToggle = await elementExists('.claude-code-toggle.active');
+    const hasActiveToggle = await elementExists('.ai-tool-toggle.active');
     expect(hasActiveToggle).toBe(false);
 
     // Toggle button should still exist, just not active
-    const hasToggle = await elementExists('.claude-code-toggle');
+    const hasToggle = await elementExists('.ai-tool-toggle');
     expect(hasToggle).toBe(true);
   });
 
-  it('should NOT auto-execute claude command when CC mode is off', async () => {
+  it('should NOT auto-execute claude command when AI tool mode is none', async () => {
     const countBefore = await getElementCount('.tab');
     await createNewTerminalTab();
 
@@ -156,18 +156,18 @@ describe('Claude Code Mode', () => {
     expect(text).not.toContain('claude --dangerously-skip-permissions');
   });
 
-  it('should persist Claude Code mode via toggle_claude_code_mode IPC', async () => {
-    // Enable CC mode
-    await toggleClaudeCodeMode(workspaceId, true);
+  it('should persist AI tool mode via set_ai_tool_mode IPC', async () => {
+    // Enable claude mode
+    await setAiToolMode(workspaceId, 'claude');
 
     // Verify it's enabled in store
-    const enabled = await getClaudeCodeMode(workspaceId);
-    expect(enabled).toBe(true);
+    const enabled = await getAiToolMode(workspaceId);
+    expect(enabled).toBe('claude');
 
     // Disable it
-    await toggleClaudeCodeMode(workspaceId, false);
+    await setAiToolMode(workspaceId, 'none');
 
-    const disabled = await getClaudeCodeMode(workspaceId);
-    expect(disabled).toBe(false);
+    const disabled = await getAiToolMode(workspaceId);
+    expect(disabled).toBe('none');
   });
 });

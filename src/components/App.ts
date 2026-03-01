@@ -638,12 +638,13 @@ export class App {
           break;
         }
 
-        case 'workspace.toggleClaudeCodeMode': {
+        case 'workspace.cycleAiToolMode': {
           e.preventDefault();
           if (state.activeWorkspaceId) {
             const workspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
             if (workspace) {
-              await workspaceService.toggleClaudeCodeMode(workspace.id, !workspace.claudeCodeMode);
+              const nextMode = workspaceService.cycleAiToolMode(workspace.aiToolMode);
+              await workspaceService.setAiToolMode(workspace.id, nextMode);
             }
           }
           break;
@@ -744,6 +745,7 @@ export class App {
           tab_order: string[];
           shell_type?: BackendShellType;
           worktree_mode?: boolean;
+          ai_tool_mode?: string;
           claude_code_mode?: boolean;
         }>;
         terminals: Array<{
@@ -780,7 +782,7 @@ export class App {
             tabOrder: w.tab_order,
             shellType: convertShellType(w.shell_type),
             worktreeMode: w.worktree_mode ?? false,
-            claudeCodeMode: w.claude_code_mode ?? false,
+            aiToolMode: (w.ai_tool_mode as import('../state/store').AiToolMode) ?? (w.claude_code_mode ? 'claude' : 'none'),
           });
         });
 
@@ -1273,9 +1275,14 @@ export class App {
     });
     perfTracer.measure('create_terminal', 'create_terminal_start');
 
-    if (workspace?.claudeCodeMode) {
+    const aiMode = workspace?.aiToolMode ?? 'none';
+    if (aiMode === 'claude') {
       setTimeout(() => {
         terminalService.writeToTerminal(result.id, 'claude --dangerously-skip-permissions\r');
+      }, 500);
+    } else if (aiMode === 'codex') {
+      setTimeout(() => {
+        terminalService.writeToTerminal(result.id, 'codex --yolo\r');
       }, 500);
     }
 
@@ -1418,7 +1425,7 @@ export class App {
             tabOrder: [],
             shellType: { type: 'windows' },
             worktreeMode: false,
-            claudeCodeMode: false,
+            aiToolMode: 'none',
           });
         }
         store.addTerminal({

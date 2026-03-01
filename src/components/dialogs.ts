@@ -4,7 +4,7 @@ import { llmHasApiKey, llmGenerateBranchName } from '../plugins/smollm2/llm-serv
  * Show a prompt dialog for entering a custom worktree branch name.
  * Returns the user's input (empty string = auto-generate), or null if cancelled.
  */
-export function showWorktreeNamePrompt(): Promise<string | null> {
+export function showWorktreeNamePrompt(customTitle?: string): Promise<string | null> {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'dialog-overlay';
@@ -14,7 +14,7 @@ export function showWorktreeNamePrompt(): Promise<string | null> {
 
     const title = document.createElement('div');
     title.className = 'dialog-title';
-    title.textContent = 'New Worktree Branch';
+    title.textContent = customTitle || 'New Worktree Branch';
     dialog.appendChild(title);
 
     // Description input for AI suggestion

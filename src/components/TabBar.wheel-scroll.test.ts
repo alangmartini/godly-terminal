@@ -39,7 +39,7 @@ describe('Bug #189: Tab bar does not scroll with mouse wheel when tabs overflow'
       tabOrder: [],
       shellType: { type: 'windows' },
       worktreeMode: false,
-      claudeCodeMode: false,
+      aiToolMode: 'none',
     });
 
     store.setActiveWorkspace('ws-1');

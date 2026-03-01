@@ -323,8 +323,8 @@ describe('WorkspaceService', () => {
     });
   });
 
-  describe('toggleClaudeCodeMode', () => {
-    it('should invoke toggle_claude_code_mode and update store', async () => {
+  describe('setAiToolMode', () => {
+    it('should invoke set_ai_tool_mode and update store', async () => {
       mockedInvoke.mockResolvedValue(undefined);
 
       store.addWorkspace({
@@ -334,19 +334,19 @@ describe('WorkspaceService', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: false,
+        aiToolMode: 'none',
       });
 
-      await workspaceService.toggleClaudeCodeMode('ws-cc', true);
+      await workspaceService.setAiToolMode('ws-cc', 'claude');
 
-      expect(mockedInvoke).toHaveBeenCalledWith('toggle_claude_code_mode', {
+      expect(mockedInvoke).toHaveBeenCalledWith('set_ai_tool_mode', {
         workspaceId: 'ws-cc',
-        enabled: true,
+        mode: 'claude',
       });
-      expect(store.getState().workspaces[0].claudeCodeMode).toBe(true);
+      expect(store.getState().workspaces[0].aiToolMode).toBe('claude');
     });
 
-    it('should disable claude code mode', async () => {
+    it('should disable ai tool mode', async () => {
       mockedInvoke.mockResolvedValue(undefined);
 
       store.addWorkspace({
@@ -356,21 +356,21 @@ describe('WorkspaceService', () => {
         tabOrder: [],
         shellType: { type: 'windows' },
         worktreeMode: false,
-        claudeCodeMode: true,
+        aiToolMode: 'claude',
       });
 
-      await workspaceService.toggleClaudeCodeMode('ws-cc-off', false);
+      await workspaceService.setAiToolMode('ws-cc-off', 'none');
 
-      expect(mockedInvoke).toHaveBeenCalledWith('toggle_claude_code_mode', {
+      expect(mockedInvoke).toHaveBeenCalledWith('set_ai_tool_mode', {
         workspaceId: 'ws-cc-off',
-        enabled: false,
+        mode: 'none',
       });
-      expect(store.getState().workspaces[0].claudeCodeMode).toBe(false);
+      expect(store.getState().workspaces[0].aiToolMode).toBe('none');
     });
   });
 
-  describe('loadWorkspaces claude_code_mode', () => {
-    it('should default claudeCodeMode to false when missing from backend', async () => {
+  describe('loadWorkspaces ai_tool_mode', () => {
+    it('should default aiToolMode to none when missing from backend', async () => {
       const workspaceData: WorkspaceData[] = [
         {
           id: 'ws-old',
@@ -378,7 +378,7 @@ describe('WorkspaceService', () => {
           folder_path: 'C:\\old',
           tab_order: [],
           shell_type: 'windows',
-          // claude_code_mode not present (old layout)
+          // ai_tool_mode not present (old layout)
         },
       ];
 
@@ -386,10 +386,10 @@ describe('WorkspaceService', () => {
 
       const workspaces = await workspaceService.loadWorkspaces();
 
-      expect(workspaces[0].claudeCodeMode).toBe(false);
+      expect(workspaces[0].aiToolMode).toBe('none');
     });
 
-    it('should preserve claudeCodeMode=true from backend', async () => {
+    it('should preserve aiToolMode=claude from backend', async () => {
       const workspaceData: WorkspaceData[] = [
         {
           id: 'ws-cc',
@@ -397,7 +397,7 @@ describe('WorkspaceService', () => {
           folder_path: 'C:\\cc',
           tab_order: [],
           shell_type: 'windows',
-          claude_code_mode: true,
+          ai_tool_mode: 'claude',
         },
       ];
 
@@ -405,7 +405,7 @@ describe('WorkspaceService', () => {
 
       const workspaces = await workspaceService.loadWorkspaces();
 
-      expect(workspaces[0].claudeCodeMode).toBe(true);
+      expect(workspaces[0].aiToolMode).toBe('claude');
     });
   });
 

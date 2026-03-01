@@ -34,7 +34,7 @@ export type ActionId =
   | 'split.swapPanes'
   | 'split.rotateSplit'
   | 'workspace.toggleWorktreeMode'
-  | 'workspace.toggleClaudeCodeMode'
+  | 'workspace.cycleAiToolMode'
   | 'scroll.pageUp'
   | 'scroll.pageDown'
   | 'scroll.toTop'
@@ -246,8 +246,8 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'w' },
   },
   {
-    id: 'workspace.toggleClaudeCodeMode',
-    label: 'Toggle Claude Code Mode',
+    id: 'workspace.cycleAiToolMode',
+    label: 'Cycle AI Tool Mode',
     category: 'Workspace',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'e' },
