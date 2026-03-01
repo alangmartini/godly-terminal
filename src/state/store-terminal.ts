@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Store, Terminal, SplitView } from './store';
+import type { Store, Terminal } from './store';
 import {
   containsTerminal,
   removeLeaf,
