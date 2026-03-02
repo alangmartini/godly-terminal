@@ -9,7 +9,7 @@ use tauri::Emitter;
 
 use crate::daemon_client::DaemonClient;
 use crate::persistence::save_on_exit;
-use crate::state::AppState;
+use crate::state::{AppState, WindowState};
 
 /// Flag to signal that scrollback save is complete.
 static SCROLLBACK_SAVED: AtomicBool = AtomicBool::new(false);
@@ -80,6 +80,9 @@ pub(crate) fn setup_window_close_handler(
                 }
                 drop(terminals);
 
+                // Capture window geometry and current monitor before saving
+                capture_window_state(&window, &state);
+
                 // Save layout and close
                 save_on_exit(&handle, &state);
                 eprintln!("[window_lifecycle] Destroying window...");
@@ -87,4 +90,45 @@ pub(crate) fn setup_window_close_handler(
             });
         }
     });
+}
+
+/// Snapshot the window's position, size, maximized flag, and current monitor name
+/// into `AppState::window_state` so it can be persisted on exit.
+fn capture_window_state(window: &tauri::WebviewWindow, state: &AppState) {
+    let position = match window.outer_position() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[window_lifecycle] Failed to get window position: {}", e);
+            return;
+        }
+    };
+    let size = match window.outer_size() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[window_lifecycle] Failed to get window size: {}", e);
+            return;
+        }
+    };
+    let maximized = window.is_maximized().unwrap_or(false);
+    let monitor_name = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .and_then(|m| m.name().map(|n| n.to_string()));
+
+    let ws = WindowState {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        maximized,
+        monitor_name,
+    };
+
+    eprintln!(
+        "[window_lifecycle] Captured window state: {}x{} at ({},{}) maximized={} monitor={:?}",
+        ws.width, ws.height, ws.x, ws.y, ws.maximized, ws.monitor_name
+    );
+
+    *state.window_state.write() = Some(ws);
 }
