@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-02
+
+### Added
+- **Confirm quit dialog** — Shows confirmation when closing the app with active terminal sessions. Configurable via Settings (refs #511)
+- **Monitor-aware window persistence** — Window position, size, and maximized state are now saved per-monitor. Falls back to primary monitor if the saved display is disconnected (refs #511)
+- **Pinned tabs** — Tabs can be pinned via context menu to anchor them to the left and protect them from close/close-all operations (refs #511)
+- **Ctrl+Tab recency switcher** — Modal overlay showing tabs ordered by most-recently-used for fast switching in sessions with many terminals. Ctrl+Tab cycles forward, Ctrl+Shift+Tab cycles backward, release Ctrl to confirm (refs #511)
+- **Ctrl+Shift+T reopen closed session** — Reopens the most recently closed terminal with its original working directory and shell type. Keeps up to 20 entries in session history (refs #511)
+- **Message timestamps** — Optional setting that shows subtle timestamps on Claude Code message boundaries in the terminal, making it easy to track progress across parallel sessions (#526)
+- **Agent definitions section** in Quick Claude settings tab — edit built-in agents (Claude Code, Codex) binary path, args, and branch suffix, or create custom agents with full configuration
+- **Quick Claude Settings Tab** — New "Quick Claude" tab in Settings with a preset system for reusable launch configurations. Presets define which agents to launch, their split layout, and per-agent launch step sequences. Ships with 3 built-in presets: Solo Claude, Solo Codex, and Claude + Codex Split
+
+### Changed
+- **4ms event batching window** — Bridge thread now coalesces rapid terminal output events within a 4ms window after the first immediate dispatch, reducing IPC overhead for high-throughput sessions (refs #511)
+- **Concurrent IPC via pending-map** — Daemon client now supports multiple outstanding requests simultaneously using request IDs, eliminating head-of-line blocking for grid snapshot requests (refs #511)
+- **FairMutex for VT parser** — Replaced standard Mutex with parking_lot::FairMutex for the terminal parser, preventing snapshot request starvation under heavy output (refs #511)
+- **Background rect merging** — Canvas2D renderer now merges adjacent same-colored background cells into single fillRect calls, reducing draw calls by 5-10x for typical terminal content (refs #511)
+- **History-based tab close** — Closing the active tab now activates the previously-used tab instead of the positional neighbor, improving workflow in multi-tab sessions (#511)
+- **Split tabs default to unified mode** — Split terminals now appear as a single consolidated tab in the tab bar by default, reducing clutter. Individual mode remains available in Settings > Terminal (fixes #508)
+- **MCP tool descriptions** — Fixed inaccurate `create_terminal` description that claimed CWD defaults to home directory (refs #511)
+
+### Fixed
+- **Quick Claude enter retry** — Quick Claude now verifies that Enter was processed by checking the terminal grid and retries up to 5 times if the prompt is still visible (#506)
+- **Unified split tab disappears on tab switch** — Split tab grouping now survives navigation to other tabs; the unified tab remains visible for suspended splits (#509)
+- **MCP worktree workspace resolution** — `create_terminal` and `quick_claude` now use the user-supplied `workspace_id` for CWD and worktree operations, fixing misleading "Workspace not found" errors (refs #511)
+
 ## [0.11.2] - 2026-03-02
 
 ### Added
