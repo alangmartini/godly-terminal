@@ -27,6 +27,7 @@ export function addTerminalImpl(
     });
   } else {
     store.setLastActiveTerminal(terminal.workspaceId, terminal.id);
+    store.touchAccessHistory(terminal.workspaceId, terminal.id);
 
     // Clear the layout tree if the new terminal's workspace has an active split,
     // since the new terminal is not in the tree (Bug #391).
@@ -93,6 +94,7 @@ export function removeTerminalImpl(store: Store, id: string, force = false): voi
       closedAt: Date.now(),
     });
   }
+
   const remainingTerminals = state.terminals.filter(t => t.id !== id);
 
   let newActiveId = state.activeTerminalId;
@@ -173,6 +175,9 @@ export function removeTerminalImpl(store: Store, id: string, force = false): voi
     layoutTrees,
     zoomedPanes,
   });
+  if (terminal) {
+    store.removeFromAccessHistory(terminal.workspaceId, id);
+  }
   store.deleteResumedSession(id);
   store.syncSessionPauseState();
 }
@@ -181,6 +186,7 @@ export function setActiveTerminalImpl(store: Store, id: string | null): void {
   const state = store.getState();
   if (id && state.activeWorkspaceId) {
     store.setLastActiveTerminal(state.activeWorkspaceId, id);
+    store.touchAccessHistory(state.activeWorkspaceId, id);
     const wsId = state.activeWorkspaceId;
     const tree = state.layoutTrees[wsId];
 

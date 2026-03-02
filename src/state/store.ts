@@ -134,6 +134,8 @@ export class Store {
   private resumedSessions: Set<string> = new Set();
   /** LIFO stack of recently closed sessions for Ctrl+Shift+T reopen. */
   private recentlyClosedSessions: RecentlyClosedSession[] = [];
+  /** Per-workspace terminal access history (MRU order, most recent first). Max 50 per workspace. */
+  private terminalAccessHistory: Map<string, string[]> = new Map();
 
   // ---------------------------------------------------------------------------
   // Core state management
@@ -163,6 +165,7 @@ export class Store {
     this.resumedSessions.clear();
     this.suspendedLayoutTrees.clear();
     this.recentlyClosedSessions = [];
+    this.terminalAccessHistory.clear();
     this.notify();
   }
 
@@ -255,6 +258,40 @@ export class Store {
 
   getRecentlyClosedCount(): number {
     return this.recentlyClosedSessions.length;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Terminal access history (for Ctrl+Tab recency switcher)
+  // ---------------------------------------------------------------------------
+
+  private static MAX_ACCESS_HISTORY = 50;
+
+  /** Push a terminal ID to the front of a workspace's access history (removing duplicates). */
+  touchAccessHistory(wsId: string, termId: string): void {
+    let history = this.terminalAccessHistory.get(wsId);
+    if (!history) {
+      history = [];
+      this.terminalAccessHistory.set(wsId, history);
+    }
+    const idx = history.indexOf(termId);
+    if (idx !== -1) history.splice(idx, 1);
+    history.unshift(termId);
+    if (history.length > Store.MAX_ACCESS_HISTORY) {
+      history.length = Store.MAX_ACCESS_HISTORY;
+    }
+  }
+
+  /** Get the access history for a workspace (MRU order). */
+  getAccessHistory(wsId: string): string[] {
+    return this.terminalAccessHistory.get(wsId) ?? [];
+  }
+
+  /** Remove a terminal from a workspace's access history. */
+  removeFromAccessHistory(wsId: string, termId: string): void {
+    const history = this.terminalAccessHistory.get(wsId);
+    if (!history) return;
+    const idx = history.indexOf(termId);
+    if (idx !== -1) history.splice(idx, 1);
   }
 
   // ---------------------------------------------------------------------------
