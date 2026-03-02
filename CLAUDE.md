@@ -6,20 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Build the daemon (required before first dev run)
-npm run build:daemon
+pnpm build:daemon
 
 # Development mode (starts Vite + Tauri)
-npm run tauri dev
+pnpm tauri dev
 
 # Production build (daemon must be built first)
-npm run build:daemon:release
-npm run tauri build
+pnpm build:daemon:release
+pnpm tauri build
 
 # TypeScript check only
-npx tsc --noEmit
+pnpm exec tsc --noEmit
 
 # Rust check only (changed crate — NOT --workspace)
 cd src-tauri && cargo check -p <crate-you-modified>
@@ -31,19 +31,19 @@ cd src-tauri && cargo nextest run --workspace
 cd src-tauri && cargo nextest run --workspace --profile fast
 
 # Smart test runner (only affected crates based on git diff)
-npm run test:smart
+pnpm test:smart
 
 # Run TypeScript unit tests
-npm test
+pnpm test
 
 # Run browser tests (real Chromium via Playwright)
-npm run test:browser
+pnpm test:browser
 
 # Run browser tests with visible browser window
-npm run test:browser:headed
+pnpm test:browser:headed
 
 # Run integration tests (daemon required — spawns isolated daemon per suite)
-npm run build:daemon && npm run test:integration
+pnpm build:daemon && pnpm test:integration
 ```
 
 ### Voice/Whisper (Optional)
@@ -52,10 +52,10 @@ Voice-to-text (`godly-whisper`) is **not** built or bundled with the main app. I
 
 ```bash
 # Build whisper (CPU-only) and install to %LOCALAPPDATA%/godly-whisper/
-npm run build:whisper:release && npm run install:whisper
+pnpm build:whisper:release && pnpm install:whisper
 
 # Build with CUDA support
-npm run build:whisper:release:cuda && npm run install:whisper -- --release
+pnpm build:whisper:release:cuda && pnpm install:whisper -- --release
 ```
 
 The main app discovers the binary at `%LOCALAPPDATA%/godly-whisper/godly-whisper.exe`. The mic button in the tab bar is hidden unless the binary is found.
@@ -117,16 +117,16 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 
 | Tier | Naming | Command | Environment | Mocks | Best For |
 |------|--------|---------|-------------|-------|----------|
-| **Unit** | `*.test.ts` | `npm test` | Node/jsdom | Tauri APIs | Store logic, services, pure functions, keyboard routing |
-| **Browser** | `*.browser.test.ts` | `npm run test:browser` | Real Chromium | Tauri APIs | Canvas2D rendering, pixel correctness, real layout, pointer events |
-| **Integration** | `*.integration.test.ts` | `npm run test:integration` | Node + spawned daemon | Nothing | Daemon protocol, session lifecycle, Quick Claude flow, IPC correctness |
-| **E2E** | `e2e/specs/*.e2e.ts` | `npm run test:e2e` | Full Tauri app + WebdriverIO | Nothing | Full user workflows, persistence across restarts, input latency |
+| **Unit** | `*.test.ts` | `pnpm test` | Node/jsdom | Tauri APIs | Store logic, services, pure functions, keyboard routing |
+| **Browser** | `*.browser.test.ts` | `pnpm test:browser` | Real Chromium | Tauri APIs | Canvas2D rendering, pixel correctness, real layout, pointer events |
+| **Integration** | `*.integration.test.ts` | `pnpm test:integration` | Node + spawned daemon | Nothing | Daemon protocol, session lifecycle, Quick Claude flow, IPC correctness |
+| **E2E** | `e2e/specs/*.e2e.ts` | `pnpm test:e2e` | Full Tauri app + WebdriverIO | Nothing | Full user workflows, persistence across restarts, input latency |
 | **Daemon** | `daemon/tests/*.rs` | `cargo nextest run -p godly-daemon` | Isolated daemon process | Nothing | Concurrency, lock contention, memory leaks, pipe saturation, handler starvation |
 | **Crate** | `#[test]` in `*.rs` | `cargo nextest run -p <crate>` | Rust unit | — | Parser correctness, serialization, data structures |
 
 ### Tier Details
 
-#### 1. Unit Tests (`npm test`)
+#### 1. Unit Tests (`pnpm test`)
 - **Location**: `src/**/*.test.ts`
 - **Environment**: Vitest + jsdom (Node.js DOM simulator)
 - **What's real**: JavaScript logic, state machines, event bus
@@ -135,17 +135,17 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 - **Cannot catch**: Canvas rendering bugs, real DOM layout, real CSS flexbox, pointer events (jsdom returns zeros for `getBoundingClientRect`)
 - **Examples**: `src/state/store.split-navigation.test.ts`, `src/services/workspace-service.test.ts`
 
-#### 2. Browser Tests (`npm run test:browser`)
+#### 2. Browser Tests (`pnpm test:browser`)
 - **Location**: `src/**/*.browser.test.ts`
 - **Environment**: Vitest Browser Mode + real Chromium via Playwright
 - **What's real**: DOM, CSS flexbox, Canvas2D, `measureText()`, `getImageData()`, pointer events
 - **What's mocked**: Tauri APIs (via `src/test-utils/browser-setup.ts`)
 - **Catches**: Canvas paint order bugs, font metric errors, pixel color correctness, flexbox layout regressions, split pane sizing bugs, divider positioning errors
 - **Cannot catch**: Daemon interaction, session lifecycle, persistence
-- **Use `npm run test:browser:headed`** to see the Chromium window during tests
+- **Use `pnpm test:browser:headed`** to see the Chromium window during tests
 - **Examples**: `Canvas2DGridRenderer.browser.test.ts` (pixel inspection), `SplitContainer.browser.test.ts` (real layout)
 
-#### 3. Integration Tests (`npm run test:integration`)
+#### 3. Integration Tests (`pnpm test:integration`)
 - **Location**: `integration/tests/**/*.integration.test.ts`
 - **Environment**: Node.js + real spawned daemon (isolated per suite via `DaemonFixture`)
 - **What's real**: Daemon binary, named pipe IPC, PTY sessions, shell processes, binary frame protocol
@@ -155,7 +155,7 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 - **Key infrastructure**: `DaemonFixture` (spawns isolated daemon), `DaemonClient` (TypeScript wire protocol), `SessionHandle` (high-level session API)
 - **Examples**: `smoke.integration.test.ts`, `quick-claude.integration.test.ts`
 
-#### 4. E2E Tests (`npm run test:e2e`)
+#### 4. E2E Tests (`pnpm test:e2e`)
 - **Location**: `e2e/specs/**/*.e2e.ts`
 - **Environment**: Full Tauri debug binary + WebdriverIO + tauri-driver + WebView2
 - **What's real**: Everything — full app, daemon, renderer, persistence, IPC
@@ -204,12 +204,12 @@ Use this to pick the right test framework when reproducing a bug:
 ### Project-Specific Workflow Notes
 
 - **Bug fixes**: Write a full test **suite** (not a single test) to reproduce the bug. Pick the tier from the decision tree above.
-- **Features**: Write **E2E tests** (`npm run test:e2e`), not just unit tests. For Canvas2D/layout features, also write **browser tests** (`*.browser.test.ts`).
+- **Features**: Write **E2E tests** (`pnpm test:e2e`), not just unit tests. For Canvas2D/layout features, also write **browser tests** (`*.browser.test.ts`).
 - **Performance issues**: Always write automated reproducible tests that demonstrate the problem under realistic conditions. Isolated component benchmarks are useful but insufficient — the test must exercise the real bottleneck (e.g., concurrent I/O, lock contention, IPC round-trips). See `daemon/tests/input_latency.rs` and `daemon/tests/handler_starvation.rs` for patterns.
 
 ## User-Like Testing (Post-Implementation)
 
-After completing any feature or bug fix that has a visual/UX component, **ask the user** if they'd like you to run user-like testing via `/manual-testing <feature>`. Prefer testing on **Godly Staging** (`npm run staging:dev`) to avoid disrupting the production app.
+After completing any feature or bug fix that has a visual/UX component, **ask the user** if they'd like you to run user-like testing via `/manual-testing <feature>`. Prefer testing on **Godly Staging** (`pnpm staging:dev`) to avoid disrupting the production app.
 
 The testing framework combines:
 - **godly-terminal MCP** — `execute_js` (DOM/store inspection), `capture_screenshot` (canvas PNG), split view control
@@ -282,22 +282,22 @@ A global `kanban-board` MCP server tracks work across all projects. Godly Termin
 
    Or use the smart test runner to auto-detect affected crates:
    ```bash
-   npm run test:smart
+   pnpm test:smart
    ```
 
 3. **Frontend unit tests** (only if you touched TS/JS):
    ```bash
-   npm test
+   pnpm test
    ```
 
 4. **Frontend browser tests** (if you touched components with Canvas2D, layout, or pointer events):
    ```bash
-   npm run test:browser
+   pnpm test:browser
    ```
 
 5. **Integration tests** (if you touched daemon protocol, session lifecycle, or Quick Claude flow):
    ```bash
-   npm run build:daemon && npm run test:integration
+   pnpm build:daemon && pnpm test:integration
    ```
 
 6. If any step fails, fix and repeat.
@@ -306,17 +306,17 @@ A global `kanban-board` MCP server tracks work across all projects. Godly Termin
 - `cargo check --workspace` (cross-crate type checking)
 - `cargo nextest run --workspace` (full test suite, 3 daemon partitions)
 - `tsc --noEmit` (TypeScript strict check)
-- `npm run build` (production Vite build)
+- `pnpm build` (production Vite build)
 - Full release build of daemon/mcp/notify binaries
 
-Do NOT run `cargo check --workspace`, `npm run build`, or `cargo nextest run --workspace` locally unless debugging a CI failure. Let CI catch cross-crate breakage — local checks are for fast feedback only.
+Do NOT run `cargo check --workspace`, `pnpm build`, or `cargo nextest run --workspace` locally unless debugging a CI failure. Let CI catch cross-crate breakage — local checks are for fast feedback only.
 
 ### Staging verification (ask before running)
 
 After completing a feature or bug fix, **ask the user** if they want you to build and install Godly Staging to test the change in an isolated environment:
 
 ```bash
-npm run staging:build && npm run staging:install
+pnpm staging:build && pnpm staging:install
 ```
 
 This builds a fully isolated "Godly Terminal (Staging)" installation with separate pipes, app data, and daemon. Use it to verify the fix/feature works end-to-end in a real terminal before opening a PR. Do NOT run this automatically — always ask first, as it takes several minutes.
@@ -522,7 +522,7 @@ Independent: godly-llm, godly-renderer, godly-pty-shim
 - **New Tauri command**: Add to the relevant domain section in `lib.rs` invoke_handler, implement in the appropriate `commands/` submodule
 - **New App.ts feature**: Create a controller in `src/controllers/`, import from `App.ts`
 - **New store operation**: Add to the relevant domain module (`store-workspace.ts`, `store-terminal.ts`, or `store-layout.ts`), add delegation method in `store.ts`
-- **New shared type (Rust↔TS)**: Add to protocol crate with `#[derive(ts_rs::TS)]`, run `npm run generate-types`
+- **New shared type (Rust↔TS)**: Add to protocol crate with `#[derive(ts_rs::TS)]`, run `pnpm generate-types`
 
 ### Modifying godly-mcp
 

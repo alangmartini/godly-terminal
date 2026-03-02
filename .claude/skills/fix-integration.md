@@ -31,16 +31,16 @@ Forbidden workarounds:
 
 1. **Build daemon** (if not recently built):
    ```bash
-   npm run build:daemon
+   pnpm build:daemon
    ```
 
 2. **Run integration tests**:
    ```bash
    # All tests
-   npm run test:integration
+   pnpm test:integration
 
    # Or filtered
-   npx vitest run --project integration -t "<filter>"
+   pnpm exec vitest run --project integration -t "<filter>"
    ```
 
 3. **If all tests pass** → done. Report the green result.
@@ -79,7 +79,7 @@ Forbidden workarounds:
 
 ### After fixing
 
-- If you changed Rust daemon code, rebuild: `npm run build:daemon`
+- If you changed Rust daemon code, rebuild: `pnpm build:daemon`
 - If you changed integration test framework files, just re-run tests
 - Commit fixes following conventional commits (`fix:` for bugs, `test:` for test corrections)
 - Report what broke, why, and what you fixed

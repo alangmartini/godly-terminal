@@ -10,7 +10,7 @@ Bump the project version across all crates and config files, collect changelog f
 
 ## Steps
 
-1. Run `npm run version:bump -- <arg>` where `<arg>` is the bump type or explicit version from the user's input.
+1. Run `pnpm version:bump -- <arg>` where `<arg>` is the bump type or explicit version from the user's input.
 2. Verify the output shows all files updated successfully.
 3. **Collect changelog fragments** into `CHANGELOG.md`:
    a. Read all `.md` files from `changelog/unreleased/` (skip `.gitkeep` and `TEMPLATE.md`).
@@ -31,7 +31,7 @@ Bump the project version across all crates and config files, collect changelog f
         ```
       - Delete the fragment files (keep `.gitkeep`).
    c. If no fragments exist, warn and add `## [X.Y.Z] - YYYY-MM-DD` with empty content.
-4. Run `npm run build` to confirm the frontend builds with the new version constant.
+4. Run `pnpm build` to confirm the frontend builds with the new version constant.
 5. Run `cd src-tauri && cargo check --workspace` to confirm all Rust crates compile.
 6. Commit directly to the current branch with message `chore: bump version to X.Y.Z`.
 7. Create an annotated git tag: `git tag -a vX.Y.Z -m "Release X.Y.Z"`
