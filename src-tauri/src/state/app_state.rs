@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 
 #[allow(deprecated)]
-use super::models::{SessionMetadata, SplitView, Terminal, Workspace};
+use super::models::{SessionMetadata, SplitView, Terminal, WindowState, Workspace};
 
 #[allow(deprecated)]
 pub struct AppState {
@@ -26,6 +26,8 @@ pub struct AppState {
     pub zoomed_panes: RwLock<HashMap<String, String>>,
     /// Workspace ID for MCP-created terminals (Agent workspace in separate window)
     pub mcp_workspace_id: RwLock<Option<String>>,
+    /// Window geometry and monitor for cross-session restoration
+    pub window_state: RwLock<Option<WindowState>>,
 }
 
 #[allow(deprecated)]
@@ -43,6 +45,7 @@ impl AppState {
             layout_trees: RwLock::new(HashMap::new()),
             zoomed_panes: RwLock::new(HashMap::new()),
             mcp_workspace_id: RwLock::new(None),
+            window_state: RwLock::new(None),
         }
     }
 

@@ -63,6 +63,7 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
     let active_workspace_id = state.active_workspace_id.read().clone();
     let split_views = state.get_all_split_views();
     let layout_trees = state.get_all_layout_trees();
+    let window_state = state.window_state.read().clone();
 
     let layout = Layout {
         workspaces,
@@ -70,6 +71,7 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
         active_workspace_id,
         split_views,
         layout_trees,
+        window_state,
     };
 
     let json_value = serde_json::to_value(&layout)
@@ -142,6 +144,15 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                 *state.active_workspace_id.write() = Some(active_id.clone());
             }
 
+            // Restore window state to backend state
+            if let Some(ws) = &layout.window_state {
+                log_info(&format!(
+                    "Restored window state: {}x{} at ({},{}) monitor={:?}",
+                    ws.width, ws.height, ws.x, ws.y, ws.monitor_name
+                ));
+                *state.window_state.write() = layout.window_state.clone();
+            }
+
             // Restore layout trees to backend state
             if !layout.layout_trees.is_empty() {
                 for (ws_id, tree) in &layout.layout_trees {
@@ -183,6 +194,89 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
     }
 }
 
+/// Apply the saved window state to the window, validating that the target
+/// monitor is still connected. Falls back to primary monitor if missing.
+/// Clamps position to the visible area to prevent off-screen restoration.
+#[tauri::command]
+pub fn restore_window_state(
+    window: tauri::WebviewWindow,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    let saved = state.window_state.read().clone();
+    let saved = match saved {
+        Some(s) => s,
+        None => {
+            log_info("No saved window state to restore");
+            return Ok(());
+        }
+    };
+
+    // Check if the saved monitor is still available
+    let monitors = window.available_monitors().unwrap_or_default();
+    let saved_monitor_available = saved.monitor_name.as_ref().map_or(false, |name| {
+        monitors.iter().any(|m| m.name().map_or(false, |n| n == name))
+    });
+
+    if !saved_monitor_available {
+        if let Some(ref name) = saved.monitor_name {
+            log_info(&format!(
+                "Saved monitor '{}' not found, falling back to primary monitor",
+                name
+            ));
+        }
+        // Fall back to primary — don't set position, let the OS place it
+        if saved.maximized {
+            let _ = window.maximize();
+        }
+        return Ok(());
+    }
+
+    // Find the target monitor's work area for clamping
+    let target_monitor = monitors.iter().find(|m| {
+        m.name().map_or(false, |n| {
+            Some(n.to_string()) == saved.monitor_name
+        })
+    });
+
+    let (mon_x, mon_y, mon_w, mon_h) = if let Some(m) = target_monitor {
+        let pos = m.position();
+        let size = m.size();
+        (
+            pos.x,
+            pos.y,
+            size.width as i32,
+            size.height as i32,
+        )
+    } else {
+        // Shouldn't reach here since we checked above, but fallback
+        return Ok(());
+    };
+
+    // Clamp position so the window is at least partially visible
+    let w = saved.width as i32;
+    let h = saved.height as i32;
+    let min_visible = 100; // at least 100px must be on screen
+    let x = saved.x.max(mon_x - w + min_visible).min(mon_x + mon_w - min_visible);
+    let y = saved.y.max(mon_y).min(mon_y + mon_h - min_visible);
+
+    log_info(&format!(
+        "Restoring window to ({},{}) {}x{} on monitor {:?}",
+        x, y, saved.width, saved.height, saved.monitor_name
+    ));
+
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: saved.width,
+        height: saved.height,
+    }));
+
+    if saved.maximized {
+        let _ = window.maximize();
+    }
+
+    Ok(())
+}
+
 #[allow(deprecated)]
 pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     log_info("Saving layout on exit...");
@@ -200,6 +294,7 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     let active_workspace_id = state.active_workspace_id.read().clone();
     let split_views = state.get_all_split_views();
     let layout_trees = state.get_all_layout_trees();
+    let window_state = state.window_state.read().clone();
 
     let layout = Layout {
         workspaces,
@@ -207,6 +302,7 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
         active_workspace_id,
         split_views,
         layout_trees,
+        window_state,
     };
 
     match serde_json::to_value(&layout) {
@@ -301,6 +397,7 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
     let active_workspace_id = state.active_workspace_id.read().clone();
     let split_views = state.get_all_split_views();
     let layout_trees = state.get_all_layout_trees();
+    let window_state = state.window_state.read().clone();
 
     let layout = Layout {
         workspaces,
@@ -308,6 +405,7 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
         active_workspace_id,
         split_views,
         layout_trees,
+        window_state,
     };
 
     let json_value = serde_json::to_value(&layout)

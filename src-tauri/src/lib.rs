@@ -336,6 +336,7 @@ pub fn run() {
             // --- Persistence ---
             persistence::save_layout,
             persistence::load_layout,
+            persistence::restore_window_state,
             persistence::save_scrollback,
             persistence::load_scrollback,
             persistence::delete_scrollback,
