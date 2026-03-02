@@ -14,6 +14,8 @@ import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
 import type { TerminalTheme } from '../themes/types';
+import type { MessageBoundary } from './MessageTimestampTracker';
+import { formatTimestamp } from './MessageTimestampTracker';
 
 export type { TerminalTheme } from '../themes/types';
 
@@ -154,6 +156,9 @@ export class TerminalRenderer {
   private touchStartY: number | null = null;
   private touchAccumulated = 0;
 
+  // Message timestamp boundaries (set by TerminalPane from tracker)
+  private messageBoundaries: MessageBoundary[] = [];
+
   // Callbacks
   private onTitleChange?: (title: string) => void;
   private onScrollCallback?: (deltaLines: number) => void;
@@ -210,6 +215,11 @@ export class TerminalRenderer {
   /** Set zoom callback. delta > 0 = zoom in, < 0 = zoom out. */
   setOnZoom(cb: (delta: number) => void) {
     this.onZoomCallback = cb;
+  }
+
+  /** Update the message boundaries to render as timestamp annotations. */
+  setMessageBoundaries(boundaries: MessageBoundary[]): void {
+    this.messageBoundaries = boundaries;
   }
 
   /** Get the current grid dimensions in rows/cols based on canvas size. */
@@ -586,6 +596,55 @@ export class TerminalRenderer {
       ctx.lineTo(urlX + urlW, y + this.cellHeight - dpr);
       ctx.stroke();
     }
+
+    // Message timestamps
+    if (terminalSettingsStore.getMessageTimestamps() && this.messageBoundaries.length > 0) {
+      this.paintMessageTimestamps(ctx, snap, dpr);
+    }
+  }
+
+  /** Paint timestamp annotations on Claude Code message boundary rows. */
+  private paintMessageTimestamps(
+    ctx: CanvasRenderingContext2D,
+    snap: RichGridData,
+    dpr: number,
+  ): void {
+    const now = Date.now();
+    const fontSize = Math.round(Math.max(10, this.fontSize * 0.85) * dpr);
+    ctx.save();
+    ctx.font = `${fontSize}px ${this.fontFamily}`;
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = this.theme.foreground;
+
+    const canvasWidth = this.canvas.width;
+    // Leave space for scrollbar
+    const rightMargin = 10 * dpr;
+
+    for (const boundary of this.messageBoundaries) {
+      if (boundary.row < 0 || boundary.row >= snap.dimensions.rows) continue;
+
+      const text = formatTimestamp(boundary.timestamp, now);
+      const textWidth = ctx.measureText(text).width;
+      const x = canvasWidth - textWidth - rightMargin;
+      const y = boundary.row * this.cellHeight + this.cellHeight * 0.75;
+
+      // Background pill for readability
+      const padding = 3 * dpr;
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = this.theme.background;
+      const pillX = x - padding;
+      const pillY = boundary.row * this.cellHeight + 1 * dpr;
+      const pillW = textWidth + padding * 2;
+      const pillH = this.cellHeight - 2 * dpr;
+      ctx.fillRect(pillX, pillY, pillW, pillH);
+
+      // Text
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = this.theme.foreground;
+      ctx.fillText(text, x, y);
+    }
+
+    ctx.restore();
   }
 
   // ---- Private: Selection ----

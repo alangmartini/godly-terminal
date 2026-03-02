@@ -9,6 +9,7 @@ import { perfTracer } from '../utils/PerfTracer';
 import { themeStore } from '../state/theme-store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { Canvas2DGridRenderer } from './Canvas2DGridRenderer';
+import { MessageTimestampTracker } from './MessageTimestampTracker';
 
 /**
  * Terminal pane with Canvas2D grid rendering.
@@ -108,6 +109,9 @@ export class TerminalPane {
   // is lost. A textarea receives proper composition/input events from the OS.
   private inputTextarea!: HTMLTextAreaElement;
   private isComposing = false;
+
+  // Message timestamp tracking for Claude Code message boundaries
+  private timestampTracker = new MessageTimestampTracker();
 
   // Exited overlay element (hidden until showExitedOverlay() is called)
   private exitedOverlay: HTMLElement | null = null;
@@ -1002,6 +1006,9 @@ export class TerminalPane {
     if (this.gridRenderer) {
       this.gridRenderer.render(snapshot);
     }
+    // Update message timestamp tracker and pass boundaries to overlay
+    const boundaries = this.timestampTracker.update(snapshot);
+    this.renderer.setMessageBoundaries(boundaries);
     this.renderer.render(snapshot);
   }
 
