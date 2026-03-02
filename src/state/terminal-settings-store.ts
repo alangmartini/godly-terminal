@@ -18,6 +18,8 @@ export interface TerminalSettings {
   rendererMode: RendererMode;
   /** How split-panel terminals appear in the tab bar. */
   splitTabMode: SplitTabMode;
+  /** When true, show a confirmation dialog before quitting with active sessions. */
+  confirmQuit: boolean;
 }
 
 type Subscriber = () => void;
@@ -33,6 +35,7 @@ class TerminalSettingsStore {
     fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
     rendererMode: 'gpu',
     splitTabMode: 'unified',
+    confirmQuit: true,
   };
 
   private subscribers: Subscriber[] = [];
@@ -98,6 +101,17 @@ class TerminalSettingsStore {
     this.notify();
   }
 
+  getConfirmQuit(): boolean {
+    return this.settings.confirmQuit;
+  }
+
+  setConfirmQuit(enabled: boolean): void {
+    if (enabled === this.settings.confirmQuit) return;
+    this.settings.confirmQuit = enabled;
+    this.saveToStorage();
+    this.notify();
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -134,6 +148,9 @@ class TerminalSettingsStore {
       }
       if (data.splitTabMode === 'individual' || data.splitTabMode === 'unified') {
         this.settings.splitTabMode = data.splitTabMode;
+      }
+      if (typeof data.confirmQuit === 'boolean') {
+        this.settings.confirmQuit = data.confirmQuit;
       }
     } catch {
       // Corrupt data — use defaults
