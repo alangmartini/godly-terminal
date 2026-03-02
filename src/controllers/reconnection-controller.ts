@@ -1,4 +1,4 @@
-import { store } from '../state/store';
+import { store, type AiToolMode } from '../state/store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
@@ -68,7 +68,7 @@ export async function restoreLayout(deps: ReconnectionDeps): Promise<void> {
           tabOrder: w.tab_order,
           shellType: convertShellType(w.shell_type),
           worktreeMode: w.worktree_mode ?? false,
-          claudeCodeMode: w.claude_code_mode ?? false,
+          aiToolMode: ((w as Record<string, unknown>).ai_tool_mode as AiToolMode) ?? 'none',
         });
       });
 
