@@ -1,12 +1,15 @@
 import type { Store, SplitView } from './store';
 import type { LayoutNode } from './split-types';
+import type { GridRatioKey } from './split-types';
 import {
   replaceLeaf,
   removeLeaf,
   containsTerminal,
   updateRatioAtPath,
+  updateGridRatioAtPath,
   swapTerminals,
   findAdjacentTerminal,
+  maybePromoteToGrid,
 } from './split-types';
 import { syncLayoutTreeToBackend } from '../controllers/reconnection-controller';
 
@@ -19,13 +22,15 @@ export function getLayoutTreeImpl(store: Store, workspaceId: string): LayoutNode
 }
 
 export function setLayoutTreeImpl(store: Store, workspaceId: string, tree: LayoutNode): void {
+  // Auto-promote 2x2 patterns to GridNode for independent resize
+  const promoted = maybePromoteToGrid(tree);
   store.setState({
-    layoutTrees: { ...store.getState().layoutTrees, [workspaceId]: tree },
-    splitViews: { ...store.getState().splitViews, ...store.treeToSplitViews(workspaceId, tree) },
+    layoutTrees: { ...store.getState().layoutTrees, [workspaceId]: promoted },
+    splitViews: { ...store.getState().splitViews, ...store.treeToSplitViews(workspaceId, promoted) },
   });
   store.enforceSplitAdjacency(workspaceId);
   // Sync to backend for persistence (fire-and-forget)
-  syncLayoutTreeToBackend(workspaceId, tree);
+  syncLayoutTreeToBackend(workspaceId, promoted);
 }
 
 /** Clear the active layout tree for a workspace. Does not affect suspended splits. */
@@ -150,6 +155,27 @@ export function updateTreeRatioImpl(store: Store, workspaceId: string, path: num
 
   const clamped = Math.max(0.15, Math.min(0.85, ratio));
   const updated = updateRatioAtPath(tree, path, clamped);
+  if (updated) {
+    store.setState({
+      layoutTrees: { ...store.getState().layoutTrees, [workspaceId]: updated },
+      splitViews: { ...store.getState().splitViews, ...store.treeToSplitViews(workspaceId, updated) },
+    });
+    syncLayoutTreeToBackend(workspaceId, updated);
+  }
+}
+
+export function updateGridRatioImpl(
+  store: Store,
+  workspaceId: string,
+  path: number[],
+  gridKey: GridRatioKey,
+  ratio: number,
+): void {
+  const tree = store.getState().layoutTrees[workspaceId];
+  if (!tree) return;
+
+  const clamped = Math.max(0.15, Math.min(0.85, ratio));
+  const updated = updateGridRatioAtPath(tree, path, gridKey, clamped);
   if (updated) {
     store.setState({
       layoutTrees: { ...store.getState().layoutTrees, [workspaceId]: updated },

@@ -6,7 +6,8 @@
  * Split nodes become flex containers (row for horizontal, column for vertical)
  * with a divider between the two children.
  */
-import { LayoutNode, terminalIds } from '../state/split-types';
+import { LayoutNode, GridNode, terminalIds } from '../state/split-types';
+import type { GridRatioKey } from '../state/split-types';
 
 /** Minimal pane interface — satisfied by both TerminalPane and FigmaPane. */
 export interface SplitPaneHandle {
@@ -18,6 +19,7 @@ export interface SplitPaneHandle {
 export interface SplitContainerOptions {
   paneMap: Map<string, SplitPaneHandle>;
   onRatioChange: (path: number[], ratio: number) => void;
+  onGridRatioChange?: (path: number[], key: GridRatioKey, ratio: number) => void;
   onFocusPane: (terminalId: string) => void;
   focusedTerminalId: string | null;
 }
@@ -29,6 +31,8 @@ interface RenderedNode {
   node: LayoutNode;
   element: HTMLElement;
   children?: { first: RenderedNode; second: RenderedNode; divider: HTMLElement };
+  gridChildren?: RenderedNode[];
+  gridDividers?: HTMLElement[];
 }
 
 export class SplitContainer {
@@ -106,6 +110,9 @@ export class SplitContainer {
     if (node.type === 'leaf') {
       return this.renderLeaf(node, path);
     }
+    if (node.type === 'grid') {
+      return this.renderGrid(node, path);
+    }
     return this.renderSplit(node, path);
   }
 
@@ -145,6 +152,171 @@ export class SplitContainer {
       element: container,
       children: { first: firstRendered, second: secondRendered, divider },
     };
+  }
+
+  private renderGrid(node: GridNode, path: number[]): RenderedNode {
+    const container = document.createElement('div');
+    container.className = 'split-grid';
+
+    // Render 4 children
+    const childRendered: RenderedNode[] = [];
+    const cells: HTMLElement[] = [];
+    for (let i = 0; i < 4; i++) {
+      const rendered = this.renderNode(node.children[i], [...path, i]);
+      childRendered.push(rendered);
+
+      const cell = document.createElement('div');
+      cell.className = 'grid-cell';
+      cell.appendChild(rendered.element);
+      cells.push(cell);
+      container.appendChild(cell);
+    }
+
+    // Create 4 dividers: 2 horizontal (col-resize), 2 vertical (row-resize)
+    const dividers: HTMLElement[] = [
+      this.createGridDivider('horizontal', 'top', path, 'col0', node),   // top row H divider
+      this.createGridDivider('horizontal', 'bottom', path, 'col1', node), // bottom row H divider
+      this.createGridDivider('vertical', 'left', path, 'row0', node),    // left col V divider
+      this.createGridDivider('vertical', 'right', path, 'row1', node),   // right col V divider
+    ];
+    for (const d of dividers) container.appendChild(d);
+
+    this.applyGridLayout(container, cells, dividers, node.colRatios, node.rowRatios);
+
+    return {
+      node,
+      element: container,
+      gridChildren: childRendered,
+      gridDividers: dividers,
+    };
+  }
+
+  private createGridDivider(
+    axis: 'horizontal' | 'vertical',
+    _segment: string,
+    path: number[],
+    gridKey: GridRatioKey,
+    initialNode: GridNode,
+  ): HTMLElement {
+    const divider = document.createElement('div');
+    divider.className = `split-grid-divider ${axis}`;
+    divider.dataset.gridKey = gridKey;
+
+    const onMouseDown = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const container = divider.parentElement;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+
+      // Get current grid node to read live ratios
+      const gridNode = this.getNodeAtPath(this.node, path);
+      if (!gridNode || gridNode.type !== 'grid') return;
+
+      let colRatios: [number, number] = [...gridNode.colRatios];
+      let rowRatios: [number, number] = [...gridNode.rowRatios];
+
+      const cells = Array.from(container.querySelectorAll(':scope > .grid-cell')) as HTMLElement[];
+      const dividers = Array.from(container.querySelectorAll(':scope > .split-grid-divider')) as HTMLElement[];
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        let ratio: number;
+        if (axis === 'horizontal') {
+          ratio = (moveEvent.clientX - rect.left) / rect.width;
+        } else {
+          ratio = (moveEvent.clientY - rect.top) / rect.height;
+        }
+        ratio = Math.max(0.15, Math.min(0.85, ratio));
+
+        // Update the specific ratio
+        if (gridKey === 'col0') colRatios[0] = ratio;
+        else if (gridKey === 'col1') colRatios[1] = ratio;
+        else if (gridKey === 'row0') rowRatios[0] = ratio;
+        else if (gridKey === 'row1') rowRatios[1] = ratio;
+
+        // Live visual update
+        this.applyGridLayout(container, cells, dividers, colRatios, rowRatios);
+
+        // Notify store
+        if (this.options.onGridRatioChange) {
+          this.options.onGridRatioChange(path, gridKey, ratio);
+        }
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        document.body.classList.remove('split-resizing');
+      };
+
+      document.body.classList.add('split-resizing');
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    };
+
+    divider.addEventListener('mousedown', onMouseDown);
+    this.cleanupFns.push(() => divider.removeEventListener('mousedown', onMouseDown));
+
+    return divider;
+  }
+
+  private applyGridLayout(
+    _container: HTMLElement,
+    cells: HTMLElement[],
+    dividers: HTMLElement[],
+    colRatios: [number, number],
+    rowRatios: [number, number],
+  ): void {
+    const gap = 2; // divider thickness in px
+
+    // TL: left:0, top:0, w:colR[0], h:rowR[0]
+    cells[0].style.left = '0';
+    cells[0].style.top = '0';
+    cells[0].style.width = `calc(${colRatios[0] * 100}% - ${gap / 2}px)`;
+    cells[0].style.height = `calc(${rowRatios[0] * 100}% - ${gap / 2}px)`;
+
+    // TR: left:colR[0]+gap, top:0, w:1-colR[0], h:rowR[1]
+    cells[1].style.left = `calc(${colRatios[0] * 100}% + ${gap / 2}px)`;
+    cells[1].style.top = '0';
+    cells[1].style.width = `calc(${(1 - colRatios[0]) * 100}% - ${gap / 2}px)`;
+    cells[1].style.height = `calc(${rowRatios[1] * 100}% - ${gap / 2}px)`;
+
+    // BL: left:0, top:rowR[0]+gap, w:colR[1], h:1-rowR[0]
+    cells[2].style.left = '0';
+    cells[2].style.top = `calc(${rowRatios[0] * 100}% + ${gap / 2}px)`;
+    cells[2].style.width = `calc(${colRatios[1] * 100}% - ${gap / 2}px)`;
+    cells[2].style.height = `calc(${(1 - rowRatios[0]) * 100}% - ${gap / 2}px)`;
+
+    // BR: left:colR[1]+gap, top:rowR[1]+gap, w:1-colR[1], h:1-rowR[1]
+    cells[3].style.left = `calc(${colRatios[1] * 100}% + ${gap / 2}px)`;
+    cells[3].style.top = `calc(${rowRatios[1] * 100}% + ${gap / 2}px)`;
+    cells[3].style.width = `calc(${(1 - colRatios[1]) * 100}% - ${gap / 2}px)`;
+    cells[3].style.height = `calc(${(1 - rowRatios[1]) * 100}% - ${gap / 2}px)`;
+
+    // Top row horizontal divider: between TL and TR
+    dividers[0].style.left = `calc(${colRatios[0] * 100}% - ${gap / 2}px)`;
+    dividers[0].style.top = '0';
+    dividers[0].style.width = `${gap}px`;
+    dividers[0].style.height = `calc(${rowRatios[0] * 100}% - ${gap / 2}px)`;
+
+    // Bottom row horizontal divider: between BL and BR
+    dividers[1].style.left = `calc(${colRatios[1] * 100}% - ${gap / 2}px)`;
+    dividers[1].style.top = `calc(${rowRatios[0] * 100}% + ${gap / 2}px)`;
+    dividers[1].style.width = `${gap}px`;
+    dividers[1].style.height = `calc(${(1 - rowRatios[0]) * 100}% - ${gap / 2}px)`;
+
+    // Left column vertical divider: between TL and BL
+    dividers[2].style.left = '0';
+    dividers[2].style.top = `calc(${rowRatios[0] * 100}% - ${gap / 2}px)`;
+    dividers[2].style.width = `calc(${colRatios[0] * 100}% - ${gap / 2}px)`;
+    dividers[2].style.height = `${gap}px`;
+
+    // Right column vertical divider: between TR and BR
+    dividers[3].style.left = `calc(${colRatios[0] * 100}% + ${gap / 2}px)`;
+    dividers[3].style.top = `calc(${rowRatios[1] * 100}% - ${gap / 2}px)`;
+    dividers[3].style.width = `calc(${(1 - colRatios[0]) * 100}% - ${gap / 2}px)`;
+    dividers[3].style.height = `${gap}px`;
   }
 
   private createDivider(
@@ -213,13 +385,18 @@ export class SplitContainer {
   private getNodeAtPath(root: LayoutNode, path: number[]): LayoutNode | null {
     let current: LayoutNode = root;
     for (const idx of path) {
-      if (current.type !== 'split') return null;
-      current = idx === 0 ? current.first : current.second;
+      if (current.type === 'grid') {
+        if (idx >= 0 && idx < 4) {
+          current = current.children[idx];
+        } else {
+          return null;
+        }
+      } else if (current.type === 'split') {
+        current = idx === 0 ? current.first : current.second;
+      } else {
+        return null;
+      }
     }
-    // The divider is at `path` level — the parent split is one level up
-    // But since we store path as the path TO the split, we return the
-    // node that _contains_ the split. For a divider created at a split node,
-    // the path leads to the split node itself.
     return current;
   }
 
@@ -263,6 +440,10 @@ export class SplitContainer {
       if (pane) {
         parent.appendChild(pane.getContainer());
       }
+    } else if (rendered.gridChildren) {
+      for (const child of rendered.gridChildren) {
+        this.restorePaneContainers(child, parent);
+      }
     } else if (rendered.children) {
       this.restorePaneContainers(rendered.children.first, parent);
       this.restorePaneContainers(rendered.children.second, parent);
@@ -287,6 +468,15 @@ function nodesEqual(a: LayoutNode, b: LayoutNode): boolean {
       a.ratio === b.ratio &&
       nodesEqual(a.first, b.first) &&
       nodesEqual(a.second, b.second)
+    );
+  }
+  if (a.type === 'grid' && b.type === 'grid') {
+    return (
+      a.colRatios[0] === b.colRatios[0] &&
+      a.colRatios[1] === b.colRatios[1] &&
+      a.rowRatios[0] === b.rowRatios[0] &&
+      a.rowRatios[1] === b.rowRatios[1] &&
+      a.children.every((child, i) => nodesEqual(child, b.children[i]))
     );
   }
   return false;
