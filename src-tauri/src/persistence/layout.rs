@@ -254,7 +254,7 @@ pub fn restore_window_state(
 
     // Clamp position so the window is at least partially visible
     let w = saved.width as i32;
-    let h = saved.height as i32;
+    let _h = saved.height as i32;
     let min_visible = 100; // at least 100px must be on screen
     let x = saved.x.max(mon_x - w + min_visible).min(mon_x + mon_w - min_visible);
     let y = saved.y.max(mon_y).min(mon_y + mon_h - min_visible);

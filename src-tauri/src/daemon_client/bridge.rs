@@ -1002,7 +1002,7 @@ impl DaemonBridge {
                         total_responses,
                         dropped_events,
                         slow_write_count,
-                        pending_responses.len(),
+                        pending_map.len(),
                         orphan_responses,
                         if bridge_bulk_mode { "bulk" } else { "interactive" }
                     );
@@ -1014,8 +1014,8 @@ impl DaemonBridge {
 
             // Drain all pending response channels so callers get an error
             // instead of blocking forever on recv().
-            let pending_count = pending_responses.len();
-            for tx in pending_responses.drain(..) {
+            let pending_count = pending_map.len();
+            for (_id, tx) in pending_map.drain() {
                 let _ = tx.send(Response::Error {
                     message: "Bridge disconnected".to_string(),
                 });
