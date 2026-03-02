@@ -14,7 +14,7 @@ pub enum SplitDirection {
 /// Each leaf holds a terminal ID; each internal node splits space between
 /// two children with a direction and ratio.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum LayoutNode {
     Leaf {
         terminal_id: String,
@@ -813,6 +813,104 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // Bug #498: TypeScript ↔ Rust serialization format mismatch
+    //
+    // The TypeScript LayoutNode uses lowercase type tags ("leaf", "split")
+    // but the Rust serde expects PascalCase ("Leaf", "Split") because
+    // #[serde(tag = "type")] without rename_all uses the variant name as-is.
+    //
+    // This causes syncLayoutTreeToBackend() invoke to fail silently:
+    // the frontend sends { "type": "leaf", ... } but Rust can't deserialize it.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn bug498_deserialize_from_javascript_lowercase_leaf() {
+        // Bug #498: syncLayoutTreeToBackend sends { type: "leaf" } from TypeScript.
+        // The Rust LayoutNode must accept this format for persistence to work.
+        let json = r#"{"type":"leaf","terminal_id":"t1"}"#;
+        let result: Result<LayoutNode, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "LayoutNode must deserialize from lowercase 'leaf' type tag (sent by JavaScript). \
+             Got error: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap(), leaf("t1"));
+    }
+
+    #[test]
+    fn bug498_deserialize_from_javascript_lowercase_split() {
+        // Bug #498: syncLayoutTreeToBackend sends { type: "split" } from TypeScript.
+        let json = r#"{
+            "type": "split",
+            "direction": "horizontal",
+            "ratio": 0.5,
+            "first": {"type": "leaf", "terminal_id": "t1"},
+            "second": {"type": "leaf", "terminal_id": "t2"}
+        }"#;
+        let result: Result<LayoutNode, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "LayoutNode must deserialize from lowercase 'split' type tag (sent by JavaScript). \
+             Got error: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            result.unwrap(),
+            split(SplitDirection::Horizontal, 0.5, leaf("t1"), leaf("t2"))
+        );
+    }
+
+    #[test]
+    fn bug498_deserialize_nested_from_javascript_format() {
+        // Bug #498: nested split trees from JavaScript use lowercase throughout
+        let json = r#"{
+            "type": "split",
+            "direction": "horizontal",
+            "ratio": 0.5,
+            "first": {"type": "leaf", "terminal_id": "t1"},
+            "second": {
+                "type": "split",
+                "direction": "vertical",
+                "ratio": 0.6,
+                "first": {"type": "leaf", "terminal_id": "t2"},
+                "second": {"type": "leaf", "terminal_id": "t3"}
+            }
+        }"#;
+        let result: Result<LayoutNode, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "LayoutNode must deserialize nested trees with lowercase type tags. \
+             Got error: {:?}",
+            result.err()
+        );
+        let expected = split(
+            SplitDirection::Horizontal,
+            0.5,
+            leaf("t1"),
+            split(SplitDirection::Vertical, 0.6, leaf("t2"), leaf("t3")),
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn bug498_rust_serialization_uses_format_typescript_can_read() {
+        // Bug #498 (restore path): Rust serializes as PascalCase ("Leaf"/"Split")
+        // but TypeScript checks node.type === 'leaf' (lowercase).
+        // Verify the Rust output format so we can confirm the mismatch.
+        let node = leaf("t1");
+        let json = serde_json::to_string(&node).unwrap();
+        // The format Rust produces must use lowercase to match TypeScript expectations
+        assert!(
+            json.contains(r#""type":"leaf""#) || json.contains(r#""type": "leaf""#),
+            "Rust should serialize LayoutNode::Leaf with lowercase 'leaf' type tag \
+             to match TypeScript's node.type === 'leaf' check. \
+             Actual serialization: {}",
+            json
+        );
+    }
+
+    // ---------------------------------------------------------------
     // Serialization round-trips
     // ---------------------------------------------------------------
 
@@ -855,7 +953,7 @@ mod tests {
 
     #[test]
     fn serde_tagged_leaf() {
-        let json = r#"{"type":"Leaf","terminal_id":"t1"}"#;
+        let json = r#"{"type":"leaf","terminal_id":"t1"}"#;
         let node: LayoutNode = serde_json::from_str(json).unwrap();
         assert_eq!(node, leaf("t1"));
     }
@@ -863,11 +961,11 @@ mod tests {
     #[test]
     fn serde_tagged_split() {
         let json = r#"{
-            "type": "Split",
+            "type": "split",
             "direction": "horizontal",
             "ratio": 0.5,
-            "first": {"type": "Leaf", "terminal_id": "t1"},
-            "second": {"type": "Leaf", "terminal_id": "t2"}
+            "first": {"type": "leaf", "terminal_id": "t1"},
+            "second": {"type": "leaf", "terminal_id": "t2"}
         }"#;
         let node: LayoutNode = serde_json::from_str(json).unwrap();
         assert_eq!(
