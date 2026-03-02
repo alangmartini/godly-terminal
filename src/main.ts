@@ -10,9 +10,6 @@ import { themeStore } from './state/theme-store';
 
 import { terminalSettingsStore } from './state/terminal-settings-store';
 
-
-import { terminalSettingsStore } from './state/terminal-settings-store';
-
 import { initLogger } from './utils/Logger';
 import { initPlugins } from './plugins/index';
 import { initFlowEngine } from './flow-engine/index';
