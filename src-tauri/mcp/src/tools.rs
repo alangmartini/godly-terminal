@@ -28,7 +28,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "create_terminal",
-                "description": "Create a new terminal in a workspace.\n\nIMPORTANT: New terminals open in the user's home directory by default, NOT in the project directory. Always pass `cwd` with the project path when creating terminals for running project commands (build, test, git, etc.). Omitting `cwd` is the #1 cause of 'command not found' or 'no such file' errors.\n\nIf you use `command` to run something at creation time, verify it succeeded by calling `read_terminal` or `execute_command` afterward — the command output is not returned inline.",
+                "description": "Create a new terminal in a workspace.\n\nThe terminal's working directory defaults to the workspace's folder path (the project directory). Pass `cwd` to override with a specific path, or use `worktree`/`worktree_name` to create a git worktree from the workspace's repo.\n\nThe `workspace_id` determines which workspace's folder path is used for CWD and worktree operations. The terminal is always displayed in the Agent workspace tab.\n\nIf you use `command` to run something at creation time, verify it succeeded by calling `read_terminal` or `execute_command` afterward — the command output is not returned inline.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -38,7 +38,7 @@ pub fn list_tools() -> Value {
                         },
                         "cwd": {
                             "type": "string",
-                            "description": "Working directory for the new terminal. Defaults to user home if omitted — always set this to the project path when running project commands."
+                            "description": "Working directory for the new terminal. Defaults to the workspace's folder path if omitted. Mutually exclusive with worktree/worktree_name."
                         },
                         "worktree_name": {
                             "type": "string",
@@ -566,7 +566,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "quick_claude",
-                "description": "Spawn a new Claude Code session with a prompt. Creates a terminal with a git worktree (skipping fetch by default for speed), starts Claude Code, waits for it to be ready, and writes the prompt — all in background. Returns immediately with the terminal ID. Fire multiple calls in rapid succession for quick idea capture.",
+                "description": "Spawn a new Claude Code session with a prompt. Creates a terminal with a git worktree (skipping fetch by default for speed), starts Claude Code, waits for it to be ready, and writes the prompt — all in background. Returns immediately with the terminal ID. Fire multiple calls in rapid succession for quick idea capture.\n\nThe `workspace_id` determines which workspace's folder path is used as the git repo root for worktree creation. The terminal is displayed in the Agent workspace tab.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
