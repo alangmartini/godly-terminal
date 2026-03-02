@@ -2877,3 +2877,193 @@ body.dragging-active * {
   color: var(--danger);
   margin-bottom: 8px;
 }
+
+/* ── Quick Claude Presets ─────────────────────────────── */
+
+.qc-layout-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+.qc-default-star {
+  color: var(--warning, #e0af68);
+  font-size: 14px;
+  margin-left: 4px;
+}
+
+.qc-layout-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qc-layout-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 80px;
+}
+
+.qc-layout-option:hover {
+  background: var(--bg-tertiary);
+}
+
+.qc-layout-option-active {
+  border-color: var(--accent);
+  background: rgba(125, 174, 163, 0.08);
+}
+
+.qc-layout-icon {
+  font-size: 20px;
+  color: var(--text-primary);
+}
+
+.qc-layout-label {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.qc-layout-max {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.qc-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.qc-agent-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.qc-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.qc-agent-position {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-active);
+  min-width: 56px;
+}
+
+.qc-agent-header .flow-select {
+  flex: 1;
+}
+
+.qc-agent-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.qc-agent-field-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 110px;
+}
+
+.qc-agent-field .flow-input {
+  flex: 1;
+}
+
+.qc-steps-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+.qc-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qc-step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.qc-step-checkbox {
+  margin: 0;
+  cursor: pointer;
+}
+
+.qc-step-type {
+  color: var(--text-primary);
+  font-weight: 500;
+  min-width: 100px;
+}
+
+.qc-step-config {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex: 1;
+}
+
+.qc-step-config-panel {
+  width: 100%;
+  padding: 8px 0 4px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qc-config-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qc-config-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 80px;
+}
+
+.qc-config-field .flow-input {
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+/* Quick Claude dialog preset selector */
+.qc-preset-select {
+  margin-bottom: 8px;
+}
+
+.qc-agent-summary {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+}

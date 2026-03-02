@@ -1,6 +1,7 @@
 import { store } from '../state/store';
 import { terminalSettingsStore } from '../state/terminal-settings-store';
 import { aiToolsSettingsStore } from '../state/ai-tools-settings-store';
+import { quickClaudeSettingsStore, type PresetLayout } from '../state/quick-claude-settings-store';
 import { terminalService } from '../services/terminal-service';
 import { workspaceService } from '../services/workspace-service';
 import { keybindingStore } from '../state/keybinding-store';
@@ -383,6 +384,68 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
 
+          // ── Preset-based launch path ──
+          if (input.presetId) {
+            const preset = quickClaudeSettingsStore.getPreset(input.presetId);
+            if (preset && preset.agents.length > 0) {
+              // Resolve base branch name
+              let baseName: string | null = null;
+              if (!input.noWorktree) {
+                baseName = input.branchName
+                  ?? await (async () => {
+                    const { llmGenerateBranchName } = await import('../plugins/smollm2/llm-service');
+                    return llmGenerateBranchName(input.prompt);
+                  })();
+              }
+
+              // Resolve per-agent branch names
+              const branches = preset.agents.map(agent => {
+                if (!baseName) return null;
+                const suffix = agent.branchSuffixOverride
+                  ?? aiToolsSettingsStore.getBranchSuffix(agent.toolId);
+                return suffix ? `${baseName}${suffix}` : baseName;
+              });
+
+              // Launch all agents in parallel
+              const results = await Promise.all(
+                preset.agents.map((agent, i) =>
+                  invoke<{ terminal_id: string; worktree_branch: string | null }>(
+                    'quick_claude',
+                    {
+                      workspaceId: input.workspaceId,
+                      prompt: input.prompt,
+                      branchName: branches[i],
+                      skipFetch: true,
+                      noWorktree: input.noWorktree ?? false,
+                      aiTool: agent.toolId,
+                    },
+                  ),
+                ),
+              );
+
+              const processName = shellTypeToProcessName(terminalSettingsStore.getDefaultShell());
+
+              // Add terminals to store
+              for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                const agent = preset.agents[i];
+                store.addTerminal({
+                  id: r.terminal_id,
+                  workspaceId: input.workspaceId,
+                  name: r.worktree_branch ?? agent.label,
+                  processName,
+                  order: 0,
+                }, i > 0 ? { background: true } : undefined);
+              }
+
+              // Build layout from preset
+              buildPresetLayout(input.workspaceId, preset.layout, results.map(r => r.terminal_id));
+              break;
+            }
+          }
+
+          // ── Custom (non-preset) launch path ──
+
           // Determine which tools to launch
           const toolsToLaunch: string[] = [];
           if (input.aiTool === 'both') {
@@ -487,4 +550,28 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
 
   // Listen for voice toggle events from the mic button in TabBar
   document.addEventListener('voice-toggle-recording', () => deps.handleVoiceToggle());
+}
+
+/**
+ * Map a preset layout + terminal IDs to store.splitTerminalAt() calls.
+ */
+function buildPresetLayout(workspaceId: string, layout: PresetLayout, terminalIds: string[]): void {
+  if (terminalIds.length <= 1 || layout === 'single') return;
+
+  if (layout === 'vertical' && terminalIds.length >= 2) {
+    // Left / Right split
+    store.splitTerminalAt(workspaceId, terminalIds[0], terminalIds[1], 'vertical', 0.5);
+  } else if (layout === 'horizontal' && terminalIds.length >= 2) {
+    // Top / Bottom split
+    store.splitTerminalAt(workspaceId, terminalIds[0], terminalIds[1], 'horizontal', 0.5);
+  } else if (layout === 'grid' && terminalIds.length >= 2) {
+    // 2x2 grid: first split left/right, then split each half top/bottom
+    store.splitTerminalAt(workspaceId, terminalIds[0], terminalIds[1], 'vertical', 0.5);
+    if (terminalIds[2]) {
+      store.splitTerminalAt(workspaceId, terminalIds[0], terminalIds[2], 'horizontal', 0.5);
+    }
+    if (terminalIds[3]) {
+      store.splitTerminalAt(workspaceId, terminalIds[1], terminalIds[3], 'horizontal', 0.5);
+    }
+  }
 }
