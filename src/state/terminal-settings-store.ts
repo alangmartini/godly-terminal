@@ -32,7 +32,7 @@ class TerminalSettingsStore {
     autoScrollOnOutput: false,
     fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
     rendererMode: 'gpu',
-    splitTabMode: 'individual',
+    splitTabMode: 'unified',
   };
 
   private subscribers: Subscriber[] = [];
