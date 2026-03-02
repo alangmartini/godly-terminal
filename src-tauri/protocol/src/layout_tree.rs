@@ -26,6 +26,18 @@ pub enum LayoutNode {
         first: Box<LayoutNode>,
         second: Box<LayoutNode>,
     },
+    /// A 2x2 grid layout with independent column/row dividers.
+    ///
+    /// `col_ratios[0]` is the horizontal split position for the top row,
+    /// `col_ratios[1]` is the horizontal split position for the bottom row.
+    /// `row_ratios[0]` is the vertical split position for the left column,
+    /// `row_ratios[1]` is the vertical split position for the right column.
+    /// Children are ordered: TL(0), TR(1), BL(2), BR(3).
+    Grid {
+        col_ratios: [f64; 2],
+        row_ratios: [f64; 2],
+        children: [Box<LayoutNode>; 4],
+    },
 }
 
 impl LayoutNode {
@@ -35,6 +47,9 @@ impl LayoutNode {
             LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
             LayoutNode::Split { first, second, .. } => {
                 first.find_terminal(terminal_id) || second.find_terminal(terminal_id)
+            }
+            LayoutNode::Grid { children, .. } => {
+                children.iter().any(|c| c.find_terminal(terminal_id))
             }
         }
     }
@@ -53,6 +68,11 @@ impl LayoutNode {
                 first.collect_terminal_ids(out);
                 second.collect_terminal_ids(out);
             }
+            LayoutNode::Grid { children, .. } => {
+                for child in children {
+                    child.collect_terminal_ids(out);
+                }
+            }
         }
     }
 
@@ -62,6 +82,9 @@ impl LayoutNode {
             LayoutNode::Leaf { .. } => 1,
             LayoutNode::Split { first, second, .. } => {
                 first.count_leaves() + second.count_leaves()
+            }
+            LayoutNode::Grid { children, .. } => {
+                children.iter().map(|c| c.count_leaves()).sum()
             }
         }
     }
@@ -116,6 +139,90 @@ impl LayoutNode {
 
                 None
             }
+            LayoutNode::Grid {
+                col_ratios,
+                row_ratios,
+                children,
+            } => {
+                // Grid children are leaves in practice. Check each child.
+                // Find which child (if any) is the target leaf.
+                let target_idx = children.iter().position(|c| {
+                    matches!(c.as_ref(), LayoutNode::Leaf { terminal_id: id } if id == terminal_id)
+                });
+
+                if let Some(idx) = target_idx {
+                    // Collapse the grid to a 3-pane SplitNode tree.
+                    // Children: TL(0), TR(1), BL(2), BR(3)
+                    let [tl, tr, bl, br] = children.clone();
+                    let col_r = *col_ratios;
+                    let row_r = *row_ratios;
+
+                    let replacement = match idx {
+                        // Remove TL: Split(V, rowR[1], TR, Split(H, colR[1], BL, BR))
+                        0 => LayoutNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: row_r[1],
+                            first: tr,
+                            second: Box::new(LayoutNode::Split {
+                                direction: SplitDirection::Horizontal,
+                                ratio: col_r[1],
+                                first: bl,
+                                second: br,
+                            }),
+                        },
+                        // Remove TR: Split(V, rowR[0], TL, Split(H, colR[1], BL, BR))
+                        1 => LayoutNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: row_r[0],
+                            first: tl,
+                            second: Box::new(LayoutNode::Split {
+                                direction: SplitDirection::Horizontal,
+                                ratio: col_r[1],
+                                first: bl,
+                                second: br,
+                            }),
+                        },
+                        // Remove BL: Split(V, rowR[0], Split(H, colR[0], TL, TR), BR)
+                        2 => LayoutNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: row_r[0],
+                            first: Box::new(LayoutNode::Split {
+                                direction: SplitDirection::Horizontal,
+                                ratio: col_r[0],
+                                first: tl,
+                                second: tr,
+                            }),
+                            second: br,
+                        },
+                        // Remove BR: Split(V, rowR[0], Split(H, colR[0], TL, TR), BL)
+                        3 => LayoutNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: row_r[0],
+                            first: Box::new(LayoutNode::Split {
+                                direction: SplitDirection::Horizontal,
+                                ratio: col_r[0],
+                                first: tl,
+                                second: tr,
+                            }),
+                            second: bl,
+                        },
+                        _ => unreachable!(),
+                    };
+
+                    let result = replacement.clone();
+                    *self = replacement;
+                    return Some(result);
+                }
+
+                // Target not a direct child leaf — recurse into children
+                for child in children.iter_mut() {
+                    if child.find_terminal(terminal_id) {
+                        return child.remove_terminal(terminal_id);
+                    }
+                }
+
+                None
+            }
         }
     }
 
@@ -156,6 +263,14 @@ impl LayoutNode {
                 }
                 second.split_at(terminal_id, new_terminal_id, direction, ratio)
             }
+            LayoutNode::Grid { children, .. } => {
+                for child in children.iter_mut() {
+                    if child.split_at(terminal_id, new_terminal_id, direction, ratio) {
+                        return true;
+                    }
+                }
+                false
+            }
         }
     }
 
@@ -184,6 +299,11 @@ impl LayoutNode {
             LayoutNode::Split { first, second, .. } => {
                 first.rename_terminal(from, to);
                 second.rename_terminal(from, to);
+            }
+            LayoutNode::Grid { children, .. } => {
+                for child in children.iter_mut() {
+                    child.rename_terminal(from, to);
+                }
             }
         }
     }
@@ -261,6 +381,56 @@ impl LayoutNode {
 
                 None
             }
+            LayoutNode::Grid { children, .. } => {
+                // Children: TL(0), TR(1), BL(2), BR(3)
+                // Find which child contains the terminal
+                let child_idx = children.iter().position(|c| c.find_terminal(terminal_id));
+                let child_idx = match child_idx {
+                    Some(i) => i,
+                    None => return None,
+                };
+
+                // First, recurse into the child to handle nested cases
+                if let Some(result) =
+                    children[child_idx].find_adjacent_inner(terminal_id, direction, go_second)
+                {
+                    match result {
+                        AdjResult::Found(id) => return Some(AdjResult::Found(id)),
+                        AdjResult::Propagate => {
+                            // The terminal was found, but no adjacent in that child's subtree.
+                            // Navigate to the grid neighbor based on direction.
+                            let neighbor_idx = match (child_idx, direction, go_second) {
+                                // Horizontal (go_second=true = right, false = left)
+                                (0, SplitDirection::Horizontal, true) => Some(1),  // TL → TR
+                                (2, SplitDirection::Horizontal, true) => Some(3),  // BL → BR
+                                (1, SplitDirection::Horizontal, false) => Some(0), // TR → TL
+                                (3, SplitDirection::Horizontal, false) => Some(2), // BR → BL
+                                // Vertical (go_second=true = down, false = up)
+                                (0, SplitDirection::Vertical, true) => Some(2),  // TL → BL
+                                (1, SplitDirection::Vertical, true) => Some(3),  // TR → BR
+                                (2, SplitDirection::Vertical, false) => Some(0), // BL → TL
+                                (3, SplitDirection::Vertical, false) => Some(1), // BR → TR
+                                // Edge cases: no neighbor in that direction (propagate up)
+                                _ => None,
+                            };
+
+                            match neighbor_idx {
+                                Some(ni) => {
+                                    let target = if go_second {
+                                        children[ni].first_leaf()
+                                    } else {
+                                        children[ni].last_leaf()
+                                    };
+                                    return Some(AdjResult::Found(target));
+                                }
+                                None => return Some(AdjResult::Propagate),
+                            }
+                        }
+                    }
+                }
+
+                None
+            }
         }
     }
 
@@ -296,6 +466,131 @@ impl LayoutNode {
                     (None, None) => None,
                 }
             }
+            LayoutNode::Grid {
+                col_ratios,
+                row_ratios,
+                children,
+            } => {
+                // Prune each child: TL(0), TR(1), BL(2), BR(3)
+                let pruned: Vec<Option<LayoutNode>> = children
+                    .iter()
+                    .map(|c| c.prune_stale_terminal_ids(live_ids))
+                    .collect();
+
+                let survivors: Vec<(usize, LayoutNode)> = pruned
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, opt)| opt.map(|n| (i, n)))
+                    .collect();
+
+                match survivors.len() {
+                    0 => None,
+                    1 => Some(survivors.into_iter().next().unwrap().1),
+                    2 => {
+                        let (i0, n0) = &survivors[0];
+                        let (i1, n1) = &survivors[1];
+                        // Determine split direction based on positions
+                        let dir = if (*i0 == 0 && *i1 == 1) || (*i0 == 2 && *i1 == 3) {
+                            // Same row → horizontal split
+                            SplitDirection::Horizontal
+                        } else {
+                            // Same column or diagonal → vertical split
+                            SplitDirection::Vertical
+                        };
+                        let ratio = match dir {
+                            SplitDirection::Horizontal => {
+                                if *i0 <= 1 { col_ratios[0] } else { col_ratios[1] }
+                            }
+                            SplitDirection::Vertical => {
+                                if *i0 % 2 == 0 { row_ratios[0] } else { row_ratios[1] }
+                            }
+                        };
+                        Some(LayoutNode::Split {
+                            direction: dir,
+                            ratio,
+                            first: Box::new(n0.clone()),
+                            second: Box::new(n1.clone()),
+                        })
+                    }
+                    3 => {
+                        // Determine which child is missing and collapse accordingly
+                        let alive = [
+                            survivors.iter().any(|(i, _)| *i == 0),
+                            survivors.iter().any(|(i, _)| *i == 1),
+                            survivors.iter().any(|(i, _)| *i == 2),
+                            survivors.iter().any(|(i, _)| *i == 3),
+                        ];
+                        let dead_idx = alive.iter().position(|&a| !a).unwrap();
+
+                        let get = |idx: usize| -> LayoutNode {
+                            survivors.iter().find(|(i, _)| *i == idx).unwrap().1.clone()
+                        };
+
+                        match dead_idx {
+                            // TL dead: Split(V, rowR[1], TR, Split(H, colR[1], BL, BR))
+                            0 => Some(LayoutNode::Split {
+                                direction: SplitDirection::Vertical,
+                                ratio: row_ratios[1],
+                                first: Box::new(get(1)),
+                                second: Box::new(LayoutNode::Split {
+                                    direction: SplitDirection::Horizontal,
+                                    ratio: col_ratios[1],
+                                    first: Box::new(get(2)),
+                                    second: Box::new(get(3)),
+                                }),
+                            }),
+                            // TR dead: Split(V, rowR[0], TL, Split(H, colR[1], BL, BR))
+                            1 => Some(LayoutNode::Split {
+                                direction: SplitDirection::Vertical,
+                                ratio: row_ratios[0],
+                                first: Box::new(get(0)),
+                                second: Box::new(LayoutNode::Split {
+                                    direction: SplitDirection::Horizontal,
+                                    ratio: col_ratios[1],
+                                    first: Box::new(get(2)),
+                                    second: Box::new(get(3)),
+                                }),
+                            }),
+                            // BL dead: Split(V, rowR[0], Split(H, colR[0], TL, TR), BR)
+                            2 => Some(LayoutNode::Split {
+                                direction: SplitDirection::Vertical,
+                                ratio: row_ratios[0],
+                                first: Box::new(LayoutNode::Split {
+                                    direction: SplitDirection::Horizontal,
+                                    ratio: col_ratios[0],
+                                    first: Box::new(get(0)),
+                                    second: Box::new(get(1)),
+                                }),
+                                second: Box::new(get(3)),
+                            }),
+                            // BR dead: Split(V, rowR[0], Split(H, colR[0], TL, TR), BL)
+                            3 => Some(LayoutNode::Split {
+                                direction: SplitDirection::Vertical,
+                                ratio: row_ratios[0],
+                                first: Box::new(LayoutNode::Split {
+                                    direction: SplitDirection::Horizontal,
+                                    ratio: col_ratios[0],
+                                    first: Box::new(get(0)),
+                                    second: Box::new(get(1)),
+                                }),
+                                second: Box::new(get(2)),
+                            }),
+                            _ => unreachable!(),
+                        }
+                    }
+                    4 => Some(LayoutNode::Grid {
+                        col_ratios: *col_ratios,
+                        row_ratios: *row_ratios,
+                        children: [
+                            Box::new(survivors[0].1.clone()),
+                            Box::new(survivors[1].1.clone()),
+                            Box::new(survivors[2].1.clone()),
+                            Box::new(survivors[3].1.clone()),
+                        ],
+                    }),
+                    _ => unreachable!(),
+                }
+            }
         }
     }
 
@@ -304,6 +599,7 @@ impl LayoutNode {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id.clone(),
             LayoutNode::Split { first, .. } => first.first_leaf(),
+            LayoutNode::Grid { children, .. } => children[0].first_leaf(),
         }
     }
 
@@ -312,6 +608,7 @@ impl LayoutNode {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id.clone(),
             LayoutNode::Split { second, .. } => second.last_leaf(),
+            LayoutNode::Grid { children, .. } => children[3].last_leaf(),
         }
     }
 
@@ -356,6 +653,16 @@ impl LayoutNode {
                     return true;
                 }
                 second.update_ratio(terminal_id, direction, delta)
+            }
+            LayoutNode::Grid { children, .. } => {
+                // Grid ratios are managed by the frontend's updateGridRatioAtPath.
+                // Just recurse into children for nested split updates.
+                for child in children.iter_mut() {
+                    if child.update_ratio(terminal_id, direction, delta) {
+                        return true;
+                    }
+                }
+                false
             }
         }
     }
@@ -1030,5 +1337,403 @@ mod tests {
             .collect();
         let pruned = tree.prune_stale_terminal_ids(&live);
         assert_eq!(pruned, Some(tree));
+    }
+
+    // ---------------------------------------------------------------
+    // Grid tests
+    // ---------------------------------------------------------------
+
+    fn grid(
+        col_ratios: [f64; 2],
+        row_ratios: [f64; 2],
+        tl: LayoutNode,
+        tr: LayoutNode,
+        bl: LayoutNode,
+        br: LayoutNode,
+    ) -> LayoutNode {
+        LayoutNode::Grid {
+            col_ratios,
+            row_ratios,
+            children: [
+                Box::new(tl),
+                Box::new(tr),
+                Box::new(bl),
+                Box::new(br),
+            ],
+        }
+    }
+
+    #[test]
+    fn grid_serde_roundtrip() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let json = serde_json::to_string(&g).unwrap();
+        let restored: LayoutNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(g, restored);
+    }
+
+    #[test]
+    fn grid_find_terminal() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        assert!(g.find_terminal("t1"));
+        assert!(g.find_terminal("t4"));
+        assert!(!g.find_terminal("t5"));
+    }
+
+    #[test]
+    fn grid_terminal_ids() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        assert_eq!(g.terminal_ids(), vec!["t1", "t2", "t3", "t4"]);
+    }
+
+    #[test]
+    fn grid_count_leaves() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        assert_eq!(g.count_leaves(), 4);
+    }
+
+    #[test]
+    fn grid_remove_tl_collapses_to_split() {
+        let mut g = grid(
+            [0.6, 0.4],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let result = g.remove_terminal("t1");
+        assert!(result.is_some());
+        assert_eq!(g.count_leaves(), 3);
+        assert!(!g.find_terminal("t1"));
+        assert!(g.find_terminal("t2"));
+        assert!(g.find_terminal("t3"));
+        assert!(g.find_terminal("t4"));
+    }
+
+    #[test]
+    fn grid_remove_tr_collapses_to_split() {
+        let mut g = grid(
+            [0.6, 0.4],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let result = g.remove_terminal("t2");
+        assert!(result.is_some());
+        assert_eq!(g.count_leaves(), 3);
+        assert!(g.find_terminal("t1"));
+        assert!(!g.find_terminal("t2"));
+        assert!(g.find_terminal("t3"));
+        assert!(g.find_terminal("t4"));
+    }
+
+    #[test]
+    fn grid_remove_bl_collapses_to_split() {
+        let mut g = grid(
+            [0.6, 0.4],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let result = g.remove_terminal("t3");
+        assert!(result.is_some());
+        assert_eq!(g.count_leaves(), 3);
+        assert!(g.find_terminal("t1"));
+        assert!(g.find_terminal("t2"));
+        assert!(!g.find_terminal("t3"));
+        assert!(g.find_terminal("t4"));
+    }
+
+    #[test]
+    fn grid_remove_br_collapses_to_split() {
+        let mut g = grid(
+            [0.6, 0.4],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let result = g.remove_terminal("t4");
+        assert!(result.is_some());
+        assert_eq!(g.count_leaves(), 3);
+        assert!(g.find_terminal("t1"));
+        assert!(g.find_terminal("t2"));
+        assert!(g.find_terminal("t3"));
+        assert!(!g.find_terminal("t4"));
+    }
+
+    #[test]
+    fn grid_swap_terminals() {
+        let mut g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        assert!(g.swap_terminals("t1", "t4"));
+        assert_eq!(g.terminal_ids(), vec!["t4", "t2", "t3", "t1"]);
+    }
+
+    #[test]
+    fn grid_find_adjacent_right() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        // TL right -> TR
+        assert_eq!(
+            g.find_adjacent("t1", SplitDirection::Horizontal, true),
+            Some("t2".to_string())
+        );
+        // BL right -> BR
+        assert_eq!(
+            g.find_adjacent("t3", SplitDirection::Horizontal, true),
+            Some("t4".to_string())
+        );
+    }
+
+    #[test]
+    fn grid_find_adjacent_left() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        // TR left -> TL
+        assert_eq!(
+            g.find_adjacent("t2", SplitDirection::Horizontal, false),
+            Some("t1".to_string())
+        );
+        // BR left -> BL
+        assert_eq!(
+            g.find_adjacent("t4", SplitDirection::Horizontal, false),
+            Some("t3".to_string())
+        );
+    }
+
+    #[test]
+    fn grid_find_adjacent_down() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        // TL down -> BL
+        assert_eq!(
+            g.find_adjacent("t1", SplitDirection::Vertical, true),
+            Some("t3".to_string())
+        );
+        // TR down -> BR
+        assert_eq!(
+            g.find_adjacent("t2", SplitDirection::Vertical, true),
+            Some("t4".to_string())
+        );
+    }
+
+    #[test]
+    fn grid_find_adjacent_up() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        // BL up -> TL
+        assert_eq!(
+            g.find_adjacent("t3", SplitDirection::Vertical, false),
+            Some("t1".to_string())
+        );
+        // BR up -> TR
+        assert_eq!(
+            g.find_adjacent("t4", SplitDirection::Vertical, false),
+            Some("t2".to_string())
+        );
+    }
+
+    #[test]
+    fn grid_find_adjacent_edge_no_neighbor() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        // TL has no left neighbor
+        assert_eq!(
+            g.find_adjacent("t1", SplitDirection::Horizontal, false),
+            None
+        );
+        // TL has no up neighbor
+        assert_eq!(
+            g.find_adjacent("t1", SplitDirection::Vertical, false),
+            None
+        );
+        // BR has no right neighbor
+        assert_eq!(
+            g.find_adjacent("t4", SplitDirection::Horizontal, true),
+            None
+        );
+        // BR has no down neighbor
+        assert_eq!(
+            g.find_adjacent("t4", SplitDirection::Vertical, true),
+            None
+        );
+    }
+
+    #[test]
+    fn grid_prune_all_live() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let live: HashSet<String> =
+            ["t1", "t2", "t3", "t4"].iter().map(|s| s.to_string()).collect();
+        let pruned = g.prune_stale_terminal_ids(&live);
+        assert_eq!(pruned, Some(g));
+    }
+
+    #[test]
+    fn grid_prune_one_dead() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let live: HashSet<String> = ["t1", "t2", "t3"].iter().map(|s| s.to_string()).collect();
+        let pruned = g.prune_stale_terminal_ids(&live).unwrap();
+        assert_eq!(pruned.count_leaves(), 3);
+        assert!(pruned.find_terminal("t1"));
+        assert!(pruned.find_terminal("t2"));
+        assert!(pruned.find_terminal("t3"));
+    }
+
+    #[test]
+    fn grid_prune_two_dead() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let live: HashSet<String> = ["t1", "t2"].iter().map(|s| s.to_string()).collect();
+        let pruned = g.prune_stale_terminal_ids(&live).unwrap();
+        assert_eq!(pruned.count_leaves(), 2);
+        assert!(pruned.find_terminal("t1"));
+        assert!(pruned.find_terminal("t2"));
+    }
+
+    #[test]
+    fn grid_prune_three_dead() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let live: HashSet<String> = ["t3"].iter().map(|s| s.to_string()).collect();
+        let pruned = g.prune_stale_terminal_ids(&live).unwrap();
+        assert_eq!(pruned, leaf("t3"));
+    }
+
+    #[test]
+    fn grid_prune_all_dead() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        let live: HashSet<String> = HashSet::new();
+        assert_eq!(g.prune_stale_terminal_ids(&live), None);
+    }
+
+    // Backward compat: old persisted JSON with only Leaf/Split still deserializes
+    #[test]
+    fn old_json_without_grid_still_deserializes() {
+        let json = r#"{
+            "type": "Split",
+            "direction": "horizontal",
+            "ratio": 0.5,
+            "first": {"type": "Leaf", "terminal_id": "t1"},
+            "second": {"type": "Leaf", "terminal_id": "t2"}
+        }"#;
+        let node: LayoutNode = serde_json::from_str(json).unwrap();
+        assert_eq!(node.count_leaves(), 2);
+    }
+
+    #[test]
+    fn grid_first_and_last_leaf() {
+        let g = grid(
+            [0.5, 0.5],
+            [0.5, 0.5],
+            leaf("t1"),
+            leaf("t2"),
+            leaf("t3"),
+            leaf("t4"),
+        );
+        assert_eq!(g.first_leaf(), "t1");
+        assert_eq!(g.last_leaf(), "t4");
     }
 }

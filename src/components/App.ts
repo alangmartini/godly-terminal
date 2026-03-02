@@ -169,6 +169,11 @@ export class App {
               store.updateLayoutTreeRatio(state.activeWorkspaceId, path, ratio);
             }
           },
+          onGridRatioChange: (path, key, ratio) => {
+            if (state.activeWorkspaceId) {
+              store.updateGridRatio(state.activeWorkspaceId, path, key, ratio);
+            }
+          },
           onFocusPane: (terminalId) => {
             store.setActiveTerminal(terminalId);
           },

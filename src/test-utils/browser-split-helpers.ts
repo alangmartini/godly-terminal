@@ -6,7 +6,7 @@
  */
 import { vi } from 'vitest';
 import { SplitContainer, SplitPaneHandle } from '../components/SplitContainer';
-import { LayoutNode, LeafNode, SplitNode } from '../state/split-types';
+import { LayoutNode, LeafNode, SplitNode, GridNode } from '../state/split-types';
 
 // ---------------------------------------------------------------------------
 // Tree builders
@@ -23,6 +23,17 @@ export function split(
   ratio = 0.5,
 ): SplitNode {
   return { type: 'split', direction: dir, ratio, first, second };
+}
+
+export function grid(
+  tl: LayoutNode,
+  tr: LayoutNode,
+  bl: LayoutNode,
+  br: LayoutNode,
+  colRatios: [number, number] = [0.5, 0.5],
+  rowRatios: [number, number] = [0.5, 0.5],
+): GridNode {
+  return { type: 'grid', colRatios, rowRatios, children: [tl, tr, bl, br] };
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +75,12 @@ const SPLIT_CSS = `
   .split-divider.horizontal { width: 2px; cursor: col-resize; }
   .split-divider.vertical { height: 2px; cursor: row-resize; }
   .terminal-pane { overflow: hidden; }
+  .split-grid { position: relative; width: 100%; height: 100%; overflow: hidden; }
+  .grid-cell { position: absolute; overflow: hidden; }
+  .grid-cell > * { width: 100%; height: 100%; }
+  .split-grid-divider { position: absolute; z-index: 1; }
+  .split-grid-divider.horizontal { cursor: col-resize; }
+  .split-grid-divider.vertical { cursor: row-resize; }
 `;
 
 /**

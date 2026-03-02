@@ -3,6 +3,7 @@ import {
   LayoutNode,
   terminalIds,
 } from './split-types';
+import type { GridRatioKey } from './split-types';
 import {
   addWorkspaceImpl,
   updateWorkspaceImpl,
@@ -29,6 +30,7 @@ import {
   getFocusedPaneIdImpl,
   getAdjacentPaneImpl,
   updateTreeRatioImpl,
+  updateGridRatioImpl,
   setZoomedPaneImpl,
   getZoomedPaneImpl,
   swapPanesImpl,
@@ -251,6 +253,7 @@ export class Store {
   }
   updateTreeRatio(workspaceId: string, path: number[], ratio: number): void { updateTreeRatioImpl(this, workspaceId, path, ratio); }
   updateLayoutTreeRatio(workspaceId: string, path: number[], ratio: number): void { this.updateTreeRatio(workspaceId, path, ratio); }
+  updateGridRatio(workspaceId: string, path: number[], gridKey: GridRatioKey, ratio: number): void { updateGridRatioImpl(this, workspaceId, path, gridKey, ratio); }
   setZoomedPane(workspaceId: string, terminalId: string | null): void { setZoomedPaneImpl(this, workspaceId, terminalId); }
   getZoomedPane(workspaceId: string): string | null { return getZoomedPaneImpl(this, workspaceId); }
   swapPanes(workspaceId: string, idA: string, idB: string): void { swapPanesImpl(this, workspaceId, idA, idB); }
