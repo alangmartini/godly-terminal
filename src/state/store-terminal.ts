@@ -75,9 +75,12 @@ export function updateTerminalImpl(store: Store, id: string, updates: Partial<Te
   });
 }
 
-export function removeTerminalImpl(store: Store, id: string): void {
+export function removeTerminalImpl(store: Store, id: string, force = false): void {
   const state = store.getState();
   const terminal = state.terminals.find(t => t.id === id);
+
+  // Pinned tabs cannot be closed unless explicitly forced (unpin first)
+  if (terminal?.pinned && !force) return;
 
   // Capture metadata for recently-closed stack before removing
   if (terminal && terminal.paneType !== 'figma') {
@@ -90,7 +93,6 @@ export function removeTerminalImpl(store: Store, id: string): void {
       closedAt: Date.now(),
     });
   }
-
   const remainingTerminals = state.terminals.filter(t => t.id !== id);
 
   let newActiveId = state.activeTerminalId;
@@ -312,4 +314,19 @@ export function reorderTerminalsImpl(store: Store, workspaceId: string, tabOrder
     }),
   });
   store.enforceSplitAdjacency(workspaceId);
+}
+
+export function togglePinTabImpl(store: Store, terminalId: string): void {
+  const state = store.getState();
+  const terminal = state.terminals.find(t => t.id === terminalId);
+  if (!terminal) return;
+
+  const newPinned = !terminal.pinned;
+
+  // Update the pinned state
+  store.setState({
+    terminals: state.terminals.map(t =>
+      t.id === terminalId ? { ...t, pinned: newPinned } : t
+    ),
+  });
 }

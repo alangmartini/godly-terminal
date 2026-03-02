@@ -347,7 +347,13 @@ export class TabBar {
   private render() {
     const state = store.getState();
     const wsId = state.activeWorkspaceId || '';
-    const terminals = store.getWorkspaceTerminals(wsId);
+    const rawTerminals = store.getWorkspaceTerminals(wsId);
+    // Sort pinned tabs first, preserving relative order within each group
+    const terminals = [...rawTerminals].sort((a, b) => {
+      const ap = a.pinned ? 0 : 1;
+      const bp = b.pinned ? 0 : 1;
+      return ap - bp;
+    });
     const items = this.buildRenderItems(terminals, wsId);
 
     const currentIds = items.map(item => item.id);
@@ -440,15 +446,36 @@ export class TabBar {
       }
     }
 
+    // Pinned state
+    const isPinned = !!terminal.pinned;
+    tab.classList.toggle('pinned', isPinned);
+
+    // Pin indicator
+    let pinIndicator = tab.querySelector('.tab-pin-indicator') as HTMLElement | null;
+    if (isPinned && !pinIndicator) {
+      pinIndicator = document.createElement('span');
+      pinIndicator.className = 'tab-pin-indicator';
+      pinIndicator.textContent = '\uD83D\uDCCC'; // 📌
+      tab.insertBefore(pinIndicator, tab.firstChild);
+    } else if (!isPinned && pinIndicator) {
+      pinIndicator.remove();
+    }
+
+    // Hide close button on pinned tabs
+    const closeBtn = tab.querySelector('.tab-close') as HTMLElement | null;
+    if (closeBtn) {
+      closeBtn.style.display = isPinned ? 'none' : '';
+    }
+
     const hasBadge = notificationStore.hasBadge(terminal.id) && !isActive;
     const existingBadge = tab.querySelector('.tab-notification-badge');
     if (hasBadge && !existingBadge) {
       const badge = document.createElement('span');
       badge.className = 'tab-notification-badge';
       // Insert before close button
-      const closeBtn = tab.querySelector('.tab-close');
-      if (closeBtn) {
-        tab.insertBefore(badge, closeBtn);
+      const closeBtnRef = tab.querySelector('.tab-close');
+      if (closeBtnRef) {
+        tab.insertBefore(badge, closeBtnRef);
       } else {
         tab.appendChild(badge);
       }
@@ -471,6 +498,19 @@ export class TabBar {
     }
     tab.dataset.terminalId = terminal.id;
 
+    const isPinned = !!terminal.pinned;
+    if (isPinned) {
+      tab.classList.add('pinned');
+    }
+
+    // Pin indicator (before title)
+    if (isPinned) {
+      const pinIndicator = document.createElement('span');
+      pinIndicator.className = 'tab-pin-indicator';
+      pinIndicator.textContent = '\uD83D\uDCCC'; // 📌
+      tab.appendChild(pinIndicator);
+    }
+
     const displayName = getDisplayName(terminal);
 
     const title = document.createElement('span');
@@ -487,6 +527,9 @@ export class TabBar {
     const closeBtn = document.createElement('span');
     closeBtn.className = 'tab-close';
     closeBtn.textContent = '\u00d7';
+    if (isPinned) {
+      closeBtn.style.display = 'none';
+    }
     closeBtn.onclick = (e) => {
       e.stopPropagation();
       this.handleCloseTab(terminal.id);
@@ -717,6 +760,8 @@ export class TabBar {
 
   private async handleCloseTab(terminalId: string) {
     const terminal = store.getState().terminals.find(t => t.id === terminalId);
+    // Pinned tabs cannot be closed
+    if (terminal?.pinned) return;
     // Figma panes have no daemon session — just remove from store
     if (terminal?.paneType !== 'figma') {
       await terminalService.closeTerminal(terminalId);
@@ -782,6 +827,16 @@ export class TabBar {
       }
     };
     menu.appendChild(renameItem);
+
+    // Pin/Unpin option
+    const pinItem = document.createElement('div');
+    pinItem.className = 'context-menu-item';
+    pinItem.textContent = terminal.pinned ? 'Unpin Tab' : 'Pin Tab';
+    pinItem.onclick = () => {
+      menu.remove();
+      store.togglePinTab(terminal.id);
+    };
+    menu.appendChild(pinItem);
 
     // Split options
     const state = store.getState();
@@ -854,18 +909,21 @@ export class TabBar {
     };
     menu.appendChild(copyInfoItem);
 
-    const separator = document.createElement('div');
-    separator.className = 'context-menu-separator';
-    menu.appendChild(separator);
+    // Only show close option for unpinned tabs
+    if (!terminal.pinned) {
+      const separator = document.createElement('div');
+      separator.className = 'context-menu-separator';
+      menu.appendChild(separator);
 
-    const closeItem = document.createElement('div');
-    closeItem.className = 'context-menu-item danger';
-    closeItem.textContent = 'Close';
-    closeItem.onclick = () => {
-      menu.remove();
-      this.handleCloseTab(terminal.id);
-    };
-    menu.appendChild(closeItem);
+      const closeItem = document.createElement('div');
+      closeItem.className = 'context-menu-item danger';
+      closeItem.textContent = 'Close';
+      closeItem.onclick = () => {
+        menu.remove();
+        this.handleCloseTab(terminal.id);
+      };
+      menu.appendChild(closeItem);
+    }
 
     document.body.appendChild(menu);
 
