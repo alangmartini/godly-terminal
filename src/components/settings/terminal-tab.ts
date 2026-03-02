@@ -378,6 +378,38 @@ export class TerminalTab implements SettingsTabProvider {
     splitSection.appendChild(splitRadioGroup);
     content.appendChild(splitSection);
 
+    // ── Confirm Quit section ───────────────────────────────────
+    const quitSection = document.createElement('div');
+    quitSection.className = 'settings-section';
+
+    const quitTitle = document.createElement('div');
+    quitTitle.className = 'settings-section-title';
+    quitTitle.textContent = 'Window Close';
+    quitSection.appendChild(quitTitle);
+
+    const quitRow = document.createElement('div');
+    quitRow.className = 'shortcut-row';
+    const quitLabel = document.createElement('span');
+    quitLabel.className = 'shortcut-label';
+    quitLabel.textContent = 'Confirm before quitting with active sessions';
+    quitRow.appendChild(quitLabel);
+    const quitCheckbox = document.createElement('input');
+    quitCheckbox.type = 'checkbox';
+    quitCheckbox.className = 'notification-checkbox';
+    quitCheckbox.checked = terminalSettingsStore.getConfirmQuit();
+    quitCheckbox.onchange = () => {
+      terminalSettingsStore.setConfirmQuit(quitCheckbox.checked);
+    };
+    quitRow.appendChild(quitCheckbox);
+    quitSection.appendChild(quitRow);
+
+    const quitDesc = document.createElement('div');
+    quitDesc.className = 'settings-description';
+    quitDesc.textContent = 'When enabled, a confirmation dialog appears before closing the window if there are active terminal sessions.';
+    quitSection.appendChild(quitDesc);
+
+    content.appendChild(quitSection);
+
     // ── CMD Aliases section ────────────────────────────────────
     const aliasSection = document.createElement('div');
     aliasSection.className = 'settings-section';

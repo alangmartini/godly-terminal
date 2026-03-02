@@ -311,6 +311,9 @@ export class App {
     // Initialize terminal service
     await terminalService.init();
 
+    // Listen for quit confirmation requests from backend (on window close)
+    await this.setupConfirmQuitListener();
+
     // Listen for scrollback save requests from backend (on window close)
     await this.setupScrollbackSaveListener();
 
@@ -646,6 +649,30 @@ export class App {
     } catch (error) {
       console.error('[App] Failed to clear split view from backend:', error);
     }
+  }
+
+  private async setupConfirmQuitListener() {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen<{ active_session_count: number }>('confirm-quit', async (event) => {
+      const { active_session_count } = event.payload;
+      const { invoke } = await import('@tauri-apps/api/core');
+
+      // Skip dialog if setting is disabled or no active sessions
+      if (!terminalSettingsStore.getConfirmQuit() || active_session_count === 0) {
+        await invoke('confirm_quit');
+        return;
+      }
+
+      // Show confirmation dialog
+      const { showQuitConfirmDialog } = await import('./dialogs');
+      const confirmed = await showQuitConfirmDialog(active_session_count);
+
+      if (confirmed) {
+        await invoke('confirm_quit');
+      } else {
+        await invoke('cancel_quit');
+      }
+    });
   }
 
   private async setupScrollbackSaveListener() {
