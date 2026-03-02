@@ -140,6 +140,9 @@ pub struct Layout {
     /// Recursive layout trees per workspace (replaces flat split_views).
     #[serde(default)]
     pub layout_trees: HashMap<String, LayoutNode>,
+    /// Window geometry and monitor for cross-session restoration.
+    #[serde(default)]
+    pub window_state: Option<WindowState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +158,17 @@ pub struct TerminalInfo {
     pub worktree_path: Option<String>,
     #[serde(default)]
     pub worktree_branch: Option<String>,
+}
+
+/// Window geometry and monitor identity for cross-session restoration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowState {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub maximized: bool,
+    pub monitor_name: Option<String>,
 }
 
 /// Metadata about a daemon session tracked by the Tauri app (for persistence).
@@ -178,6 +192,7 @@ impl Default for Layout {
             active_workspace_id: None,
             split_views: HashMap::new(),
             layout_trees: HashMap::new(),
+            window_state: None,
         }
     }
 }
@@ -346,6 +361,7 @@ mod tests {
             active_workspace_id: Some("ws-1".to_string()),
             split_views: HashMap::new(),
             layout_trees: HashMap::new(),
+            window_state: None,
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -399,6 +415,7 @@ mod tests {
             active_workspace_id: Some("ws-abc123".to_string()),
             split_views: HashMap::new(),
             layout_trees: HashMap::new(),
+            window_state: None,
         };
 
         // Serialize to JSON (simulates save)
@@ -453,6 +470,7 @@ mod tests {
             active_workspace_id: Some("ws-1".to_string()),
             split_views: HashMap::new(),
             layout_trees: HashMap::new(),
+            window_state: None,
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -621,6 +639,7 @@ mod tests {
             active_workspace_id: Some("ws-1".to_string()),
             split_views,
             layout_trees: HashMap::new(),
+            window_state: None,
         };
 
         let json = serde_json::to_string(&layout).unwrap();
@@ -727,6 +746,7 @@ mod tests {
             active_workspace_id: None,
             split_views: HashMap::new(),
             layout_trees: HashMap::new(),
+            window_state: None,
         };
 
         let json = serde_json::to_string(&layout).unwrap();
