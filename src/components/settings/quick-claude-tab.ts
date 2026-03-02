@@ -7,7 +7,7 @@ import {
   type LaunchStep,
   type LaunchStepType,
 } from '../../state/quick-claude-settings-store';
-import { aiToolsSettingsStore } from '../../state/ai-tools-settings-store';
+import { aiToolsSettingsStore, type AgentDefinition } from '../../state/ai-tools-settings-store';
 import type { SettingsTabProvider, SettingsDialogContext } from './types';
 
 // ── Step type metadata ──────────────────────────────────────────────
@@ -51,6 +51,7 @@ export class QuickClaudeTab implements SettingsTabProvider {
     const renderList = () => {
       editingPresetId = null;
       content.textContent = '';
+      this.renderAgentsSection(content);
       this.renderPresetList(content, (presetId) => {
         editingPresetId = presetId;
         renderEditor();
@@ -68,9 +69,198 @@ export class QuickClaudeTab implements SettingsTabProvider {
     const unsub = quickClaudeSettingsStore.subscribe(() => {
       if (!editingPresetId) renderList();
     });
-    (content as any).__qcUnsub = unsub;
+    const unsub2 = aiToolsSettingsStore.subscribe(() => {
+      if (!editingPresetId) renderList();
+    });
+    (content as any).__qcUnsub = () => { unsub(); unsub2(); };
 
     return content;
+  }
+
+  // ── Agents Section ─────────────────────────────────────────────────
+
+  private renderAgentsSection(container: HTMLElement): void {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    section.style.marginBottom = '24px';
+
+    const header = document.createElement('div');
+    header.className = 'flow-list-header';
+
+    const title = document.createElement('div');
+    title.className = 'settings-section-title';
+    title.textContent = 'Agents';
+    title.style.marginBottom = '0';
+    header.appendChild(title);
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'flow-header-actions';
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'flow-btn flow-btn-primary';
+    addBtn.textContent = 'New Agent';
+    addBtn.addEventListener('click', () => {
+      const id = `custom-${Date.now()}`;
+      aiToolsSettingsStore.addCustomTool({
+        id,
+        name: '',
+        binaryPath: '',
+        launchCommand: '',
+        branchSuffix: '',
+      });
+    });
+    headerActions.appendChild(addBtn);
+    header.appendChild(headerActions);
+    section.appendChild(header);
+
+    const desc = document.createElement('div');
+    desc.className = 'settings-description';
+    desc.textContent = 'Configure AI agents available for Quick Claude presets. Edit built-in agents or add your own custom tools.';
+    section.appendChild(desc);
+
+    const agentsList = document.createElement('div');
+    agentsList.className = 'qc-agents-list';
+
+    const agents = aiToolsSettingsStore.getAllAgentDefinitions();
+
+    for (const agent of agents) {
+      agentsList.appendChild(this.createAgentDefinitionCard(agent));
+    }
+
+    section.appendChild(agentsList);
+    container.appendChild(section);
+  }
+
+  private createAgentDefinitionCard(agent: AgentDefinition): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'qc-agent-def-card';
+
+    // Header row: name + badge + actions
+    const headerRow = document.createElement('div');
+    headerRow.className = 'qc-agent-def-header';
+
+    const nameCol = document.createElement('div');
+    nameCol.className = 'qc-agent-def-name-col';
+
+    if (agent.builtin) {
+      const nameLabel = document.createElement('span');
+      nameLabel.className = 'qc-agent-def-name';
+      nameLabel.textContent = agent.name;
+      nameCol.appendChild(nameLabel);
+
+      const badge = document.createElement('span');
+      badge.className = 'qc-agent-def-badge';
+      badge.textContent = 'Built-in';
+      nameCol.appendChild(badge);
+    } else {
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'flow-input';
+      nameInput.value = agent.name;
+      nameInput.placeholder = 'Agent name';
+      nameInput.style.fontWeight = '600';
+      nameInput.addEventListener('change', () => {
+        aiToolsSettingsStore.updateCustomTool(agent.id, { name: nameInput.value.trim() });
+      });
+      nameCol.appendChild(nameInput);
+    }
+    headerRow.appendChild(nameCol);
+
+    // Delete button for custom agents
+    if (!agent.builtin) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'flow-btn flow-btn-icon flow-btn-danger-icon';
+      delBtn.title = 'Remove agent';
+      delBtn.textContent = '\u2715';
+      delBtn.addEventListener('click', () => {
+        aiToolsSettingsStore.removeCustomTool(agent.id);
+      });
+      headerRow.appendChild(delBtn);
+    }
+
+    card.appendChild(headerRow);
+
+    // Fields grid
+    const fields = document.createElement('div');
+    fields.className = 'qc-agent-def-fields';
+
+    // Binary path
+    const binaryRow = this.createAgentDefField(
+      'Binary',
+      agent.binaryPath,
+      agent.builtin ? agent.binaryPath : 'e.g. aider.exe',
+      (val) => {
+        if (agent.builtin) {
+          aiToolsSettingsStore.setBuiltInOverride(agent.id, { binaryPath: val });
+        } else {
+          aiToolsSettingsStore.updateCustomTool(agent.id, { binaryPath: val });
+        }
+      },
+    );
+    fields.appendChild(binaryRow);
+
+    // Args
+    const argsRow = this.createAgentDefField(
+      'Args',
+      agent.args,
+      agent.builtin ? '(default)' : 'e.g. --prompt "{prompt}"',
+      (val) => {
+        if (agent.builtin) {
+          aiToolsSettingsStore.setBuiltInOverride(agent.id, { args: val });
+        } else {
+          aiToolsSettingsStore.updateCustomTool(agent.id, { launchCommand: val });
+        }
+      },
+    );
+    fields.appendChild(argsRow);
+
+    // Branch suffix
+    const suffixRow = this.createAgentDefField(
+      'Branch Suffix',
+      agent.branchSuffix,
+      'e.g. -cc',
+      (val) => {
+        aiToolsSettingsStore.setBranchSuffix(agent.id, val);
+        if (!agent.builtin) {
+          aiToolsSettingsStore.updateCustomTool(agent.id, { branchSuffix: val });
+        }
+      },
+      '100px',
+    );
+    fields.appendChild(suffixRow);
+
+    card.appendChild(fields);
+    return card;
+  }
+
+  private createAgentDefField(
+    label: string,
+    value: string,
+    placeholder: string,
+    onChange: (val: string) => void,
+    width?: string,
+  ): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'qc-agent-def-field';
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'qc-agent-def-field-label';
+    labelEl.textContent = label;
+    row.appendChild(labelEl);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'flow-input';
+    input.value = value;
+    input.placeholder = placeholder;
+    if (width) input.style.width = width;
+    else input.style.flex = '1';
+    input.addEventListener('change', () => {
+      onChange(input.value.trim());
+    });
+    row.appendChild(input);
+
+    return row;
   }
 
   // ── List View ─────────────────────────────────────────────────────
