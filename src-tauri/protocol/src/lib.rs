@@ -8,14 +8,14 @@ pub mod messages;
 pub mod types;
 pub mod whisper;
 
-pub use frame::{read_daemon_message, read_daemon_message_ext, read_message, read_request, write_daemon_message, write_message, write_request, ReadResult};
+pub use frame::{read_daemon_message, read_daemon_message_ext, read_message, read_request, read_request_with_id, write_daemon_message, write_daemon_message_with_id, write_message, write_request, write_request_with_id, ReadResult};
 pub use frame::{
     read_shim_frame, write_shim_binary, write_shim_json, ShimFrame,
     TAG_SHIM_WRITE, TAG_SHIM_BUFFER_DATA, TAG_SHIM_OUTPUT,
 };
 pub use layout_tree::{LayoutNode, SplitDirection};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
-pub use messages::{DaemonMessage, Event, Request, Response};
+pub use messages::{DaemonMessage, Event, Request, RequestEnvelope, Response};
 pub use messages::{ShimRequest, ShimResponse};
 pub use types::{GridData, SessionInfo, ShellType};
 pub use types::ShimMetadata;
