@@ -584,21 +584,69 @@ pub(crate) fn quick_claude_background(
         eprintln!("[quick_claude] Prompt text not echoed within 30s, sending Enter anyway");
     }
 
-    // Step 5c: Small buffer after echo detection, then send Enter.
+    // Step 5c: Small buffer after echo detection.
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let submit_req = Request::Write {
-        session_id: terminal_id.clone(),
-        data: b"\r".to_vec(),
-    };
-    if let Err(e) = daemon.send_request(&submit_req) {
-        eprintln!("[quick_claude] Failed to send submit key: {}", e);
-        return;
+    // Step 6: Send Enter with verify-and-retry.
+    //
+    // Bug #506: A single fire-and-forget Enter is unreliable. When Enter arrives
+    // during an ink TUI state transition (re-render, async init), it's consumed
+    // but not treated as submit. The prompt sits in the input area forever.
+    //
+    // Fix: After sending Enter, read the terminal grid and check if the prompt
+    // text has disappeared. When Claude Code processes Enter as submit, ink clears
+    // the input area and shows the processing UI — the prompt is no longer visible.
+    // If still visible after a delay, Enter was lost; retry.
+    const MAX_ENTER_RETRIES: u32 = 5;
+    const ENTER_VERIFY_DELAY_MS: u64 = 500;
+    const ENTER_RETRY_BACKOFF_MS: u64 = 300;
+
+    let mut enter_succeeded = false;
+    for attempt in 0..MAX_ENTER_RETRIES {
+        let submit_req = Request::Write {
+            session_id: terminal_id.clone(),
+            data: b"\r".to_vec(),
+        };
+        if let Err(e) = daemon.send_request(&submit_req) {
+            eprintln!("[quick_claude] Failed to send submit key (attempt {}): {}", attempt + 1, e);
+            return;
+        }
+
+        // Wait for the TUI to process Enter
+        std::thread::sleep(std::time::Duration::from_millis(ENTER_VERIFY_DELAY_MS));
+
+        // Check if the prompt text has disappeared from the visible grid
+        if prompt_disappeared_from_grid(&daemon, &terminal_id, &search_prefix) {
+            eprintln!(
+                "[quick_claude] Enter verified on attempt {} — prompt no longer visible in grid",
+                attempt + 1
+            );
+            enter_succeeded = true;
+            break;
+        }
+
+        // Prompt still visible — Enter was likely lost during a TUI state transition
+        if attempt + 1 < MAX_ENTER_RETRIES {
+            let backoff = ENTER_RETRY_BACKOFF_MS * (attempt as u64 + 1);
+            eprintln!(
+                "[quick_claude] Enter attempt {} — prompt still visible, retrying in {}ms",
+                attempt + 1,
+                backoff
+            );
+            std::thread::sleep(std::time::Duration::from_millis(backoff));
+        }
+    }
+
+    if !enter_succeeded {
+        eprintln!(
+            "[quick_claude] Enter not verified after {} attempts — prompt may still be visible",
+            MAX_ENTER_RETRIES
+        );
     }
 
     eprintln!("[quick_claude] Prompt delivered to {}", display_name);
 
-    // Step 6: Emit toast notification
+    // Step 7: Emit toast notification
     #[derive(serde::Serialize, Clone)]
     struct QuickClaudeReadyPayload {
         terminal_id: String,
@@ -842,6 +890,30 @@ fn poll_text_in_output(
             return false;
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// Check if the given text has disappeared from the visible terminal grid.
+/// Used by the Enter verify-and-retry loop: when Claude Code processes Enter
+/// as submit, ink clears the input area — the prompt text is no longer visible.
+/// Returns true if the text is NOT found in the grid (Enter was processed).
+fn prompt_disappeared_from_grid(
+    daemon: &DaemonClient,
+    session_id: &str,
+    search_text: &str,
+) -> bool {
+    let grid_req = Request::ReadGrid {
+        session_id: session_id.to_string(),
+    };
+    match daemon.send_request(&grid_req) {
+        Ok(Response::Grid { grid }) => {
+            let screen_text = grid.rows.join(" ");
+            !screen_text.contains(search_text)
+        }
+        _ => {
+            // Can't read grid — assume Enter worked to avoid infinite retries
+            true
+        }
     }
 }
 
