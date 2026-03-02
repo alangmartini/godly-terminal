@@ -42,6 +42,15 @@ export type { LayoutNode } from './split-types';
 
 export type PaneType = 'terminal' | 'figma';
 
+/** Metadata captured when a terminal is closed, used for Ctrl+Shift+T reopen. */
+export interface RecentlyClosedSession {
+  workspaceId: string;
+  name: string;
+  cwd: string | null;
+  shellType: ShellType | null;
+  closedAt: number;
+}
+
 export interface Terminal {
   id: string;
   workspaceId: string;
@@ -113,6 +122,7 @@ export class Store {
 
   private listeners: Set<Listener> = new Set();
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
+  private previousActiveTerminalByWorkspace: Map<string, string> = new Map();
   private pendingNotify = false;
   /** Suspended layout trees, keyed by workspaceId. Stored when navigating to a
    *  tab outside the split so the split can be restored on return. */
@@ -120,6 +130,10 @@ export class Store {
   /** Sessions currently resumed (not paused). Tracks which sessions we've
    *  sent resumeSession to, so we can pause them when they become invisible. */
   private resumedSessions: Set<string> = new Set();
+  /** LIFO stack of recently closed sessions for Ctrl+Shift+T reopen. */
+  private recentlyClosedSessions: RecentlyClosedSession[] = [];
+  /** Per-workspace terminal access history (MRU order, most recent first). Max 50 per workspace. */
+  private terminalAccessHistory: Map<string, string[]> = new Map();
 
   // ---------------------------------------------------------------------------
   // Core state management
@@ -145,8 +159,11 @@ export class Store {
       zoomedPanes: {},
     };
     this.lastActiveTerminalByWorkspace.clear();
+    this.previousActiveTerminalByWorkspace.clear();
     this.resumedSessions.clear();
     this.suspendedLayoutTrees.clear();
+    this.recentlyClosedSessions = [];
+    this.terminalAccessHistory.clear();
     this.notify();
   }
 
@@ -180,11 +197,20 @@ export class Store {
   }
 
   setLastActiveTerminal(wsId: string, termId: string): void {
+    const current = this.lastActiveTerminalByWorkspace.get(wsId);
+    if (current && current !== termId) {
+      this.previousActiveTerminalByWorkspace.set(wsId, current);
+    }
     this.lastActiveTerminalByWorkspace.set(wsId, termId);
+  }
+
+  getPreviousActiveTerminal(wsId: string): string | null {
+    return this.previousActiveTerminalByWorkspace.get(wsId) ?? null;
   }
 
   deleteLastActiveTerminal(wsId: string): void {
     this.lastActiveTerminalByWorkspace.delete(wsId);
+    this.previousActiveTerminalByWorkspace.delete(wsId);
   }
 
   getSuspendedLayoutTree(wsId: string): { tree: LayoutNode; splitView?: SplitView; zoomedPane?: string } | undefined {
@@ -209,6 +235,61 @@ export class Store {
 
   hasResumedSession(id: string): boolean {
     return this.resumedSessions.has(id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recently closed sessions (for Ctrl+Shift+T reopen)
+  // ---------------------------------------------------------------------------
+
+  private static MAX_RECENTLY_CLOSED = 20;
+
+  pushRecentlyClosed(entry: RecentlyClosedSession): void {
+    this.recentlyClosedSessions.push(entry);
+    if (this.recentlyClosedSessions.length > Store.MAX_RECENTLY_CLOSED) {
+      this.recentlyClosedSessions.splice(0, this.recentlyClosedSessions.length - Store.MAX_RECENTLY_CLOSED);
+    }
+  }
+
+  popRecentlyClosed(): RecentlyClosedSession | undefined {
+    return this.recentlyClosedSessions.pop();
+  }
+
+  getRecentlyClosedCount(): number {
+    return this.recentlyClosedSessions.length;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Terminal access history (for Ctrl+Tab recency switcher)
+  // ---------------------------------------------------------------------------
+
+  private static MAX_ACCESS_HISTORY = 50;
+
+  /** Push a terminal ID to the front of a workspace's access history (removing duplicates). */
+  touchAccessHistory(wsId: string, termId: string): void {
+    let history = this.terminalAccessHistory.get(wsId);
+    if (!history) {
+      history = [];
+      this.terminalAccessHistory.set(wsId, history);
+    }
+    const idx = history.indexOf(termId);
+    if (idx !== -1) history.splice(idx, 1);
+    history.unshift(termId);
+    if (history.length > Store.MAX_ACCESS_HISTORY) {
+      history.length = Store.MAX_ACCESS_HISTORY;
+    }
+  }
+
+  /** Get the access history for a workspace (MRU order). */
+  getAccessHistory(wsId: string): string[] {
+    return this.terminalAccessHistory.get(wsId) ?? [];
+  }
+
+  /** Remove a terminal from a workspace's access history. */
+  removeFromAccessHistory(wsId: string, termId: string): void {
+    const history = this.terminalAccessHistory.get(wsId);
+    if (!history) return;
+    const idx = history.indexOf(termId);
+    if (idx !== -1) history.splice(idx, 1);
   }
 
   // ---------------------------------------------------------------------------

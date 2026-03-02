@@ -25,6 +25,7 @@ import { ToastContainer } from './ToastContainer';
 import { PerfOverlay } from './PerfOverlay';
 import { onDragMove, onDragDrop } from '../state/drag-state';
 import { SplitContainer } from './SplitContainer';
+import { RecencySwitcher } from './RecencySwitcher';
 import { terminalIds, fromLegacySplitView, swapTerminals } from '../state/split-types';
 
 // Re-export for backward compatibility (used by test files)
@@ -49,6 +50,7 @@ export class App {
   private zoomedPaneId: string | null = null;
   /** Stores the split ratio before zoom, so it can be restored on unzoom. */
   private preZoomRatio: number | null = null;
+  private recencySwitcher: RecencySwitcher;
   constructor(container: HTMLElement) {
     this.container = container;
 
@@ -87,6 +89,10 @@ export class App {
     mainContent.appendChild(this.terminalContainer);
     this.container.appendChild(mainContent);
     this.toastContainer.mount(document.body);
+
+    // Create and mount recency switcher
+    this.recencySwitcher = new RecencySwitcher();
+    this.recencySwitcher.mount(document.body);
 
     // Subscribe to state changes
     store.subscribe(() => this.handleStateChange());
@@ -303,6 +309,7 @@ export class App {
       setZoomedPaneId: (id) => { this.zoomedPaneId = id; },
       getPreZoomRatio: () => this.preZoomRatio,
       setPreZoomRatio: (ratio) => { this.preZoomRatio = ratio; },
+      getRecencySwitcher: () => this.recencySwitcher,
     });
   }
 
