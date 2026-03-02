@@ -811,6 +811,12 @@ impl DaemonBridge {
                                                 running.store(false, Ordering::Relaxed);
                                                 break;
                                             }
+                                            // DaemonMessage::Response is handled via ReadResult::Response;
+                                            // this arm should never be reached but satisfies exhaustiveness.
+                                            Ok(ReadResult::Message(DaemonMessage::Response(_))) => {
+                                                blog!("WARNING: unexpected DaemonMessage::Response in ReadResult::Message");
+                                                continue;
+                                            }
                                         }
                                     }
                                     PeekResult::Empty => {
@@ -964,6 +970,11 @@ impl DaemonBridge {
                                     }
                                     running.store(false, Ordering::Relaxed);
                                     break;
+                                }
+                                // DaemonMessage::Response is handled via ReadResult::Response;
+                                // this arm should never be reached but satisfies exhaustiveness.
+                                Ok(ReadResult::Message(DaemonMessage::Response(_))) => {
+                                    blog!("WARNING: unexpected DaemonMessage::Response in ReadResult::Message");
                                 }
                             }
                         }
