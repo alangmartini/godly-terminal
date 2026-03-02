@@ -78,6 +78,19 @@ export function updateTerminalImpl(store: Store, id: string, updates: Partial<Te
 export function removeTerminalImpl(store: Store, id: string): void {
   const state = store.getState();
   const terminal = state.terminals.find(t => t.id === id);
+
+  // Capture metadata for recently-closed stack before removing
+  if (terminal && terminal.paneType !== 'figma') {
+    const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
+    store.pushRecentlyClosed({
+      workspaceId: terminal.workspaceId,
+      name: terminal.name,
+      cwd: workspace?.folderPath ?? null,
+      shellType: workspace?.shellType ?? null,
+      closedAt: Date.now(),
+    });
+  }
+
   const remainingTerminals = state.terminals.filter(t => t.id !== id);
 
   let newActiveId = state.activeTerminalId;
@@ -85,7 +98,9 @@ export function removeTerminalImpl(store: Store, id: string): void {
     const sameWorkspace = remainingTerminals.filter(
       t => t.workspaceId === terminal.workspaceId
     );
-    newActiveId = sameWorkspace[0]?.id ?? null;
+    const prevId = store.getPreviousActiveTerminal(terminal.workspaceId);
+    const prevStillExists = prevId && prevId !== id && sameWorkspace.some(t => t.id === prevId);
+    newActiveId = prevStillExists ? prevId : sameWorkspace[0]?.id ?? null;
   }
 
   let layoutTrees = state.layoutTrees;
