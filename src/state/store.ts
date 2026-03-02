@@ -42,6 +42,15 @@ export type { LayoutNode } from './split-types';
 
 export type PaneType = 'terminal' | 'figma';
 
+/** Metadata captured when a terminal is closed, used for Ctrl+Shift+T reopen. */
+export interface RecentlyClosedSession {
+  workspaceId: string;
+  name: string;
+  cwd: string | null;
+  shellType: ShellType | null;
+  closedAt: number;
+}
+
 export interface Terminal {
   id: string;
   workspaceId: string;
@@ -121,6 +130,8 @@ export class Store {
   /** Sessions currently resumed (not paused). Tracks which sessions we've
    *  sent resumeSession to, so we can pause them when they become invisible. */
   private resumedSessions: Set<string> = new Set();
+  /** LIFO stack of recently closed sessions for Ctrl+Shift+T reopen. */
+  private recentlyClosedSessions: RecentlyClosedSession[] = [];
 
   // ---------------------------------------------------------------------------
   // Core state management
@@ -149,6 +160,7 @@ export class Store {
     this.previousActiveTerminalByWorkspace.clear();
     this.resumedSessions.clear();
     this.suspendedLayoutTrees.clear();
+    this.recentlyClosedSessions = [];
     this.notify();
   }
 
@@ -220,6 +232,27 @@ export class Store {
 
   hasResumedSession(id: string): boolean {
     return this.resumedSessions.has(id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recently closed sessions (for Ctrl+Shift+T reopen)
+  // ---------------------------------------------------------------------------
+
+  private static MAX_RECENTLY_CLOSED = 20;
+
+  pushRecentlyClosed(entry: RecentlyClosedSession): void {
+    this.recentlyClosedSessions.push(entry);
+    if (this.recentlyClosedSessions.length > Store.MAX_RECENTLY_CLOSED) {
+      this.recentlyClosedSessions.splice(0, this.recentlyClosedSessions.length - Store.MAX_RECENTLY_CLOSED);
+    }
+  }
+
+  popRecentlyClosed(): RecentlyClosedSession | undefined {
+    return this.recentlyClosedSessions.pop();
+  }
+
+  getRecentlyClosedCount(): number {
+    return this.recentlyClosedSessions.length;
   }
 
   // ---------------------------------------------------------------------------
