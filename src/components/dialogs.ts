@@ -3,6 +3,85 @@ import { aiToolsSettingsStore } from '../state/ai-tools-settings-store';
 import { quickClaudeSettingsStore } from '../state/quick-claude-settings-store';
 
 /**
+ * Show a confirmation dialog before quitting with active sessions.
+ * Returns true if the user confirms, false if cancelled.
+ */
+export function showQuitConfirmDialog(activeSessionCount: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+
+    const title = document.createElement('div');
+    title.className = 'dialog-title';
+    title.textContent = 'Quit Godly Terminal?';
+    dialog.appendChild(title);
+
+    const message = document.createElement('div');
+    message.style.cssText = 'font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;';
+    const sessionWord = activeSessionCount === 1 ? 'session' : 'sessions';
+    message.textContent = `${activeSessionCount} active ${sessionWord} will be lost. Quit anyway?`;
+    dialog.appendChild(message);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'dialog-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dialog-btn dialog-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    buttons.appendChild(cancelBtn);
+
+    const quitBtn = document.createElement('button');
+    quitBtn.className = 'dialog-btn dialog-btn-primary';
+    quitBtn.style.backgroundColor = 'var(--error, #e74c3c)';
+    quitBtn.textContent = 'Quit';
+    buttons.appendChild(quitBtn);
+
+    dialog.appendChild(buttons);
+    overlay.appendChild(dialog);
+
+    const close = () => overlay.remove();
+
+    cancelBtn.onclick = () => {
+      close();
+      resolve(false);
+    };
+
+    quitBtn.onclick = () => {
+      close();
+      resolve(true);
+    };
+
+    // Keyboard handling
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        resolve(false);
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        close();
+        resolve(true);
+      }
+    };
+    dialog.addEventListener('keydown', onKeydown);
+
+    overlay.onclick = (e) => {
+      if (e.target === overlay) {
+        close();
+        resolve(false);
+      }
+    };
+
+    document.body.appendChild(overlay);
+    quitBtn.focus();
+  });
+}
+
+/**
  * Show a prompt dialog for entering a custom worktree branch name.
  * Returns the user's input (empty string = auto-generate), or null if cancelled.
  */

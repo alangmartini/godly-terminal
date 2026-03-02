@@ -1,10 +1,16 @@
 //! Window lifecycle management: close handler with scrollback save coordination
 //! and graceful session detachment.
+//!
+//! When the user closes the window, the frontend is first asked whether to show
+//! a confirmation dialog (based on active session count and user settings).
+//! If confirmed (or skipped), scrollback is saved, sessions are detached, and
+//! the window is destroyed.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
 use tauri::Emitter;
 
 use crate::daemon_client::DaemonClient;
@@ -14,6 +20,22 @@ use crate::state::{AppState, WindowState};
 /// Flag to signal that scrollback save is complete.
 static SCROLLBACK_SAVED: AtomicBool = AtomicBool::new(false);
 
+/// Flag to signal that the user confirmed the quit (or the frontend skipped the dialog).
+static QUIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
+/// Flag to signal that the user cancelled the quit.
+static QUIT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Flag to prevent re-entrant close handling while a confirm dialog is showing.
+static CLOSE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+/// Payload sent with the `confirm-quit` event so the frontend knows how many
+/// active sessions would be lost.
+#[derive(Clone, Serialize)]
+struct ConfirmQuitPayload {
+    active_session_count: usize,
+}
+
 /// Called by the frontend after it finishes persisting scrollback data.
 #[tauri::command]
 pub(crate) fn scrollback_save_complete() {
@@ -21,11 +43,28 @@ pub(crate) fn scrollback_save_complete() {
     SCROLLBACK_SAVED.store(true, Ordering::SeqCst);
 }
 
+/// Called by the frontend when the user confirms the quit (or the setting is
+/// disabled / no active sessions).
+#[tauri::command]
+pub(crate) fn confirm_quit() {
+    eprintln!("[window_lifecycle] Quit confirmed by frontend");
+    QUIT_CONFIRMED.store(true, Ordering::SeqCst);
+}
+
+/// Called by the frontend when the user cancels the quit dialog.
+#[tauri::command]
+pub(crate) fn cancel_quit() {
+    eprintln!("[window_lifecycle] Quit cancelled by frontend");
+    QUIT_CANCELLED.store(true, Ordering::SeqCst);
+}
+
 /// Register the window close handler on the main window.
 ///
-/// On close: requests frontend scrollback save, waits (up to 3s), detaches
-/// all daemon sessions so they survive the app exit, saves layout, then
-/// destroys the window.
+/// Flow:
+/// 1. `CloseRequested` → prevent close, emit `confirm-quit` to frontend
+/// 2. Frontend checks settings/session count → calls `confirm_quit` or `cancel_quit`
+/// 3. If confirmed: emit `request-scrollback-save`, wait, detach, save, destroy
+/// 4. If cancelled: reset state, window stays open
 pub(crate) fn setup_window_close_handler(
     window: &tauri::WebviewWindow,
     state: Arc<AppState>,
@@ -39,26 +78,65 @@ pub(crate) fn setup_window_close_handler(
 
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            // Prevent immediate close
+            // Prevent re-entrant close while a dialog is already showing
+            if CLOSE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+                api.prevent_close();
+                return;
+            }
+
+            // Prevent immediate close — we need to ask the frontend first
             api.prevent_close();
 
-            // Reset the flag
+            // Reset all flags
             SCROLLBACK_SAVED.store(false, Ordering::SeqCst);
+            QUIT_CONFIRMED.store(false, Ordering::SeqCst);
+            QUIT_CANCELLED.store(false, Ordering::SeqCst);
 
-            // Request frontend to save scrollbacks
-            eprintln!("[window_lifecycle] Requesting frontend to save scrollbacks...");
-            let _ = window_for_close.emit("request-scrollback-save", ());
+            // Count active sessions
+            let active_session_count = state_for_close.terminals.read().len();
 
-            // Move the blocking wait to a background thread so the main
-            // thread stays free to process the frontend's IPC callback
-            // (scrollback_save_complete). Previously this busy-waited on
-            // the main thread, deadlocking because the callback could
-            // never be dispatched.
+            // Emit confirm-quit event to frontend with session count
+            eprintln!(
+                "[window_lifecycle] Requesting quit confirmation ({} active sessions)...",
+                active_session_count
+            );
+            let _ = window_for_close.emit(
+                "confirm-quit",
+                ConfirmQuitPayload {
+                    active_session_count,
+                },
+            );
+
+            // Spawn background thread to wait for frontend decision
             let state = state_for_close.clone();
             let daemon = daemon_for_close.clone();
             let handle = handle_for_close.clone();
             let window = window_for_close.clone();
             std::thread::spawn(move || {
+                // Wait for confirm or cancel (max 30s — generous timeout for user interaction)
+                let start = Instant::now();
+                loop {
+                    if QUIT_CONFIRMED.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    if QUIT_CANCELLED.load(Ordering::SeqCst) {
+                        eprintln!("[window_lifecycle] Quit cancelled, window stays open");
+                        CLOSE_IN_PROGRESS.store(false, Ordering::SeqCst);
+                        return;
+                    }
+                    if start.elapsed() > Duration::from_secs(30) {
+                        eprintln!("[window_lifecycle] Quit confirmation timeout, proceeding with close");
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+
+                // --- Confirmed: proceed with graceful shutdown ---
+
+                // Request frontend to save scrollbacks
+                eprintln!("[window_lifecycle] Requesting frontend to save scrollbacks...");
+                let _ = window.emit("request-scrollback-save", ());
+
                 // Wait for scrollback save to complete (max 3 seconds)
                 let start = Instant::now();
                 while !SCROLLBACK_SAVED.load(Ordering::SeqCst) {
@@ -85,6 +163,7 @@ pub(crate) fn setup_window_close_handler(
 
                 // Save layout and close
                 save_on_exit(&handle, &state);
+                CLOSE_IN_PROGRESS.store(false, Ordering::SeqCst);
                 eprintln!("[window_lifecycle] Destroying window...");
                 let _ = window.destroy();
             });
