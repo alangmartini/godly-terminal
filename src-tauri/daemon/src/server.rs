@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use parking_lot::RwLock;
 use tokio::sync::mpsc;
 
-use godly_protocol::{DaemonMessage, Event, Request, Response, read_request, write_daemon_message};
+use godly_protocol::{DaemonMessage, Event, Request, Response, read_request_with_id, write_daemon_message, write_daemon_message_with_id};
 
 use crate::debug_log::daemon_log;
 use crate::handlers;
@@ -445,12 +445,14 @@ async fn handle_client(
     let attached_sessions: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
 
     // Channel: I/O thread -> async handler (incoming requests from client)
-    let (req_tx, mut req_rx) = mpsc::unbounded_channel::<Request>();
+    // Carries (Request, Option<request_id>) for concurrent IPC routing.
+    let (req_tx, mut req_rx) = mpsc::unbounded_channel::<(Request, Option<u32>)>();
 
     // Channel: async handler -> I/O thread (responses only, HIGH PRIORITY)
     // Responses are always written before events to prevent user input from
     // timing out when the terminal is producing heavy output (e.g. Claude CLI).
-    let (resp_tx, resp_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+    // Carries (DaemonMessage, Option<request_id>) for concurrent IPC routing.
+    let (resp_tx, resp_rx) = mpsc::unbounded_channel::<(DaemonMessage, Option<u32>)>();
 
     // Channel: session forwarding tasks -> I/O thread (output events, NORMAL PRIORITY)
     let (event_tx, event_rx) = mpsc::channel::<DaemonMessage>(1024);
@@ -471,7 +473,7 @@ async fn handle_client(
     // Async handler loop: process requests from the I/O thread
     eprintln!("[daemon] Entering request loop for client");
     daemon_log!("Entering request loop for client");
-    while let Some(request) = req_rx.recv().await {
+    while let Some((request, request_id)) = req_rx.recv().await {
         // If the I/O thread has died (pipe closed/broken), stop processing.
         // Without this check, a stuck handler keeps accumulating when the bridge
         // reconnects — each new client's handler blocks on session locks while
@@ -482,7 +484,7 @@ async fn handle_client(
         }
 
         *last_activity.write() = Instant::now();
-        daemon_log!("Received request: {:?}", request);
+        daemon_log!("Received request: {:?} (request_id={:?})", request, request_id);
 
         let response = handle_request(
             &request,
@@ -495,10 +497,9 @@ async fn handle_client(
         daemon_log!("Sending response for {:?}", std::mem::discriminant(&request));
 
         // Send response to the HIGH PRIORITY channel so it's written before events.
-        // Bug fix: previously responses shared a channel with output events, causing
-        // user input to time out during heavy terminal output (e.g. Claude CLI).
+        // Wraps (DaemonMessage, Option<request_id>) so io_thread can echo the ID.
         let msg = DaemonMessage::Response(response);
-        if resp_tx.send(msg).is_err() {
+        if resp_tx.send((msg, request_id)).is_err() {
             daemon_log!("resp_tx send failed, breaking handler loop");
             break;
         }
@@ -547,8 +548,8 @@ const MAX_WRITES_PER_ITERATION: usize = 128;
 /// This prevents user input responses from being delayed by output event floods.
 fn io_thread(
     mut pipe: std::fs::File,
-    req_tx: mpsc::UnboundedSender<Request>,
-    mut resp_rx: mpsc::UnboundedReceiver<DaemonMessage>,
+    req_tx: mpsc::UnboundedSender<(Request, Option<u32>)>,
+    mut resp_rx: mpsc::UnboundedReceiver<(DaemonMessage, Option<u32>)>,
     mut event_rx: mpsc::Receiver<DaemonMessage>,
     io_running: Arc<AtomicBool>,
     server_running: Arc<AtomicBool>,
@@ -574,8 +575,8 @@ fn io_thread(
             PeekResult::Data => {
                 // Read the request from the pipe
                 let read_start = Instant::now();
-                match read_request(&mut pipe) {
-                    Ok(Some(request)) => {
+                match read_request_with_id(&mut pipe) {
+                    Ok(Some((request, request_id))) => {
                         total_reads += 1;
                         let elapsed = read_start.elapsed();
                         if elapsed > Duration::from_millis(50) {
@@ -594,7 +595,7 @@ fn io_thread(
                             Request::Resize { session_id, rows, cols } => {
                                 let response = handlers::resize::handle_raw(&sessions, session_id, *rows, *cols);
                                 let msg = DaemonMessage::Response(response);
-                                if write_daemon_message(&mut pipe, &msg).is_err() {
+                                if write_daemon_message_with_id(&mut pipe, &msg, request_id).is_err() {
                                     daemon_log!("Write error on direct Resize response, stopping");
                                     io_running.store(false, Ordering::Relaxed);
                                     break;
@@ -606,7 +607,7 @@ fn io_thread(
                             Request::PauseSession { session_id } => {
                                 let response = handlers::pause_session::handle_raw(&sessions, session_id);
                                 let msg = DaemonMessage::Response(response);
-                                if write_daemon_message(&mut pipe, &msg).is_err() {
+                                if write_daemon_message_with_id(&mut pipe, &msg, request_id).is_err() {
                                     daemon_log!("Write error on direct PauseSession response, stopping");
                                     io_running.store(false, Ordering::Relaxed);
                                     break;
@@ -618,7 +619,7 @@ fn io_thread(
                             Request::ResumeSession { session_id } => {
                                 let response = handlers::resume_session::handle_raw(&sessions, session_id);
                                 let msg = DaemonMessage::Response(response);
-                                if write_daemon_message(&mut pipe, &msg).is_err() {
+                                if write_daemon_message_with_id(&mut pipe, &msg, request_id).is_err() {
                                     daemon_log!("Write error on direct ResumeSession response, stopping");
                                     io_running.store(false, Ordering::Relaxed);
                                     break;
@@ -629,7 +630,8 @@ fn io_thread(
                             }
                             _ => {
                                 // All other requests go through the async handler
-                                if req_tx.send(request).is_err() {
+                                // Thread request_id alongside the request
+                                if req_tx.send((request, request_id)).is_err() {
                                     eprintln!("[daemon-io] Request channel closed, stopping");
                                     daemon_log!("Request channel closed, stopping");
                                     break;
@@ -668,9 +670,9 @@ fn io_thread(
         // directly in step 1, so this handles only async-handler responses.
         loop {
             match resp_rx.try_recv() {
-                Ok(msg) => {
+                Ok((msg, request_id)) => {
                     let write_start = Instant::now();
-                    if write_daemon_message(&mut pipe, &msg).is_err() {
+                    if write_daemon_message_with_id(&mut pipe, &msg, request_id).is_err() {
                         eprintln!("[daemon-io] Write error on response, stopping");
                         daemon_log!("Write error on response, stopping");
                         io_running.store(false, Ordering::Relaxed);
@@ -903,8 +905,8 @@ mod tests {
         let client_file = client_thread.join().unwrap();
 
         // Set up channels
-        let (req_tx, _req_rx) = mpsc::unbounded_channel::<Request>();
-        let (resp_tx, resp_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+        let (req_tx, _req_rx) = mpsc::unbounded_channel::<(Request, Option<u32>)>();
+        let (resp_tx, resp_rx) = mpsc::unbounded_channel::<(DaemonMessage, Option<u32>)>();
         let (event_tx, event_rx) = mpsc::channel::<DaemonMessage>(1024);
         let io_running = Arc::new(AtomicBool::new(true));
         let server_running = Arc::new(AtomicBool::new(true));
@@ -920,7 +922,7 @@ mod tests {
                 .unwrap();
         }
         resp_tx
-            .send(DaemonMessage::Response(Response::Pong))
+            .send((DaemonMessage::Response(Response::Pong), None))
             .unwrap();
 
         // Run io_thread — it will write to the server side of the pipe
