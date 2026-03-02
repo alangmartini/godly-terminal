@@ -7,6 +7,7 @@ import { workspaceService } from '../services/workspace-service';
 import { keybindingStore } from '../state/keybinding-store';
 import { perfTracer } from '../utils/PerfTracer';
 import { PerfOverlay } from '../components/PerfOverlay';
+import type { RecencySwitcher } from '../components/RecencySwitcher';
 import { shellTypeToProcessName } from '../utils/shell-type-utils';
 import { terminalIds } from '../state/split-types';
 
@@ -30,6 +31,8 @@ export interface KeyboardDeps {
   setZoomedPaneId(id: string | null): void;
   getPreZoomRatio(): number | null;
   setPreZoomRatio(ratio: number | null): void;
+  /** Returns the RecencySwitcher instance. */
+  getRecencySwitcher(): RecencySwitcher;
 }
 
 export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
@@ -116,16 +119,12 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
 
       case 'tabs.nextTab': {
         e.preventDefault();
-        perfTracer.mark('tab_switch_start');
-        const terminals = store.getWorkspaceTerminals(
-          state.activeWorkspaceId || ''
-        );
-        if (terminals.length > 1 && state.activeTerminalId) {
-          const currentIndex = terminals.findIndex(
-            (t) => t.id === state.activeTerminalId
-          );
-          const nextIndex = (currentIndex + 1) % terminals.length;
-          store.setActiveTerminal(terminals[nextIndex].id);
+        const switcher = deps.getRecencySwitcher();
+        if (switcher.isVisible()) {
+          // Already open — cycle forward (handled by RecencySwitcher's own keydown listener)
+        } else {
+          perfTracer.mark('tab_switch_start');
+          switcher.show(false);
           perfTracer.measure('tab_switch', 'tab_switch_start');
         }
         break;
@@ -133,16 +132,12 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
 
       case 'tabs.previousTab': {
         e.preventDefault();
-        perfTracer.mark('tab_switch_start');
-        const terminals = store.getWorkspaceTerminals(
-          state.activeWorkspaceId || ''
-        );
-        if (terminals.length > 1 && state.activeTerminalId) {
-          const currentIndex = terminals.findIndex(
-            (t) => t.id === state.activeTerminalId
-          );
-          const nextIndex = (currentIndex - 1 + terminals.length) % terminals.length;
-          store.setActiveTerminal(terminals[nextIndex].id);
+        const switcher = deps.getRecencySwitcher();
+        if (switcher.isVisible()) {
+          // Already open — cycle backward (handled by RecencySwitcher's own keydown listener)
+        } else {
+          perfTracer.mark('tab_switch_start');
+          switcher.show(true);
           perfTracer.measure('tab_switch', 'tab_switch_start');
         }
         break;
