@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use parking_lot::Mutex;
+use parking_lot::{FairMutex, Mutex};
 
 use godly_protocol::types::ShellType;
 use godly_protocol::{
@@ -229,7 +229,7 @@ pub struct DaemonSession {
     /// godly-vt terminal state engine -- parses all PTY output and maintains an
     /// in-memory grid. Used by ReadGrid to provide clean, parsed terminal content
     /// without ANSI escape stripping.
-    vt_parser: Arc<Mutex<godly_vt::Parser>>,
+    vt_parser: Arc<FairMutex<godly_vt::Parser>>,
     /// Exit code from the child process. Set by the reader thread when
     /// ShellExited is received from the shim. i64::MIN means "not yet exited" (sentinel).
     exit_code: Arc<AtomicI64>,
@@ -316,7 +316,7 @@ impl DaemonSession {
             .as_millis() as u64;
         let last_output_epoch_ms = Arc::new(AtomicU64::new(now_ms));
 
-        let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(rows, cols, 10_000)));
+        let vt_parser = Arc::new(FairMutex::new(godly_vt::Parser::new(rows, cols, 10_000)));
         let exit_code = Arc::new(AtomicI64::new(i64::MIN));
 
         // Feed any early output (captured during status query) into ring buffer,
@@ -390,7 +390,7 @@ impl DaemonSession {
 
         // Read all frames until we get the StatusInfo response.
         // Buffer data frames go into the vt parser.
-        let vt_parser = Arc::new(Mutex::new(godly_vt::Parser::new(
+        let vt_parser = Arc::new(FairMutex::new(godly_vt::Parser::new(
             meta.rows, meta.cols, 10_000,
         )));
         let output_history = Arc::new(Mutex::new(VecDeque::with_capacity(RING_BUFFER_SIZE)));
@@ -627,7 +627,7 @@ impl DaemonSession {
         reader_tx: Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
         reader_attached: Arc<AtomicBool>,
         reader_last_output: Arc<AtomicU64>,
-        reader_vt: Arc<Mutex<godly_vt::Parser>>,
+        reader_vt: Arc<FairMutex<godly_vt::Parser>>,
         reader_exit_code: Arc<AtomicI64>,
         reader_paused: Arc<AtomicBool>,
     ) {
@@ -1505,7 +1505,7 @@ fn process_output(
     reader_ring: &Arc<Mutex<VecDeque<u8>>>,
     reader_last_output: &Arc<AtomicU64>,
     reader_history: &Arc<Mutex<VecDeque<u8>>>,
-    reader_vt: &Arc<Mutex<godly_vt::Parser>>,
+    reader_vt: &Arc<FairMutex<godly_vt::Parser>>,
     channel_send_failures: &mut u64,
     reader_paused: &Arc<AtomicBool>,
 ) {
@@ -1633,7 +1633,7 @@ fn maybe_send_diff(
     _session_id: &str,
     reader_tx: &Arc<Mutex<Option<tokio::sync::mpsc::Sender<SessionOutput>>>>,
     reader_attached: &Arc<AtomicBool>,
-    reader_vt: &Arc<Mutex<godly_vt::Parser>>,
+    reader_vt: &Arc<FairMutex<godly_vt::Parser>>,
     last_diff_time: &mut Instant,
     diff_interval: Duration,
     reader_paused: &Arc<AtomicBool>,
