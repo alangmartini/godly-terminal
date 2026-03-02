@@ -204,7 +204,7 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::CreateTerminal {
-            workspace_id: _original_workspace_id,
+            workspace_id: original_workspace_id,
             shell_type,
             cwd,
             worktree_name,
@@ -214,8 +214,16 @@ pub fn handle_mcp_request(
             use std::collections::HashMap;
             use uuid::Uuid;
 
-            // MCP terminals always go into the Agent workspace (separate window)
-            let workspace_id = &ensure_mcp_workspace(app_state);
+            // MCP terminals are displayed in the Agent workspace (avoids WebView2
+            // broadcast storm — issue #204), but we use the *original* workspace_id
+            // to resolve folder_path for CWD and worktree operations.
+            let agent_workspace_id = ensure_mcp_workspace(app_state);
+
+            // Resolve the source workspace for folder_path: prefer original, fall back to Agent
+            let source_folder = app_state
+                .get_workspace(&original_workspace_id)
+                .or_else(|| app_state.get_workspace(&agent_workspace_id))
+                .map(|ws| ws.folder_path.clone());
 
             let want_worktree = worktree.unwrap_or(false) || worktree_name.is_some();
 
@@ -233,30 +241,32 @@ pub fn handle_mcp_request(
             let mut worktree_branch_result: Option<String> = None;
 
             let working_dir = if want_worktree {
-                // Worktree mode: workspace must exist and be a git repo
-                let ws = match app_state.get_workspace(workspace_id) {
-                    Some(ws) => ws,
+                let folder = match &source_folder {
+                    Some(f) => f.clone(),
                     None => {
                         return McpResponse::Error {
-                            message: format!("Workspace {} not found", workspace_id),
+                            message: format!(
+                                "Workspace '{}' not found and no fallback available",
+                                original_workspace_id
+                            ),
                         };
                     }
                 };
 
-                if !crate::worktree::is_git_repo(&ws.folder_path, None) {
+                if !crate::worktree::is_git_repo(&folder, None) {
                     return McpResponse::Error {
                         message: format!(
                             "Workspace folder is not a git repo: {}",
-                            ws.folder_path
+                            folder
                         ),
                     };
                 }
 
-                let repo_root = match crate::worktree::get_repo_root(&ws.folder_path, None) {
+                let repo_root = match crate::worktree::get_repo_root(&folder, None) {
                     Ok(r) => r,
                     Err(e) => {
                         return McpResponse::Error {
-                            message: format!("Failed to get repo root: {}", e),
+                            message: format!("Failed to get repo root for '{}': {}", folder, e),
                         };
                     }
                 };
@@ -280,10 +290,10 @@ pub fn handle_mcp_request(
             } else if let Some(dir) = cwd {
                 Some(dir.clone())
             } else {
-                app_state
-                    .get_workspace(workspace_id)
-                    .map(|ws| ws.folder_path)
+                source_folder.clone()
             };
+
+            let workspace_id = &agent_workspace_id;
 
             // Determine shell type
             let shell = shell_type
@@ -393,7 +403,7 @@ pub fn handle_mcp_request(
         }
 
         McpRequest::QuickClaude {
-            workspace_id: _original_workspace_id,
+            workspace_id: original_workspace_id,
             prompt,
             branch_name,
             skip_fetch,
@@ -422,8 +432,15 @@ pub fn handle_mcp_request(
                 branch_name.clone()
             };
 
-            // MCP terminals always go into the Agent workspace (separate window)
-            let workspace_id = &ensure_mcp_workspace(app_state);
+            // MCP terminals are displayed in the Agent workspace (avoids WebView2
+            // broadcast storm — issue #204), but we use the *original* workspace_id
+            // to resolve folder_path for worktree operations.
+            let agent_workspace_id = ensure_mcp_workspace(app_state);
+
+            // Resolve the source workspace for folder_path: prefer original, fall back to Agent
+            let source_ws = app_state
+                .get_workspace(&original_workspace_id)
+                .or_else(|| app_state.get_workspace(&agent_workspace_id));
 
             let terminal_id = Uuid::new_v4().to_string();
 
@@ -431,11 +448,14 @@ pub fn handle_mcp_request(
             let mut worktree_branch_result: Option<String> = None;
 
             let working_dir = {
-                let ws = match app_state.get_workspace(workspace_id) {
+                let ws = match source_ws {
                     Some(ws) => ws,
                     None => {
                         return McpResponse::Error {
-                            message: format!("Workspace {} not found", workspace_id),
+                            message: format!(
+                                "Workspace '{}' not found and no fallback available",
+                                original_workspace_id
+                            ),
                         };
                     }
                 };
@@ -478,6 +498,9 @@ pub fn handle_mcp_request(
                     Some(ws.folder_path.clone())
                 }
             };
+
+            // Terminal is displayed in the Agent workspace
+            let workspace_id = &agent_workspace_id;
 
             // Determine shell type
             let shell = app_state
