@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter};
 
-use godly_protocol::{DaemonMessage, Event, Request, Response, ReadResult, read_daemon_message_ext, write_request};
+use godly_protocol::{DaemonMessage, Event, Request, Response, ReadResult, read_daemon_message_ext, write_request_with_id};
 
 // ── Per-session output stream registry ──────────────────────────────────
 //
@@ -581,6 +581,7 @@ impl WakeEvent {
 /// Fire-and-forget writes set `response_tx = None` to avoid tracking dead channels.
 pub struct BridgeRequest {
     pub request: Request,
+    pub request_id: Option<u32>,
     pub response_tx: Option<std::sync::mpsc::Sender<Response>>,
 }
 
@@ -647,9 +648,13 @@ impl DaemonBridge {
             let raw_handle = get_raw_handle(&reader);
             blog!("Pipe handle={}", raw_handle);
 
-            // FIFO queue of response channels — one per in-flight request.
-            // Responses from the daemon arrive in the same order as requests.
-            let mut pending_responses: VecDeque<std::sync::mpsc::Sender<Response>> =
+            // Pending-map: keyed by request_id for concurrent IPC routing.
+            // When a response arrives with a request_id, the matching sender is
+            // looked up and removed. This eliminates head-of-line blocking.
+            let mut pending_map: HashMap<u32, std::sync::mpsc::Sender<Response>> =
+                HashMap::new();
+            // Legacy FIFO queue for requests without request_id (backward compat).
+            let mut legacy_pending: VecDeque<std::sync::mpsc::Sender<Response>> =
                 VecDeque::new();
 
             // Stats for periodic logging
@@ -684,13 +689,19 @@ impl DaemonBridge {
                         Ok(bridge_req) => {
                             update_phase(&health, PHASE_WRITE);
                             let write_start = Instant::now();
-                            match write_request(&mut writer, &bridge_req.request) {
+                            match write_request_with_id(&mut writer, &bridge_req.request, bridge_req.request_id) {
                                 Ok(()) => {
                                     total_requests_sent += 1;
                                     did_work = true;
 
                                     match bridge_req.response_tx {
-                                        Some(tx) => pending_responses.push_back(tx),
+                                        Some(tx) => {
+                                            if let Some(id) = bridge_req.request_id {
+                                                pending_map.insert(id, tx);
+                                            } else {
+                                                legacy_pending.push_back(tx);
+                                            }
+                                        }
                                         None => orphan_responses += 1,
                                     }
 
@@ -763,11 +774,17 @@ impl DaemonBridge {
                                                 // Keep reading — response hasn't arrived yet
                                                 continue;
                                             }
-                                            Ok(ReadResult::Message(DaemonMessage::Response(response))) => {
+                                            Ok(ReadResult::Response { response, request_id }) => {
                                                 total_responses += 1;
                                                 if orphan_responses > 0 {
                                                     orphan_responses -= 1;
-                                                } else if let Some(tx) = pending_responses.pop_front() {
+                                                } else if let Some(id) = request_id {
+                                                    if let Some(tx) = pending_map.remove(&id) {
+                                                        let _ = tx.send(response);
+                                                    } else {
+                                                        blog!("WARNING: response for unknown request_id={}", id);
+                                                    }
+                                                } else if let Some(tx) = legacy_pending.pop_front() {
                                                     let _ = tx.send(response);
                                                 } else {
                                                     eprintln!("[bridge] Got response but no pending request");
@@ -908,12 +925,18 @@ impl DaemonBridge {
                                         blog!("DROPPED EVENT (channel full, total dropped={})", dropped_events);
                                     }
                                 }
-                                Ok(ReadResult::Message(DaemonMessage::Response(response))) => {
+                                Ok(ReadResult::Response { response, request_id }) => {
                                     total_responses += 1;
                                     did_work = true;
                                     if orphan_responses > 0 {
                                         orphan_responses -= 1;
-                                    } else if let Some(tx) = pending_responses.pop_front() {
+                                    } else if let Some(id) = request_id {
+                                        if let Some(tx) = pending_map.remove(&id) {
+                                            let _ = tx.send(response);
+                                        } else {
+                                            blog!("WARNING: response for unknown request_id={}", id);
+                                        }
+                                    } else if let Some(tx) = legacy_pending.pop_front() {
                                         let _ = tx.send(response);
                                     } else {
                                         eprintln!(

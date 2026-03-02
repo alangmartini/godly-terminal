@@ -172,6 +172,40 @@ pub enum DaemonMessage {
     Event(Event),
 }
 
+// ── Wire-format envelopes for concurrent IPC ────────────────────────────
+//
+// These wrapper types carry an optional `request_id` alongside the inner
+// Request/DaemonMessage on the wire. They are used only by the frame layer
+// (frame.rs) for serialization; the rest of the codebase continues to use
+// the plain Request/Response/DaemonMessage types.
+
+/// Wire-format envelope for requests (carries optional request_id for concurrent IPC).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestEnvelope {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<u32>,
+    #[serde(flatten)]
+    pub request: Request,
+}
+
+/// Wire-format envelope for serializing DaemonMessage with optional request_id.
+#[derive(Serialize)]
+pub(crate) struct DaemonMessageWriteEnvelope<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<u32>,
+    #[serde(flatten)]
+    pub message: &'a DaemonMessage,
+}
+
+/// Wire-format envelope for deserializing DaemonMessage with optional request_id.
+#[derive(Deserialize)]
+pub(crate) struct DaemonMessageReadEnvelope {
+    #[serde(default)]
+    pub request_id: Option<u32>,
+    #[serde(flatten)]
+    pub message: DaemonMessage,
+}
+
 /// Requests sent from the daemon to a pty-shim process
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -360,5 +394,64 @@ mod tests {
             }
             other => panic!("Expected ShellExited, got {:?}", other),
         }
+    }
+
+    // ── RequestEnvelope tests ───────────────────────────────────────────
+
+    #[test]
+    fn request_envelope_with_id_roundtrip() {
+        let envelope = RequestEnvelope {
+            request_id: Some(42),
+            request: Request::Ping,
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains("\"request_id\":42"));
+        assert!(json.contains("\"type\":\"Ping\""));
+        let deserialized: RequestEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.request_id, Some(42));
+        assert!(matches!(deserialized.request, Request::Ping));
+    }
+
+    #[test]
+    fn request_envelope_without_id_backward_compat() {
+        let json = r#"{"type":"Ping"}"#;
+        let deserialized: RequestEnvelope = serde_json::from_str(json).unwrap();
+        assert_eq!(deserialized.request_id, None);
+        assert!(matches!(deserialized.request, Request::Ping));
+    }
+
+    #[test]
+    fn request_envelope_none_id_omits_field() {
+        let envelope = RequestEnvelope {
+            request_id: None,
+            request: Request::Ping,
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(!json.contains("request_id"));
+    }
+
+    #[test]
+    fn daemon_message_envelope_response_with_id() {
+        let msg = DaemonMessage::Response(Response::Pong);
+        let envelope = DaemonMessageWriteEnvelope {
+            request_id: Some(7),
+            message: &msg,
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains("\"request_id\":7"));
+        assert!(json.contains("\"kind\":\"Response\""));
+        assert!(json.contains("\"type\":\"Pong\""));
+
+        let read_env: DaemonMessageReadEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(read_env.request_id, Some(7));
+        assert!(matches!(read_env.message, DaemonMessage::Response(Response::Pong)));
+    }
+
+    #[test]
+    fn daemon_message_envelope_backward_compat() {
+        let json = r#"{"kind":"Response","type":"Pong"}"#;
+        let read_env: DaemonMessageReadEnvelope = serde_json::from_str(json).unwrap();
+        assert_eq!(read_env.request_id, None);
+        assert!(matches!(read_env.message, DaemonMessage::Response(Response::Pong)));
     }
 }
