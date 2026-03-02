@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,6 +46,8 @@ pub struct DaemonClient {
     /// Per-session binary-encoded grid diff registry for stream://localhost/terminal-diff/.
     /// Set via `set_diff_registry()` before `setup_bridge()`.
     diff_registry: Mutex<Option<Arc<DiffStreamRegistry>>>,
+    /// Monotonically incrementing counter for concurrent IPC request IDs.
+    next_request_id: AtomicU32,
 }
 
 impl DaemonClient {
@@ -192,6 +195,7 @@ impl DaemonClient {
             wake_event: Mutex::new(None),
             output_registry: Mutex::new(None),
             diff_registry: Mutex::new(None),
+            next_request_id: AtomicU32::new(1),
         })
     }
 
@@ -584,9 +588,11 @@ impl DaemonClient {
 
         // Create a one-shot channel for this request's response
         let (response_tx, response_rx) = mpsc::channel();
+        let request_id = Some(self.next_request_id.fetch_add(1, AtomicOrdering::Relaxed));
 
         tx.send(BridgeRequest {
             request: request.clone(),
+            request_id,
             response_tx: Some(response_tx),
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
@@ -627,6 +633,7 @@ impl DaemonClient {
 
         tx.send(BridgeRequest {
             request: request.clone(),
+            request_id: None,
             response_tx: None,
         })
         .map_err(|e| format!("Failed to send request to bridge: {}", e))?;
