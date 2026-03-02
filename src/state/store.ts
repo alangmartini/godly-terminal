@@ -113,6 +113,7 @@ export class Store {
 
   private listeners: Set<Listener> = new Set();
   private lastActiveTerminalByWorkspace: Map<string, string> = new Map();
+  private previousActiveTerminalByWorkspace: Map<string, string> = new Map();
   private pendingNotify = false;
   /** Suspended layout trees, keyed by workspaceId. Stored when navigating to a
    *  tab outside the split so the split can be restored on return. */
@@ -145,6 +146,7 @@ export class Store {
       zoomedPanes: {},
     };
     this.lastActiveTerminalByWorkspace.clear();
+    this.previousActiveTerminalByWorkspace.clear();
     this.resumedSessions.clear();
     this.suspendedLayoutTrees.clear();
     this.notify();
@@ -180,11 +182,20 @@ export class Store {
   }
 
   setLastActiveTerminal(wsId: string, termId: string): void {
+    const current = this.lastActiveTerminalByWorkspace.get(wsId);
+    if (current && current !== termId) {
+      this.previousActiveTerminalByWorkspace.set(wsId, current);
+    }
     this.lastActiveTerminalByWorkspace.set(wsId, termId);
+  }
+
+  getPreviousActiveTerminal(wsId: string): string | null {
+    return this.previousActiveTerminalByWorkspace.get(wsId) ?? null;
   }
 
   deleteLastActiveTerminal(wsId: string): void {
     this.lastActiveTerminalByWorkspace.delete(wsId);
+    this.previousActiveTerminalByWorkspace.delete(wsId);
   }
 
   getSuspendedLayoutTree(wsId: string): { tree: LayoutNode; splitView?: SplitView; zoomedPane?: string } | undefined {
