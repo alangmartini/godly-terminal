@@ -18,6 +18,8 @@ export interface TerminalSettings {
   rendererMode: RendererMode;
   /** How split-panel terminals appear in the tab bar. */
   splitTabMode: SplitTabMode;
+  /** When true, show timestamps on Claude Code message boundaries. */
+  messageTimestamps: boolean;
 }
 
 type Subscriber = () => void;
@@ -33,6 +35,7 @@ class TerminalSettingsStore {
     fontSize: TerminalSettingsStore.DEFAULT_FONT_SIZE,
     rendererMode: 'gpu',
     splitTabMode: 'unified',
+    messageTimestamps: false,
   };
 
   private subscribers: Subscriber[] = [];
@@ -98,6 +101,17 @@ class TerminalSettingsStore {
     this.notify();
   }
 
+  getMessageTimestamps(): boolean {
+    return this.settings.messageTimestamps;
+  }
+
+  setMessageTimestamps(enabled: boolean): void {
+    if (enabled === this.settings.messageTimestamps) return;
+    this.settings.messageTimestamps = enabled;
+    this.saveToStorage();
+    this.notify();
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -134,6 +148,9 @@ class TerminalSettingsStore {
       }
       if (data.splitTabMode === 'individual' || data.splitTabMode === 'unified') {
         this.settings.splitTabMode = data.splitTabMode;
+      }
+      if (typeof data.messageTimestamps === 'boolean') {
+        this.settings.messageTimestamps = data.messageTimestamps;
       }
     } catch {
       // Corrupt data — use defaults

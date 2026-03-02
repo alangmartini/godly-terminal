@@ -313,6 +313,38 @@ export class TerminalTab implements SettingsTabProvider {
 
     content.appendChild(scrollSection);
 
+    // ── Message Timestamps section ─────────────────────────────
+    const timestampSection = document.createElement('div');
+    timestampSection.className = 'settings-section';
+
+    const timestampTitle = document.createElement('div');
+    timestampTitle.className = 'settings-section-title';
+    timestampTitle.textContent = 'Message Timestamps';
+    timestampSection.appendChild(timestampTitle);
+
+    const timestampRow = document.createElement('div');
+    timestampRow.className = 'shortcut-row';
+    const timestampLabel = document.createElement('span');
+    timestampLabel.className = 'shortcut-label';
+    timestampLabel.textContent = 'Show timestamps on Claude Code messages';
+    timestampRow.appendChild(timestampLabel);
+    const timestampCheckbox = document.createElement('input');
+    timestampCheckbox.type = 'checkbox';
+    timestampCheckbox.className = 'notification-checkbox';
+    timestampCheckbox.checked = terminalSettingsStore.getMessageTimestamps();
+    timestampCheckbox.onchange = () => {
+      terminalSettingsStore.setMessageTimestamps(timestampCheckbox.checked);
+    };
+    timestampRow.appendChild(timestampCheckbox);
+    timestampSection.appendChild(timestampRow);
+
+    const timestampDesc = document.createElement('div');
+    timestampDesc.className = 'settings-description';
+    timestampDesc.textContent = 'When enabled, shows a subtle timestamp on each Claude Code message boundary. Useful for tracking progress across multiple parallel sessions.';
+    timestampSection.appendChild(timestampDesc);
+
+    content.appendChild(timestampSection);
+
     // ── Split Tabs section ─────────────────────────────────────
     const splitSection = document.createElement('div');
     splitSection.className = 'settings-section';
