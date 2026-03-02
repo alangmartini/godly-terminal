@@ -1,5 +1,6 @@
 import { llmHasApiKey, llmGenerateBranchName } from '../plugins/smollm2/llm-service';
 import { aiToolsSettingsStore } from '../state/ai-tools-settings-store';
+import { quickClaudeSettingsStore } from '../state/quick-claude-settings-store';
 
 /**
  * Show a prompt dialog for entering a custom worktree branch name.
@@ -231,6 +232,7 @@ export interface QuickClaudeInput {
   workspaceId: string;
   noWorktree?: boolean;
   aiTool?: string;
+  presetId?: string;
 }
 
 export interface QuickClaudeOptions {
@@ -242,6 +244,7 @@ const QUICK_CLAUDE_WORKSPACE_KEY = 'quick-claude-last-workspace';
 const QUICK_CLAUDE_NO_WORKTREE_KEY = 'quick-claude-no-worktree';
 const QUICK_CLAUDE_AUTO_SUGGEST_KEY = 'quick-claude-auto-suggest';
 const QUICK_CLAUDE_AI_TOOL_KEY = 'quick-claude-ai-tool';
+const QUICK_CLAUDE_PRESET_KEY = 'quick-claude-preset';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.ico',
@@ -313,6 +316,42 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     workspaceSelect.addEventListener('focus', () => setActiveStep(1));
     dialog.appendChild(workspaceSelect);
 
+    // -- Preset selector --
+    const presetSelect = document.createElement('select');
+    presetSelect.className = 'dialog-input qc-preset-select';
+    presetSelect.style.marginBottom = '8px';
+
+    const agentSummary = document.createElement('div');
+    agentSummary.className = 'qc-agent-summary';
+    agentSummary.style.display = 'none';
+
+    function populatePresets() {
+      presetSelect.innerHTML = '';
+      const presets = quickClaudeSettingsStore.getPresets();
+      for (const p of presets) {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name + (p.isDefault ? ' (Default)' : '');
+        presetSelect.appendChild(opt);
+      }
+      const customOpt = document.createElement('option');
+      customOpt.value = '__custom__';
+      customOpt.textContent = 'Custom...';
+      presetSelect.appendChild(customOpt);
+    }
+    populatePresets();
+
+    const savedPreset = localStorage.getItem(QUICK_CLAUDE_PRESET_KEY);
+    const presetIds = quickClaudeSettingsStore.getPresets().map(p => p.id);
+    if (savedPreset && presetIds.includes(savedPreset)) {
+      presetSelect.value = savedPreset;
+    } else {
+      const defaultPreset = quickClaudeSettingsStore.getDefaultPreset();
+      presetSelect.value = defaultPreset?.id ?? '__custom__';
+    }
+
+    dialog.appendChild(presetSelect);
+
     // -- AI tool selector --
     const aiToolSelect = document.createElement('select');
     aiToolSelect.className = 'dialog-input ai-tool-mode-select';
@@ -344,7 +383,30 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         aiToolSelect.value = getWsAiMode(workspaceSelect.value);
       }
     });
+
+    function updatePresetUI() {
+      const isCustom = presetSelect.value === '__custom__';
+      aiToolSelect.style.display = isCustom ? '' : 'none';
+      if (!isCustom) {
+        const preset = quickClaudeSettingsStore.getPreset(presetSelect.value);
+        if (preset) {
+          const names = preset.agents.map(a => a.label).join(', ');
+          const layoutLabel = preset.layout === 'single' ? '' : ` \u00b7 ${preset.layout}`;
+          agentSummary.textContent = `${names}${layoutLabel}`;
+          agentSummary.style.display = '';
+        } else {
+          agentSummary.style.display = 'none';
+        }
+      } else {
+        agentSummary.style.display = 'none';
+      }
+    }
+
+    presetSelect.addEventListener('change', updatePresetUI);
+    updatePresetUI();
+
     dialog.appendChild(aiToolSelect);
+    dialog.appendChild(agentSummary);
 
     // -- Prompt textarea with skill dropdown wrapper --
     const promptWrapper = document.createElement('div');
@@ -859,6 +921,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       localStorage.setItem(QUICK_CLAUDE_WORKSPACE_KEY, workspaceSelect.value);
       localStorage.setItem(QUICK_CLAUDE_NO_WORKTREE_KEY, String(noWorktreeCheckbox.checked));
       localStorage.setItem(QUICK_CLAUDE_AI_TOOL_KEY, aiToolSelect.value);
+      localStorage.setItem(QUICK_CLAUDE_PRESET_KEY, presetSelect.value);
 
       // Prepend image paths to the prompt so Claude Code auto-loads them
       let prompt = promptText;
@@ -868,6 +931,8 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         prompt = prompt ? `${imagePrefix} ${prompt}` : imagePrefix;
       }
 
+      const selectedPresetId = presetSelect.value !== '__custom__' ? presetSelect.value : undefined;
+
       close();
       resolve({
         prompt,
@@ -875,6 +940,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         workspaceId: workspaceSelect.value,
         noWorktree: noWorktreeCheckbox.checked || undefined,
         aiTool: aiToolSelect.value,
+        presetId: selectedPresetId,
       });
     };
 
