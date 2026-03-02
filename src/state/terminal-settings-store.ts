@@ -20,6 +20,8 @@ export interface TerminalSettings {
   splitTabMode: SplitTabMode;
   /** When true, show a confirmation dialog before quitting with active sessions. */
   confirmQuit: boolean;
+  /** When true, show timestamps on Claude Code message boundaries. */
+  messageTimestamps: boolean;
 }
 
 type Subscriber = () => void;
@@ -36,6 +38,7 @@ class TerminalSettingsStore {
     rendererMode: 'gpu',
     splitTabMode: 'unified',
     confirmQuit: true,
+    messageTimestamps: false,
   };
 
   private subscribers: Subscriber[] = [];
@@ -112,6 +115,17 @@ class TerminalSettingsStore {
     this.notify();
   }
 
+  getMessageTimestamps(): boolean {
+    return this.settings.messageTimestamps;
+  }
+
+  setMessageTimestamps(enabled: boolean): void {
+    if (enabled === this.settings.messageTimestamps) return;
+    this.settings.messageTimestamps = enabled;
+    this.saveToStorage();
+    this.notify();
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -151,6 +165,9 @@ class TerminalSettingsStore {
       }
       if (typeof data.confirmQuit === 'boolean') {
         this.settings.confirmQuit = data.confirmQuit;
+      }
+      if (typeof data.messageTimestamps === 'boolean') {
+        this.settings.messageTimestamps = data.messageTimestamps;
       }
     } catch {
       // Corrupt data — use defaults
