@@ -25,7 +25,7 @@
     },
     {
       "name": "feature",
-      "description": "Implement new terminal features (frontend + backend)",
+      "description": "Orchestrate feature development: GitHub issue, parallelizable plan, multi-agent spawning (Claude Code or Codex), PR, and staging build. Use for any new feature or improvement.",
       "path": "skills/feature.md"
     },
     {
