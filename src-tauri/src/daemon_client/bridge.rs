@@ -222,9 +222,21 @@ impl EventEmitter {
 
                     Self::classify_payload(first, &mut output_terminals, &mut diff_terminals, &mut other_events);
 
-                    // Drain any pending events without blocking
-                    while let Ok(payload) = rx.try_recv() {
-                        Self::classify_payload(payload, &mut output_terminals, &mut diff_terminals, &mut other_events);
+                    // 4ms batching window: after the first (immediate) event,
+                    // accumulate up to 100 more events within 4ms. This coalesces
+                    // rapid terminal output bursts into fewer IPC round-trips.
+                    const BATCH_WINDOW: Duration = Duration::from_millis(4);
+                    const BATCH_CAP: usize = 100;
+                    let mut batch_count: usize = 1;
+                    while batch_count < BATCH_CAP {
+                        match rx.recv_timeout(BATCH_WINDOW) {
+                            Ok(payload) => {
+                                Self::classify_payload(payload, &mut output_terminals, &mut diff_terminals, &mut other_events);
+                                batch_count += 1;
+                            }
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        }
                     }
 
                     // Emit GridDiff for terminals that have one (suppresses TerminalOutput)
