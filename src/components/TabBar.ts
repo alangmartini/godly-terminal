@@ -307,12 +307,12 @@ export class TabBar {
     wsId: string,
   ): { id: string; terminals: Terminal[] }[] {
     const isUnified = terminalSettingsStore.getSplitTabMode() === 'unified';
-    const tree = wsId ? store.getLayoutTree(wsId) : null;
-    const treeIdSet = tree ? new Set(terminalIds(tree)) : new Set<string>();
-
-    if (!isUnified || treeIdSet.size === 0) {
+    if (!isUnified) {
       return terminals.map(t => ({ id: t.id, terminals: [t] }));
     }
+
+    const tree = wsId ? store.getLayoutTree(wsId) : null;
+    const treeIdSet = tree ? new Set(terminalIds(tree)) : new Set<string>();
 
     // Also check the suspended tree — if we navigated away from the split,
     // we still want to show a unified tab for it.
