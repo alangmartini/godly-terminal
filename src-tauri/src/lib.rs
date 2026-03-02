@@ -345,6 +345,8 @@ pub fn run() {
             commands::write_remote_config,
             // --- Window lifecycle ---
             window_lifecycle::scrollback_save_complete,
+            window_lifecycle::confirm_quit,
+            window_lifecycle::cancel_quit,
             // --- MCP ---
             mcp_js_result,
         ])
