@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-03-02
+
+### Added
+- **AI Tools settings page** — New settings tab for configuring custom AI tool binaries (name, binary path, launch command template, branch suffix) (#495)
+- **Configurable branch suffixes** — Branch name suffixes for parallel AI tool launches are now configurable in Settings > AI Tools instead of hardcoded `-cc`/`-c` (#495)
+- **Up to 4 simultaneous launches** — Quick Claude can now launch up to 4 AI tools in parallel with a 2x2 grid layout, extending the previous limit of 2 (#495)
+- **Split tab display mode** — New setting in Settings > Terminal to choose how split panel terminals appear in the tab bar: "Individual" (each terminal gets its own tab, default) or "Unified" (terminals in a split share a single merged tab) (#496)
+
+### Fixed
+- **Split replaces existing layout instead of nesting** — Triggering a split on a pane already in a split view now correctly creates a nested split instead of replacing the existing layout. The fix restores suspended layout trees in `splitTerminalAt()` so the new split is nested into the existing tree (#494)
+- **AI tool selection persistence** — Quick Claude dialog now remembers the user's AI tool choice (claude/codex/both) between invocations via localStorage (#495)
+- **Split layouts lost on restart** — Split pane configurations are now preserved when restarting the app. Previously, all splits reverted to single-pane view because layout trees were not synced to the backend or read back on restore (#498)
+- **Staging installer no longer kills production Godly Terminal** — Set `mainBinaryName` to `godly-terminal-staging` so the NSIS installer only targets the staging binary during upgrades (#504)
+- **Staging app fully isolated from production at runtime** — Bake `GODLY_INSTANCE=staging` into the binary via `#[cfg(feature = "staging")]` so installed staging builds use separate daemon pipes, PID files, and shim metadata without needing env vars (#504)
+
 ## [0.11.1] - 2026-03-01
 
 ### Fixed
