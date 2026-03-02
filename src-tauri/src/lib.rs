@@ -52,6 +52,13 @@ fn mcp_js_result(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // When built with --features staging, bake the instance name into the
+    // process so installed staging binaries don't need env vars at runtime.
+    // This ensures the staging app connects to its own daemon pipe, PID file,
+    // and shim metadata directory — completely isolated from production.
+    #[cfg(feature = "staging")]
+    std::env::set_var("GODLY_INSTANCE", "staging");
+
     #[cfg(feature = "leak-check")]
     let _profiler = dhat::Profiler::new_heap();
 
