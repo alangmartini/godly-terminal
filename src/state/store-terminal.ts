@@ -27,6 +27,7 @@ export function addTerminalImpl(
     });
   } else {
     store.setLastActiveTerminal(terminal.workspaceId, terminal.id);
+    store.touchAccessHistory(terminal.workspaceId, terminal.id);
 
     // Clear the layout tree if the new terminal's workspace has an active split,
     // since the new terminal is not in the tree (Bug #391).
@@ -78,6 +79,19 @@ export function updateTerminalImpl(store: Store, id: string, updates: Partial<Te
 export function removeTerminalImpl(store: Store, id: string): void {
   const state = store.getState();
   const terminal = state.terminals.find(t => t.id === id);
+
+  // Capture metadata for recently-closed stack before removing
+  if (terminal && terminal.paneType !== 'figma') {
+    const workspace = state.workspaces.find(w => w.id === terminal.workspaceId);
+    store.pushRecentlyClosed({
+      workspaceId: terminal.workspaceId,
+      name: terminal.name,
+      cwd: workspace?.folderPath ?? null,
+      shellType: workspace?.shellType ?? null,
+      closedAt: Date.now(),
+    });
+  }
+
   const remainingTerminals = state.terminals.filter(t => t.id !== id);
 
   let newActiveId = state.activeTerminalId;
@@ -85,7 +99,9 @@ export function removeTerminalImpl(store: Store, id: string): void {
     const sameWorkspace = remainingTerminals.filter(
       t => t.workspaceId === terminal.workspaceId
     );
-    newActiveId = sameWorkspace[0]?.id ?? null;
+    const prevId = store.getPreviousActiveTerminal(terminal.workspaceId);
+    const prevStillExists = prevId && prevId !== id && sameWorkspace.some(t => t.id === prevId);
+    newActiveId = prevStillExists ? prevId : sameWorkspace[0]?.id ?? null;
   }
 
   let layoutTrees = state.layoutTrees;
@@ -156,6 +172,9 @@ export function removeTerminalImpl(store: Store, id: string): void {
     layoutTrees,
     zoomedPanes,
   });
+  if (terminal) {
+    store.removeFromAccessHistory(terminal.workspaceId, id);
+  }
   store.deleteResumedSession(id);
   store.syncSessionPauseState();
 }
@@ -164,6 +183,7 @@ export function setActiveTerminalImpl(store: Store, id: string | null): void {
   const state = store.getState();
   if (id && state.activeWorkspaceId) {
     store.setLastActiveTerminal(state.activeWorkspaceId, id);
+    store.touchAccessHistory(state.activeWorkspaceId, id);
     const wsId = state.activeWorkspaceId;
     const tree = state.layoutTrees[wsId];
 
