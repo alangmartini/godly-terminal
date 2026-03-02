@@ -1,4 +1,5 @@
 import { llmHasApiKey, llmGenerateBranchName } from '../plugins/smollm2/llm-service';
+import { aiToolsSettingsStore } from '../state/ai-tools-settings-store';
 
 /**
  * Show a prompt dialog for entering a custom worktree branch name.
@@ -229,7 +230,7 @@ export interface QuickClaudeInput {
   branchName?: string;
   workspaceId: string;
   noWorktree?: boolean;
-  aiTool?: 'claude' | 'codex' | 'both';
+  aiTool?: string;
 }
 
 export interface QuickClaudeOptions {
@@ -240,6 +241,7 @@ export interface QuickClaudeOptions {
 const QUICK_CLAUDE_WORKSPACE_KEY = 'quick-claude-last-workspace';
 const QUICK_CLAUDE_NO_WORKTREE_KEY = 'quick-claude-no-worktree';
 const QUICK_CLAUDE_AUTO_SUGGEST_KEY = 'quick-claude-auto-suggest';
+const QUICK_CLAUDE_AI_TOOL_KEY = 'quick-claude-ai-tool';
 
 const IMAGE_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.tiff', '.tif', '.ico',
@@ -316,16 +318,12 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
     aiToolSelect.className = 'dialog-input ai-tool-mode-select';
     aiToolSelect.dataset.testid = 'ai-tool-mode';
     aiToolSelect.style.marginBottom = '8px';
-    const claudeOpt = document.createElement('option');
-    claudeOpt.value = 'claude';
-    claudeOpt.textContent = 'Claude Code';
-    const codexOpt = document.createElement('option');
-    codexOpt.value = 'codex';
-    codexOpt.textContent = 'Codex';
-    const bothOpt = document.createElement('option');
-    bothOpt.value = 'both';
-    bothOpt.textContent = 'Both (Claude + Codex)';
-    aiToolSelect.append(claudeOpt, codexOpt, bothOpt);
+    for (const tool of aiToolsSettingsStore.getAllToolOptions()) {
+      const opt = document.createElement('option');
+      opt.value = tool.id;
+      opt.textContent = tool.name;
+      aiToolSelect.appendChild(opt);
+    }
 
     // Default from selected workspace's aiToolMode
     const getWsAiMode = (wsId: string) => {
@@ -334,9 +332,17 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       if (mode === 'both') return 'both';
       return mode === 'codex' ? 'codex' : 'claude';
     };
-    aiToolSelect.value = getWsAiMode(workspaceSelect.value);
-    workspaceSelect.addEventListener('change', () => {
+    const savedAiTool = localStorage.getItem(QUICK_CLAUDE_AI_TOOL_KEY);
+    const validAiTools = ['claude', 'codex', 'both'];
+    if (savedAiTool && validAiTools.includes(savedAiTool)) {
+      aiToolSelect.value = savedAiTool;
+    } else {
       aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+    }
+    workspaceSelect.addEventListener('change', () => {
+      if (!localStorage.getItem(QUICK_CLAUDE_AI_TOOL_KEY)) {
+        aiToolSelect.value = getWsAiMode(workspaceSelect.value);
+      }
     });
     dialog.appendChild(aiToolSelect);
 
@@ -852,6 +858,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
       if (!promptText && attachedImages.length === 0) return;
       localStorage.setItem(QUICK_CLAUDE_WORKSPACE_KEY, workspaceSelect.value);
       localStorage.setItem(QUICK_CLAUDE_NO_WORKTREE_KEY, String(noWorktreeCheckbox.checked));
+      localStorage.setItem(QUICK_CLAUDE_AI_TOOL_KEY, aiToolSelect.value);
 
       // Prepend image paths to the prompt so Claude Code auto-loads them
       let prompt = promptText;
@@ -867,7 +874,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
         branchName: noWorktreeCheckbox.checked ? undefined : (branchInput.value.trim() || undefined),
         workspaceId: workspaceSelect.value,
         noWorktree: noWorktreeCheckbox.checked || undefined,
-        aiTool: aiToolSelect.value as 'claude' | 'codex' | 'both',
+        aiTool: aiToolSelect.value,
       });
     };
 
