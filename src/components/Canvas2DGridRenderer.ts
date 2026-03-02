@@ -162,17 +162,38 @@ export class Canvas2DGridRenderer {
     const rows = snapshot.rows;
     const numCols = snapshot.dimensions.cols;
 
-    // 2. Non-default cell backgrounds
+    // 2. Non-default cell backgrounds (horizontal run-length merged)
     for (let row = 0; row < rows.length; row++) {
       const gridRow = rows[row];
       const y = row * cellHeight;
+      let runStart = 0;
+      let runColor: string | null = null;
+      let runLength = 0;
+
       for (let col = 0; col < gridRow.cells.length && col < numCols; col++) {
         const cell = gridRow.cells[col];
         const bg = this.resolveBg(cell);
-        if (bg) {
-          ctx.fillStyle = bg;
-          ctx.fillRect(col * cellWidth, y, cellWidth, cellHeight);
+
+        if (bg === runColor) {
+          runLength++;
+        } else {
+          if (runColor !== null) {
+            ctx.fillStyle = runColor;
+            ctx.fillRect(runStart * cellWidth, y, runLength * cellWidth, cellHeight);
+          }
+          if (bg !== null) {
+            runStart = col;
+            runColor = bg;
+            runLength = 1;
+          } else {
+            runColor = null;
+            runLength = 0;
+          }
         }
+      }
+      if (runColor !== null) {
+        ctx.fillStyle = runColor;
+        ctx.fillRect(runStart * cellWidth, y, runLength * cellWidth, cellHeight);
       }
     }
 
