@@ -8,15 +8,37 @@ export interface CustomAiTool {
   branchSuffix: string;
 }
 
+/** Overrides for built-in agents (claude, codex). Empty strings = use default. */
+export interface BuiltInOverride {
+  binaryPath: string;
+  args: string;
+}
+
+/** Unified view of any agent (built-in or custom). */
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  builtin: boolean;
+  binaryPath: string;
+  args: string;
+  branchSuffix: string;
+}
+
 export interface AiToolsSettings {
   customTools: CustomAiTool[];
   maxSimultaneous: number;
   branchSuffixes: Record<string, string>;
+  builtInOverrides: Record<string, BuiltInOverride>;
 }
 
 const BUILT_IN_SUFFIXES: Record<string, string> = {
   claude: '-cc',
   codex: '-c',
+};
+
+const BUILT_IN_DEFAULTS: Record<string, { name: string; binaryPath: string; args: string }> = {
+  claude: { name: 'Claude Code', binaryPath: 'claude', args: '' },
+  codex: { name: 'Codex', binaryPath: 'codex', args: '' },
 };
 
 type Subscriber = () => void;
@@ -29,6 +51,7 @@ class AiToolsSettingsStore {
     customTools: [],
     maxSimultaneous: 2,
     branchSuffixes: { ...BUILT_IN_SUFFIXES },
+    builtInOverrides: {},
   };
 
   private subscribers: Subscriber[] = [];
@@ -109,6 +132,77 @@ class AiToolsSettingsStore {
     return options;
   }
 
+  // ── Built-in overrides ──────────────────────────────────────────
+
+  getBuiltInOverride(toolId: string): BuiltInOverride {
+    return this.settings.builtInOverrides[toolId] ?? { binaryPath: '', args: '' };
+  }
+
+  setBuiltInOverride(toolId: string, override: Partial<BuiltInOverride>): void {
+    if (!BUILT_IN_DEFAULTS[toolId]) return;
+    const current = this.settings.builtInOverrides[toolId] ?? { binaryPath: '', args: '' };
+    this.settings.builtInOverrides[toolId] = { ...current, ...override };
+    this.saveToStorage();
+    this.notify();
+  }
+
+  // ── Unified agent definitions ───────────────────────────────────
+
+  /** Returns a unified AgentDefinition for any tool (built-in or custom). */
+  getAgentDefinition(toolId: string): AgentDefinition | undefined {
+    const builtIn = BUILT_IN_DEFAULTS[toolId];
+    if (builtIn) {
+      const override = this.settings.builtInOverrides[toolId];
+      return {
+        id: toolId,
+        name: builtIn.name,
+        builtin: true,
+        binaryPath: override?.binaryPath || builtIn.binaryPath,
+        args: override?.args || builtIn.args,
+        branchSuffix: this.settings.branchSuffixes[toolId] ?? '',
+      };
+    }
+    const custom = this.settings.customTools.find(t => t.id === toolId);
+    if (custom) {
+      return {
+        id: custom.id,
+        name: custom.name,
+        builtin: false,
+        binaryPath: custom.binaryPath,
+        args: custom.launchCommand,
+        branchSuffix: custom.branchSuffix,
+      };
+    }
+    return undefined;
+  }
+
+  /** Returns all agent definitions (built-in + custom), excluding meta-options like 'both'. */
+  getAllAgentDefinitions(): AgentDefinition[] {
+    const agents: AgentDefinition[] = [];
+    for (const [id, defaults] of Object.entries(BUILT_IN_DEFAULTS)) {
+      const override = this.settings.builtInOverrides[id];
+      agents.push({
+        id,
+        name: defaults.name,
+        builtin: true,
+        binaryPath: override?.binaryPath || defaults.binaryPath,
+        args: override?.args || defaults.args,
+        branchSuffix: this.settings.branchSuffixes[id] ?? '',
+      });
+    }
+    for (const tool of this.settings.customTools) {
+      agents.push({
+        id: tool.id,
+        name: tool.name,
+        builtin: false,
+        binaryPath: tool.binaryPath,
+        args: tool.launchCommand,
+        branchSuffix: tool.branchSuffix,
+      });
+    }
+    return agents;
+  }
+
   subscribe(fn: Subscriber): () => void {
     this.subscribers.push(fn);
     return () => {
@@ -145,6 +239,18 @@ class AiToolsSettingsStore {
           ...BUILT_IN_SUFFIXES,
           ...data.branchSuffixes,
         };
+      }
+      if (data.builtInOverrides && typeof data.builtInOverrides === 'object') {
+        const overrides: Record<string, BuiltInOverride> = {};
+        for (const [key, val] of Object.entries(data.builtInOverrides)) {
+          if (val && typeof val === 'object' && typeof (val as any).binaryPath === 'string') {
+            overrides[key] = {
+              binaryPath: (val as BuiltInOverride).binaryPath,
+              args: typeof (val as BuiltInOverride).args === 'string' ? (val as BuiltInOverride).args : '',
+            };
+          }
+        }
+        this.settings.builtInOverrides = overrides;
       }
     } catch {
       // Corrupt data — use defaults
