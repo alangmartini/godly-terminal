@@ -19,6 +19,7 @@ import {
   setActiveTerminalImpl,
   moveTerminalToWorkspaceImpl,
   reorderTerminalsImpl,
+  togglePinTabImpl,
 } from './store-terminal';
 import {
   getLayoutTreeImpl,
@@ -54,6 +55,7 @@ export interface Terminal {
   figmaUrl?: string;
   exited?: boolean;
   exitCode?: number;
+  pinned?: boolean;
 }
 
 export type ShellType =
@@ -229,10 +231,11 @@ export class Store {
 
   addTerminal(terminal: Terminal, opts?: { background?: boolean }) { addTerminalImpl(this, terminal, opts); }
   updateTerminal(id: string, updates: Partial<Terminal>) { updateTerminalImpl(this, id, updates); }
-  removeTerminal(id: string) { removeTerminalImpl(this, id); }
+  removeTerminal(id: string, force = false) { removeTerminalImpl(this, id, force); }
   setActiveTerminal(id: string | null) { setActiveTerminalImpl(this, id); }
   moveTerminalToWorkspace(terminalId: string, workspaceId: string) { moveTerminalToWorkspaceImpl(this, terminalId, workspaceId); }
   reorderTerminals(workspaceId: string, tabOrder: string[]) { reorderTerminalsImpl(this, workspaceId, tabOrder); }
+  togglePinTab(terminalId: string) { togglePinTabImpl(this, terminalId); }
 
   // ---------------------------------------------------------------------------
   // Layout tree operations (delegated to store-layout.ts)

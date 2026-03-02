@@ -104,6 +104,8 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
         e.preventDefault();
         if (state.activeTerminalId) {
           const terminal = state.terminals.find(t => t.id === state.activeTerminalId);
+          // Pinned tabs cannot be closed via keyboard shortcut
+          if (terminal?.pinned) break;
           if (terminal?.paneType !== 'figma') {
             await terminalService.closeTerminal(state.activeTerminalId);
           }
