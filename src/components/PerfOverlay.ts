@@ -37,6 +37,7 @@ export class PerfOverlay {
   private tableBody: HTMLElement;
   private fpsLine: HTMLElement;
   private interval: ReturnType<typeof setInterval> | null = null;
+  private rafId: ReturnType<typeof requestAnimationFrame> | null = null;
   private lastTickTime = performance.now();
   private lastFrameCount = 0;
 
@@ -89,16 +90,30 @@ export class PerfOverlay {
     parent.appendChild(this.el);
     this.lastTickTime = performance.now();
     this.lastFrameCount = perfTracer.getFrameCount();
+    this.startFrameCounter();
     this.interval = setInterval(() => this.refresh(), 1000);
     this.refresh();
   }
 
   destroy(): void {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
     if (this.interval) {
       clearInterval(this.interval);
       this.interval = null;
     }
     this.el.remove();
+  }
+
+  /** Continuous rAF loop that counts actual animation frames for FPS. */
+  private startFrameCounter(): void {
+    const loop = () => {
+      perfTracer.tick();
+      this.rafId = requestAnimationFrame(loop);
+    };
+    this.rafId = requestAnimationFrame(loop);
   }
 
   private refresh(): void {
