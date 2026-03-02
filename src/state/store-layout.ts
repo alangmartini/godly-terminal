@@ -8,6 +8,7 @@ import {
   swapTerminals,
   findAdjacentTerminal,
 } from './split-types';
+import { syncLayoutTreeToBackend } from '../controllers/reconnection-controller';
 
 // ---------------------------------------------------------------------------
 // Layout tree CRUD
@@ -23,6 +24,8 @@ export function setLayoutTreeImpl(store: Store, workspaceId: string, tree: Layou
     splitViews: { ...store.getState().splitViews, ...store.treeToSplitViews(workspaceId, tree) },
   });
   store.enforceSplitAdjacency(workspaceId);
+  // Sync to backend for persistence (fire-and-forget)
+  syncLayoutTreeToBackend(workspaceId, tree);
 }
 
 /** Clear the active layout tree for a workspace. Does not affect suspended splits. */
@@ -109,6 +112,7 @@ export function unsplitTerminalImpl(store: Store, workspaceId: string, terminalI
       zoomedPanes,
     });
     store.enforceSplitAdjacency(workspaceId);
+    syncLayoutTreeToBackend(workspaceId, result);
   }
 }
 
@@ -151,6 +155,7 @@ export function updateTreeRatioImpl(store: Store, workspaceId: string, path: num
       layoutTrees: { ...store.getState().layoutTrees, [workspaceId]: updated },
       splitViews: { ...store.getState().splitViews, ...store.treeToSplitViews(workspaceId, updated) },
     });
+    syncLayoutTreeToBackend(workspaceId, updated);
   }
 }
 
@@ -188,6 +193,7 @@ export function swapPanesImpl(store: Store, workspaceId: string, idA: string, id
       splitViews: { ...store.getState().splitViews, ...store.treeToSplitViews(workspaceId, swapped) },
     });
     store.enforceSplitAdjacency(workspaceId);
+    syncLayoutTreeToBackend(workspaceId, swapped);
   }
 }
 
@@ -233,14 +239,16 @@ export function updateSplitRatioImpl(store: Store, workspaceId: string, ratio: n
   const state = store.getState();
   const tree = state.layoutTrees[workspaceId];
   if (!tree || tree.type !== 'split') return;
+  const updated = { ...tree, ratio };
   store.setState({
     layoutTrees: {
       ...state.layoutTrees,
-      [workspaceId]: { ...tree, ratio },
+      [workspaceId]: updated,
     },
     splitViews: {
       ...state.splitViews,
       [workspaceId]: { ...state.splitViews[workspaceId], ratio },
     },
   });
+  syncLayoutTreeToBackend(workspaceId, updated);
 }
