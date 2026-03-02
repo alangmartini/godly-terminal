@@ -3,7 +3,10 @@ use std::io;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::binary_diff::{decode_grid_diff, encode_grid_diff_into};
-use crate::messages::{DaemonMessage, Event, Request, Response};
+use crate::messages::{
+    DaemonMessage, DaemonMessageReadEnvelope, DaemonMessageWriteEnvelope, Event, Request,
+    RequestEnvelope, Response,
+};
 
 // ── Binary frame type tags ──────────────────────────────────────────────
 // JSON payloads always start with '{' (0x7B) due to #[serde(tag = ...)].
@@ -121,23 +124,43 @@ pub fn read_message<R: io::Read, T: DeserializeOwned>(reader: &mut R) -> io::Res
 /// - `Event::GridDiff` → binary (tag 0x04) — compact binary diff, ~10x smaller than JSON
 /// - Everything else → JSON
 pub fn write_daemon_message<W: io::Write>(writer: &mut W, msg: &DaemonMessage) -> io::Result<()> {
+    write_daemon_message_with_id(writer, msg, None)
+}
+
+/// Write a DaemonMessage with an optional request_id for concurrent IPC routing.
+///
+/// When `request_id` is `Some`, the JSON envelope includes it so the client
+/// can match responses to requests without relying on FIFO ordering.
+/// Binary frames (Event::Output, Event::GridDiff, legacy Response::Buffer)
+/// never carry request_id.
+pub fn write_daemon_message_with_id<W: io::Write>(
+    writer: &mut W,
+    msg: &DaemonMessage,
+    request_id: Option<u32>,
+) -> io::Result<()> {
     match msg {
         DaemonMessage::Event(Event::Output { session_id, data }) => {
             let frame = encode_binary_frame(TAG_EVENT_OUTPUT, session_id, data);
             write_length_prefixed(writer, &frame)
         }
         DaemonMessage::Event(Event::GridDiff { session_id, diff }) => {
-            // Binary-encode the diff, then wrap in our binary frame format.
             let mut diff_bytes = Vec::new();
             encode_grid_diff_into(diff, &mut diff_bytes);
             let frame = encode_binary_frame(TAG_EVENT_GRID_DIFF, session_id, &diff_bytes);
             write_length_prefixed(writer, &frame)
         }
-        DaemonMessage::Response(Response::Buffer { session_id, data }) => {
+        DaemonMessage::Response(Response::Buffer { session_id, data }) if request_id.is_none() => {
+            // Binary framing for legacy (no request_id) Buffer responses
             let frame = encode_binary_frame(TAG_RESPONSE_BUFFER, session_id, data);
             write_length_prefixed(writer, &frame)
         }
-        _ => write_message(writer, msg),
+        _ => {
+            let envelope = DaemonMessageWriteEnvelope {
+                request_id,
+                message: msg,
+            };
+            write_message(writer, &envelope)
+        }
     }
 }
 
@@ -147,8 +170,15 @@ pub fn write_daemon_message<W: io::Write>(writer: &mut W, msg: &DaemonMessage) -
 /// to the DiffStreamRegistry without deserializing + re-encoding.
 #[derive(Debug)]
 pub enum ReadResult {
-    /// A fully parsed DaemonMessage.
+    /// A fully parsed DaemonMessage (events only — responses use `Response` variant).
     Message(DaemonMessage),
+    /// A response with an optional request_id for concurrent IPC routing.
+    /// All Response-type messages (both JSON and binary) are returned through
+    /// this variant so the bridge can route by request_id.
+    Response {
+        response: Response,
+        request_id: Option<u32>,
+    },
     /// A binary-encoded GridDiff frame. Contains the session_id and raw binary
     /// diff bytes (already in the compact `encode_grid_diff` format) that can
     /// be pushed directly to the diff stream registry.
@@ -181,12 +211,18 @@ pub fn read_daemon_message_ext<R: io::Read>(reader: &mut R) -> io::Result<ReadRe
     }
 
     if buf[0] == 0x7B {
-        // JSON message
-        let msg = serde_json::from_slice(&buf)
+        // JSON message — deserialize via envelope to extract optional request_id
+        let envelope: DaemonMessageReadEnvelope = serde_json::from_slice(&buf)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        Ok(ReadResult::Message(msg))
+        match envelope.message {
+            DaemonMessage::Response(response) => Ok(ReadResult::Response {
+                response,
+                request_id: envelope.request_id,
+            }),
+            other => Ok(ReadResult::Message(other)),
+        }
     } else {
-        // Binary frame
+        // Binary frame (no request_id — legacy path)
         let (tag, session_id, data) = decode_binary_frame(&buf)?;
         match tag {
             TAG_EVENT_OUTPUT => Ok(ReadResult::Message(DaemonMessage::Event(Event::Output {
@@ -200,12 +236,13 @@ pub fn read_daemon_message_ext<R: io::Read>(reader: &mut R) -> io::Result<ReadRe
                     binary_diff: data.to_vec(),
                 })
             }
-            TAG_RESPONSE_BUFFER => Ok(ReadResult::Message(DaemonMessage::Response(
-                Response::Buffer {
+            TAG_RESPONSE_BUFFER => Ok(ReadResult::Response {
+                response: Response::Buffer {
                     session_id: session_id.to_string(),
                     data: data.to_vec(),
                 },
-            ))),
+                request_id: None,
+            }),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Unknown daemon binary frame tag: 0x{:02X}", tag),
@@ -224,6 +261,7 @@ pub fn read_daemon_message_ext<R: io::Read>(reader: &mut R) -> io::Result<ReadRe
 pub fn read_daemon_message<R: io::Read>(reader: &mut R) -> io::Result<Option<DaemonMessage>> {
     match read_daemon_message_ext(reader)? {
         ReadResult::Message(msg) => Ok(Some(msg)),
+        ReadResult::Response { response, .. } => Ok(Some(DaemonMessage::Response(response))),
         ReadResult::RawGridDiff {
             session_id,
             binary_diff,
@@ -249,20 +287,49 @@ pub fn read_daemon_message<R: io::Read>(reader: &mut R) -> io::Result<Option<Dae
 /// - `Request::Write` → binary (tag 0x02)
 /// - Everything else → JSON
 pub fn write_request<W: io::Write>(writer: &mut W, msg: &Request) -> io::Result<()> {
+    write_request_with_id(writer, msg, None)
+}
+
+/// Write a Request with an optional request_id for concurrent IPC routing.
+///
+/// When `request_id` is `Some`, the JSON envelope includes it so the daemon
+/// can echo it back in the response. Binary frames (Request::Write) never
+/// carry request_id since they are fire-and-forget.
+pub fn write_request_with_id<W: io::Write>(
+    writer: &mut W,
+    msg: &Request,
+    request_id: Option<u32>,
+) -> io::Result<()> {
     match msg {
         Request::Write { session_id, data } => {
             let frame = encode_binary_frame(TAG_REQUEST_WRITE, session_id, data);
             write_length_prefixed(writer, &frame)
         }
-        _ => write_message(writer, msg),
+        _ => {
+            let envelope = RequestEnvelope {
+                request_id,
+                request: msg.clone(),
+            };
+            write_message(writer, &envelope)
+        }
     }
 }
 
 /// Read a Request, auto-detecting binary vs JSON by first byte.
 ///
-/// - First byte == 0x7B ('{') → JSON
-/// - First byte is a type tag → binary frame
+/// Backward-compatible: discards the request_id. Use `read_request_with_id`
+/// to receive the request_id for concurrent IPC routing.
 pub fn read_request<R: io::Read>(reader: &mut R) -> io::Result<Option<Request>> {
+    Ok(read_request_with_id(reader)?.map(|(req, _id)| req))
+}
+
+/// Read a Request and its optional request_id for concurrent IPC routing.
+///
+/// - First byte == 0x7B ('{') → JSON (may include request_id)
+/// - First byte is a type tag → binary frame (request_id is always None)
+pub fn read_request_with_id<R: io::Read>(
+    reader: &mut R,
+) -> io::Result<Option<(Request, Option<u32>)>> {
     let buf = match read_length_prefixed(reader)? {
         Some(buf) => buf,
         None => return Ok(None),
@@ -276,18 +343,21 @@ pub fn read_request<R: io::Read>(reader: &mut R) -> io::Result<Option<Request>> 
     }
 
     if buf[0] == 0x7B {
-        // JSON message
-        let msg = serde_json::from_slice(&buf)
+        // JSON message — deserialize as RequestEnvelope to extract optional request_id
+        let envelope: RequestEnvelope = serde_json::from_slice(&buf)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        Ok(Some(msg))
+        Ok(Some((envelope.request, envelope.request_id)))
     } else {
-        // Binary frame
+        // Binary frame — no request_id (fire-and-forget path)
         let (tag, session_id, data) = decode_binary_frame(&buf)?;
         match tag {
-            TAG_REQUEST_WRITE => Ok(Some(Request::Write {
-                session_id: session_id.to_string(),
-                data: data.to_vec(),
-            })),
+            TAG_REQUEST_WRITE => Ok(Some((
+                Request::Write {
+                    session_id: session_id.to_string(),
+                    data: data.to_vec(),
+                },
+                None,
+            ))),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Unknown request binary frame tag: 0x{:02X}", tag),
