@@ -370,6 +370,37 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
         break;
       }
 
+      case 'tabs.reopenClosed': {
+        e.preventDefault();
+        // Pop entries until we find one whose workspace still exists
+        let entry = store.popRecentlyClosed();
+        while (entry) {
+          const workspace = state.workspaces.find(w => w.id === entry!.workspaceId);
+          if (workspace) break;
+          entry = store.popRecentlyClosed();
+        }
+        if (entry) {
+          try {
+            const result = await terminalService.createTerminal(entry.workspaceId, {
+              cwdOverride: entry.cwd ?? undefined,
+              shellTypeOverride: entry.shellType ?? undefined,
+            });
+            store.addTerminal({
+              id: result.id,
+              workspaceId: entry.workspaceId,
+              name: entry.name,
+              processName: shellTypeToProcessName(
+                entry.shellType ?? terminalSettingsStore.getDefaultShell()
+              ),
+              order: 0,
+            });
+          } catch (error) {
+            console.error('[App] Reopen closed terminal failed:', error);
+          }
+        }
+        break;
+      }
+
       case 'tabs.quickClaude': {
         e.preventDefault();
         if (!state.activeWorkspaceId) break;

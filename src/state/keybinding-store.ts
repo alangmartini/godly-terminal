@@ -40,6 +40,7 @@ export type ActionId =
   | 'scroll.toTop'
   | 'scroll.toBottom'
   | 'tabs.renameTerminal'
+  | 'tabs.reopenClosed'
   | 'tabs.quickClaude'
   | 'zoom.in'
   | 'zoom.out'
@@ -286,6 +287,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     category: 'Tabs',
     type: 'app',
     defaultChord: { ctrlKey: false, shiftKey: false, altKey: false, key: 'f2' },
+  },
+  {
+    id: 'tabs.reopenClosed',
+    label: 'Reopen Closed Terminal',
+    category: 'Tabs',
+    type: 'app',
+    defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 't' },
   },
   {
     id: 'tabs.quickClaude',
