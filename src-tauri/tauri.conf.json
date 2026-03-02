@@ -4,9 +4,9 @@
   "version": "0.11.1",
   "identifier": "com.godly.terminal",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run unlock -- --release && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote --release && cd .. && npm run build:check",
+    "beforeBuildCommand": "pnpm run unlock -- --release && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote --release && cd .. && pnpm run build:check",
     "frontendDist": "../dist"
   },
   "app": {

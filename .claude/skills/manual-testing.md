@@ -225,4 +225,4 @@ When the `pyautogui-mcp` server is registered, you have real mouse/keyboard cont
 5. Use `execute_js` to verify state changes in the store
 
 #### Testing on Staging
-Prefer running tests on the Godly Staging instance (`npm run staging:dev`) to avoid disrupting the production app. The staging instance uses `GODLY_INSTANCE=staging` for full isolation.
+Prefer running tests on the Godly Staging instance (`pnpm staging:dev`) to avoid disrupting the production app. The staging instance uses `GODLY_INSTANCE=staging` for full isolation.

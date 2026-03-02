@@ -71,10 +71,10 @@ Before writing any code, decide which test tiers are needed. Use this decision t
 
 | Feature involves... | Test tier | Why |
 |---------------------|-----------|-----|
-| Store logic, keyboard shortcuts, event routing | **Unit** (`npm test`) | Pure logic, no DOM needed |
-| Canvas2D rendering, layout, pointer events | **Browser** (`npm run test:browser`) | Needs real Chromium |
-| Daemon protocol, session lifecycle, IPC | **Integration** (`npm run test:integration`) | Needs real daemon |
-| Full user workflow, persistence across restart | **E2E** (`npm run test:e2e`) | Needs full app |
+| Store logic, keyboard shortcuts, event routing | **Unit** (`pnpm test`) | Pure logic, no DOM needed |
+| Canvas2D rendering, layout, pointer events | **Browser** (`pnpm test:browser`) | Needs real Chromium |
+| Daemon protocol, session lifecycle, IPC | **Integration** (`pnpm test:integration`) | Needs real daemon |
+| Full user workflow, persistence across restart | **E2E** (`pnpm test:e2e`) | Needs full app |
 | New daemon command, concurrency, ring buffers | **Daemon** (`cargo nextest run -p godly-daemon`) | Needs isolated daemon |
 | New VT sequences, parser changes | **Crate** (`cargo nextest run -p godly-vt`) | Rust unit tests |
 
@@ -129,21 +129,21 @@ Run the local verification checks required by CLAUDE.md:
    ```bash
    cd src-tauri && cargo nextest run -p <crate-you-modified>
    ```
-   Or use the smart runner: `npm run test:smart`
+   Or use the smart runner: `pnpm test:smart`
 
 3. **Frontend unit tests** (if TypeScript was touched):
    ```bash
-   npm test
+   pnpm test
    ```
 
 4. **Browser tests** (if Canvas2D, layout, or pointer events were touched):
    ```bash
-   npm run test:browser
+   pnpm test:browser
    ```
 
 5. **Integration tests** (if daemon protocol or session lifecycle was touched):
    ```bash
-   npm run build:daemon && npm run test:integration
+   pnpm build:daemon && pnpm test:integration
    ```
 
 All checks must pass before proceeding. Fix any failures and re-run.
@@ -204,7 +204,7 @@ The version number gets filled in later by the `/release` or `/bump-version` ski
    Fixes #<issue-number>
 
    ## Test Plan
-   - [ ] Unit tests pass (`npm test`)
+   - [ ] Unit tests pass (`pnpm test`)
    - [ ] Cargo tests pass (`cargo nextest run -p <crate>`)
    - [ ] <any additional verification steps>
    EOF

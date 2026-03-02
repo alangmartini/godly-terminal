@@ -85,7 +85,7 @@ Tauri 2.0 enables Chrome DevTools in debug builds by default.
 
 1. **Start the app in dev mode**:
    ```bash
-   npm run tauri dev
+   pnpm tauri dev
    ```
 
 2. **Open DevTools**: Press `F12` or right-click and select "Inspect"
