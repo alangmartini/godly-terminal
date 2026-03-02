@@ -85,7 +85,9 @@ export function removeTerminalImpl(store: Store, id: string): void {
     const sameWorkspace = remainingTerminals.filter(
       t => t.workspaceId === terminal.workspaceId
     );
-    newActiveId = sameWorkspace[0]?.id ?? null;
+    const prevId = store.getPreviousActiveTerminal(terminal.workspaceId);
+    const prevStillExists = prevId && prevId !== id && sameWorkspace.some(t => t.id === prevId);
+    newActiveId = prevStillExists ? prevId : sameWorkspace[0]?.id ?? null;
   }
 
   let layoutTrees = state.layoutTrees;
