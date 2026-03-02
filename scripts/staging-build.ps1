@@ -7,7 +7,7 @@ function Write-Ok($msg)   { Write-Host "   $msg" -ForegroundColor Green }
 
 function Assert-ExitCode {
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "`nProduction build failed (exit code $LASTEXITCODE)." -ForegroundColor Red
+        Write-Host "`nStaging build failed (exit code $LASTEXITCODE)." -ForegroundColor Red
         exit $LASTEXITCODE
     }
 }
@@ -18,7 +18,7 @@ $repoRoot = Split-Path $PSScriptRoot
 $packageJson = Get-Content (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
 $version = $packageJson.version
 
-Write-Host "Godly Terminal build  v$version" -ForegroundColor Magenta
+Write-Host "Godly Terminal (Staging) build  v$version" -ForegroundColor Magenta
 
 # ── Install dependencies ──────────────────────────────────────────────────
 
@@ -33,23 +33,29 @@ Write-Step "Unlocking release binaries..."
 pnpm run unlock -- --release
 Assert-ExitCode
 
-# ── Build Tauri production bundle ─────────────────────────────────────────
+# ── Build Tauri staging bundle ───────────────────────────────────────────
+# Uses --features staging to bake GODLY_INSTANCE=staging into the binary,
+# and --config to override identifier/productName/title for full isolation.
 
-Write-Step "Building Tauri production bundle..."
+Write-Step "Building Tauri staging bundle..."
+Write-Host "   Features: staging (isolated pipes, metadata, app data)" -ForegroundColor DarkGray
+Write-Host "   Config:   tauri.conf.staging.json (separate identity)" -ForegroundColor DarkGray
 
-pnpm exec tauri build
+$env:GODLY_INSTANCE = "staging"
+pnpm exec tauri build --features staging --config src-tauri/tauri.conf.staging.json
 Assert-ExitCode
+Remove-Item Env:\GODLY_INSTANCE -ErrorAction SilentlyContinue
 
-# ── Copy artifacts to installations/production/ ──────────────────────────
+# ── Copy artifacts to installations/staging/ ─────────────────────────────
 
 $bundleDir = Join-Path $repoRoot "src-tauri\target\release\bundle"
-$outDir = Join-Path $repoRoot "installations\production"
+$outDir = Join-Path $repoRoot "installations\staging"
 
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 }
 
-Write-Step "Copying artifacts to installations\production\..."
+Write-Step "Copying artifacts to installations\staging\..."
 
 $nsisExe = Get-ChildItem "$bundleDir\nsis\*.exe" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -71,4 +77,4 @@ if (-not $nsisExe -and -not $msiFile) {
 
 Pop-Location
 
-Write-Host "`nProduction build complete. Artifacts in: $outDir" -ForegroundColor Green
+Write-Host "`nStaging build complete. Artifacts in: $outDir" -ForegroundColor Green
