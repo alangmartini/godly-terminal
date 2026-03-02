@@ -118,18 +118,18 @@ describe('TerminalSettingsStore', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('defaults splitTabMode to individual', async () => {
+  it('defaults splitTabMode to unified', async () => {
     const store = await createStore();
-    expect(store.getSplitTabMode()).toBe('individual');
+    expect(store.getSplitTabMode()).toBe('unified');
   });
 
   it('persists splitTabMode to localStorage', async () => {
     const store = await createStore();
-    store.setSplitTabMode('unified');
+    store.setSplitTabMode('individual');
 
     expect(localStorageMock.setItem).toHaveBeenCalledWith(
       'godly-terminal-settings',
-      expect.stringContaining('"splitTabMode":"unified"'),
+      expect.stringContaining('"splitTabMode":"individual"'),
     );
   });
 
@@ -150,7 +150,7 @@ describe('TerminalSettingsStore', () => {
     );
 
     const store = await createStore();
-    expect(store.getSplitTabMode()).toBe('individual');
+    expect(store.getSplitTabMode()).toBe('unified');
   });
 
   it('does not notify when splitTabMode is set to same value', async () => {
@@ -158,7 +158,7 @@ describe('TerminalSettingsStore', () => {
     const listener = vi.fn();
     store.subscribe(listener);
 
-    store.setSplitTabMode('individual'); // same as default
+    store.setSplitTabMode('unified'); // same as default
     expect(listener).not.toHaveBeenCalled();
   });
 });
