@@ -17,13 +17,22 @@ pub struct TerminalInfo {
     pub scrollback_offset: usize,
     /// Total number of scrollback rows available.
     pub total_scrollback: usize,
+    /// Workspace this terminal belongs to (None = default workspace).
+    pub workspace_id: Option<String>,
+    /// User-assigned custom name (overrides title/process_name in tab label).
+    pub custom_name: Option<String>,
 }
 
 impl TerminalInfo {
     /// Returns the display label for this terminal's tab.
     ///
-    /// Priority: title > process_name > "Terminal"
+    /// Priority: custom_name > title > process_name > "Terminal"
     pub fn tab_label(&self) -> &str {
+        if let Some(ref name) = self.custom_name {
+            if !name.is_empty() {
+                return name;
+            }
+        }
         if !self.title.is_empty() {
             &self.title
         } else if !self.process_name.is_empty() {
@@ -75,6 +84,8 @@ impl TerminalCollection {
             exit_code: None,
             scrollback_offset: 0,
             total_scrollback: 0,
+            workspace_id: None,
+            custom_name: None,
         });
 
         if is_first {
@@ -191,6 +202,68 @@ impl TerminalCollection {
     fn active_index(&self) -> Option<usize> {
         let id = self.active_id.as_deref()?;
         self.terminals.iter().position(|t| t.id == id)
+    }
+
+    /// Adds a terminal to a specific workspace.
+    ///
+    /// Like `add()`, but also sets `workspace_id`. Returns a mutable reference
+    /// to the newly created `TerminalInfo`.
+    pub fn add_to_workspace(
+        &mut self,
+        id: String,
+        rows: u16,
+        cols: u16,
+        workspace_id: String,
+    ) -> &mut TerminalInfo {
+        let order = self.next_order;
+        self.next_order += 1;
+        let is_first = self.terminals.is_empty();
+
+        self.terminals.push(TerminalInfo {
+            id: id.clone(),
+            title: String::new(),
+            process_name: String::new(),
+            order,
+            grid: None,
+            dirty: false,
+            fetching: false,
+            rows,
+            cols,
+            exited: false,
+            exit_code: None,
+            scrollback_offset: 0,
+            total_scrollback: 0,
+            workspace_id: Some(workspace_id),
+            custom_name: None,
+        });
+
+        if is_first {
+            self.active_id = Some(id);
+        }
+
+        self.terminals.last_mut().unwrap()
+    }
+
+    /// Set or clear the custom name for a terminal.
+    pub fn rename(&mut self, id: &str, name: Option<String>) {
+        if let Some(term) = self.get_mut(id) {
+            term.custom_name = name;
+        }
+    }
+
+    /// Returns terminals belonging to a specific workspace.
+    pub fn terminals_for_workspace(&self, workspace_id: &str) -> Vec<&TerminalInfo> {
+        self.terminals
+            .iter()
+            .filter(|t| t.workspace_id.as_deref() == Some(workspace_id))
+            .collect()
+    }
+
+    /// Move a terminal to a workspace (or unassign with None).
+    pub fn set_workspace(&mut self, terminal_id: &str, workspace_id: Option<String>) {
+        if let Some(term) = self.get_mut(terminal_id) {
+            term.workspace_id = workspace_id;
+        }
     }
 }
 
@@ -453,5 +526,74 @@ mod tests {
         let info = col.add("t1".into(), 24, 80);
         assert_eq!(info.scrollback_offset, 0);
         assert_eq!(info.total_scrollback, 0);
+    }
+
+    #[test]
+    fn test_tab_label_custom_name_priority() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+        info.process_name = "pwsh".into();
+        info.title = "My Shell".into();
+        info.custom_name = Some("Custom Name".into());
+        assert_eq!(info.tab_label(), "Custom Name");
+    }
+
+    #[test]
+    fn test_tab_label_empty_custom_name_falls_through() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+        info.custom_name = Some(String::new());
+        info.title = "Title".into();
+        assert_eq!(info.tab_label(), "Title");
+    }
+
+    #[test]
+    fn test_rename() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.rename("t1", Some("My Terminal".into()));
+        assert_eq!(col.get("t1").unwrap().tab_label(), "My Terminal");
+
+        col.rename("t1", None);
+        assert_eq!(col.get("t1").unwrap().tab_label(), "Terminal");
+    }
+
+    #[test]
+    fn test_workspace_filtering() {
+        let mut col = TerminalCollection::new();
+        col.add_to_workspace("t1".into(), 24, 80, "w1".into());
+        col.add_to_workspace("t2".into(), 24, 80, "w1".into());
+        col.add_to_workspace("t3".into(), 24, 80, "w2".into());
+        col.add("t4".into(), 24, 80); // No workspace
+
+        let w1_terms = col.terminals_for_workspace("w1");
+        assert_eq!(w1_terms.len(), 2);
+
+        let w2_terms = col.terminals_for_workspace("w2");
+        assert_eq!(w2_terms.len(), 1);
+
+        let w3_terms = col.terminals_for_workspace("w3");
+        assert_eq!(w3_terms.len(), 0);
+    }
+
+    #[test]
+    fn test_set_workspace() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        assert!(col.get("t1").unwrap().workspace_id.is_none());
+
+        col.set_workspace("t1", Some("w1".into()));
+        assert_eq!(col.get("t1").unwrap().workspace_id.as_deref(), Some("w1"));
+
+        col.set_workspace("t1", None);
+        assert!(col.get("t1").unwrap().workspace_id.is_none());
+    }
+
+    #[test]
+    fn test_new_fields_default_to_none() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+        assert!(info.workspace_id.is_none());
+        assert!(info.custom_name.is_none());
     }
 }
