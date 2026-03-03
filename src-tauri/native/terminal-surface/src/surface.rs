@@ -7,6 +7,13 @@ use godly_protocol::types::RichGridData;
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 
+/// Grid position for selection rendering (local to avoid cross-crate dependency).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridPos {
+    pub row: usize,
+    pub col: usize,
+}
+
 /// Default terminal foreground (light gray).
 pub const DEFAULT_FG: Color = Color {
     r: 0.8,
@@ -42,6 +49,9 @@ pub struct TerminalCanvas {
     pub grid: Option<RichGridData>,
     /// Font metrics for cell sizing.
     pub metrics: FontMetrics,
+    /// Optional selection range (start, end) in reading order.
+    /// When set, draws a semi-transparent blue overlay on selected cells.
+    pub selection: Option<(GridPos, GridPos)>,
 }
 
 impl Default for TerminalCanvas {
@@ -49,6 +59,7 @@ impl Default for TerminalCanvas {
         Self {
             grid: None,
             metrics: FontMetrics::default(),
+            selection: None,
         }
     }
 }
@@ -59,6 +70,7 @@ impl TerminalCanvas {
         Self {
             grid: None,
             metrics,
+            selection: None,
         }
     }
 }
@@ -176,6 +188,30 @@ impl<Message> canvas::Program<Message> for TerminalCanvas {
                         canvas::Stroke::default().with_color(fg).with_width(1.0),
                     );
                 }
+            }
+        }
+
+        // Draw selection overlay
+        if let Some((start, end)) = &self.selection {
+            let selection_color = Color::from_rgba(0.2, 0.4, 0.8, 0.3); // semi-transparent blue
+            for row in start.row..=end.row {
+                if row >= grid.rows.len() {
+                    break;
+                }
+                let y = row as f32 * cell_h;
+                let col_start = if row == start.row { start.col } else { 0 };
+                let col_end = if row == end.row {
+                    end.col
+                } else {
+                    grid.rows[row].cells.len().saturating_sub(1)
+                };
+                let x = col_start as f32 * cell_w;
+                let width = ((col_end - col_start + 1) as f32) * cell_w;
+                frame.fill_rectangle(
+                    Point::new(x, y),
+                    Size::new(width, cell_h),
+                    selection_color,
+                );
             }
         }
 
