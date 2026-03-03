@@ -1,6 +1,7 @@
 use iced::window;
 
 mod app;
+mod split_pane;
 mod subscription;
 mod tab_bar;
 mod terminal_state;
