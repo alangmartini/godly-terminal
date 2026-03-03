@@ -16,6 +16,11 @@ pub enum AppAction {
     ScrollPageDown,
     ScrollToTop,
     ScrollToBottom,
+    SplitRight,
+    SplitDown,
+    Unsplit,
+    FocusNextPane,
+    SelectAll,
 }
 
 /// Check if a key event matches an app-level shortcut.
@@ -37,30 +42,61 @@ pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> 
     }
 }
 
-/// Match character-based shortcuts (Ctrl+T, Ctrl+W, etc.).
+/// Match character-based shortcuts (Ctrl+T, Ctrl+W, Ctrl+\, Alt+\, etc.).
 fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Option<AppAction> {
-    // All character shortcuts require Ctrl, no Alt
+    // Alt-only shortcuts (no Ctrl, no Shift)
+    if alt && !ctrl && !shift {
+        return match s {
+            // Alt+\ -> FocusNextPane
+            "\\" => Some(AppAction::FocusNextPane),
+            _ => None,
+        };
+    }
+
+    // Ctrl+Alt shortcuts (no Shift)
+    if ctrl && alt && !shift {
+        return match s {
+            // Ctrl+Alt+\ -> SplitDown
+            "\\" => Some(AppAction::SplitDown),
+            _ => None,
+        };
+    }
+
+    // Ctrl shortcuts (no Alt)
     if !ctrl || alt {
         return None;
     }
 
+    // Backslash has no case distinction -- match on raw `s` first.
+    if s == "\\" {
+        return if !shift {
+            // Ctrl+\ -> SplitRight
+            Some(AppAction::SplitRight)
+        } else {
+            // Ctrl+Shift+\ -> Unsplit
+            Some(AppAction::Unsplit)
+        };
+    }
+
     match s.to_ascii_lowercase().as_str() {
-        // Ctrl+T (no shift) → NewTab
+        // Ctrl+T (no shift) -> NewTab
         "t" if !shift => Some(AppAction::NewTab),
-        // Ctrl+W (no shift) → CloseTab
+        // Ctrl+W (no shift) -> CloseTab
         "w" if !shift => Some(AppAction::CloseTab),
-        // Ctrl+= or Ctrl++ → ZoomIn
+        // Ctrl+= or Ctrl++ -> ZoomIn
         // On US keyboard, '+' is Shift+'=', so both '=' and '+' should trigger ZoomIn.
         // Ctrl+= (no shift) or Ctrl+Shift+= (which produces '+') both work.
         "=" | "+" => Some(AppAction::ZoomIn),
-        // Ctrl+- (no shift) → ZoomOut
+        // Ctrl+- (no shift) -> ZoomOut
         "-" if !shift => Some(AppAction::ZoomOut),
-        // Ctrl+0 (no shift) → ZoomReset
+        // Ctrl+0 (no shift) -> ZoomReset
         "0" if !shift => Some(AppAction::ZoomReset),
-        // Ctrl+Shift+C → Copy
+        // Ctrl+Shift+C -> Copy
         "c" if shift => Some(AppAction::Copy),
-        // Ctrl+Shift+V → Paste
+        // Ctrl+Shift+V -> Paste
         "v" if shift => Some(AppAction::Paste),
+        // Ctrl+Shift+A -> SelectAll
+        "a" if shift => Some(AppAction::SelectAll),
         _ => None,
     }
 }
@@ -73,17 +109,17 @@ fn check_named_shortcut(named: &Named, ctrl: bool, shift: bool, alt: bool) -> Op
     }
 
     match named {
-        // Ctrl+Tab (no shift) → NextTab
+        // Ctrl+Tab (no shift) -> NextTab
         Named::Tab if ctrl && !shift => Some(AppAction::NextTab),
-        // Ctrl+Shift+Tab → PreviousTab
+        // Ctrl+Shift+Tab -> PreviousTab
         Named::Tab if ctrl && shift => Some(AppAction::PreviousTab),
-        // Shift+PageUp (no ctrl) → ScrollPageUp
+        // Shift+PageUp (no ctrl) -> ScrollPageUp
         Named::PageUp if shift && !ctrl => Some(AppAction::ScrollPageUp),
-        // Shift+PageDown (no ctrl) → ScrollPageDown
+        // Shift+PageDown (no ctrl) -> ScrollPageDown
         Named::PageDown if shift && !ctrl => Some(AppAction::ScrollPageDown),
-        // Ctrl+Home (no shift) → ScrollToTop
+        // Ctrl+Home (no shift) -> ScrollToTop
         Named::Home if ctrl && !shift => Some(AppAction::ScrollToTop),
-        // Ctrl+End (no shift) → ScrollToBottom
+        // Ctrl+End (no shift) -> ScrollToBottom
         Named::End if ctrl && !shift => Some(AppAction::ScrollToBottom),
         _ => None,
     }
@@ -92,8 +128,6 @@ fn check_named_shortcut(named: &Named, ctrl: bool, shift: bool, alt: bool) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Helper constructors ──────────────────────────────────────────
 
     fn char_key(s: &str) -> Key {
         Key::Character(s.into())
@@ -122,28 +156,28 @@ mod tests {
         Modifiers::CTRL.union(Modifiers::ALT)
     }
 
-    // ── NewTab: Ctrl+T ───────────────────────────────────────────────
+    fn alt_shift() -> Modifiers {
+        Modifiers::ALT.union(Modifiers::SHIFT)
+    }
+
+    fn ctrl_alt_shift() -> Modifiers {
+        Modifiers::CTRL.union(Modifiers::ALT).union(Modifiers::SHIFT)
+    }
+
+    // NewTab: Ctrl+T
 
     #[test]
     fn ctrl_t_is_new_tab() {
-        assert_eq!(
-            check_app_shortcut(&char_key("t"), CTRL),
-            Some(AppAction::NewTab)
-        );
+        assert_eq!(check_app_shortcut(&char_key("t"), CTRL), Some(AppAction::NewTab));
     }
 
     #[test]
     fn ctrl_uppercase_t_is_new_tab() {
-        // Iced may send uppercase "T" — we match case-insensitively
-        assert_eq!(
-            check_app_shortcut(&char_key("T"), CTRL),
-            Some(AppAction::NewTab)
-        );
+        assert_eq!(check_app_shortcut(&char_key("T"), CTRL), Some(AppAction::NewTab));
     }
 
     #[test]
     fn ctrl_shift_t_is_not_shortcut() {
-        // Ctrl+Shift+T should pass through to PTY (not intercepted)
         assert_eq!(check_app_shortcut(&char_key("t"), ctrl_shift()), None);
     }
 
@@ -162,22 +196,16 @@ mod tests {
         assert_eq!(check_app_shortcut(&char_key("t"), ctrl_alt()), None);
     }
 
-    // ── CloseTab: Ctrl+W ─────────────────────────────────────────────
+    // CloseTab: Ctrl+W
 
     #[test]
     fn ctrl_w_is_close_tab() {
-        assert_eq!(
-            check_app_shortcut(&char_key("w"), CTRL),
-            Some(AppAction::CloseTab)
-        );
+        assert_eq!(check_app_shortcut(&char_key("w"), CTRL), Some(AppAction::CloseTab));
     }
 
     #[test]
     fn ctrl_uppercase_w_is_close_tab() {
-        assert_eq!(
-            check_app_shortcut(&char_key("W"), CTRL),
-            Some(AppAction::CloseTab)
-        );
+        assert_eq!(check_app_shortcut(&char_key("W"), CTRL), Some(AppAction::CloseTab));
     }
 
     #[test]
@@ -190,14 +218,11 @@ mod tests {
         assert_eq!(check_app_shortcut(&char_key("w"), NONE), None);
     }
 
-    // ── NextTab: Ctrl+Tab ────────────────────────────────────────────
+    // NextTab: Ctrl+Tab
 
     #[test]
     fn ctrl_tab_is_next_tab() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Tab), CTRL),
-            Some(AppAction::NextTab)
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Tab), CTRL), Some(AppAction::NextTab));
     }
 
     #[test]
@@ -207,46 +232,31 @@ mod tests {
 
     #[test]
     fn shift_tab_is_not_shortcut() {
-        // Shift+Tab is reverse-tab in terminal, not an app shortcut
         assert_eq!(check_app_shortcut(&named_key(Named::Tab), shift()), None);
     }
 
-    // ── PreviousTab: Ctrl+Shift+Tab ──────────────────────────────────
+    // PreviousTab: Ctrl+Shift+Tab
 
     #[test]
     fn ctrl_shift_tab_is_previous_tab() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Tab), ctrl_shift()),
-            Some(AppAction::PreviousTab)
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Tab), ctrl_shift()), Some(AppAction::PreviousTab));
     }
 
-    // ── ZoomIn: Ctrl+= or Ctrl++ ────────────────────────────────────
+    // ZoomIn: Ctrl+= or Ctrl++
 
     #[test]
     fn ctrl_equals_is_zoom_in() {
-        assert_eq!(
-            check_app_shortcut(&char_key("="), CTRL),
-            Some(AppAction::ZoomIn)
-        );
+        assert_eq!(check_app_shortcut(&char_key("="), CTRL), Some(AppAction::ZoomIn));
     }
 
     #[test]
     fn ctrl_plus_is_zoom_in() {
-        assert_eq!(
-            check_app_shortcut(&char_key("+"), CTRL),
-            Some(AppAction::ZoomIn)
-        );
+        assert_eq!(check_app_shortcut(&char_key("+"), CTRL), Some(AppAction::ZoomIn));
     }
 
     #[test]
     fn ctrl_shift_equals_is_zoom_in() {
-        // On US keyboard Ctrl+Shift+= produces "+" — but even if Iced reports
-        // "=" with shift, we still accept it as ZoomIn.
-        assert_eq!(
-            check_app_shortcut(&char_key("="), ctrl_shift()),
-            Some(AppAction::ZoomIn)
-        );
+        assert_eq!(check_app_shortcut(&char_key("="), ctrl_shift()), Some(AppAction::ZoomIn));
     }
 
     #[test]
@@ -254,14 +264,11 @@ mod tests {
         assert_eq!(check_app_shortcut(&char_key("="), NONE), None);
     }
 
-    // ── ZoomOut: Ctrl+- ──────────────────────────────────────────────
+    // ZoomOut: Ctrl+-
 
     #[test]
     fn ctrl_minus_is_zoom_out() {
-        assert_eq!(
-            check_app_shortcut(&char_key("-"), CTRL),
-            Some(AppAction::ZoomOut)
-        );
+        assert_eq!(check_app_shortcut(&char_key("-"), CTRL), Some(AppAction::ZoomOut));
     }
 
     #[test]
@@ -271,18 +278,14 @@ mod tests {
 
     #[test]
     fn ctrl_shift_minus_is_not_shortcut() {
-        // Ctrl+Shift+- (underscore) should not trigger ZoomOut
         assert_eq!(check_app_shortcut(&char_key("-"), ctrl_shift()), None);
     }
 
-    // ── ZoomReset: Ctrl+0 ────────────────────────────────────────────
+    // ZoomReset: Ctrl+0
 
     #[test]
     fn ctrl_0_is_zoom_reset() {
-        assert_eq!(
-            check_app_shortcut(&char_key("0"), CTRL),
-            Some(AppAction::ZoomReset)
-        );
+        assert_eq!(check_app_shortcut(&char_key("0"), CTRL), Some(AppAction::ZoomReset));
     }
 
     #[test]
@@ -295,27 +298,20 @@ mod tests {
         assert_eq!(check_app_shortcut(&char_key("0"), ctrl_shift()), None);
     }
 
-    // ── Copy: Ctrl+Shift+C ──────────────────────────────────────────
+    // Copy: Ctrl+Shift+C
 
     #[test]
     fn ctrl_shift_c_is_copy() {
-        assert_eq!(
-            check_app_shortcut(&char_key("c"), ctrl_shift()),
-            Some(AppAction::Copy)
-        );
+        assert_eq!(check_app_shortcut(&char_key("c"), ctrl_shift()), Some(AppAction::Copy));
     }
 
     #[test]
     fn ctrl_shift_uppercase_c_is_copy() {
-        assert_eq!(
-            check_app_shortcut(&char_key("C"), ctrl_shift()),
-            Some(AppAction::Copy)
-        );
+        assert_eq!(check_app_shortcut(&char_key("C"), ctrl_shift()), Some(AppAction::Copy));
     }
 
     #[test]
     fn ctrl_c_alone_is_not_copy() {
-        // Ctrl+C is SIGINT — must pass through to PTY, not intercept as Copy
         assert_eq!(check_app_shortcut(&char_key("c"), CTRL), None);
     }
 
@@ -324,161 +320,177 @@ mod tests {
         assert_eq!(check_app_shortcut(&char_key("c"), NONE), None);
     }
 
-    // ── Paste: Ctrl+Shift+V ─────────────────────────────────────────
+    // Paste: Ctrl+Shift+V
 
     #[test]
     fn ctrl_shift_v_is_paste() {
-        assert_eq!(
-            check_app_shortcut(&char_key("v"), ctrl_shift()),
-            Some(AppAction::Paste)
-        );
+        assert_eq!(check_app_shortcut(&char_key("v"), ctrl_shift()), Some(AppAction::Paste));
     }
 
     #[test]
     fn ctrl_shift_uppercase_v_is_paste() {
-        assert_eq!(
-            check_app_shortcut(&char_key("V"), ctrl_shift()),
-            Some(AppAction::Paste)
-        );
+        assert_eq!(check_app_shortcut(&char_key("V"), ctrl_shift()), Some(AppAction::Paste));
     }
 
     #[test]
     fn ctrl_v_alone_is_not_paste() {
-        // Ctrl+V should pass through to PTY (some shells use it for literal input)
         assert_eq!(check_app_shortcut(&char_key("v"), CTRL), None);
     }
 
-    // ── ScrollPageUp: Shift+PageUp ───────────────────────────────────
+    // ScrollPageUp: Shift+PageUp
 
     #[test]
     fn shift_pageup_is_scroll_page_up() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageUp), shift()),
-            Some(AppAction::ScrollPageUp)
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageUp), shift()), Some(AppAction::ScrollPageUp));
     }
 
     #[test]
     fn pageup_alone_is_not_shortcut() {
-        // PageUp without Shift goes to PTY
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageUp), NONE),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageUp), NONE), None);
     }
 
     #[test]
     fn ctrl_pageup_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageUp), CTRL),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageUp), CTRL), None);
     }
 
     #[test]
     fn ctrl_shift_pageup_is_not_shortcut() {
-        // Only Shift+PageUp is a shortcut, not Ctrl+Shift+PageUp
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageUp), ctrl_shift()),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageUp), ctrl_shift()), None);
     }
 
-    // ── ScrollPageDown: Shift+PageDown ───────────────────────────────
+    // ScrollPageDown: Shift+PageDown
 
     #[test]
     fn shift_pagedown_is_scroll_page_down() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageDown), shift()),
-            Some(AppAction::ScrollPageDown)
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageDown), shift()), Some(AppAction::ScrollPageDown));
     }
 
     #[test]
     fn pagedown_alone_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageDown), NONE),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageDown), NONE), None);
     }
 
     #[test]
     fn ctrl_pagedown_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::PageDown), CTRL),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::PageDown), CTRL), None);
     }
 
-    // ── ScrollToTop: Ctrl+Home ───────────────────────────────────────
+    // ScrollToTop: Ctrl+Home
 
     #[test]
     fn ctrl_home_is_scroll_to_top() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Home), CTRL),
-            Some(AppAction::ScrollToTop)
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Home), CTRL), Some(AppAction::ScrollToTop));
     }
 
     #[test]
     fn home_alone_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Home), NONE),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Home), NONE), None);
     }
 
     #[test]
     fn shift_home_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Home), shift()),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Home), shift()), None);
     }
 
     #[test]
     fn ctrl_shift_home_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Home), ctrl_shift()),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Home), ctrl_shift()), None);
     }
 
-    // ── ScrollToBottom: Ctrl+End ─────────────────────────────────────
+    // ScrollToBottom: Ctrl+End
 
     #[test]
     fn ctrl_end_is_scroll_to_bottom() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::End), CTRL),
-            Some(AppAction::ScrollToBottom)
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::End), CTRL), Some(AppAction::ScrollToBottom));
     }
 
     #[test]
     fn end_alone_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::End), NONE),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::End), NONE), None);
     }
 
     #[test]
     fn shift_end_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::End), shift()),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::End), shift()), None);
     }
 
     #[test]
     fn ctrl_shift_end_is_not_shortcut() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::End), ctrl_shift()),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::End), ctrl_shift()), None);
     }
 
-    // ── Cross-cutting: unrelated keys produce None ───────────────────
+    // SplitRight: Ctrl+backslash
+
+    #[test]
+    fn ctrl_backslash_is_split_right() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), CTRL), Some(AppAction::SplitRight));
+    }
+
+    #[test]
+    fn backslash_alone_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), NONE), None);
+    }
+
+    #[test]
+    fn shift_backslash_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), shift()), None);
+    }
+
+    // SplitDown: Ctrl+Alt+backslash
+
+    #[test]
+    fn ctrl_alt_backslash_is_split_down() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), ctrl_alt()), Some(AppAction::SplitDown));
+    }
+
+    #[test]
+    fn ctrl_alt_shift_backslash_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), ctrl_alt_shift()), None);
+    }
+
+    // Unsplit: Ctrl+Shift+backslash
+
+    #[test]
+    fn ctrl_shift_backslash_is_unsplit() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), ctrl_shift()), Some(AppAction::Unsplit));
+    }
+
+    // FocusNextPane: Alt+backslash
+
+    #[test]
+    fn alt_backslash_is_focus_next_pane() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), alt()), Some(AppAction::FocusNextPane));
+    }
+
+    #[test]
+    fn alt_shift_backslash_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("\\"), alt_shift()), None);
+    }
+
+    // SelectAll: Ctrl+Shift+A
+
+    #[test]
+    fn ctrl_shift_a_is_select_all() {
+        assert_eq!(check_app_shortcut(&char_key("a"), ctrl_shift()), Some(AppAction::SelectAll));
+    }
+
+    #[test]
+    fn ctrl_shift_uppercase_a_is_select_all() {
+        assert_eq!(check_app_shortcut(&char_key("A"), ctrl_shift()), Some(AppAction::SelectAll));
+    }
+
+    #[test]
+    fn ctrl_a_alone_is_not_select_all() {
+        assert_eq!(check_app_shortcut(&char_key("a"), CTRL), None);
+    }
+
+    #[test]
+    fn a_alone_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("a"), NONE), None);
+    }
+
+    // Cross-cutting: unrelated keys produce None
 
     #[test]
     fn unidentified_key_is_none() {
@@ -492,18 +504,12 @@ mod tests {
 
     #[test]
     fn enter_with_ctrl_is_none() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::Enter), CTRL),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::Enter), CTRL), None);
     }
 
     #[test]
     fn f1_with_ctrl_is_none() {
-        assert_eq!(
-            check_app_shortcut(&named_key(Named::F1), CTRL),
-            None
-        );
+        assert_eq!(check_app_shortcut(&named_key(Named::F1), CTRL), None);
     }
 
     #[test]

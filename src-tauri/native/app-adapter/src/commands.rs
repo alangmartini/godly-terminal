@@ -1,4 +1,4 @@
-use godly_protocol::types::RichGridData;
+use godly_protocol::types::{RichGridData, SessionInfo};
 use godly_protocol::{Request, Response, ShellType};
 
 use crate::daemon_client::NativeDaemonClient;
@@ -160,4 +160,32 @@ pub fn scroll_and_get_snapshot(
         Response::Error { message } => Err(message),
         other => Err(format!("Unexpected scroll+grid response: {:?}", other)),
     }
+}
+
+/// List all live sessions on the daemon.
+///
+/// Used for session recovery on app restart — discovers sessions
+/// that survived from a previous app instance.
+pub fn list_sessions(client: &NativeDaemonClient) -> Result<Vec<SessionInfo>, String> {
+    let response = client.send_request(&Request::ListSessions)?;
+    match response {
+        Response::SessionList { sessions } => Ok(sessions),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected list response: {:?}", other)),
+    }
+}
+
+/// Detach from all sessions for clean shutdown.
+///
+/// Errors are logged but not propagated — best-effort cleanup.
+pub fn detach_all_sessions(
+    client: &NativeDaemonClient,
+    session_ids: &[String],
+) -> Result<(), String> {
+    for id in session_ids {
+        if let Err(e) = detach_session(client, id) {
+            log::warn!("Failed to detach session {}: {}", id, e);
+        }
+    }
+    Ok(())
 }
