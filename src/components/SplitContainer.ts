@@ -196,7 +196,7 @@ export class SplitContainer {
     _segment: string,
     path: number[],
     gridKey: GridRatioKey,
-    initialNode: GridNode,
+    _initialNode: GridNode,
   ): HTMLElement {
     const divider = document.createElement('div');
     divider.className = `split-grid-divider ${axis}`;
