@@ -706,7 +706,7 @@ fn quick_codex_background(
 }
 
 /// Poll until the terminal has been idle for `idle_ms` milliseconds, or timeout.
-fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: u64) -> bool {
+pub(crate) fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: u64) -> bool {
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     let poll_interval = (idle_ms / 4).min(500).max(50);
