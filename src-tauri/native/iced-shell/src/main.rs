@@ -2,6 +2,8 @@ use iced::window;
 
 mod app;
 mod subscription;
+mod tab_bar;
+mod terminal_state;
 
 use app::{GodlyApp, Message};
 
