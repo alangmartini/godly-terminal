@@ -4,7 +4,7 @@ use iced::{Color, Font, Pixels, Point, Rectangle, Renderer, Size, Theme};
 
 use godly_protocol::types::RichGridData;
 
-use crate::colors::{dim_color, parse_color};
+use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 
 /// Default terminal foreground (light gray).
@@ -119,6 +119,11 @@ impl<Message> canvas::Program<Message> for TerminalCanvas {
                     fg = dim_color(fg);
                 }
 
+                // Bold brightening (most terminals render bold as brighter)
+                if cell.bold {
+                    fg = brighten_color(fg);
+                }
+
                 // Draw background (only if non-default to avoid overdraw)
                 if bg.r != DEFAULT_BG.r || bg.g != DEFAULT_BG.g || bg.b != DEFAULT_BG.b {
                     frame.fill_rectangle(
@@ -128,6 +133,24 @@ impl<Message> canvas::Program<Message> for TerminalCanvas {
                     );
                 }
 
+                // Determine font variant based on cell attributes
+                let cell_font = match (cell.bold, cell.italic) {
+                    (false, false) => monospace,
+                    (true, false) => Font {
+                        weight: iced::font::Weight::Bold,
+                        ..monospace
+                    },
+                    (false, true) => Font {
+                        style: iced::font::Style::Italic,
+                        ..monospace
+                    },
+                    (true, true) => Font {
+                        weight: iced::font::Weight::Bold,
+                        style: iced::font::Style::Italic,
+                        ..monospace
+                    },
+                };
+
                 // Draw text content
                 if !cell.content.is_empty() && cell.content != " " {
                     let text = canvas::Text {
@@ -135,7 +158,7 @@ impl<Message> canvas::Program<Message> for TerminalCanvas {
                         position: Point::new(x, y),
                         color: fg,
                         size: Pixels(font_size),
-                        font: monospace,
+                        font: cell_font,
                         ..canvas::Text::default()
                     };
                     frame.fill_text(text);
