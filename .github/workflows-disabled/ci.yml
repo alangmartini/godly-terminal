@@ -150,3 +150,41 @@ jobs:
       - name: Production build
         run: npm run build
         timeout-minutes: 8
+
+  # ---------------------------------------------------------------------------
+  # Job 6: Native frontend — cargo check all new crates (~5 min)
+  # ---------------------------------------------------------------------------
+  native-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - name: Check native crates
+        run: >
+          cd src-tauri && cargo check
+          -p godly-app-adapter
+          -p godly-iced-shell
+          -p godly-terminal-surface
+          -p godly-parity-harness
+        timeout-minutes: 12
+
+  # ---------------------------------------------------------------------------
+  # Job 7: Contract tests — parity-harness test suite (~3 min)
+  # ---------------------------------------------------------------------------
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: taiki-e/install-action@nextest
+      - name: Run contract tests
+        run: cd src-tauri && cargo nextest run -p godly-parity-harness --profile ci
+        timeout-minutes: 5
