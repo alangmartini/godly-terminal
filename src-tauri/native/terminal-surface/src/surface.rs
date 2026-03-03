@@ -5,6 +5,7 @@ use iced::{Color, Font, Pixels, Point, Rectangle, Renderer, Size, Theme};
 use godly_protocol::types::RichGridData;
 
 use crate::colors::{dim_color, parse_color};
+use crate::font_metrics::FontMetrics;
 
 /// Default terminal foreground (light gray).
 pub const DEFAULT_FG: Color = Color {
@@ -22,42 +23,52 @@ pub const DEFAULT_BG: Color = Color {
     a: 1.0,
 };
 
-/// Terminal canvas state holding the current grid snapshot and font metrics.
-pub struct TerminalCanvasState {
+/// Minimal internal state for the Canvas `Program`.
+///
+/// Grid data and font metrics live on [`TerminalCanvas`] itself so that the
+/// parent widget can update them directly. This struct exists only to satisfy
+/// the `Program::State` associated type.
+#[derive(Debug, Default)]
+pub struct TerminalCanvasState;
+
+/// Terminal canvas program that renders a RichGridData snapshot.
+///
+/// Grid data and font metrics are carried on the struct, enabling the parent
+/// to set per-terminal data before each render. Drawing uses Iced's Canvas
+/// widget via `Frame::fill_rectangle()` for backgrounds and
+/// `Frame::fill_text()` for cell content.
+pub struct TerminalCanvas {
     /// Current grid data from the daemon.
     pub grid: Option<RichGridData>,
-    /// Width of a single cell in pixels.
-    pub cell_width: f32,
-    /// Height of a single cell in pixels.
-    pub cell_height: f32,
-    /// Font size in pixels.
-    pub font_size: f32,
+    /// Font metrics for cell sizing.
+    pub metrics: FontMetrics,
 }
 
-impl Default for TerminalCanvasState {
+impl Default for TerminalCanvas {
     fn default() -> Self {
         Self {
             grid: None,
-            cell_width: 9.0,
-            cell_height: 18.0,
-            font_size: 14.0,
+            metrics: FontMetrics::default(),
         }
     }
 }
 
-/// Terminal canvas program that renders a RichGridData snapshot.
-///
-/// Uses Iced's Canvas widget with the `Program` trait. Drawing is done
-/// via `Frame::fill_rectangle()` for backgrounds and `Frame::fill_text()`
-/// for cell content.
-pub struct TerminalCanvas;
+impl TerminalCanvas {
+    /// Create a new terminal canvas with the given font metrics.
+    pub fn new(metrics: FontMetrics) -> Self {
+        Self {
+            grid: None,
+            metrics,
+        }
+    }
+}
 
 impl<Message> canvas::Program<Message> for TerminalCanvas {
     type State = TerminalCanvasState;
 
     fn draw(
         &self,
-        state: &Self::State,
+        _state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -68,14 +79,14 @@ impl<Message> canvas::Program<Message> for TerminalCanvas {
         // Fill background
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), DEFAULT_BG);
 
-        let grid = match &state.grid {
+        let grid = match &self.grid {
             Some(g) => g,
             None => return vec![frame.into_geometry()],
         };
 
-        let cell_w = state.cell_width;
-        let cell_h = state.cell_height;
-        let font_size = state.font_size;
+        let cell_w = self.metrics.cell_width;
+        let cell_h = self.metrics.cell_height;
+        let font_size = self.metrics.font_size;
         let monospace = Font::MONOSPACE;
 
         // Draw each cell
