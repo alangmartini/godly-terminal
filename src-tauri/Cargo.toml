@@ -14,7 +14,7 @@ serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 parking_lot = "0.12"
 godly-protocol = { path = "protocol" }
-iced = { version = "0.13", features = ["wgpu", "advanced"] }
+iced = { version = "0.14", features = ["wgpu", "advanced", "canvas", "tokio"] }
 
 [workspace.dependencies.winapi]
 version = "0.3"
