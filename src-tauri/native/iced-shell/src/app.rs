@@ -5,13 +5,17 @@ use iced::keyboard;
 use iced::widget::{canvas, center, column, text};
 use iced::{event, window, Element, Length, Subscription, Task};
 
+use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
 use godly_app_adapter::daemon_client::NativeDaemonClient;
 use godly_app_adapter::keys::key_to_pty_bytes;
+use godly_app_adapter::shortcuts::{self, AppAction};
 use godly_protocol::types::RichGridData;
 
-use godly_terminal_surface::{FontMetrics, TerminalCanvas};
+use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCanvas};
 
+use crate::selection::{GridPos, SelectionState};
+use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::terminal_state::TerminalCollection;
@@ -31,6 +35,13 @@ pub struct GodlyApp {
     window_height: f32,
     /// Font metrics for cell sizing and grid dimension calculations.
     font_metrics: FontMetrics,
+    /// Layout tree for split panes. A single leaf when no splits exist.
+    layout: LayoutNode,
+    /// ID of the focused terminal pane (receives keyboard input).
+    /// This may differ from the "active" tab when splits are present.
+    focused_terminal: Option<String>,
+    /// Mouse text selection state.
+    selection: SelectionState,
 }
 
 impl Default for GodlyApp {
@@ -43,6 +54,11 @@ impl Default for GodlyApp {
             window_width: 1200.0,
             window_height: 800.0,
             font_metrics: FontMetrics::default(),
+            layout: LayoutNode::Leaf {
+                terminal_id: String::new(),
+            },
+            focused_terminal: None,
+            selection: SelectionState::default(),
         }
     }
 }
@@ -75,6 +91,18 @@ pub enum Message {
     WindowResized { width: f32, height: f32 },
     /// Mouse wheel scrolled (for scrollback).
     MouseWheel { delta_y: f32 },
+    /// Mouse button pressed at pixel position (starts selection).
+    SelectionStart { x: f32, y: f32 },
+    /// Mouse dragged to pixel position (updates selection).
+    SelectionUpdate { x: f32, y: f32 },
+    /// Mouse button released (finishes selection).
+    SelectionEnd,
+    /// Split the focused pane in a direction, creating a new terminal.
+    SplitPane { direction: SplitDirection },
+    /// Remove the focused pane from its split, promoting its sibling.
+    UnsplitPane,
+    /// Cycle focus to the next pane in the layout tree.
+    FocusNextPane,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -113,6 +141,10 @@ impl GodlyApp {
                 match result {
                     InitResult::Fresh { session_id } => {
                         self.terminals.add(session_id.clone(), rows, cols);
+                        self.layout = LayoutNode::Leaf {
+                            terminal_id: session_id.clone(),
+                        };
+                        self.focused_terminal = Some(session_id.clone());
                         return self.fetch_grid(&session_id);
                     }
                     InitResult::Recovered {
@@ -123,6 +155,11 @@ impl GodlyApp {
                             self.terminals.add(id.clone(), rows, cols);
                         }
                         self.terminals.set_active(&first_id);
+                        // Set layout to first session (flat, no splits on recovery).
+                        self.layout = LayoutNode::Leaf {
+                            terminal_id: first_id.clone(),
+                        };
+                        self.focused_terminal = Some(first_id.clone());
                         // Fetch grids for all recovered sessions.
                         let tasks: Vec<Task<Message>> =
                             session_ids.iter().map(|id| self.fetch_grid(id)).collect();
@@ -191,16 +228,19 @@ impl GodlyApp {
                 key, modifiers, ..
             }) => {
                 // Check app shortcuts first.
-                if let Some(action) = check_app_shortcut(&key, modifiers) {
+                if let Some(action) = shortcuts::check_app_shortcut(&key, modifiers) {
                     return self.handle_app_action(action);
                 }
 
-                // Forward to PTY.
+                // Any keypress clears selection.
+                self.selection.clear();
+
+                // Forward to PTY — send to focused terminal, not just active tab.
                 if let Some(bytes) = key_to_pty_bytes(&key, modifiers) {
-                    if let Some(active_id) = self.terminals.active_id().map(str::to_string) {
-                        if let Some(client) = &self.client {
-                            let _ = commands::write_to_terminal(client, &active_id, &bytes);
-                        }
+                    if let (Some(tid), Some(client)) =
+                        (self.target_terminal_id(), &self.client)
+                    {
+                        let _ = commands::write_to_terminal(client, tid, &bytes);
                     }
                 }
             }
@@ -227,7 +267,18 @@ impl GodlyApp {
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
                 self.terminals.add(session_id.clone(), rows, cols);
-                self.terminals.set_active(&session_id);
+
+                // If this terminal is already in the layout (from a split), just focus it.
+                // Otherwise it's a new tab — set layout to it.
+                if self.layout.find_leaf(&session_id) {
+                    self.focused_terminal = Some(session_id.clone());
+                } else {
+                    self.terminals.set_active(&session_id);
+                    self.layout = LayoutNode::Leaf {
+                        terminal_id: session_id.clone(),
+                    };
+                    self.focused_terminal = Some(session_id.clone());
+                }
                 return self.fetch_grid(&session_id);
             }
             Message::TerminalCreated(Err(e)) => {
@@ -248,6 +299,32 @@ impl GodlyApp {
                 if new_cols != old_cols || new_rows != old_rows {
                     return self.resize_active_terminal(new_rows, new_cols);
                 }
+            }
+
+            // --- Mouse selection ---
+            Message::SelectionStart { x, y } => {
+                let pos = self.pixel_to_grid(x, y);
+                self.selection.start(pos);
+            }
+            Message::SelectionUpdate { x, y } => {
+                if self.selection.active {
+                    let pos = self.pixel_to_grid(x, y);
+                    self.selection.update(pos);
+                }
+            }
+            Message::SelectionEnd => {
+                self.selection.finish();
+            }
+
+            // --- Split pane operations ---
+            Message::SplitPane { direction } => {
+                return self.split_focused_pane(direction);
+            }
+            Message::UnsplitPane => {
+                return self.unsplit_focused_pane();
+            }
+            Message::FocusNextPane => {
+                self.cycle_focus();
             }
         }
         Task::none()
@@ -273,20 +350,16 @@ impl GodlyApp {
             Message::NewTabRequested,
         );
 
-        // Active terminal canvas — TerminalCanvas carries grid data directly.
-        let terminal_view: Element<'_, Message> = if let Some(active) = self.terminals.active() {
-            let tc = TerminalCanvas {
-                grid: active.grid.clone(),
-                metrics: self.font_metrics,
-                selection: None,
+        // Render the layout tree — each leaf becomes a terminal canvas.
+        let focused_id = self.focused_terminal.as_deref();
+        let terminal_view: Element<'_, Message> =
+            if self.layout.leaf_count() > 0 && self.terminals.count() > 0 {
+                view_layout(&self.layout, &|terminal_id: &str| {
+                    self.render_terminal_pane(terminal_id, focused_id)
+                })
+            } else {
+                center(text("No active terminal").size(16)).into()
             };
-            canvas(tc)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        } else {
-            center(text("No active terminal").size(16)).into()
-        };
 
         column![tab_bar, terminal_view].into()
     }
@@ -297,7 +370,7 @@ impl GodlyApp {
             keyboard::listen().map(Message::KeyboardEvent),
             // Daemon events via channel.
             daemon_events(Arc::clone(&self.event_receiver)).map(Message::DaemonEvent),
-            // Window resize + mouse wheel events.
+            // Window resize + mouse events.
             event::listen_with(|ev, _status, _window_id| match ev {
                 event::Event::Window(window::Event::Resized(size)) => {
                     Some(Message::WindowResized {
@@ -311,6 +384,21 @@ impl GodlyApp {
                         iced::mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
                     };
                     Some(Message::MouseWheel { delta_y })
+                }
+                // NOTE: Iced's listen_with doesn't provide cursor position in
+                // ButtonPressed events. We start at (0,0) and the first CursorMoved
+                // event (which fires before any visible render) corrects the position.
+                event::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::SelectionStart { x: 0.0, y: 0.0 }),
+                event::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::SelectionEnd),
+                event::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::SelectionUpdate {
+                        x: position.x,
+                        y: position.y,
+                    })
                 }
                 _ => None,
             }),
@@ -364,9 +452,20 @@ impl GodlyApp {
             }
             AppAction::ScrollToTop => self.scroll_to_top(),
             AppAction::ScrollToBottom => self.scroll_to_bottom(),
-            AppAction::Copy | AppAction::Paste => {
-                // Copy/Paste requires clipboard integration — log for now.
-                log::info!("Copy/Paste not yet implemented in native shell");
+            AppAction::Copy => {
+                self.copy_selection();
+                Task::none()
+            }
+            AppAction::Paste => self.paste_from_clipboard(),
+            AppAction::SplitRight => self.split_focused_pane(SplitDirection::Horizontal),
+            AppAction::SplitDown => self.split_focused_pane(SplitDirection::Vertical),
+            AppAction::Unsplit => self.unsplit_focused_pane(),
+            AppAction::FocusNextPane => {
+                self.cycle_focus();
+                Task::none()
+            }
+            AppAction::SelectAll => {
+                self.select_all();
                 Task::none()
             }
         }
@@ -514,6 +613,11 @@ impl GodlyApp {
 
     /// Create a new terminal session via the daemon.
     fn create_new_terminal(&self) -> Task<Message> {
+        self.create_terminal_task(uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Create a terminal session with the given ID asynchronously.
+    fn create_terminal_task(&self, session_id: String) -> Task<Message> {
         let Some(client) = &self.client else {
             return Task::done(Message::TerminalCreated(Err(
                 "No daemon connection".to_string(),
@@ -521,8 +625,6 @@ impl GodlyApp {
         };
 
         let client = Arc::clone(client);
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let sid = session_id.clone();
         let rows = self.calculate_rows();
         let cols = self.calculate_cols();
 
@@ -532,13 +634,13 @@ impl GodlyApp {
                 std::thread::spawn(move || {
                     let result = commands::create_terminal(
                         &client,
-                        &sid,
+                        &session_id,
                         godly_protocol::ShellType::Windows,
                         None,
                         rows,
                         cols,
                     )
-                    .map(|_| sid);
+                    .map(|_| session_id);
                     let _ = tx.send(result);
                 });
                 rx.await
@@ -609,6 +711,17 @@ impl GodlyApp {
     }
 
     // -----------------------------------------------------------------------
+    // Target terminal resolution
+    // -----------------------------------------------------------------------
+
+    /// Get the target terminal ID — prefer focused pane, fall back to active tab.
+    fn target_terminal_id(&self) -> Option<&str> {
+        self.focused_terminal
+            .as_deref()
+            .or_else(|| self.terminals.active_id())
+    }
+
+    // -----------------------------------------------------------------------
     // Grid dimension calculations
     // -----------------------------------------------------------------------
 
@@ -621,6 +734,192 @@ impl GodlyApp {
     fn calculate_rows(&self) -> u16 {
         let available = (self.window_height - TAB_BAR_HEIGHT).max(0.0);
         (available / self.font_metrics.cell_height).max(1.0) as u16
+    }
+
+    // -----------------------------------------------------------------------
+    // Split pane operations
+    // -----------------------------------------------------------------------
+
+    /// Split the focused pane, creating a new terminal in the given direction.
+    fn split_focused_pane(&mut self, direction: SplitDirection) -> Task<Message> {
+        let Some(focused) = self.focused_terminal.clone() else {
+            return Task::none();
+        };
+
+        let new_id = uuid::Uuid::new_v4().to_string();
+
+        // Split the layout tree immediately (optimistic).
+        self.layout
+            .split_leaf(&focused, new_id.clone(), direction);
+
+        // Create the terminal on the daemon.
+        self.create_terminal_task(new_id)
+    }
+
+    /// Remove the focused pane from its split, promoting the sibling.
+    fn unsplit_focused_pane(&mut self) -> Task<Message> {
+        let Some(focused) = self.focused_terminal.clone() else {
+            return Task::none();
+        };
+
+        if let Some(removed_id) = self.layout.unsplit_leaf(&focused) {
+            // Close the removed terminal on the daemon.
+            self.terminals.remove(&removed_id);
+            if let Some(client) = &self.client {
+                let _ = commands::close_terminal(client, &removed_id);
+            }
+
+            // Update focus to the next available leaf.
+            let leaf_ids = self.layout.all_leaf_ids();
+            if let Some(first) = leaf_ids.first() {
+                self.focused_terminal = Some(first.to_string());
+            }
+        }
+
+        Task::none()
+    }
+
+    /// Cycle focus to the next pane in depth-first order.
+    fn cycle_focus(&mut self) {
+        let Some(focused) = &self.focused_terminal else {
+            return;
+        };
+
+        if let Some(next_id) = self.layout.next_leaf_id(focused) {
+            self.focused_terminal = Some(next_id.to_string());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Clipboard
+    // -----------------------------------------------------------------------
+
+    /// Copy the current selection text to the system clipboard.
+    fn copy_selection(&mut self) {
+        let Some(tid) = self.target_terminal_id() else {
+            return;
+        };
+
+        let Some(term) = self.terminals.get(tid) else {
+            return;
+        };
+        let Some(grid) = &term.grid else { return };
+
+        let text = self.selection.selected_text(grid);
+        if text.is_empty() {
+            return;
+        }
+
+        if let Err(e) = clipboard::copy_to_clipboard(&text) {
+            log::error!("Clipboard copy failed: {}", e);
+        }
+    }
+
+    /// Paste text from the system clipboard into the focused terminal.
+    fn paste_from_clipboard(&self) -> Task<Message> {
+        let Some(tid) = self.target_terminal_id() else {
+            return Task::none();
+        };
+        let Some(client) = &self.client else {
+            return Task::none();
+        };
+
+        match clipboard::paste_from_clipboard() {
+            Ok(text) if !text.is_empty() => {
+                let _ = commands::write_to_terminal(client, &tid, text.as_bytes());
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::error!("Clipboard paste failed: {}", e);
+            }
+        }
+        Task::none()
+    }
+
+    // -----------------------------------------------------------------------
+    // Selection
+    // -----------------------------------------------------------------------
+
+    /// Select all text in the focused terminal's grid.
+    fn select_all(&mut self) {
+        let Some(tid) = self.target_terminal_id() else {
+            return;
+        };
+        let Some(term) = self.terminals.get(tid) else {
+            return;
+        };
+        let Some(grid) = &term.grid else { return };
+
+        if grid.rows.is_empty() {
+            return;
+        }
+
+        let last_row = grid.rows.len() - 1;
+        let last_col = grid.rows[last_row].cells.len().saturating_sub(1);
+        self.selection.start(GridPos { row: 0, col: 0 });
+        self.selection.update(GridPos {
+            row: last_row,
+            col: last_col,
+        });
+        self.selection.finish();
+    }
+
+    /// Convert pixel coordinates to grid position.
+    fn pixel_to_grid(&self, x: f32, y: f32) -> GridPos {
+        // Subtract tab bar height from y.
+        let adjusted_y = (y - TAB_BAR_HEIGHT).max(0.0);
+        let row = (adjusted_y / self.font_metrics.cell_height) as usize;
+        let col = (x / self.font_metrics.cell_width) as usize;
+        GridPos { row, col }
+    }
+
+    // -----------------------------------------------------------------------
+    // Rendering helpers
+    // -----------------------------------------------------------------------
+
+    /// Render a single terminal pane for the layout tree.
+    fn render_terminal_pane<'a>(
+        &'a self,
+        terminal_id: &str,
+        focused_id: Option<&str>,
+    ) -> Element<'a, Message> {
+        let Some(term) = self.terminals.get(terminal_id) else {
+            return center(text("Session not found").size(14)).into();
+        };
+
+        // Pass selection only if this is the focused pane and a selection exists.
+        let is_focused = focused_id == Some(terminal_id);
+        let selection = if is_focused && (self.selection.active || self.has_selection()) {
+            let (start, end) = self.selection.normalized();
+            Some((
+                SurfaceGridPos {
+                    row: start.row,
+                    col: start.col,
+                },
+                SurfaceGridPos {
+                    row: end.row,
+                    col: end.col,
+                },
+            ))
+        } else {
+            None
+        };
+
+        let tc = TerminalCanvas {
+            grid: term.grid.clone(),
+            metrics: self.font_metrics,
+            selection,
+        };
+        canvas(tc)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// Returns true if there is a non-empty selection.
+    fn has_selection(&self) -> bool {
+        let (start, end) = self.selection.normalized();
+        start != end
     }
 }
 
@@ -718,207 +1017,3 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// App-level shortcuts (inlined from WU-1 until it merges)
-// ---------------------------------------------------------------------------
-
-/// App-level shortcut check. Returns an `AppAction` if the key+modifiers
-/// match a known shortcut, or `None` to let the key pass through to the PTY.
-fn check_app_shortcut(
-    key: &iced::keyboard::Key,
-    modifiers: iced::keyboard::Modifiers,
-) -> Option<AppAction> {
-    use iced::keyboard::{key::Named, Key};
-
-    match key {
-        Key::Character(ch) => {
-            let s = ch.as_str();
-            if modifiers.control() && !modifiers.shift() {
-                match s {
-                    "t" => Some(AppAction::NewTab),
-                    "w" => Some(AppAction::CloseTab),
-                    "=" | "+" => Some(AppAction::ZoomIn),
-                    "-" => Some(AppAction::ZoomOut),
-                    "0" => Some(AppAction::ZoomReset),
-                    _ => None,
-                }
-            } else if modifiers.control() && modifiers.shift() {
-                match s {
-                    "C" | "c" => Some(AppAction::Copy),
-                    "V" | "v" => Some(AppAction::Paste),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }
-        Key::Named(named) => match named {
-            Named::Tab if modifiers.control() && !modifiers.shift() => Some(AppAction::NextTab),
-            Named::Tab if modifiers.control() && modifiers.shift() => {
-                Some(AppAction::PreviousTab)
-            }
-            Named::PageUp if modifiers.shift() => Some(AppAction::ScrollPageUp),
-            Named::PageDown if modifiers.shift() => Some(AppAction::ScrollPageDown),
-            Named::Home if modifiers.control() => Some(AppAction::ScrollToTop),
-            Named::End if modifiers.control() => Some(AppAction::ScrollToBottom),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum AppAction {
-    NewTab,
-    CloseTab,
-    NextTab,
-    PreviousTab,
-    ZoomIn,
-    ZoomOut,
-    ZoomReset,
-    Copy,
-    Paste,
-    ScrollPageUp,
-    ScrollPageDown,
-    ScrollToTop,
-    ScrollToBottom,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use iced::keyboard::{key::Named, Key, Modifiers};
-
-    #[test]
-    fn ctrl_t_is_new_tab() {
-        let action = check_app_shortcut(
-            &Key::Character("t".into()),
-            Modifiers::CTRL,
-        );
-        assert!(matches!(action, Some(AppAction::NewTab)));
-    }
-
-    #[test]
-    fn ctrl_w_is_close_tab() {
-        let action = check_app_shortcut(
-            &Key::Character("w".into()),
-            Modifiers::CTRL,
-        );
-        assert!(matches!(action, Some(AppAction::CloseTab)));
-    }
-
-    #[test]
-    fn ctrl_tab_is_next_tab() {
-        let action = check_app_shortcut(&Key::Named(Named::Tab), Modifiers::CTRL);
-        assert!(matches!(action, Some(AppAction::NextTab)));
-    }
-
-    #[test]
-    fn ctrl_shift_tab_is_previous_tab() {
-        let action =
-            check_app_shortcut(&Key::Named(Named::Tab), Modifiers::CTRL | Modifiers::SHIFT);
-        assert!(matches!(action, Some(AppAction::PreviousTab)));
-    }
-
-    #[test]
-    fn ctrl_equals_is_zoom_in() {
-        let action = check_app_shortcut(
-            &Key::Character("=".into()),
-            Modifiers::CTRL,
-        );
-        assert!(matches!(action, Some(AppAction::ZoomIn)));
-    }
-
-    #[test]
-    fn ctrl_plus_is_zoom_in() {
-        let action = check_app_shortcut(
-            &Key::Character("+".into()),
-            Modifiers::CTRL,
-        );
-        assert!(matches!(action, Some(AppAction::ZoomIn)));
-    }
-
-    #[test]
-    fn ctrl_minus_is_zoom_out() {
-        let action = check_app_shortcut(
-            &Key::Character("-".into()),
-            Modifiers::CTRL,
-        );
-        assert!(matches!(action, Some(AppAction::ZoomOut)));
-    }
-
-    #[test]
-    fn ctrl_zero_is_zoom_reset() {
-        let action = check_app_shortcut(
-            &Key::Character("0".into()),
-            Modifiers::CTRL,
-        );
-        assert!(matches!(action, Some(AppAction::ZoomReset)));
-    }
-
-    #[test]
-    fn ctrl_shift_c_is_copy() {
-        let action = check_app_shortcut(
-            &Key::Character("C".into()),
-            Modifiers::CTRL | Modifiers::SHIFT,
-        );
-        assert!(matches!(action, Some(AppAction::Copy)));
-    }
-
-    #[test]
-    fn ctrl_shift_v_is_paste() {
-        let action = check_app_shortcut(
-            &Key::Character("V".into()),
-            Modifiers::CTRL | Modifiers::SHIFT,
-        );
-        assert!(matches!(action, Some(AppAction::Paste)));
-    }
-
-    #[test]
-    fn shift_pageup_is_scroll_page_up() {
-        let action = check_app_shortcut(&Key::Named(Named::PageUp), Modifiers::SHIFT);
-        assert!(matches!(action, Some(AppAction::ScrollPageUp)));
-    }
-
-    #[test]
-    fn shift_pagedown_is_scroll_page_down() {
-        let action = check_app_shortcut(&Key::Named(Named::PageDown), Modifiers::SHIFT);
-        assert!(matches!(action, Some(AppAction::ScrollPageDown)));
-    }
-
-    #[test]
-    fn ctrl_home_is_scroll_to_top() {
-        let action = check_app_shortcut(&Key::Named(Named::Home), Modifiers::CTRL);
-        assert!(matches!(action, Some(AppAction::ScrollToTop)));
-    }
-
-    #[test]
-    fn ctrl_end_is_scroll_to_bottom() {
-        let action = check_app_shortcut(&Key::Named(Named::End), Modifiers::CTRL);
-        assert!(matches!(action, Some(AppAction::ScrollToBottom)));
-    }
-
-    #[test]
-    fn plain_letter_is_not_shortcut() {
-        let action = check_app_shortcut(
-            &Key::Character("a".into()),
-            Modifiers::empty(),
-        );
-        assert!(action.is_none());
-    }
-
-    #[test]
-    fn ctrl_a_is_not_shortcut() {
-        let action = check_app_shortcut(
-            &Key::Character("a".into()),
-            Modifiers::CTRL,
-        );
-        assert!(action.is_none());
-    }
-
-    #[test]
-    fn unmodified_tab_is_not_shortcut() {
-        let action = check_app_shortcut(&Key::Named(Named::Tab), Modifiers::empty());
-        assert!(action.is_none());
-    }
-}
