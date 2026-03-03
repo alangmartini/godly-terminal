@@ -1,0 +1,2 @@
+### Added
+- **Phase 0: Iced + wgpu native UI foundations** — scaffolded 4 new crates for the native frontend migration: `godly-app-adapter` (Tauri-free daemon client), `godly-iced-shell` (Iced window shell), `godly-terminal-surface` (wgpu terminal widget stub), `godly-parity-harness` (web-vs-native contract tests). Added `FrontendMode` enum, frozen frontend protocol contract at v1, `native-frontend` feature flag, CI jobs, and build scripts (#541)

@@ -50,7 +50,9 @@
     "production:build": "pwsh scripts/production-build.ps1",
     "production:install": "pwsh scripts/production-install.ps1",
     "staging:build": "pwsh scripts/staging-build.ps1",
-    "staging:install": "pwsh scripts/staging-install.ps1"
+    "staging:install": "pwsh scripts/staging-install.ps1",
+    "build:native": "pwsh scripts/build-native.ps1",
+    "build:native:release": "pwsh scripts/build-native.ps1 -Release"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

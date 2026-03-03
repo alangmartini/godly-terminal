@@ -1,5 +1,36 @@
 use serde::{Deserialize, Serialize};
 
+/// Which frontend is driving the terminal.
+///
+/// - `Web` — Tauri + TypeScript + Canvas2D (current default)
+/// - `Native` — Iced + wgpu (the migration target)
+/// - `Shadow` — headless mode for testing (no rendering)
+///
+/// Read from `GODLY_FRONTEND_MODE` env var at startup. Defaults to `Web`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendMode {
+    Web,
+    Native,
+    Shadow,
+}
+
+impl Default for FrontendMode {
+    fn default() -> Self {
+        Self::Web
+    }
+}
+
+/// Read the frontend mode from the `GODLY_FRONTEND_MODE` env var.
+/// Returns `FrontendMode::Web` if unset or unrecognized.
+pub fn frontend_mode() -> FrontendMode {
+    match std::env::var("GODLY_FRONTEND_MODE").as_deref() {
+        Ok("native") => FrontendMode::Native,
+        Ok("shadow") => FrontendMode::Shadow,
+        _ => FrontendMode::Web,
+    }
+}
+
 /// Shell type matching the existing Tauri app's ShellType
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[ts(export)]
@@ -210,6 +241,27 @@ pub struct ShimMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_frontend_mode_default_is_web() {
+        assert_eq!(FrontendMode::default(), FrontendMode::Web);
+    }
+
+    #[test]
+    fn test_frontend_mode_serialization_roundtrip() {
+        for mode in [FrontendMode::Web, FrontendMode::Native, FrontendMode::Shadow] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let deserialized: FrontendMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, mode);
+        }
+    }
+
+    #[test]
+    fn test_frontend_mode_serde_values() {
+        assert_eq!(serde_json::to_string(&FrontendMode::Web).unwrap(), "\"web\"");
+        assert_eq!(serde_json::to_string(&FrontendMode::Native).unwrap(), "\"native\"");
+        assert_eq!(serde_json::to_string(&FrontendMode::Shadow).unwrap(), "\"shadow\"");
+    }
 
     #[test]
     fn test_shell_type_windows_serialization() {

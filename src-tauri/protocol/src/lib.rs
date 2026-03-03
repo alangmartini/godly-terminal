@@ -8,6 +8,11 @@ pub mod messages;
 pub mod types;
 pub mod whisper;
 
+/// Frozen protocol contract version. Any frontend (Web, Native, Shadow) that
+/// implements this contract can drive Godly Terminal sessions.
+/// See `docs/frontend_contract_v1.md` for the full specification.
+pub const FRONTEND_CONTRACT_VERSION: &str = "1.0.0";
+
 pub use frame::{read_daemon_message, read_daemon_message_ext, read_message, read_request, read_request_with_id, write_daemon_message, write_daemon_message_with_id, write_message, write_request, write_request_with_id, ReadResult};
 pub use frame::{
     read_shim_frame, write_shim_binary, write_shim_json, ShimFrame,
@@ -19,6 +24,7 @@ pub use messages::{DaemonMessage, Event, Request, RequestEnvelope, Response};
 pub use messages::{ShimRequest, ShimResponse};
 pub use types::{GridData, SessionInfo, ShellType};
 pub use types::ShimMetadata;
+pub use types::{FrontendMode, frontend_mode};
 pub use whisper::{AudioDeviceInfo, WhisperRequest, WhisperResponse};
 
 /// Default named pipe path used by both daemon and client
