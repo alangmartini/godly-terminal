@@ -1200,6 +1200,10 @@ impl DaemonSession {
 
         // Remove metadata file
         shim_metadata::remove_metadata(&self.id);
+
+        // Safety net: kill the shim process directly in case the Shutdown
+        // message doesn't reach it (I/O thread race, broken pipe, etc.)
+        shim_client::kill_process(self.shim_pid);
     }
 
     /// Get the session info for protocol messages
@@ -1485,6 +1489,8 @@ impl Drop for DaemonSession {
                 .shim_io_tx
                 .send(ShimIoMessage::Control(ShimRequest::Shutdown));
             shim_metadata::remove_metadata(&self.id);
+            // Kill the shim process directly as a belt-and-suspenders measure
+            shim_client::kill_process(self.shim_pid);
         }
     }
 }
