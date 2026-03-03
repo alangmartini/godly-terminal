@@ -8,5 +8,4 @@ description = "Custom Iced widget for rendering terminal grid via wgpu"
 [dependencies]
 iced.workspace = true
 godly-protocol = { path = "../../protocol" }
-wgpu = "24"
 log = "0.4"
