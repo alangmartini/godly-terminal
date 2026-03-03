@@ -76,6 +76,74 @@ fn auto_focus_terminal(
     let _ = app_handle.emit("focus-terminal", terminal_id.to_string());
 }
 
+/// Clean up a git worktree by its path.
+///
+/// Derives the main repo root from within the worktree (via `--git-common-dir`),
+/// then runs `git worktree remove --force`. Falls back to deleting the directory
+/// directly if the git command fails (e.g., corrupt `.git` file).
+fn cleanup_worktree(wt_path: &str) {
+    use std::path::Path;
+    use std::process::Command;
+
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    #[cfg(windows)]
+    use winapi::um::winbase::CREATE_NO_WINDOW;
+
+    eprintln!("[mcp] Cleaning up worktree: {}", wt_path);
+
+    if !Path::new(wt_path).is_dir() {
+        eprintln!("[mcp] Worktree directory already gone: {}", wt_path);
+        return;
+    }
+
+    // Derive the main repo root from the worktree's git common dir.
+    // Inside a worktree, `git rev-parse --path-format=absolute --git-common-dir`
+    // returns e.g. `C:\Users\...\main-repo\.git` — the parent is the repo root.
+    let repo_root = {
+        let mut cmd = Command::new("git");
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.args(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+        cmd.current_dir(wt_path);
+        match cmd.output() {
+            Ok(output) if output.status.success() => {
+                let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // Parent of `.git` dir is the repo root
+                Path::new(&git_dir)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+            }
+            _ => None,
+        }
+    };
+
+    // Try `git worktree remove --force` from the main repo root
+    if let Some(ref root) = repo_root {
+        let wsl = crate::worktree::WslConfig::from_path(wt_path);
+        match crate::worktree::remove_worktree(root, wt_path, true, wsl.as_ref()) {
+            Ok(()) => {
+                eprintln!("[mcp] Worktree removed successfully: {}", wt_path);
+                return;
+            }
+            Err(e) => {
+                eprintln!("[mcp] git worktree remove failed: {} — falling back to rm", e);
+            }
+        }
+    } else {
+        eprintln!(
+            "[mcp] Could not determine repo root for worktree: {} — falling back to rm",
+            wt_path
+        );
+    }
+
+    // Fallback: delete the directory directly
+    match std::fs::remove_dir_all(wt_path) {
+        Ok(()) => eprintln!("[mcp] Worktree directory deleted: {}", wt_path),
+        Err(e) => eprintln!("[mcp] Failed to delete worktree directory: {}", e),
+    }
+}
+
 /// Execute a JavaScript snippet in the main webview via the JS callback bridge.
 /// Returns McpResponse::Ok on success (the JS result is logged but not returned
 /// as structured data — these tools are fire-and-forget commands).
@@ -348,15 +416,37 @@ pub fn handle_mcp_request(
                 _ => {}
             }
 
-            // Run command if specified
+            // Run command if specified — in a background thread that waits for
+            // the shell prompt to be ready first. Writing immediately after
+            // CreateSession causes a race: the command text arrives before the
+            // shell has finished initialising, so the shell echoes it back during
+            // startup and then executes it again once the prompt appears, making
+            // the command appear to run twice. (Bug #534)
             if let Some(ref cmd) = command {
-                let write_req = godly_protocol::Request::Write {
-                    session_id: terminal_id.clone(),
-                    data: format!("{}\r", cmd).into_bytes(),
-                };
-                // Fire-and-forget: response is ignored anyway, and blocking
-                // here risks the same 15s timeout under bridge congestion.
-                let _ = daemon.send_fire_and_forget(&write_req);
+                let daemon_bg = daemon.clone();
+                let terminal_id_bg = terminal_id.clone();
+                let cmd_bg = cmd.clone();
+                std::thread::spawn(move || {
+                    // Wait for the shell to become idle (prompt ready)
+                    let ready = crate::commands::terminal::poll_idle(
+                        &daemon_bg,
+                        &terminal_id_bg,
+                        500,  // idle_ms: 500ms of silence = prompt ready
+                        5_000, // timeout_ms: give up after 5s
+                    );
+                    if !ready {
+                        eprintln!(
+                            "[mcp] Shell did not become idle in time for command, writing anyway"
+                        );
+                    }
+                    let write_req = godly_protocol::Request::Write {
+                        session_id: terminal_id_bg,
+                        data: format!("{}\r", cmd_bg).into_bytes(),
+                    };
+                    // Fire-and-forget: response is ignored anyway, and blocking
+                    // here risks the same 15s timeout under bridge congestion.
+                    let _ = daemon_bg.send_fire_and_forget(&write_req);
+                });
             }
 
             // Store metadata
@@ -631,6 +721,20 @@ pub fn handle_mcp_request(
                     eprintln!("[mcp] Warning: close session error: {}", message);
                 }
                 _ => {}
+            }
+
+            // Read session metadata before removing — if it has a worktree,
+            // clean it up in a background thread. (Bug #534)
+            let worktree_path = {
+                let meta = app_state.session_metadata.read();
+                meta.get(terminal_id).and_then(|m| m.worktree_path.clone())
+            };
+
+            if let Some(wt_path) = worktree_path {
+                let wt_path_clone = wt_path.clone();
+                std::thread::spawn(move || {
+                    cleanup_worktree(&wt_path_clone);
+                });
             }
 
             app_state.remove_session_metadata(terminal_id);
