@@ -283,7 +283,6 @@ export class TerminalRenderer {
           this.paintOverlay();
           perfTracer.measure('paint_duration', 'paint_start');
           perfTracer.measure('keydown_to_paint', 'keydown');
-          perfTracer.tick();
         }
       });
     }
