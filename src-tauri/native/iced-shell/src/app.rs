@@ -278,6 +278,7 @@ impl GodlyApp {
             let tc = TerminalCanvas {
                 grid: active.grid.clone(),
                 metrics: self.font_metrics,
+                selection: None,
             };
             canvas(tc)
                 .width(Length::Fill)
