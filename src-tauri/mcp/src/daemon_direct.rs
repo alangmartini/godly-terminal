@@ -179,6 +179,7 @@ impl Backend for DaemonDirectBackend {
                 worktree_name,
                 worktree,
                 command,
+                focus: _,
             } => {
                 // Worktree support requires git operations from the Tauri app
                 if worktree.unwrap_or(false) || worktree_name.is_some() {
@@ -253,7 +254,7 @@ impl Backend for DaemonDirectBackend {
                 }
             }
 
-            McpRequest::WriteToTerminal { terminal_id, data } => {
+            McpRequest::WriteToTerminal { terminal_id, data, focus: _ } => {
                 // Convert \n → \r for PTY (same as handler.rs)
                 let converted = data.replace("\r\n", "\r").replace('\n', "\r");
                 let resp = self.daemon_request(&Request::Write {
@@ -443,7 +444,7 @@ impl Backend for DaemonDirectBackend {
                 }
             }
 
-            McpRequest::SendKeys { terminal_id, keys } => {
+            McpRequest::SendKeys { terminal_id, keys, focus: _ } => {
                 // Convert each key name to bytes and concatenate
                 let mut all_bytes = Vec::new();
                 for key in keys {
@@ -465,7 +466,7 @@ impl Backend for DaemonDirectBackend {
                 }
             }
 
-            McpRequest::EraseContent { terminal_id, count } => {
+            McpRequest::EraseContent { terminal_id, count, focus: _ } => {
                 let backspaces = vec![0x08u8; *count];
                 let resp = self.daemon_request(&Request::Write {
                     session_id: terminal_id.clone(),
@@ -485,6 +486,7 @@ impl Backend for DaemonDirectBackend {
                 command,
                 idle_ms,
                 timeout_ms,
+                focus: _,
             } => {
                 // 1. Snapshot buffer length before command
                 let before_len = match self.daemon_request(&Request::ReadBuffer {
