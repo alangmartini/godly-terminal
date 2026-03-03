@@ -50,6 +50,8 @@ pub enum McpRequest {
         worktree: Option<bool>,
         #[serde(default)]
         command: Option<String>,
+        #[serde(default)]
+        focus: Option<bool>,
     },
     CloseTerminal { terminal_id: String },
     RenameTerminal { terminal_id: String, name: String },
@@ -75,7 +77,12 @@ pub enum McpRequest {
     GetWorkspaceModes { workspace_id: String },
 
     // Terminal I/O
-    WriteToTerminal { terminal_id: String, data: String },
+    WriteToTerminal {
+        terminal_id: String,
+        data: String,
+        #[serde(default)]
+        focus: Option<bool>,
+    },
     ReadTerminal {
         terminal_id: String,
         #[serde(default)]
@@ -122,11 +129,15 @@ pub enum McpRequest {
     SendKeys {
         terminal_id: String,
         keys: Vec<String>,
+        #[serde(default)]
+        focus: Option<bool>,
     },
     EraseContent {
         terminal_id: String,
         #[serde(default = "default_erase_count")]
         count: usize,
+        #[serde(default)]
+        focus: Option<bool>,
     },
     ExecuteCommand {
         terminal_id: String,
@@ -135,6 +146,8 @@ pub enum McpRequest {
         idle_ms: u64,
         #[serde(default = "default_timeout_ms")]
         timeout_ms: u64,
+        #[serde(default)]
+        focus: Option<bool>,
     },
 
     // Split view control (legacy — prefer layout tree commands below)

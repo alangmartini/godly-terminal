@@ -51,6 +51,10 @@ pub fn list_tools() -> Value {
                         "command": {
                             "type": "string",
                             "description": "A command to run in the terminal immediately after creation. A newline (Enter) is appended automatically."
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to auto-focus the new terminal in the UI. Default: false."
                         }
                     },
                     "required": ["workspace_id"]
@@ -235,6 +239,10 @@ pub fn list_tools() -> Value {
                         "data": {
                             "type": "string",
                             "description": "Text to send to the terminal. Newlines (\\n) are converted to Enter (CR)."
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to auto-focus the terminal in the UI. Default: false."
                         }
                     },
                     "required": ["terminal_id", "data"]
@@ -512,6 +520,10 @@ pub fn list_tools() -> Value {
                             "type": "array",
                             "items": { "type": "string" },
                             "description": "Array of key names to send in sequence. Examples: [\"ctrl+c\"], [\"up\", \"enter\"], [\"tab\"]"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to auto-focus the terminal in the UI. Default: false."
                         }
                     },
                     "required": ["terminal_id", "keys"]
@@ -531,6 +543,10 @@ pub fn list_tools() -> Value {
                             "type": "number",
                             "default": 1,
                             "description": "Number of characters to erase (backspaces to send). Default: 1."
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to auto-focus the terminal in the UI. Default: false."
                         }
                     },
                     "required": ["terminal_id"]
@@ -559,6 +575,10 @@ pub fn list_tools() -> Value {
                             "type": "number",
                             "default": 30000,
                             "description": "Maximum time to wait in milliseconds (default: 30000)"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to auto-focus the terminal in the UI. Default: false."
                         }
                     },
                     "required": ["terminal_id", "command"]
@@ -1339,6 +1359,7 @@ pub fn call_tool(
                 .map(String::from);
             let worktree = args.get("worktree").and_then(|v| v.as_bool());
             let command = args.get("command").and_then(|v| v.as_str()).map(String::from);
+            let focus = args.get("focus").and_then(|v| v.as_bool());
             McpRequest::CreateTerminal {
                 workspace_id,
                 shell_type: None,
@@ -1346,6 +1367,7 @@ pub fn call_tool(
                 worktree_name,
                 worktree,
                 command,
+                focus,
             }
         }
 
@@ -1480,7 +1502,8 @@ pub fn call_tool(
                 .and_then(|v| v.as_str())
                 .ok_or("Missing data")?;
             let data = convert_newlines_to_cr(raw_data);
-            McpRequest::WriteToTerminal { terminal_id, data }
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::WriteToTerminal { terminal_id, data, focus }
         }
 
         "read_terminal" => {
@@ -1694,7 +1717,8 @@ pub fn call_tool(
             if keys.is_empty() {
                 return Err("keys array must not be empty".to_string());
             }
-            McpRequest::SendKeys { terminal_id, keys }
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::SendKeys { terminal_id, keys, focus }
         }
 
         "erase_content" => {
@@ -1708,7 +1732,8 @@ pub fn call_tool(
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize)
                 .unwrap_or(1);
-            McpRequest::EraseContent { terminal_id, count }
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::EraseContent { terminal_id, count, focus }
         }
 
         "execute_command" => {
@@ -1730,11 +1755,13 @@ pub fn call_tool(
                 .get("timeout_ms")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(30000);
+            let focus = args.get("focus").and_then(|v| v.as_bool());
             McpRequest::ExecuteCommand {
                 terminal_id,
                 command,
                 idle_ms,
                 timeout_ms,
+                focus,
             }
         }
 
