@@ -1,22 +1,15 @@
-use crate::daemon_client::FrontendEventSink;
+use std::sync::Arc;
 
-/// Configuration for the native event loop.
-pub struct EventLoopConfig {
-    pub poll_interval_ms: u64,
-}
+use crate::daemon_client::{FrontendEventSink, NativeDaemonClient};
 
-impl Default for EventLoopConfig {
-    fn default() -> Self {
-        Self {
-            poll_interval_ms: 1,
-        }
-    }
-}
-
-/// Start the event loop (stub — returns immediately in Phase 0).
-pub fn start_event_loop<S: FrontendEventSink>(
-    _sink: S,
-    _config: EventLoopConfig,
-) {
-    log::info!("Native event loop stub — full implementation in Phase 1");
+/// Set up the bridge I/O thread on the daemon client.
+///
+/// This hands off the pipe reader/writer to a background thread that
+/// handles all pipe I/O, dispatching events to the sink and routing
+/// responses back to callers.
+pub fn setup_bridge<S: FrontendEventSink>(
+    client: &NativeDaemonClient,
+    sink: Arc<S>,
+) -> Result<(), String> {
+    client.setup_bridge(sink)
 }

@@ -1480,18 +1480,13 @@ pub fn handle_mcp_request(
                 _ => 0,
             };
 
-            // 2. Write command + Enter
+            // 2. Write command + Enter (fire-and-forget to avoid bridge timeout)
             let write_req = godly_protocol::Request::Write {
                 session_id: terminal_id.clone(),
                 data: format!("{}\r", command).into_bytes(),
             };
-            match daemon.send_request(&write_req) {
-                Ok(godly_protocol::Response::Ok) => {}
-                Ok(godly_protocol::Response::Error { message }) => {
-                    return McpResponse::Error { message };
-                }
-                Err(e) => return McpResponse::Error { message: e },
-                _ => {}
+            if let Err(e) = daemon.send_fire_and_forget(&write_req) {
+                return McpResponse::Error { message: e };
             }
 
             // 3. Wait for idle (reuses same pattern as WaitForIdle handler)

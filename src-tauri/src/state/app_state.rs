@@ -405,6 +405,7 @@ impl AppState {
 
                 None
             }
+            LayoutNode::Grid { .. } => None,
         }
     }
 
@@ -422,6 +423,7 @@ impl AppState {
                 Self::swap_terminals(first, id_a, id_b);
                 Self::swap_terminals(second, id_a, id_b);
             }
+            LayoutNode::Grid { .. } => {}
         }
     }
 
