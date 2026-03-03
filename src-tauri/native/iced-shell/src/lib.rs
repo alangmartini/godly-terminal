@@ -2,6 +2,7 @@ pub mod app;
 pub mod notification_state;
 pub mod selection;
 pub mod settings_dialog;
+pub mod shortcuts_tab;
 pub mod sidebar;
 pub mod split_pane;
 pub mod subscription;
