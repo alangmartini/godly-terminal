@@ -10,7 +10,7 @@ use godly_app_adapter::daemon_client::{FrontendEventSink, NativeDaemonClient};
 use godly_app_adapter::keys::key_to_pty_bytes;
 use godly_protocol::types::RichGridData;
 
-use godly_terminal_surface::{TerminalCanvas, TerminalCanvasState};
+use godly_terminal_surface::{FontMetrics, TerminalCanvas};
 
 use crate::subscription::DaemonEventMsg;
 
@@ -20,8 +20,10 @@ pub struct GodlyApp {
     client: Option<Arc<NativeDaemonClient>>,
     /// Current session ID.
     session_id: Option<String>,
-    /// Terminal canvas state (shared with Canvas Program).
-    canvas_state: TerminalCanvasState,
+    /// Current grid data from daemon.
+    grid: Option<RichGridData>,
+    /// Font metrics for terminal rendering.
+    font_metrics: FontMetrics,
     /// Window title from terminal.
     terminal_title: String,
     /// Error message to display if initialization failed.
@@ -40,7 +42,8 @@ impl Default for GodlyApp {
         Self {
             client: None,
             session_id: None,
-            canvas_state: TerminalCanvasState::default(),
+            grid: None,
+            font_metrics: FontMetrics::default(),
             terminal_title: String::new(),
             init_error: None,
             grid_rows: 24,
@@ -139,7 +142,7 @@ impl GodlyApp {
             Message::GridFetched(grid) => {
                 self.fetching_grid = false;
                 self.terminal_title = grid.title.clone();
-                self.canvas_state.grid = Some(grid);
+                self.grid = Some(grid);
             }
             Message::GridFetchFailed(e) => {
                 self.fetching_grid = false;
@@ -172,10 +175,13 @@ impl GodlyApp {
             return center(text("Session closed").size(18)).into();
         }
 
-        canvas(TerminalCanvas)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        canvas(TerminalCanvas {
+            grid: self.grid.clone(),
+            metrics: self.font_metrics,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
