@@ -3,3 +3,4 @@ pub mod split_pane;
 pub mod subscription;
 pub mod tab_bar;
 pub mod terminal_state;
+pub mod workspace_state;
