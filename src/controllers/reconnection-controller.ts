@@ -275,7 +275,8 @@ export async function createDefaultWorkspace(): Promise<void> {
 /** Check whether all terminal IDs in a layout tree exist in the live set. */
 function hasAllTerminals(node: LayoutNode, liveIds: Set<string>): boolean {
   if (node.type === 'leaf') return liveIds.has(node.terminal_id);
-  return hasAllTerminals(node.first, liveIds) && hasAllTerminals(node.second, liveIds);
+  if (node.type === 'split') return hasAllTerminals(node.first, liveIds) && hasAllTerminals(node.second, liveIds);
+  return true;
 }
 
 /** Sync a layout tree to the backend for persistence. Fire-and-forget. */
