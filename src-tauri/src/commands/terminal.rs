@@ -530,7 +530,7 @@ pub(crate) fn quick_claude_background(
         session_id: terminal_id.clone(),
         data: "claude --dangerously-skip-permissions\r".as_bytes().to_vec(),
     };
-    if let Err(e) = daemon.send_request(&claude_cmd) {
+    if let Err(e) = daemon.send_fire_and_forget(&claude_cmd) {
         eprintln!("[quick_claude] Failed to write claude command: {}", e);
         return;
     }
@@ -562,7 +562,7 @@ pub(crate) fn quick_claude_background(
         session_id: terminal_id.clone(),
         data: prompt_text.into_bytes(),
     };
-    if let Err(e) = daemon.send_request(&text_req) {
+    if let Err(e) = daemon.send_fire_and_forget(&text_req) {
         eprintln!("[quick_claude] Failed to write prompt text: {}", e);
         return;
     }
@@ -607,7 +607,7 @@ pub(crate) fn quick_claude_background(
             session_id: terminal_id.clone(),
             data: b"\r".to_vec(),
         };
-        if let Err(e) = daemon.send_request(&submit_req) {
+        if let Err(e) = daemon.send_fire_and_forget(&submit_req) {
             eprintln!("[quick_claude] Failed to send submit key (attempt {}): {}", attempt + 1, e);
             return;
         }
