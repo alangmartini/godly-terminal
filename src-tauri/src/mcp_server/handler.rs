@@ -278,6 +278,7 @@ pub fn handle_mcp_request(
             worktree_name,
             worktree,
             command,
+            focus,
         } => {
             use std::collections::HashMap;
             use uuid::Uuid;
@@ -484,8 +485,10 @@ pub fn handle_mcp_request(
                 },
             );
 
-            // Auto-focus the new terminal so the user sees it
-            auto_focus_terminal(&terminal_id, app_state, app_handle);
+            // Auto-focus only if explicitly requested (default: false)
+            if focus.unwrap_or(false) {
+                auto_focus_terminal(&terminal_id, app_state, app_handle);
+            }
 
             McpResponse::Created {
                 id: terminal_id,
@@ -1203,9 +1206,10 @@ pub fn handle_mcp_request(
             }
         }
 
-        McpRequest::WriteToTerminal { terminal_id, data } => {
-            // Auto-focus so the user sees the terminal being typed into
-            auto_focus_terminal(terminal_id, app_state, app_handle);
+        McpRequest::WriteToTerminal { terminal_id, data, focus } => {
+            if focus.unwrap_or(false) {
+                auto_focus_terminal(terminal_id, app_state, app_handle);
+            }
 
             // Convert newlines → \r for PTY: terminals expect CR (Enter), not LF.
             // Also handle literal escape sequences (\\n, \\r\\n) since LLMs often
@@ -1381,7 +1385,7 @@ pub fn handle_mcp_request(
             }
         }
 
-        McpRequest::SendKeys { terminal_id, keys } => {
+        McpRequest::SendKeys { terminal_id, keys, focus } => {
             // Validate terminal exists
             if !app_state.terminals.read().contains_key(terminal_id) {
                 return McpResponse::Error {
@@ -1389,8 +1393,9 @@ pub fn handle_mcp_request(
                 };
             }
 
-            // Auto-focus so the user sees the keystrokes
-            auto_focus_terminal(terminal_id, app_state, app_handle);
+            if focus.unwrap_or(false) {
+                auto_focus_terminal(terminal_id, app_state, app_handle);
+            }
 
             // Convert each key name to bytes and concatenate
             let mut all_bytes = Vec::new();
@@ -1416,7 +1421,7 @@ pub fn handle_mcp_request(
             }
         }
 
-        McpRequest::EraseContent { terminal_id, count } => {
+        McpRequest::EraseContent { terminal_id, count, focus } => {
             // Validate terminal exists
             if !app_state.terminals.read().contains_key(terminal_id) {
                 return McpResponse::Error {
@@ -1424,8 +1429,9 @@ pub fn handle_mcp_request(
                 };
             }
 
-            // Auto-focus so the user sees the erasure
-            auto_focus_terminal(terminal_id, app_state, app_handle);
+            if focus.unwrap_or(false) {
+                auto_focus_terminal(terminal_id, app_state, app_handle);
+            }
 
             let backspaces = vec![0x08u8; *count];
             let request = godly_protocol::Request::Write {
@@ -1449,6 +1455,7 @@ pub fn handle_mcp_request(
             command,
             idle_ms,
             timeout_ms,
+            focus,
         } => {
             // Validate terminal exists
             if !app_state.terminals.read().contains_key(terminal_id) {
@@ -1457,8 +1464,9 @@ pub fn handle_mcp_request(
                 };
             }
 
-            // Auto-focus so the user sees the command executing
-            auto_focus_terminal(terminal_id, app_state, app_handle);
+            if focus.unwrap_or(false) {
+                auto_focus_terminal(terminal_id, app_state, app_handle);
+            }
 
             // 1. Snapshot buffer length before command
             let before_len = match daemon.send_request(&godly_protocol::Request::ReadBuffer {
