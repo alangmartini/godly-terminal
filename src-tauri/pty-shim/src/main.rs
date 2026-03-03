@@ -14,7 +14,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU16, Ordering},
     mpsc, Arc, Mutex,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Grace period after shell exits before shim self-terminates.
 const SHELL_EXIT_GRACE_SECS: u64 = 30;
@@ -23,6 +23,12 @@ const SHELL_EXIT_GRACE_SECS: u64 = 30;
 /// After this period with no daemon connection, the shim self-terminates to
 /// prevent orphaned processes from accumulating indefinitely.
 const ORPHAN_TIMEOUT_SECS: u64 = 90; // 90 seconds
+
+/// Maximum time (seconds) the shim tolerates no messages FROM the daemon during
+/// an active connection. If the daemon silently dies (crash, force-kill) without
+/// closing the pipe cleanly, the shim won't get a Disconnected error — reads
+/// just return empty. This timeout catches that case.
+const DAEMON_IDLE_TIMEOUT_SECS: u64 = 60;
 
 /// Maximum number of pending output messages in the channel between the PTY
 /// reader thread and the main loop. At 8KB per message, 128 messages ≈ 1MB.
@@ -351,6 +357,7 @@ fn main_loop(
 
         // Bidirectional I/O loop
         let mut disconnected = false;
+        let mut last_daemon_activity = Instant::now();
 
         loop {
             if shutdown_requested.load(Ordering::SeqCst) {
@@ -398,6 +405,7 @@ fn main_loop(
             // Read daemon→shim messages (non-blocking)
             match pipe::try_read_frame(&handle) {
                 Ok(Some(frame_data)) => {
+                    last_daemon_activity = Instant::now();
                     match parse_incoming_frame(&frame_data) {
                         Ok(ShimFrame::Binary { tag, data }) if tag == TAG_WRITE => {
                             let _ = input_tx.send(data);
@@ -459,6 +467,17 @@ fn main_loop(
             }
 
             if disconnected {
+                break;
+            }
+
+            // Daemon idle timeout: if the daemon hasn't sent any messages
+            // (writes, control, status) for DAEMON_IDLE_TIMEOUT_SECS, assume
+            // it crashed or was force-killed without closing the pipe.
+            if last_daemon_activity.elapsed() > Duration::from_secs(DAEMON_IDLE_TIMEOUT_SECS) {
+                eprintln!(
+                    "godly-pty-shim: no daemon activity for {}s, assuming disconnected",
+                    DAEMON_IDLE_TIMEOUT_SECS
+                );
                 break;
             }
 
@@ -538,6 +557,11 @@ mod pipe {
     ///
     /// For the connection timeout, we run blocking ConnectNamedPipe in a dedicated
     /// thread and wait on a channel with timeout.
+    ///
+    /// CRITICAL: On timeout, we close the handle to unblock the thread, then JOIN
+    /// the thread before returning. Without the join, the thread may still be
+    /// referencing the old handle value when Windows recycles it for the next
+    /// CreateNamedPipeW call, causing phantom connections that reset the orphan timer.
     pub fn create_pipe_and_wait(
         pipe_name: &str,
         timeout: Duration,
@@ -567,7 +591,7 @@ mod pipe {
         // system call that returns cleanly when the handle is closed).
         let handle_raw = handle as usize;
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        let join_handle = std::thread::spawn(move || {
             let h = handle_raw as HANDLE;
             let result = unsafe { ConnectNamedPipe(h, std::ptr::null_mut()) };
             let err = if result == 0 {
@@ -580,6 +604,8 @@ mod pipe {
 
         match rx.recv_timeout(timeout) {
             Ok((result, err)) => {
+                // Thread completed — join to clean up
+                let _ = join_handle.join();
                 if result != 0 || err == winerror::ERROR_PIPE_CONNECTED {
                     Ok(Some(PipeHandle { handle }))
                 } else {
@@ -591,11 +617,15 @@ mod pipe {
                 }
             }
             Err(_) => {
-                // Timeout: close the handle to unblock ConnectNamedPipe in the thread
+                // Timeout: close the handle to unblock ConnectNamedPipe in the thread,
+                // then JOIN the thread to ensure it has fully exited before we return.
+                // Without this join, the stale thread can interfere with the next pipe
+                // handle if Windows recycles the handle value.
                 unsafe {
                     DisconnectNamedPipe(handle);
                     CloseHandle(handle);
                 }
+                let _ = join_handle.join();
                 Ok(None)
             }
         }
