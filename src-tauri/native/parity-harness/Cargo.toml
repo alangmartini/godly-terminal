@@ -10,5 +10,9 @@ godly-protocol = { path = "../../protocol" }
 serde_json.workspace = true
 log = "0.4"
 
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true
+
 [dev-dependencies]
 pretty_assertions = "1"
+godly-app-adapter = { path = "../app-adapter" }
