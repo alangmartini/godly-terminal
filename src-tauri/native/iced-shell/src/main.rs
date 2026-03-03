@@ -1,10 +1,12 @@
 use iced::window;
 
 mod app;
+mod selection;
 mod split_pane;
 mod subscription;
 mod tab_bar;
 mod terminal_state;
+mod workspace_state;
 
 use app::{GodlyApp, Message};
 
