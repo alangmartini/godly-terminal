@@ -1,34 +1,163 @@
-use godly_protocol::{Response, ShellType};
+use godly_protocol::types::RichGridData;
+use godly_protocol::{Request, Response, ShellType};
 
 use crate::daemon_client::NativeDaemonClient;
 
-/// Create a terminal session (stub).
+/// Create a terminal session and attach to it.
 pub fn create_terminal(
-    _client: &NativeDaemonClient,
-    _id: &str,
-    _shell_type: ShellType,
-    _cwd: Option<&str>,
-    _rows: u16,
-    _cols: u16,
-) -> Result<Response, String> {
-    Err("create_terminal stub — full implementation in Phase 1".into())
+    client: &NativeDaemonClient,
+    id: &str,
+    shell_type: ShellType,
+    cwd: Option<&str>,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    let response = client.send_request(&Request::CreateSession {
+        id: id.to_string(),
+        shell_type,
+        cwd: cwd.map(|s| s.to_string()),
+        rows,
+        cols,
+        env: None,
+    })?;
+
+    match response {
+        Response::SessionCreated { .. } => {}
+        Response::Error { message } => return Err(message),
+        other => return Err(format!("Unexpected create response: {:?}", other)),
+    }
+
+    // Attach to start receiving events
+    attach_session(client, id)?;
+
+    Ok(())
 }
 
-/// Write input to a terminal session (stub).
+/// Close a terminal session.
+pub fn close_terminal(client: &NativeDaemonClient, session_id: &str) -> Result<(), String> {
+    let response = client.send_request(&Request::CloseSession {
+        session_id: session_id.to_string(),
+    })?;
+
+    match response {
+        Response::Ok => {}
+        Response::Error { message } => {
+            log::warn!("Close session error: {}", message);
+        }
+        _ => {}
+    }
+
+    client.track_detach(session_id);
+    Ok(())
+}
+
+/// Attach to a session to start receiving events.
+pub fn attach_session(client: &NativeDaemonClient, session_id: &str) -> Result<(), String> {
+    let response = client.send_request(&Request::Attach {
+        session_id: session_id.to_string(),
+    })?;
+
+    match response {
+        Response::Ok | Response::Buffer { .. } => {}
+        Response::Error { message } => return Err(format!("Attach failed: {}", message)),
+        other => return Err(format!("Unexpected attach response: {:?}", other)),
+    }
+
+    client.track_attach(session_id.to_string());
+    Ok(())
+}
+
+/// Detach from a session.
+pub fn detach_session(client: &NativeDaemonClient, session_id: &str) -> Result<(), String> {
+    let response = client.send_request(&Request::Detach {
+        session_id: session_id.to_string(),
+    })?;
+
+    match response {
+        Response::Ok => {}
+        Response::Error { message } => return Err(format!("Detach failed: {}", message)),
+        other => return Err(format!("Unexpected detach response: {:?}", other)),
+    }
+
+    client.track_detach(session_id);
+    Ok(())
+}
+
+/// Write input to a terminal session (fire-and-forget for low latency).
+/// Converts `\n` to `\r` for PTY compatibility.
 pub fn write_to_terminal(
-    _client: &NativeDaemonClient,
-    _session_id: &str,
-    _data: &[u8],
+    client: &NativeDaemonClient,
+    session_id: &str,
+    data: &[u8],
 ) -> Result<(), String> {
-    Err("write_to_terminal stub — full implementation in Phase 1".into())
+    client.send_fire_and_forget(&Request::Write {
+        session_id: session_id.to_string(),
+        data: data.to_vec(),
+    })
 }
 
-/// Resize a terminal session (stub).
+/// Resize a terminal session (fire-and-forget).
 pub fn resize_terminal(
-    _client: &NativeDaemonClient,
-    _session_id: &str,
-    _rows: u16,
-    _cols: u16,
+    client: &NativeDaemonClient,
+    session_id: &str,
+    rows: u16,
+    cols: u16,
 ) -> Result<(), String> {
-    Err("resize_terminal stub — full implementation in Phase 1".into())
+    client.send_fire_and_forget(&Request::Resize {
+        session_id: session_id.to_string(),
+        rows,
+        cols,
+    })
+}
+
+/// Fetch the full grid snapshot from the daemon.
+pub fn get_grid_snapshot(
+    client: &NativeDaemonClient,
+    session_id: &str,
+) -> Result<RichGridData, String> {
+    let response = client.send_request(&Request::ReadRichGrid {
+        session_id: session_id.to_string(),
+    })?;
+
+    match response {
+        Response::RichGrid { grid } => Ok(grid),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected grid response: {:?}", other)),
+    }
+}
+
+/// Set the scrollback offset.
+pub fn set_scrollback(
+    client: &NativeDaemonClient,
+    session_id: &str,
+    offset: usize,
+) -> Result<(), String> {
+    let response = client.send_request(&Request::SetScrollback {
+        session_id: session_id.to_string(),
+        offset,
+    })?;
+
+    match response {
+        Response::Ok => Ok(()),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected scrollback response: {:?}", other)),
+    }
+}
+
+/// Set scrollback offset and fetch the grid in one round-trip.
+pub fn scroll_and_get_snapshot(
+    client: &NativeDaemonClient,
+    session_id: &str,
+    offset: usize,
+) -> Result<RichGridData, String> {
+    let response = client.send_request(&Request::ScrollAndReadRichGrid {
+        session_id: session_id.to_string(),
+        offset,
+    })?;
+
+    match response {
+        Response::RichGrid { grid } => Ok(grid),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected scroll+grid response: {:?}", other)),
+    }
 }
