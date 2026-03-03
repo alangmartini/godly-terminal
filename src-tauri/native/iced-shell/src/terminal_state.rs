@@ -13,6 +13,10 @@ pub struct TerminalInfo {
     pub cols: u16,
     pub exited: bool,
     pub exit_code: Option<i64>,
+    /// Current scrollback offset (0 = live view, >0 = scrolled into history).
+    pub scrollback_offset: usize,
+    /// Total number of scrollback rows available.
+    pub total_scrollback: usize,
 }
 
 impl TerminalInfo {
@@ -69,6 +73,8 @@ impl TerminalCollection {
             cols,
             exited: false,
             exit_code: None,
+            scrollback_offset: 0,
+            total_scrollback: 0,
         });
 
         if is_first {
@@ -153,6 +159,38 @@ impl TerminalCollection {
     /// Returns the active terminal's id, if any.
     pub fn active_id(&self) -> Option<&str> {
         self.active_id.as_deref()
+    }
+
+    /// Switch to the next terminal (wraps around).
+    pub fn next(&mut self) {
+        if self.terminals.len() <= 1 {
+            return;
+        }
+        if let Some(idx) = self.active_index() {
+            let next_idx = (idx + 1) % self.terminals.len();
+            self.active_id = Some(self.terminals[next_idx].id.clone());
+        }
+    }
+
+    /// Switch to the previous terminal (wraps around).
+    pub fn previous(&mut self) {
+        if self.terminals.len() <= 1 {
+            return;
+        }
+        if let Some(idx) = self.active_index() {
+            let prev_idx = if idx == 0 {
+                self.terminals.len() - 1
+            } else {
+                idx - 1
+            };
+            self.active_id = Some(self.terminals[prev_idx].id.clone());
+        }
+    }
+
+    /// Returns the index of the active terminal.
+    fn active_index(&self) -> Option<usize> {
+        let id = self.active_id.as_deref()?;
+        self.terminals.iter().position(|t| t.id == id)
     }
 }
 
@@ -318,5 +356,102 @@ mod tests {
 
         col.active_mut().unwrap().title = "Hello".into();
         assert_eq!(col.active().unwrap().title, "Hello");
+    }
+
+    #[test]
+    fn test_next_wraps_around() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+
+        assert_eq!(col.active_id(), Some("t1"));
+
+        col.next();
+        assert_eq!(col.active_id(), Some("t2"));
+
+        col.next();
+        assert_eq!(col.active_id(), Some("t3"));
+
+        // Wraps around to t1.
+        col.next();
+        assert_eq!(col.active_id(), Some("t1"));
+    }
+
+    #[test]
+    fn test_previous_wraps_around() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+
+        assert_eq!(col.active_id(), Some("t1"));
+
+        // Wraps around to t3.
+        col.previous();
+        assert_eq!(col.active_id(), Some("t3"));
+
+        col.previous();
+        assert_eq!(col.active_id(), Some("t2"));
+
+        col.previous();
+        assert_eq!(col.active_id(), Some("t1"));
+    }
+
+    #[test]
+    fn test_next_single_terminal_is_noop() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+
+        col.next();
+        assert_eq!(col.active_id(), Some("t1"));
+    }
+
+    #[test]
+    fn test_previous_single_terminal_is_noop() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+
+        col.previous();
+        assert_eq!(col.active_id(), Some("t1"));
+    }
+
+    #[test]
+    fn test_next_empty_is_noop() {
+        let mut col = TerminalCollection::new();
+        col.next();
+        assert_eq!(col.active_id(), None);
+    }
+
+    #[test]
+    fn test_previous_empty_is_noop() {
+        let mut col = TerminalCollection::new();
+        col.previous();
+        assert_eq!(col.active_id(), None);
+    }
+
+    #[test]
+    fn test_next_previous_round_trip() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+
+        col.set_active("t2");
+        assert_eq!(col.active_id(), Some("t2"));
+
+        col.next();
+        assert_eq!(col.active_id(), Some("t3"));
+
+        col.previous();
+        assert_eq!(col.active_id(), Some("t2"));
+    }
+
+    #[test]
+    fn test_scrollback_fields_initialized_to_zero() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+        assert_eq!(info.scrollback_offset, 0);
+        assert_eq!(info.total_scrollback, 0);
     }
 }
