@@ -354,7 +354,9 @@ pub fn handle_mcp_request(
                     session_id: terminal_id.clone(),
                     data: format!("{}\r", cmd).into_bytes(),
                 };
-                let _ = daemon.send_request(&write_req);
+                // Fire-and-forget: response is ignored anyway, and blocking
+                // here risks the same 15s timeout under bridge congestion.
+                let _ = daemon.send_fire_and_forget(&write_req);
             }
 
             // Store metadata
@@ -1114,14 +1116,13 @@ pub fn handle_mcp_request(
                 session_id: terminal_id.clone(),
                 data: converted.as_bytes().to_vec(),
             };
-            match daemon.send_request(&request) {
-                Ok(godly_protocol::Response::Ok) => McpResponse::Ok,
-                Ok(godly_protocol::Response::Error { message }) => {
-                    McpResponse::Error { message }
-                }
-                Ok(other) => McpResponse::Error {
-                    message: format!("Unexpected response: {:?}", other),
-                },
+            // Fire-and-forget: don't block the MCP handler waiting for the
+            // daemon's Ok response. Blocking here caused 15s timeouts under
+            // load because the bridge I/O thread is congested with output
+            // from multiple terminals. Matches the Tauri command handler
+            // pattern in commands/terminal.rs.
+            match daemon.send_fire_and_forget(&request) {
+                Ok(()) => McpResponse::Ok,
                 Err(e) => McpResponse::Error { message: e },
             }
         }
