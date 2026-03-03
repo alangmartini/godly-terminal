@@ -1,0 +1,15 @@
+[package]
+name = "godly-app-adapter"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+description = "Tauri-free daemon client adapter for the native frontend"
+
+[dependencies]
+godly-protocol = { path = "../../protocol" }
+parking_lot.workspace = true
+log = "0.4"
+iced.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true
