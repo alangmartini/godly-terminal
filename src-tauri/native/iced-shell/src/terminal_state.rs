@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use godly_tabs_core::TabState;
 use godly_protocol::types::RichGridData;
 
 /// Information about a single terminal session.
@@ -47,13 +48,11 @@ impl TerminalInfo {
 
 /// Collection of terminal sessions with active tab tracking.
 ///
-/// Uses a `HashMap` for O(1) lookup by id, with a separate `order_list`
-/// to maintain insertion order for iteration and tab display.
+/// Uses a `HashMap` for O(1) lookup by id and delegates ordering/active
+/// semantics to the pure `godly-tabs-core` state machine.
 pub struct TerminalCollection {
     terminals: HashMap<String, TerminalInfo>,
-    /// Maintains insertion order of terminal ids for ordered iteration.
-    order_list: Vec<String>,
-    active_id: Option<String>,
+    tabs: TabState,
     next_order: u32,
 }
 
@@ -62,8 +61,7 @@ impl TerminalCollection {
     pub fn new() -> Self {
         Self {
             terminals: HashMap::new(),
-            order_list: Vec::new(),
-            active_id: None,
+            tabs: TabState::new(),
             next_order: 0,
         }
     }
@@ -73,38 +71,7 @@ impl TerminalCollection {
     /// Auto-increments the order counter. Sets as active if this is the first terminal.
     /// Returns a mutable reference to the newly created `TerminalInfo`.
     pub fn add(&mut self, id: String, rows: u16, cols: u16) -> &mut TerminalInfo {
-        let order = self.next_order;
-        self.next_order += 1;
-
-        let is_first = self.terminals.is_empty();
-
-        self.order_list.push(id.clone());
-        self.terminals.insert(
-            id.clone(),
-            TerminalInfo {
-                id: id.clone(),
-                title: String::new(),
-                process_name: String::new(),
-                order,
-                grid: None,
-                dirty: false,
-                fetching: false,
-                rows,
-                cols,
-                exited: false,
-                exit_code: None,
-                scrollback_offset: 0,
-                total_scrollback: 0,
-                workspace_id: None,
-                custom_name: None,
-            },
-        );
-
-        if is_first {
-            self.active_id = Some(id.clone());
-        }
-
-        self.terminals.get_mut(&id).unwrap()
+        self.add_terminal(id, rows, cols, None)
     }
 
     /// Removes the terminal with the given id.
@@ -112,38 +79,21 @@ impl TerminalCollection {
     /// If the removed terminal was active, the next terminal at the same index
     /// (or the previous one if at the end) becomes active.
     pub fn remove(&mut self, id: &str) {
-        let Some(idx) = self.order_list.iter().position(|s| s == id) else {
+        if !self.tabs.close(id) {
             return;
-        };
-
-        let was_active = self.active_id.as_deref() == Some(id);
-        self.order_list.remove(idx);
-        self.terminals.remove(id);
-
-        if was_active {
-            if self.order_list.is_empty() {
-                self.active_id = None;
-            } else {
-                // Prefer same index (next terminal), or fall back to previous.
-                let new_idx = if idx < self.order_list.len() {
-                    idx
-                } else {
-                    self.order_list.len() - 1
-                };
-                self.active_id = Some(self.order_list[new_idx].clone());
-            }
         }
+        self.terminals.remove(id);
     }
 
     /// Returns a reference to the active terminal, if any.
     pub fn active(&self) -> Option<&TerminalInfo> {
-        let id = self.active_id.as_deref()?;
+        let id = self.tabs.active_id()?;
         self.terminals.get(id)
     }
 
     /// Returns a mutable reference to the active terminal, if any.
     pub fn active_mut(&mut self) -> Option<&mut TerminalInfo> {
-        let id = self.active_id.as_deref()?.to_owned();
+        let id = self.tabs.active_id()?.to_owned();
         self.terminals.get_mut(&id)
     }
 
@@ -159,9 +109,7 @@ impl TerminalCollection {
 
     /// Sets the active terminal by id. No-op if id not found.
     pub fn set_active(&mut self, id: &str) {
-        if self.terminals.contains_key(id) {
-            self.active_id = Some(id.to_owned());
-        }
+        let _ = self.tabs.activate(id);
     }
 
     /// Returns the number of terminals in the collection.
@@ -171,7 +119,8 @@ impl TerminalCollection {
 
     /// Iterates over all terminals in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = &TerminalInfo> {
-        self.order_list
+        self.tabs
+            .ids()
             .iter()
             .filter_map(|id| self.terminals.get(id))
     }
@@ -180,47 +129,22 @@ impl TerminalCollection {
     ///
     /// Use this for the tab bar and other ordered displays.
     pub fn ordered_terminals(&self) -> Vec<&TerminalInfo> {
-        self.order_list
-            .iter()
-            .filter_map(|id| self.terminals.get(id))
-            .collect()
+        self.iter().collect()
     }
 
     /// Returns the active terminal's id, if any.
     pub fn active_id(&self) -> Option<&str> {
-        self.active_id.as_deref()
+        self.tabs.active_id()
     }
 
     /// Switch to the next terminal (wraps around).
     pub fn next(&mut self) {
-        if self.order_list.len() <= 1 {
-            return;
-        }
-        if let Some(idx) = self.active_index() {
-            let next_idx = (idx + 1) % self.order_list.len();
-            self.active_id = Some(self.order_list[next_idx].clone());
-        }
+        self.tabs.next();
     }
 
     /// Switch to the previous terminal (wraps around).
     pub fn previous(&mut self) {
-        if self.order_list.len() <= 1 {
-            return;
-        }
-        if let Some(idx) = self.active_index() {
-            let prev_idx = if idx == 0 {
-                self.order_list.len() - 1
-            } else {
-                idx - 1
-            };
-            self.active_id = Some(self.order_list[prev_idx].clone());
-        }
-    }
-
-    /// Returns the index of the active terminal in the order list.
-    fn active_index(&self) -> Option<usize> {
-        let id = self.active_id.as_deref()?;
-        self.order_list.iter().position(|s| s == id)
+        self.tabs.previous();
     }
 
     /// Adds a terminal to a specific workspace.
@@ -234,11 +158,26 @@ impl TerminalCollection {
         cols: u16,
         workspace_id: String,
     ) -> &mut TerminalInfo {
+        self.add_terminal(id, rows, cols, Some(workspace_id))
+    }
+
+    fn add_terminal(
+        &mut self,
+        id: String,
+        rows: u16,
+        cols: u16,
+        workspace_id: Option<String>,
+    ) -> &mut TerminalInfo {
+        if self.terminals.contains_key(&id) {
+            return self
+                .terminals
+                .get_mut(&id)
+                .expect("terminal must exist after contains_key");
+        }
+
         let order = self.next_order;
         self.next_order += 1;
-        let is_first = self.terminals.is_empty();
-
-        self.order_list.push(id.clone());
+        let _ = self.tabs.open(id.clone());
         self.terminals.insert(
             id.clone(),
             TerminalInfo {
@@ -255,16 +194,14 @@ impl TerminalCollection {
                 exit_code: None,
                 scrollback_offset: 0,
                 total_scrollback: 0,
-                workspace_id: Some(workspace_id),
+                workspace_id,
                 custom_name: None,
             },
         );
 
-        if is_first {
-            self.active_id = Some(id.clone());
-        }
-
-        self.terminals.get_mut(&id).unwrap()
+        self.terminals
+            .get_mut(&id)
+            .expect("newly inserted terminal must exist")
     }
 
     /// Set or clear the custom name for a terminal.
@@ -276,7 +213,8 @@ impl TerminalCollection {
 
     /// Returns terminals belonging to a specific workspace.
     pub fn terminals_for_workspace(&self, workspace_id: &str) -> Vec<&TerminalInfo> {
-        self.order_list
+        self.tabs
+            .ids()
             .iter()
             .filter_map(|id| self.terminals.get(id))
             .filter(|t| t.workspace_id.as_deref() == Some(workspace_id))
@@ -628,7 +566,11 @@ mod tests {
         col.add("t1".into(), 24, 80);
         col.add("t2".into(), 24, 80);
 
-        let ordered: Vec<&str> = col.ordered_terminals().iter().map(|t| t.id.as_str()).collect();
+        let ordered: Vec<&str> = col
+            .ordered_terminals()
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
         assert_eq!(ordered, vec!["t3", "t1", "t2"]);
     }
 
@@ -641,7 +583,11 @@ mod tests {
 
         col.remove("t2");
 
-        let ordered: Vec<&str> = col.ordered_terminals().iter().map(|t| t.id.as_str()).collect();
+        let ordered: Vec<&str> = col
+            .ordered_terminals()
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
         assert_eq!(ordered, vec!["t1", "t3"]);
     }
 }
