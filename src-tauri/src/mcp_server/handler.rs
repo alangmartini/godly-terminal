@@ -512,11 +512,19 @@ pub fn handle_mcp_request(
             // Auto-generate branch name from prompt if not provided
             let branch_name = if use_worktree && branch_name.is_none() {
                 if let Some(api_key) = llm_state.get_api_key() {
+                    let provider = llm_state.get_provider();
                     let model = llm_state.get_model();
+                    let api_base_url = llm_state.get_api_base_url();
                     tokio::runtime::Runtime::new()
                         .ok()
                         .and_then(|rt| {
-                            rt.block_on(godly_llm::generate_branch_name_gemini(&api_key, prompt, &model))
+                            rt.block_on(godly_llm::generate_branch_name(
+                                &provider,
+                                &api_key,
+                                prompt,
+                                &model,
+                                api_base_url.as_deref(),
+                            ))
                                 .ok()
                         })
                         .filter(|name| godly_llm::is_quality_branch_name(name))

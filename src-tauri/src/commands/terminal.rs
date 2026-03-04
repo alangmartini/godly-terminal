@@ -363,8 +363,18 @@ pub async fn quick_claude(
     // Auto-generate branch name from prompt if not provided
     let branch_name = if use_worktree && branch_name.is_none() {
         if let Some(api_key) = llm.get_api_key() {
+            let provider = llm.get_provider();
             let model = llm.get_model();
-            match godly_llm::generate_branch_name_gemini(&api_key, &prompt, &model).await {
+            let api_base_url = llm.get_api_base_url();
+            match godly_llm::generate_branch_name(
+                &provider,
+                &api_key,
+                &prompt,
+                &model,
+                api_base_url.as_deref(),
+            )
+            .await
+            {
                 Ok(name) if godly_llm::is_quality_branch_name(&name) => Some(name),
                 _ => None,
             }
