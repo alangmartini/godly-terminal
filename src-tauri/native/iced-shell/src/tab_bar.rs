@@ -18,7 +18,7 @@ const CLOSE_HOVER_BG: Color = Color::from_rgb(0.35, 0.15, 0.15);
 /// This function is generic over the message type so it can be used
 /// independently of any specific app `Message` enum.
 pub fn view_tab_bar<'a, M: Clone + 'a>(
-    terminals: &'a [TerminalInfo],
+    terminals: &[&'a TerminalInfo],
     active_id: Option<&str>,
     on_tab_click: impl Fn(String) -> M + 'a,
     on_close: impl Fn(String) -> M + 'a,
@@ -26,7 +26,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     let mut tabs = row![].spacing(1);
 
-    for terminal in terminals {
+    for &terminal in terminals {
         let is_active = active_id == Some(terminal.id.as_str());
         let bg = if is_active {
             ACTIVE_TAB_BG
