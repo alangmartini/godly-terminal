@@ -14,6 +14,8 @@ iced.workspace = true
 godly-protocol = { path = "../../protocol" }
 godly-app-adapter = { path = "../app-adapter" }
 godly-terminal-surface = { path = "../terminal-surface" }
+godly-tabs-core = { path = "../tabs-core" }
+godly-workspaces-core = { path = "../workspaces-core" }
 log = "0.4"
 env_logger = "0.11"
 uuid.workspace = true

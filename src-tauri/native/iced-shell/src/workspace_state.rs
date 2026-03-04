@@ -1,29 +1,23 @@
+use godly_workspaces_core as workspaces_core;
+
 use crate::split_pane::LayoutNode;
 
-/// Information about a single workspace.
-pub struct WorkspaceInfo {
-    /// Unique workspace ID.
-    pub id: String,
-    /// Display name.
-    pub name: String,
-    /// Layout tree of terminal panes in this workspace.
-    pub layout: LayoutNode,
-    /// ID of the focused terminal pane within this workspace.
-    pub focused_terminal: String,
-}
+/// Workspace metadata used by the native shell.
+pub type WorkspaceInfo = workspaces_core::WorkspaceInfo<LayoutNode>;
 
 /// Collection of workspaces with active workspace tracking.
+///
+/// Ordering and active-selection behavior are delegated to
+/// `godly-workspaces-core` for deterministic unit testing.
 pub struct WorkspaceCollection {
-    workspaces: Vec<WorkspaceInfo>,
-    active_id: Option<String>,
+    inner: workspaces_core::WorkspaceCollection<LayoutNode>,
 }
 
 impl WorkspaceCollection {
     /// Creates an empty collection.
     pub fn new() -> Self {
         Self {
-            workspaces: Vec::new(),
-            active_id: None,
+            inner: workspaces_core::WorkspaceCollection::new(),
         }
     }
 
@@ -38,132 +32,102 @@ impl WorkspaceCollection {
         name: String,
         initial_terminal_id: String,
     ) -> &mut WorkspaceInfo {
-        let is_first = self.workspaces.is_empty();
-
+        let folder_path = std::env::current_dir()
+            .ok()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| ".".to_string());
         let focused = initial_terminal_id.clone();
-        self.workspaces.push(WorkspaceInfo {
-            id: id.clone(),
+        let workspace = WorkspaceInfo {
+            id,
             name,
+            folder_path,
+            worktree_mode: false,
             layout: LayoutNode::Leaf {
                 terminal_id: initial_terminal_id,
             },
             focused_terminal: focused,
-        });
-
-        if is_first {
-            self.active_id = Some(id);
-        }
-
-        // Return mutable reference to the last element (the one we just pushed).
-        self.workspaces.last_mut().unwrap()
+        };
+        self.inner.add(workspace)
     }
 
     /// Removes the workspace with the given id.
-    ///
-    /// If the removed workspace was active, the next workspace at the same index
-    /// (or the previous one if at the end) becomes active.
     pub fn remove(&mut self, id: &str) {
-        let Some(idx) = self.workspaces.iter().position(|w| w.id == id) else {
-            return;
-        };
-
-        let was_active = self.active_id.as_deref() == Some(id);
-        self.workspaces.remove(idx);
-
-        if was_active {
-            if self.workspaces.is_empty() {
-                self.active_id = None;
-            } else {
-                // Prefer same index (next workspace), or fall back to previous.
-                let new_idx = if idx < self.workspaces.len() {
-                    idx
-                } else {
-                    self.workspaces.len() - 1
-                };
-                self.active_id = Some(self.workspaces[new_idx].id.clone());
-            }
-        }
+        let _ = self.inner.remove(id);
     }
 
     /// Returns a reference to the active workspace, if any.
     pub fn active(&self) -> Option<&WorkspaceInfo> {
-        let id = self.active_id.as_deref()?;
-        self.workspaces.iter().find(|w| w.id == id)
+        self.inner.active()
     }
 
     /// Returns a mutable reference to the active workspace, if any.
     pub fn active_mut(&mut self) -> Option<&mut WorkspaceInfo> {
-        let id = self.active_id.as_deref()?.to_owned();
-        self.workspaces.iter_mut().find(|w| w.id == id)
+        self.inner.active_mut()
     }
 
     /// Finds a workspace by id.
     pub fn get(&self, id: &str) -> Option<&WorkspaceInfo> {
-        self.workspaces.iter().find(|w| w.id == id)
+        self.inner.get(id)
     }
 
     /// Finds a workspace by id, mutably.
     pub fn get_mut(&mut self, id: &str) -> Option<&mut WorkspaceInfo> {
-        self.workspaces.iter_mut().find(|w| w.id == id)
+        self.inner.get_mut(id)
     }
 
     /// Sets the active workspace by id. No-op if id not found.
     pub fn set_active(&mut self, id: &str) {
-        if self.workspaces.iter().any(|w| w.id == id) {
-            self.active_id = Some(id.to_owned());
-        }
+        let _ = self.inner.set_active(id);
+    }
+
+    /// Renames a workspace by id. Returns whether the workspace was found.
+    pub fn rename(&mut self, id: &str, name: String) -> bool {
+        self.inner.rename(id, name)
+    }
+
+    /// Toggles worktree mode by id. Returns whether the workspace was found.
+    pub fn set_worktree_mode(&mut self, id: &str, enabled: bool) -> bool {
+        self.inner.set_worktree_mode(id, enabled)
+    }
+
+    /// Move a workspace one slot up in display order.
+    pub fn move_up(&mut self, id: &str) -> bool {
+        self.inner.move_up(id)
+    }
+
+    /// Move a workspace one slot down in display order.
+    pub fn move_down(&mut self, id: &str) -> bool {
+        self.inner.move_down(id)
     }
 
     /// Returns the number of workspaces in the collection.
     pub fn count(&self) -> usize {
-        self.workspaces.len()
+        self.inner.count()
     }
 
     /// Iterates over all workspaces.
     pub fn iter(&self) -> impl Iterator<Item = &WorkspaceInfo> {
-        self.workspaces.iter()
+        self.inner.iter()
     }
 
     /// Returns the workspaces as a slice.
     pub fn as_slice(&self) -> &[WorkspaceInfo] {
-        &self.workspaces
+        self.inner.as_slice()
     }
 
     /// Returns the active workspace's id, if any.
     pub fn active_id(&self) -> Option<&str> {
-        self.active_id.as_deref()
+        self.inner.active_id()
     }
 
     /// Switch to the next workspace (wraps around).
     pub fn next(&mut self) {
-        if self.workspaces.len() <= 1 {
-            return;
-        }
-        if let Some(idx) = self.active_index() {
-            let next_idx = (idx + 1) % self.workspaces.len();
-            self.active_id = Some(self.workspaces[next_idx].id.clone());
-        }
+        self.inner.next();
     }
 
     /// Switch to the previous workspace (wraps around).
     pub fn previous(&mut self) {
-        if self.workspaces.len() <= 1 {
-            return;
-        }
-        if let Some(idx) = self.active_index() {
-            let prev_idx = if idx == 0 {
-                self.workspaces.len() - 1
-            } else {
-                idx - 1
-            };
-            self.active_id = Some(self.workspaces[prev_idx].id.clone());
-        }
-    }
-
-    /// Returns the index of the active workspace.
-    fn active_index(&self) -> Option<usize> {
-        let id = self.active_id.as_deref()?;
-        self.workspaces.iter().position(|w| w.id == id)
+        self.inner.previous();
     }
 }
 
@@ -201,17 +165,14 @@ mod tests {
         col.add("w2".into(), "Workspace 2".into(), "t2".into());
         col.add("w3".into(), "Workspace 3".into(), "t3".into());
 
-        // Active is w1 (first added). Remove it -> w2 should become active (same index 0).
         col.remove("w1");
         assert_eq!(col.active_id(), Some("w2"));
         assert_eq!(col.count(), 2);
 
-        // Remove w2 (active) -> w3 should become active.
         col.remove("w2");
         assert_eq!(col.active_id(), Some("w3"));
         assert_eq!(col.count(), 1);
 
-        // Remove last workspace -> no active.
         col.remove("w3");
         assert_eq!(col.active_id(), None);
         assert_eq!(col.count(), 0);
@@ -224,7 +185,6 @@ mod tests {
         col.add("w2".into(), "Workspace 2".into(), "t2".into());
         col.add("w3".into(), "Workspace 3".into(), "t3".into());
 
-        // Make w3 active, then remove it -> should pick w2 (previous).
         col.set_active("w3");
         assert_eq!(col.active_id(), Some("w3"));
         col.remove("w3");
@@ -238,7 +198,6 @@ mod tests {
         col.add("w2".into(), "Workspace 2".into(), "t2".into());
         col.add("w3".into(), "Workspace 3".into(), "t3".into());
 
-        // Active is w1. Remove w2 -> active should still be w1.
         col.remove("w2");
         assert_eq!(col.active_id(), Some("w1"));
         assert_eq!(col.count(), 2);
@@ -267,7 +226,6 @@ mod tests {
         col.next();
         assert_eq!(col.active_id(), Some("w3"));
 
-        // Wraps around to w1.
         col.next();
         assert_eq!(col.active_id(), Some("w1"));
     }
@@ -281,7 +239,6 @@ mod tests {
 
         assert_eq!(col.active_id(), Some("w1"));
 
-        // Wraps around to w3.
         col.previous();
         assert_eq!(col.active_id(), Some("w3"));
 
@@ -315,7 +272,7 @@ mod tests {
         let mut col = WorkspaceCollection::new();
         col.add("w1".into(), "Workspace 1".into(), "t1".into());
 
-        let ws = col.get("w1").unwrap();
+        let ws = col.get("w1").expect("workspace must exist");
         assert_eq!(ws.layout.leaf_count(), 1);
         assert!(ws.layout.find_leaf("t1"));
         assert_eq!(ws.layout.all_leaf_ids(), vec!["t1"]);
@@ -326,7 +283,7 @@ mod tests {
         let mut col = WorkspaceCollection::new();
         col.add("w1".into(), "Workspace 1".into(), "term-abc".into());
 
-        let ws = col.get("w1").unwrap();
+        let ws = col.get("w1").expect("workspace must exist");
         assert_eq!(ws.focused_terminal, "term-abc");
     }
 
@@ -337,11 +294,11 @@ mod tests {
         assert!(col.active_mut().is_none());
 
         col.add("w1".into(), "Workspace 1".into(), "t1".into());
-        assert_eq!(col.active().unwrap().id, "w1");
-        assert_eq!(col.active().unwrap().name, "Workspace 1");
+        assert_eq!(col.active().expect("active workspace").id, "w1");
+        assert_eq!(col.active().expect("active workspace").name, "Workspace 1");
 
-        col.active_mut().unwrap().name = "Renamed".into();
-        assert_eq!(col.active().unwrap().name, "Renamed");
+        col.active_mut().expect("active workspace").name = "Renamed".into();
+        assert_eq!(col.active().expect("active workspace").name, "Renamed");
     }
 
     #[test]
@@ -350,12 +307,12 @@ mod tests {
         col.add("w1".into(), "Alpha".into(), "t1".into());
         col.add("w2".into(), "Beta".into(), "t2".into());
 
-        assert_eq!(col.get("w1").unwrap().name, "Alpha");
-        assert_eq!(col.get("w2").unwrap().name, "Beta");
+        assert_eq!(col.get("w1").expect("workspace").name, "Alpha");
+        assert_eq!(col.get("w2").expect("workspace").name, "Beta");
         assert!(col.get("nonexistent").is_none());
 
-        col.get_mut("w1").unwrap().name = "Alpha Prime".into();
-        assert_eq!(col.get("w1").unwrap().name, "Alpha Prime");
+        col.get_mut("w1").expect("workspace").name = "Alpha Prime".into();
+        assert_eq!(col.get("w1").expect("workspace").name, "Alpha Prime");
         assert!(col.get_mut("nonexistent").is_none());
     }
 
@@ -415,5 +372,46 @@ mod tests {
         col.remove("nonexistent");
         assert_eq!(col.count(), 1);
         assert_eq!(col.active_id(), Some("w1"));
+    }
+
+    #[test]
+    fn test_rename_workspace() {
+        let mut col = WorkspaceCollection::new();
+        col.add("w1".into(), "Workspace 1".into(), "t1".into());
+
+        assert!(col.rename("w1", "Renamed Workspace".into()));
+        assert_eq!(col.get("w1").expect("workspace").name, "Renamed Workspace");
+        assert!(!col.rename("missing", "Nope".into()));
+    }
+
+    #[test]
+    fn test_set_worktree_mode() {
+        let mut col = WorkspaceCollection::new();
+        col.add("w1".into(), "Workspace 1".into(), "t1".into());
+
+        assert!(!col.get("w1").expect("workspace").worktree_mode);
+        assert!(col.set_worktree_mode("w1", true));
+        assert!(col.get("w1").expect("workspace").worktree_mode);
+        assert!(!col.set_worktree_mode("missing", true));
+    }
+
+    #[test]
+    fn test_move_up_down() {
+        let mut col = WorkspaceCollection::new();
+        col.add("w1".into(), "A".into(), "t1".into());
+        col.add("w2".into(), "B".into(), "t2".into());
+        col.add("w3".into(), "C".into(), "t3".into());
+
+        assert!(!col.move_up("w1"));
+        assert!(col.move_up("w3"));
+        let ids: Vec<&str> = col.iter().map(|w| w.id.as_str()).collect();
+        assert_eq!(ids, vec!["w1", "w3", "w2"]);
+
+        assert!(col.move_down("w1"));
+        let ids: Vec<&str> = col.iter().map(|w| w.id.as_str()).collect();
+        assert_eq!(ids, vec!["w3", "w1", "w2"]);
+
+        assert!(!col.move_down("w2"));
+        assert!(!col.move_down("missing"));
     }
 }
