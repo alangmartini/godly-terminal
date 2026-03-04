@@ -1,0 +1,8 @@
+[package]
+name = "godly-layout-core"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+description = "Pure split layout tree state machine for native frontend features"
+
+[dependencies]
