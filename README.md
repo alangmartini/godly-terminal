@@ -123,6 +123,29 @@ npm run tauri build
 
 The installer is output to `src-tauri/target/release/bundle/`.
 
+### Frontend Mode
+
+Godly Terminal now defaults to the **native Iced + wgpu frontend**. The `GODLY_FRONTEND_MODE` environment variable controls which frontend runs:
+
+| Value | Frontend | Description |
+|-------|----------|-------------|
+| `native` (default) | Iced + wgpu | Native GPU-accelerated shell |
+| `web` | Tauri + TypeScript + Canvas2D | Legacy web-based frontend |
+| `shadow` | Headless | No UI — for testing and automation |
+
+To switch frontends, set the variable before launching:
+
+```bash
+# Use legacy web frontend
+set GODLY_FRONTEND_MODE=web
+
+# Development shortcuts
+pnpm dev:native   # Default — Iced frontend
+pnpm dev:web      # Legacy Tauri + Canvas2D frontend
+```
+
+See [docs/native-frontend-rollback.md](docs/native-frontend-rollback.md) for the full rollback guide, including persistent system-wide configuration.
+
 ### Running Tests
 
 Six test tiers target different layers of the stack:
