@@ -1,6 +1,7 @@
 mod commands;
 mod custom_protocols;
 mod daemon_client;
+mod github_auth;
 mod gpu_renderer;
 mod llm_state;
 mod mcp_server;
@@ -14,9 +15,9 @@ mod whisper_state;
 mod window_lifecycle;
 mod worktree;
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::Mutex;
 use tauri::Manager;
 
 use crate::daemon_client::bridge::{DiffStreamRegistry, OutputStreamRegistry};
@@ -248,6 +249,8 @@ pub fn run() {
             commands::create_workspace,
             commands::delete_workspace,
             commands::get_workspaces,
+            commands::set_workspace_github_auth_policy,
+            commands::get_workspace_github_auth_policy,
             commands::move_tab_to_workspace,
             commands::reorder_tabs,
             // --- Split/Layout ---
@@ -370,7 +373,12 @@ pub fn run() {
             let emitter = daemon_client.event_emitter();
 
             // Start process monitor (queries daemon for PIDs, resolves process names locally)
-            process_monitor.start(app_handle.clone(), emitter, state_clone.clone(), daemon_client.clone());
+            process_monitor.start(
+                app_handle.clone(),
+                emitter,
+                state_clone.clone(),
+                daemon_client.clone(),
+            );
 
             // Start auto-save manager
             auto_save.start(app_handle.clone(), state_clone.clone());
