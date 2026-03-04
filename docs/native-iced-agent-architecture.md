@@ -17,11 +17,12 @@ native/
   terminal-surface/    # rendering primitive
   parity-harness/      # integration + parity validation
 
+  layout-core/         # core: pure split/layout tree state machine (added)
   tabs-core/           # core: pure tab state machine (added)
   workspaces-core/     # core: pure workspace ordering/selection state machine (added)
   features/            # future: one crate per feature
-  ports/               # future: shared side-effect traits
-  testkit/             # future: fakes for ports, deterministic clocks/schedulers
+  ports/               # shared side-effect traits (added)
+  testkit/             # fakes for ports, deterministic clocks/schedulers (added)
 ```
 
 ## Layering Rules
@@ -41,7 +42,7 @@ features   -> ports
 core       -> (nothing)
 ```
 
-## First Vertical Slice: Tabs
+## Extracted Core Slices
 
 Implemented in this change:
 
@@ -53,7 +54,15 @@ Implemented in this change:
   - Ordered workspace state machine (`add`, `remove`, `set_active`, `next`, `previous`, `move_up/down`)
   - Pure logic with focused unit tests
 - `godly-iced-shell` now delegates workspace ordering/active selection in `WorkspaceCollection`
-  to `godly-workspaces-core`, while keeping `LayoutNode` construction local to shell code.
+  to `godly-workspaces-core`.
+- `godly-layout-core` crate (`native/layout-core`):
+  - Split tree model + mutations (`split_leaf`, `unsplit_leaf`, traversal helpers)
+  - Pure logic with focused unit tests
+- `godly-iced-shell` `split_pane` now uses `godly-layout-core` types and stays focused on rendering.
+- `godly-ports` crate (`native/ports`):
+  - Side-effect trait contracts (`DaemonPort`, `ClipboardPort`, `NotificationPort`, `ClockPort`)
+- `godly-testkit` crate (`native/testkit`):
+  - In-memory fakes implementing ports for deterministic feature tests.
 
 This creates a stable seam for future tab features (reorder DnD, pinned tabs, MRU, grouping) without
 expanding `app.rs`.
