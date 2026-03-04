@@ -1,7 +1,11 @@
 use iced::window;
 
 mod app;
+mod notification_state;
 mod selection;
+mod settings_dialog;
+mod shortcuts_tab;
+mod sidebar;
 mod split_pane;
 mod subscription;
 mod tab_bar;
