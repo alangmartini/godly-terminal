@@ -487,6 +487,15 @@ export class WorkspaceSidebar {
 
       item.addEventListener('pointermove', onMove);
       item.addEventListener('pointerup', onUp);
+      // Guard: if pointer capture is lost (e.g., window blur), clean up
+      item.addEventListener('lostpointercapture', () => {
+        item.removeEventListener('pointermove', onMove);
+        item.removeEventListener('pointerup', onUp);
+        if (dragging) {
+          item.classList.remove('dragging');
+          endDrag();
+        }
+      }, { once: true });
     });
   }
 
