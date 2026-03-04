@@ -47,7 +47,6 @@ export class SmolLM2Plugin implements GodlyPlugin {
   private hasKey = false;
   private selectedProvider: BranchAiProvider = 'gemini';
   private selectedModel = defaultModelForProvider('gemini');
-  private apiBaseUrl = '';
 
   private getSavedApiKey(provider: BranchAiProvider): string | null {
     if (provider === 'gemini') {
@@ -143,7 +142,6 @@ export class SmolLM2Plugin implements GodlyPlugin {
     const savedBaseUrl = this.getSavedApiBaseUrl(provider) ?? '';
 
     this.selectedModel = savedModel;
-    this.apiBaseUrl = savedBaseUrl;
     this.hasKey = Boolean(savedKey);
 
     // Persist migrated/default model so provider switches keep stable defaults.
@@ -314,7 +312,6 @@ export class SmolLM2Plugin implements GodlyPlugin {
       const savedBaseUrl = this.getSavedApiBaseUrl(provider) ?? '';
 
       this.selectedModel = savedModel;
-      this.apiBaseUrl = savedBaseUrl;
       this.hasKey = Boolean(savedKey);
 
       keyInput.value = savedKey;
@@ -393,7 +390,6 @@ export class SmolLM2Plugin implements GodlyPlugin {
     baseUrlInput.onchange = async () => {
       if (this.selectedProvider !== 'openai-compatible') return;
       const apiBaseUrl = baseUrlInput.value.trim();
-      this.apiBaseUrl = apiBaseUrl;
       this.setSavedApiBaseUrl(this.selectedProvider, apiBaseUrl || null);
       try {
         await llmSetApiBaseUrl(apiBaseUrl || null);
