@@ -1,0 +1,8 @@
+[package]
+name = "godly-tabs-core"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+description = "Pure tab state machine for native frontend features"
+
+[dependencies]
