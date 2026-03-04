@@ -755,6 +755,15 @@ export class TabBar {
 
       tab.addEventListener('pointermove', onMove);
       tab.addEventListener('pointerup', onUp);
+      // Guard: if pointer capture is lost (e.g., window blur), clean up
+      tab.addEventListener('lostpointercapture', () => {
+        tab.removeEventListener('pointermove', onMove);
+        tab.removeEventListener('pointerup', onUp);
+        if (dragging) {
+          tab.classList.remove('dragging');
+          endDrag();
+        }
+      }, { once: true });
     });
   }
 

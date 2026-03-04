@@ -221,6 +221,9 @@ export class SplitContainer {
       const dividers = Array.from(container.querySelectorAll(':scope > .split-grid-divider')) as HTMLElement[];
 
       const onMouseMove = (moveEvent: MouseEvent) => {
+        // Guard: if button was released outside the window, clean up
+        if (moveEvent.buttons === 0) { onMouseUp(); return; }
+
         let ratio: number;
         if (axis === 'horizontal') {
           ratio = (moveEvent.clientX - rect.left) / rect.width;
@@ -343,6 +346,9 @@ export class SplitContainer {
       const rect = parentContainer.getBoundingClientRect();
 
       const onMouseMove = (moveEvent: MouseEvent) => {
+        // Guard: if button was released outside the window, clean up
+        if (moveEvent.buttons === 0) { onMouseUp(); return; }
+
         let ratio: number;
         if (isHorizontal) {
           ratio = (moveEvent.clientX - rect.left) / rect.width;

@@ -368,6 +368,9 @@ export class App {
       const rect = this.terminalContainer.getBoundingClientRect();
 
       const onMouseMove = (moveEvent: MouseEvent) => {
+        // Guard: if button was released outside the window, clean up
+        if (moveEvent.buttons === 0) { onMouseUp(); return; }
+
         let ratio: number;
         if (isHorizontal) {
           ratio = (moveEvent.clientX - rect.left) / rect.width;
