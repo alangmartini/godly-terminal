@@ -1119,7 +1119,7 @@ impl GodlyApp {
         };
 
         let tc = TerminalCanvas {
-            grid: term.grid.clone(),
+            grid: term.grid.as_ref(),
             metrics: self.font_metrics,
             selection,
         };

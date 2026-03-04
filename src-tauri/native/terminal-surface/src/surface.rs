@@ -40,13 +40,12 @@ pub struct TerminalCanvasState;
 
 /// Terminal canvas program that renders a RichGridData snapshot.
 ///
-/// Grid data and font metrics are carried on the struct, enabling the parent
-/// to set per-terminal data before each render. Drawing uses Iced's Canvas
-/// widget via `Frame::fill_rectangle()` for backgrounds and
-/// `Frame::fill_text()` for cell content.
-pub struct TerminalCanvas {
-    /// Current grid data from the daemon.
-    pub grid: Option<RichGridData>,
+/// Grid data is borrowed for the duration of the render, avoiding a full clone
+/// of `RichGridData` per pane per frame. Font metrics and selection state are
+/// cheap `Copy` types carried by value.
+pub struct TerminalCanvas<'a> {
+    /// Borrowed grid data from the daemon (avoids cloning per frame).
+    pub grid: Option<&'a RichGridData>,
     /// Font metrics for cell sizing.
     pub metrics: FontMetrics,
     /// Optional selection range (start, end) in reading order.
@@ -54,7 +53,7 @@ pub struct TerminalCanvas {
     pub selection: Option<(GridPos, GridPos)>,
 }
 
-impl Default for TerminalCanvas {
+impl Default for TerminalCanvas<'_> {
     fn default() -> Self {
         Self {
             grid: None,
@@ -64,7 +63,7 @@ impl Default for TerminalCanvas {
     }
 }
 
-impl TerminalCanvas {
+impl<'a> TerminalCanvas<'a> {
     /// Create a new terminal canvas with the given font metrics.
     pub fn new(metrics: FontMetrics) -> Self {
         Self {
@@ -75,7 +74,7 @@ impl TerminalCanvas {
     }
 }
 
-impl<Message> canvas::Program<Message> for TerminalCanvas {
+impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
     type State = TerminalCanvasState;
 
     fn draw(
