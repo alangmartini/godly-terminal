@@ -5,9 +5,9 @@
 import { mkdir, rename, unlink, writeFile, stat } from 'fs/promises';
 import { join } from 'path';
 
-const BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe', 'godly-terminal.exe'];
+const BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe', 'godly-terminal.exe', 'godly-native.exe'];
 // Binaries referenced in tauri.conf.json bundle.resources (release profile only)
-const RESOURCE_BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe'];
+const RESOURCE_BINARIES = ['godly-daemon.exe', 'godly-mcp.exe', 'godly-notify.exe', 'godly-native.exe'];
 const TARGET_DIR = join(import.meta.dirname, '..', 'src-tauri', 'target');
 // Only unlock the requested profile. Default to 'debug' to avoid destroying
 // release binaries that Tauri's build.rs needs for resource path validation.
