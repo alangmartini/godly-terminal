@@ -4,6 +4,7 @@ use tauri::{Emitter, State};
 use uuid::Uuid;
 
 use crate::daemon_client::DaemonClient;
+use crate::github_auth;
 use crate::llm_state::LlmState;
 use crate::persistence::AutoSaveManager;
 use crate::state::{AppState, SessionMetadata, ShellType, Terminal};
@@ -48,9 +49,17 @@ pub fn create_terminal(
             match crate::worktree::get_repo_root(&ws.folder_path, wsl.as_ref()) {
                 Ok(repo_root) => {
                     let custom_name = worktree_name.as_deref();
-                    match crate::worktree::create_worktree(&repo_root, &terminal_id, custom_name, wsl.as_ref()) {
+                    match crate::worktree::create_worktree(
+                        &repo_root,
+                        &terminal_id,
+                        custom_name,
+                        wsl.as_ref(),
+                    ) {
                         Ok(wt_result) => {
-                            eprintln!("[terminal] Created worktree at: {} (branch: {})", wt_result.path, wt_result.branch);
+                            eprintln!(
+                                "[terminal] Created worktree at: {} (branch: {})",
+                                wt_result.path, wt_result.branch
+                            );
                             worktree_path_result = Some(wt_result.path.clone());
                             worktree_branch = Some(wt_result.branch);
                             Some(wt_result.path)
@@ -102,6 +111,16 @@ pub fn create_terminal(
                 );
             }
         }
+    }
+
+    if let Some(ref ws) = workspace {
+        let policy = state.get_workspace_github_auth_policy(&workspace_id);
+        github_auth::inject_workspace_github_token_env(
+            &mut env_vars,
+            ws,
+            working_dir.as_deref(),
+            &policy,
+        );
     }
 
     // Create session via daemon
@@ -157,7 +176,10 @@ pub fn create_terminal(
 
     auto_save.mark_dirty();
 
-    Ok(CreateTerminalResult { id: terminal_id, worktree_branch })
+    Ok(CreateTerminalResult {
+        id: terminal_id,
+        worktree_branch,
+    })
 }
 
 #[tauri::command]
@@ -201,9 +223,7 @@ pub fn write_to_terminal(
     // Convert \n → \r for PTY: terminals expect CR (Enter), not LF.
     // Frontend already sends \r for Enter, so this is a no-op for keyboard input
     // but fixes programmatic writes (MCP, paste) that use \n.
-    let converted = data
-        .replace("\r\n", "\r")
-        .replace('\n', "\r");
+    let converted = data.replace("\r\n", "\r").replace('\n', "\r");
     let request = Request::Write {
         session_id: terminal_id,
         data: converted.into_bytes(),
@@ -250,9 +270,7 @@ pub fn rename_terminal(
 
 /// List live sessions from the daemon (for reconnection on app restart)
 #[tauri::command]
-pub fn reconnect_sessions(
-    daemon: State<Arc<DaemonClient>>,
-) -> Result<Vec<SessionInfo>, String> {
+pub fn reconnect_sessions(daemon: State<Arc<DaemonClient>>) -> Result<Vec<SessionInfo>, String> {
     let request = Request::ListSessions;
     let response = daemon.send_request(&request)?;
     match response {
@@ -436,7 +454,11 @@ pub async fn quick_claude(
     env_vars.insert("GODLY_WORKSPACE_ID".to_string(), workspace_id.clone());
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(exe_dir) = current_exe.parent() {
-            let mcp_name = if cfg!(windows) { "godly-mcp.exe" } else { "godly-mcp" };
+            let mcp_name = if cfg!(windows) {
+                "godly-mcp.exe"
+            } else {
+                "godly-mcp"
+            };
             let mcp_path = exe_dir.join(mcp_name);
             if mcp_path.exists() {
                 env_vars.insert(
@@ -446,6 +468,14 @@ pub async fn quick_claude(
             }
         }
     }
+
+    let github_policy = state.get_workspace_github_auth_policy(&workspace_id);
+    github_auth::inject_workspace_github_token_env(
+        &mut env_vars,
+        &workspace,
+        working_dir.as_deref(),
+        &github_policy,
+    );
 
     // Create session via daemon
     let request = Request::CreateSession {
@@ -508,9 +538,21 @@ pub async fn quick_claude(
     let use_codex = ai_tool.as_deref() == Some("codex");
     std::thread::spawn(move || {
         if use_codex {
-            quick_codex_background(daemon_bg, app_handle_bg, terminal_id_bg, prompt, terminal_name);
+            quick_codex_background(
+                daemon_bg,
+                app_handle_bg,
+                terminal_id_bg,
+                prompt,
+                terminal_name,
+            );
         } else {
-            quick_claude_background(daemon_bg, app_handle_bg, terminal_id_bg, prompt, terminal_name);
+            quick_claude_background(
+                daemon_bg,
+                app_handle_bg,
+                terminal_id_bg,
+                prompt,
+                terminal_name,
+            );
         }
     });
 
@@ -532,13 +574,17 @@ pub(crate) fn quick_claude_background(
     // Step 1: Wait for shell to be ready (idle for 500ms, timeout 5s)
     let shell_ready = poll_idle(&daemon, &terminal_id, 500, 5_000);
     if !shell_ready {
-        eprintln!("[quick_claude] Shell did not become idle in time, writing claude command anyway");
+        eprintln!(
+            "[quick_claude] Shell did not become idle in time, writing claude command anyway"
+        );
     }
 
     // Step 2: Write claude command
     let claude_cmd = Request::Write {
         session_id: terminal_id.clone(),
-        data: "claude --dangerously-skip-permissions\r".as_bytes().to_vec(),
+        data: "claude --dangerously-skip-permissions\r"
+            .as_bytes()
+            .to_vec(),
     };
     if let Err(e) = daemon.send_fire_and_forget(&claude_cmd) {
         eprintln!("[quick_claude] Failed to write claude command: {}", e);
@@ -558,7 +604,9 @@ pub(crate) fn quick_claude_background(
     // If a trust prompt appears at any point, auto-accept it and keep polling.
     let claude_ready = poll_idle_or_trust(&daemon, &terminal_id, 400, 25_000);
     if !claude_ready {
-        eprintln!("[quick_claude] Claude did not become idle within timeout, writing prompt anyway");
+        eprintln!(
+            "[quick_claude] Claude did not become idle within timeout, writing prompt anyway"
+        );
     }
 
     // Step 4: Small delay to ensure Claude is fully accepting input
@@ -618,7 +666,11 @@ pub(crate) fn quick_claude_background(
             data: b"\r".to_vec(),
         };
         if let Err(e) = daemon.send_fire_and_forget(&submit_req) {
-            eprintln!("[quick_claude] Failed to send submit key (attempt {}): {}", attempt + 1, e);
+            eprintln!(
+                "[quick_claude] Failed to send submit key (attempt {}): {}",
+                attempt + 1,
+                e
+            );
             return;
         }
 
@@ -716,9 +768,13 @@ fn quick_codex_background(
 }
 
 /// Poll until the terminal has been idle for `idle_ms` milliseconds, or timeout.
-pub(crate) fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, timeout_ms: u64) -> bool {
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+pub(crate) fn poll_idle(
+    daemon: &DaemonClient,
+    session_id: &str,
+    idle_ms: u64,
+    timeout_ms: u64,
+) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     let poll_interval = (idle_ms / 4).min(500).max(50);
 
     loop {
@@ -726,7 +782,9 @@ pub(crate) fn poll_idle(daemon: &DaemonClient, session_id: &str, idle_ms: u64, t
             session_id: session_id.to_string(),
         };
         match daemon.send_request(&req) {
-            Ok(Response::LastOutputTime { epoch_ms, running, .. }) => {
+            Ok(Response::LastOutputTime {
+                epoch_ms, running, ..
+            }) => {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -775,7 +833,9 @@ fn poll_idle_or_trust(
             session_id: session_id.to_string(),
         };
         let is_idle = match daemon.send_request(&req) {
-            Ok(Response::LastOutputTime { epoch_ms, running, .. }) => {
+            Ok(Response::LastOutputTime {
+                epoch_ms, running, ..
+            }) => {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -861,7 +921,10 @@ fn has_trust_prompt(daemon: &DaemonClient, session_id: &str) -> bool {
         let screen_text = grid.rows.join(" ");
         for needle in NEEDLES {
             if screen_text.contains(needle) {
-                eprintln!("[quick_claude] Trust prompt found via grid search: {:?}", needle);
+                eprintln!(
+                    "[quick_claude] Trust prompt found via grid search: {:?}",
+                    needle
+                );
                 return true;
             }
         }
@@ -880,8 +943,7 @@ fn poll_text_in_output(
     text: &str,
     timeout_ms: u64,
 ) -> bool {
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
     loop {
         let req = Request::SearchBuffer {
@@ -930,25 +992,15 @@ fn prompt_disappeared_from_grid(
 /// Pause output streaming for a session (session stays alive, VT parser
 /// keeps running, but no Output/GridDiff events are sent to the client).
 #[tauri::command]
-pub fn pause_session(
-    session_id: String,
-    daemon: State<Arc<DaemonClient>>,
-) -> Result<(), String> {
-    let request = Request::PauseSession {
-        session_id,
-    };
+pub fn pause_session(session_id: String, daemon: State<Arc<DaemonClient>>) -> Result<(), String> {
+    let request = Request::PauseSession { session_id };
     daemon.send_fire_and_forget(&request)
 }
 
 /// Resume output streaming for a previously paused session.
 #[tauri::command]
-pub fn resume_session(
-    session_id: String,
-    daemon: State<Arc<DaemonClient>>,
-) -> Result<(), String> {
-    let request = Request::ResumeSession {
-        session_id,
-    };
+pub fn resume_session(session_id: String, daemon: State<Arc<DaemonClient>>) -> Result<(), String> {
+    let request = Request::ResumeSession { session_id };
     daemon.send_fire_and_forget(&request)
 }
 

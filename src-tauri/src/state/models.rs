@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // Re-export layout tree types from protocol
 pub use godly_protocol::LayoutNode;
@@ -20,6 +20,37 @@ pub enum AiToolMode {
 impl Default for AiToolMode {
     fn default() -> Self {
         AiToolMode::None
+    }
+}
+
+fn default_github_fallback_to_gh_auth() -> bool {
+    true
+}
+
+/// Rule for selecting a GitHub token by matching a repository/path pattern.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GitHubTokenRule {
+    /// Glob-like pattern (`*` and `?` supported), e.g. `typesense/*` or `*`.
+    pub pattern: String,
+    /// Name of an environment variable that contains the token value.
+    pub token_env_var: String,
+}
+
+/// Workspace-level policy for injecting `GH_TOKEN` / `GITHUB_TOKEN`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceGitHubAuthPolicy {
+    #[serde(default)]
+    pub rules: Vec<GitHubTokenRule>,
+    #[serde(default = "default_github_fallback_to_gh_auth")]
+    pub fallback_to_gh_auth: bool,
+}
+
+impl Default for WorkspaceGitHubAuthPolicy {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            fallback_to_gh_auth: true,
+        }
     }
 }
 
@@ -125,7 +156,7 @@ impl<'de> Deserialize<'de> for Workspace {
 pub struct SplitView {
     pub left_terminal_id: String,
     pub right_terminal_id: String,
-    pub direction: String,  // "horizontal" or "vertical"
+    pub direction: String, // "horizontal" or "vertical"
     pub ratio: f64,
 }
 
@@ -431,7 +462,10 @@ mod tests {
 
         assert_eq!(restored.terminals.len(), 2);
         assert_eq!(restored.terminals[0].id, "term-1");
-        assert_eq!(restored.terminals[0].cwd, Some("C:\\Projects\\myapp\\src".to_string()));
+        assert_eq!(
+            restored.terminals[0].cwd,
+            Some("C:\\Projects\\myapp\\src".to_string())
+        );
         assert_eq!(restored.terminals[1].id, "term-2");
         assert_eq!(
             restored.terminals[1].shell_type,
@@ -587,7 +621,12 @@ mod tests {
 
     #[test]
     fn test_ai_tool_mode_serialization_roundtrip() {
-        for mode in &[AiToolMode::None, AiToolMode::Claude, AiToolMode::Codex, AiToolMode::Both] {
+        for mode in &[
+            AiToolMode::None,
+            AiToolMode::Claude,
+            AiToolMode::Codex,
+            AiToolMode::Both,
+        ] {
             let json = serde_json::to_string(mode).unwrap();
             let deserialized: AiToolMode = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, *mode);
@@ -753,7 +792,10 @@ mod tests {
         let restored: Layout = serde_json::from_str(&json).unwrap();
         assert_eq!(
             restored.terminals[0].shell_type,
-            ShellType::Custom { program: "nu.exe".to_string(), args: None }
+            ShellType::Custom {
+                program: "nu.exe".to_string(),
+                args: None
+            }
         );
         assert_eq!(restored.terminals[1].shell_type, ShellType::Windows);
     }

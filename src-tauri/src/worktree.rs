@@ -62,7 +62,9 @@ impl WslConfig {
         };
 
         after_prefix.map(|s| {
-            let distribution = s.split('/').next()
+            let distribution = s
+                .split('/')
+                .next()
                 .filter(|d| !d.is_empty())
                 .map(|d| d.to_string());
             WslConfig { distribution }
@@ -137,6 +139,24 @@ pub fn get_repo_root(path: &str, wsl: Option<&WslConfig>) -> Result<String, Stri
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Return `remote.origin.url` for the repository containing `path`.
+/// Returns `Ok(None)` when `path` is not in a git repo or origin is unset.
+pub fn get_origin_url(path: &str, wsl: Option<&WslConfig>) -> Result<Option<String>, String> {
+    let output = run_git(&["config", "--get", "remote.origin.url"], path, wsl)
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(value))
+}
+
 /// Compute a short (8-char) hex hash of a string (used to namespace temp dirs).
 fn short_hash(input: &str) -> String {
     let mut hasher = DefaultHasher::new();
@@ -148,7 +168,11 @@ fn short_hash(input: &str) -> String {
 fn wt_name_from(custom_name: Option<&str>, terminal_id: &str) -> String {
     match custom_name {
         Some(name) if !name.is_empty() => format!("{}{}", BRANCH_PREFIX, name),
-        _ => format!("{}{}", BRANCH_PREFIX, &terminal_id[..6.min(terminal_id.len())]),
+        _ => format!(
+            "{}{}",
+            BRANCH_PREFIX,
+            &terminal_id[..6.min(terminal_id.len())]
+        ),
     }
 }
 
@@ -170,7 +194,11 @@ fn worktree_path_wsl(repo_root: &str, terminal_id: &str, custom_name: Option<&st
 /// Detect the default branch name (master or main) for the repo.
 fn detect_default_branch(repo_root: &str, wsl: Option<&WslConfig>) -> Option<String> {
     // Try symbolic-ref first (works when origin/HEAD is set)
-    if let Ok(output) = run_git(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo_root, wsl) {
+    if let Ok(output) = run_git(
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        repo_root,
+        wsl,
+    ) {
         if output.status.success() {
             let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
             // "origin/main" -> "main"
@@ -205,7 +233,10 @@ fn detect_default_branch(repo_root: &str, wsl: Option<&WslConfig>) -> Option<Str
 fn fetch_latest(repo_root: &str, wsl: Option<&WslConfig>) -> Option<String> {
     let branch = detect_default_branch(repo_root, wsl)?;
 
-    eprintln!("[worktree] Fetching origin/{} before creating worktree...", branch);
+    eprintln!(
+        "[worktree] Fetching origin/{} before creating worktree...",
+        branch
+    );
 
     match run_git(&["fetch", "origin", &branch, "--no-tags"], repo_root, wsl) {
         Ok(output) => {
@@ -229,14 +260,25 @@ fn fetch_latest(repo_root: &str, wsl: Option<&WslConfig>) -> Option<String> {
 /// If `custom_name` is provided, it is used as the branch/folder suffix instead of the terminal id prefix.
 /// Fetches latest from origin before creating the worktree so it branches from the latest state.
 /// Returns a `WorktreeResult` with the path and branch name.
-pub fn create_worktree(repo_root: &str, terminal_id: &str, custom_name: Option<&str>, wsl: Option<&WslConfig>) -> Result<WorktreeResult, String> {
+pub fn create_worktree(
+    repo_root: &str,
+    terminal_id: &str,
+    custom_name: Option<&str>,
+    wsl: Option<&WslConfig>,
+) -> Result<WorktreeResult, String> {
     create_worktree_with_options(repo_root, terminal_id, custom_name, wsl, false)
 }
 
 /// Create a new worktree with configurable fetch behavior.
 /// When `skip_fetch` is true, branches from local HEAD instead of fetching from origin first.
 /// This saves 100-500ms of network latency, useful for rapid-fire workflows like Quick Claude.
-pub fn create_worktree_with_options(repo_root: &str, terminal_id: &str, custom_name: Option<&str>, wsl: Option<&WslConfig>, skip_fetch: bool) -> Result<WorktreeResult, String> {
+pub fn create_worktree_with_options(
+    repo_root: &str,
+    terminal_id: &str,
+    custom_name: Option<&str>,
+    wsl: Option<&WslConfig>,
+    skip_fetch: bool,
+) -> Result<WorktreeResult, String> {
     let start_point = if skip_fetch {
         eprintln!("[worktree] Skipping fetch (skip_fetch=true), branching from local HEAD");
         None
@@ -271,7 +313,10 @@ pub fn create_worktree_with_options(repo_root: &str, terminal_id: &str, custom_n
         }
 
         // Return the Linux path — the daemon's windows_to_wsl_path passes it through unchanged
-        Ok(WorktreeResult { path: wt_linux_path, branch: branch_name })
+        Ok(WorktreeResult {
+            path: wt_linux_path,
+            branch: branch_name,
+        })
     } else {
         // Windows: create worktree in %TEMP%
         let wt_path = worktree_path(repo_root, terminal_id, custom_name);
@@ -296,12 +341,18 @@ pub fn create_worktree_with_options(repo_root: &str, terminal_id: &str, custom_n
             return Err(format!("git worktree add failed: {}", stderr.trim()));
         }
 
-        Ok(WorktreeResult { path: wt_path_str, branch: branch_name })
+        Ok(WorktreeResult {
+            path: wt_path_str,
+            branch: branch_name,
+        })
     }
 }
 
 /// List all worktrees for the repo at `repo_root`.
-pub fn list_worktrees(repo_root: &str, wsl: Option<&WslConfig>) -> Result<Vec<WorktreeInfo>, String> {
+pub fn list_worktrees(
+    repo_root: &str,
+    wsl: Option<&WslConfig>,
+) -> Result<Vec<WorktreeInfo>, String> {
     let output = run_git(&["worktree", "list", "--porcelain"], repo_root, wsl)
         .map_err(|e| format!("Failed to run git worktree list: {}", e))?;
 
@@ -370,7 +421,12 @@ pub fn list_worktrees(repo_root: &str, wsl: Option<&WslConfig>) -> Result<Vec<Wo
 }
 
 /// Remove a single worktree by its path.
-pub fn remove_worktree(repo_root: &str, wt_path: &str, force: bool, wsl: Option<&WslConfig>) -> Result<(), String> {
+pub fn remove_worktree(
+    repo_root: &str,
+    wt_path: &str,
+    force: bool,
+    wsl: Option<&WslConfig>,
+) -> Result<(), String> {
     let mut args = vec!["worktree", "remove", wt_path];
     if force {
         args.push("--force");
@@ -390,7 +446,11 @@ pub fn remove_worktree(repo_root: &str, wt_path: &str, force: bool, wsl: Option<
 /// Remove all godly-managed worktrees with progress reporting.
 /// Calls `on_progress` at each stage: "listing", "removing", and "done".
 /// Returns the number of worktrees removed.
-pub fn cleanup_all_worktrees_with_progress<F>(repo_root: &str, on_progress: F, wsl: Option<&WslConfig>) -> Result<u32, String>
+pub fn cleanup_all_worktrees_with_progress<F>(
+    repo_root: &str,
+    on_progress: F,
+    wsl: Option<&WslConfig>,
+) -> Result<u32, String>
 where
     F: Fn(&CleanupProgress),
 {
@@ -433,12 +493,20 @@ where
     };
 
     let total = managed.len() as u32;
-    eprintln!("[worktree] cleanup_all: found {} godly-managed worktrees", total);
+    eprintln!(
+        "[worktree] cleanup_all: found {} godly-managed worktrees",
+        total
+    );
 
     let mut removed = 0u32;
     for (i, wt) in managed.iter().enumerate() {
         let name = wt.branch.clone();
-        eprintln!("[worktree] cleanup_all: removing {} ({}/{})", name, i + 1, total);
+        eprintln!(
+            "[worktree] cleanup_all: removing {} ({}/{})",
+            name,
+            i + 1,
+            total
+        );
 
         on_progress(&CleanupProgress {
             step: "removing".to_string(),
@@ -454,7 +522,11 @@ where
     }
 
     let elapsed = start.elapsed();
-    eprintln!("[worktree] cleanup_all: done — removed {} worktrees in {:.1}s", removed, elapsed.as_secs_f64());
+    eprintln!(
+        "[worktree] cleanup_all: done — removed {} worktrees in {:.1}s",
+        removed,
+        elapsed.as_secs_f64()
+    );
 
     on_progress(&CleanupProgress {
         step: "done".to_string(),
@@ -544,7 +616,10 @@ mod tests {
         let terminal_id = "abcdef-1234-5678";
 
         let result = create_worktree(repo_root, terminal_id, None, None).expect("create worktree");
-        assert!(Path::new(&result.path).is_dir(), "worktree directory should exist");
+        assert!(
+            Path::new(&result.path).is_dir(),
+            "worktree directory should exist"
+        );
         assert_eq!(result.branch, "wt-abcdef");
 
         // Verify branch exists
@@ -566,8 +641,12 @@ mod tests {
         let repo_root = repo.path().to_str().unwrap();
         let terminal_id = "abcdef-1234-5678";
 
-        let result = create_worktree(repo_root, terminal_id, Some("my-feature"), None).expect("create worktree with custom name");
-        assert!(Path::new(&result.path).is_dir(), "worktree directory should exist");
+        let result = create_worktree(repo_root, terminal_id, Some("my-feature"), None)
+            .expect("create worktree with custom name");
+        assert!(
+            Path::new(&result.path).is_dir(),
+            "worktree directory should exist"
+        );
         assert_eq!(result.branch, "wt-my-feature");
 
         // Verify branch exists
@@ -577,7 +656,10 @@ mod tests {
             .output()
             .expect("git branch list");
         let branches = String::from_utf8_lossy(&output.stdout);
-        assert!(branches.contains("wt-my-feature"), "custom branch should exist");
+        assert!(
+            branches.contains("wt-my-feature"),
+            "custom branch should exist"
+        );
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&result.path);
@@ -614,7 +696,10 @@ mod tests {
         assert!(Path::new(&result.path).is_dir());
 
         remove_worktree(repo_root, &result.path, false, None).expect("remove worktree");
-        assert!(!Path::new(&result.path).is_dir(), "worktree should be removed");
+        assert!(
+            !Path::new(&result.path).is_dir(),
+            "worktree should be removed"
+        );
     }
 
     #[test]
@@ -672,20 +757,35 @@ mod tests {
         let events: Arc<Mutex<Vec<CleanupProgress>>> = Arc::new(Mutex::new(Vec::new()));
         let events_clone = events.clone();
 
-        let removed = cleanup_all_worktrees_with_progress(repo_root, move |progress| {
-            events_clone.lock().unwrap().push(progress.clone());
-        }, None)
+        let removed = cleanup_all_worktrees_with_progress(
+            repo_root,
+            move |progress| {
+                events_clone.lock().unwrap().push(progress.clone());
+            },
+            None,
+        )
         .expect("cleanup should succeed");
 
         assert_eq!(removed, 2, "should have removed 2 worktrees");
 
         // Verify worktree directories were actually removed
-        assert!(!Path::new(&wt1.path).is_dir(), "worktree 1 directory should be deleted");
-        assert!(!Path::new(&wt2.path).is_dir(), "worktree 2 directory should be deleted");
+        assert!(
+            !Path::new(&wt1.path).is_dir(),
+            "worktree 1 directory should be deleted"
+        );
+        assert!(
+            !Path::new(&wt2.path).is_dir(),
+            "worktree 2 directory should be deleted"
+        );
 
         let collected = events.lock().unwrap();
         // Exactly 4 events: listing, removing x2, done
-        assert_eq!(collected.len(), 4, "expected exactly 4 progress events, got {}", collected.len());
+        assert_eq!(
+            collected.len(),
+            4,
+            "expected exactly 4 progress events, got {}",
+            collected.len()
+        );
 
         // Event 0: listing
         assert_eq!(collected[0].step, "listing");
@@ -696,12 +796,18 @@ mod tests {
         assert_eq!(collected[1].step, "removing");
         assert_eq!(collected[1].current, 1);
         assert_eq!(collected[1].total, 2);
-        assert!(!collected[1].worktree_name.is_empty(), "worktree_name should not be empty");
+        assert!(
+            !collected[1].worktree_name.is_empty(),
+            "worktree_name should not be empty"
+        );
 
         assert_eq!(collected[2].step, "removing");
         assert_eq!(collected[2].current, 2);
         assert_eq!(collected[2].total, 2);
-        assert!(!collected[2].worktree_name.is_empty(), "worktree_name should not be empty");
+        assert!(
+            !collected[2].worktree_name.is_empty(),
+            "worktree_name should not be empty"
+        );
 
         // Event 3: done
         assert_eq!(collected[3].step, "done");
@@ -740,14 +846,22 @@ mod tests {
     #[test]
     fn test_worktree_path_wsl() {
         let path = worktree_path_wsl("/home/user/project", "abcdef-1234", None);
-        let expected = format!("/tmp/{}/{}/wt-abcdef", WORKTREES_DIR, short_hash("/home/user/project"));
+        let expected = format!(
+            "/tmp/{}/{}/wt-abcdef",
+            WORKTREES_DIR,
+            short_hash("/home/user/project")
+        );
         assert_eq!(path, expected);
     }
 
     #[test]
     fn test_worktree_path_wsl_custom_name() {
         let path = worktree_path_wsl("/home/user/project", "abcdef-1234", Some("my-feature"));
-        let expected = format!("/tmp/{}/{}/wt-my-feature", WORKTREES_DIR, short_hash("/home/user/project"));
+        let expected = format!(
+            "/tmp/{}/{}/wt-my-feature",
+            WORKTREES_DIR,
+            short_hash("/home/user/project")
+        );
         assert_eq!(path, expected);
     }
 
@@ -755,7 +869,10 @@ mod tests {
     fn test_worktree_path_wsl_different_repos_different_paths() {
         let path_a = worktree_path_wsl("/home/user/repo-a", "abcdef-1234", None);
         let path_b = worktree_path_wsl("/home/user/repo-b", "abcdef-1234", None);
-        assert_ne!(path_a, path_b, "different repos must produce different worktree paths");
+        assert_ne!(
+            path_a, path_b,
+            "different repos must produce different worktree paths"
+        );
     }
 
     #[test]
