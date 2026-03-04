@@ -15,6 +15,26 @@ export interface WorkspaceData {
   claude_code_mode?: boolean;
 }
 
+interface GitHubTokenRuleData {
+  pattern: string;
+  token_env_var: string;
+}
+
+interface WorkspaceGitHubAuthPolicyData {
+  rules?: GitHubTokenRuleData[];
+  fallback_to_gh_auth?: boolean;
+}
+
+export interface WorkspaceGitHubAuthRule {
+  pattern: string;
+  tokenEnvVar: string;
+}
+
+export interface WorkspaceGitHubAuthPolicy {
+  rules: WorkspaceGitHubAuthRule[];
+  fallbackToGhAuth: boolean;
+}
+
 export interface WorktreeInfo {
   path: string;
   branch: string;
@@ -113,6 +133,31 @@ class WorkspaceService {
   async toggleWorktreeMode(workspaceId: string, enabled: boolean): Promise<void> {
     await invoke('toggle_worktree_mode', { workspaceId, enabled });
     store.updateWorkspace(workspaceId, { worktreeMode: enabled });
+  }
+
+  async getWorkspaceGitHubAuthPolicy(workspaceId: string): Promise<WorkspaceGitHubAuthPolicy> {
+    const policy = await invoke<WorkspaceGitHubAuthPolicyData>('get_workspace_github_auth_policy', { workspaceId });
+    return {
+      rules: (policy.rules ?? []).map(rule => ({
+        pattern: rule.pattern,
+        tokenEnvVar: rule.token_env_var,
+      })),
+      fallbackToGhAuth: policy.fallback_to_gh_auth ?? true,
+    };
+  }
+
+  async setWorkspaceGitHubAuthPolicy(
+    workspaceId: string,
+    policy: WorkspaceGitHubAuthPolicy
+  ): Promise<void> {
+    const payload: WorkspaceGitHubAuthPolicyData = {
+      rules: policy.rules.map(rule => ({
+        pattern: rule.pattern,
+        token_env_var: rule.tokenEnvVar,
+      })),
+      fallback_to_gh_auth: policy.fallbackToGhAuth,
+    };
+    await invoke('set_workspace_github_auth_policy', { workspaceId, policy: payload });
   }
 
   async setAiToolMode(workspaceId: string, mode: AiToolMode): Promise<void> {

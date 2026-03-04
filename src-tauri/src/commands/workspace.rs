@@ -1,13 +1,15 @@
-use std::sync::Arc;
 use godly_protocol::{LayoutNode, SplitDirection};
+use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
 
-use std::collections::HashSet;
 use crate::daemon_client::DaemonClient;
 use crate::persistence::AutoSaveManager;
 #[allow(deprecated)]
-use crate::state::{AiToolMode, AppState, ShellType, SplitView, Workspace};
+use crate::state::{
+    AiToolMode, AppState, ShellType, SplitView, Workspace, WorkspaceGitHubAuthPolicy,
+};
+use std::collections::HashSet;
 
 #[tauri::command]
 pub fn create_workspace(
@@ -63,6 +65,56 @@ pub fn delete_workspace(
 #[tauri::command]
 pub fn get_workspaces(state: State<Arc<AppState>>) -> Vec<Workspace> {
     state.get_all_workspaces()
+}
+
+fn is_valid_env_var_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+#[tauri::command]
+pub fn set_workspace_github_auth_policy(
+    workspace_id: String,
+    policy: WorkspaceGitHubAuthPolicy,
+    state: State<Arc<AppState>>,
+    auto_save: State<Arc<AutoSaveManager>>,
+) -> Result<(), String> {
+    if state.get_workspace(&workspace_id).is_none() {
+        return Err("Workspace not found".to_string());
+    }
+
+    if policy.rules.len() > 64 {
+        return Err("GitHub auth policy supports at most 64 rules".to_string());
+    }
+
+    for rule in &policy.rules {
+        if rule.pattern.trim().is_empty() {
+            return Err("GitHub auth rule pattern must not be empty".to_string());
+        }
+        if !is_valid_env_var_name(&rule.token_env_var) {
+            return Err(format!(
+                "Invalid token_env_var '{}': use only letters, numbers, and underscores",
+                rule.token_env_var
+            ));
+        }
+    }
+
+    state.set_workspace_github_auth_policy(&workspace_id, policy);
+    auto_save.mark_dirty();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_workspace_github_auth_policy(
+    workspace_id: String,
+    state: State<Arc<AppState>>,
+) -> Result<WorkspaceGitHubAuthPolicy, String> {
+    if state.get_workspace(&workspace_id).is_none() {
+        return Err("Workspace not found".to_string());
+    }
+    Ok(state.get_workspace_github_auth_policy(&workspace_id))
 }
 
 #[tauri::command]
@@ -151,7 +203,10 @@ pub fn split_terminal(
         }
     });
     if !tree.split_at(&target_terminal_id, &new_terminal_id, direction, ratio) {
-        return Err(format!("Terminal {} not found in layout tree", target_terminal_id));
+        return Err(format!(
+            "Terminal {} not found in layout tree",
+            target_terminal_id
+        ));
     }
     drop(trees);
     auto_save.mark_dirty();
@@ -168,7 +223,10 @@ pub fn unsplit_terminal(
     let mut trees = state.layout_trees.write();
     if let Some(tree) = trees.get_mut(&workspace_id) {
         // Check if this terminal is the root (only leaf)
-        if let LayoutNode::Leaf { terminal_id: ref id } = tree {
+        if let LayoutNode::Leaf {
+            terminal_id: ref id,
+        } = tree
+        {
             if id == &terminal_id {
                 // Last terminal — remove the tree entirely
                 trees.remove(&workspace_id);
@@ -197,10 +255,7 @@ pub fn unsplit_terminal(
 }
 
 #[tauri::command]
-pub fn get_layout_tree(
-    workspace_id: String,
-    state: State<Arc<AppState>>,
-) -> Option<LayoutNode> {
+pub fn get_layout_tree(workspace_id: String, state: State<Arc<AppState>>) -> Option<LayoutNode> {
     state.get_layout_tree(&workspace_id)
 }
 
@@ -258,4 +313,3 @@ pub fn prune_stale_terminal_ids(
     auto_save.mark_dirty();
     Ok(())
 }
-
