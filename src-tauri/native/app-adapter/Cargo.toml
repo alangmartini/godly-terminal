@@ -7,10 +7,15 @@ description = "Tauri-free daemon client adapter for the native frontend"
 
 [dependencies]
 godly-protocol = { path = "../../protocol" }
+godly-ports = { path = "../ports" }
 parking_lot.workspace = true
+uuid.workspace = true
 log = "0.4"
 iced.workspace = true
 arboard = "3"
 
 [target.'cfg(windows)'.dependencies]
 winapi.workspace = true
+
+[dev-dependencies]
+godly-testkit = { path = "../testkit" }

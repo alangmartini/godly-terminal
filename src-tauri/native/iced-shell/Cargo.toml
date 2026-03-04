@@ -15,6 +15,7 @@ godly-protocol = { path = "../../protocol" }
 godly-app-adapter = { path = "../app-adapter" }
 godly-terminal-surface = { path = "../terminal-surface" }
 godly-layout-core = { path = "../layout-core" }
+godly-features-shell = { path = "../features-shell" }
 godly-tabs-core = { path = "../tabs-core" }
 godly-workspaces-core = { path = "../workspaces-core" }
 log = "0.4"

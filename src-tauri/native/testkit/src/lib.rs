@@ -5,6 +5,8 @@ use godly_ports::{
     ClipboardPort, ClockPort, DaemonPort, NotificationPort, SessionSnapshot, SessionSpec,
 };
 
+pub mod contracts;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DaemonCall {
     CreateSession(SessionSpec),
@@ -130,6 +132,11 @@ impl ClockPort for FakeClock {
 
 #[cfg(test)]
 mod tests {
+    use crate::contracts::{
+        daemon_lifecycle_expectation, run_daemon_lifecycle_contract, run_notification_contract,
+        verify_daemon_lifecycle_outcome,
+    };
+
     use super::*;
     use std::time::UNIX_EPOCH;
 
@@ -166,5 +173,32 @@ mod tests {
         assert_eq!(clock.now(), UNIX_EPOCH);
         clock.advance(Duration::from_secs(5));
         assert_eq!(clock.now(), UNIX_EPOCH + Duration::from_secs(5));
+    }
+
+    #[test]
+    fn fake_daemon_satisfies_shared_lifecycle_contract() {
+        let mut daemon = FakeDaemonPort::default();
+        let outcome = run_daemon_lifecycle_contract(
+            &mut daemon,
+            SessionSpec {
+                cwd: Some("C:\\repo".into()),
+                shell: Some("pwsh".into()),
+            },
+        )
+        .expect("daemon lifecycle contract should pass");
+
+        verify_daemon_lifecycle_outcome(&outcome, &daemon_lifecycle_expectation("session-1"))
+            .expect("lifecycle outcome should satisfy shared expectation");
+        assert_eq!(daemon.calls.len(), 4);
+    }
+
+    #[test]
+    fn fake_notifications_satisfy_shared_contract() {
+        let mut notifications = FakeNotificationPort::default();
+        let expected_sequence =
+            run_notification_contract(&mut notifications, "Build done", "Terminal finished")
+            .expect("notification contract should pass");
+
+        assert_eq!(notifications.notifications, expected_sequence);
     }
 }
