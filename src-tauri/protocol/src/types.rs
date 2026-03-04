@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 
 /// Which frontend is driving the terminal.
 ///
-/// - `Web` — Tauri + TypeScript + Canvas2D (current default)
-/// - `Native` — Iced + wgpu (the migration target)
+/// - `Web` — Tauri + TypeScript + Canvas2D (legacy fallback)
+/// - `Native` — Iced + wgpu (default)
 /// - `Shadow` — headless mode for testing (no rendering)
 ///
-/// Read from `GODLY_FRONTEND_MODE` env var at startup. Defaults to `Web`.
+/// Read from `GODLY_FRONTEND_MODE` env var at startup. Defaults to `Native`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrontendMode {
@@ -17,17 +17,18 @@ pub enum FrontendMode {
 
 impl Default for FrontendMode {
     fn default() -> Self {
-        Self::Web
+        Self::Native
     }
 }
 
 /// Read the frontend mode from the `GODLY_FRONTEND_MODE` env var.
-/// Returns `FrontendMode::Web` if unset or unrecognized.
+/// Returns `FrontendMode::Native` if unset or unrecognized.
 pub fn frontend_mode() -> FrontendMode {
     match std::env::var("GODLY_FRONTEND_MODE").as_deref() {
+        Ok("web") => FrontendMode::Web,
         Ok("native") => FrontendMode::Native,
         Ok("shadow") => FrontendMode::Shadow,
-        _ => FrontendMode::Web,
+        _ => FrontendMode::Native,
     }
 }
 
@@ -243,8 +244,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_frontend_mode_default_is_web() {
-        assert_eq!(FrontendMode::default(), FrontendMode::Web);
+    fn test_frontend_mode_default_is_native() {
+        assert_eq!(FrontendMode::default(), FrontendMode::Native);
     }
 
     #[test]
