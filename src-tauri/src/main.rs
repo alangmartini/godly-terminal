@@ -5,6 +5,15 @@
 )]
 
 fn main() {
+    // When built with --features staging, set GODLY_INSTANCE before anything else.
+    // This must happen here (not in lib::run()) because the Native frontend path
+    // spawns godly-native.exe and exits without ever calling run(). The child
+    // process inherits this env var, ensuring it connects to the staging daemon.
+    #[cfg(feature = "staging")]
+    unsafe {
+        std::env::set_var("GODLY_INSTANCE", "staging");
+    }
+
     let mode = godly_protocol::frontend_mode();
 
     match mode {
