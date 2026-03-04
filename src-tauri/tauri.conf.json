@@ -42,12 +42,12 @@
       }
     },
     "resources": {
-      "target/release/godly-daemon.exe": "./",
-      "target/release/godly-mcp.exe": "./",
-      "target/release/godly-notify.exe": "./",
-      "target/release/godly-pty-shim.exe": "./",
-      "target/release/godly-remote.exe": "./",
-      "target/release/godly-native.exe": "./",
+      "target/release/godly-daemon.exe": "godly-daemon.exe",
+      "target/release/godly-mcp.exe": "godly-mcp.exe",
+      "target/release/godly-notify.exe": "godly-notify.exe",
+      "target/release/godly-pty-shim.exe": "godly-pty-shim.exe",
+      "target/release/godly-remote.exe": "godly-remote.exe",
+      "target/release/godly-native.exe": "godly-native.exe",
       "sounds/*": "sounds/",
       "soundpacks/**/*": "soundpacks/"
     }
