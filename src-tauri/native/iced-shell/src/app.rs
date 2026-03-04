@@ -495,8 +495,9 @@ impl GodlyApp {
 
         // Tab bar — show terminals for the active workspace.
         let active_id = self.active_focused();
+        let ordered = self.terminals.ordered_terminals();
         let tab_bar = tab_bar::view_tab_bar(
-            self.terminals.as_slice(),
+            &ordered,
             active_id,
             |id| Message::TabClicked(id),
             |id| Message::CloseTabRequested(id),
