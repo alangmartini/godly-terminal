@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm run unlock -- --release && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote --release && cd .. && pnpm run build:check",
+    "beforeBuildCommand": "pnpm run unlock -- --release && cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote -p godly-iced-shell --release && cd .. && pnpm run build:check",
     "frontendDist": "../dist"
   },
   "app": {
@@ -47,6 +47,7 @@
       "target/release/godly-notify.exe": "./",
       "target/release/godly-pty-shim.exe": "./",
       "target/release/godly-remote.exe": "./",
+      "target/release/godly-native.exe": "./",
       "sounds/*": "sounds/",
       "soundpacks/**/*": "soundpacks/"
     }
