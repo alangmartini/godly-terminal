@@ -124,6 +124,11 @@ impl WorkspaceCollection {
         self.workspaces.iter()
     }
 
+    /// Returns the workspaces as a slice.
+    pub fn as_slice(&self) -> &[WorkspaceInfo] {
+        &self.workspaces
+    }
+
     /// Returns the active workspace's id, if any.
     pub fn active_id(&self) -> Option<&str> {
         self.active_id.as_deref()
