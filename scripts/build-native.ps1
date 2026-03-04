@@ -14,25 +14,37 @@ Write-Host "=== Building Godly Terminal (Native) ===" -ForegroundColor Cyan
 $profileArg = if ($Release) { "--release" } else { $null }
 $profileName = if ($Release) { "release" } else { "debug" }
 
-# Build the native binary
-$buildArgs = @("build", "-p", "godly-iced-shell")
-if ($profileArg) { $buildArgs += $profileArg }
-
-Write-Host "Running: cargo $($buildArgs -join ' ')" -ForegroundColor Gray
 Push-Location "$PSScriptRoot\..\src-tauri"
 try {
+    # Build the daemon first
+    $daemonArgs = @("build", "-p", "godly-daemon")
+    if ($profileArg) { $daemonArgs += $profileArg }
+
+    Write-Host "Running: cargo $($daemonArgs -join ' ')" -ForegroundColor Gray
+    & cargo @daemonArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Daemon build failed with exit code $LASTEXITCODE"
+    }
+
+    # Build the native shell
+    $buildArgs = @("build", "-p", "godly-iced-shell")
+    if ($profileArg) { $buildArgs += $profileArg }
+
+    Write-Host "Running: cargo $($buildArgs -join ' ')" -ForegroundColor Gray
     & cargo @buildArgs
     if ($LASTEXITCODE -ne 0) {
-        throw "Cargo build failed with exit code $LASTEXITCODE"
+        throw "Native shell build failed with exit code $LASTEXITCODE"
     }
 } finally {
     Pop-Location
 }
 
-$binaryPath = "$PSScriptRoot\..\src-tauri\target\$profileName\godly-native.exe"
-if (Test-Path $binaryPath) {
-    $size = (Get-Item $binaryPath).Length / 1MB
-    Write-Host "`nBuild complete: $binaryPath ($([math]::Round($size, 1)) MB)" -ForegroundColor Green
-} else {
-    Write-Host "`nBuild complete (binary at: src-tauri/target/$profileName/godly-native)" -ForegroundColor Green
+$targetDir = "$PSScriptRoot\..\src-tauri\target\$profileName"
+Write-Host "`nBuild complete:" -ForegroundColor Green
+foreach ($bin in @("godly-native.exe", "godly-daemon.exe")) {
+    $path = Join-Path $targetDir $bin
+    if (Test-Path $path) {
+        $size = (Get-Item $path).Length / 1MB
+        Write-Host "  $bin ($([math]::Round($size, 1)) MB)" -ForegroundColor Green
+    }
 }
