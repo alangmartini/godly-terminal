@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures_channel::mpsc;
 use iced::keyboard;
-use iced::widget::{canvas, center, column, text};
+use iced::widget::{canvas, center, column, row, stack, text};
 use iced::{event, window, Element, Length, Subscription, Task};
 
 use godly_app_adapter::clipboard;
@@ -14,18 +14,25 @@ use godly_protocol::types::RichGridData;
 
 use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCanvas};
 
+use crate::notification_state::NotificationTracker;
 use crate::selection::{GridPos, SelectionState};
+use crate::settings_dialog::{self, SettingsTab};
+use crate::shortcuts_tab;
+use crate::sidebar::{self, SIDEBAR_WIDTH};
 use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::terminal_state::TerminalCollection;
+use crate::workspace_state::WorkspaceCollection;
 
 /// Main Iced application state — multi-terminal with event-driven updates.
 pub struct GodlyApp {
     /// Daemon client (shared with bridge thread).
     client: Option<Arc<NativeDaemonClient>>,
-    /// All terminal sessions.
+    /// All terminal sessions (global, with workspace_id tracking).
     terminals: TerminalCollection,
+    /// Workspace collection — each workspace owns its layout tree and focused terminal.
+    workspaces: WorkspaceCollection,
     /// Error message to display if initialization failed.
     init_error: Option<String>,
     /// Event receiver for the daemon subscription (taken once by the subscription).
@@ -35,13 +42,18 @@ pub struct GodlyApp {
     window_height: f32,
     /// Font metrics for cell sizing and grid dimension calculations.
     font_metrics: FontMetrics,
-    /// Layout tree for split panes. A single leaf when no splits exist.
-    layout: LayoutNode,
-    /// ID of the focused terminal pane (receives keyboard input).
-    /// This may differ from the "active" tab when splits are present.
-    focused_terminal: Option<String>,
     /// Mouse text selection state.
     selection: SelectionState,
+    /// Whether the workspace sidebar is visible.
+    sidebar_visible: bool,
+    /// Whether the settings dialog is open.
+    settings_open: bool,
+    /// Active tab in the settings dialog.
+    settings_tab: String,
+    /// Notification tracker for terminals.
+    notifications: NotificationTracker,
+    /// Counter for generating workspace names.
+    next_workspace_num: u32,
 }
 
 impl Default for GodlyApp {
@@ -49,16 +61,18 @@ impl Default for GodlyApp {
         Self {
             client: None,
             terminals: TerminalCollection::new(),
+            workspaces: WorkspaceCollection::new(),
             init_error: None,
             event_receiver: Arc::new(parking_lot::Mutex::new(None)),
             window_width: 1200.0,
             window_height: 800.0,
             font_metrics: FontMetrics::default(),
-            layout: LayoutNode::Leaf {
-                terminal_id: String::new(),
-            },
-            focused_terminal: None,
             selection: SelectionState::default(),
+            sidebar_visible: false,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            notifications: NotificationTracker::new(),
+            next_workspace_num: 2, // First workspace is "Workspace 1"
         }
     }
 }
@@ -103,6 +117,16 @@ pub enum Message {
     UnsplitPane,
     /// Cycle focus to the next pane in the layout tree.
     FocusNextPane,
+    /// User clicked a workspace in the sidebar.
+    WorkspaceClicked(String),
+    /// User requested a new workspace.
+    NewWorkspaceRequested,
+    /// Toggle the sidebar visibility.
+    ToggleSidebar,
+    /// Toggle the settings dialog.
+    ToggleSettings,
+    /// User clicked a settings tab.
+    SettingsTabClicked(String),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -118,11 +142,43 @@ pub enum InitResult {
 }
 
 impl GodlyApp {
+    // -----------------------------------------------------------------------
+    // Workspace-aware helpers
+    // -----------------------------------------------------------------------
+
+    /// Get the active workspace's layout, if any.
+    fn active_layout(&self) -> Option<&LayoutNode> {
+        self.workspaces.active().map(|ws| &ws.layout)
+    }
+
+    /// Get the active workspace's focused terminal ID.
+    fn active_focused(&self) -> Option<&str> {
+        self.workspaces.active().map(|ws| ws.focused_terminal.as_str())
+    }
+
+    /// Get the target terminal ID — prefer workspace's focused pane, fall back to active tab.
+    fn target_terminal_id(&self) -> Option<&str> {
+        self.active_focused()
+            .or_else(|| self.terminals.active_id())
+    }
+
+    /// Get terminals filtered to the active workspace.
+    fn active_workspace_terminals(&self) -> Vec<&crate::terminal_state::TerminalInfo> {
+        if let Some(ws) = self.workspaces.active() {
+            self.terminals.terminals_for_workspace(&ws.id)
+        } else {
+            // Fallback: show all terminals
+            self.terminals.iter().collect()
+        }
+    }
+
     pub fn title(&self) -> String {
-        if let Some(active) = self.terminals.active() {
-            let label: &str = active.tab_label();
-            if label != "Terminal" {
-                return format!("{} — Godly Terminal (Native)", label);
+        if let Some(tid) = self.active_focused() {
+            if let Some(term) = self.terminals.get(tid) {
+                let label = term.tab_label();
+                if label != "Terminal" {
+                    return format!("{} — Godly Terminal (Native)", label);
+                }
             }
         }
         format!(
@@ -140,11 +196,18 @@ impl GodlyApp {
 
                 match result {
                     InitResult::Fresh { session_id } => {
-                        self.terminals.add(session_id.clone(), rows, cols);
-                        self.layout = LayoutNode::Leaf {
-                            terminal_id: session_id.clone(),
-                        };
-                        self.focused_terminal = Some(session_id.clone());
+                        self.terminals.add_to_workspace(
+                            session_id.clone(),
+                            rows,
+                            cols,
+                            "w-default".to_string(),
+                        );
+                        self.workspaces.add(
+                            "w-default".to_string(),
+                            "Workspace 1".to_string(),
+                            session_id.clone(),
+                        );
+                        self.terminals.set_active(&session_id);
                         return self.fetch_grid(&session_id);
                     }
                     InitResult::Recovered {
@@ -152,14 +215,30 @@ impl GodlyApp {
                         first_id,
                     } => {
                         for id in &session_ids {
-                            self.terminals.add(id.clone(), rows, cols);
+                            self.terminals.add_to_workspace(
+                                id.clone(),
+                                rows,
+                                cols,
+                                "w-default".to_string(),
+                            );
                         }
                         self.terminals.set_active(&first_id);
-                        // Set layout to first session (flat, no splits on recovery).
-                        self.layout = LayoutNode::Leaf {
-                            terminal_id: first_id.clone(),
-                        };
-                        self.focused_terminal = Some(first_id.clone());
+                        // Create default workspace with first session's layout.
+                        self.workspaces.add(
+                            "w-default".to_string(),
+                            "Workspace 1".to_string(),
+                            first_id.clone(),
+                        );
+                        // Add remaining sessions to the workspace's layout.
+                        if let Some(ws) = self.workspaces.get_mut("w-default") {
+                            for id in session_ids.iter().skip(1) {
+                                ws.layout.split_leaf(
+                                    &first_id,
+                                    id.clone(),
+                                    SplitDirection::Vertical,
+                                );
+                            }
+                        }
                         // Fetch grids for all recovered sessions.
                         let tasks: Vec<Task<Message>> =
                             session_ids.iter().map(|id| self.fetch_grid(id)).collect();
@@ -176,6 +255,11 @@ impl GodlyApp {
             Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     term.dirty = true;
+                }
+                // Track notifications for non-focused terminals.
+                let is_focused = self.active_focused() == Some(session_id.as_str());
+                if !is_focused {
+                    self.notifications.record_output(&session_id);
                 }
                 return self.fetch_grid(&session_id);
             }
@@ -202,6 +286,7 @@ impl GodlyApp {
                 }
             }
             Message::DaemonEvent(DaemonEventMsg::Bell { session_id }) => {
+                self.notifications.record_bell(&session_id);
                 log::debug!("Bell from session {}", session_id);
             }
 
@@ -248,14 +333,20 @@ impl GodlyApp {
 
             // --- Mouse wheel scrollback ---
             Message::MouseWheel { delta_y } => {
-                // Scroll up (negative delta) increases offset, scroll down decreases.
-                let lines = -(delta_y * 3.0) as isize; // 3 lines per scroll notch
+                let lines = -(delta_y * 3.0) as isize;
                 return self.scroll_active(lines);
             }
 
             // --- Tab management ---
             Message::TabClicked(id) => {
                 self.terminals.set_active(&id);
+                // Update workspace's focused terminal.
+                if let Some(ws) = self.workspaces.active_mut() {
+                    if ws.layout.find_leaf(&id) {
+                        ws.focused_terminal = id.clone();
+                    }
+                }
+                self.notifications.mark_read(&id);
             }
             Message::NewTabRequested => {
                 return self.create_new_terminal();
@@ -266,18 +357,38 @@ impl GodlyApp {
             Message::TerminalCreated(Ok(session_id)) => {
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
-                self.terminals.add(session_id.clone(), rows, cols);
+                let ws_id = self.workspaces.active_id().map(str::to_string);
+
+                if let Some(ws_id) = &ws_id {
+                    self.terminals.add_to_workspace(
+                        session_id.clone(),
+                        rows,
+                        cols,
+                        ws_id.clone(),
+                    );
+                } else {
+                    self.terminals.add(session_id.clone(), rows, cols);
+                }
 
                 // If this terminal is already in the layout (from a split), just focus it.
-                // Otherwise it's a new tab — set layout to it.
-                if self.layout.find_leaf(&session_id) {
-                    self.focused_terminal = Some(session_id.clone());
+                let in_layout = self
+                    .active_layout()
+                    .map(|l| l.find_leaf(&session_id))
+                    .unwrap_or(false);
+
+                if in_layout {
+                    if let Some(ws) = self.workspaces.active_mut() {
+                        ws.focused_terminal = session_id.clone();
+                    }
                 } else {
+                    // New tab — update the workspace layout.
                     self.terminals.set_active(&session_id);
-                    self.layout = LayoutNode::Leaf {
-                        terminal_id: session_id.clone(),
-                    };
-                    self.focused_terminal = Some(session_id.clone());
+                    if let Some(ws) = self.workspaces.active_mut() {
+                        ws.layout = LayoutNode::Leaf {
+                            terminal_id: session_id.clone(),
+                        };
+                        ws.focused_terminal = session_id.clone();
+                    }
                 }
                 return self.fetch_grid(&session_id);
             }
@@ -326,6 +437,29 @@ impl GodlyApp {
             Message::FocusNextPane => {
                 self.cycle_focus();
             }
+
+            // --- Workspace operations ---
+            Message::WorkspaceClicked(id) => {
+                self.workspaces.set_active(&id);
+                // Mark the new workspace's focused terminal as read.
+                if let Some(ws) = self.workspaces.active() {
+                    self.notifications.mark_read(&ws.focused_terminal);
+                }
+            }
+            Message::NewWorkspaceRequested => {
+                return self.create_new_workspace();
+            }
+
+            // --- Sidebar + Settings ---
+            Message::ToggleSidebar => {
+                self.sidebar_visible = !self.sidebar_visible;
+            }
+            Message::ToggleSettings => {
+                self.settings_open = !self.settings_open;
+            }
+            Message::SettingsTabClicked(tab_id) => {
+                self.settings_tab = tab_id;
+            }
         }
         Task::none()
     }
@@ -339,9 +473,8 @@ impl GodlyApp {
             return center(text("Connecting to daemon...").size(18)).into();
         }
 
-        let active_id = self.terminals.active_id();
-
-        // Tab bar.
+        // Tab bar — show terminals for the active workspace.
+        let active_id = self.active_focused();
         let tab_bar = tab_bar::view_tab_bar(
             self.terminals.as_slice(),
             active_id,
@@ -350,18 +483,55 @@ impl GodlyApp {
             Message::NewTabRequested,
         );
 
-        // Render the layout tree — each leaf becomes a terminal canvas.
-        let focused_id = self.focused_terminal.as_deref();
-        let terminal_view: Element<'_, Message> =
-            if self.layout.leaf_count() > 0 && self.terminals.count() > 0 {
-                view_layout(&self.layout, &|terminal_id: &str| {
+        // Render the layout tree from active workspace.
+        let focused_id = self.active_focused();
+        let terminal_view: Element<'_, Message> = if let Some(layout) = self.active_layout() {
+            if layout.leaf_count() > 0 && self.terminals.count() > 0 {
+                view_layout(layout, &|terminal_id: &str| {
                     self.render_terminal_pane(terminal_id, focused_id)
                 })
             } else {
                 center(text("No active terminal").size(16)).into()
-            };
+            }
+        } else {
+            center(text("No active terminal").size(16)).into()
+        };
 
-        column![tab_bar, terminal_view].into()
+        // Compose main content with optional sidebar.
+        let main_area = column![tab_bar, terminal_view];
+
+        let main_content: Element<'_, Message> = if self.sidebar_visible {
+            let sidebar = sidebar::view_sidebar(
+                self.workspaces.as_slice(),
+                self.workspaces.active_id(),
+                |id| Message::WorkspaceClicked(id),
+                Message::NewWorkspaceRequested,
+            );
+            row![sidebar, main_area].into()
+        } else {
+            main_area.into()
+        };
+
+        // Overlay settings dialog if open.
+        if self.settings_open {
+            let tabs = &[
+                SettingsTab {
+                    id: "shortcuts",
+                    label: "Shortcuts",
+                },
+            ];
+            let tab_content = shortcuts_tab::view_shortcuts_tab();
+            let settings_overlay = settings_dialog::view_settings_dialog(
+                tabs,
+                &self.settings_tab,
+                tab_content,
+                |id| Message::SettingsTabClicked(id),
+                Message::ToggleSettings,
+            );
+            stack![main_content, settings_overlay].into()
+        } else {
+            main_content
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -385,9 +555,6 @@ impl GodlyApp {
                     };
                     Some(Message::MouseWheel { delta_y })
                 }
-                // NOTE: Iced's listen_with doesn't provide cursor position in
-                // ButtonPressed events. We start at (0,0) and the first CursorMoved
-                // event (which fires before any visible render) corrects the position.
                 event::Event::Mouse(iced::mouse::Event::ButtonPressed(
                     iced::mouse::Button::Left,
                 )) => Some(Message::SelectionStart { x: 0.0, y: 0.0 }),
@@ -409,12 +576,11 @@ impl GodlyApp {
     // App action dispatch
     // -----------------------------------------------------------------------
 
-    /// Handle an app-level shortcut action.
     fn handle_app_action(&mut self, action: AppAction) -> Task<Message> {
         match action {
             AppAction::NewTab => self.create_new_terminal(),
             AppAction::CloseTab => {
-                if let Some(id) = self.terminals.active_id().map(str::to_string) {
+                if let Some(id) = self.active_focused().map(str::to_string) {
                     self.close_terminal(&id)
                 } else {
                     Task::none()
@@ -468,16 +634,68 @@ impl GodlyApp {
                 self.select_all();
                 Task::none()
             }
+            AppAction::NextWorkspace => {
+                self.workspaces.next();
+                if let Some(ws) = self.workspaces.active() {
+                    self.notifications.mark_read(&ws.focused_terminal);
+                }
+                Task::none()
+            }
+            AppAction::PrevWorkspace => {
+                self.workspaces.previous();
+                if let Some(ws) = self.workspaces.active() {
+                    self.notifications.mark_read(&ws.focused_terminal);
+                }
+                Task::none()
+            }
+            AppAction::ToggleSidebar => {
+                self.sidebar_visible = !self.sidebar_visible;
+                Task::none()
+            }
+            AppAction::OpenSettings => {
+                self.settings_open = !self.settings_open;
+                Task::none()
+            }
+            AppAction::RenameTab => {
+                // TODO: Open rename dialog for focused terminal (future PR).
+                Task::none()
+            }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Workspace operations
+    // -----------------------------------------------------------------------
+
+    /// Create a new workspace with a fresh terminal.
+    fn create_new_workspace(&mut self) -> Task<Message> {
+        let ws_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let ws_name = format!("Workspace {}", self.next_workspace_num);
+        self.next_workspace_num += 1;
+
+        let rows = self.calculate_rows();
+        let cols = self.calculate_cols();
+
+        self.terminals.add_to_workspace(
+            session_id.clone(),
+            rows,
+            cols,
+            ws_id.clone(),
+        );
+        self.workspaces.add(ws_id.clone(), ws_name, session_id.clone());
+        self.workspaces.set_active(&ws_id);
+        self.terminals.set_active(&session_id);
+
+        self.create_terminal_task(session_id)
     }
 
     // -----------------------------------------------------------------------
     // Scrollback
     // -----------------------------------------------------------------------
 
-    /// Scroll the active terminal by delta lines (negative = up, positive = down).
     fn scroll_active(&mut self, delta: isize) -> Task<Message> {
-        let Some(active_id) = self.terminals.active_id().map(str::to_string) else {
+        let Some(active_id) = self.active_focused().map(str::to_string) else {
             return Task::none();
         };
 
@@ -498,9 +716,8 @@ impl GodlyApp {
         self.scroll_fetch(&active_id, new_offset)
     }
 
-    /// Scroll to the top of scrollback history.
     fn scroll_to_top(&mut self) -> Task<Message> {
-        let Some(active_id) = self.terminals.active_id().map(str::to_string) else {
+        let Some(active_id) = self.active_focused().map(str::to_string) else {
             return Task::none();
         };
 
@@ -517,9 +734,8 @@ impl GodlyApp {
         self.scroll_fetch(&active_id, max)
     }
 
-    /// Scroll to the bottom (live view).
     fn scroll_to_bottom(&mut self) -> Task<Message> {
-        let Some(active_id) = self.terminals.active_id().map(str::to_string) else {
+        let Some(active_id) = self.active_focused().map(str::to_string) else {
             return Task::none();
         };
 
@@ -530,7 +746,6 @@ impl GodlyApp {
         self.scroll_fetch(&active_id, 0)
     }
 
-    /// Set scrollback offset and fetch the grid snapshot for a session.
     fn scroll_fetch(&self, session_id: &str, offset: usize) -> Task<Message> {
         let Some(client) = &self.client else {
             return Task::none();
@@ -568,7 +783,6 @@ impl GodlyApp {
     // Terminal lifecycle
     // -----------------------------------------------------------------------
 
-    /// Fetch the grid snapshot for a specific session.
     fn fetch_grid(&mut self, session_id: &str) -> Task<Message> {
         let Some(client) = &self.client else {
             return Task::none();
@@ -611,12 +825,10 @@ impl GodlyApp {
         )
     }
 
-    /// Create a new terminal session via the daemon.
     fn create_new_terminal(&self) -> Task<Message> {
         self.create_terminal_task(uuid::Uuid::new_v4().to_string())
     }
 
-    /// Create a terminal session with the given ID asynchronously.
     fn create_terminal_task(&self, session_id: String) -> Task<Message> {
         let Some(client) = &self.client else {
             return Task::done(Message::TerminalCreated(Err(
@@ -650,11 +862,23 @@ impl GodlyApp {
         )
     }
 
-    /// Close a terminal session.
     fn close_terminal(&mut self, session_id: &str) -> Task<Message> {
-        self.terminals.remove(session_id);
+        // Remove from workspace layout.
+        if let Some(ws) = self.workspaces.active_mut() {
+            ws.layout.unsplit_leaf(session_id);
+            // If the focused terminal was closed, update focus.
+            if ws.focused_terminal == session_id {
+                let leaf_ids = ws.layout.all_leaf_ids();
+                ws.focused_terminal = leaf_ids
+                    .first()
+                    .map(|id| id.to_string())
+                    .unwrap_or_default();
+            }
+        }
 
-        // Close on daemon (fire-and-forget).
+        self.terminals.remove(session_id);
+        self.notifications.clear(session_id);
+
         if let Some(client) = &self.client {
             let _ = commands::close_terminal(client, session_id);
         }
@@ -666,9 +890,8 @@ impl GodlyApp {
     // Resize
     // -----------------------------------------------------------------------
 
-    /// Resize the active terminal on the daemon.
     fn resize_active_terminal(&mut self, rows: u16, cols: u16) -> Task<Message> {
-        let Some(active_id) = self.terminals.active_id().map(str::to_string) else {
+        let Some(active_id) = self.active_focused().map(str::to_string) else {
             return Task::none();
         };
 
@@ -681,11 +904,9 @@ impl GodlyApp {
             let _ = commands::resize_terminal(client, &active_id, rows, cols);
         }
 
-        // Fetch updated grid after resize.
         self.fetch_grid(&active_id)
     }
 
-    /// Resize all terminals after a font size change.
     fn resize_all_terminals(&mut self) -> Task<Message> {
         let new_rows = self.calculate_rows();
         let new_cols = self.calculate_cols();
@@ -702,8 +923,7 @@ impl GodlyApp {
             }
         }
 
-        // Fetch grid for active terminal.
-        if let Some(active_id) = self.terminals.active_id().map(str::to_string) {
+        if let Some(active_id) = self.active_focused().map(str::to_string) {
             self.fetch_grid(&active_id)
         } else {
             Task::none()
@@ -711,82 +931,76 @@ impl GodlyApp {
     }
 
     // -----------------------------------------------------------------------
-    // Target terminal resolution
-    // -----------------------------------------------------------------------
-
-    /// Get the target terminal ID — prefer focused pane, fall back to active tab.
-    fn target_terminal_id(&self) -> Option<&str> {
-        self.focused_terminal
-            .as_deref()
-            .or_else(|| self.terminals.active_id())
-    }
-
-    // -----------------------------------------------------------------------
     // Grid dimension calculations
     // -----------------------------------------------------------------------
 
-    /// Calculate terminal columns from window width and font metrics.
     fn calculate_cols(&self) -> u16 {
-        (self.window_width / self.font_metrics.cell_width).max(1.0) as u16
+        let sidebar_offset = if self.sidebar_visible {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        };
+        ((self.window_width - sidebar_offset) / self.font_metrics.cell_width).max(1.0) as u16
     }
 
-    /// Calculate terminal rows from window height (minus tab bar) and font metrics.
     fn calculate_rows(&self) -> u16 {
         let available = (self.window_height - TAB_BAR_HEIGHT).max(0.0);
         (available / self.font_metrics.cell_height).max(1.0) as u16
     }
 
     // -----------------------------------------------------------------------
-    // Split pane operations
+    // Split pane operations (workspace-aware)
     // -----------------------------------------------------------------------
 
-    /// Split the focused pane, creating a new terminal in the given direction.
     fn split_focused_pane(&mut self, direction: SplitDirection) -> Task<Message> {
-        let Some(focused) = self.focused_terminal.clone() else {
+        let Some(focused) = self.active_focused().map(str::to_string) else {
             return Task::none();
         };
 
         let new_id = uuid::Uuid::new_v4().to_string();
 
-        // Split the layout tree immediately (optimistic).
-        self.layout
-            .split_leaf(&focused, new_id.clone(), direction);
+        // Split the active workspace's layout tree.
+        if let Some(ws) = self.workspaces.active_mut() {
+            ws.layout.split_leaf(&focused, new_id.clone(), direction);
+        }
 
-        // Create the terminal on the daemon.
         self.create_terminal_task(new_id)
     }
 
-    /// Remove the focused pane from its split, promoting the sibling.
     fn unsplit_focused_pane(&mut self) -> Task<Message> {
-        let Some(focused) = self.focused_terminal.clone() else {
+        let Some(focused) = self.active_focused().map(str::to_string) else {
             return Task::none();
         };
 
-        if let Some(removed_id) = self.layout.unsplit_leaf(&focused) {
-            // Close the removed terminal on the daemon.
-            self.terminals.remove(&removed_id);
-            if let Some(client) = &self.client {
-                let _ = commands::close_terminal(client, &removed_id);
-            }
+        if let Some(ws) = self.workspaces.active_mut() {
+            if let Some(removed_id) = ws.layout.unsplit_leaf(&focused) {
+                // Close the removed terminal.
+                self.terminals.remove(&removed_id);
+                self.notifications.clear(&removed_id);
+                if let Some(client) = &self.client {
+                    let _ = commands::close_terminal(client, &removed_id);
+                }
 
-            // Update focus to the next available leaf.
-            let leaf_ids = self.layout.all_leaf_ids();
-            if let Some(first) = leaf_ids.first() {
-                self.focused_terminal = Some(first.to_string());
+                // Update focus.
+                let leaf_ids = ws.layout.all_leaf_ids();
+                if let Some(first) = leaf_ids.first() {
+                    ws.focused_terminal = first.to_string();
+                }
             }
         }
 
         Task::none()
     }
 
-    /// Cycle focus to the next pane in depth-first order.
     fn cycle_focus(&mut self) {
-        let Some(focused) = &self.focused_terminal else {
+        let Some(ws) = self.workspaces.active_mut() else {
             return;
         };
 
-        if let Some(next_id) = self.layout.next_leaf_id(focused) {
-            self.focused_terminal = Some(next_id.to_string());
+        if let Some(next_id) = ws.layout.next_leaf_id(&ws.focused_terminal) {
+            let next_id = next_id.to_string();
+            self.notifications.mark_read(&next_id);
+            ws.focused_terminal = next_id;
         }
     }
 
@@ -794,7 +1008,6 @@ impl GodlyApp {
     // Clipboard
     // -----------------------------------------------------------------------
 
-    /// Copy the current selection text to the system clipboard.
     fn copy_selection(&mut self) {
         let Some(tid) = self.target_terminal_id() else {
             return;
@@ -815,7 +1028,6 @@ impl GodlyApp {
         }
     }
 
-    /// Paste text from the system clipboard into the focused terminal.
     fn paste_from_clipboard(&self) -> Task<Message> {
         let Some(tid) = self.target_terminal_id() else {
             return Task::none();
@@ -840,7 +1052,6 @@ impl GodlyApp {
     // Selection
     // -----------------------------------------------------------------------
 
-    /// Select all text in the focused terminal's grid.
     fn select_all(&mut self) {
         let Some(tid) = self.target_terminal_id() else {
             return;
@@ -864,12 +1075,16 @@ impl GodlyApp {
         self.selection.finish();
     }
 
-    /// Convert pixel coordinates to grid position.
     fn pixel_to_grid(&self, x: f32, y: f32) -> GridPos {
-        // Subtract tab bar height from y.
+        let sidebar_offset = if self.sidebar_visible {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        };
+        let adjusted_x = (x - sidebar_offset).max(0.0);
         let adjusted_y = (y - TAB_BAR_HEIGHT).max(0.0);
         let row = (adjusted_y / self.font_metrics.cell_height) as usize;
-        let col = (x / self.font_metrics.cell_width) as usize;
+        let col = (adjusted_x / self.font_metrics.cell_width) as usize;
         GridPos { row, col }
     }
 
@@ -877,7 +1092,6 @@ impl GodlyApp {
     // Rendering helpers
     // -----------------------------------------------------------------------
 
-    /// Render a single terminal pane for the layout tree.
     fn render_terminal_pane<'a>(
         &'a self,
         terminal_id: &str,
@@ -887,7 +1101,6 @@ impl GodlyApp {
             return center(text("Session not found").size(14)).into();
         };
 
-        // Pass selection only if this is the focused pane and a selection exists.
         let is_focused = focused_id == Some(terminal_id);
         let selection = if is_focused && (self.selection.active || self.has_selection()) {
             let (start, end) = self.selection.normalized();
@@ -916,7 +1129,6 @@ impl GodlyApp {
             .into()
     }
 
-    /// Returns true if there is a non-empty selection.
     fn has_selection(&self) -> bool {
         let (start, end) = self.selection.normalized();
         start != end
@@ -929,7 +1141,6 @@ impl GodlyApp {
 
 /// Initialize the app: connect to daemon, set up bridge, recover or create sessions.
 pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
-    // Connect to daemon.
     let client = match NativeDaemonClient::connect_or_launch() {
         Ok(c) => Arc::new(c),
         Err(e) => {
@@ -937,13 +1148,9 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
         }
     };
 
-    // Create the event channel.
     let (tx, rx) = mpsc::unbounded();
-
-    // Store receiver for the subscription to pick up.
     *app.event_receiver.lock() = Some(rx);
 
-    // Set up bridge with channel event sink.
     let sink = Arc::new(ChannelEventSink::new(tx));
     if let Err(e) = client.setup_bridge(sink) {
         return Task::done(Message::Initialized(Err(e)));
@@ -958,7 +1165,6 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
         async move {
             let (tx, rx) = futures_channel::oneshot::channel();
             std::thread::spawn(move || {
-                // Try to recover existing daemon sessions.
                 let sessions =
                     match client.send_request(&godly_protocol::Request::ListSessions) {
                         Ok(godly_protocol::Response::SessionList { sessions }) => sessions,
@@ -996,7 +1202,6 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
                     }
                 }
 
-                // No sessions to recover — create a new one.
                 let session_id = uuid::Uuid::new_v4().to_string();
                 let sid = session_id.clone();
                 let result = commands::create_terminal(
@@ -1016,4 +1221,3 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
         Message::Initialized,
     )
 }
-
