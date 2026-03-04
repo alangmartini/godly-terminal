@@ -711,6 +711,8 @@ export class TerminalRenderer {
 
       // Register document-level listeners so we receive events even when cursor leaves canvas
       this.onDocumentSelectionMouseMove = (moveEvent: MouseEvent) => {
+        // Guard: if button was released outside the window, clean up
+        if (moveEvent.buttons === 0) { this.onDocumentSelectionMouseUp?.(moveEvent); return; }
         moveEvent.preventDefault();
         const gridRows = this.currentSnapshot?.dimensions.rows ?? 24;
         const raw = this.pixelToGridRaw(moveEvent.clientX, moveEvent.clientY);
@@ -859,6 +861,8 @@ export class TerminalRenderer {
     this.handleScrollbarDragAt(e.clientY);
 
     this.onDocumentMouseMove = (moveEvent: MouseEvent) => {
+      // Guard: if button was released outside the window, clean up
+      if (moveEvent.buttons === 0) { this.onDocumentMouseUp?.(moveEvent); return; }
       moveEvent.preventDefault();
       this.handleScrollbarDragAt(moveEvent.clientY);
     };
