@@ -1,0 +1,13 @@
+[package]
+name = "godly-features-shell"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+description = "Reducer-style state transitions for native shell features"
+
+[dependencies]
+godly-layout-core = { path = "../layout-core" }
+
+[dev-dependencies]
+godly-tabs-core = { path = "../tabs-core" }
+godly-workspaces-core = { path = "../workspaces-core" }

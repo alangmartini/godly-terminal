@@ -5,6 +5,12 @@ members = [
     "native/iced-shell",
     "native/terminal-surface",
     "native/parity-harness",
+    "native/layout-core",
+    "native/features-shell",
+    "native/ports",
+    "native/tabs-core",
+    "native/testkit",
+    "native/workspaces-core",
 ]
 resolver = "2"
 
