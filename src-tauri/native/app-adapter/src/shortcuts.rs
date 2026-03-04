@@ -9,6 +9,7 @@ pub enum AppAction {
     ScrollPageUp, ScrollPageDown, ScrollToTop, ScrollToBottom,
     SplitRight, SplitDown, Unsplit, FocusNextPane,
     SelectAll,
+    NextWorkspace, PrevWorkspace, ToggleSidebar, OpenSettings, RenameTab,
 }
 
 pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> {
@@ -36,6 +37,8 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
     match s.to_ascii_lowercase().as_str() {
         "t" if !shift => Some(AppAction::NewTab),
         "w" if !shift => Some(AppAction::CloseTab),
+        "b" if !shift => Some(AppAction::ToggleSidebar),
+        "," if !shift => Some(AppAction::OpenSettings),
         "=" | "+" => Some(AppAction::ZoomIn),
         "-" if !shift => Some(AppAction::ZoomOut),
         "0" if !shift => Some(AppAction::ZoomReset),
@@ -47,6 +50,21 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
 }
 
 fn check_named_shortcut(named: &Named, ctrl: bool, shift: bool, alt: bool) -> Option<AppAction> {
+    // Ctrl+Alt (no shift) — workspace navigation.
+    if ctrl && alt && !shift {
+        return match named {
+            Named::ArrowRight => Some(AppAction::NextWorkspace),
+            Named::ArrowLeft => Some(AppAction::PrevWorkspace),
+            _ => None,
+        };
+    }
+    // No modifiers — F2 rename.
+    if !ctrl && !shift && !alt {
+        return match named {
+            Named::F2 => Some(AppAction::RenameTab),
+            _ => None,
+        };
+    }
     if alt { return None; }
     match named {
         Named::Tab if ctrl && !shift => Some(AppAction::NextTab),
@@ -137,4 +155,26 @@ mod tests {
     #[test] fn f1_with_ctrl_is_none() { assert_eq!(check_app_shortcut(&named_key(Named::F1), CTRL), None); }
     #[test] fn alt_t_is_not_shortcut() { assert_eq!(check_app_shortcut(&char_key("t"), alt()), None); }
     #[test] fn alt_tab_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::Tab), alt()), None); }
+    // --- Workspace shortcuts ---
+    #[test] fn ctrl_alt_right_is_next_workspace() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowRight), ctrl_alt()), Some(AppAction::NextWorkspace)); }
+    #[test] fn ctrl_alt_left_is_prev_workspace() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowLeft), ctrl_alt()), Some(AppAction::PrevWorkspace)); }
+    #[test] fn ctrl_alt_shift_right_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowRight), ctrl_alt_shift()), None); }
+    #[test] fn ctrl_alt_shift_left_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowLeft), ctrl_alt_shift()), None); }
+    #[test] fn ctrl_right_alone_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowRight), CTRL), None); }
+    #[test] fn alt_right_alone_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowRight), alt()), None); }
+    #[test] fn right_alone_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::ArrowRight), NONE), None); }
+    // --- Sidebar toggle ---
+    #[test] fn ctrl_b_is_toggle_sidebar() { assert_eq!(check_app_shortcut(&char_key("b"), CTRL), Some(AppAction::ToggleSidebar)); }
+    #[test] fn ctrl_uppercase_b_is_toggle_sidebar() { assert_eq!(check_app_shortcut(&char_key("B"), CTRL), Some(AppAction::ToggleSidebar)); }
+    #[test] fn ctrl_shift_b_is_not_shortcut() { assert_eq!(check_app_shortcut(&char_key("b"), ctrl_shift()), None); }
+    #[test] fn b_alone_is_not_shortcut() { assert_eq!(check_app_shortcut(&char_key("b"), NONE), None); }
+    // --- Settings ---
+    #[test] fn ctrl_comma_is_open_settings() { assert_eq!(check_app_shortcut(&char_key(","), CTRL), Some(AppAction::OpenSettings)); }
+    #[test] fn ctrl_shift_comma_is_not_shortcut() { assert_eq!(check_app_shortcut(&char_key(","), ctrl_shift()), None); }
+    #[test] fn comma_alone_is_not_shortcut() { assert_eq!(check_app_shortcut(&char_key(","), NONE), None); }
+    // --- Rename tab ---
+    #[test] fn f2_is_rename_tab() { assert_eq!(check_app_shortcut(&named_key(Named::F2), NONE), Some(AppAction::RenameTab)); }
+    #[test] fn ctrl_f2_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::F2), CTRL), None); }
+    #[test] fn shift_f2_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::F2), shift()), None); }
+    #[test] fn alt_f2_is_not_shortcut() { assert_eq!(check_app_shortcut(&named_key(Named::F2), alt()), None); }
 }
