@@ -10,6 +10,7 @@ mod split_pane;
 mod subscription;
 mod tab_bar;
 mod terminal_state;
+mod theme;
 mod workspace_state;
 
 use app::{GodlyApp, Message};
