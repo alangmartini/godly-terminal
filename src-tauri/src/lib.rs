@@ -313,8 +313,12 @@ pub fn run() {
             // --- LLM ---
             commands::llm_has_api_key,
             commands::llm_set_api_key,
+            commands::llm_set_provider,
+            commands::llm_get_provider,
             commands::llm_set_model,
             commands::llm_get_model,
+            commands::llm_set_api_base_url,
+            commands::llm_get_api_base_url,
             commands::llm_generate_branch_name,
             // --- Whisper ---
             commands::whisper_is_available,
