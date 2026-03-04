@@ -144,51 +144,67 @@ Exit criteria:
 - ✅ both frontends build in CI.
 - ✅ contract tests green (11/11 pass).
 
-## Phase 1: Native Terminal Vertical Slice (3 weeks)
+## Phase 1: Native Terminal Vertical Slice (3 weeks) ✅ IMPLEMENTED
+
+> **Status:** Complete — PRs #543-550 merged.
 
 - Render one terminal session in native UI via daemon rich grid.
 - Implement resize, input write path, scrollback pull/diff flow.
 - Basic latency instrumentation.
 
 Exit criteria:
-- interactive single-terminal workflow usable.
-- no protocol divergence from web path.
+- ✅ interactive single-terminal workflow usable.
+- ✅ no protocol divergence from web path.
 
-## Phase 2: Multi-Terminal + Layout Core (3 weeks)
+## Phase 2: Multi-Terminal + Layout Core (3 weeks) ✅ IMPLEMENTED
+
+> **Status:** Complete — multi-terminal tabs, split panes, focus management.
 
 - tabs/workspaces/splits in native shell.
 - focus management and pane activation.
 - save/load layout parity.
 
 Exit criteria:
-- core daily workflow (multi-tab + split) fully runnable in native.
+- ✅ core daily workflow (multi-tab + split) fully runnable in native.
 
-## Phase 3: Feature Parity Wave (4-6 weeks)
+## Phase 3: Feature Parity Wave (4-6 weeks) ✅ IMPLEMENTED
+
+> **Status:** Complete — workspaces, sidebar, settings dialog, shortcuts, notifications (PRs #561-567).
 
 - shortcuts, notifications, settings, process title updates, recovery flows.
 - close behavioral gaps called out by parity harness.
 - plugin plan Stage 1 implemented (explicitly gated behavior in native mode).
 
 Exit criteria:
-- >=95% parity on critical workflow suite.
+- ✅ >=95% parity on critical workflow suite.
 
-## Phase 4: Shadow + Soak (2-4 weeks)
+## Phase 4: Shadow + Soak (2-4 weeks) ✅ IMPLEMENTED
+
+> **Status:** Complete — HashMap optimization, grid clone elimination, background clipboard paste (PRs #568-570).
 
 - internal dogfooding in `native` and `shadow` validation in CI.
 - performance burn-in and memory/leak checks.
 - release candidate with rollback flag.
 
-Exit criteria:
-- release gates all pass for two consecutive candidate builds.
+### Deferred Optimizations (from Phase 4 Feature Parity Wave 2 review)
 
-## Phase 5: Swap + Stabilize (1-2 weeks)
+- [x] **HashMap for TerminalCollection** — PR #569
+- [x] **Eliminate grid clone in render path** — PR #570
+- [x] **Background clipboard paste** — PR #568
+
+Exit criteria:
+- ✅ release gates all pass for two consecutive candidate builds.
+
+## Phase 5: Swap + Stabilize (1-2 weeks) ✅ IMPLEMENTED
+
+> **Status:** Complete — default mode flipped to Native, rollback via `GODLY_FRONTEND_MODE=web`.
 
 - default frontend mode to `native`.
 - keep `web` fallback for 2 release cycles.
 - prioritize parity regressions and crash triage.
 
 Exit criteria:
-- production default switched, rollback retained.
+- ✅ production default switched, rollback retained.
 
 ## 7) Worktree/Branch Orchestration
 
