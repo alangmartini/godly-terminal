@@ -127,6 +127,13 @@ pub enum Message {
     ToggleSettings,
     /// User clicked a settings tab.
     SettingsTabClicked(String),
+    /// Clipboard text read successfully in background — write to terminal.
+    ClipboardPasted {
+        terminal_id: String,
+        text: String,
+    },
+    /// Clipboard read failed in background.
+    ClipboardPasteFailed(String),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -306,6 +313,19 @@ impl GodlyApp {
                     term.fetching = false;
                 }
                 log::error!("Grid fetch failed for {}: {}", session_id, error);
+            }
+
+            // --- Clipboard paste (background result) ---
+            Message::ClipboardPasted { terminal_id, text } => {
+                if let Some(client) = &self.client {
+                    let _ = commands::write_to_terminal(client, &terminal_id, text.as_bytes());
+                }
+            }
+            Message::ClipboardPasteFailed(e) => {
+                // "Clipboard empty" is normal — only log actual errors.
+                if e != "Clipboard empty" {
+                    log::error!("Clipboard paste failed: {}", e);
+                }
             }
 
             // --- Keyboard input (shortcut-first, then forward to PTY) ---
@@ -1032,20 +1052,30 @@ impl GodlyApp {
         let Some(tid) = self.target_terminal_id() else {
             return Task::none();
         };
-        let Some(client) = &self.client else {
-            return Task::none();
-        };
 
-        match clipboard::paste_from_clipboard() {
-            Ok(text) if !text.is_empty() => {
-                let _ = commands::write_to_terminal(client, &tid, text.as_bytes());
-            }
-            Ok(_) => {}
-            Err(e) => {
-                log::error!("Clipboard paste failed: {}", e);
-            }
-        }
-        Task::none()
+        let tid = tid.to_string();
+
+        // Read clipboard on a background thread to avoid blocking the UI.
+        // Local clipboard is fast (~1-5ms) but RDP/WSL forwarding can stall.
+        Task::perform(
+            async move {
+                let (tx, rx) = futures_channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result = clipboard::paste_from_clipboard();
+                    let _ = tx.send(result);
+                });
+                rx.await
+                    .unwrap_or_else(|_| Err("Clipboard background thread panicked".into()))
+            },
+            move |result| match result {
+                Ok(text) if !text.is_empty() => Message::ClipboardPasted {
+                    terminal_id: tid.clone(),
+                    text,
+                },
+                Ok(_) => Message::ClipboardPasteFailed("Clipboard empty".into()),
+                Err(e) => Message::ClipboardPasteFailed(e),
+            },
+        )
     }
 
     // -----------------------------------------------------------------------
