@@ -1,4 +1,5 @@
 pub mod app;
+pub mod notification_state;
 pub mod selection;
 pub mod split_pane;
 pub mod subscription;
