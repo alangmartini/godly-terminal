@@ -3,7 +3,9 @@ use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 
 #[allow(deprecated)]
-use super::models::{SessionMetadata, SplitView, Terminal, WindowState, Workspace};
+use super::models::{
+    SessionMetadata, SplitView, Terminal, WindowState, Workspace, WorkspaceGitHubAuthPolicy,
+};
 
 #[allow(deprecated)]
 pub struct AppState {
@@ -26,6 +28,8 @@ pub struct AppState {
     pub zoomed_panes: RwLock<HashMap<String, String>>,
     /// Workspace ID for MCP-created terminals (Agent workspace in separate window)
     pub mcp_workspace_id: RwLock<Option<String>>,
+    /// Per-workspace GitHub token injection policy (workspace_id -> policy)
+    pub github_auth_policies: RwLock<HashMap<String, WorkspaceGitHubAuthPolicy>>,
     /// Window geometry and monitor for cross-session restoration
     pub window_state: RwLock<Option<WindowState>>,
 }
@@ -45,6 +49,7 @@ impl AppState {
             layout_trees: RwLock::new(HashMap::new()),
             zoomed_panes: RwLock::new(HashMap::new()),
             mcp_workspace_id: RwLock::new(None),
+            github_auth_policies: RwLock::new(HashMap::new()),
             window_state: RwLock::new(None),
         }
     }
@@ -57,6 +62,10 @@ impl AppState {
     pub fn remove_workspace(&self, id: &str) {
         let mut workspaces = self.workspaces.write();
         workspaces.remove(id);
+        drop(workspaces);
+
+        let mut policies = self.github_auth_policies.write();
+        policies.remove(id);
     }
 
     pub fn get_workspace(&self, id: &str) -> Option<Workspace> {
@@ -139,6 +148,40 @@ impl AppState {
     pub fn add_session_metadata(&self, id: String, metadata: SessionMetadata) {
         let mut meta = self.session_metadata.write();
         meta.insert(id, metadata);
+    }
+
+    pub fn set_workspace_github_auth_policy(
+        &self,
+        workspace_id: &str,
+        policy: WorkspaceGitHubAuthPolicy,
+    ) {
+        let mut policies = self.github_auth_policies.write();
+        policies.insert(workspace_id.to_string(), policy);
+    }
+
+    pub fn get_workspace_github_auth_policy(
+        &self,
+        workspace_id: &str,
+    ) -> WorkspaceGitHubAuthPolicy {
+        self.github_auth_policies
+            .read()
+            .get(workspace_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn get_all_workspace_github_auth_policies(
+        &self,
+    ) -> HashMap<String, WorkspaceGitHubAuthPolicy> {
+        self.github_auth_policies.read().clone()
+    }
+
+    pub fn replace_workspace_github_auth_policies(
+        &self,
+        policies: HashMap<String, WorkspaceGitHubAuthPolicy>,
+    ) {
+        let mut current = self.github_auth_policies.write();
+        *current = policies;
     }
 
     pub fn remove_session_metadata(&self, id: &str) {
@@ -266,9 +309,9 @@ impl AppState {
     ) -> Result<(), String> {
         let mut trees = self.layout_trees.write();
 
-        let tree = trees.get_mut(workspace_id).ok_or_else(|| {
-            format!("No layout tree for workspace {}", workspace_id)
-        })?;
+        let tree = trees
+            .get_mut(workspace_id)
+            .ok_or_else(|| format!("No layout tree for workspace {}", workspace_id))?;
 
         // If the tree is just a single leaf, remove the whole tree
         if let LayoutNode::Leaf { terminal_id: tid } = tree {
@@ -276,10 +319,7 @@ impl AppState {
                 trees.remove(workspace_id);
                 return Ok(());
             }
-            return Err(format!(
-                "Terminal {} not found in layout tree",
-                terminal_id
-            ));
+            return Err(format!("Terminal {} not found in layout tree", terminal_id));
         }
 
         // Try to remove the terminal and collapse
@@ -309,9 +349,9 @@ impl AppState {
         terminal_id_b: &str,
     ) -> Result<(), String> {
         let mut trees = self.layout_trees.write();
-        let tree = trees.get_mut(workspace_id).ok_or_else(|| {
-            format!("No layout tree for workspace {}", workspace_id)
-        })?;
+        let tree = trees
+            .get_mut(workspace_id)
+            .ok_or_else(|| format!("No layout tree for workspace {}", workspace_id))?;
 
         Self::swap_terminals(tree, terminal_id_a, terminal_id_b);
         Ok(())
@@ -330,8 +370,12 @@ impl AppState {
         }
         let mut zoomed = self.zoomed_panes.write();
         match terminal_id {
-            Some(tid) => { zoomed.insert(workspace_id.to_string(), tid); }
-            None => { zoomed.remove(workspace_id); }
+            Some(tid) => {
+                zoomed.insert(workspace_id.to_string(), tid);
+            }
+            None => {
+                zoomed.remove(workspace_id);
+            }
         }
     }
 
@@ -532,7 +576,7 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::models::{AiToolMode, ShellType};
+    use crate::state::models::{AiToolMode, GitHubTokenRule, ShellType, WorkspaceGitHubAuthPolicy};
 
     #[test]
     fn test_workspace_add_and_get() {
@@ -686,6 +730,38 @@ mod tests {
         assert_eq!(m.cwd, Some("C:\\Users\\test".to_string()));
     }
 
+    #[test]
+    fn test_workspace_github_auth_policy_roundtrip() {
+        let state = AppState::new();
+        state.add_workspace(Workspace {
+            id: "ws-1".to_string(),
+            name: "Workspace".to_string(),
+            folder_path: "C:\\".to_string(),
+            tab_order: vec![],
+            shell_type: ShellType::Windows,
+            worktree_mode: false,
+            ai_tool_mode: AiToolMode::None,
+        });
+
+        let policy = WorkspaceGitHubAuthPolicy {
+            rules: vec![
+                GitHubTokenRule {
+                    pattern: "typesense/*".to_string(),
+                    token_env_var: "GH_TOKEN_TYPESENSE".to_string(),
+                },
+                GitHubTokenRule {
+                    pattern: "*".to_string(),
+                    token_env_var: "GH_TOKEN_FULL".to_string(),
+                },
+            ],
+            fallback_to_gh_auth: true,
+        };
+        state.set_workspace_github_auth_policy("ws-1", policy.clone());
+
+        let restored = state.get_workspace_github_auth_policy("ws-1");
+        assert_eq!(restored, policy);
+    }
+
     // ---------------------------------------------------------------
     // prune_stale_ids
     // ---------------------------------------------------------------
@@ -756,7 +832,8 @@ mod tests {
     #[test]
     fn prune_removes_dead_zoomed_pane() {
         let state = make_state_with_terminals(&["t1"]);
-        state.zoomed_panes
+        state
+            .zoomed_panes
             .write()
             .insert("ws-1".to_string(), "t2".to_string());
 
@@ -858,13 +935,8 @@ mod tests {
             },
         );
 
-        let result = state.split_terminal_in_tree(
-            "ws-1",
-            "t1",
-            "t2",
-            SplitDirection::Vertical,
-            0.5,
-        );
+        let result =
+            state.split_terminal_in_tree("ws-1", "t1", "t2", SplitDirection::Vertical, 0.5);
         assert!(result.is_ok());
 
         let tree = state.get_layout_tree("ws-1").unwrap();

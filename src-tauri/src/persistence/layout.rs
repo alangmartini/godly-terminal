@@ -1,13 +1,14 @@
-use std::sync::Arc;
 use godly_protocol::{LayoutNode, SplitDirection};
+use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tauri_plugin_store::StoreExt;
 
 #[allow(deprecated)]
-use crate::state::{AppState, Layout, TerminalInfo};
+use crate::state::{AppState, Layout, TerminalInfo, WorkspaceGitHubAuthPolicy};
 
 const STORE_PATH: &str = "layout.json";
 const LAYOUT_KEY: &str = "layout";
+const GITHUB_AUTH_POLICIES_KEY: &str = "workspace_github_auth_policies";
 
 fn log_info(msg: &str) {
     eprintln!("[persistence] {}", msg);
@@ -24,9 +25,7 @@ fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
         .values()
         .map(|t| {
             let meta = session_meta.get(&t.id);
-            let shell_type = meta
-                .map(|m| m.shell_type.clone())
-                .unwrap_or_default();
+            let shell_type = meta.map(|m| m.shell_type.clone()).unwrap_or_default();
             let cwd = meta.and_then(|m| m.cwd.clone());
 
             let worktree_path = meta.and_then(|m| m.worktree_path.clone());
@@ -50,13 +49,11 @@ fn build_terminal_infos(state: &AppState) -> Vec<TerminalInfo> {
 pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<(), String> {
     log_info("Saving layout...");
 
-    let store = app_handle
-        .store(STORE_PATH)
-        .map_err(|e| {
-            let msg = format!("Failed to open store: {}", e);
-            log_error(&msg);
-            msg
-        })?;
+    let store = app_handle.store(STORE_PATH).map_err(|e| {
+        let msg = format!("Failed to open store: {}", e);
+        log_error(&msg);
+        msg
+    })?;
 
     let workspaces = state.get_all_workspaces();
     let terminals = build_terminal_infos(&state);
@@ -74,14 +71,22 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
         window_state,
     };
 
-    let json_value = serde_json::to_value(&layout)
-        .map_err(|e| {
-            let msg = format!("Failed to serialize layout: {}", e);
+    let json_value = serde_json::to_value(&layout).map_err(|e| {
+        let msg = format!("Failed to serialize layout: {}", e);
+        log_error(&msg);
+        msg
+    })?;
+
+    store.set(LAYOUT_KEY, json_value);
+
+    let github_policies_value =
+        serde_json::to_value(state.get_all_workspace_github_auth_policies()).map_err(|e| {
+            let msg = format!("Failed to serialize GitHub auth policies: {}", e);
             log_error(&msg);
             msg
         })?;
+    store.set(GITHUB_AUTH_POLICIES_KEY, github_policies_value);
 
-    store.set(LAYOUT_KEY, json_value);
     store.save().map_err(|e| {
         let msg = format!("Failed to save store: {}", e);
         log_error(&msg);
@@ -102,22 +107,19 @@ pub fn save_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
 pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result<Layout, String> {
     log_info("Loading layout...");
 
-    let store = app_handle
-        .store(STORE_PATH)
-        .map_err(|e| {
-            let msg = format!("Failed to open store: {}", e);
-            log_error(&msg);
-            msg
-        })?;
+    let store = app_handle.store(STORE_PATH).map_err(|e| {
+        let msg = format!("Failed to open store: {}", e);
+        log_error(&msg);
+        msg
+    })?;
 
     match store.get(LAYOUT_KEY) {
         Some(value) => {
-            let layout: Layout = serde_json::from_value(value.clone())
-                .map_err(|e| {
-                    let msg = format!("Failed to parse layout: {}", e);
-                    log_error(&msg);
-                    msg
-                })?;
+            let layout: Layout = serde_json::from_value(value.clone()).map_err(|e| {
+                let msg = format!("Failed to parse layout: {}", e);
+                log_error(&msg);
+                msg
+            })?;
 
             log_info(&format!(
                 "Layout loaded: {} workspaces, {} terminals",
@@ -127,7 +129,10 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
 
             // Restore workspaces to backend state so create_terminal can find them
             for ws in &layout.workspaces {
-                log_info(&format!("Restoring workspace to backend state: {} ({})", ws.name, ws.id));
+                log_info(&format!(
+                    "Restoring workspace to backend state: {} ({})",
+                    ws.name, ws.id
+                ));
                 state.add_workspace(crate::state::Workspace {
                     id: ws.id.clone(),
                     name: ws.name.clone(),
@@ -158,7 +163,10 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                 for (ws_id, tree) in &layout.layout_trees {
                     state.set_layout_tree(ws_id, tree.clone());
                 }
-                log_info(&format!("Restored {} layout trees", layout.layout_trees.len()));
+                log_info(&format!(
+                    "Restored {} layout trees",
+                    layout.layout_trees.len()
+                ));
             } else if !layout.split_views.is_empty() {
                 // Migrate old split_views to layout trees
                 for (ws_id, sv) in &layout.split_views {
@@ -183,6 +191,33 @@ pub fn load_layout(app_handle: AppHandle, state: State<Arc<AppState>>) -> Result
                     "Migrated {} split_views to layout trees",
                     layout.split_views.len()
                 ));
+            }
+
+            match store.get(GITHUB_AUTH_POLICIES_KEY) {
+                Some(policies_value) => {
+                    match serde_json::from_value::<
+                        std::collections::HashMap<String, WorkspaceGitHubAuthPolicy>,
+                    >(policies_value)
+                    {
+                        Ok(mut policies) => {
+                            let known_workspaces: std::collections::HashSet<String> =
+                                layout.workspaces.iter().map(|ws| ws.id.clone()).collect();
+                            policies
+                                .retain(|workspace_id, _| known_workspaces.contains(workspace_id));
+                            state.replace_workspace_github_auth_policies(policies);
+                        }
+                        Err(e) => {
+                            log_error(&format!(
+                                "Failed to parse GitHub auth policies, ignoring: {}",
+                                e
+                            ));
+                            state.replace_workspace_github_auth_policies(Default::default());
+                        }
+                    }
+                }
+                None => {
+                    state.replace_workspace_github_auth_policies(Default::default());
+                }
             }
 
             Ok(layout)
@@ -214,7 +249,9 @@ pub fn restore_window_state(
     // Check if the saved monitor is still available
     let monitors = window.available_monitors().unwrap_or_default();
     let saved_monitor_available = saved.monitor_name.as_ref().map_or(false, |name| {
-        monitors.iter().any(|m| m.name().map_or(false, |n| n == name))
+        monitors
+            .iter()
+            .any(|m| m.name().map_or(false, |n| n == name))
     });
 
     if !saved_monitor_available {
@@ -233,20 +270,14 @@ pub fn restore_window_state(
 
     // Find the target monitor's work area for clamping
     let target_monitor = monitors.iter().find(|m| {
-        m.name().map_or(false, |n| {
-            Some(n.to_string()) == saved.monitor_name
-        })
+        m.name()
+            .map_or(false, |n| Some(n.to_string()) == saved.monitor_name)
     });
 
     let (mon_x, mon_y, mon_w, mon_h) = if let Some(m) = target_monitor {
         let pos = m.position();
         let size = m.size();
-        (
-            pos.x,
-            pos.y,
-            size.width as i32,
-            size.height as i32,
-        )
+        (pos.x, pos.y, size.width as i32, size.height as i32)
     } else {
         // Shouldn't reach here since we checked above, but fallback
         return Ok(());
@@ -256,7 +287,10 @@ pub fn restore_window_state(
     let w = saved.width as i32;
     let _h = saved.height as i32;
     let min_visible = 100; // at least 100px must be on screen
-    let x = saved.x.max(mon_x - w + min_visible).min(mon_x + mon_w - min_visible);
+    let x = saved
+        .x
+        .max(mon_x - w + min_visible)
+        .min(mon_x + mon_w - min_visible);
     let y = saved.y.max(mon_y).min(mon_y + mon_h - min_visible);
 
     log_info(&format!(
@@ -308,6 +342,11 @@ pub fn save_on_exit(app_handle: &AppHandle, state: &Arc<AppState>) {
     match serde_json::to_value(&layout) {
         Ok(json_value) => {
             store.set(LAYOUT_KEY, json_value);
+            if let Ok(github_policies_value) =
+                serde_json::to_value(state.get_all_workspace_github_auth_policies())
+            {
+                store.set(GITHUB_AUTH_POLICIES_KEY, github_policies_value);
+            }
             if let Err(e) = store.save() {
                 log_error(&format!("Failed to save store on exit: {}", e));
             } else {
@@ -408,11 +447,17 @@ pub fn save_layout_internal(app_handle: &AppHandle, state: &Arc<AppState>) -> Re
         window_state,
     };
 
-    let json_value = serde_json::to_value(&layout)
-        .map_err(|e| format!("Failed to serialize layout: {}", e))?;
+    let json_value =
+        serde_json::to_value(&layout).map_err(|e| format!("Failed to serialize layout: {}", e))?;
 
     store.set(LAYOUT_KEY, json_value);
-    store.save().map_err(|e| format!("Failed to save store: {}", e))?;
+    let github_policies_value =
+        serde_json::to_value(state.get_all_workspace_github_auth_policies())
+            .map_err(|e| format!("Failed to serialize GitHub auth policies: {}", e))?;
+    store.set(GITHUB_AUTH_POLICIES_KEY, github_policies_value);
+    store
+        .save()
+        .map_err(|e| format!("Failed to save store: {}", e))?;
 
     Ok(())
 }
