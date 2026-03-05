@@ -1,5 +1,7 @@
 pub mod app;
 pub mod notification_state;
+pub mod notifications;
+pub mod scrollback_restore;
 pub mod selection;
 pub mod settings_dialog;
 pub mod shortcuts_tab;
