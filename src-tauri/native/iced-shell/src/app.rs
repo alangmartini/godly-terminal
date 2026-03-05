@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_channel::mpsc;
 use iced::keyboard;
 use iced::widget::{
-    button, canvas, center, column, container, row, stack, text, text_input, Space,
+    button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
 };
 use iced::{event, window, Element, Length, Padding, Subscription, Task};
 
@@ -12,14 +15,18 @@ use godly_app_adapter::commands;
 use godly_app_adapter::daemon_client::NativeDaemonClient;
 use godly_app_adapter::keys::key_to_pty_bytes;
 use godly_app_adapter::shortcuts::{self, AppAction};
+use godly_app_adapter::sound::{self, NotificationSoundPreset};
 use godly_features_shell::layout as layout_reducer;
 use godly_features_shell::tabs as tab_reducer;
 use godly_features_shell::workspaces as workspace_reducer;
+use godly_layout_core::SplitPlacement;
 use godly_protocol::types::RichGridData;
 
 use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCanvas};
 
 use crate::notification_state::NotificationTracker;
+use crate::notifications;
+use crate::scrollback_restore;
 use crate::selection::{GridPos, SelectionState};
 use crate::settings_dialog::{self, SettingsTab};
 use crate::shortcuts_tab;
@@ -28,8 +35,112 @@ use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::terminal_state::TerminalCollection;
-use crate::theme::{BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY};
+use crate::theme::{
+    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+};
 use crate::workspace_state::WorkspaceCollection;
+
+#[path = "mru_switcher.rs"]
+mod mru_switcher;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuickClaudeLayout {
+    Single,
+    VSplit,
+    HSplit,
+    Grid2x2,
+}
+
+impl QuickClaudeLayout {
+    fn all() -> [Self; 4] {
+        [Self::Single, Self::VSplit, Self::HSplit, Self::Grid2x2]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Single => "Single",
+            Self::VSplit => "VSplit",
+            Self::HSplit => "HSplit",
+            Self::Grid2x2 => "2x2",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QuickClaudePreset {
+    name: String,
+    prompt_template: String,
+    layout: QuickClaudeLayout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AiToolEntry {
+    display_name: String,
+    command: String,
+    icon_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PluginEntry {
+    name: String,
+    source: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FlowEntry {
+    name: String,
+    trigger: String,
+    steps: Vec<String>,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteAuthMode {
+    Password,
+    SshKey,
+}
+
+impl RemoteAuthMode {
+    fn all() -> [Self; 2] {
+        [Self::Password, Self::SshKey]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Password => "Password",
+            Self::SshKey => "SSH Key",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteConnectionEntry {
+    name: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_mode: RemoteAuthMode,
+    auth_value: Option<String>,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToastNotification {
+    id: u64,
+    title: String,
+    message: String,
+    expires_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MruSwitcherState {
+    selected_terminal_id: String,
+}
+
+const TOAST_TTL_MS: u64 = 4_000;
+const TOAST_TICK_INTERVAL_MS: u64 = 250;
+const MAX_ACTIVE_TOASTS: usize = 6;
 
 /// Main Iced application state — multi-terminal with event-driven updates.
 pub struct GodlyApp {
@@ -46,12 +157,20 @@ pub struct GodlyApp {
     /// Window dimensions in logical pixels.
     window_width: f32,
     window_height: f32,
+    /// Native window id captured from runtime events.
+    window_id: Option<window::Id>,
+    /// Whether the app window is currently focused.
+    window_focused: bool,
     /// Font metrics for cell sizing and grid dimension calculations.
     font_metrics: FontMetrics,
     /// Mouse text selection state.
     selection: SelectionState,
     /// Whether the workspace sidebar is visible.
     sidebar_visible: bool,
+    /// Current sidebar width in logical pixels.
+    sidebar_width: f32,
+    /// Whether the sidebar resize handle is currently being dragged.
+    sidebar_resizing: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
     /// Active tab in the settings dialog.
@@ -66,6 +185,88 @@ pub struct GodlyApp {
     rename_workspace_id: Option<String>,
     /// Current value in the rename workspace input.
     rename_workspace_value: String,
+    /// Tab currently showing context menu actions.
+    tab_context_menu_id: Option<String>,
+    /// Tab currently being renamed.
+    rename_tab_id: Option<String>,
+    /// Current value in the rename tab input.
+    rename_tab_value: String,
+    /// Whether audible notification sounds are enabled.
+    notification_sounds_enabled: bool,
+    /// Active notification sound preset.
+    notification_sound_preset: NotificationSoundPreset,
+    /// Last terminal-local sound timestamps for debounce.
+    last_terminal_sound_ms: HashMap<String, u64>,
+    /// Last global sound timestamp for debounce.
+    last_global_sound_ms: Option<u64>,
+    /// Last native attention request timestamp for debounce.
+    last_attention_request_ms: Option<u64>,
+    /// Workspace name/id mute patterns for notification sounds.
+    workspace_mute_patterns: Vec<String>,
+    /// Current input value for adding a workspace mute pattern.
+    workspace_mute_pattern_input: String,
+    /// Quick Claude preset editor input: preset name.
+    quick_claude_name_input: String,
+    /// Quick Claude preset editor input: prompt template.
+    quick_claude_prompt_input: String,
+    /// Quick Claude preset editor selected layout.
+    quick_claude_layout: QuickClaudeLayout,
+    /// Stored Quick Claude presets for settings/runtime usage.
+    quick_claude_presets: Vec<QuickClaudePreset>,
+    /// Selected preset index when editing an existing preset.
+    quick_claude_edit_index: Option<usize>,
+    /// AI Tools editor input: display name.
+    ai_tool_name_input: String,
+    /// AI Tools editor input: launch command.
+    ai_tool_command_input: String,
+    /// AI Tools editor input: optional icon tag.
+    ai_tool_icon_input: String,
+    /// Stored AI tool entries for settings/runtime usage.
+    ai_tools: Vec<AiToolEntry>,
+    /// Selected AI tool index when editing an existing tool.
+    ai_tool_edit_index: Option<usize>,
+    /// Plugins editor input: plugin name.
+    plugin_name_input: String,
+    /// Plugins editor input: plugin source path/url.
+    plugin_source_input: String,
+    /// Stored plugin entries for settings/runtime usage.
+    plugins: Vec<PluginEntry>,
+    /// Selected plugin index when editing an existing plugin.
+    plugin_edit_index: Option<usize>,
+    /// Flows editor input: flow name.
+    flow_name_input: String,
+    /// Flows editor input: trigger descriptor.
+    flow_trigger_input: String,
+    /// Flows editor input: list of steps separated by new lines, commas, or semicolons.
+    flow_steps_input: String,
+    /// Stored flow entries for settings/runtime usage.
+    flows: Vec<FlowEntry>,
+    /// Selected flow index when editing an existing flow.
+    flow_edit_index: Option<usize>,
+    /// Remote profile editor input: profile name.
+    remote_name_input: String,
+    /// Remote profile editor input: SSH host/IP.
+    remote_host_input: String,
+    /// Remote profile editor input: SSH port.
+    remote_port_input: String,
+    /// Remote profile editor input: SSH username.
+    remote_username_input: String,
+    /// Remote profile editor selected auth mode.
+    remote_auth_mode: RemoteAuthMode,
+    /// Remote profile editor input: password or key path.
+    remote_auth_value_input: String,
+    /// Stored remote connection profiles for settings/runtime usage.
+    remote_connections: Vec<RemoteConnectionEntry>,
+    /// Selected remote profile index when editing.
+    remote_edit_index: Option<usize>,
+    /// Active toast notifications rendered as overlay cards.
+    toasts: Vec<ToastNotification>,
+    /// Monotonic id source for toast notifications.
+    next_toast_id: u64,
+    /// Tab ID currently being dragged for reorder.
+    dragging_tab_id: Option<String>,
+    /// Ctrl+Tab MRU switcher popup state while modifier is held.
+    mru_switcher: Option<MruSwitcherState>,
 }
 
 impl Default for GodlyApp {
@@ -78,9 +279,13 @@ impl Default for GodlyApp {
             event_receiver: Arc::new(parking_lot::Mutex::new(None)),
             window_width: 1200.0,
             window_height: 800.0,
+            window_id: None,
+            window_focused: true,
             font_metrics: FontMetrics::default(),
             selection: SelectionState::default(),
             sidebar_visible: true,
+            sidebar_width: SIDEBAR_WIDTH,
+            sidebar_resizing: false,
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             notifications: NotificationTracker::new(),
@@ -88,6 +293,47 @@ impl Default for GodlyApp {
             workspace_context_menu_id: None,
             rename_workspace_id: None,
             rename_workspace_value: String::new(),
+            tab_context_menu_id: None,
+            rename_tab_id: None,
+            rename_tab_value: String::new(),
+            notification_sounds_enabled: true,
+            notification_sound_preset: NotificationSoundPreset::Bell,
+            last_terminal_sound_ms: HashMap::new(),
+            last_global_sound_ms: None,
+            last_attention_request_ms: None,
+            workspace_mute_patterns: Vec::new(),
+            workspace_mute_pattern_input: String::new(),
+            quick_claude_name_input: String::new(),
+            quick_claude_prompt_input: String::new(),
+            quick_claude_layout: QuickClaudeLayout::Single,
+            quick_claude_presets: Vec::new(),
+            quick_claude_edit_index: None,
+            ai_tool_name_input: String::new(),
+            ai_tool_command_input: String::new(),
+            ai_tool_icon_input: String::new(),
+            ai_tools: Vec::new(),
+            ai_tool_edit_index: None,
+            plugin_name_input: String::new(),
+            plugin_source_input: String::new(),
+            plugins: Vec::new(),
+            plugin_edit_index: None,
+            flow_name_input: String::new(),
+            flow_trigger_input: String::new(),
+            flow_steps_input: String::new(),
+            flows: Vec::new(),
+            flow_edit_index: None,
+            remote_name_input: String::new(),
+            remote_host_input: String::new(),
+            remote_port_input: "22".to_string(),
+            remote_username_input: String::new(),
+            remote_auth_mode: RemoteAuthMode::Password,
+            remote_auth_value_input: String::new(),
+            remote_connections: Vec::new(),
+            remote_edit_index: None,
+            toasts: Vec::new(),
+            next_toast_id: 1,
+            dragging_tab_id: None,
+            mru_switcher: None,
         }
     }
 }
@@ -110,14 +356,49 @@ pub enum Message {
     Initialized(Result<InitResult, String>),
     /// User clicked a tab.
     TabClicked(String),
+    /// User opened/closes tab context menu via right click.
+    TabContextToggle(String),
+    /// Tab context menu action: begin rename.
+    TabContextRename(String),
+    /// Tab context menu action: split tab in direction.
+    TabContextSplit {
+        terminal_id: String,
+        direction: SplitDirection,
+    },
+    /// Tab context menu action: copy tab info to clipboard.
+    TabContextCopyInfo(String),
+    /// Tab context menu action: close tab.
+    TabContextClose(String),
+    /// User started dragging a tab.
+    TabDragStart(String),
+    /// User hovered another tab while dragging.
+    TabDragHover(String),
+    /// User hovered a split drop zone while dragging.
+    TabSplitZoneHover {
+        target_terminal_id: String,
+        placement: SplitPlacement,
+    },
+    /// User finished dragging a tab.
+    TabDragEnd,
     /// User wants a new terminal.
     NewTabRequested,
     /// User wants to close a terminal.
     CloseTabRequested(String),
     /// New terminal created by daemon.
     TerminalCreated(Result<String, String>),
+    /// Window opened and delivered a runtime window id.
+    WindowOpened(window::Id),
     /// Window was resized.
-    WindowResized { width: f32, height: f32 },
+    WindowResized {
+        window_id: window::Id,
+        width: f32,
+        height: f32,
+    },
+    /// App window focus changed.
+    WindowFocusChanged {
+        window_id: window::Id,
+        focused: bool,
+    },
     /// Mouse wheel scrolled (for scrollback).
     MouseWheel { delta_y: f32 },
     /// Mouse button pressed at pixel position (starts selection).
@@ -140,12 +421,116 @@ pub enum Message {
     SidebarAction(SidebarAction),
     /// Toggle the sidebar visibility.
     ToggleSidebar,
+    /// Begin dragging the sidebar resize handle.
+    SidebarResizeStart,
+    /// Finish dragging the sidebar resize handle.
+    SidebarResizeEnd,
     /// Rename dialog input changed.
     WorkspaceRenameInputChanged(String),
     /// Rename dialog submitted.
     WorkspaceRenameSubmitted,
     /// Rename dialog canceled.
     WorkspaceRenameCancelled,
+    /// Tab rename dialog input changed.
+    TabRenameInputChanged(String),
+    /// Tab rename dialog submitted.
+    TabRenameSubmitted,
+    /// Tab rename dialog canceled.
+    TabRenameCancelled,
+    /// Toggle notification sounds enabled/disabled.
+    NotificationSoundsToggled,
+    /// Select notification sound preset.
+    NotificationSoundPresetSelected(NotificationSoundPreset),
+    /// Play test notification sound.
+    NotificationSoundTest,
+    /// Input changed for workspace mute pattern editor.
+    WorkspaceMutePatternInputChanged(String),
+    /// Add a workspace mute pattern from the current input.
+    AddWorkspaceMutePattern,
+    /// Remove a workspace mute pattern.
+    RemoveWorkspaceMutePattern(String),
+    /// Quick Claude preset name input changed.
+    QuickClaudeNameInputChanged(String),
+    /// Quick Claude prompt template input changed.
+    QuickClaudePromptInputChanged(String),
+    /// Quick Claude layout selected.
+    QuickClaudeLayoutSelected(QuickClaudeLayout),
+    /// Save current Quick Claude preset editor values.
+    QuickClaudeSavePreset,
+    /// Load an existing Quick Claude preset into the editor.
+    QuickClaudeEditPreset(usize),
+    /// Remove an existing Quick Claude preset.
+    QuickClaudeDeletePreset(usize),
+    /// Clear Quick Claude preset editor state.
+    QuickClaudeClearEditor,
+    /// AI tool display name input changed.
+    AiToolNameInputChanged(String),
+    /// AI tool command input changed.
+    AiToolCommandInputChanged(String),
+    /// AI tool icon input changed.
+    AiToolIconInputChanged(String),
+    /// Save current AI tool editor values.
+    AiToolSave,
+    /// Load an existing AI tool into editor.
+    AiToolEdit(usize),
+    /// Remove an existing AI tool.
+    AiToolDelete(usize),
+    /// Clear AI tool editor state.
+    AiToolClearEditor,
+    /// Plugin name input changed.
+    PluginNameInputChanged(String),
+    /// Plugin source input changed.
+    PluginSourceInputChanged(String),
+    /// Save current plugin editor values.
+    PluginSave,
+    /// Load an existing plugin entry into editor.
+    PluginEdit(usize),
+    /// Remove an existing plugin entry.
+    PluginDelete(usize),
+    /// Toggle enabled state for a plugin entry.
+    PluginToggleEnabled(usize),
+    /// Clear plugin editor state.
+    PluginClearEditor,
+    /// Flow name input changed.
+    FlowNameInputChanged(String),
+    /// Flow trigger input changed.
+    FlowTriggerInputChanged(String),
+    /// Flow steps input changed.
+    FlowStepsInputChanged(String),
+    /// Save current flow editor values.
+    FlowSave,
+    /// Load an existing flow entry into editor.
+    FlowEdit(usize),
+    /// Remove an existing flow entry.
+    FlowDelete(usize),
+    /// Toggle enabled state for a flow entry.
+    FlowToggleEnabled(usize),
+    /// Clear flow editor state.
+    FlowClearEditor,
+    /// Remote profile name input changed.
+    RemoteNameInputChanged(String),
+    /// Remote host input changed.
+    RemoteHostInputChanged(String),
+    /// Remote port input changed.
+    RemotePortInputChanged(String),
+    /// Remote username input changed.
+    RemoteUsernameInputChanged(String),
+    /// Remote auth mode selected.
+    RemoteAuthModeSelected(RemoteAuthMode),
+    /// Remote auth value input changed.
+    RemoteAuthValueInputChanged(String),
+    /// Save current remote profile values.
+    RemoteSave,
+    /// Load an existing remote profile into editor.
+    RemoteEdit(usize),
+    /// Remove an existing remote profile.
+    RemoteDelete(usize),
+    /// Toggle enabled state for a remote profile.
+    RemoteToggleEnabled(usize),
+    /// Clear remote editor state.
+    RemoteClearEditor,
+    /// Periodic tick used for toast auto-dismiss.
+    ToastTick,
     /// Toggle the settings dialog.
     ToggleSettings,
     /// User clicked a settings tab.
@@ -154,6 +539,8 @@ pub enum Message {
     ClipboardPasted { terminal_id: String, text: String },
     /// Clipboard read failed in background.
     ClipboardPasteFailed(String),
+    /// File path dropped on window.
+    FileDropped(PathBuf),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -165,6 +552,7 @@ pub enum InitResult {
     Recovered {
         session_ids: Vec<String>,
         first_id: String,
+        restored_scrollback_offsets: HashMap<String, usize>,
     },
 }
 
@@ -197,6 +585,147 @@ impl GodlyApp {
         } else {
             // Fallback: show all terminals
             self.terminals.iter().collect()
+        }
+    }
+
+    fn workspace_has_notifications(
+        &self,
+        workspace: &crate::workspace_state::WorkspaceInfo,
+    ) -> bool {
+        workspace.layout.all_leaf_ids().iter().any(|terminal_id| {
+            self.notifications.unread_count(terminal_id) > 0
+                || self.notifications.has_bell(terminal_id)
+        })
+    }
+
+    fn notified_workspace_ids(&self) -> Vec<String> {
+        self.workspaces
+            .as_slice()
+            .iter()
+            .filter(|workspace| self.workspace_has_notifications(workspace))
+            .map(|workspace| workspace.id.clone())
+            .collect()
+    }
+
+    fn workspace_muted_for_terminal(&self, terminal_id: &str) -> bool {
+        let Some(terminal) = self.terminals.get(terminal_id) else {
+            return false;
+        };
+        let Some(workspace_id) = terminal.workspace_id.as_deref() else {
+            return false;
+        };
+        let Some(workspace) = self.workspaces.get(workspace_id) else {
+            return false;
+        };
+        workspace_matches_mute_patterns(
+            &self.workspace_mute_patterns,
+            workspace_id,
+            &workspace.name,
+        )
+    }
+
+    fn now_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    fn enqueue_toast(&mut self, title: String, message: String) {
+        let now_ms = Self::now_ms();
+        enqueue_toast_entry(
+            self.toasts.as_mut(),
+            &mut self.next_toast_id,
+            title,
+            message,
+            now_ms,
+        );
+    }
+
+    fn enqueue_bell_toast(&mut self, terminal_id: &str) {
+        let title = "Terminal Bell".to_string();
+        let message = if let Some(term) = self.terminals.get(terminal_id) {
+            let workspace = term
+                .workspace_id
+                .as_deref()
+                .and_then(|workspace_id| self.workspaces.get(workspace_id))
+                .map(|workspace| workspace.name.as_str())
+                .unwrap_or("Unknown workspace");
+            format!("{} in {}", term.tab_label(), workspace)
+        } else {
+            format!("Bell event from {}", terminal_id)
+        };
+        self.enqueue_toast(title, message);
+    }
+
+    fn play_notification_sound_if_allowed(&mut self, terminal_id: &str) {
+        if !self.notification_sounds_enabled
+            || self.notification_sound_preset == NotificationSoundPreset::None
+        {
+            return;
+        }
+        if self.workspace_muted_for_terminal(terminal_id) {
+            return;
+        }
+
+        let now_ms = Self::now_ms();
+        let last_terminal_sound_ms = self.last_terminal_sound_ms.get(terminal_id).copied();
+        let decision = notifications::decide_sound_playback(
+            now_ms,
+            last_terminal_sound_ms,
+            self.last_global_sound_ms,
+        );
+        if !decision.should_play_sound {
+            return;
+        }
+
+        if let Err(e) = sound::play_notification_sound_async(self.notification_sound_preset) {
+            log::warn!(
+                "Failed to launch notification sound preset '{}': {}",
+                self.notification_sound_preset.label(),
+                e
+            );
+            return;
+        }
+
+        self.last_terminal_sound_ms
+            .insert(terminal_id.to_string(), now_ms);
+        self.last_global_sound_ms = Some(now_ms);
+    }
+
+    fn request_window_attention_if_allowed(&mut self) -> Task<Message> {
+        let now_ms = Self::now_ms();
+        let decision = notifications::decide_window_attention_request(
+            now_ms,
+            self.window_focused,
+            self.last_attention_request_ms,
+        );
+        if !decision.should_request_attention {
+            return Task::none();
+        }
+
+        let Some(window_id) = self.window_id else {
+            return Task::none();
+        };
+
+        self.last_attention_request_ms = Some(now_ms);
+        let attention = if notifications::bell_attention_is_critical(cfg!(target_os = "windows")) {
+            window::UserAttention::Critical
+        } else {
+            window::UserAttention::Informational
+        };
+        window::request_user_attention(window_id, Some(attention))
+    }
+
+    fn persist_scrollback_offsets(&self) {
+        let offsets: HashMap<String, usize> = self
+            .terminals
+            .iter()
+            .filter(|terminal| terminal.scrollback_offset > 0)
+            .map(|terminal| (terminal.id.clone(), terminal.scrollback_offset))
+            .collect();
+        if let Err(error) = scrollback_restore::save_offsets(&offsets) {
+            log::warn!("Failed to persist scrollback offsets: {}", error);
         }
     }
 
@@ -241,6 +770,7 @@ impl GodlyApp {
                     InitResult::Recovered {
                         session_ids,
                         first_id,
+                        restored_scrollback_offsets,
                     } => {
                         for id in &session_ids {
                             self.terminals.add_to_workspace(
@@ -249,6 +779,11 @@ impl GodlyApp {
                                 cols,
                                 "w-default".to_string(),
                             );
+                            if let Some(offset) = restored_scrollback_offsets.get(id) {
+                                if let Some(term) = self.terminals.get_mut(id) {
+                                    term.scrollback_offset = *offset;
+                                }
+                            }
                         }
                         self.terminals.set_active(&first_id);
                         // Create default workspace with first session's layout.
@@ -268,8 +803,26 @@ impl GodlyApp {
                             }
                         }
                         // Fetch grids for all recovered sessions.
-                        let tasks: Vec<Task<Message>> =
-                            session_ids.iter().map(|id| self.fetch_grid(id)).collect();
+                        let plan = scrollback_restore::build_recovery_fetch_plan(
+                            &session_ids,
+                            &restored_scrollback_offsets,
+                        );
+                        let mut tasks: Vec<Task<Message>> = Vec::with_capacity(plan.len());
+                        for action in plan {
+                            match action {
+                                scrollback_restore::RecoveryFetchAction::FetchGrid {
+                                    session_id,
+                                } => {
+                                    tasks.push(self.fetch_grid(&session_id));
+                                }
+                                scrollback_restore::RecoveryFetchAction::ScrollFetch {
+                                    session_id,
+                                    offset,
+                                } => {
+                                    tasks.push(self.scroll_fetch(&session_id, offset));
+                                }
+                            }
+                        }
                         return Task::batch(tasks);
                     }
                 }
@@ -311,18 +864,31 @@ impl GodlyApp {
             }
             Message::DaemonEvent(DaemonEventMsg::Bell { session_id }) => {
                 self.notifications.record_bell(&session_id);
+                let is_focused = self.active_focused() == Some(session_id.as_str());
+                if !is_focused {
+                    self.enqueue_bell_toast(&session_id);
+                }
+                self.play_notification_sound_if_allowed(&session_id);
                 log::debug!("Bell from session {}", session_id);
+                return self.request_window_attention_if_allowed();
             }
 
             // --- Grid fetch results ---
             Message::GridFetched { session_id, grid } => {
+                let mut should_persist_clamp = false;
                 if let Some(term) = self.terminals.get_mut(&session_id) {
+                    if grid.scrollback_offset < term.scrollback_offset {
+                        should_persist_clamp = true;
+                    }
                     term.fetching = false;
                     term.dirty = false;
                     term.title = grid.title.clone();
                     term.total_scrollback = grid.total_scrollback;
-                    term.scrollback_offset = grid.scrollback_offset;
+                    term.scrollback_offset = grid.scrollback_offset.min(grid.total_scrollback);
                     term.grid = Some(grid);
+                }
+                if should_persist_clamp {
+                    self.persist_scrollback_offsets();
                 }
             }
             Message::GridFetchFailed { session_id, error } => {
@@ -344,9 +910,28 @@ impl GodlyApp {
                     log::error!("Clipboard paste failed: {}", e);
                 }
             }
+            Message::FileDropped(path) => {
+                let target_terminal = self.target_terminal_id().map(str::to_string);
+                if let (Some(terminal_id), Some(client)) = (target_terminal, &self.client) {
+                    let payload = format!("{} ", quote_dropped_path(&path));
+                    let _ = commands::write_to_terminal(client, &terminal_id, payload.as_bytes());
+                }
+            }
 
             // --- Keyboard input (shortcut-first, then forward to PTY) ---
             Message::KeyboardEvent(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                if let Some(direction) = mru_cycle_direction_from_shortcut_key(&key, modifiers) {
+                    self.open_or_cycle_mru_switcher(direction);
+                    return Task::none();
+                }
+
+                if self.mru_switcher.is_some() {
+                    if is_escape_key(&key) {
+                        self.cancel_mru_switcher();
+                    }
+                    return Task::none();
+                }
+
                 // Check app shortcuts first.
                 if let Some(action) = shortcuts::check_app_shortcut(&key, modifiers) {
                     return self.handle_app_action(action);
@@ -362,7 +947,23 @@ impl GodlyApp {
                     }
                 }
             }
-            Message::KeyboardEvent(_) => {}
+            Message::KeyboardEvent(keyboard::Event::KeyReleased { key, modifiers, .. }) => {
+                if should_commit_mru_switcher_on_key_release(
+                    self.mru_switcher.is_some(),
+                    &key,
+                    modifiers,
+                ) {
+                    self.commit_mru_switcher();
+                }
+            }
+            Message::KeyboardEvent(keyboard::Event::ModifiersChanged(modifiers)) => {
+                if should_commit_mru_switcher_on_modifiers_changed(
+                    self.mru_switcher.is_some(),
+                    modifiers,
+                ) {
+                    self.commit_mru_switcher();
+                }
+            }
 
             // --- Mouse wheel scrollback ---
             Message::MouseWheel { delta_y } => {
@@ -372,28 +973,112 @@ impl GodlyApp {
 
             // --- Tab management ---
             Message::TabClicked(id) => {
-                let in_active_layout = self
-                    .active_layout()
-                    .map(|layout| layout.find_leaf(&id))
-                    .unwrap_or(false);
-                let decision = tab_reducer::reduce_tab_click(tab_reducer::TabClickInput {
-                    terminal_id: id,
-                    terminal_in_active_layout: in_active_layout,
-                });
-
-                self.terminals.set_active(&decision.activate_terminal_id);
-                if let Some(focus_terminal_id) = decision.focus_workspace_terminal_id {
-                    if let Some(ws) = self.workspaces.active_mut() {
-                        ws.focused_terminal = focus_terminal_id;
+                self.activate_tab_via_reducer(id);
+            }
+            Message::TabContextToggle(id) => {
+                self.tab_context_menu_id = tab_reducer::reduce_tab_context_toggle(
+                    self.tab_context_menu_id.as_deref(),
+                    &id,
+                );
+            }
+            Message::TabContextRename(id) => {
+                if let Some(term) = self.terminals.get(&id) {
+                    self.rename_tab_value = term.custom_name.clone().unwrap_or_default();
+                    self.rename_tab_id = Some(id);
+                    self.tab_context_menu_id = None;
+                }
+            }
+            Message::TabContextSplit {
+                terminal_id,
+                direction,
+            } => {
+                if let Some(ws) = self.workspaces.active_mut() {
+                    ws.focused_terminal = terminal_id.clone();
+                }
+                self.terminals.set_active(&terminal_id);
+                self.notifications.mark_read(&terminal_id);
+                self.tab_context_menu_id = None;
+                return self.split_focused_pane(direction);
+            }
+            Message::TabContextCopyInfo(id) => {
+                if let Some(term) = self.terminals.get(&id) {
+                    let info = format!(
+                        "Tab: {}\nSession: {}\nWorkspace: {}\nTitle: {}\nProcess: {}\nExited: {}{}\nSize: {}x{}",
+                        term.tab_label(),
+                        term.id,
+                        term.workspace_id.as_deref().unwrap_or("-"),
+                        if term.title.is_empty() { "-" } else { &term.title },
+                        if term.process_name.is_empty() {
+                            "-"
+                        } else {
+                            &term.process_name
+                        },
+                        term.exited,
+                        term.exit_code
+                            .map(|code| format!("\nExit code: {}", code))
+                            .unwrap_or_default(),
+                        term.cols,
+                        term.rows
+                    );
+                    if let Err(e) = clipboard::copy_to_clipboard(&info) {
+                        log::error!("Failed to copy tab info to clipboard: {}", e);
                     }
                 }
-                self.notifications
-                    .mark_read(&decision.mark_terminal_read_id);
+                self.tab_context_menu_id = None;
+            }
+            Message::TabContextClose(id) => {
+                self.tab_context_menu_id = None;
+                return self.close_terminal(&id);
+            }
+            Message::TabDragStart(tab_id) => {
+                self.dragging_tab_id = Some(tab_id);
+                self.tab_context_menu_id = None;
+            }
+            Message::TabDragHover(target_id) => {
+                if let Some(source_id) = self.dragging_tab_id.clone() {
+                    if source_id != target_id {
+                        let _ = self.terminals.reorder_by_ids(&source_id, &target_id);
+                    }
+                }
+            }
+            Message::TabSplitZoneHover {
+                target_terminal_id,
+                placement,
+            } => {
+                if let Some(source_id) = self.dragging_tab_id.clone() {
+                    let decision = layout_reducer::reduce_drop_tab_into_split_zone(
+                        layout_reducer::DropTabIntoSplitZoneInput {
+                            layout: self.active_layout().cloned(),
+                            source_terminal_id: Some(source_id.clone()),
+                            target_terminal_id: Some(target_terminal_id),
+                            placement,
+                        },
+                    );
+
+                    if let Some(decision) = decision {
+                        if let Some(ws) = self.workspaces.active_mut() {
+                            ws.layout = decision.next_layout;
+                            ws.focused_terminal = decision.next_focused_terminal_id.clone();
+                        }
+                        self.terminals
+                            .set_active(&decision.next_focused_terminal_id);
+                        self.notifications
+                            .mark_read(&decision.next_focused_terminal_id);
+                        self.dragging_tab_id = None;
+                        return self.fetch_grid(&decision.next_focused_terminal_id);
+                    }
+                }
+            }
+            Message::TabDragEnd => {
+                self.dragging_tab_id = None;
             }
             Message::NewTabRequested => {
                 return self.create_new_terminal();
             }
             Message::CloseTabRequested(id) => {
+                if self.dragging_tab_id.as_deref() == Some(id.as_str()) {
+                    self.dragging_tab_id = None;
+                }
                 return self.close_terminal(&id);
             }
             Message::TerminalCreated(Ok(session_id)) => {
@@ -446,11 +1131,20 @@ impl GodlyApp {
                 log::error!("Failed to create terminal: {}", e);
             }
 
+            Message::WindowOpened(window_id) => {
+                self.window_id = Some(window_id);
+            }
+
             // --- Window resize ---
-            Message::WindowResized { width, height } => {
+            Message::WindowResized {
+                window_id,
+                width,
+                height,
+            } => {
                 let old_cols = self.calculate_cols();
                 let old_rows = self.calculate_rows();
 
+                self.window_id = Some(window_id);
                 self.window_width = width;
                 self.window_height = height;
 
@@ -461,6 +1155,17 @@ impl GodlyApp {
                     return self.resize_active_terminal(new_rows, new_cols);
                 }
             }
+            Message::WindowFocusChanged { window_id, focused } => {
+                self.window_id = Some(window_id);
+                self.window_focused = focused;
+                if !focused {
+                    self.cancel_mru_switcher();
+                }
+                if focused {
+                    self.last_attention_request_ms = None;
+                    return window::request_user_attention(window_id, None);
+                }
+            }
 
             // --- Mouse selection ---
             Message::SelectionStart { x, y } => {
@@ -468,13 +1173,22 @@ impl GodlyApp {
                 self.selection.start(pos);
             }
             Message::SelectionUpdate { x, y } => {
+                if self.sidebar_resizing {
+                    self.sidebar_width = sidebar::clamp_sidebar_width(x);
+                    return Task::none();
+                }
                 if self.selection.active {
                     let pos = self.pixel_to_grid(x, y);
                     self.selection.update(pos);
                 }
             }
             Message::SelectionEnd => {
+                if self.sidebar_resizing {
+                    self.sidebar_resizing = false;
+                    return self.resize_all_terminals();
+                }
                 self.selection.finish();
+                self.dragging_tab_id = None;
             }
 
             // --- Split pane operations ---
@@ -513,6 +1227,7 @@ impl GodlyApp {
                 if let Some(terminal_id) = decision.mark_terminal_read_id {
                     self.notifications.mark_read(&terminal_id);
                 }
+                self.tab_context_menu_id = None;
             }
             Message::NewWorkspaceRequested => {
                 return self.create_new_workspace();
@@ -536,10 +1251,483 @@ impl GodlyApp {
                 self.rename_workspace_id = None;
                 self.rename_workspace_value.clear();
             }
+            Message::TabRenameInputChanged(value) => {
+                self.rename_tab_value = value;
+            }
+            Message::TabRenameSubmitted => {
+                if let Some(tab_id) = self.rename_tab_id.take() {
+                    let decision = tab_reducer::reduce_tab_rename(tab_reducer::TabRenameInput {
+                        terminal_id: tab_id.clone(),
+                        raw_name: self.rename_tab_value.clone(),
+                        terminal_exists: self.terminals.get(&tab_id).is_some(),
+                    });
+                    if let Some(decision) = decision {
+                        self.terminals
+                            .rename(&decision.terminal_id, decision.next_custom_name);
+                        if decision.clear_context_menu {
+                            self.tab_context_menu_id = None;
+                        }
+                    }
+                }
+                self.rename_tab_value.clear();
+            }
+            Message::TabRenameCancelled => {
+                self.rename_tab_id = None;
+                self.rename_tab_value.clear();
+            }
+            Message::NotificationSoundsToggled => {
+                self.notification_sounds_enabled = !self.notification_sounds_enabled;
+            }
+            Message::NotificationSoundPresetSelected(preset) => {
+                self.notification_sound_preset = preset;
+            }
+            Message::NotificationSoundTest => {
+                if self.notification_sounds_enabled {
+                    if let Err(e) =
+                        sound::play_notification_sound_async(self.notification_sound_preset)
+                    {
+                        log::warn!("Failed to play notification test sound: {}", e);
+                    }
+                }
+            }
+            Message::WorkspaceMutePatternInputChanged(value) => {
+                self.workspace_mute_pattern_input = value;
+            }
+            Message::AddWorkspaceMutePattern => {
+                if let Some(pattern) =
+                    normalize_mute_pattern(self.workspace_mute_pattern_input.as_str())
+                {
+                    if !self
+                        .workspace_mute_patterns
+                        .iter()
+                        .any(|existing| existing == &pattern)
+                    {
+                        self.workspace_mute_patterns.push(pattern);
+                    }
+                    self.workspace_mute_pattern_input.clear();
+                }
+            }
+            Message::RemoveWorkspaceMutePattern(pattern) => {
+                self.workspace_mute_patterns
+                    .retain(|existing| existing != &pattern);
+            }
+            Message::QuickClaudeNameInputChanged(value) => {
+                self.quick_claude_name_input = value;
+            }
+            Message::QuickClaudePromptInputChanged(value) => {
+                self.quick_claude_prompt_input = value;
+            }
+            Message::QuickClaudeLayoutSelected(layout) => {
+                self.quick_claude_layout = layout;
+            }
+            Message::QuickClaudeSavePreset => {
+                let Some(name) = normalize_quick_claude_text(&self.quick_claude_name_input) else {
+                    return Task::none();
+                };
+                let Some(prompt_template) =
+                    normalize_quick_claude_text(&self.quick_claude_prompt_input)
+                else {
+                    return Task::none();
+                };
+
+                let next_preset = QuickClaudePreset {
+                    name,
+                    prompt_template,
+                    layout: self.quick_claude_layout,
+                };
+
+                if let Some(edit_index) = self.quick_claude_edit_index {
+                    if edit_index < self.quick_claude_presets.len() {
+                        self.quick_claude_presets[edit_index] = next_preset;
+                    } else {
+                        self.quick_claude_presets.push(next_preset);
+                    }
+                } else {
+                    self.quick_claude_presets.push(next_preset);
+                }
+
+                self.quick_claude_name_input.clear();
+                self.quick_claude_prompt_input.clear();
+                self.quick_claude_layout = QuickClaudeLayout::Single;
+                self.quick_claude_edit_index = None;
+            }
+            Message::QuickClaudeEditPreset(index) => {
+                if let Some(preset) = self.quick_claude_presets.get(index) {
+                    self.quick_claude_name_input = preset.name.clone();
+                    self.quick_claude_prompt_input = preset.prompt_template.clone();
+                    self.quick_claude_layout = preset.layout;
+                    self.quick_claude_edit_index = Some(index);
+                }
+            }
+            Message::QuickClaudeDeletePreset(index) => {
+                if index < self.quick_claude_presets.len() {
+                    self.quick_claude_presets.remove(index);
+                    match self.quick_claude_edit_index {
+                        Some(edit_index) if edit_index == index => {
+                            self.quick_claude_edit_index = None;
+                            self.quick_claude_name_input.clear();
+                            self.quick_claude_prompt_input.clear();
+                            self.quick_claude_layout = QuickClaudeLayout::Single;
+                        }
+                        Some(edit_index) if edit_index > index => {
+                            self.quick_claude_edit_index = Some(edit_index - 1);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Message::QuickClaudeClearEditor => {
+                self.quick_claude_edit_index = None;
+                self.quick_claude_name_input.clear();
+                self.quick_claude_prompt_input.clear();
+                self.quick_claude_layout = QuickClaudeLayout::Single;
+            }
+            Message::AiToolNameInputChanged(value) => {
+                self.ai_tool_name_input = value;
+            }
+            Message::AiToolCommandInputChanged(value) => {
+                self.ai_tool_command_input = value;
+            }
+            Message::AiToolIconInputChanged(value) => {
+                self.ai_tool_icon_input = value;
+            }
+            Message::AiToolSave => {
+                let Some(display_name) = normalize_ai_tool_field(&self.ai_tool_name_input) else {
+                    return Task::none();
+                };
+                let Some(command) = normalize_ai_tool_field(&self.ai_tool_command_input) else {
+                    return Task::none();
+                };
+                let icon_tag = normalize_ai_tool_field(&self.ai_tool_icon_input);
+
+                let next_entry = AiToolEntry {
+                    display_name,
+                    command,
+                    icon_tag,
+                };
+
+                if let Some(edit_index) = self.ai_tool_edit_index {
+                    if edit_index < self.ai_tools.len() {
+                        self.ai_tools[edit_index] = next_entry;
+                    } else {
+                        self.ai_tools.push(next_entry);
+                    }
+                } else {
+                    self.ai_tools.push(next_entry);
+                }
+
+                self.ai_tool_name_input.clear();
+                self.ai_tool_command_input.clear();
+                self.ai_tool_icon_input.clear();
+                self.ai_tool_edit_index = None;
+            }
+            Message::AiToolEdit(index) => {
+                if let Some(entry) = self.ai_tools.get(index) {
+                    self.ai_tool_name_input = entry.display_name.clone();
+                    self.ai_tool_command_input = entry.command.clone();
+                    self.ai_tool_icon_input = entry.icon_tag.clone().unwrap_or_default();
+                    self.ai_tool_edit_index = Some(index);
+                }
+            }
+            Message::AiToolDelete(index) => {
+                if index < self.ai_tools.len() {
+                    self.ai_tools.remove(index);
+                    match self.ai_tool_edit_index {
+                        Some(edit_index) if edit_index == index => {
+                            self.ai_tool_edit_index = None;
+                            self.ai_tool_name_input.clear();
+                            self.ai_tool_command_input.clear();
+                            self.ai_tool_icon_input.clear();
+                        }
+                        Some(edit_index) if edit_index > index => {
+                            self.ai_tool_edit_index = Some(edit_index - 1);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Message::AiToolClearEditor => {
+                self.ai_tool_edit_index = None;
+                self.ai_tool_name_input.clear();
+                self.ai_tool_command_input.clear();
+                self.ai_tool_icon_input.clear();
+            }
+            Message::PluginNameInputChanged(value) => {
+                self.plugin_name_input = value;
+            }
+            Message::PluginSourceInputChanged(value) => {
+                self.plugin_source_input = value;
+            }
+            Message::PluginSave => {
+                let Some(name) = normalize_plugin_field(&self.plugin_name_input) else {
+                    return Task::none();
+                };
+                let Some(source) = normalize_plugin_field(&self.plugin_source_input) else {
+                    return Task::none();
+                };
+
+                let next_entry = PluginEntry {
+                    name,
+                    source,
+                    enabled: true,
+                };
+
+                if let Some(edit_index) = self.plugin_edit_index {
+                    if edit_index < self.plugins.len() {
+                        self.plugins[edit_index] = next_entry;
+                    } else {
+                        self.plugins.push(next_entry);
+                    }
+                } else {
+                    self.plugins.push(next_entry);
+                }
+
+                self.plugin_name_input.clear();
+                self.plugin_source_input.clear();
+                self.plugin_edit_index = None;
+            }
+            Message::PluginEdit(index) => {
+                if let Some(entry) = self.plugins.get(index) {
+                    self.plugin_name_input = entry.name.clone();
+                    self.plugin_source_input = entry.source.clone();
+                    self.plugin_edit_index = Some(index);
+                }
+            }
+            Message::PluginDelete(index) => {
+                if index < self.plugins.len() {
+                    self.plugins.remove(index);
+                    match self.plugin_edit_index {
+                        Some(edit_index) if edit_index == index => {
+                            self.plugin_edit_index = None;
+                            self.plugin_name_input.clear();
+                            self.plugin_source_input.clear();
+                        }
+                        Some(edit_index) if edit_index > index => {
+                            self.plugin_edit_index = Some(edit_index - 1);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Message::PluginToggleEnabled(index) => {
+                let _ = toggle_plugin_enabled(self.plugins.as_mut_slice(), index);
+            }
+            Message::PluginClearEditor => {
+                self.plugin_edit_index = None;
+                self.plugin_name_input.clear();
+                self.plugin_source_input.clear();
+            }
+            Message::FlowNameInputChanged(value) => {
+                self.flow_name_input = value;
+            }
+            Message::FlowTriggerInputChanged(value) => {
+                self.flow_trigger_input = value;
+            }
+            Message::FlowStepsInputChanged(value) => {
+                self.flow_steps_input = value;
+            }
+            Message::FlowSave => {
+                let Some(name) = normalize_flow_field(&self.flow_name_input) else {
+                    return Task::none();
+                };
+                let trigger = normalize_flow_field(&self.flow_trigger_input)
+                    .unwrap_or_else(|| "Manual".to_string());
+                let steps = parse_flow_steps(&self.flow_steps_input);
+                let enabled = self
+                    .flow_edit_index
+                    .and_then(|index| self.flows.get(index).map(|flow| flow.enabled))
+                    .unwrap_or(true);
+
+                let next_entry = FlowEntry {
+                    name,
+                    trigger,
+                    steps,
+                    enabled,
+                };
+
+                if let Some(edit_index) = self.flow_edit_index {
+                    if edit_index < self.flows.len() {
+                        self.flows[edit_index] = next_entry;
+                    } else {
+                        self.flows.push(next_entry);
+                    }
+                } else {
+                    self.flows.push(next_entry);
+                }
+
+                self.flow_name_input.clear();
+                self.flow_trigger_input.clear();
+                self.flow_steps_input.clear();
+                self.flow_edit_index = None;
+            }
+            Message::FlowEdit(index) => {
+                if let Some(entry) = self.flows.get(index) {
+                    self.flow_name_input = entry.name.clone();
+                    self.flow_trigger_input = entry.trigger.clone();
+                    self.flow_steps_input = entry.steps.join("\n");
+                    self.flow_edit_index = Some(index);
+                }
+            }
+            Message::FlowDelete(index) => {
+                if index < self.flows.len() {
+                    self.flows.remove(index);
+                    match self.flow_edit_index {
+                        Some(edit_index) if edit_index == index => {
+                            self.flow_edit_index = None;
+                            self.flow_name_input.clear();
+                            self.flow_trigger_input.clear();
+                            self.flow_steps_input.clear();
+                        }
+                        Some(edit_index) if edit_index > index => {
+                            self.flow_edit_index = Some(edit_index - 1);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Message::FlowToggleEnabled(index) => {
+                let _ = toggle_flow_enabled(self.flows.as_mut_slice(), index);
+            }
+            Message::FlowClearEditor => {
+                self.flow_edit_index = None;
+                self.flow_name_input.clear();
+                self.flow_trigger_input.clear();
+                self.flow_steps_input.clear();
+            }
+            Message::RemoteNameInputChanged(value) => {
+                self.remote_name_input = value;
+            }
+            Message::RemoteHostInputChanged(value) => {
+                self.remote_host_input = value;
+            }
+            Message::RemotePortInputChanged(value) => {
+                self.remote_port_input = value;
+            }
+            Message::RemoteUsernameInputChanged(value) => {
+                self.remote_username_input = value;
+            }
+            Message::RemoteAuthModeSelected(mode) => {
+                self.remote_auth_mode = mode;
+            }
+            Message::RemoteAuthValueInputChanged(value) => {
+                self.remote_auth_value_input = value;
+            }
+            Message::RemoteSave => {
+                let Some(name) = normalize_remote_field(&self.remote_name_input) else {
+                    return Task::none();
+                };
+                let Some(host) = normalize_remote_field(&self.remote_host_input) else {
+                    return Task::none();
+                };
+                let Some(port) = normalize_remote_port(&self.remote_port_input) else {
+                    return Task::none();
+                };
+                let Some(username) = normalize_remote_field(&self.remote_username_input) else {
+                    return Task::none();
+                };
+                let auth_value = normalize_remote_field(&self.remote_auth_value_input);
+                let enabled = self
+                    .remote_edit_index
+                    .and_then(|index| {
+                        self.remote_connections
+                            .get(index)
+                            .map(|profile| profile.enabled)
+                    })
+                    .unwrap_or(true);
+
+                let next_profile = RemoteConnectionEntry {
+                    name,
+                    host,
+                    port,
+                    username,
+                    auth_mode: self.remote_auth_mode,
+                    auth_value,
+                    enabled,
+                };
+
+                if let Some(edit_index) = self.remote_edit_index {
+                    if edit_index < self.remote_connections.len() {
+                        self.remote_connections[edit_index] = next_profile;
+                    } else {
+                        self.remote_connections.push(next_profile);
+                    }
+                } else {
+                    self.remote_connections.push(next_profile);
+                }
+
+                self.remote_name_input.clear();
+                self.remote_host_input.clear();
+                self.remote_port_input = "22".to_string();
+                self.remote_username_input.clear();
+                self.remote_auth_mode = RemoteAuthMode::Password;
+                self.remote_auth_value_input.clear();
+                self.remote_edit_index = None;
+            }
+            Message::RemoteEdit(index) => {
+                if let Some(profile) = self.remote_connections.get(index) {
+                    self.remote_name_input = profile.name.clone();
+                    self.remote_host_input = profile.host.clone();
+                    self.remote_port_input = profile.port.to_string();
+                    self.remote_username_input = profile.username.clone();
+                    self.remote_auth_mode = profile.auth_mode;
+                    self.remote_auth_value_input = profile.auth_value.clone().unwrap_or_default();
+                    self.remote_edit_index = Some(index);
+                }
+            }
+            Message::RemoteDelete(index) => {
+                if index < self.remote_connections.len() {
+                    self.remote_connections.remove(index);
+                    match self.remote_edit_index {
+                        Some(edit_index) if edit_index == index => {
+                            self.remote_edit_index = None;
+                            self.remote_name_input.clear();
+                            self.remote_host_input.clear();
+                            self.remote_port_input = "22".to_string();
+                            self.remote_username_input.clear();
+                            self.remote_auth_mode = RemoteAuthMode::Password;
+                            self.remote_auth_value_input.clear();
+                        }
+                        Some(edit_index) if edit_index > index => {
+                            self.remote_edit_index = Some(edit_index - 1);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Message::RemoteToggleEnabled(index) => {
+                let _ = toggle_remote_enabled(self.remote_connections.as_mut_slice(), index);
+            }
+            Message::RemoteClearEditor => {
+                self.remote_edit_index = None;
+                self.remote_name_input.clear();
+                self.remote_host_input.clear();
+                self.remote_port_input = "22".to_string();
+                self.remote_username_input.clear();
+                self.remote_auth_mode = RemoteAuthMode::Password;
+                self.remote_auth_value_input.clear();
+            }
+            Message::ToastTick => {
+                let now_ms = Self::now_ms();
+                let _ = prune_expired_toasts(self.toasts.as_mut(), now_ms);
+            }
 
             // --- Sidebar + Settings ---
             Message::ToggleSidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
+                self.sidebar_resizing = false;
+                return self.resize_all_terminals();
+            }
+            Message::SidebarResizeStart => {
+                if self.sidebar_visible {
+                    self.sidebar_resizing = true;
+                    self.selection.clear();
+                }
+            }
+            Message::SidebarResizeEnd => {
+                if self.sidebar_resizing {
+                    self.sidebar_resizing = false;
+                    return self.resize_all_terminals();
+                }
             }
             Message::ToggleSettings => {
                 self.settings_open = !self.settings_open;
@@ -562,12 +1750,16 @@ impl GodlyApp {
 
         // Tab bar — show terminals for the active workspace.
         let active_id = self.active_focused();
-        let ordered = self.terminals.ordered_terminals();
+        let ordered = self.active_workspace_terminals();
         let tab_bar = tab_bar::view_tab_bar(
             &ordered,
             active_id,
             |id| Message::TabClicked(id),
             |id| Message::CloseTabRequested(id),
+            |id| Message::TabDragStart(id),
+            |id| Message::TabDragHover(id),
+            |id| Message::TabContextToggle(id),
+            Message::TabDragEnd,
             Message::NewTabRequested,
         );
 
@@ -576,7 +1768,7 @@ impl GodlyApp {
         let terminal_view: Element<'_, Message> = if let Some(layout) = self.active_layout() {
             if layout.leaf_count() > 0 && self.terminals.count() > 0 {
                 view_layout(layout, &|terminal_id: &str| {
-                    self.render_terminal_pane(terminal_id, focused_id)
+                    self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
                 })
             } else {
                 center(text("No active terminal").size(16)).into()
@@ -589,11 +1781,22 @@ impl GodlyApp {
         let main_area = column![tab_bar, terminal_view];
 
         let main_content: Element<'_, Message> = if self.sidebar_visible {
+            let notified_workspace_ids = self.notified_workspace_ids();
             let sidebar = sidebar::view_sidebar(
                 self.workspaces.as_slice(),
                 self.workspaces.active_id(),
-                self.workspace_context_menu_id.as_deref(),
+                (
+                    self.workspace_context_menu_id.as_deref(),
+                    move |workspace_id: &str| {
+                        notified_workspace_ids
+                            .iter()
+                            .any(|id| id.as_str() == workspace_id)
+                    },
+                ),
+                self.sidebar_width,
                 Message::SidebarAction,
+                Message::SidebarResizeStart,
+                Message::SidebarResizeEnd,
             );
             row![sidebar, main_area].into()
         } else {
@@ -601,12 +1804,46 @@ impl GodlyApp {
         };
 
         // Overlay settings dialog if open.
-        let layered: Element<'_, Message> = if self.settings_open {
-            let tabs = &[SettingsTab {
-                id: "shortcuts",
-                label: "Shortcuts",
-            }];
-            let tab_content = shortcuts_tab::view_shortcuts_tab();
+        let with_settings: Element<'_, Message> = if self.settings_open {
+            let tabs = &[
+                SettingsTab {
+                    id: "shortcuts",
+                    label: "Shortcuts",
+                },
+                SettingsTab {
+                    id: "notifications",
+                    label: "Notifications",
+                },
+                SettingsTab {
+                    id: "quick-claude",
+                    label: "Quick Claude",
+                },
+                SettingsTab {
+                    id: "ai-tools",
+                    label: "AI Tools",
+                },
+                SettingsTab {
+                    id: "plugins",
+                    label: "Plugins",
+                },
+                SettingsTab {
+                    id: "flows",
+                    label: "Flows",
+                },
+                SettingsTab {
+                    id: "remote",
+                    label: "Remote",
+                },
+            ];
+            let tab_content = match self.settings_tab.as_str() {
+                "notifications" => self.view_notifications_tab(),
+                "quick-claude" => self.view_quick_claude_tab(),
+                "ai-tools" => self.view_ai_tools_tab(),
+                "plugins" => self.view_plugins_tab(),
+                "flows" => self.view_flows_tab(),
+                "remote" => self.view_remote_tab(),
+                _ => shortcuts_tab::view_shortcuts_tab(),
+            };
             let settings_overlay = settings_dialog::view_settings_dialog(
                 tabs,
                 &self.settings_tab,
@@ -619,28 +1856,965 @@ impl GodlyApp {
             main_content
         };
 
-        if self.rename_workspace_id.is_some() {
-            stack![layered, self.view_workspace_rename_dialog()].into()
+        let with_toasts: Element<'_, Message> = if self.toasts.is_empty() {
+            with_settings
         } else {
-            layered
+            stack![with_settings, self.view_toast_overlay()].into()
+        };
+
+        let with_tab_context: Element<'_, Message> = if self.tab_context_menu_id.is_some() {
+            stack![with_toasts, self.view_tab_context_menu()].into()
+        } else {
+            with_toasts
+        };
+
+        let with_mru_switcher: Element<'_, Message> = if self.mru_switcher.is_some() {
+            stack![with_tab_context, self.view_mru_switcher_overlay()].into()
+        } else {
+            with_tab_context
+        };
+
+        let with_workspace_rename: Element<'_, Message> = if self.rename_workspace_id.is_some() {
+            stack![with_mru_switcher, self.view_workspace_rename_dialog()].into()
+        } else {
+            with_mru_switcher
+        };
+
+        if self.rename_tab_id.is_some() {
+            stack![with_workspace_rename, self.view_tab_rename_dialog()].into()
+        } else {
+            with_workspace_rename
         }
     }
 
+    fn view_tab_context_menu(&self) -> Element<'_, Message> {
+        let Some(tab_id) = self.tab_context_menu_id.as_deref() else {
+            return Space::new().into();
+        };
+        let Some(term) = self.terminals.get(tab_id) else {
+            return Space::new().into();
+        };
+
+        let title = text(format!("Tab Actions: {}", term.tab_label()))
+            .size(14)
+            .color(TEXT_ACTIVE);
+        let rename_id = tab_id.to_string();
+        let split_right_id = tab_id.to_string();
+        let split_down_id = tab_id.to_string();
+        let copy_info_id = tab_id.to_string();
+        let close_id = tab_id.to_string();
+
+        let action_btn = |label: &'static str, msg: Message| {
+            button(text(label).size(12).color(TEXT_PRIMARY))
+                .on_press(msg)
+                .padding(Padding::from([5, 8]))
+                .width(Length::Fill)
+                .style(|_theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        _ => iced::Color::TRANSPARENT,
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(bg)),
+                        text_color: TEXT_PRIMARY,
+                        border: iced::Border::default(),
+                        ..button::Style::default()
+                    }
+                })
+        };
+
+        let menu = container(
+            column![
+                title,
+                action_btn("Rename", Message::TabContextRename(rename_id)),
+                action_btn(
+                    "Split Right",
+                    Message::TabContextSplit {
+                        terminal_id: split_right_id,
+                        direction: SplitDirection::Horizontal
+                    }
+                ),
+                action_btn(
+                    "Split Down",
+                    Message::TabContextSplit {
+                        terminal_id: split_down_id,
+                        direction: SplitDirection::Vertical
+                    }
+                ),
+                action_btn("Copy Info", Message::TabContextCopyInfo(copy_info_id)),
+                action_btn("Close", Message::TabContextClose(close_id)),
+                action_btn("Dismiss", Message::TabContextToggle(tab_id.to_string())),
+            ]
+            .spacing(4),
+        )
+        .padding(Padding::from([10, 10]))
+        .width(Length::Fixed(260.0))
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(BG_SECONDARY)),
+            border: iced::Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..container::Style::default()
+        });
+
+        container(center(menu))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(BACKDROP)),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn view_tab_rename_dialog(&self) -> Element<'_, Message> {
+        let dialog = container(column![
+            text("Rename Tab").size(16).color(TEXT_ACTIVE),
+            text_input(
+                "Tab name (empty clears custom name)",
+                &self.rename_tab_value
+            )
+            .on_input(Message::TabRenameInputChanged)
+            .on_submit(Message::TabRenameSubmitted)
+            .padding(Padding::from([6, 8]))
+            .size(14),
+            row![
+                Space::new().width(Length::Fill),
+                button(text("Cancel").size(12).color(TEXT_PRIMARY))
+                    .on_press(Message::TabRenameCancelled)
+                    .padding(Padding::from([4, 9]))
+                    .style(|_theme, status| {
+                        let bg = match status {
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                            _ => iced::Color::TRANSPARENT,
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            text_color: TEXT_PRIMARY,
+                            border: iced::Border {
+                                color: BORDER,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..button::Style::default()
+                        }
+                    }),
+                button(text("Rename").size(12).color(TEXT_ACTIVE))
+                    .on_press(Message::TabRenameSubmitted)
+                    .padding(Padding::from([4, 9]))
+                    .style(|_theme, status| {
+                        let bg = match status {
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                            _ => BG_SECONDARY,
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            text_color: TEXT_ACTIVE,
+                            border: iced::Border {
+                                color: BORDER,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..button::Style::default()
+                        }
+                    }),
+            ]
+            .spacing(8),
+        ])
+        .padding(Padding::from([14, 16]))
+        .width(Length::Fixed(360.0))
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(BG_SECONDARY)),
+            border: iced::Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..container::Style::default()
+        });
+
+        container(center(dialog))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(BACKDROP)),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn view_mru_switcher_overlay(&self) -> Element<'_, Message> {
+        let Some(selected_terminal_id) = self
+            .mru_switcher
+            .as_ref()
+            .map(|state| state.selected_terminal_id.as_str())
+        else {
+            return Space::new().into();
+        };
+
+        let entries: Vec<mru_switcher::MruSwitcherEntry> = self
+            .terminals
+            .mru_terminal_ids()
+            .into_iter()
+            .filter_map(|terminal_id| {
+                self.terminals.get(terminal_id).map(|terminal| {
+                    let detail =
+                        (!terminal.process_name.is_empty()).then(|| terminal.process_name.clone());
+                    mru_switcher::MruSwitcherEntry {
+                        terminal_id: terminal.id.clone(),
+                        label: terminal.tab_label().to_string(),
+                        detail,
+                    }
+                })
+            })
+            .collect();
+        if entries.is_empty() {
+            return Space::new().into();
+        }
+
+        mru_switcher::view_overlay(entries, Some(selected_terminal_id))
+    }
+
+    fn view_toast_overlay(&self) -> Element<'_, Message> {
+        let mut toasts_column = column![].spacing(8).width(Length::Fixed(320.0));
+        for toast in &self.toasts {
+            let card = container(column![
+                text(&toast.title).size(13).color(TEXT_ACTIVE),
+                text(&toast.message).size(11).color(TEXT_PRIMARY),
+            ])
+            .padding(Padding::from([8, 10]))
+            .width(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(BG_SECONDARY)),
+                border: iced::Border {
+                    color: BORDER,
+                    width: 1.0,
+                    radius: 5.0.into(),
+                },
+                ..container::Style::default()
+            });
+            toasts_column = toasts_column.push(card);
+        }
+
+        container(row![Space::new().width(Length::Fill), toasts_column])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding::from([14, 14]))
+            .into()
+    }
+
+    fn view_notifications_tab(&self) -> Element<'_, Message> {
+        let toggle_label = if self.notification_sounds_enabled {
+            "Disable Sounds"
+        } else {
+            "Enable Sounds"
+        };
+
+        let mut preset_row = row![].spacing(8);
+        for preset in NotificationSoundPreset::all() {
+            let is_active = self.notification_sound_preset == preset;
+            let bg = if is_active { BG_TERTIARY } else { BG_SECONDARY };
+            let fg = if is_active { TEXT_ACTIVE } else { TEXT_PRIMARY };
+
+            let btn = button(text(preset.label()).size(12).color(fg))
+                .on_press(Message::NotificationSoundPresetSelected(preset))
+                .padding(Padding::from([4, 9]))
+                .style(move |_theme, status| {
+                    let hover_bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        _ => bg,
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(hover_bg)),
+                        text_color: fg,
+                        border: iced::Border {
+                            color: BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..button::Style::default()
+                    }
+                });
+            preset_row = preset_row.push(btn);
+        }
+
+        let add_pattern_row = row![
+            text_input(
+                "Mute pattern (e.g. work-* or w-default)",
+                &self.workspace_mute_pattern_input,
+            )
+            .on_input(Message::WorkspaceMutePatternInputChanged)
+            .on_submit(Message::AddWorkspaceMutePattern)
+            .padding(Padding::from([4, 8]))
+            .size(12)
+            .width(Length::Fill),
+            button(text("Add").size(12).color(TEXT_PRIMARY))
+                .on_press(Message::AddWorkspaceMutePattern)
+                .padding(Padding::from([4, 9]))
+        ]
+        .spacing(8)
+        .width(Length::Fill)
+        .align_y(iced::Alignment::Center);
+
+        let mut mute_pattern_list = column![].spacing(6).width(Length::Fill);
+        if self.workspace_mute_patterns.is_empty() {
+            mute_pattern_list = mute_pattern_list.push(
+                text("No workspace mute patterns configured.")
+                    .size(11)
+                    .color(TEXT_SECONDARY),
+            );
+        } else {
+            for pattern in &self.workspace_mute_patterns {
+                let remove_pattern = pattern.clone();
+                let row = row![
+                    text(pattern).size(12).color(TEXT_PRIMARY),
+                    Space::new().width(Length::Fill),
+                    button(text("Remove").size(11).color(TEXT_PRIMARY))
+                        .on_press(Message::RemoveWorkspaceMutePattern(remove_pattern))
+                        .padding(Padding::from([2, 7]))
+                ]
+                .spacing(8)
+                .width(Length::Fill)
+                .align_y(iced::Alignment::Center);
+                mute_pattern_list = mute_pattern_list.push(row);
+            }
+        }
+
+        container(
+            column![
+                text("Notification Sounds").size(14).color(TEXT_ACTIVE),
+                text("Choose a sound preset for bell events.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                button(text(toggle_label).size(12).color(TEXT_PRIMARY))
+                    .on_press(Message::NotificationSoundsToggled)
+                    .padding(Padding::from([4, 9])),
+                preset_row,
+                button(text("Play Test Sound").size(12).color(TEXT_PRIMARY))
+                    .on_press(Message::NotificationSoundTest)
+                    .padding(Padding::from([4, 9])),
+                text("Workspace mute patterns").size(14).color(TEXT_ACTIVE),
+                text("Use * wildcard. Matches workspace id or name.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                add_pattern_row,
+                mute_pattern_list,
+            ]
+            .spacing(10)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn view_quick_claude_tab(&self) -> Element<'_, Message> {
+        let save_label = if self.quick_claude_edit_index.is_some() {
+            "Update Preset"
+        } else {
+            "Add Preset"
+        };
+
+        let mut layout_row = row![].spacing(8).align_y(iced::Alignment::Center);
+        for layout in QuickClaudeLayout::all() {
+            let is_active = self.quick_claude_layout == layout;
+            let bg = if is_active { BG_TERTIARY } else { BG_SECONDARY };
+            let fg = if is_active { TEXT_ACTIVE } else { TEXT_PRIMARY };
+            let layout_button = button(text(layout.label()).size(12).color(fg))
+                .on_press(Message::QuickClaudeLayoutSelected(layout))
+                .padding(Padding::from([4, 9]))
+                .style(move |_theme, status| {
+                    let hover_bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        _ => bg,
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(hover_bg)),
+                        text_color: fg,
+                        border: iced::Border {
+                            color: BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..button::Style::default()
+                    }
+                });
+            layout_row = layout_row.push(layout_button);
+        }
+
+        let mut presets_list = column![].spacing(8).width(Length::Fill);
+        if self.quick_claude_presets.is_empty() {
+            presets_list = presets_list.push(
+                text("No Quick Claude presets yet.")
+                    .size(11)
+                    .color(TEXT_SECONDARY),
+            );
+        } else {
+            for (index, preset) in self.quick_claude_presets.iter().enumerate() {
+                let is_editing = self.quick_claude_edit_index == Some(index);
+                let card_bg = if is_editing {
+                    BG_TERTIARY
+                } else {
+                    BG_SECONDARY
+                };
+                let card = container(column![
+                    row![
+                        text(&preset.name).size(13).color(TEXT_ACTIVE),
+                        Space::new().width(Length::Fill),
+                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::QuickClaudeEditPreset(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::QuickClaudeDeletePreset(index))
+                            .padding(Padding::from([2, 7])),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                    text(format!("Layout: {}", preset.layout.label()))
+                        .size(11)
+                        .color(TEXT_SECONDARY),
+                    text(&preset.prompt_template).size(11).color(TEXT_PRIMARY),
+                ])
+                .padding(Padding::from([8, 10]))
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(card_bg)),
+                    border: iced::Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::Style::default()
+                });
+                presets_list = presets_list.push(card);
+            }
+        }
+
+        container(
+            column![
+                text("Quick Claude Presets").size(14).color(TEXT_ACTIVE),
+                text("Configure reusable launch presets.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                text_input("Preset name", &self.quick_claude_name_input)
+                    .on_input(Message::QuickClaudeNameInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Prompt template", &self.quick_claude_prompt_input)
+                    .on_input(Message::QuickClaudePromptInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text("Layout").size(12).color(TEXT_SECONDARY),
+                layout_row,
+                row![
+                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::QuickClaudeSavePreset)
+                        .padding(Padding::from([4, 9])),
+                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::QuickClaudeClearEditor)
+                        .padding(Padding::from([4, 9])),
+                ]
+                .spacing(8),
+                text("Saved Presets").size(12).color(TEXT_SECONDARY),
+                presets_list,
+            ]
+            .spacing(10)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn view_ai_tools_tab(&self) -> Element<'_, Message> {
+        let save_label = if self.ai_tool_edit_index.is_some() {
+            "Update Tool"
+        } else {
+            "Add Tool"
+        };
+
+        let mut tools_list = column![].spacing(8).width(Length::Fill);
+        if self.ai_tools.is_empty() {
+            tools_list = tools_list.push(
+                text("No AI tools configured.")
+                    .size(11)
+                    .color(TEXT_SECONDARY),
+            );
+        } else {
+            for (index, entry) in self.ai_tools.iter().enumerate() {
+                let is_editing = self.ai_tool_edit_index == Some(index);
+                let card_bg = if is_editing {
+                    BG_TERTIARY
+                } else {
+                    BG_SECONDARY
+                };
+                let icon_line = entry.icon_tag.as_deref().unwrap_or("-");
+                let card = container(column![
+                    row![
+                        text(&entry.display_name).size(13).color(TEXT_ACTIVE),
+                        Space::new().width(Length::Fill),
+                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::AiToolEdit(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::AiToolDelete(index))
+                            .padding(Padding::from([2, 7])),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                    text(format!("Command: {}", entry.command))
+                        .size(11)
+                        .color(TEXT_PRIMARY),
+                    text(format!("Icon: {}", icon_line))
+                        .size(11)
+                        .color(TEXT_SECONDARY),
+                ])
+                .padding(Padding::from([8, 10]))
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(card_bg)),
+                    border: iced::Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::Style::default()
+                });
+                tools_list = tools_list.push(card);
+            }
+        }
+
+        container(
+            column![
+                text("AI Tools").size(14).color(TEXT_ACTIVE),
+                text("Register custom AI tool launch entries.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                text_input("Display name", &self.ai_tool_name_input)
+                    .on_input(Message::AiToolNameInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Command", &self.ai_tool_command_input)
+                    .on_input(Message::AiToolCommandInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Icon tag (optional)", &self.ai_tool_icon_input)
+                    .on_input(Message::AiToolIconInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                row![
+                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::AiToolSave)
+                        .padding(Padding::from([4, 9])),
+                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::AiToolClearEditor)
+                        .padding(Padding::from([4, 9])),
+                ]
+                .spacing(8),
+                text("Registered Tools").size(12).color(TEXT_SECONDARY),
+                tools_list,
+            ]
+            .spacing(10)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn view_plugins_tab(&self) -> Element<'_, Message> {
+        let save_label = if self.plugin_edit_index.is_some() {
+            "Update Plugin"
+        } else {
+            "Add Plugin"
+        };
+
+        let mut plugins_list = column![].spacing(8).width(Length::Fill);
+        if self.plugins.is_empty() {
+            plugins_list = plugins_list.push(
+                text("No plugins configured.")
+                    .size(11)
+                    .color(TEXT_SECONDARY),
+            );
+        } else {
+            for (index, entry) in self.plugins.iter().enumerate() {
+                let is_editing = self.plugin_edit_index == Some(index);
+                let card_bg = if is_editing {
+                    BG_TERTIARY
+                } else {
+                    BG_SECONDARY
+                };
+                let status_label = if entry.enabled { "Enabled" } else { "Disabled" };
+                let toggle_label = if entry.enabled { "Disable" } else { "Enable" };
+                let card = container(column![
+                    row![
+                        text(&entry.name).size(13).color(TEXT_ACTIVE),
+                        Space::new().width(Length::Fill),
+                        text(status_label).size(11).color(TEXT_SECONDARY),
+                        button(text(toggle_label).size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::PluginToggleEnabled(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::PluginEdit(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::PluginDelete(index))
+                            .padding(Padding::from([2, 7])),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                    text(format!("Source: {}", entry.source))
+                        .size(11)
+                        .color(TEXT_PRIMARY),
+                ])
+                .padding(Padding::from([8, 10]))
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(card_bg)),
+                    border: iced::Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::Style::default()
+                });
+                plugins_list = plugins_list.push(card);
+            }
+        }
+
+        container(
+            column![
+                text("Plugins").size(14).color(TEXT_ACTIVE),
+                text("Manage plugin entries for native shell runtime.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                text_input("Plugin name", &self.plugin_name_input)
+                    .on_input(Message::PluginNameInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Source path / URL", &self.plugin_source_input)
+                    .on_input(Message::PluginSourceInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                row![
+                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::PluginSave)
+                        .padding(Padding::from([4, 9])),
+                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::PluginClearEditor)
+                        .padding(Padding::from([4, 9])),
+                ]
+                .spacing(8),
+                text("Registered Plugins").size(12).color(TEXT_SECONDARY),
+                plugins_list,
+            ]
+            .spacing(10)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn view_flows_tab(&self) -> Element<'_, Message> {
+        let save_label = if self.flow_edit_index.is_some() {
+            "Update Flow"
+        } else {
+            "Add Flow"
+        };
+
+        let mut flows_list = column![].spacing(8).width(Length::Fill);
+        if self.flows.is_empty() {
+            flows_list =
+                flows_list.push(text("No flows configured.").size(11).color(TEXT_SECONDARY));
+        } else {
+            for (index, entry) in self.flows.iter().enumerate() {
+                let is_editing = self.flow_edit_index == Some(index);
+                let card_bg = if is_editing {
+                    BG_TERTIARY
+                } else {
+                    BG_SECONDARY
+                };
+                let status_label = if entry.enabled { "Enabled" } else { "Disabled" };
+                let toggle_label = if entry.enabled { "Disable" } else { "Enable" };
+                let steps_label = if entry.steps.is_empty() {
+                    "No steps".to_string()
+                } else {
+                    format!("{} step(s)", entry.steps.len())
+                };
+                let steps_preview = if entry.steps.is_empty() {
+                    "-".to_string()
+                } else {
+                    entry.steps.join(" -> ")
+                };
+                let card = container(column![
+                    row![
+                        text(&entry.name).size(13).color(TEXT_ACTIVE),
+                        Space::new().width(Length::Fill),
+                        text(status_label).size(11).color(TEXT_SECONDARY),
+                        button(text(toggle_label).size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::FlowToggleEnabled(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::FlowEdit(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::FlowDelete(index))
+                            .padding(Padding::from([2, 7])),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                    text(format!("Trigger: {}", entry.trigger))
+                        .size(11)
+                        .color(TEXT_PRIMARY),
+                    text(format!("Steps: {} | {}", steps_label, steps_preview))
+                        .size(11)
+                        .color(TEXT_SECONDARY),
+                ])
+                .padding(Padding::from([8, 10]))
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(card_bg)),
+                    border: iced::Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::Style::default()
+                });
+                flows_list = flows_list.push(card);
+            }
+        }
+
+        container(
+            column![
+                text("Flows").size(14).color(TEXT_ACTIVE),
+                text("Create simple automation flow profiles with trigger and ordered steps.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                text_input("Flow name", &self.flow_name_input)
+                    .on_input(Message::FlowNameInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input(
+                    "Trigger (optional, defaults to Manual)",
+                    &self.flow_trigger_input
+                )
+                .on_input(Message::FlowTriggerInputChanged)
+                .padding(Padding::from([4, 8]))
+                .size(12),
+                text_input(
+                    "Steps (comma, semicolon, or newline separated)",
+                    &self.flow_steps_input
+                )
+                .on_input(Message::FlowStepsInputChanged)
+                .padding(Padding::from([4, 8]))
+                .size(12),
+                row![
+                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::FlowSave)
+                        .padding(Padding::from([4, 9])),
+                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::FlowClearEditor)
+                        .padding(Padding::from([4, 9])),
+                ]
+                .spacing(8),
+                text("Registered Flows").size(12).color(TEXT_SECONDARY),
+                flows_list,
+            ]
+            .spacing(10)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .into()
+    }
+
+    fn view_remote_tab(&self) -> Element<'_, Message> {
+        let save_label = if self.remote_edit_index.is_some() {
+            "Update Profile"
+        } else {
+            "Add Profile"
+        };
+
+        let auth_placeholder = match self.remote_auth_mode {
+            RemoteAuthMode::Password => "Password (optional)",
+            RemoteAuthMode::SshKey => "SSH key path (optional)",
+        };
+
+        let mut auth_mode_row = row![].spacing(8).align_y(iced::Alignment::Center);
+        for mode in RemoteAuthMode::all() {
+            let is_active = self.remote_auth_mode == mode;
+            let bg = if is_active { BG_TERTIARY } else { BG_SECONDARY };
+            let fg = if is_active { TEXT_ACTIVE } else { TEXT_PRIMARY };
+            let mode_button = button(text(mode.label()).size(12).color(fg))
+                .on_press(Message::RemoteAuthModeSelected(mode))
+                .padding(Padding::from([4, 9]))
+                .style(move |_theme, status| {
+                    let hover_bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        _ => bg,
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(hover_bg)),
+                        text_color: fg,
+                        border: iced::Border {
+                            color: BORDER,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..button::Style::default()
+                    }
+                });
+            auth_mode_row = auth_mode_row.push(mode_button);
+        }
+
+        let mut remote_list = column![].spacing(8).width(Length::Fill);
+        if self.remote_connections.is_empty() {
+            remote_list = remote_list.push(
+                text("No remote profiles configured.")
+                    .size(11)
+                    .color(TEXT_SECONDARY),
+            );
+        } else {
+            for (index, profile) in self.remote_connections.iter().enumerate() {
+                let is_editing = self.remote_edit_index == Some(index);
+                let card_bg = if is_editing {
+                    BG_TERTIARY
+                } else {
+                    BG_SECONDARY
+                };
+                let status_label = if profile.enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                };
+                let toggle_label = if profile.enabled { "Disable" } else { "Enable" };
+                let auth_display = match (profile.auth_mode, profile.auth_value.as_deref()) {
+                    (RemoteAuthMode::Password, Some(_)) => "Password: ******".to_string(),
+                    (RemoteAuthMode::Password, None) => "Password: -".to_string(),
+                    (RemoteAuthMode::SshKey, Some(value)) => format!("SSH Key: {}", value),
+                    (RemoteAuthMode::SshKey, None) => "SSH Key: -".to_string(),
+                };
+                let card = container(column![
+                    row![
+                        text(&profile.name).size(13).color(TEXT_ACTIVE),
+                        Space::new().width(Length::Fill),
+                        text(status_label).size(11).color(TEXT_SECONDARY),
+                        button(text(toggle_label).size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::RemoteToggleEnabled(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::RemoteEdit(index))
+                            .padding(Padding::from([2, 7])),
+                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                            .on_press(Message::RemoteDelete(index))
+                            .padding(Padding::from([2, 7])),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
+                    text(format!(
+                        "Connection: {}@{}:{}",
+                        profile.username, profile.host, profile.port
+                    ))
+                    .size(11)
+                    .color(TEXT_PRIMARY),
+                    text(auth_display).size(11).color(TEXT_SECONDARY),
+                ])
+                .padding(Padding::from([8, 10]))
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(card_bg)),
+                    border: iced::Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..container::Style::default()
+                });
+                remote_list = remote_list.push(card);
+            }
+        }
+
+        container(
+            column![
+                text("Remote (SSH)").size(14).color(TEXT_ACTIVE),
+                text("Configure SSH connection profiles for remote terminal sessions.")
+                    .size(12)
+                    .color(TEXT_PRIMARY),
+                text_input("Profile name", &self.remote_name_input)
+                    .on_input(Message::RemoteNameInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Host or IP", &self.remote_host_input)
+                    .on_input(Message::RemoteHostInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Port", &self.remote_port_input)
+                    .on_input(Message::RemotePortInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text_input("Username", &self.remote_username_input)
+                    .on_input(Message::RemoteUsernameInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                text("Auth Mode").size(12).color(TEXT_SECONDARY),
+                auth_mode_row,
+                text_input(auth_placeholder, &self.remote_auth_value_input)
+                    .on_input(Message::RemoteAuthValueInputChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
+                row![
+                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::RemoteSave)
+                        .padding(Padding::from([4, 9])),
+                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                        .on_press(Message::RemoteClearEditor)
+                        .padding(Padding::from([4, 9])),
+                ]
+                .spacing(8),
+                text("Connection Profiles").size(12).color(TEXT_SECONDARY),
+                remote_list,
+            ]
+            .spacing(10)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .into()
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
+        let mut subscriptions = vec![
             // Keyboard events.
             keyboard::listen().map(Message::KeyboardEvent),
             // Daemon events via channel.
             daemon_events(Arc::clone(&self.event_receiver)).map(Message::DaemonEvent),
-            // Window resize + mouse events.
-            event::listen_with(|ev, _status, _window_id| match ev {
+            // Window + mouse events.
+            event::listen_with(|ev, status, window_id| match ev {
+                event::Event::Window(window::Event::Opened { .. }) => {
+                    Some(Message::WindowOpened(window_id))
+                }
                 event::Event::Window(window::Event::Resized(size)) => {
                     Some(Message::WindowResized {
+                        window_id,
                         width: size.width,
                         height: size.height,
                     })
                 }
+                event::Event::Window(window::Event::Focused) => Some(Message::WindowFocusChanged {
+                    window_id,
+                    focused: true,
+                }),
+                event::Event::Window(window::Event::Unfocused) => {
+                    Some(Message::WindowFocusChanged {
+                        window_id,
+                        focused: false,
+                    })
+                }
+                event::Event::Window(window::Event::FileDropped(path)) => {
+                    Some(Message::FileDropped(path))
+                }
                 event::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    if status == event::Status::Captured {
+                        return None;
+                    }
                     let delta_y = match delta {
                         iced::mouse::ScrollDelta::Lines { y, .. } => y,
                         iced::mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
@@ -661,12 +2835,89 @@ impl GodlyApp {
                 }
                 _ => None,
             }),
-        ])
+        ];
+
+        if !self.toasts.is_empty() {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(TOAST_TICK_INTERVAL_MS))
+                    .map(|_| Message::ToastTick),
+            );
+        }
+
+        Subscription::batch(subscriptions)
     }
 
     // -----------------------------------------------------------------------
     // App action dispatch
     // -----------------------------------------------------------------------
+
+    fn activate_tab_via_reducer(&mut self, terminal_id: String) {
+        let in_active_layout = self
+            .active_layout()
+            .map(|layout| layout.find_leaf(&terminal_id))
+            .unwrap_or(false);
+        let decision = tab_reducer::reduce_tab_click(tab_reducer::TabClickInput {
+            terminal_id,
+            terminal_in_active_layout: in_active_layout,
+        });
+
+        self.terminals.set_active(&decision.activate_terminal_id);
+        if let Some(focus_terminal_id) = decision.focus_workspace_terminal_id {
+            if let Some(ws) = self.workspaces.active_mut() {
+                ws.focused_terminal = focus_terminal_id;
+            }
+        }
+        self.notifications
+            .mark_read(&decision.mark_terminal_read_id);
+        self.tab_context_menu_id = None;
+        self.mru_switcher = None;
+    }
+
+    fn cycle_tabs_by_mru(&mut self, direction: tab_reducer::TabMruCycleDirection) {
+        let next_terminal_id = next_tab_id_from_mru(
+            self.terminals.mru_terminal_ids(),
+            self.terminals.active_id(),
+            direction,
+        );
+        let Some(next_terminal_id) = next_terminal_id else {
+            return;
+        };
+        self.activate_tab_via_reducer(next_terminal_id);
+    }
+
+    fn open_or_cycle_mru_switcher(&mut self, direction: tab_reducer::TabMruCycleDirection) {
+        let next_terminal_id = next_mru_switcher_selection(
+            self.terminals.mru_terminal_ids(),
+            self.terminals.active_id(),
+            self.mru_switcher
+                .as_ref()
+                .map(|state| state.selected_terminal_id.as_str()),
+            direction,
+        );
+        let Some(next_terminal_id) = next_terminal_id else {
+            return;
+        };
+
+        self.mru_switcher = Some(MruSwitcherState {
+            selected_terminal_id: next_terminal_id,
+        });
+        self.tab_context_menu_id = None;
+    }
+
+    fn commit_mru_switcher(&mut self) {
+        let selected_terminal_id = self
+            .mru_switcher
+            .take()
+            .map(|state| state.selected_terminal_id);
+        let Some(selected_terminal_id) = selected_terminal_id else {
+            return;
+        };
+        self.activate_tab_via_reducer(selected_terminal_id);
+    }
+
+    fn cancel_mru_switcher(&mut self) {
+        self.mru_switcher = None;
+    }
 
     fn handle_app_action(&mut self, action: AppAction) -> Task<Message> {
         match action {
@@ -679,11 +2930,11 @@ impl GodlyApp {
                 }
             }
             AppAction::NextTab => {
-                self.terminals.next();
+                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Forward);
                 Task::none()
             }
             AppAction::PreviousTab => {
-                self.terminals.previous();
+                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward);
                 Task::none()
             }
             AppAction::ZoomIn => {
@@ -751,14 +3002,21 @@ impl GodlyApp {
             }
             AppAction::ToggleSidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
-                Task::none()
+                self.sidebar_resizing = false;
+                self.resize_all_terminals()
             }
             AppAction::OpenSettings => {
                 self.settings_open = !self.settings_open;
                 Task::none()
             }
             AppAction::RenameTab => {
-                // TODO: Open rename dialog for focused terminal (future PR).
+                if let Some(tab_id) = self.active_focused().map(str::to_string) {
+                    if let Some(term) = self.terminals.get(&tab_id) {
+                        self.rename_tab_value = term.custom_name.clone().unwrap_or_default();
+                        self.rename_tab_id = Some(tab_id);
+                        self.tab_context_menu_id = None;
+                    }
+                }
                 Task::none()
             }
         }
@@ -793,6 +3051,85 @@ impl GodlyApp {
                 if let Some(terminal_id) = decision.mark_terminal_read_id {
                     self.notifications.mark_read(&terminal_id);
                 }
+                self.tab_context_menu_id = None;
+                Task::none()
+            }
+            SidebarAction::WorkspaceDragHover(target_workspace_id) => {
+                let Some(dragged_terminal_id) = self.dragging_tab_id.clone() else {
+                    return Task::none();
+                };
+                let Some(source_workspace_id) = self
+                    .terminals
+                    .get(&dragged_terminal_id)
+                    .and_then(|terminal| terminal.workspace_id.clone())
+                else {
+                    return Task::none();
+                };
+
+                let source_snapshot = self.workspaces.get(&source_workspace_id).map(|workspace| {
+                    (
+                        workspace.layout.clone(),
+                        Some(workspace.focused_terminal.clone()),
+                    )
+                });
+                let target_snapshot = self.workspaces.get(&target_workspace_id).map(|workspace| {
+                    (
+                        workspace.layout.clone(),
+                        Some(workspace.focused_terminal.clone()),
+                    )
+                });
+
+                let (source_layout, source_focused_terminal_id) = match source_snapshot {
+                    Some(values) => values,
+                    None => return Task::none(),
+                };
+                let (target_layout, target_focused_terminal_id) = match target_snapshot {
+                    Some(values) => values,
+                    None => return Task::none(),
+                };
+
+                let decision = workspace_reducer::reduce_move_terminal_across_workspaces(
+                    workspace_reducer::MoveTerminalAcrossWorkspacesInput {
+                        source_workspace_id: source_workspace_id.clone(),
+                        target_workspace_id: target_workspace_id.clone(),
+                        moved_terminal_id: dragged_terminal_id.clone(),
+                        source_layout: Some(source_layout),
+                        target_layout: Some(target_layout),
+                        source_focused_terminal_id,
+                        target_focused_terminal_id,
+                    },
+                );
+
+                if let workspace_reducer::MoveTerminalAcrossWorkspacesDecision::Move {
+                    source_workspace_id,
+                    target_workspace_id,
+                    moved_terminal_id,
+                    next_source_layout,
+                    next_target_layout,
+                    next_source_focused_terminal_id,
+                    next_target_focused_terminal_id,
+                } = decision
+                {
+                    if let Some(workspace) = self.workspaces.get_mut(&source_workspace_id) {
+                        workspace.layout = next_source_layout;
+                        workspace.focused_terminal = next_source_focused_terminal_id;
+                    }
+                    if let Some(workspace) = self.workspaces.get_mut(&target_workspace_id) {
+                        workspace.layout = next_target_layout;
+                        workspace.focused_terminal = next_target_focused_terminal_id;
+                    }
+
+                    self.terminals
+                        .set_workspace(&moved_terminal_id, Some(target_workspace_id.clone()));
+                    self.workspaces.set_active(&target_workspace_id);
+                    self.terminals.set_active(&moved_terminal_id);
+                    self.notifications.mark_read(&moved_terminal_id);
+                    self.workspace_context_menu_id = None;
+                    self.dragging_tab_id = None;
+
+                    return self.fetch_grid(&moved_terminal_id);
+                }
+
                 Task::none()
             }
             SidebarAction::ToggleWorkspaceContext(id) => {
@@ -873,10 +3210,12 @@ impl GodlyApp {
                 for terminal_id in terminal_ids {
                     self.terminals.remove(&terminal_id);
                     self.notifications.clear(&terminal_id);
+                    self.last_terminal_sound_ms.remove(&terminal_id);
                     if let Some(client) = &self.client {
                         let _ = commands::close_terminal(client, &terminal_id);
                     }
                 }
+                self.persist_scrollback_offsets();
                 self.workspaces.remove(workspace_id);
                 if clear_context_menu {
                     self.workspace_context_menu_id = None;
@@ -1061,6 +3400,7 @@ impl GodlyApp {
         };
 
         term.scrollback_offset = new_offset;
+        self.persist_scrollback_offsets();
 
         self.scroll_fetch(&active_id, new_offset)
     }
@@ -1079,6 +3419,7 @@ impl GodlyApp {
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = max;
         }
+        self.persist_scrollback_offsets();
 
         self.scroll_fetch(&active_id, max)
     }
@@ -1091,6 +3432,7 @@ impl GodlyApp {
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = 0;
         }
+        self.persist_scrollback_offsets();
 
         self.scroll_fetch(&active_id, 0)
     }
@@ -1212,6 +3554,17 @@ impl GodlyApp {
     }
 
     fn close_terminal(&mut self, session_id: &str) -> Task<Message> {
+        if self.dragging_tab_id.as_deref() == Some(session_id) {
+            self.dragging_tab_id = None;
+        }
+        if self.tab_context_menu_id.as_deref() == Some(session_id) {
+            self.tab_context_menu_id = None;
+        }
+        if self.rename_tab_id.as_deref() == Some(session_id) {
+            self.rename_tab_id = None;
+            self.rename_tab_value.clear();
+        }
+
         // Remove from workspace layout.
         if let Some(ws) = self.workspaces.active_mut() {
             let decision =
@@ -1228,6 +3581,8 @@ impl GodlyApp {
 
         self.terminals.remove(session_id);
         self.notifications.clear(session_id);
+        self.last_terminal_sound_ms.remove(session_id);
+        self.persist_scrollback_offsets();
 
         if let Some(client) = &self.client {
             let _ = commands::close_terminal(client, session_id);
@@ -1286,7 +3641,7 @@ impl GodlyApp {
 
     fn calculate_cols(&self) -> u16 {
         let sidebar_offset = if self.sidebar_visible {
-            SIDEBAR_WIDTH
+            self.sidebar_width
         } else {
             0.0
         };
@@ -1342,6 +3697,9 @@ impl GodlyApp {
         }
         self.terminals.remove(&decision.removed_terminal_id);
         self.notifications.clear(&decision.removed_terminal_id);
+        self.last_terminal_sound_ms
+            .remove(&decision.removed_terminal_id);
+        self.persist_scrollback_offsets();
         if let Some(client) = &self.client {
             let _ = commands::close_terminal(client, &decision.removed_terminal_id);
         }
@@ -1443,7 +3801,7 @@ impl GodlyApp {
 
     fn pixel_to_grid(&self, x: f32, y: f32) -> GridPos {
         let sidebar_offset = if self.sidebar_visible {
-            SIDEBAR_WIDTH
+            self.sidebar_width
         } else {
             0.0
         };
@@ -1492,10 +3850,320 @@ impl GodlyApp {
         canvas(tc).width(Length::Fill).height(Length::Fill).into()
     }
 
+    fn render_terminal_leaf_with_drop_overlay<'a>(
+        &'a self,
+        terminal_id: &str,
+        focused_id: Option<&str>,
+    ) -> Element<'a, Message> {
+        let base = self.render_terminal_pane(terminal_id, focused_id);
+
+        let Some(dragged_terminal_id) = self.dragging_tab_id.as_deref() else {
+            return base;
+        };
+        if dragged_terminal_id == terminal_id {
+            return base;
+        }
+
+        let overlay_zone = |placement: SplitPlacement, alpha: f32| -> Element<'a, Message> {
+            let target_terminal_id = terminal_id.to_string();
+            mouse_area(
+                container(Space::new().width(Length::Fill).height(Length::Fill))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba(
+                            ACCENT.r, ACCENT.g, ACCENT.b, alpha,
+                        ))),
+                        ..container::Style::default()
+                    }),
+            )
+            .on_enter(Message::TabSplitZoneHover {
+                target_terminal_id,
+                placement,
+            })
+            .into()
+        };
+
+        let left = container(overlay_zone(SplitPlacement::Left, 0.16))
+            .width(Length::FillPortion(22))
+            .height(Length::Fill);
+        let right = container(overlay_zone(SplitPlacement::Right, 0.16))
+            .width(Length::FillPortion(22))
+            .height(Length::Fill);
+        let top = container(overlay_zone(SplitPlacement::Top, 0.22))
+            .width(Length::Fill)
+            .height(Length::FillPortion(26));
+        let bottom = container(overlay_zone(SplitPlacement::Bottom, 0.22))
+            .width(Length::Fill)
+            .height(Length::FillPortion(26));
+        let middle = container(Space::new().width(Length::Fill).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let center = column![top, middle, bottom]
+            .width(Length::FillPortion(56))
+            .height(Length::Fill);
+
+        let overlay = row![left, center, right]
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        stack![base, overlay].into()
+    }
+
     fn has_selection(&self) -> bool {
         let (start, end) = self.selection.normalized();
         start != end
     }
+}
+
+fn quote_dropped_path(path: &std::path::Path) -> String {
+    let raw = path.to_string_lossy();
+    let escaped = raw.replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
+fn normalize_mute_pattern(pattern: &str) -> Option<String> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_ascii_lowercase())
+    }
+}
+
+fn normalize_quick_claude_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_ai_tool_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_plugin_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_flow_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn parse_flow_steps(raw: &str) -> Vec<String> {
+    raw.split([',', ';', '\n'])
+        .filter_map(normalize_flow_field)
+        .collect()
+}
+
+fn enqueue_toast_entry(
+    toasts: &mut Vec<ToastNotification>,
+    next_toast_id: &mut u64,
+    title: String,
+    message: String,
+    now_ms: u64,
+) -> u64 {
+    let toast_id = *next_toast_id;
+    *next_toast_id = next_toast_id.saturating_add(1);
+
+    toasts.push(ToastNotification {
+        id: toast_id,
+        title,
+        message,
+        expires_at_ms: now_ms.saturating_add(TOAST_TTL_MS),
+    });
+
+    if toasts.len() > MAX_ACTIVE_TOASTS {
+        let overflow = toasts.len() - MAX_ACTIVE_TOASTS;
+        toasts.drain(0..overflow);
+    }
+
+    toast_id
+}
+
+fn prune_expired_toasts(toasts: &mut Vec<ToastNotification>, now_ms: u64) -> usize {
+    let before = toasts.len();
+    toasts.retain(|toast| toast.expires_at_ms > now_ms);
+    before.saturating_sub(toasts.len())
+}
+
+fn toggle_plugin_enabled(plugins: &mut [PluginEntry], index: usize) -> bool {
+    let Some(entry) = plugins.get_mut(index) else {
+        return false;
+    };
+    entry.enabled = !entry.enabled;
+    true
+}
+
+fn toggle_flow_enabled(flows: &mut [FlowEntry], index: usize) -> bool {
+    let Some(entry) = flows.get_mut(index) else {
+        return false;
+    };
+    entry.enabled = !entry.enabled;
+    true
+}
+
+fn normalize_remote_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_remote_port(value: &str) -> Option<u16> {
+    let parsed = value.trim().parse::<u16>().ok()?;
+    if parsed == 0 {
+        None
+    } else {
+        Some(parsed)
+    }
+}
+
+fn toggle_remote_enabled(profiles: &mut [RemoteConnectionEntry], index: usize) -> bool {
+    let Some(entry) = profiles.get_mut(index) else {
+        return false;
+    };
+    entry.enabled = !entry.enabled;
+    true
+}
+
+fn wildcard_matches(pattern: &str, candidate: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return candidate == pattern;
+    }
+
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let starts_with_wildcard = pattern.starts_with('*');
+    let ends_with_wildcard = pattern.ends_with('*');
+    let mut cursor = 0usize;
+
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+
+        if index == 0 && !starts_with_wildcard {
+            if !candidate[cursor..].starts_with(part) {
+                return false;
+            }
+            cursor += part.len();
+            continue;
+        }
+
+        if index == parts.len() - 1 && !ends_with_wildcard {
+            let Some(found) = candidate[cursor..].rfind(part) else {
+                return false;
+            };
+            let absolute = cursor + found;
+            return absolute + part.len() == candidate.len();
+        }
+
+        let Some(found) = candidate[cursor..].find(part) else {
+            return false;
+        };
+        cursor += found + part.len();
+    }
+
+    true
+}
+
+fn workspace_matches_mute_patterns(
+    patterns: &[String],
+    workspace_id: &str,
+    workspace_name: &str,
+) -> bool {
+    let normalized_id = workspace_id.to_ascii_lowercase();
+    let normalized_name = workspace_name.to_ascii_lowercase();
+    patterns.iter().any(|pattern| {
+        let normalized_pattern = pattern.to_ascii_lowercase();
+        wildcard_matches(&normalized_pattern, &normalized_id)
+            || wildcard_matches(&normalized_pattern, &normalized_name)
+    })
+}
+
+fn is_escape_key(key: &keyboard::Key) -> bool {
+    matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
+}
+
+fn is_control_key(key: &keyboard::Key) -> bool {
+    matches!(key, keyboard::Key::Named(keyboard::key::Named::Control))
+}
+
+fn mru_cycle_direction_from_shortcut_key(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> Option<tab_reducer::TabMruCycleDirection> {
+    if !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))
+        || !modifiers.control()
+        || modifiers.alt()
+    {
+        return None;
+    }
+
+    if modifiers.shift() {
+        Some(tab_reducer::TabMruCycleDirection::Backward)
+    } else {
+        Some(tab_reducer::TabMruCycleDirection::Forward)
+    }
+}
+
+fn next_mru_switcher_selection(
+    mru_terminal_ids: Vec<&str>,
+    active_terminal_id: Option<&str>,
+    current_selection_terminal_id: Option<&str>,
+    direction: tab_reducer::TabMruCycleDirection,
+) -> Option<String> {
+    let cursor_terminal_id = current_selection_terminal_id.or(active_terminal_id);
+    next_tab_id_from_mru(mru_terminal_ids, cursor_terminal_id, direction)
+}
+
+fn should_commit_mru_switcher_on_key_release(
+    popup_open: bool,
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+) -> bool {
+    popup_open && (is_control_key(key) || !modifiers.control())
+}
+
+fn should_commit_mru_switcher_on_modifiers_changed(
+    popup_open: bool,
+    modifiers: keyboard::Modifiers,
+) -> bool {
+    popup_open && !modifiers.control()
+}
+
+fn next_tab_id_from_mru(
+    mru_terminal_ids: Vec<&str>,
+    current_terminal_id: Option<&str>,
+    direction: tab_reducer::TabMruCycleDirection,
+) -> Option<String> {
+    tab_reducer::reduce_tab_mru_cycle(tab_reducer::TabMruCycleInput {
+        mru_terminal_ids: mru_terminal_ids.into_iter().map(str::to_string).collect(),
+        current_terminal_id: current_terminal_id.map(str::to_string),
+        direction,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1551,9 +4219,32 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 
                     if !recovered_ids.is_empty() {
                         let first_id = recovered_ids[0].clone();
+                        let persisted_offsets = scrollback_restore::load_offsets();
+                        let live_session_ids: Vec<String> = live_sessions
+                            .iter()
+                            .map(|session| session.id.clone())
+                            .collect();
+                        let pruned_offsets = scrollback_restore::prune_offsets_for_live_sessions(
+                            &persisted_offsets,
+                            &live_session_ids,
+                        );
+                        if pruned_offsets != persisted_offsets {
+                            if let Err(error) = scrollback_restore::save_offsets(&pruned_offsets) {
+                                log::warn!(
+                                    "Failed to persist pruned scrollback offsets: {}",
+                                    error
+                                );
+                            }
+                        }
+                        let restored_scrollback_offsets =
+                            scrollback_restore::restored_offsets_for_recovered_sessions(
+                                &pruned_offsets,
+                                &recovered_ids,
+                            );
                         let _ = tx.send(Ok(InitResult::Recovered {
                             session_ids: recovered_ids,
                             first_id,
+                            restored_scrollback_offsets,
                         }));
                         return;
                     }
@@ -1577,4 +4268,332 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
         },
         Message::Initialized,
     )
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::tab_reducer::TabMruCycleDirection;
+    use super::{
+        enqueue_toast_entry, mru_cycle_direction_from_shortcut_key, next_mru_switcher_selection,
+        next_tab_id_from_mru, normalize_ai_tool_field, normalize_flow_field,
+        normalize_mute_pattern, normalize_plugin_field, normalize_quick_claude_text,
+        normalize_remote_field, normalize_remote_port, parse_flow_steps, prune_expired_toasts,
+        quote_dropped_path, should_commit_mru_switcher_on_key_release,
+        should_commit_mru_switcher_on_modifiers_changed, toggle_flow_enabled,
+        toggle_plugin_enabled, toggle_remote_enabled, wildcard_matches,
+        workspace_matches_mute_patterns, FlowEntry, PluginEntry, RemoteAuthMode,
+        RemoteConnectionEntry, ToastNotification, MAX_ACTIVE_TOASTS, TOAST_TTL_MS,
+    };
+    use iced::keyboard::{key::Named, Key, Modifiers};
+    use std::path::Path;
+
+    #[test]
+    fn quote_dropped_path_wraps_spaces() {
+        let quoted = quote_dropped_path(Path::new(r"C:\Program Files\Godly Terminal\file.txt"));
+        assert_eq!(quoted, r#""C:\Program Files\Godly Terminal\file.txt""#);
+    }
+
+    #[test]
+    fn quote_dropped_path_escapes_double_quotes() {
+        let quoted = quote_dropped_path(Path::new(r#"C:\tmp\a"b.txt"#));
+        assert_eq!(quoted, r#""C:\tmp\a\"b.txt""#);
+    }
+
+    #[test]
+    fn quote_dropped_path_keeps_unicode() {
+        let quoted = quote_dropped_path(Path::new(r"C:\tmp\áéí\file.txt"));
+        assert_eq!(quoted, "\"C:\\tmp\\áéí\\file.txt\"");
+    }
+
+    #[test]
+    fn normalize_mute_pattern_trims_and_lowercases() {
+        assert_eq!(
+            normalize_mute_pattern("  Work-*  "),
+            Some("work-*".to_string())
+        );
+        assert_eq!(normalize_mute_pattern("   "), None);
+    }
+
+    #[test]
+    fn normalize_quick_claude_text_trims_and_rejects_empty() {
+        assert_eq!(
+            normalize_quick_claude_text("  launch preset  "),
+            Some("launch preset".to_string())
+        );
+        assert_eq!(normalize_quick_claude_text(""), None);
+        assert_eq!(normalize_quick_claude_text("   "), None);
+    }
+
+    #[test]
+    fn normalize_ai_tool_field_trims_and_rejects_empty() {
+        assert_eq!(
+            normalize_ai_tool_field("  my-tool  "),
+            Some("my-tool".to_string())
+        );
+        assert_eq!(normalize_ai_tool_field(""), None);
+        assert_eq!(normalize_ai_tool_field("   "), None);
+    }
+
+    #[test]
+    fn normalize_plugin_field_trims_and_rejects_empty() {
+        assert_eq!(
+            normalize_plugin_field("  plugin-a  "),
+            Some("plugin-a".to_string())
+        );
+        assert_eq!(normalize_plugin_field(""), None);
+        assert_eq!(normalize_plugin_field("   "), None);
+    }
+
+    #[test]
+    fn toggle_plugin_enabled_flips_state_and_handles_missing_index() {
+        let mut plugins = vec![PluginEntry {
+            name: "plugin-a".to_string(),
+            source: "local".to_string(),
+            enabled: true,
+        }];
+        assert!(toggle_plugin_enabled(plugins.as_mut_slice(), 0));
+        assert!(!plugins[0].enabled);
+        assert!(!toggle_plugin_enabled(plugins.as_mut_slice(), 10));
+    }
+
+    #[test]
+    fn normalize_flow_field_and_parse_steps_work() {
+        assert_eq!(
+            normalize_flow_field("  build release  "),
+            Some("build release".to_string())
+        );
+        assert_eq!(normalize_flow_field("  "), None);
+        assert_eq!(
+            parse_flow_steps("build,test ; deploy\n notify"),
+            vec![
+                "build".to_string(),
+                "test".to_string(),
+                "deploy".to_string(),
+                "notify".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn toggle_flow_enabled_flips_state_and_handles_missing_index() {
+        let mut flows = vec![FlowEntry {
+            name: "nightly".to_string(),
+            trigger: "Manual".to_string(),
+            steps: vec!["build".to_string(), "deploy".to_string()],
+            enabled: true,
+        }];
+        assert!(toggle_flow_enabled(flows.as_mut_slice(), 0));
+        assert!(!flows[0].enabled);
+        assert!(!toggle_flow_enabled(flows.as_mut_slice(), 10));
+    }
+
+    #[test]
+    fn normalize_remote_fields_and_port_validation_work() {
+        assert_eq!(
+            normalize_remote_field("  prod-cluster  "),
+            Some("prod-cluster".to_string())
+        );
+        assert_eq!(normalize_remote_field("  "), None);
+        assert_eq!(normalize_remote_port("22"), Some(22));
+        assert_eq!(normalize_remote_port(" 65535 "), Some(65535));
+        assert_eq!(normalize_remote_port("0"), None);
+        assert_eq!(normalize_remote_port("70000"), None);
+        assert_eq!(normalize_remote_port("abc"), None);
+    }
+
+    #[test]
+    fn toggle_remote_enabled_flips_state_and_handles_missing_index() {
+        let mut profiles = vec![RemoteConnectionEntry {
+            name: "Prod SSH".to_string(),
+            host: "10.0.0.20".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            auth_mode: RemoteAuthMode::Password,
+            auth_value: Some("secret".to_string()),
+            enabled: true,
+        }];
+        assert!(toggle_remote_enabled(profiles.as_mut_slice(), 0));
+        assert!(!profiles[0].enabled);
+        assert!(!toggle_remote_enabled(profiles.as_mut_slice(), 10));
+    }
+
+    #[test]
+    fn enqueue_toast_entry_assigns_ids_and_limits_queue() {
+        let mut toasts = Vec::new();
+        let mut next_id = 1u64;
+        for index in 0..(MAX_ACTIVE_TOASTS + 2) {
+            enqueue_toast_entry(
+                &mut toasts,
+                &mut next_id,
+                format!("title-{index}"),
+                format!("message-{index}"),
+                10_000,
+            );
+        }
+
+        assert_eq!(toasts.len(), MAX_ACTIVE_TOASTS);
+        assert_eq!(toasts.first().map(|toast| toast.id), Some(3));
+        assert_eq!(
+            toasts.last().map(|toast| toast.id),
+            Some((MAX_ACTIVE_TOASTS + 2) as u64)
+        );
+        assert_eq!(next_id, (MAX_ACTIVE_TOASTS + 3) as u64);
+    }
+
+    #[test]
+    fn prune_expired_toasts_removes_elapsed_entries() {
+        let mut toasts = vec![
+            ToastNotification {
+                id: 1,
+                title: "A".to_string(),
+                message: "first".to_string(),
+                expires_at_ms: 1_000 + TOAST_TTL_MS,
+            },
+            ToastNotification {
+                id: 2,
+                title: "B".to_string(),
+                message: "second".to_string(),
+                expires_at_ms: 5_000 + TOAST_TTL_MS,
+            },
+        ];
+
+        let removed = prune_expired_toasts(&mut toasts, 1_000 + TOAST_TTL_MS);
+        assert_eq!(removed, 1);
+        assert_eq!(toasts.len(), 1);
+        assert_eq!(toasts[0].id, 2);
+    }
+
+    #[test]
+    fn wildcard_matches_supports_infix_and_suffix_globs() {
+        assert!(wildcard_matches("work-*", "work-alpha"));
+        assert!(wildcard_matches("*-prod", "cluster-prod"));
+        assert!(wildcard_matches("alpha*beta", "alpha-123-beta"));
+        assert!(!wildcard_matches("work-*", "prod-work"));
+    }
+
+    #[test]
+    fn workspace_mute_patterns_match_name_or_id() {
+        let patterns = vec!["ops-*".to_string(), "w-default".to_string()];
+        assert!(workspace_matches_mute_patterns(
+            &patterns,
+            "w-default",
+            "Workspace 1"
+        ));
+        assert!(workspace_matches_mute_patterns(
+            &patterns, "w-prod", "Ops-Live"
+        ));
+        assert!(!workspace_matches_mute_patterns(
+            &patterns,
+            "w-alpha",
+            "Workspace Alpha"
+        ));
+    }
+
+    #[test]
+    fn mru_cycle_direction_from_shortcut_key_detects_forward_and_backward() {
+        assert_eq!(
+            mru_cycle_direction_from_shortcut_key(&Key::Named(Named::Tab), Modifiers::CTRL),
+            Some(TabMruCycleDirection::Forward)
+        );
+        assert_eq!(
+            mru_cycle_direction_from_shortcut_key(
+                &Key::Named(Named::Tab),
+                Modifiers::CTRL.union(Modifiers::SHIFT),
+            ),
+            Some(TabMruCycleDirection::Backward)
+        );
+        assert_eq!(
+            mru_cycle_direction_from_shortcut_key(
+                &Key::Named(Named::Tab),
+                Modifiers::CTRL.union(Modifiers::ALT),
+            ),
+            None
+        );
+        assert_eq!(
+            mru_cycle_direction_from_shortcut_key(&Key::Named(Named::Escape), Modifiers::CTRL),
+            None
+        );
+    }
+
+    #[test]
+    fn next_mru_switcher_selection_uses_active_then_selected_cursor() {
+        let from_active = next_mru_switcher_selection(
+            vec!["t-3", "t-2", "t-1"],
+            Some("t-1"),
+            None,
+            TabMruCycleDirection::Forward,
+        );
+        assert_eq!(from_active, Some("t-3".to_string()));
+
+        let from_selection = next_mru_switcher_selection(
+            vec!["t-3", "t-2", "t-1"],
+            Some("t-1"),
+            Some("t-3"),
+            TabMruCycleDirection::Forward,
+        );
+        assert_eq!(from_selection, Some("t-2".to_string()));
+    }
+
+    #[test]
+    fn mru_switcher_commit_guards_match_release_semantics() {
+        assert!(!should_commit_mru_switcher_on_key_release(
+            false,
+            &Key::Named(Named::Control),
+            Modifiers::CTRL,
+        ));
+        assert!(should_commit_mru_switcher_on_key_release(
+            true,
+            &Key::Named(Named::Control),
+            Modifiers::CTRL,
+        ));
+        assert!(should_commit_mru_switcher_on_key_release(
+            true,
+            &Key::Named(Named::Tab),
+            Modifiers::empty(),
+        ));
+        assert!(!should_commit_mru_switcher_on_key_release(
+            true,
+            &Key::Named(Named::Tab),
+            Modifiers::CTRL,
+        ));
+
+        assert!(should_commit_mru_switcher_on_modifiers_changed(
+            true,
+            Modifiers::empty(),
+        ));
+        assert!(!should_commit_mru_switcher_on_modifiers_changed(
+            true,
+            Modifiers::CTRL,
+        ));
+    }
+
+    #[test]
+    fn next_tab_id_from_mru_cycles_forward_and_wraps() {
+        let next = next_tab_id_from_mru(
+            vec!["t-3", "t-2", "t-1"],
+            Some("t-1"),
+            TabMruCycleDirection::Forward,
+        );
+        assert_eq!(next, Some("t-3".to_string()));
+    }
+
+    #[test]
+    fn next_tab_id_from_mru_cycles_backward_and_wraps() {
+        let next = next_tab_id_from_mru(
+            vec!["t-3", "t-2", "t-1"],
+            Some("t-3"),
+            TabMruCycleDirection::Backward,
+        );
+        assert_eq!(next, Some("t-1".to_string()));
+    }
+
+    #[test]
+    fn next_tab_id_from_mru_handles_missing_current_id() {
+        let next = next_tab_id_from_mru(
+            vec!["t-3", "t-2", "t-1"],
+            Some("missing"),
+            TabMruCycleDirection::Forward,
+        );
+        assert_eq!(next, Some("t-2".to_string()));
+    }
 }
