@@ -145,9 +145,9 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [ ] I1. Quick Claude multi-agent launcher (preset system)
 - [ ] I2. Launch step sequences (create terminal, run cmd, wait, send prompt)
 - [ ] I3. Layout options for Quick Claude (single, vsplit, hsplit, 2x2)
-- [ ] I4. Voice input (Whisper integration, Ctrl+Shift+M)
-- [ ] I5. Recording UI (level bar, timer, transcription toast)
-- [ ] I6. Figma pane embedding (iframe-like webview in split)
+- [x] I4. Voice input (Whisper integration, Ctrl+Shift+M)
+- [x] I5. Recording UI (level bar, timer, transcription toast)
+- [ ] ~~I6. Figma pane embedding (iframe-like webview in split)~~ — Skipped (not worth implementing)
 
 ---
 
@@ -326,3 +326,8 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 ### Completed in this update
 - **F5**: Custom theme JSON import/export with serde support for `iced::Color`, file dialog via `rfd`, persistence to `custom-themes.json`, and full UI in Appearance settings tab.
 - **F6**: Marked done — Rust `BG_PRIMARY()`, `TEXT_PRIMARY()`, spacing/radius constants are the Iced equivalent of CSS variables.
+## Progress Log — 2026-03-06 (I4-I5 Voice/Whisper Integration)
+
+### Completed in this update
+- **Stream I**: I4, I5 completed (WhisperService sidecar in app-adapter, recording overlay UI with level meter/timer/stop/cancel, mic button in tab bar, Ctrl+Shift+M shortcut, toast on transcription).
+- **Stream I**: I6 skipped (Figma pane embedding not worth implementing).
