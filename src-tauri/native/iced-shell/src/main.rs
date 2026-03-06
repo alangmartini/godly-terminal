@@ -16,6 +16,8 @@ mod theme;
 mod title_bar;
 mod workspace_state;
 
+mod confirm_dialog;
+
 use app::{GodlyApp, Message};
 
 fn main() -> iced::Result {
