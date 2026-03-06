@@ -15,6 +15,7 @@ mod terminal_state;
 mod theme;
 mod title_bar;
 mod workspace_state;
+mod shell_picker;
 
 mod confirm_dialog;
 
