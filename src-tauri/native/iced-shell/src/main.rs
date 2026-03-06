@@ -14,7 +14,14 @@ mod tab_bar;
 mod terminal_state;
 mod theme;
 mod title_bar;
+mod url_detector;
 mod workspace_state;
+mod terminal_context_menu;
+mod scrollbar;
+mod perf_overlay;
+mod confirm_dialog;
+mod search;
+mod shell_picker;
 
 use app::{GodlyApp, Message};
 

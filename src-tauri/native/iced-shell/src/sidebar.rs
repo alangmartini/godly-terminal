@@ -129,15 +129,15 @@ impl<Message> canvas::Program<Message> for SidebarHeaderIcon {
 
 fn header_action_button_style(status: button::Status) -> button::Style {
     let bg = match status {
-        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
         _ => Color::TRANSPARENT,
     };
 
     button::Style {
         background: Some(iced::Background::Color(bg)),
-        text_color: TEXT_ACTIVE,
+        text_color: TEXT_ACTIVE(),
         border: Border {
-            color: BORDER,
+            color: BORDER(),
             width: 1.0,
             radius: 4.0.into(),
         },
@@ -170,6 +170,11 @@ pub trait SidebarWorkspaceSignals {
     fn has_workspace_notification(&self, _workspace_id: &str) -> bool {
         false
     }
+
+    /// Returns an optional AI mode icon string for a workspace.
+    fn workspace_ai_mode_icon(&self, _workspace_id: &str) -> Option<&'static str> {
+        None
+    }
 }
 
 impl<'a> SidebarWorkspaceSignals for Option<&'a str> {
@@ -188,6 +193,24 @@ where
 
     fn has_workspace_notification(&self, workspace_id: &str) -> bool {
         (self.1)(workspace_id)
+    }
+}
+
+impl<'a, F, G> SidebarWorkspaceSignals for (Option<&'a str>, F, G)
+where
+    F: for<'b> Fn(&'b str) -> bool,
+    G: for<'b> Fn(&'b str) -> Option<&'static str>,
+{
+    fn context_menu_workspace_id(&self) -> Option<&str> {
+        self.0
+    }
+
+    fn has_workspace_notification(&self, workspace_id: &str) -> bool {
+        (self.1)(workspace_id)
+    }
+
+    fn workspace_ai_mode_icon(&self, workspace_id: &str) -> Option<&'static str> {
+        (self.2)(workspace_id)
     }
 }
 
@@ -217,19 +240,19 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             workspace_signals.has_workspace_notification(ws.id.as_str());
 
         let row_text = if is_active {
-            ACCENT_HOVER
+            ACCENT_HOVER()
         } else {
-            TEXT_PRIMARY
+            TEXT_PRIMARY()
         };
 
         let name_label = text(&ws.name).size(13).color(row_text);
 
         let terminal_count = ws.layout.leaf_count();
-        let badge_bg = if is_active { ACCENT } else { BG_TERTIARY };
+        let badge_bg = if is_active { ACCENT() } else { BG_TERTIARY() };
         let badge_text = if is_active {
-            BG_SECONDARY
+            BG_SECONDARY()
         } else {
-            TEXT_SECONDARY
+            TEXT_SECONDARY()
         };
 
         let badge = container(
@@ -249,9 +272,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         });
 
         let worktree_indicator_bg = if ws.worktree_mode {
-            ACCENT_HOVER
+            ACCENT_HOVER()
         } else {
-            Color::from_rgba(TEXT_SECONDARY.r, TEXT_SECONDARY.g, TEXT_SECONDARY.b, 0.25)
+            Color::from_rgba(TEXT_SECONDARY().r, TEXT_SECONDARY().g, TEXT_SECONDARY().b, 0.25)
         };
         let worktree_indicator = container(
             Space::new()
@@ -268,8 +291,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
-        let notification_indicator_bg = if is_active { ACCENT_HOVER } else { DANGER };
-        let notification_indicator_border = if is_active { BORDER } else { BG_SECONDARY };
+        let notification_indicator_bg = if is_active { ACCENT_HOVER() } else { DANGER() };
+        let notification_indicator_border = if is_active { BORDER() } else { BG_SECONDARY() };
         let notification_indicator = container(
             Space::new()
                 .width(Length::Fixed(8.0))
@@ -285,11 +308,15 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
+        let ai_mode_icon = workspace_signals.workspace_ai_mode_icon(ws.id.as_str());
         let mut item_content = row![
             worktree_indicator,
             name_label,
-            Space::new().width(Length::Fill)
         ];
+        if let Some(icon) = ai_mode_icon {
+            item_content = item_content.push(text(icon).size(11));
+        }
+        item_content = item_content.push(Space::new().width(Length::Fill));
         if has_workspace_notification {
             item_content = item_content.push(notification_indicator);
         }
@@ -306,17 +333,17 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             .width(Length::Fill)
             .style(move |_theme, status| {
                 let bg = if is_active {
-                    Color::from_rgba(ACCENT_HOVER.r, ACCENT_HOVER.g, ACCENT_HOVER.b, 0.08)
+                    Color::from_rgba(ACCENT_HOVER().r, ACCENT_HOVER().g, ACCENT_HOVER().b, 0.08)
                 } else {
                     match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => Color::TRANSPARENT,
                     }
                 };
 
                 let border = if is_active {
                     Border {
-                        color: ACCENT_HOVER,
+                        color: ACCENT_HOVER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     }
@@ -353,35 +380,35 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             let move_down_id = ws.id.clone();
             let delete_id = ws.id.clone();
 
-            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY))
+            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY()))
                 .on_press(on_action(SidebarAction::RenameWorkspace(rename_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
-                        text_color: TEXT_PRIMARY,
+                        text_color: TEXT_PRIMARY(),
                         border: Border::default(),
                         ..button::Style::default()
                     }
                 });
 
-            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY))
+            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY()))
                 .on_press(on_action(SidebarAction::OpenWorkspaceInExplorer(open_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
-                        text_color: TEXT_PRIMARY,
+                        text_color: TEXT_PRIMARY(),
                         border: Border::default(),
                         ..button::Style::default()
                     }
@@ -392,7 +419,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             } else {
                 "Enable Worktree Mode"
             };
-            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY))
+            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY()))
                 .on_press(on_action(SidebarAction::ToggleWorkspaceWorktreeMode(
                     worktree_id,
                 )))
@@ -400,79 +427,79 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
-                        text_color: TEXT_PRIMARY,
+                        text_color: TEXT_PRIMARY(),
                         border: Border::default(),
                         ..button::Style::default()
                     }
                 });
 
             let move_up_btn = if idx > 0 {
-                button(text("Move Up").size(12).color(TEXT_PRIMARY))
+                button(text("Move Up").size(12).color(TEXT_PRIMARY()))
                     .on_press(on_action(SidebarAction::MoveWorkspaceUp(move_up_id)))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                             _ => Color::TRANSPARENT,
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_PRIMARY,
+                            text_color: TEXT_PRIMARY(),
                             border: Border::default(),
                             ..button::Style::default()
                         }
                     })
             } else {
-                button(text("Move Up").size(12).color(TEXT_SECONDARY))
+                button(text("Move Up").size(12).color(TEXT_SECONDARY()))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style::default())
             };
 
             let move_down_btn = if idx + 1 < workspaces.len() {
-                button(text("Move Down").size(12).color(TEXT_PRIMARY))
+                button(text("Move Down").size(12).color(TEXT_PRIMARY()))
                     .on_press(on_action(SidebarAction::MoveWorkspaceDown(move_down_id)))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                             _ => Color::TRANSPARENT,
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_PRIMARY,
+                            text_color: TEXT_PRIMARY(),
                             border: Border::default(),
                             ..button::Style::default()
                         }
                     })
             } else {
-                button(text("Move Down").size(12).color(TEXT_SECONDARY))
+                button(text("Move Down").size(12).color(TEXT_SECONDARY()))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style::default())
             };
 
-            let delete_btn = button(text("Delete").size(12).color(DANGER))
+            let delete_btn = button(text("Delete").size(12).color(DANGER()))
                 .on_press(on_action(SidebarAction::DeleteWorkspace(delete_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
                         button::Status::Hovered | button::Status::Pressed => {
-                            Color::from_rgba(DANGER.r, DANGER.g, DANGER.b, 0.20)
+                            Color::from_rgba(DANGER().r, DANGER().g, DANGER().b, 0.20)
                         }
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
-                        text_color: DANGER,
+                        text_color: DANGER(),
                         border: Border::default(),
                         ..button::Style::default()
                     }
@@ -488,9 +515,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ])
             .padding(Padding::from([4, 4]))
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(BG_SECONDARY)),
+                background: Some(iced::Background::Color(BG_SECONDARY())),
                 border: Border {
-                    color: BORDER,
+                    color: BORDER(),
                     width: 1.0,
                     radius: 4.0.into(),
                 },
@@ -504,11 +531,11 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     let workspaces_badge = container(
         text(format!("{}", workspaces.len()))
             .size(10)
-            .color(TEXT_SECONDARY),
+            .color(TEXT_SECONDARY()),
     )
     .padding(Padding::from([1, 7]))
     .style(|_theme| container::Style {
-        background: Some(iced::Background::Color(BG_TERTIARY)),
+        background: Some(iced::Background::Color(BG_TERTIARY())),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -518,7 +545,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     });
 
     let settings_btn = button(
-        canvas(SidebarHeaderIcon::settings(TEXT_PRIMARY))
+        canvas(SidebarHeaderIcon::settings(TEXT_PRIMARY()))
             .width(Length::Fixed(HEADER_ICON_SIZE))
             .height(Length::Fixed(HEADER_ICON_SIZE)),
     )
@@ -527,7 +554,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .style(|_theme, status| header_action_button_style(status));
 
     let new_btn = button(
-        canvas(SidebarHeaderIcon::new_workspace(TEXT_PRIMARY))
+        canvas(SidebarHeaderIcon::new_workspace(TEXT_PRIMARY()))
             .width(Length::Fixed(HEADER_ICON_SIZE))
             .height(Length::Fixed(HEADER_ICON_SIZE)),
     )
@@ -537,7 +564,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let header = container(
         row![
-            text("WORKSPACES").size(11).color(TEXT_SECONDARY),
+            text("WORKSPACES").size(11).color(TEXT_SECONDARY()),
             Space::new().width(Length::Fill),
             workspaces_badge,
             settings_btn,
@@ -548,9 +575,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     )
     .padding(Padding::from([10, 10]))
     .style(|_theme| container::Style {
-        background: Some(iced::Background::Color(BG_SECONDARY)),
+        background: Some(iced::Background::Color(BG_SECONDARY())),
         border: Border {
-            color: BORDER,
+            color: BORDER(),
             width: 1.0,
             radius: 0.0.into(),
         },
@@ -570,12 +597,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         .height(Length::Fill)
         .clip(true)
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             ..container::Style::default()
         });
 
     let divider = rule::vertical(1).style(move |_theme| rule::Style {
-        color: BORDER,
+        color: BORDER(),
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,

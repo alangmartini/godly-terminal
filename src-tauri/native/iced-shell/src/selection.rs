@@ -132,6 +132,63 @@ impl SelectionState {
 
         lines.join("\n")
     }
+
+    /// Extract selected text with ANSI escape sequences stripped.
+    pub fn selected_text_clean(&self, grid: &RichGridData) -> String {
+        let raw = self.selected_text(grid);
+        strip_ansi_escapes(&raw)
+    }
+}
+
+/// Strip ANSI escape sequences from text.
+///
+/// Removes CSI (ESC[...X), OSC (ESC]...BEL/ST), and single-char escapes.
+/// Preserves printable characters, newlines, carriage returns, and tabs.
+fn strip_ansi_escapes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    chars.next(); // consume [
+                    // Skip until final byte (0x40-0x7E)
+                    while let Some(&c) = chars.peek() {
+                        chars.next();
+                        if (c as u32) >= 0x40 && (c as u32) <= 0x7E {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next(); // consume ]
+                    // Skip until BEL or ESC backslash (ST)
+                    while let Some(&c) = chars.peek() {
+                        if c == '\x07' {
+                            chars.next();
+                            break;
+                        }
+                        if c == '\x1b' {
+                            chars.next();
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                        chars.next();
+                    }
+                }
+                _ => {
+                    // Single-char escape — skip one character after ESC
+                    chars.next();
+                }
+            }
+        } else if ch >= '\x20' || ch == '\n' || ch == '\r' || ch == '\t' {
+            result.push(ch);
+        }
+        // Skip other control characters
+    }
+    result
 }
 
 #[cfg(test)]
@@ -384,5 +441,52 @@ mod tests {
         assert!(!sel.active);
         assert_eq!(sel.anchor, GridPos { row: 0, col: 0 });
         assert_eq!(sel.end, GridPos { row: 0, col: 0 });
+    }
+
+    #[test]
+    fn test_strip_ansi_csi() {
+        assert_eq!(
+            strip_ansi_escapes("hello \x1b[31mworld\x1b[0m"),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn test_strip_ansi_osc() {
+        assert_eq!(
+            strip_ansi_escapes("before\x1b]0;title\x07after"),
+            "beforeafter"
+        );
+    }
+
+    #[test]
+    fn test_strip_preserves_newlines() {
+        assert_eq!(strip_ansi_escapes("line1\nline2\n"), "line1\nline2\n");
+    }
+
+    #[test]
+    fn test_strip_no_escapes() {
+        assert_eq!(strip_ansi_escapes("plain text"), "plain text");
+    }
+
+    #[test]
+    fn test_strip_control_chars() {
+        assert_eq!(strip_ansi_escapes("hello\x01\x02world"), "helloworld");
+    }
+
+    #[test]
+    fn test_selected_text_clean() {
+        // Build a grid where cell content contains an escape sequence.
+        let mut grid = make_grid(&["hello world"]);
+        // Inject an escape sequence into cell content to simulate raw data.
+        grid.rows[0].cells[5].content = "\x1b[31m ".to_string();
+        let mut sel = SelectionState::default();
+        sel.start(GridPos { row: 0, col: 0 });
+        sel.update(GridPos { row: 0, col: 10 });
+
+        let clean = sel.selected_text_clean(&grid);
+        assert!(!clean.contains('\x1b'));
+        assert!(clean.contains("hello"));
+        assert!(clean.contains("world"));
     }
 }
