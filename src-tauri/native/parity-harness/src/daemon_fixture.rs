@@ -2,7 +2,9 @@ use std::io::{Read, Write};
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use godly_protocol::{read_daemon_message, write_request_with_id, Request, Response, DaemonMessage};
+use godly_protocol::{
+    read_daemon_message, write_request_with_id, DaemonMessage, Request, Response,
+};
 
 /// Isolated daemon fixture for integration tests.
 ///
@@ -36,7 +38,11 @@ impl DaemonFixture {
             DUPLICATE_SAME_ACCESS, FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE,
         };
 
-        let pipe_name = format!(r"\\.\pipe\godly-test-parity-{}-{}", test_name, std::process::id());
+        let pipe_name = format!(
+            r"\\.\pipe\godly-test-parity-{}-{}",
+            test_name,
+            std::process::id()
+        );
         let instance = pipe_name.trim_start_matches(r"\\.\pipe\");
 
         // Find daemon binary
@@ -88,7 +94,9 @@ impl DaemonFixture {
                 };
 
                 if dup_result == 0 {
-                    return Err(format!("DuplicateHandle failed: {}", unsafe { GetLastError() }));
+                    return Err(format!("DuplicateHandle failed: {}", unsafe {
+                        GetLastError()
+                    }));
                 }
 
                 let reader: Box<dyn Read + Send> =
@@ -164,13 +172,19 @@ impl DaemonFixture {
         };
 
         // Check target/debug first (most common in tests)
-        let debug_path = workspace_root.join("target").join("debug").join(daemon_name);
+        let debug_path = workspace_root
+            .join("target")
+            .join("debug")
+            .join(daemon_name);
         if debug_path.exists() {
             return Ok(debug_path);
         }
 
         // Check target/release
-        let release_path = workspace_root.join("target").join("release").join(daemon_name);
+        let release_path = workspace_root
+            .join("target")
+            .join("release")
+            .join(daemon_name);
         if release_path.exists() {
             return Ok(release_path);
         }

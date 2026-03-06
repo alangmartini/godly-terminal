@@ -3073,8 +3073,9 @@ impl GodlyApp {
     }
 
     fn open_or_cycle_mru_switcher(&mut self, direction: tab_reducer::TabMruCycleDirection) {
+        let mru_terminal_ids = self.active_workspace_mru_terminal_ids();
         let next_terminal_id = next_mru_switcher_selection(
-            self.active_workspace_mru_terminal_ids(),
+            mru_terminal_ids,
             self.active_focused(),
             self.mru_switcher
                 .as_ref()
@@ -3110,6 +3111,15 @@ impl GodlyApp {
 
     fn cancel_mru_switcher(&mut self) {
         self.mru_switcher = None;
+    }
+
+    fn active_workspace_mru_terminal_ids(&self) -> Vec<&str> {
+        let Some(workspace_id) = self.workspaces.active_id() else {
+            return Vec::new();
+        };
+
+        self.terminals
+            .mru_terminal_ids_for_workspace(Some(workspace_id))
     }
 
     fn handle_app_action(&mut self, action: AppAction) -> Task<Message> {
@@ -4926,6 +4936,25 @@ mod helper_tests {
     }
 
     #[test]
+    fn workspace_scoped_mru_cycle_uses_active_workspace_only() {
+        let mut terminals = TerminalCollection::new();
+        terminals.add_to_workspace("w1-a".into(), 24, 80, "w1".into());
+        terminals.add_to_workspace("w2-a".into(), 24, 80, "w2".into());
+        terminals.add_to_workspace("w1-b".into(), 24, 80, "w1".into());
+
+        terminals.set_active("w1-b");
+        terminals.set_active("w2-a");
+        terminals.set_active("w1-a");
+
+        let next = next_tab_id_from_mru(
+            terminals.mru_terminal_ids_for_workspace(Some("w1")),
+            Some("w1-a"),
+            TabMruCycleDirection::Forward,
+        );
+        assert_eq!(next, Some("w1-b".to_string()));
+    }
+
+    #[test]
     fn mru_switcher_commit_guards_match_release_semantics() {
         assert!(!should_commit_mru_switcher_on_key_release(
             false,
@@ -5093,24 +5122,5 @@ mod helper_tests {
         let (rows, cols) = grid_dimensions_for_viewport(viewport, font_metrics);
         assert!(rows >= 1);
         assert!(cols >= 1);
-    }
-
-    #[test]
-    fn workspace_scoped_mru_cycle_uses_active_workspace_only() {
-        let mut terminals = TerminalCollection::new();
-        terminals.add_to_workspace("w1-a".into(), 24, 80, "w1".into());
-        terminals.add_to_workspace("w2-a".into(), 24, 80, "w2".into());
-        terminals.add_to_workspace("w1-b".into(), 24, 80, "w1".into());
-
-        terminals.set_active("w1-b");
-        terminals.set_active("w2-a");
-        terminals.set_active("w1-a");
-
-        let next = next_tab_id_from_mru(
-            terminals.mru_terminal_ids_for_workspace(Some("w1")),
-            Some("w1-a"),
-            TabMruCycleDirection::Forward,
-        );
-        assert_eq!(next, Some("w1-b".to_string()));
     }
 }

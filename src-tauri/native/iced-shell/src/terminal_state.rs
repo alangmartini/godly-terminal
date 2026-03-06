@@ -176,6 +176,7 @@ impl TerminalCollection {
             })
             .collect()
     }
+
     /// Returns the next MRU terminal after the active one, if any.
     pub fn mru_next_after_active(&self) -> Option<&str> {
         let active_id = self.active_id()?;
@@ -773,6 +774,7 @@ mod tests {
         assert_eq!(col.mru_terminal_ids(), vec!["t1"]);
         assert_eq!(col.mru_next_after_active(), None);
     }
+
     #[test]
     fn test_mru_terminal_ids_for_workspace_filters_to_active_scope() {
         let mut col = TerminalCollection::new();

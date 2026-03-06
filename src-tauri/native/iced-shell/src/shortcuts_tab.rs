@@ -1,13 +1,17 @@
-use iced::widget::{column, container, row, rule, scrollable, text, Space};
-use iced::{Color, Element, Length, Padding};
+use iced::widget::{column, container, row, scrollable, text};
+use iced::{Background, Border, Color, Element, Length, Padding};
+
+use crate::theme::{ACCENT, BG_PRIMARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY};
 
 /// A single shortcut entry.
+#[derive(Clone, Copy)]
 pub struct ShortcutEntry {
     pub action: &'static str,
     pub keys: &'static str,
 }
 
 /// A category of shortcuts.
+#[derive(Clone, Copy)]
 pub struct ShortcutCategory {
     pub name: &'static str,
     pub entries: &'static [ShortcutEntry],
@@ -127,14 +131,42 @@ const WORKSPACES: &[ShortcutEntry] = &[
     },
 ];
 
-// ---------------------------------------------------------------------------
-// Colors (dark theme)
-// ---------------------------------------------------------------------------
+const CATEGORIES: &[ShortcutCategory] = &[
+    ShortcutCategory {
+        name: "Tabs",
+        entries: TABS,
+    },
+    ShortcutCategory {
+        name: "Split Panes",
+        entries: SPLIT_PANES,
+    },
+    ShortcutCategory {
+        name: "Clipboard",
+        entries: CLIPBOARD,
+    },
+    ShortcutCategory {
+        name: "Scrollback",
+        entries: SCROLLBACK,
+    },
+    ShortcutCategory {
+        name: "Zoom",
+        entries: ZOOM,
+    },
+    ShortcutCategory {
+        name: "Workspaces",
+        entries: WORKSPACES,
+    },
+];
 
-const TEXT_COLOR: Color = Color::from_rgb(0.85, 0.85, 0.85);
-const HEADER_COLOR: Color = Color::from_rgb(0.95, 0.95, 0.95);
-const KEY_COLOR: Color = Color::from_rgb(0.6, 0.7, 0.8);
-const SEPARATOR_COLOR: Color = Color::from_rgb(0.2, 0.2, 0.25);
+const SECTION_RADIUS: f32 = 6.0;
+const KEY_BADGE_RADIUS: f32 = 5.0;
+const SECTION_SPACING: f32 = 10.0;
+const ENTRY_SPACING: f32 = 8.0;
+const ROW_SPACING: f32 = 10.0;
+
+fn tint(color: Color, alpha: f32) -> Color {
+    Color::from_rgba(color.r, color.g, color.b, alpha)
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -142,73 +174,79 @@ const SEPARATOR_COLOR: Color = Color::from_rgb(0.2, 0.2, 0.25);
 
 /// Returns all shortcut categories.
 pub fn shortcut_categories() -> Vec<ShortcutCategory> {
-    vec![
-        ShortcutCategory {
-            name: "Tabs",
-            entries: TABS,
-        },
-        ShortcutCategory {
-            name: "Split Panes",
-            entries: SPLIT_PANES,
-        },
-        ShortcutCategory {
-            name: "Clipboard",
-            entries: CLIPBOARD,
-        },
-        ShortcutCategory {
-            name: "Scrollback",
-            entries: SCROLLBACK,
-        },
-        ShortcutCategory {
-            name: "Zoom",
-            entries: ZOOM,
-        },
-        ShortcutCategory {
-            name: "Workspaces",
-            entries: WORKSPACES,
-        },
-    ]
+    CATEGORIES.to_vec()
 }
 
 /// Renders the shortcuts tab content as a scrollable list of categories.
 pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
-    let categories = shortcut_categories();
-    let mut content = column![].spacing(12).padding(Padding::from([8, 16]));
+    let mut content = column![]
+        .spacing(SECTION_SPACING)
+        .padding(Padding::from([2, 2]));
 
-    for (i, cat) in categories.iter().enumerate() {
-        // Category header
-        let header = text(cat.name).size(14).color(HEADER_COLOR);
-        content = content.push(header);
+    for cat in CATEGORIES {
+        let mut entries = column![].spacing(ENTRY_SPACING).width(Length::Fill);
 
-        // Shortcut entries
         for entry in cat.entries {
-            let action_label = text(entry.action).size(13).color(TEXT_COLOR);
+            let key_badge = container(text(entry.keys).size(12).color(ACCENT))
+                .padding(Padding::from([3, 8]))
+                .style(|_theme| container::Style {
+                    background: Some(Background::Color(tint(BG_PRIMARY, 0.7))),
+                    border: Border {
+                        color: BORDER,
+                        width: 1.0,
+                        radius: KEY_BADGE_RADIUS.into(),
+                    },
+                    ..container::Style::default()
+                });
 
-            let key_badge = text(entry.keys).size(12).color(KEY_COLOR);
+            let entry_row = row![
+                text(entry.action)
+                    .size(13)
+                    .color(TEXT_PRIMARY)
+                    .width(Length::Fill),
+                key_badge
+            ]
+            .align_y(iced::Alignment::Center)
+            .spacing(ROW_SPACING)
+            .padding(Padding::from([2, 0]))
+            .width(Length::Fill);
 
-            let entry_row = row![action_label, Space::new().width(Length::Fill), key_badge]
-                .align_y(iced::Alignment::Center)
-                .padding(Padding::from([2, 0]));
-
-            content = content.push(entry_row);
+            entries = entries.push(entry_row);
         }
 
-        // Separator between categories (not after the last one)
-        if i + 1 < categories.len() {
-            content = content.push(Space::new().height(4));
-            content = content.push(rule::horizontal(1).style(move |_theme| rule::Style {
-                color: SEPARATOR_COLOR,
-                radius: 0.0.into(),
-                fill_mode: rule::FillMode::Full,
-                snap: true,
-            }));
-            content = content.push(Space::new().height(4));
-        }
+        let section = container(
+            column![text(cat.name).size(14).color(TEXT_ACTIVE), entries]
+                .spacing(8)
+                .width(Length::Fill),
+        )
+        .padding(Padding::from([10, 12]))
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(tint(BG_PRIMARY, 0.4))),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: SECTION_RADIUS.into(),
+            },
+            ..container::Style::default()
+        });
+
+        content = content.push(section);
     }
 
-    let scroll = scrollable(content).width(Length::Fill).height(Length::Fill);
+    let scroll = scrollable(content)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(6)
+                .scroller_width(6)
+                .spacing(2),
+        ))
+        .spacing(8)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     container(scroll)
+        .padding(Padding::from([0, 2]))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
