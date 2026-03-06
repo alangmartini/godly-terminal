@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -37,11 +39,13 @@ use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
-    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
+    ACCENT, BACKDROP, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, BORDER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
     PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_LG, SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY,
     TEXT_SECONDARY,
 };
+use crate::url_detector;
 use crate::workspace_state::WorkspaceCollection;
+use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
 
 #[path = "mru_switcher.rs"]
 mod mru_switcher;
@@ -341,6 +345,8 @@ pub struct GodlyApp {
     // --- K2/K3: Quit Confirmation + Copy Preview ---
     quit_confirm_pending: bool,
     copy_preview_text: Option<String>,
+    // --- F1-F4: Theme System ---
+    active_theme: crate::theme::ThemeId,
 }
 
 impl Default for GodlyApp {
@@ -413,6 +419,7 @@ impl Default for GodlyApp {
             mru_switcher: None,
             quit_confirm_pending: false,
             copy_preview_text: None,
+            active_theme: crate::theme::ThemeId::Dusk,
         }
     }
 }
@@ -630,6 +637,9 @@ pub enum Message {
     ClipboardPasted { terminal_id: String, text: String },
     /// Clipboard read failed in background.
     ClipboardPasteFailed(String),
+    // --- G3: URL Detection ---
+    /// URL clicked (Ctrl+Click) — open in default browser.
+    UrlClicked(String),
     /// File path dropped on window.
     FileDropped(PathBuf),
     // --- K2/K3: Quit Confirmation + Copy Preview ---
@@ -639,6 +649,8 @@ pub enum Message {
     CopyPreviewShow(String),
     CopyPreviewConfirmed,
     CopyPreviewDismissed,
+    // --- F1-F4: Theme System ---
+    ThemeChanged(crate::theme::ThemeId),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -766,6 +778,28 @@ impl GodlyApp {
             .unwrap_or_else(|| inset_terminal_pane_rect(self.terminal_content_area()));
 
         grid_dimensions_for_viewport(viewport, self.font_metrics)
+    }
+
+    /// G3: Detect if the cursor is currently over a URL in the terminal grid.
+    fn detect_url_under_cursor(&self) -> Option<String> {
+        let grid_pos = self.active_terminal_pointer_grid(false)?;
+        let terminal_id = self.target_terminal_id()?;
+        let term = self.terminals.get(terminal_id)?;
+        let grid = term.grid.as_ref()?;
+        let row_idx = grid_pos.row as usize;
+        let row = grid.rows.get(row_idx)?;
+        let line: String = row
+            .cells
+            .iter()
+            .map(|c| {
+                if c.content.is_empty() {
+                    " "
+                } else {
+                    c.content.as_str()
+                }
+            })
+            .collect();
+        url_detector::url_at_col(&line, grid_pos.col as usize)
     }
 
     fn active_terminal_pointer_grid(&self, clamp_to_viewport: bool) -> Option<GridPos> {
@@ -1093,6 +1127,13 @@ impl GodlyApp {
                     log::error!("Clipboard paste failed: {}", e);
                 }
             }
+            // --- G3: URL Click-to-Open ---
+            Message::UrlClicked(url) => {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &url])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .spawn();
+            }
             Message::FileDropped(path) => {
                 let target_terminal = self.target_terminal_id().map(str::to_string);
                 if let (Some(terminal_id), Some(client)) = (target_terminal, &self.client) {
@@ -1140,6 +1181,7 @@ impl GodlyApp {
                 }
             }
             Message::KeyboardEvent(keyboard::Event::ModifiersChanged(modifiers)) => {
+                self.ctrl_held = modifiers.control();
                 if should_commit_mru_switcher_on_modifiers_changed(
                     self.mru_switcher.is_some(),
                     modifiers,
@@ -1379,12 +1421,20 @@ impl GodlyApp {
                 if x != 0.0 || y != 0.0 {
                     self.cursor_position = Some(Point::new(x, y));
                 }
+                // G3: Ctrl+Click opens URL under cursor
+                if self.ctrl_held {
+                    if let Some(url) = self.detect_url_under_cursor() {
+                        return Task::done(Message::UrlClicked(url));
+                    }
+                }
                 if let Some(pos) = self.active_terminal_pointer_grid(false) {
                     self.selection.start(pos);
                 }
             }
             Message::SelectionUpdate { x, y } => {
                 self.cursor_position = Some(Point::new(x, y));
+                // G3: Track hovered URL for visual feedback
+                self.hovered_url = self.detect_url_under_cursor();
                 if self.sidebar_resizing {
                     self.sidebar_width = sidebar::clamp_sidebar_width(x);
                     return Task::none();
@@ -1988,6 +2038,10 @@ impl GodlyApp {
             Message::CopyPreviewDismissed => {
                 self.copy_preview_text = None;
             }
+            Message::ThemeChanged(id) => {
+                self.active_theme = id;
+                crate::theme::set_active_theme(id);
+            }
         }
         Task::none()
     }
@@ -2083,6 +2137,10 @@ impl GodlyApp {
         let with_settings: Element<'_, Message> = if self.settings_open {
             let tabs = &[
                 SettingsTab {
+                    id: "appearance",
+                    label: "Appearance",
+                },
+                SettingsTab {
                     id: "shortcuts",
                     label: "Shortcuts",
                 },
@@ -2112,6 +2170,7 @@ impl GodlyApp {
                 },
             ];
             let tab_content = match self.settings_tab.as_str() {
+                "appearance" => self.view_appearance_tab(),
                 "notifications" => self.view_notifications_tab(),
                 "quick-claude" => self.view_quick_claude_tab(),
                 "ai-tools" => self.view_ai_tools_tab(),
@@ -2204,7 +2263,7 @@ impl GodlyApp {
 
         let title = text(format!("Tab Actions: {}", term.tab_label()))
             .size(14)
-            .color(TEXT_ACTIVE);
+            .color(TEXT_ACTIVE());
         let rename_id = tab_id.to_string();
         let split_right_id = tab_id.to_string();
         let split_down_id = tab_id.to_string();
@@ -2212,18 +2271,18 @@ impl GodlyApp {
         let close_id = tab_id.to_string();
 
         let action_btn = |label: &'static str, msg: Message| {
-            button(text(label).size(12).color(TEXT_PRIMARY))
+            button(text(label).size(12).color(TEXT_PRIMARY()))
                 .on_press(msg)
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => iced::Color::TRANSPARENT,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
-                        text_color: TEXT_PRIMARY,
+                        text_color: TEXT_PRIMARY(),
                         border: iced::Border::default(),
                         ..button::Style::default()
                     }
@@ -2257,9 +2316,9 @@ impl GodlyApp {
         .padding(Padding::from([10, 10]))
         .width(Length::Fixed(260.0))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             border: iced::Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: RADIUS_MD.into(),
             },
@@ -2275,7 +2334,7 @@ impl GodlyApp {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(BACKDROP)),
+                background: Some(iced::Background::Color(BACKDROP())),
                 ..container::Style::default()
             })
             .into()
@@ -2283,7 +2342,7 @@ impl GodlyApp {
 
     fn view_tab_rename_dialog(&self) -> Element<'_, Message> {
         let dialog = container(column![
-            text("Rename Tab").size(16).color(TEXT_ACTIVE),
+            text("Rename Tab").size(16).color(TEXT_ACTIVE()),
             text_input(
                 "Tab name (empty clears custom name)",
                 &self.rename_tab_value
@@ -2294,38 +2353,38 @@ impl GodlyApp {
             .size(14),
             row![
                 Space::new().width(Length::Fill),
-                button(text("Cancel").size(12).color(TEXT_PRIMARY))
+                button(text("Cancel").size(12).color(TEXT_PRIMARY()))
                     .on_press(Message::TabRenameCancelled)
                     .padding(Padding::from([4, 9]))
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                             _ => iced::Color::TRANSPARENT,
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_PRIMARY,
+                            text_color: TEXT_PRIMARY(),
                             border: iced::Border {
-                                color: BORDER,
+                                color: BORDER(),
                                 width: 1.0,
                                 radius: 4.0.into(),
                             },
                             ..button::Style::default()
                         }
                     }),
-                button(text("Rename").size(12).color(TEXT_ACTIVE))
+                button(text("Rename").size(12).color(TEXT_ACTIVE()))
                     .on_press(Message::TabRenameSubmitted)
                     .padding(Padding::from([4, 9]))
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
-                            _ => BG_SECONDARY,
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                            _ => BG_SECONDARY(),
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_ACTIVE,
+                            text_color: TEXT_ACTIVE(),
                             border: iced::Border {
-                                color: BORDER,
+                                color: BORDER(),
                                 width: 1.0,
                                 radius: 4.0.into(),
                             },
@@ -2338,9 +2397,9 @@ impl GodlyApp {
         .padding(Padding::from([14, 16]))
         .width(Length::Fixed(360.0))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             border: iced::Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -2351,7 +2410,7 @@ impl GodlyApp {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(BACKDROP)),
+                background: Some(iced::Background::Color(BACKDROP())),
                 ..container::Style::default()
             })
             .into()
@@ -2397,19 +2456,102 @@ impl GodlyApp {
             .mru_terminal_ids_for_workspace(Some(workspace_id))
     }
 
+    /// Render the Appearance tab (theme selection grid with preview swatches).
+    fn view_appearance_tab(&self) -> Element<'_, Message> {
+        use crate::theme::ThemeId;
+        use iced::widget::{button, row, scrollable, text, Space};
+        use iced::Theme;
+
+        let all_themes = ThemeId::all();
+        let mut grid_children: Vec<Element<'_, Message>> = Vec::new();
+
+        for &theme_id in all_themes {
+            let colors = theme_id.preview_colors();
+            let is_active = self.active_theme == theme_id;
+
+            // Build swatch row
+            let mut swatches = row![].spacing(2);
+            for c in &colors {
+                let color_val = *c;
+                swatches = swatches.push(
+                    container(Space::with_width(16).height(16))
+                        .style(move |_t: &Theme| container::Style {
+                            background: Some(iced::Background::Color(color_val)),
+                            border: iced::Border {
+                                radius: 2.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                );
+            }
+
+            let label = text(theme_id.name())
+                .size(13)
+                .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
+
+            let btn_content = column![label, swatches].spacing(4).padding(8);
+
+            let border_color = if is_active { ACCENT() } else { BORDER() };
+            let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+
+            let theme_button = button(btn_content)
+                .on_press(Message::ThemeChanged(theme_id))
+                .padding(0)
+                .style(move |_t: &Theme, _status| button::Style {
+                    background: Some(iced::Background::Color(bg_color)),
+                    border: iced::Border {
+                        color: border_color,
+                        width: if is_active { 2.0 } else { 1.0 },
+                        radius: RADIUS_MD.into(),
+                    },
+                    text_color: TEXT_PRIMARY(),
+                    ..Default::default()
+                });
+
+            grid_children.push(theme_button.width(Length::FillPortion(1)).into());
+        }
+
+        // Arrange in rows of 3
+        let mut rows: Vec<Element<'_, Message>> = Vec::new();
+        for chunk in grid_children.chunks_mut(3) {
+            let mut r = row![].spacing(8);
+            for child in chunk.iter_mut() {
+                let taken = std::mem::replace(child, Space::with_width(0).height(0).into());
+                r = r.push(taken);
+            }
+            rows.push(r.into());
+        }
+
+        let mut col = column![
+            text("Theme").size(16).color(TEXT_PRIMARY()),
+            text("Choose a color theme for the terminal and UI.")
+                .size(13)
+                .color(TEXT_SECONDARY()),
+        ]
+        .spacing(8)
+        .padding(16);
+
+        for r in rows {
+            col = col.push(r);
+        }
+
+        scrollable(col).height(Length::Fill).into()
+    }
+
     fn view_toast_overlay(&self) -> Element<'_, Message> {
         let mut toasts_column = column![].spacing(8).width(Length::Fixed(320.0));
         for toast in &self.toasts {
             let card = container(column![
-                text(&toast.title).size(13).color(TEXT_ACTIVE),
-                text(&toast.message).size(11).color(TEXT_PRIMARY),
+                text(&toast.title).size(13).color(TEXT_ACTIVE()),
+                text(&toast.message).size(11).color(TEXT_PRIMARY()),
             ])
             .padding(Padding::from([8, 10]))
             .width(Length::Fill)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(BG_SECONDARY)),
+                background: Some(iced::Background::Color(BG_SECONDARY())),
                 border: iced::Border {
-                    color: BORDER,
+                    color: BORDER(),
                     width: 1.0,
                     radius: RADIUS_MD.into(),
                 },
@@ -2440,22 +2582,22 @@ impl GodlyApp {
         let mut preset_row = row![].spacing(8);
         for preset in NotificationSoundPreset::all() {
             let is_active = self.notification_sound_preset == preset;
-            let bg = if is_active { BG_TERTIARY } else { BG_SECONDARY };
-            let fg = if is_active { TEXT_ACTIVE } else { TEXT_PRIMARY };
+            let bg = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+            let fg = if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() };
 
             let btn = button(text(preset.label()).size(12).color(fg))
                 .on_press(Message::NotificationSoundPresetSelected(preset))
                 .padding(Padding::from([4, 9]))
                 .style(move |_theme, status| {
                     let hover_bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => bg,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(hover_bg)),
                         text_color: fg,
                         border: iced::Border {
-                            color: BORDER,
+                            color: BORDER(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -2475,7 +2617,7 @@ impl GodlyApp {
             .padding(Padding::from([4, 8]))
             .size(12)
             .width(Length::Fill),
-            button(text("Add").size(12).color(TEXT_PRIMARY))
+            button(text("Add").size(12).color(TEXT_PRIMARY()))
                 .on_press(Message::AddWorkspaceMutePattern)
                 .padding(Padding::from([4, 9]))
         ]
@@ -2488,15 +2630,15 @@ impl GodlyApp {
             mute_pattern_list = mute_pattern_list.push(
                 text("No workspace mute patterns configured.")
                     .size(11)
-                    .color(TEXT_SECONDARY),
+                    .color(TEXT_SECONDARY()),
             );
         } else {
             for pattern in &self.workspace_mute_patterns {
                 let remove_pattern = pattern.clone();
                 let row = row![
-                    text(pattern).size(12).color(TEXT_PRIMARY),
+                    text(pattern).size(12).color(TEXT_PRIMARY()),
                     Space::new().width(Length::Fill),
-                    button(text("Remove").size(11).color(TEXT_PRIMARY))
+                    button(text("Remove").size(11).color(TEXT_PRIMARY()))
                         .on_press(Message::RemoveWorkspaceMutePattern(remove_pattern))
                         .padding(Padding::from([2, 7]))
                 ]
@@ -2509,21 +2651,21 @@ impl GodlyApp {
 
         container(
             column![
-                text("Notification Sounds").size(14).color(TEXT_ACTIVE),
+                text("Notification Sounds").size(14).color(TEXT_ACTIVE()),
                 text("Choose a sound preset for bell events.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
-                button(text(toggle_label).size(12).color(TEXT_PRIMARY))
+                    .color(TEXT_PRIMARY()),
+                button(text(toggle_label).size(12).color(TEXT_PRIMARY()))
                     .on_press(Message::NotificationSoundsToggled)
                     .padding(Padding::from([4, 9])),
                 preset_row,
-                button(text("Play Test Sound").size(12).color(TEXT_PRIMARY))
+                button(text("Play Test Sound").size(12).color(TEXT_PRIMARY()))
                     .on_press(Message::NotificationSoundTest)
                     .padding(Padding::from([4, 9])),
-                text("Workspace mute patterns").size(14).color(TEXT_ACTIVE),
+                text("Workspace mute patterns").size(14).color(TEXT_ACTIVE()),
                 text("Use * wildcard. Matches workspace id or name.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
+                    .color(TEXT_PRIMARY()),
                 add_pattern_row,
                 mute_pattern_list,
             ]
@@ -2544,21 +2686,21 @@ impl GodlyApp {
         let mut layout_row = row![].spacing(8).align_y(iced::Alignment::Center);
         for layout in QuickClaudeLayout::all() {
             let is_active = self.quick_claude_layout == layout;
-            let bg = if is_active { BG_TERTIARY } else { BG_SECONDARY };
-            let fg = if is_active { TEXT_ACTIVE } else { TEXT_PRIMARY };
+            let bg = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+            let fg = if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() };
             let layout_button = button(text(layout.label()).size(12).color(fg))
                 .on_press(Message::QuickClaudeLayoutSelected(layout))
                 .padding(Padding::from([4, 9]))
                 .style(move |_theme, status| {
                     let hover_bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => bg,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(hover_bg)),
                         text_color: fg,
                         border: iced::Border {
-                            color: BORDER,
+                            color: BORDER(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -2573,24 +2715,24 @@ impl GodlyApp {
             presets_list = presets_list.push(
                 text("No Quick Claude presets yet.")
                     .size(11)
-                    .color(TEXT_SECONDARY),
+                    .color(TEXT_SECONDARY()),
             );
         } else {
             for (index, preset) in self.quick_claude_presets.iter().enumerate() {
                 let is_editing = self.quick_claude_edit_index == Some(index);
                 let card_bg = if is_editing {
-                    BG_TERTIARY
+                    BG_TERTIARY()
                 } else {
-                    BG_SECONDARY
+                    BG_SECONDARY()
                 };
                 let card = container(column![
                     row![
-                        text(&preset.name).size(13).color(TEXT_ACTIVE),
+                        text(&preset.name).size(13).color(TEXT_ACTIVE()),
                         Space::new().width(Length::Fill),
-                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                        button(text("Edit").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::QuickClaudeEditPreset(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                        button(text("Delete").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::QuickClaudeDeletePreset(index))
                             .padding(Padding::from([2, 7])),
                     ]
@@ -2598,15 +2740,15 @@ impl GodlyApp {
                     .align_y(iced::Alignment::Center),
                     text(format!("Layout: {}", preset.layout.label()))
                         .size(11)
-                        .color(TEXT_SECONDARY),
-                    text(&preset.prompt_template).size(11).color(TEXT_PRIMARY),
+                        .color(TEXT_SECONDARY()),
+                    text(&preset.prompt_template).size(11).color(TEXT_PRIMARY()),
                 ])
                 .padding(Padding::from([8, 10]))
                 .width(Length::Fill)
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(card_bg)),
                     border: iced::Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -2618,10 +2760,10 @@ impl GodlyApp {
 
         container(
             column![
-                text("Quick Claude Presets").size(14).color(TEXT_ACTIVE),
+                text("Quick Claude Presets").size(14).color(TEXT_ACTIVE()),
                 text("Configure reusable launch presets.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
+                    .color(TEXT_PRIMARY()),
                 text_input("Preset name", &self.quick_claude_name_input)
                     .on_input(Message::QuickClaudeNameInputChanged)
                     .padding(Padding::from([4, 8]))
@@ -2630,18 +2772,18 @@ impl GodlyApp {
                     .on_input(Message::QuickClaudePromptInputChanged)
                     .padding(Padding::from([4, 8]))
                     .size(12),
-                text("Layout").size(12).color(TEXT_SECONDARY),
+                text("Layout").size(12).color(TEXT_SECONDARY()),
                 layout_row,
                 row![
-                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                    button(text(save_label).size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::QuickClaudeSavePreset)
                         .padding(Padding::from([4, 9])),
-                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                    button(text("Clear").size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::QuickClaudeClearEditor)
                         .padding(Padding::from([4, 9])),
                 ]
                 .spacing(8),
-                text("Saved Presets").size(12).color(TEXT_SECONDARY),
+                text("Saved Presets").size(12).color(TEXT_SECONDARY()),
                 presets_list,
             ]
             .spacing(10)
@@ -2663,25 +2805,25 @@ impl GodlyApp {
             tools_list = tools_list.push(
                 text("No AI tools configured.")
                     .size(11)
-                    .color(TEXT_SECONDARY),
+                    .color(TEXT_SECONDARY()),
             );
         } else {
             for (index, entry) in self.ai_tools.iter().enumerate() {
                 let is_editing = self.ai_tool_edit_index == Some(index);
                 let card_bg = if is_editing {
-                    BG_TERTIARY
+                    BG_TERTIARY()
                 } else {
-                    BG_SECONDARY
+                    BG_SECONDARY()
                 };
                 let icon_line = entry.icon_tag.as_deref().unwrap_or("-");
                 let card = container(column![
                     row![
-                        text(&entry.display_name).size(13).color(TEXT_ACTIVE),
+                        text(&entry.display_name).size(13).color(TEXT_ACTIVE()),
                         Space::new().width(Length::Fill),
-                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                        button(text("Edit").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::AiToolEdit(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                        button(text("Delete").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::AiToolDelete(index))
                             .padding(Padding::from([2, 7])),
                     ]
@@ -2689,17 +2831,17 @@ impl GodlyApp {
                     .align_y(iced::Alignment::Center),
                     text(format!("Command: {}", entry.command))
                         .size(11)
-                        .color(TEXT_PRIMARY),
+                        .color(TEXT_PRIMARY()),
                     text(format!("Icon: {}", icon_line))
                         .size(11)
-                        .color(TEXT_SECONDARY),
+                        .color(TEXT_SECONDARY()),
                 ])
                 .padding(Padding::from([8, 10]))
                 .width(Length::Fill)
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(card_bg)),
                     border: iced::Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -2711,10 +2853,10 @@ impl GodlyApp {
 
         container(
             column![
-                text("AI Tools").size(14).color(TEXT_ACTIVE),
+                text("AI Tools").size(14).color(TEXT_ACTIVE()),
                 text("Register custom AI tool launch entries.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
+                    .color(TEXT_PRIMARY()),
                 text_input("Display name", &self.ai_tool_name_input)
                     .on_input(Message::AiToolNameInputChanged)
                     .padding(Padding::from([4, 8]))
@@ -2728,15 +2870,15 @@ impl GodlyApp {
                     .padding(Padding::from([4, 8]))
                     .size(12),
                 row![
-                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                    button(text(save_label).size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::AiToolSave)
                         .padding(Padding::from([4, 9])),
-                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                    button(text("Clear").size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::AiToolClearEditor)
                         .padding(Padding::from([4, 9])),
                 ]
                 .spacing(8),
-                text("Registered Tools").size(12).color(TEXT_SECONDARY),
+                text("Registered Tools").size(12).color(TEXT_SECONDARY()),
                 tools_list,
             ]
             .spacing(10)
@@ -2758,30 +2900,30 @@ impl GodlyApp {
             plugins_list = plugins_list.push(
                 text("No plugins configured.")
                     .size(11)
-                    .color(TEXT_SECONDARY),
+                    .color(TEXT_SECONDARY()),
             );
         } else {
             for (index, entry) in self.plugins.iter().enumerate() {
                 let is_editing = self.plugin_edit_index == Some(index);
                 let card_bg = if is_editing {
-                    BG_TERTIARY
+                    BG_TERTIARY()
                 } else {
-                    BG_SECONDARY
+                    BG_SECONDARY()
                 };
                 let status_label = if entry.enabled { "Enabled" } else { "Disabled" };
                 let toggle_label = if entry.enabled { "Disable" } else { "Enable" };
                 let card = container(column![
                     row![
-                        text(&entry.name).size(13).color(TEXT_ACTIVE),
+                        text(&entry.name).size(13).color(TEXT_ACTIVE()),
                         Space::new().width(Length::Fill),
-                        text(status_label).size(11).color(TEXT_SECONDARY),
-                        button(text(toggle_label).size(11).color(TEXT_PRIMARY))
+                        text(status_label).size(11).color(TEXT_SECONDARY()),
+                        button(text(toggle_label).size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::PluginToggleEnabled(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                        button(text("Edit").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::PluginEdit(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                        button(text("Delete").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::PluginDelete(index))
                             .padding(Padding::from([2, 7])),
                     ]
@@ -2789,14 +2931,14 @@ impl GodlyApp {
                     .align_y(iced::Alignment::Center),
                     text(format!("Source: {}", entry.source))
                         .size(11)
-                        .color(TEXT_PRIMARY),
+                        .color(TEXT_PRIMARY()),
                 ])
                 .padding(Padding::from([8, 10]))
                 .width(Length::Fill)
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(card_bg)),
                     border: iced::Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -2808,10 +2950,10 @@ impl GodlyApp {
 
         container(
             column![
-                text("Plugins").size(14).color(TEXT_ACTIVE),
+                text("Plugins").size(14).color(TEXT_ACTIVE()),
                 text("Manage plugin entries for native shell runtime.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
+                    .color(TEXT_PRIMARY()),
                 text_input("Plugin name", &self.plugin_name_input)
                     .on_input(Message::PluginNameInputChanged)
                     .padding(Padding::from([4, 8]))
@@ -2821,15 +2963,15 @@ impl GodlyApp {
                     .padding(Padding::from([4, 8]))
                     .size(12),
                 row![
-                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                    button(text(save_label).size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::PluginSave)
                         .padding(Padding::from([4, 9])),
-                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                    button(text("Clear").size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::PluginClearEditor)
                         .padding(Padding::from([4, 9])),
                 ]
                 .spacing(8),
-                text("Registered Plugins").size(12).color(TEXT_SECONDARY),
+                text("Registered Plugins").size(12).color(TEXT_SECONDARY()),
                 plugins_list,
             ]
             .spacing(10)
@@ -2849,14 +2991,14 @@ impl GodlyApp {
         let mut flows_list = column![].spacing(8).width(Length::Fill);
         if self.flows.is_empty() {
             flows_list =
-                flows_list.push(text("No flows configured.").size(11).color(TEXT_SECONDARY));
+                flows_list.push(text("No flows configured.").size(11).color(TEXT_SECONDARY()));
         } else {
             for (index, entry) in self.flows.iter().enumerate() {
                 let is_editing = self.flow_edit_index == Some(index);
                 let card_bg = if is_editing {
-                    BG_TERTIARY
+                    BG_TERTIARY()
                 } else {
-                    BG_SECONDARY
+                    BG_SECONDARY()
                 };
                 let status_label = if entry.enabled { "Enabled" } else { "Disabled" };
                 let toggle_label = if entry.enabled { "Disable" } else { "Enable" };
@@ -2872,16 +3014,16 @@ impl GodlyApp {
                 };
                 let card = container(column![
                     row![
-                        text(&entry.name).size(13).color(TEXT_ACTIVE),
+                        text(&entry.name).size(13).color(TEXT_ACTIVE()),
                         Space::new().width(Length::Fill),
-                        text(status_label).size(11).color(TEXT_SECONDARY),
-                        button(text(toggle_label).size(11).color(TEXT_PRIMARY))
+                        text(status_label).size(11).color(TEXT_SECONDARY()),
+                        button(text(toggle_label).size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::FlowToggleEnabled(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                        button(text("Edit").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::FlowEdit(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                        button(text("Delete").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::FlowDelete(index))
                             .padding(Padding::from([2, 7])),
                     ]
@@ -2889,17 +3031,17 @@ impl GodlyApp {
                     .align_y(iced::Alignment::Center),
                     text(format!("Trigger: {}", entry.trigger))
                         .size(11)
-                        .color(TEXT_PRIMARY),
+                        .color(TEXT_PRIMARY()),
                     text(format!("Steps: {} | {}", steps_label, steps_preview))
                         .size(11)
-                        .color(TEXT_SECONDARY),
+                        .color(TEXT_SECONDARY()),
                 ])
                 .padding(Padding::from([8, 10]))
                 .width(Length::Fill)
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(card_bg)),
                     border: iced::Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -2911,10 +3053,10 @@ impl GodlyApp {
 
         container(
             column![
-                text("Flows").size(14).color(TEXT_ACTIVE),
+                text("Flows").size(14).color(TEXT_ACTIVE()),
                 text("Create simple automation flow profiles with trigger and ordered steps.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
+                    .color(TEXT_PRIMARY()),
                 text_input("Flow name", &self.flow_name_input)
                     .on_input(Message::FlowNameInputChanged)
                     .padding(Padding::from([4, 8]))
@@ -2934,15 +3076,15 @@ impl GodlyApp {
                 .padding(Padding::from([4, 8]))
                 .size(12),
                 row![
-                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                    button(text(save_label).size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::FlowSave)
                         .padding(Padding::from([4, 9])),
-                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                    button(text("Clear").size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::FlowClearEditor)
                         .padding(Padding::from([4, 9])),
                 ]
                 .spacing(8),
-                text("Registered Flows").size(12).color(TEXT_SECONDARY),
+                text("Registered Flows").size(12).color(TEXT_SECONDARY()),
                 flows_list,
             ]
             .spacing(10)
@@ -2967,21 +3109,21 @@ impl GodlyApp {
         let mut auth_mode_row = row![].spacing(8).align_y(iced::Alignment::Center);
         for mode in RemoteAuthMode::all() {
             let is_active = self.remote_auth_mode == mode;
-            let bg = if is_active { BG_TERTIARY } else { BG_SECONDARY };
-            let fg = if is_active { TEXT_ACTIVE } else { TEXT_PRIMARY };
+            let bg = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+            let fg = if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() };
             let mode_button = button(text(mode.label()).size(12).color(fg))
                 .on_press(Message::RemoteAuthModeSelected(mode))
                 .padding(Padding::from([4, 9]))
                 .style(move |_theme, status| {
                     let hover_bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                         _ => bg,
                     };
                     button::Style {
                         background: Some(iced::Background::Color(hover_bg)),
                         text_color: fg,
                         border: iced::Border {
-                            color: BORDER,
+                            color: BORDER(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -2996,15 +3138,15 @@ impl GodlyApp {
             remote_list = remote_list.push(
                 text("No remote profiles configured.")
                     .size(11)
-                    .color(TEXT_SECONDARY),
+                    .color(TEXT_SECONDARY()),
             );
         } else {
             for (index, profile) in self.remote_connections.iter().enumerate() {
                 let is_editing = self.remote_edit_index == Some(index);
                 let card_bg = if is_editing {
-                    BG_TERTIARY
+                    BG_TERTIARY()
                 } else {
-                    BG_SECONDARY
+                    BG_SECONDARY()
                 };
                 let status_label = if profile.enabled {
                     "Enabled"
@@ -3020,16 +3162,16 @@ impl GodlyApp {
                 };
                 let card = container(column![
                     row![
-                        text(&profile.name).size(13).color(TEXT_ACTIVE),
+                        text(&profile.name).size(13).color(TEXT_ACTIVE()),
                         Space::new().width(Length::Fill),
-                        text(status_label).size(11).color(TEXT_SECONDARY),
-                        button(text(toggle_label).size(11).color(TEXT_PRIMARY))
+                        text(status_label).size(11).color(TEXT_SECONDARY()),
+                        button(text(toggle_label).size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::RemoteToggleEnabled(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Edit").size(11).color(TEXT_PRIMARY))
+                        button(text("Edit").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::RemoteEdit(index))
                             .padding(Padding::from([2, 7])),
-                        button(text("Delete").size(11).color(TEXT_PRIMARY))
+                        button(text("Delete").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::RemoteDelete(index))
                             .padding(Padding::from([2, 7])),
                     ]
@@ -3040,15 +3182,15 @@ impl GodlyApp {
                         profile.username, profile.host, profile.port
                     ))
                     .size(11)
-                    .color(TEXT_PRIMARY),
-                    text(auth_display).size(11).color(TEXT_SECONDARY),
+                    .color(TEXT_PRIMARY()),
+                    text(auth_display).size(11).color(TEXT_SECONDARY()),
                 ])
                 .padding(Padding::from([8, 10]))
                 .width(Length::Fill)
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(card_bg)),
                     border: iced::Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -3060,10 +3202,10 @@ impl GodlyApp {
 
         container(
             column![
-                text("Remote (SSH)").size(14).color(TEXT_ACTIVE),
+                text("Remote (SSH)").size(14).color(TEXT_ACTIVE()),
                 text("Configure SSH connection profiles for remote terminal sessions.")
                     .size(12)
-                    .color(TEXT_PRIMARY),
+                    .color(TEXT_PRIMARY()),
                 text_input("Profile name", &self.remote_name_input)
                     .on_input(Message::RemoteNameInputChanged)
                     .padding(Padding::from([4, 8]))
@@ -3080,22 +3222,22 @@ impl GodlyApp {
                     .on_input(Message::RemoteUsernameInputChanged)
                     .padding(Padding::from([4, 8]))
                     .size(12),
-                text("Auth Mode").size(12).color(TEXT_SECONDARY),
+                text("Auth Mode").size(12).color(TEXT_SECONDARY()),
                 auth_mode_row,
                 text_input(auth_placeholder, &self.remote_auth_value_input)
                     .on_input(Message::RemoteAuthValueInputChanged)
                     .padding(Padding::from([4, 8]))
                     .size(12),
                 row![
-                    button(text(save_label).size(12).color(TEXT_PRIMARY))
+                    button(text(save_label).size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::RemoteSave)
                         .padding(Padding::from([4, 9])),
-                    button(text("Clear").size(12).color(TEXT_PRIMARY))
+                    button(text("Clear").size(12).color(TEXT_PRIMARY()))
                         .on_press(Message::RemoteClearEditor)
                         .padding(Padding::from([4, 9])),
                 ]
                 .spacing(8),
-                text("Connection Profiles").size(12).color(TEXT_SECONDARY),
+                text("Connection Profiles").size(12).color(TEXT_SECONDARY()),
                 remote_list,
             ]
             .spacing(10)
@@ -3362,6 +3504,14 @@ impl GodlyApp {
                 }
                 Task::none()
             }
+            AppAction::TogglePerfOverlay => {
+                self.perf_overlay_visible = !self.perf_overlay_visible;
+                Task::none()
+            }
+            AppAction::Find => {
+                self.search.open();
+                Task::none()
+            }
         }
     }
 
@@ -3619,7 +3769,7 @@ impl GodlyApp {
 
     fn view_workspace_rename_dialog(&self) -> Element<'_, Message> {
         let dialog = container(column![
-            text("Rename Workspace").size(16).color(TEXT_ACTIVE),
+            text("Rename Workspace").size(16).color(TEXT_ACTIVE()),
             text_input("Workspace name", &self.rename_workspace_value)
                 .on_input(Message::WorkspaceRenameInputChanged)
                 .on_submit(Message::WorkspaceRenameSubmitted)
@@ -3627,38 +3777,38 @@ impl GodlyApp {
                 .size(14),
             row![
                 Space::new().width(Length::Fill),
-                button(text("Cancel").size(12).color(TEXT_PRIMARY))
+                button(text("Cancel").size(12).color(TEXT_PRIMARY()))
                     .on_press(Message::WorkspaceRenameCancelled)
                     .padding(Padding::from([4, 9]))
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
                             _ => iced::Color::TRANSPARENT,
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_PRIMARY,
+                            text_color: TEXT_PRIMARY(),
                             border: iced::Border {
-                                color: BORDER,
+                                color: BORDER(),
                                 width: 1.0,
                                 radius: 4.0.into(),
                             },
                             ..button::Style::default()
                         }
                     }),
-                button(text("Rename").size(12).color(TEXT_ACTIVE))
+                button(text("Rename").size(12).color(TEXT_ACTIVE()))
                     .on_press(Message::WorkspaceRenameSubmitted)
                     .padding(Padding::from([4, 9]))
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY,
-                            _ => BG_SECONDARY,
+                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                            _ => BG_SECONDARY(),
                         };
                         button::Style {
                             background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_ACTIVE,
+                            text_color: TEXT_ACTIVE(),
                             border: iced::Border {
-                                color: BORDER,
+                                color: BORDER(),
                                 width: 1.0,
                                 radius: 4.0.into(),
                             },
@@ -3671,9 +3821,9 @@ impl GodlyApp {
         .padding(Padding::from([14, 16]))
         .width(Length::Fixed(340.0))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             border: iced::Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: 6.0.into(),
             },
@@ -3684,7 +3834,7 @@ impl GodlyApp {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(BACKDROP)),
+                background: Some(iced::Background::Color(BACKDROP())),
                 ..container::Style::default()
             })
             .into()
@@ -4153,16 +4303,19 @@ impl GodlyApp {
             None
         };
 
+        let term_palette = crate::theme::active_terminal_palette();
         let tc = TerminalCanvas {
             grid: term.grid.as_ref(),
             metrics: self.font_metrics,
             selection,
+            default_fg: term_palette.foreground,
+            default_bg: term_palette.background,
         };
 
         let border_color = if is_focused {
-            PANE_FOCUSED_BORDER
+            PANE_FOCUSED_BORDER()
         } else {
-            PANE_BORDER
+            PANE_BORDER()
         };
 
         container(canvas(tc).width(Length::Fill).height(Length::Fill))
@@ -4173,7 +4326,7 @@ impl GodlyApp {
                 TERMINAL_VIEWPORT_INSET_X,
             ]))
             .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(PANE_BG)),
+                background: Some(iced::Background::Color(PANE_BG())),
                 border: iced::Border {
                     color: border_color,
                     width: if is_focused { 2.0 } else { 1.0 },
@@ -4187,24 +4340,24 @@ impl GodlyApp {
     fn view_terminal_empty_state(&self) -> Element<'_, Message> {
         let card = container(
             column![
-                text("No terminals open").size(22).color(TEXT_ACTIVE),
+                text("No terminals open").size(22).color(TEXT_ACTIVE()),
                 text("Create a terminal in this workspace to start working.")
                     .size(13)
-                    .color(TEXT_SECONDARY),
-                button(text("Create terminal").size(13).color(BG_SECONDARY))
+                    .color(TEXT_SECONDARY()),
+                button(text("Create terminal").size(13).color(BG_SECONDARY()))
                     .on_press(Message::NewTabRequested)
                     .padding(Padding::from([8, 14]))
                     .style(|_theme, status| {
                         let background = match status {
                             button::Status::Hovered | button::Status::Pressed => {
-                                iced::Background::Color(PANE_FOCUSED_BORDER)
+                                iced::Background::Color(PANE_FOCUSED_BORDER())
                             }
-                            _ => iced::Background::Color(ACCENT),
+                            _ => iced::Background::Color(ACCENT()),
                         };
 
                         button::Style {
                             background: Some(background),
-                            text_color: BG_SECONDARY,
+                            text_color: BG_SECONDARY(),
                             border: iced::Border {
                                 color: iced::Color::TRANSPARENT,
                                 width: 0.0,
@@ -4220,9 +4373,9 @@ impl GodlyApp {
         .padding(Padding::from([18, 20]))
         .width(Length::Fixed(EMPTY_STATE_CARD_WIDTH))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(EMPTY_STATE_BG)),
+            background: Some(iced::Background::Color(EMPTY_STATE_BG())),
             border: iced::Border {
-                color: PANE_BORDER,
+                color: PANE_BORDER(),
                 width: 1.0,
                 radius: 10.0.into(),
             },
@@ -4257,7 +4410,7 @@ impl GodlyApp {
                     .height(Length::Fill)
                     .style(move |_theme| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(
-                            ACCENT.r, ACCENT.g, ACCENT.b, alpha,
+                            ACCENT().r, ACCENT().g, ACCENT().b, alpha,
                         ))),
                         ..container::Style::default()
                     }),

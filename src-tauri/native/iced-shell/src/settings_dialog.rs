@@ -46,11 +46,11 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
             .style(move |_theme, status| {
                 let (bg, border_color, text_color, shadow) = if is_active {
                     (
-                        tint(ACCENT, 0.22),
-                        ACCENT_HOVER,
-                        TEXT_ACTIVE,
+                        tint(ACCENT(), 0.22),
+                        ACCENT_HOVER(),
+                        TEXT_ACTIVE(),
                         Shadow {
-                            color: tint(ACCENT, 0.30),
+                            color: tint(ACCENT(), 0.30),
                             offset: Vector::new(0.0, 1.0),
                             blur_radius: 8.0,
                         },
@@ -58,21 +58,21 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
                 } else {
                     match status {
                         button::Status::Hovered => (
-                            tint(BG_TERTIARY, 0.95),
-                            tint(ACCENT, 0.45),
-                            TEXT_PRIMARY,
+                            tint(BG_TERTIARY(), 0.95),
+                            tint(ACCENT(), 0.45),
+                            TEXT_PRIMARY(),
                             Shadow::default(),
                         ),
                         button::Status::Pressed => (
-                            tint(ACCENT, 0.16),
-                            tint(ACCENT, 0.60),
-                            TEXT_ACTIVE,
+                            tint(ACCENT(), 0.16),
+                            tint(ACCENT(), 0.60),
+                            TEXT_ACTIVE(),
                             Shadow::default(),
                         ),
                         _ => (
-                            tint(BG_PRIMARY, 0.18),
-                            tint(BORDER, 0.85),
-                            TEXT_SECONDARY,
+                            tint(BG_PRIMARY(), 0.18),
+                            tint(BORDER(), 0.85),
+                            TEXT_SECONDARY(),
                             Shadow::default(),
                         ),
                     }
@@ -100,10 +100,10 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .style(|_theme, status| {
             let (bg, border_color, text_color) = match status {
                 button::Status::Hovered => {
-                    (tint(BG_TERTIARY, 0.95), tint(BORDER, 0.9), TEXT_ACTIVE)
+                    (tint(BG_TERTIARY(), 0.95), tint(BORDER(), 0.9), TEXT_ACTIVE())
                 }
-                button::Status::Pressed => (tint(ACCENT, 0.18), tint(ACCENT, 0.6), TEXT_ACTIVE),
-                _ => (tint(BG_PRIMARY, 0.35), tint(BORDER, 0.7), TEXT_PRIMARY),
+                button::Status::Pressed => (tint(ACCENT(), 0.18), tint(ACCENT(), 0.6), TEXT_ACTIVE()),
+                _ => (tint(BG_PRIMARY(), 0.35), tint(BORDER(), 0.7), TEXT_PRIMARY()),
             };
 
             button::Style {
@@ -120,7 +120,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
 
     let header = container(
         row![
-            text("Settings").size(18).color(TEXT_ACTIVE),
+            text("Settings").size(18).color(TEXT_ACTIVE()),
             Space::new().width(Length::Fill),
             close_btn,
         ]
@@ -128,7 +128,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .padding(Padding::from([10, 16])),
     )
     .style(|_theme| container::Style {
-        background: Some(Background::Color(tint(BG_PRIMARY, 0.97))),
+        background: Some(Background::Color(tint(BG_PRIMARY(), 0.97))),
         ..container::Style::default()
     })
     .width(Length::Fill);
@@ -138,10 +138,10 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         "Godly Terminal (Native) \u{2014} v{}",
         godly_protocol::FRONTEND_CONTRACT_VERSION
     );
-    let footer = container(text(version).size(11).color(TEXT_SECONDARY))
+    let footer = container(text(version).size(11).color(TEXT_SECONDARY()))
         .padding(Padding::from([8, 16]))
         .style(|_theme| container::Style {
-            background: Some(Background::Color(tint(BG_PRIMARY, 0.68))),
+            background: Some(Background::Color(tint(BG_PRIMARY(), 0.68))),
             ..container::Style::default()
         })
         .width(Length::Fill);
@@ -156,14 +156,14 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     .padding(Padding::from([8, 10]))
     .width(Length::Fill)
     .style(|_theme| container::Style {
-        background: Some(Background::Color(tint(BG_PRIMARY, 0.72))),
+        background: Some(Background::Color(tint(BG_PRIMARY(), 0.72))),
         border: Border {
-            color: tint(BORDER, 0.9),
+            color: tint(BORDER(), 0.9),
             width: 1.0,
             radius: TAB_STRIP_RADIUS.into(),
         },
         shadow: Shadow {
-            color: tint(BACKDROP, 0.28),
+            color: tint(BACKDROP(), 0.28),
             offset: Vector::new(0.0, 1.0),
             blur_radius: 6.0,
         },
@@ -183,9 +183,9 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .style(|_theme| container::Style {
-        background: Some(Background::Color(BG_SECONDARY)),
+        background: Some(Background::Color(BG_SECONDARY())),
         border: Border {
-            color: tint(BG_PRIMARY, 0.88),
+            color: tint(BG_PRIMARY(), 0.88),
             width: 1.0,
             radius: DIALOG_RADIUS.into(),
         },
@@ -197,14 +197,14 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .width(Length::FillPortion(80))
         .height(Length::FillPortion(70))
         .style(|_theme| container::Style {
-            background: Some(Background::Color(tint(BG_PRIMARY, 0.84))),
+            background: Some(Background::Color(tint(BG_PRIMARY(), 0.84))),
             border: Border {
-                color: tint(ACCENT, 0.26),
+                color: tint(ACCENT(), 0.26),
                 width: 1.0,
                 radius: DIALOG_OUTER_RADIUS.into(),
             },
             shadow: Shadow {
-                color: tint(BACKDROP, 0.65),
+                color: tint(BACKDROP(), 0.65),
                 offset: Vector::new(0.0, 14.0),
                 blur_radius: 34.0,
             },
@@ -216,7 +216,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(Background::Color(tint(BACKDROP, 0.84))),
+            background: Some(Background::Color(tint(BACKDROP(), 0.84))),
             ..container::Style::default()
         })
         .into()
