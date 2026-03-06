@@ -146,12 +146,6 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             INACTIVE_TAB_BG
         };
 
-        let icon_color = if is_active {
-            ACCENT
-        } else {
-            Color::from_rgb(0.50, 0.50, 0.55)
-        };
-        let icon = text(terminal.tab_icon()).size(10).color(icon_color);
         let label = text(terminal.tab_label()).size(13).color(TAB_TEXT_COLOR);
         let process_badge = process_badge_label(&terminal.process_name).map(|badge| {
             let badge_bg = if is_active {
@@ -413,10 +407,12 @@ mod tests {
         terminal.process_name.clear();
         terminal.title = "Named tab".into();
         let terminals = vec![&terminal];
+        let no_anim: HashMap<String, f32> = HashMap::new();
 
         let _ = view_tab_bar(
             &terminals,
             Some("t-1"),
+            &no_anim,
             |_| TestMessage::TabClicked,
             |_| TestMessage::TabClosed,
             |_| TestMessage::TabDragStart,

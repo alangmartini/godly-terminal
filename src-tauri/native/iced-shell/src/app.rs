@@ -3193,15 +3193,6 @@ impl GodlyApp {
         self.mru_switcher = None;
     }
 
-    fn active_workspace_mru_terminal_ids(&self) -> Vec<&str> {
-        let Some(workspace_id) = self.workspaces.active_id() else {
-            return Vec::new();
-        };
-
-        self.terminals
-            .mru_terminal_ids_for_workspace(Some(workspace_id))
-    }
-
     fn handle_app_action(&mut self, action: AppAction) -> Task<Message> {
         match action {
             AppAction::NewTab => self.create_new_terminal(),
