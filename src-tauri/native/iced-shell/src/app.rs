@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -41,7 +43,9 @@ use crate::theme::{
     PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_LG, SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY,
     TEXT_SECONDARY,
 };
+use crate::url_detector;
 use crate::workspace_state::WorkspaceCollection;
+use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
 
 #[path = "mru_switcher.rs"]
 mod mru_switcher;
@@ -338,6 +342,19 @@ pub struct GodlyApp {
     dragging_tab_id: Option<String>,
     /// Ctrl+Tab MRU switcher popup state while modifier is held.
     mru_switcher: Option<MruSwitcherState>,
+    // --- G3: URL Detection ---
+    /// URL currently hovered by the mouse cursor (if any).
+    hovered_url: Option<String>,
+    /// Whether the Ctrl modifier is currently held (for Ctrl+Click URL opening).
+    ctrl_held: bool,
+    // --- H1-H6: Shell Picker & Workspace Creation ---
+    shell_picker: ShellPickerState,
+    workspace_ai_modes: HashMap<String, AiToolMode>,
+    // --- G6/G7: Scrollbar + Perf Overlay ---
+    perf_overlay_visible: bool,
+    // --- K2/K3: Quit Confirmation + Copy Preview ---
+    quit_confirm_pending: bool,
+    copy_preview_text: Option<String>,
 }
 
 impl Default for GodlyApp {
@@ -408,6 +425,12 @@ impl Default for GodlyApp {
             next_toast_id: 1,
             dragging_tab_id: None,
             mru_switcher: None,
+            hovered_url: None,
+            ctrl_held: false,
+            shell_picker: ShellPickerState::default(),
+            workspace_ai_modes: HashMap::new(),
+            quit_confirm_pending: false,
+            copy_preview_text: None,
         }
     }
 }
@@ -625,8 +648,18 @@ pub enum Message {
     ClipboardPasted { terminal_id: String, text: String },
     /// Clipboard read failed in background.
     ClipboardPasteFailed(String),
+    // --- G3: URL Detection ---
+    /// URL clicked (Ctrl+Click) — open in default browser.
+    UrlClicked(String),
     /// File path dropped on window.
     FileDropped(PathBuf),
+    // --- K2/K3: Quit Confirmation + Copy Preview ---
+    QuitConfirmShow,
+    QuitConfirmed,
+    QuitCancelled,
+    CopyPreviewShow(String),
+    CopyPreviewConfirmed,
+    CopyPreviewDismissed,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -754,6 +787,28 @@ impl GodlyApp {
             .unwrap_or_else(|| inset_terminal_pane_rect(self.terminal_content_area()));
 
         grid_dimensions_for_viewport(viewport, self.font_metrics)
+    /// G3: Detect if the cursor is currently over a URL in the terminal grid.
+    fn detect_url_under_cursor(&self) -> Option<String> {
+        let grid_pos = self.active_terminal_pointer_grid(false)?;
+        let terminal_id = self.target_terminal_id()?;
+        let term = self.terminals.get(terminal_id)?;
+        let grid = term.grid.as_ref()?;
+        let row_idx = grid_pos.row as usize;
+        let row = grid.rows.get(row_idx)?;
+        let line: String = row
+            .cells
+            .iter()
+            .map(|c| {
+                if c.content.is_empty() {
+                    " "
+                } else {
+                    c.content.as_str()
+                }
+            })
+            .collect();
+        url_detector::url_at_col(&line, grid_pos.col as usize)
+    }
+
     }
 
     fn active_terminal_pointer_grid(&self, clamp_to_viewport: bool) -> Option<GridPos> {
@@ -1081,6 +1136,13 @@ impl GodlyApp {
                     log::error!("Clipboard paste failed: {}", e);
                 }
             }
+            // --- G3: URL Click-to-Open ---
+            Message::UrlClicked(url) => {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &url])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .spawn();
+            }
             Message::FileDropped(path) => {
                 let target_terminal = self.target_terminal_id().map(str::to_string);
                 if let (Some(terminal_id), Some(client)) = (target_terminal, &self.client) {
@@ -1324,7 +1386,10 @@ impl GodlyApp {
                 }
             }
             Message::TitleBarClose => {
-                if let Some(id) = self.window_id {
+                let terminal_count = self.terminals.count();
+                if terminal_count > 0 {
+                    self.quit_confirm_pending = true;
+                } else if let Some(id) = self.window_id {
                     return window::close(id);
                 }
             }
@@ -1946,6 +2011,33 @@ impl GodlyApp {
             Message::SettingsTabClicked(tab_id) => {
                 self.settings_tab = tab_id;
             }
+            // --- K2/K3: Quit Confirmation + Copy Preview ---
+            Message::QuitConfirmShow => {
+                self.quit_confirm_pending = true;
+            }
+            Message::QuitConfirmed => {
+                self.quit_confirm_pending = false;
+                if let Some(id) = self.window_id {
+                    return window::close(id);
+                }
+            }
+            Message::QuitCancelled => {
+                self.quit_confirm_pending = false;
+            }
+            Message::CopyPreviewShow(preview_text) => {
+                self.copy_preview_text = Some(preview_text);
+            }
+            Message::CopyPreviewConfirmed => {
+                if let Some(ref text) = self.copy_preview_text {
+                    if let Err(e) = clipboard::copy_to_clipboard(text) {
+                        log::error!("Clipboard copy failed: {}", e);
+                    }
+                }
+                self.copy_preview_text = None;
+            }
+            Message::CopyPreviewDismissed => {
+                self.copy_preview_text = None;
+            }
         }
         Task::none()
     }
@@ -2114,10 +2206,41 @@ impl GodlyApp {
             with_mru_switcher
         };
 
-        if self.rename_tab_id.is_some() {
+        let with_tab_rename: Element<'_, Message> = if self.rename_tab_id.is_some() {
             stack![with_workspace_rename, self.view_tab_rename_dialog()].into()
         } else {
             with_workspace_rename
+        };
+
+        // --- K2/K3: Quit Confirmation + Copy Preview ---
+        let with_quit: Element<'_, Message> = if self.quit_confirm_pending {
+            let terminal_count = self.terminals.count();
+            stack![
+                with_tab_rename,
+                crate::confirm_dialog::view_quit_confirm(
+                    terminal_count,
+                    Message::QuitConfirmed,
+                    Message::QuitCancelled,
+                )
+            ]
+            .into()
+        } else {
+            with_tab_rename
+        };
+
+        if let Some(ref preview_text) = self.copy_preview_text {
+            stack![
+                with_quit,
+                crate::confirm_dialog::view_copy_preview(
+                    preview_text,
+                    preview_text.len(),
+                    Message::CopyPreviewConfirmed,
+                    Message::CopyPreviewDismissed,
+                )
+            ]
+            .into()
+        } else {
+            with_quit
         }
     }
 
@@ -3289,6 +3412,14 @@ impl GodlyApp {
                 }
                 Task::none()
             }
+            AppAction::TogglePerfOverlay => {
+                self.perf_overlay_visible = !self.perf_overlay_visible;
+                Task::none()
+            }
+            AppAction::Find => {
+                self.search.open();
+                Task::none()
+            }
         }
     }
 
@@ -3980,6 +4111,11 @@ impl GodlyApp {
 
         let text = self.selection.selected_text(grid);
         if text.is_empty() {
+            return;
+        }
+
+        if text.len() > crate::confirm_dialog::COPY_PREVIEW_THRESHOLD {
+            self.copy_preview_text = Some(text);
             return;
         }
 

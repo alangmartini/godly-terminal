@@ -12,4 +12,6 @@ pub mod tab_bar;
 pub mod terminal_state;
 pub mod title_bar;
 pub mod theme;
+pub mod url_detector;
 pub mod workspace_state;
+pub mod shell_picker;
