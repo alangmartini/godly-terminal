@@ -28,6 +28,7 @@ pub enum AppAction {
     RenameTab,
     TogglePerfOverlay,
     Find,
+    WhisperToggle,
 }
 
 pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> {
@@ -77,6 +78,7 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
         "a" if shift => Some(AppAction::SelectAll),
         "o" if shift => Some(AppAction::TogglePerfOverlay),
         "f" if !shift => Some(AppAction::Find),
+        "m" if shift => Some(AppAction::WhisperToggle),
         _ => None,
     }
 }

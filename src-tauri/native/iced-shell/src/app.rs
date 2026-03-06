@@ -48,6 +48,7 @@ use crate::workspace_state::WorkspaceCollection;
 use crate::search::SearchState;
 use crate::terminal_context_menu::{self, TermCtxAction};
 use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
+use crate::whisper_ui;
 
 #[path = "mru_switcher.rs"]
 mod mru_switcher;
@@ -371,6 +372,10 @@ pub struct GodlyApp {
     perf_overlay_visible: bool,
     // --- K1: CLAUDE.md Editor ---
     claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
+    // --- I4/I5: Voice/Whisper Integration ---
+    whisper_available: bool,
+    whisper_state: Option<whisper_ui::WhisperState>,
+    whisper_service: Option<Arc<parking_lot::Mutex<Option<godly_app_adapter::whisper::WhisperService>>>>,
 }
 
 impl Default for GodlyApp {
@@ -457,6 +462,9 @@ impl Default for GodlyApp {
             search: SearchState::default(),
             perf_overlay_visible: false,
             claude_md_editor: None,
+            whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
+            whisper_state: None,
+            whisper_service: None,
         }
     }
 }
@@ -736,6 +744,13 @@ pub enum Message {
     ClaudeMdClose,
     // --- J1-J9: MCP Event Integration ---
     McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
+    // --- I4/I5: Voice/Whisper Integration ---
+    WhisperToggle,
+    WhisperStarted,
+    WhisperStopped(Result<(String, u64), String>),
+    WhisperLevelUpdate(f32),
+    WhisperTimerTick,
+    WhisperCancel,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -2466,6 +2481,72 @@ impl GodlyApp {
             // --- J1-J9: MCP Event Integration ---
             Message::McpEvent(event) => {
                 return self.handle_mcp_event(event);
+            // --- I4/I5: Voice/Whisper Integration ---
+            Message::WhisperToggle => {
+                if !self.whisper_available {
+                    return Task::none();
+                }
+                if self.whisper_state.is_some() {
+                    return self.whisper_stop();
+                }
+                return self.whisper_start();
+            }
+            Message::WhisperStarted => {
+                if let Some(ref mut state) = self.whisper_state {
+                    state.recording = true;
+                }
+            }
+            Message::WhisperStopped(result) => {
+                self.whisper_state = None;
+                self.whisper_service = None;
+                match result {
+                    Ok((text, duration_ms)) => {
+                        if !text.is_empty() {
+                            if let (Some(client), Some(session_id)) =
+                                (&self.client, self.active_focused().map(str::to_string))
+                            {
+                                let _ = commands::write_to_terminal(client, &session_id, text.as_bytes());
+                            }
+                            let secs = duration_ms / 1000;
+                            self.enqueue_toast(
+                                "Voice Input".to_string(),
+                                format!("Transcribed {secs}s of audio"),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        self.enqueue_toast("Whisper Error".to_string(), e);
+                    }
+                }
+            }
+            Message::WhisperLevelUpdate(level) => {
+                if let Some(ref mut state) = self.whisper_state {
+                    state.level = level;
+                }
+            }
+            Message::WhisperTimerTick => {
+                if let Some(ref mut state) = self.whisper_state {
+                    state.elapsed_ms = state.elapsed_ms.saturating_add(100);
+                }
+                if let Some(ref slot) = self.whisper_service {
+                    let slot = Arc::clone(slot);
+                    return Task::perform(
+                        async move {
+                            let mut guard = slot.lock();
+                            guard.as_mut().map(|svc| svc.get_level().unwrap_or(0.0)).unwrap_or(0.0)
+                        },
+                        Message::WhisperLevelUpdate,
+                    );
+                }
+            }
+            Message::WhisperCancel => {
+                if let Some(ref slot) = self.whisper_service {
+                    if let Some(svc) = slot.lock().as_mut() {
+                        svc.kill();
+                    }
+                }
+                self.whisper_service = None;
+                self.whisper_state = None;
             }
         }
         Task::none()
@@ -2507,6 +2588,22 @@ impl GodlyApp {
             Message::TabDragEnd,
             Message::NewTabRequested,
         );
+
+        // Mic button for whisper (I4/I5)
+        let tab_bar: Element<'_, Message> = if self.whisper_available {
+            let mic = whisper_ui::view_mic_button(Message::WhisperToggle);
+            row![
+                container(tab_bar).width(Length::Fill),
+                container(mic)
+                    .padding(Padding::from([0, 4]))
+                    .height(Length::Fixed(TAB_BAR_HEIGHT))
+            ]
+            .align_y(iced::Alignment::Center)
+            .height(Length::Fixed(TAB_BAR_HEIGHT))
+            .into()
+        } else {
+            tab_bar
+        };
 
         // Render the layout tree from active workspace.
         let focused_id = self.active_focused();
@@ -2747,7 +2844,7 @@ impl GodlyApp {
         };
 
         // --- G7: Performance overlay (top-right corner) ---
-        if self.perf_overlay_visible {
+        let with_perf: Element<'_, Message> = if self.perf_overlay_visible {
             let perf: Element<'_, Message> = crate::perf_overlay::view_perf_overlay(
                 60.0, // placeholder FPS
                 16.6, // placeholder frame_ms
@@ -2760,6 +2857,18 @@ impl GodlyApp {
             stack![with_search, positioned].into()
         } else {
             with_search
+        };
+
+        // --- I4/I5: Whisper recording overlay ---
+        if let Some(ref state) = self.whisper_state {
+            let overlay = whisper_ui::view_whisper_overlay(
+                state,
+                Message::WhisperToggle,
+                Message::WhisperCancel,
+            );
+            stack![with_perf, overlay].into()
+        } else {
+            with_perf
         }
     }
 
@@ -3989,6 +4098,14 @@ impl GodlyApp {
             );
         }
 
+        // Whisper recording timer (I4/I5)
+        if self.whisper_state.as_ref().is_some_and(|s| s.recording) {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(100))
+                    .map(|_| Message::WhisperTimerTick),
+            );
+        }
+
         Subscription::batch(subscriptions)
     }
 
@@ -4176,7 +4293,62 @@ impl GodlyApp {
                 self.search.open();
                 Task::none()
             }
+            AppAction::WhisperToggle => {
+                return self.update(Message::WhisperToggle);
+            }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Whisper voice integration (I4/I5)
+    // -----------------------------------------------------------------------
+
+    fn whisper_start(&mut self) -> Task<Message> {
+        use godly_app_adapter::whisper::WhisperService;
+
+        self.whisper_state = Some(whisper_ui::WhisperState::new());
+
+        // Shared slot: background task populates, timer/stop reads.
+        let slot: Arc<parking_lot::Mutex<Option<WhisperService>>> =
+            Arc::new(parking_lot::Mutex::new(None));
+        let slot_for_task = Arc::clone(&slot);
+        self.whisper_service = Some(slot);
+
+        Task::perform(
+            async move {
+                WhisperService::spawn().and_then(|mut svc| {
+                    svc.start_recording()?;
+                    *slot_for_task.lock() = Some(svc);
+                    Ok(())
+                })
+            },
+            |result: Result<(), String>| match result {
+                Ok(()) => Message::WhisperStarted,
+                Err(e) => Message::WhisperStopped(Err(e)),
+            },
+        )
+    }
+
+    fn whisper_stop(&mut self) -> Task<Message> {
+        if let Some(ref mut state) = self.whisper_state {
+            state.transcribing = true;
+            state.recording = false;
+        }
+        if let Some(ref slot) = self.whisper_service {
+            let slot = Arc::clone(slot);
+            return Task::perform(
+                async move {
+                    let mut guard = slot.lock();
+                    match guard.as_mut() {
+                        Some(svc) => svc.stop_recording().map(|r| (r.text, r.duration_ms)),
+                        None => Err("Whisper service not ready".to_string()),
+                    }
+                },
+                Message::WhisperStopped,
+            );
+        }
+        self.whisper_state = None;
+        Task::none()
     }
 
     // -----------------------------------------------------------------------
