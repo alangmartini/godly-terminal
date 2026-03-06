@@ -338,6 +338,9 @@ pub struct GodlyApp {
     dragging_tab_id: Option<String>,
     /// Ctrl+Tab MRU switcher popup state while modifier is held.
     mru_switcher: Option<MruSwitcherState>,
+    // --- K2/K3: Quit Confirmation + Copy Preview ---
+    quit_confirm_pending: bool,
+    copy_preview_text: Option<String>,
 }
 
 impl Default for GodlyApp {
@@ -408,6 +411,8 @@ impl Default for GodlyApp {
             next_toast_id: 1,
             dragging_tab_id: None,
             mru_switcher: None,
+            quit_confirm_pending: false,
+            copy_preview_text: None,
         }
     }
 }
@@ -627,6 +632,13 @@ pub enum Message {
     ClipboardPasteFailed(String),
     /// File path dropped on window.
     FileDropped(PathBuf),
+    // --- K2/K3: Quit Confirmation + Copy Preview ---
+    QuitConfirmShow,
+    QuitConfirmed,
+    QuitCancelled,
+    CopyPreviewShow(String),
+    CopyPreviewConfirmed,
+    CopyPreviewDismissed,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -1324,7 +1336,10 @@ impl GodlyApp {
                 }
             }
             Message::TitleBarClose => {
-                if let Some(id) = self.window_id {
+                let terminal_count = self.terminals.count();
+                if terminal_count > 0 {
+                    self.quit_confirm_pending = true;
+                } else if let Some(id) = self.window_id {
                     return window::close(id);
                 }
             }
@@ -1946,6 +1961,33 @@ impl GodlyApp {
             Message::SettingsTabClicked(tab_id) => {
                 self.settings_tab = tab_id;
             }
+            // --- K2/K3: Quit Confirmation + Copy Preview ---
+            Message::QuitConfirmShow => {
+                self.quit_confirm_pending = true;
+            }
+            Message::QuitConfirmed => {
+                self.quit_confirm_pending = false;
+                if let Some(id) = self.window_id {
+                    return window::close(id);
+                }
+            }
+            Message::QuitCancelled => {
+                self.quit_confirm_pending = false;
+            }
+            Message::CopyPreviewShow(preview_text) => {
+                self.copy_preview_text = Some(preview_text);
+            }
+            Message::CopyPreviewConfirmed => {
+                if let Some(ref text) = self.copy_preview_text {
+                    if let Err(e) = clipboard::copy_to_clipboard(text) {
+                        log::error!("Clipboard copy failed: {}", e);
+                    }
+                }
+                self.copy_preview_text = None;
+            }
+            Message::CopyPreviewDismissed => {
+                self.copy_preview_text = None;
+            }
         }
         Task::none()
     }
@@ -2114,10 +2156,41 @@ impl GodlyApp {
             with_mru_switcher
         };
 
-        if self.rename_tab_id.is_some() {
+        let with_tab_rename: Element<'_, Message> = if self.rename_tab_id.is_some() {
             stack![with_workspace_rename, self.view_tab_rename_dialog()].into()
         } else {
             with_workspace_rename
+        };
+
+        // --- K2/K3: Quit Confirmation + Copy Preview ---
+        let with_quit: Element<'_, Message> = if self.quit_confirm_pending {
+            let terminal_count = self.terminals.count();
+            stack![
+                with_tab_rename,
+                crate::confirm_dialog::view_quit_confirm(
+                    terminal_count,
+                    Message::QuitConfirmed,
+                    Message::QuitCancelled,
+                )
+            ]
+            .into()
+        } else {
+            with_tab_rename
+        };
+
+        if let Some(ref preview_text) = self.copy_preview_text {
+            stack![
+                with_quit,
+                crate::confirm_dialog::view_copy_preview(
+                    preview_text,
+                    preview_text.len(),
+                    Message::CopyPreviewConfirmed,
+                    Message::CopyPreviewDismissed,
+                )
+            ]
+            .into()
+        } else {
+            with_quit
         }
     }
 
@@ -3980,6 +4053,11 @@ impl GodlyApp {
 
         let text = self.selection.selected_text(grid);
         if text.is_empty() {
+            return;
+        }
+
+        if text.len() > crate::confirm_dialog::COPY_PREVIEW_THRESHOLD {
+            self.copy_preview_text = Some(text);
             return;
         }
 
