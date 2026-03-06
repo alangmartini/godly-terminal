@@ -187,12 +187,12 @@ pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
         let mut entries = column![].spacing(ENTRY_SPACING).width(Length::Fill);
 
         for entry in cat.entries {
-            let key_badge = container(text(entry.keys).size(12).color(ACCENT))
+            let key_badge = container(text(entry.keys).size(12).color(ACCENT()))
                 .padding(Padding::from([3, 8]))
                 .style(|_theme| container::Style {
-                    background: Some(Background::Color(tint(BG_PRIMARY, 0.7))),
+                    background: Some(Background::Color(tint(BG_PRIMARY(), 0.7))),
                     border: Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: KEY_BADGE_RADIUS.into(),
                     },
@@ -202,7 +202,7 @@ pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
             let entry_row = row![
                 text(entry.action)
                     .size(13)
-                    .color(TEXT_PRIMARY)
+                    .color(TEXT_PRIMARY())
                     .width(Length::Fill),
                 key_badge
             ]
@@ -215,16 +215,16 @@ pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
         }
 
         let section = container(
-            column![text(cat.name).size(14).color(TEXT_ACTIVE), entries]
+            column![text(cat.name).size(14).color(TEXT_ACTIVE()), entries]
                 .spacing(8)
                 .width(Length::Fill),
         )
         .padding(Padding::from([10, 12]))
         .width(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(Background::Color(tint(BG_PRIMARY, 0.4))),
+            background: Some(Background::Color(tint(BG_PRIMARY(), 0.4))),
             border: Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: SECTION_RADIUS.into(),
             },
