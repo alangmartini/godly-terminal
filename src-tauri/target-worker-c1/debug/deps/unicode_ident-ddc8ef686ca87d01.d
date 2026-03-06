@@ -1,0 +1,6 @@
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\unicode_ident-ddc8ef686ca87d01.d: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-ident-1.0.22\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-ident-1.0.22\src\tables.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\libunicode_ident-ddc8ef686ca87d01.rmeta: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-ident-1.0.22\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-ident-1.0.22\src\tables.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-ident-1.0.22\src\lib.rs:
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-ident-1.0.22\src\tables.rs:

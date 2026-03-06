@@ -236,6 +236,8 @@ pub struct GodlyApp {
     sidebar_animation: Option<SidebarAnimation>,
     /// Whether the sidebar resize handle is currently being dragged.
     sidebar_resizing: bool,
+    /// Tabs currently animating their entry (tab_id → started_at_ms).
+    entering_tabs: std::collections::HashMap<String, u64>,
     /// Last known global cursor position in logical pixels.
     cursor_position: Option<Point>,
     /// Whether the settings dialog is open.
@@ -354,6 +356,7 @@ impl Default for GodlyApp {
             sidebar_width: SIDEBAR_WIDTH,
             sidebar_animation: None,
             sidebar_resizing: false,
+            entering_tabs: std::collections::HashMap::new(),
             cursor_position: None,
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
@@ -496,6 +499,8 @@ pub enum Message {
     SidebarResizeEnd,
     /// Periodic tick used for sidebar collapse/expand animation.
     SidebarAnimationTick,
+    /// Periodic tick used for tab entry width animation.
+    TabEntryAnimationTick,
     /// Rename dialog input changed.
     WorkspaceRenameInputChanged(String),
     /// Rename dialog submitted.
@@ -1279,6 +1284,9 @@ impl GodlyApp {
                 if decision.set_terminal_active {
                     self.terminals.set_active(&decision.session_id);
                 }
+                // Start tab entry animation.
+                self.entering_tabs
+                    .insert(decision.session_id.clone(), Self::now_ms());
                 return self.fetch_grid(&decision.fetch_grid_terminal_id);
             }
             Message::TerminalCreated(Err(e)) => {
@@ -1894,6 +1902,12 @@ impl GodlyApp {
                     }
                 }
             }
+            Message::TabEntryAnimationTick => {
+                let now_ms = Self::now_ms();
+                if tab_bar::all_entries_finished(&self.entering_tabs, now_ms) {
+                    self.entering_tabs.clear();
+                }
+            }
             Message::ToggleSettings => {
                 self.settings_open = !self.settings_open;
             }
@@ -1917,9 +1931,11 @@ impl GodlyApp {
         let active_id = self.active_focused();
         let ordered = self.active_workspace_terminals();
         let active_workspace_terminal_count = ordered.len();
+        let entry_progress = tab_bar::tab_entry_progress(&self.entering_tabs, Self::now_ms());
         let tab_bar = tab_bar::view_tab_bar(
             &ordered,
             active_id,
+            &entry_progress,
             |id| Message::TabClicked(id),
             |id| Message::CloseTabRequested(id),
             |id| Message::TabDragStart(id),
@@ -3027,6 +3043,13 @@ impl GodlyApp {
             subscriptions.push(
                 iced::time::every(Duration::from_millis(SIDEBAR_ANIMATION_TICK_MS))
                     .map(|_| Message::SidebarAnimationTick),
+            );
+        }
+
+        if !self.entering_tabs.is_empty() {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(SIDEBAR_ANIMATION_TICK_MS))
+                    .map(|_| Message::TabEntryAnimationTick),
             );
         }
 

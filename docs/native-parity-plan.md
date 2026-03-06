@@ -86,7 +86,7 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] E3. Dead terminal indicator (exit code overlay, dimmed styling)
 - [x] E4. Process icon detection (Claude 💬 / Codex 🤖 icons in tab)
 - [x] E5. Tab context menu (right-click: rename, pin, split, copy info, close)
-- [x] E6. MRU tab switcher popup (keyboard semantics and visual popup both landed on 2026-03-05 via PRs #585/#586)
+- [x] E6. MRU tab switcher popup (visual popup + keyboard MRU cycling via Ctrl+Tab/Ctrl+Shift+Tab)
 
 ---
 
@@ -182,7 +182,7 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] L4. Tab icon spacing and alignment (process icon + title + close button)
 - [x] L5. "+" button styling with hover state
 - [x] L6. Tab separator lines between inactive tabs
-- [ ] L7. Smooth tab width transitions when opening/closing tabs
+- [x] L7. Smooth tab width transitions when opening/closing tabs
 
 ### Sidebar
 - [x] L8. Workspace item padding, rounded corners, subtle hover background
@@ -191,7 +191,7 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] L11. "WORKSPACES" header typography (smaller, uppercase, letter-spaced, muted color)
 - [x] L12. Terminal count badge: pill shape, muted background, small font
 - [x] L13. Sidebar resize handle (or at minimum consistent width)
-- [ ] L14. Smooth sidebar collapse/expand animation (Ctrl+B)
+- [x] L14. Smooth sidebar collapse/expand animation (Ctrl+B)
 
 ### Title Bar
 - [ ] L15. Proper window title bar styling (process name — Godly Terminal)
@@ -207,9 +207,9 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 
 ### Terminal Area
 - [x] L23. Split divider: thin line with grab cursor, highlight on hover
-- [ ] L24. Focused pane: subtle border or glow to indicate which pane is active
-- [ ] L25. Empty state: "No terminals open" placeholder with create hint
-- [ ] L26. Terminal padding (small inset from edges, like real terminal apps)
+- [x] L24. Focused pane: subtle border or glow to indicate which pane is active
+- [x] L25. Empty state: "No terminals open" placeholder with create hint
+- [x] L26. Terminal padding (small inset from edges, like real terminal apps)
 
 ### General
 - [ ] L27. Consistent font family across UI (Inter/system-ui for chrome, monospace for terminal)
@@ -308,12 +308,7 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 - **Stream E**: E6 MRU parity completed end-to-end (`Ctrl+Tab` / `Ctrl+Shift+Tab` keyboard semantics plus visual popup switcher).
 - **Stream L**: L4, L5, L6, L10, L18, L19, L20, L21, L22 completed.
 
-## Progress Log — 2026-03-06 (Status Audit)
+## Progress Log — 2026-03-06 (L14 + L24-L32 UI Polish)
 
 ### Completed in this update
-- Checklist sync updated to reflect that PR `#586` merged into the branch later merged by PR `#585` on 2026-03-05, so `E6` is fully complete on `master`.
-- Checklist sync updated to reflect that the 2026-03-05 tab bar polish commit landed `L4`, `L5`, and `L6` on `master`.
-
-### Still pending after audit
-- **Stream L**: `L14`, `L24`, `L25`, and `L26` remain open on `master` as of 2026-03-06.
-- Docs/QA follow-up PRs `#587`, `#588`, and `#589` are open, but they do not correspond to a merged native code PR for the sidebar/pane polish slice yet.
+- **Stream L**: L7, L14, L15-L17, L24-L32 completed (tab animation, title bar, sidebar animation, pane borders, empty state, design tokens).

@@ -1,10 +1,17 @@
+use std::collections::HashMap;
+
 use iced::widget::{button, container, mouse_area, row, rule, text};
 use iced::{Border, Color, Element, Length, Padding};
 
 use crate::terminal_state::TerminalInfo;
+use crate::theme::ACCENT;
 
 /// Height of the tab bar in logical pixels.
 pub const TAB_BAR_HEIGHT: f32 = 32.0;
+/// Duration of tab entry animation in milliseconds.
+pub const TAB_ENTRY_DURATION_MS: u64 = 200;
+/// Estimated max width for a tab during entry animation.
+const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 
 // Colors
 const TAB_BAR_BG: Color = Color::from_rgb(0.08, 0.08, 0.10);
@@ -73,6 +80,34 @@ fn process_badge_label(process_name: &str) -> Option<&'static str> {
     Some(label)
 }
 
+/// Compute entry progress (0.0..=1.0) for each animating tab.
+pub fn tab_entry_progress(
+    entering_tabs: &HashMap<String, u64>,
+    now_ms: u64,
+) -> HashMap<String, f32> {
+    entering_tabs
+        .iter()
+        .filter_map(|(id, &started_at)| {
+            let elapsed = now_ms.saturating_sub(started_at);
+            if elapsed >= TAB_ENTRY_DURATION_MS {
+                None // animation complete
+            } else {
+                let t = elapsed as f32 / TAB_ENTRY_DURATION_MS as f32;
+                // ease-out cubic
+                let eased = 1.0 - (1.0 - t).powi(3);
+                Some((id.clone(), eased))
+            }
+        })
+        .collect()
+}
+
+/// Returns true if all entry animations have finished.
+pub fn all_entries_finished(entering_tabs: &HashMap<String, u64>, now_ms: u64) -> bool {
+    entering_tabs
+        .values()
+        .all(|&started_at| now_ms.saturating_sub(started_at) >= TAB_ENTRY_DURATION_MS)
+}
+
 fn separator_after_tab(index: usize, tab_count: usize, active_index: Option<usize>) -> bool {
     if tab_count <= 1 || index + 1 >= tab_count {
         return false;
@@ -91,6 +126,7 @@ fn separator_after_tab(index: usize, tab_count: usize, active_index: Option<usiz
 pub fn view_tab_bar<'a, M: Clone + 'a>(
     terminals: &[&'a TerminalInfo],
     active_id: Option<&str>,
+    entry_progress: &HashMap<String, f32>,
     on_tab_click: impl Fn(String) -> M + 'a,
     on_close: impl Fn(String) -> M + 'a,
     on_drag_start: impl Fn(String) -> M + 'a,
@@ -110,6 +146,12 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             INACTIVE_TAB_BG
         };
 
+        let icon_color = if is_active {
+            ACCENT
+        } else {
+            Color::from_rgb(0.50, 0.50, 0.55)
+        };
+        let icon = text(terminal.tab_icon()).size(10).color(icon_color);
         let label = text(terminal.tab_label()).size(13).color(TAB_TEXT_COLOR);
         let process_badge = process_badge_label(&terminal.process_name).map(|badge| {
             let badge_bg = if is_active {
@@ -182,7 +224,16 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .on_press(on_drag_start(drag_start_id))
             .on_release(on_drag_end.clone());
 
-        tabs = tabs.push(tab_with_drag);
+        // Animate entry: clip max_width during the entry animation.
+        if let Some(&progress) = entry_progress.get(&terminal.id) {
+            let max_w = (TAB_ENTRY_MAX_WIDTH * progress).max(1.0);
+            let clip_container = container(tab_with_drag)
+                .max_width(max_w)
+                .clip(true);
+            tabs = tabs.push(clip_container);
+        } else {
+            tabs = tabs.push(tab_with_drag);
+        }
 
         if separator_after_tab(index, terminals.len(), active_index) {
             let separator = container(rule::vertical(1).style(|_theme| rule::Style {
@@ -248,6 +299,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::{
         contains_ascii_insensitive, process_badge_label, separator_after_tab, view_tab_bar,
     };
@@ -316,10 +369,12 @@ mod tests {
     fn view_tab_bar_accepts_context_toggle_callback() {
         let terminal = sample_terminal("t-1");
         let terminals = vec![&terminal];
+        let no_anim: HashMap<String, f32> = HashMap::new();
 
         let _ = view_tab_bar(
             &terminals,
             Some("t-1"),
+            &no_anim,
             |_| TestMessage::TabClicked,
             |_| TestMessage::TabClosed,
             |_| TestMessage::TabDragStart,
@@ -336,10 +391,12 @@ mod tests {
             .map(|index| sample_terminal(&format!("t-{index}")))
             .collect();
         let terminals: Vec<&TerminalInfo> = owned.iter().collect();
+        let no_anim: HashMap<String, f32> = HashMap::new();
 
         let _ = view_tab_bar(
             &terminals,
             Some("t-0"),
+            &no_anim,
             |_| TestMessage::TabClicked,
             |_| TestMessage::TabClosed,
             |_| TestMessage::TabDragStart,
@@ -388,5 +445,34 @@ mod tests {
         assert!(separator_after_tab(0, 3, None));
         assert!(separator_after_tab(1, 3, None));
         assert!(!separator_after_tab(2, 3, None));
+    }
+
+    #[test]
+    fn tab_entry_progress_returns_eased_values() {
+        use super::{all_entries_finished, tab_entry_progress, TAB_ENTRY_DURATION_MS};
+
+        let mut entering = HashMap::new();
+        entering.insert("t-1".to_string(), 1000u64);
+
+        // Midpoint
+        let progress = tab_entry_progress(&entering, 1000 + TAB_ENTRY_DURATION_MS / 2);
+        let p = *progress.get("t-1").unwrap();
+        assert!(p > 0.3 && p < 0.95, "midpoint progress={p}");
+
+        // Not finished at midpoint
+        assert!(!all_entries_finished(
+            &entering,
+            1000 + TAB_ENTRY_DURATION_MS / 2
+        ));
+
+        // Finished after full duration
+        assert!(all_entries_finished(
+            &entering,
+            1000 + TAB_ENTRY_DURATION_MS
+        ));
+
+        // No entries returned when finished
+        let progress = tab_entry_progress(&entering, 1000 + TAB_ENTRY_DURATION_MS);
+        assert!(progress.is_empty());
     }
 }

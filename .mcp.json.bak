@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "playwright-webview": {
+      "command": "playwright-mcp",
+      "args": [
+        "--cdp-endpoint",
+        "http://localhost:9222"
+      ]
+    }
+  }
+}
