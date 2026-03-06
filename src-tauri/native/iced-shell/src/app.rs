@@ -45,6 +45,8 @@ use crate::theme::{
 };
 use crate::url_detector;
 use crate::workspace_state::WorkspaceCollection;
+use crate::search::SearchState;
+use crate::terminal_context_menu::{self, TermCtxAction};
 use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
 
 #[path = "mru_switcher.rs"]
@@ -350,6 +352,16 @@ pub struct GodlyApp {
     // --- H1-H6: Shell Picker & Workspace Creation ---
     shell_picker: ShellPickerState,
     workspace_ai_modes: HashMap<String, AiToolMode>,
+    // --- G1/G2: Terminal Context Menu ---
+    terminal_context_menu_pos: Option<(f32, f32)>,
+    terminal_context_menu_terminal_id: Option<String>,
+    // --- G3: URL Detection ---
+    hovered_url: Option<String>,
+    ctrl_held: bool,
+    // --- G4: Find in Terminal ---
+    search: SearchState,
+    // --- G6/G7: Scrollbar + Performance Overlay ---
+    perf_overlay_visible: bool,
 }
 
 impl Default for GodlyApp {
@@ -425,6 +437,12 @@ impl Default for GodlyApp {
             active_theme: crate::theme::ThemeId::Dusk,
             shell_picker: ShellPickerState::default(),
             workspace_ai_modes: HashMap::new(),
+            terminal_context_menu_pos: None,
+            terminal_context_menu_terminal_id: None,
+            hovered_url: None,
+            ctrl_held: false,
+            search: SearchState::default(),
+            perf_overlay_visible: false,
         }
     }
 }
@@ -668,6 +686,19 @@ pub enum Message {
         workspace_id: String,
         mode: AiToolMode,
     },
+    // --- G1/G2: Terminal Context Menu ---
+    TerminalContextOpen { id: String, x: f32, y: f32 },
+    TerminalContextClose,
+    TerminalContextAction(TermCtxAction),
+    // --- G4: Find in Terminal ---
+    SearchOpen,
+    SearchClose,
+    SearchQueryChanged(String),
+    SearchNext,
+    SearchPrev,
+    SearchToggleRegex,
+    // --- G6/G7: Scrollbar + Performance Overlay ---
+    TogglePerfOverlay,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -2089,6 +2120,84 @@ impl GodlyApp {
                 self.active_theme = id;
                 crate::theme::set_active_theme(id);
             }
+            // --- G1/G2: Terminal Context Menu ---
+            Message::TerminalContextOpen { id, x, y } => {
+                self.terminal_context_menu_pos = Some((x, y));
+                self.terminal_context_menu_terminal_id = Some(id);
+            }
+            Message::TerminalContextClose => {
+                self.terminal_context_menu_pos = None;
+                self.terminal_context_menu_terminal_id = None;
+            }
+            Message::TerminalContextAction(action) => {
+                self.terminal_context_menu_pos = None;
+                self.terminal_context_menu_terminal_id = None;
+                match action {
+                    TermCtxAction::Copy => {
+                        self.copy_selection();
+                    }
+                    TermCtxAction::CopyClean => {
+                        if let Some(tid) = self.target_terminal_id() {
+                            if let Some(term) = self.terminals.get(tid) {
+                                if let Some(grid) = &term.grid {
+                                    let clean = self.selection.selected_text_clean(grid);
+                                    if !clean.is_empty() {
+                                        if let Err(e) = clipboard::copy_to_clipboard(&clean) {
+                                            log::error!("Clipboard copy (clean) failed: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    TermCtxAction::Paste => {
+                        return self.paste_from_clipboard();
+                    }
+                    TermCtxAction::SelectAll => {
+                        self.select_all();
+                    }
+                    TermCtxAction::Clear => {
+                        if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client) {
+                            let _ = commands::write_to_terminal(client, tid, b"clear\r");
+                        }
+                    }
+                    TermCtxAction::SplitRight => {
+                        return self.split_focused_pane(SplitDirection::Horizontal);
+                    }
+                    TermCtxAction::SplitDown => {
+                        return self.split_focused_pane(SplitDirection::Vertical);
+                    }
+                }
+            }
+            // --- G4: Find in Terminal ---
+            Message::SearchOpen => {
+                self.search.open();
+            }
+            Message::SearchClose => {
+                self.search.close();
+            }
+            Message::SearchQueryChanged(query) => {
+                let grid = self.target_terminal_id()
+                    .and_then(|tid| self.terminals.get(tid))
+                    .and_then(|term| term.grid.as_ref());
+                self.search.set_query(query, grid);
+            }
+            Message::SearchNext => {
+                self.search.next_match();
+            }
+            Message::SearchPrev => {
+                self.search.prev_match();
+            }
+            Message::SearchToggleRegex => {
+                let grid = self.target_terminal_id()
+                    .and_then(|tid| self.terminals.get(tid))
+                    .and_then(|term| term.grid.as_ref());
+                self.search.toggle_regex(grid);
+            }
+            // --- G6/G7: Performance Overlay ---
+            Message::TogglePerfOverlay => {
+                self.perf_overlay_visible = !self.perf_overlay_visible;
+            }
         }
         Task::none()
     }
@@ -2308,7 +2417,7 @@ impl GodlyApp {
         };
 
         // Shell picker overlay (H1-H6)
-        if self.shell_picker.visible {
+        let with_shell_picker: Element<'_, Message> = if self.shell_picker.visible {
             let picker = shell_picker::view_shell_picker(
                 &self.shell_picker,
                 Message::ShellPickerTabClicked,
@@ -2321,7 +2430,56 @@ impl GodlyApp {
             stack![with_copy_preview, picker].into()
         } else {
             with_copy_preview
+        };
+
+        // --- G1/G2: Terminal Context Menu overlay ---
+        let with_ctx_menu: Element<'_, Message> = if let Some((x, y)) = self.terminal_context_menu_pos {
+            let ctx_menu = terminal_context_menu::view_terminal_context_menu(
+                x,
+                y,
+                |action| Message::TerminalContextAction(action),
+                Message::TerminalContextClose,
+            );
+            stack![with_shell_picker, ctx_menu].into()
+        } else {
+            with_shell_picker
+        };
+
+        // --- G4: Search bar overlay (top-right, non-blocking) ---
+        let with_search: Element<'_, Message> = if self.search.active {
+            let search_bar = crate::search::view_search_bar(
+                &self.search,
+                |q| Message::SearchQueryChanged(q),
+                Message::SearchNext,
+                Message::SearchPrev,
+                Message::SearchClose,
+                Message::SearchToggleRegex,
+            );
+            let positioned = container(search_bar)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .padding(Padding::from([4, 8]));
+            stack![with_ctx_menu, positioned].into()
+        } else {
+            with_ctx_menu
+        };
+
+        // --- G7: Performance overlay (top-right corner) ---
+        if self.perf_overlay_visible {
+            let perf: Element<'_, Message> = crate::perf_overlay::view_perf_overlay(
+                60.0, // placeholder FPS
+                16.6, // placeholder frame_ms
+                self.terminals.count(),
+            );
+            let positioned = container(perf)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .padding(Padding::from([30, 8]));
+            stack![with_search, positioned].into()
+        } else {
+            with_search
         }
+    }
 
     fn view_tab_context_menu(&self) -> Element<'_, Message> {
         let Some(tab_id) = self.tab_context_menu_id.as_deref() else {
@@ -2544,7 +2702,7 @@ impl GodlyApp {
             for c in &colors {
                 let color_val = *c;
                 swatches = swatches.push(
-                    container(Space::with_width(16).height(16))
+                    container(Space::new().width(16).height(16))
                         .style(move |_t: &Theme| container::Style {
                             background: Some(iced::Background::Color(color_val)),
                             border: iced::Border {
@@ -2556,7 +2714,7 @@ impl GodlyApp {
                 );
             }
 
-            let label = text(theme_id.name())
+            let label = text(theme_id.label())
                 .size(13)
                 .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
 
@@ -2587,7 +2745,7 @@ impl GodlyApp {
         for chunk in grid_children.chunks_mut(3) {
             let mut r = row![].spacing(8);
             for child in chunk.iter_mut() {
-                let taken = std::mem::replace(child, Space::with_width(0).height(0).into());
+                let taken = std::mem::replace(child, Space::new().width(0).height(0).into());
                 r = r.push(taken);
             }
             rows.push(r.into());
