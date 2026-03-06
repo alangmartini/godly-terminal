@@ -1,5 +1,6 @@
 pub mod app;
 pub mod mcp_handler;
+pub mod claude_md_editor;
 pub mod notification_state;
 pub mod notifications;
 pub mod quick_claude;

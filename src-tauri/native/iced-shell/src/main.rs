@@ -1,6 +1,7 @@
 use iced::window;
 
 mod app;
+mod claude_md_editor;
 mod notification_state;
 mod notifications;
 mod scrollback_restore;
