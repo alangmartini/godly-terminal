@@ -8,7 +8,7 @@ use iced::keyboard;
 use iced::widget::{
     button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
 };
-use iced::{event, window, Element, Length, Padding, Subscription, Task};
+use iced::{event, window, Element, Length, Padding, Point, Subscription, Task};
 
 use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
@@ -36,7 +36,8 @@ use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
-    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
+    PANE_FOCUSED_BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::workspace_state::WorkspaceCollection;
 
@@ -141,6 +142,68 @@ struct MruSwitcherState {
 const TOAST_TTL_MS: u64 = 4_000;
 const TOAST_TICK_INTERVAL_MS: u64 = 250;
 const MAX_ACTIVE_TOASTS: usize = 6;
+const SIDEBAR_ANIMATION_DURATION_MS: u64 = 200;
+const SIDEBAR_ANIMATION_TICK_MS: u64 = 16;
+const TERMINAL_VIEWPORT_INSET_X: f32 = 12.0;
+const TERMINAL_VIEWPORT_INSET_Y: f32 = 10.0;
+const EMPTY_STATE_CARD_WIDTH: f32 = 360.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SidebarAnimation {
+    from_width: f32,
+    to_width: f32,
+    started_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PaneRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl PaneRect {
+    fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x,
+            y,
+            width: width.max(1.0),
+            height: height.max(1.0),
+        }
+    }
+
+    fn contains(self, point: Point) -> bool {
+        point.x >= self.x
+            && point.x <= self.x + self.width
+            && point.y >= self.y
+            && point.y <= self.y + self.height
+    }
+
+    fn inset(self, inset_x: f32, inset_y: f32) -> Self {
+        let inset_x = inset_x.min(self.width * 0.5);
+        let inset_y = inset_y.min(self.height * 0.5);
+
+        Self::new(
+            self.x + inset_x,
+            self.y + inset_y,
+            self.width - inset_x * 2.0,
+            self.height - inset_y * 2.0,
+        )
+    }
+
+    fn clamp_point(self, point: Point) -> Point {
+        let max_x = (self.x + self.width - 0.001).max(self.x);
+        let max_y = (self.y + self.height - 0.001).max(self.y);
+
+        Point::new(point.x.clamp(self.x, max_x), point.y.clamp(self.y, max_y))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalEmptyState {
+    NoTerminalsOpen,
+}
 
 /// Main Iced application state — multi-terminal with event-driven updates.
 pub struct GodlyApp {
@@ -169,8 +232,12 @@ pub struct GodlyApp {
     sidebar_visible: bool,
     /// Current sidebar width in logical pixels.
     sidebar_width: f32,
+    /// In-flight sidebar width animation, if any.
+    sidebar_animation: Option<SidebarAnimation>,
     /// Whether the sidebar resize handle is currently being dragged.
     sidebar_resizing: bool,
+    /// Last known global cursor position in logical pixels.
+    cursor_position: Option<Point>,
     /// Whether the settings dialog is open.
     settings_open: bool,
     /// Active tab in the settings dialog.
@@ -285,7 +352,9 @@ impl Default for GodlyApp {
             selection: SelectionState::default(),
             sidebar_visible: true,
             sidebar_width: SIDEBAR_WIDTH,
+            sidebar_animation: None,
             sidebar_resizing: false,
+            cursor_position: None,
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             notifications: NotificationTracker::new(),
@@ -425,6 +494,8 @@ pub enum Message {
     SidebarResizeStart,
     /// Finish dragging the sidebar resize handle.
     SidebarResizeEnd,
+    /// Periodic tick used for sidebar collapse/expand animation.
+    SidebarAnimationTick,
     /// Rename dialog input changed.
     WorkspaceRenameInputChanged(String),
     /// Rename dialog submitted.
@@ -629,6 +700,91 @@ impl GodlyApp {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64
+    }
+
+    fn current_sidebar_width(&self) -> f32 {
+        resolved_sidebar_width(
+            self.sidebar_visible,
+            self.sidebar_width,
+            self.sidebar_animation,
+            Self::now_ms(),
+        )
+    }
+
+    fn terminal_content_area(&self) -> PaneRect {
+        terminal_content_rect(
+            self.window_width,
+            self.window_height,
+            self.current_sidebar_width(),
+        )
+    }
+
+    fn terminal_pane_rect(&self, terminal_id: &str) -> Option<PaneRect> {
+        let content_rect = self.terminal_content_area();
+
+        self.workspaces.iter().find_map(|workspace| {
+            pane_rect_for_terminal(&workspace.layout, terminal_id, content_rect)
+        })
+    }
+
+    fn terminal_viewport_rect(&self, terminal_id: &str) -> PaneRect {
+        self.terminal_pane_rect(terminal_id)
+            .map(inset_terminal_pane_rect)
+            .unwrap_or_else(|| inset_terminal_pane_rect(self.terminal_content_area()))
+    }
+
+    fn terminal_grid_size(&self, terminal_id: Option<&str>) -> (u16, u16) {
+        let viewport = terminal_id
+            .map(|id| self.terminal_viewport_rect(id))
+            .unwrap_or_else(|| inset_terminal_pane_rect(self.terminal_content_area()));
+
+        grid_dimensions_for_viewport(viewport, self.font_metrics)
+    }
+
+    fn active_terminal_pointer_grid(&self, clamp_to_viewport: bool) -> Option<GridPos> {
+        let cursor = self.cursor_position?;
+        let terminal_id = self.target_terminal_id()?;
+        let pane_rect = self.terminal_pane_rect(terminal_id)?;
+
+        if !clamp_to_viewport && !pane_rect.contains(cursor) {
+            return None;
+        }
+
+        let viewport_rect = inset_terminal_pane_rect(pane_rect);
+        Some(pointer_to_grid(cursor, viewport_rect, self.font_metrics))
+    }
+
+    fn terminal_empty_state(
+        &self,
+        active_workspace_terminal_count: usize,
+    ) -> Option<TerminalEmptyState> {
+        resolve_terminal_empty_state(self.active_layout(), active_workspace_terminal_count)
+    }
+
+    fn set_sidebar_visible(&mut self, visible: bool) -> Task<Message> {
+        self.sidebar_resizing = false;
+
+        let now_ms = Self::now_ms();
+        let current_width = resolved_sidebar_width(
+            self.sidebar_visible,
+            self.sidebar_width,
+            self.sidebar_animation,
+            now_ms,
+        );
+        let target_width = if visible { self.sidebar_width } else { 0.0 };
+
+        self.sidebar_visible = visible;
+        self.sidebar_animation = begin_sidebar_animation(current_width, target_width, now_ms);
+
+        if self.sidebar_animation.is_none() {
+            return self.resize_all_terminals();
+        }
+
+        Task::none()
+    }
+
+    fn toggle_sidebar_visibility(&mut self) -> Task<Message> {
+        self.set_sidebar_visible(!self.sidebar_visible)
     }
 
     fn enqueue_toast(&mut self, title: String, message: String) {
@@ -1082,8 +1238,6 @@ impl GodlyApp {
                 return self.close_terminal(&id);
             }
             Message::TerminalCreated(Ok(session_id)) => {
-                let rows = self.calculate_rows();
-                let cols = self.calculate_cols();
                 let ws_id = self.workspaces.active_id().map(str::to_string);
                 let in_layout = self
                     .active_layout()
@@ -1095,21 +1249,6 @@ impl GodlyApp {
                         active_workspace_id: ws_id.clone(),
                         terminal_in_active_layout: in_layout,
                     });
-
-                if let Some(ws_id) = &decision.assign_workspace_id {
-                    self.terminals.add_to_workspace(
-                        decision.session_id.clone(),
-                        rows,
-                        cols,
-                        ws_id.clone(),
-                    );
-                } else {
-                    self.terminals.add(decision.session_id.clone(), rows, cols);
-                }
-
-                if decision.set_terminal_active {
-                    self.terminals.set_active(&decision.session_id);
-                }
                 if let Some(workspace_mutation) = decision.workspace_mutation {
                     if let Some(ws) = self.workspaces.active_mut() {
                         match workspace_mutation {
@@ -1124,6 +1263,21 @@ impl GodlyApp {
                             }
                         }
                     }
+                }
+                let (rows, cols) = self.terminal_grid_size(Some(decision.session_id.as_str()));
+                if let Some(ws_id) = &decision.assign_workspace_id {
+                    self.terminals.add_to_workspace(
+                        decision.session_id.clone(),
+                        rows,
+                        cols,
+                        ws_id.clone(),
+                    );
+                } else {
+                    self.terminals.add(decision.session_id.clone(), rows, cols);
+                }
+
+                if decision.set_terminal_active {
+                    self.terminals.set_active(&decision.session_id);
                 }
                 return self.fetch_grid(&decision.fetch_grid_terminal_id);
             }
@@ -1141,18 +1295,16 @@ impl GodlyApp {
                 width,
                 height,
             } => {
-                let old_cols = self.calculate_cols();
-                let old_rows = self.calculate_rows();
+                let (old_rows, old_cols) = self.terminal_grid_size(self.target_terminal_id());
 
                 self.window_id = Some(window_id);
                 self.window_width = width;
                 self.window_height = height;
 
-                let new_cols = self.calculate_cols();
-                let new_rows = self.calculate_rows();
+                let (new_rows, new_cols) = self.terminal_grid_size(self.target_terminal_id());
 
                 if new_cols != old_cols || new_rows != old_rows {
-                    return self.resize_active_terminal(new_rows, new_cols);
+                    return self.resize_all_terminals();
                 }
             }
             Message::WindowFocusChanged { window_id, focused } => {
@@ -1169,17 +1321,23 @@ impl GodlyApp {
 
             // --- Mouse selection ---
             Message::SelectionStart { x, y } => {
-                let pos = self.pixel_to_grid(x, y);
-                self.selection.start(pos);
+                if x != 0.0 || y != 0.0 {
+                    self.cursor_position = Some(Point::new(x, y));
+                }
+                if let Some(pos) = self.active_terminal_pointer_grid(false) {
+                    self.selection.start(pos);
+                }
             }
             Message::SelectionUpdate { x, y } => {
+                self.cursor_position = Some(Point::new(x, y));
                 if self.sidebar_resizing {
                     self.sidebar_width = sidebar::clamp_sidebar_width(x);
                     return Task::none();
                 }
                 if self.selection.active {
-                    let pos = self.pixel_to_grid(x, y);
-                    self.selection.update(pos);
+                    if let Some(pos) = self.active_terminal_pointer_grid(true) {
+                        self.selection.update(pos);
+                    }
                 }
             }
             Message::SelectionEnd => {
@@ -1713,12 +1871,10 @@ impl GodlyApp {
 
             // --- Sidebar + Settings ---
             Message::ToggleSidebar => {
-                self.sidebar_visible = !self.sidebar_visible;
-                self.sidebar_resizing = false;
-                return self.resize_all_terminals();
+                return self.toggle_sidebar_visibility();
             }
             Message::SidebarResizeStart => {
-                if self.sidebar_visible {
+                if self.sidebar_visible && self.sidebar_animation.is_none() {
                     self.sidebar_resizing = true;
                     self.selection.clear();
                 }
@@ -1727,6 +1883,15 @@ impl GodlyApp {
                 if self.sidebar_resizing {
                     self.sidebar_resizing = false;
                     return self.resize_all_terminals();
+                }
+            }
+            Message::SidebarAnimationTick => {
+                let now_ms = Self::now_ms();
+                if let Some(animation) = self.sidebar_animation {
+                    if sidebar_animation_finished(animation, now_ms) {
+                        self.sidebar_animation = None;
+                        return self.resize_all_terminals();
+                    }
                 }
             }
             Message::ToggleSettings => {
@@ -1751,6 +1916,7 @@ impl GodlyApp {
         // Tab bar — show terminals for the active workspace.
         let active_id = self.active_focused();
         let ordered = self.active_workspace_terminals();
+        let active_workspace_terminal_count = ordered.len();
         let tab_bar = tab_bar::view_tab_bar(
             &ordered,
             active_id,
@@ -1765,22 +1931,24 @@ impl GodlyApp {
 
         // Render the layout tree from active workspace.
         let focused_id = self.active_focused();
-        let terminal_view: Element<'_, Message> = if let Some(layout) = self.active_layout() {
-            if layout.leaf_count() > 0 && self.terminals.count() > 0 {
-                view_layout(layout, &|terminal_id: &str| {
-                    self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
-                })
-            } else {
-                center(text("No active terminal").size(16)).into()
-            }
+        let terminal_view: Element<'_, Message> = if let Some(_empty_state) =
+            self.terminal_empty_state(active_workspace_terminal_count)
+        {
+            self.view_terminal_empty_state()
+        } else if let Some(layout) = self.active_layout() {
+            view_layout(layout, &|terminal_id: &str| {
+                self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
+            })
         } else {
-            center(text("No active terminal").size(16)).into()
+            self.view_terminal_empty_state()
         };
 
-        // Compose main content with optional sidebar.
-        let main_area = column![tab_bar, terminal_view];
+        let main_area = column![tab_bar, container(terminal_view).height(Length::Fill)]
+            .width(Length::Fill)
+            .height(Length::Fill);
 
-        let main_content: Element<'_, Message> = if self.sidebar_visible {
+        let sidebar_width = self.current_sidebar_width();
+        let main_content: Element<'_, Message> = if sidebar_width > 0.0 {
             let notified_workspace_ids = self.notified_workspace_ids();
             let sidebar = sidebar::view_sidebar(
                 self.workspaces.as_slice(),
@@ -1793,12 +1961,15 @@ impl GodlyApp {
                             .any(|id| id.as_str() == workspace_id)
                     },
                 ),
-                self.sidebar_width,
+                sidebar_width,
                 Message::SidebarAction,
                 Message::SidebarResizeStart,
                 Message::SidebarResizeEnd,
             );
-            row![sidebar, main_area].into()
+            row![sidebar, main_area]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
         } else {
             main_area.into()
         };
@@ -2844,6 +3015,13 @@ impl GodlyApp {
             );
         }
 
+        if self.sidebar_animation.is_some() {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(SIDEBAR_ANIMATION_TICK_MS))
+                    .map(|_| Message::SidebarAnimationTick),
+            );
+        }
+
         Subscription::batch(subscriptions)
     }
 
@@ -3000,11 +3178,7 @@ impl GodlyApp {
                 }
                 Task::none()
             }
-            AppAction::ToggleSidebar => {
-                self.sidebar_visible = !self.sidebar_visible;
-                self.sidebar_resizing = false;
-                self.resize_all_terminals()
-            }
+            AppAction::ToggleSidebar => self.toggle_sidebar_visibility(),
             AppAction::OpenSettings => {
                 self.settings_open = !self.settings_open;
                 Task::none()
@@ -3528,8 +3702,7 @@ impl GodlyApp {
         };
 
         let client = Arc::clone(client);
-        let rows = self.calculate_rows();
-        let cols = self.calculate_cols();
+        let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
 
         Task::perform(
             async move {
@@ -3595,30 +3768,11 @@ impl GodlyApp {
     // Resize
     // -----------------------------------------------------------------------
 
-    fn resize_active_terminal(&mut self, rows: u16, cols: u16) -> Task<Message> {
-        let Some(active_id) = self.active_focused().map(str::to_string) else {
-            return Task::none();
-        };
-
-        if let Some(term) = self.terminals.get_mut(&active_id) {
-            term.rows = rows;
-            term.cols = cols;
-        }
-
-        if let Some(client) = &self.client {
-            let _ = commands::resize_terminal(client, &active_id, rows, cols);
-        }
-
-        self.fetch_grid(&active_id)
-    }
-
     fn resize_all_terminals(&mut self) -> Task<Message> {
-        let new_rows = self.calculate_rows();
-        let new_cols = self.calculate_cols();
-
         let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
 
         for id in &ids {
+            let (new_rows, new_cols) = self.terminal_grid_size(Some(id.as_str()));
             if let Some(term) = self.terminals.get_mut(id) {
                 term.rows = new_rows;
                 term.cols = new_cols;
@@ -3640,17 +3794,13 @@ impl GodlyApp {
     // -----------------------------------------------------------------------
 
     fn calculate_cols(&self) -> u16 {
-        let sidebar_offset = if self.sidebar_visible {
-            self.sidebar_width
-        } else {
-            0.0
-        };
-        ((self.window_width - sidebar_offset) / self.font_metrics.cell_width).max(1.0) as u16
+        let (_, cols) = self.terminal_grid_size(self.target_terminal_id());
+        cols
     }
 
     fn calculate_rows(&self) -> u16 {
-        let available = (self.window_height - TAB_BAR_HEIGHT).max(0.0);
-        (available / self.font_metrics.cell_height).max(1.0) as u16
+        let (rows, _) = self.terminal_grid_size(self.target_terminal_id());
+        rows
     }
 
     // -----------------------------------------------------------------------
@@ -3799,19 +3949,6 @@ impl GodlyApp {
         self.selection.finish();
     }
 
-    fn pixel_to_grid(&self, x: f32, y: f32) -> GridPos {
-        let sidebar_offset = if self.sidebar_visible {
-            self.sidebar_width
-        } else {
-            0.0
-        };
-        let adjusted_x = (x - sidebar_offset).max(0.0);
-        let adjusted_y = (y - TAB_BAR_HEIGHT).max(0.0);
-        let row = (adjusted_y / self.font_metrics.cell_height) as usize;
-        let col = (adjusted_x / self.font_metrics.cell_width) as usize;
-        GridPos { row, col }
-    }
-
     // -----------------------------------------------------------------------
     // Rendering helpers
     // -----------------------------------------------------------------------
@@ -3847,7 +3984,81 @@ impl GodlyApp {
             metrics: self.font_metrics,
             selection,
         };
-        canvas(tc).width(Length::Fill).height(Length::Fill).into()
+
+        let border_color = if is_focused {
+            PANE_FOCUSED_BORDER
+        } else {
+            PANE_BORDER
+        };
+
+        container(canvas(tc).width(Length::Fill).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding::from([
+                TERMINAL_VIEWPORT_INSET_Y,
+                TERMINAL_VIEWPORT_INSET_X,
+            ]))
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(PANE_BG)),
+                border: iced::Border {
+                    color: border_color,
+                    width: if is_focused { 2.0 } else { 1.0 },
+                    radius: 8.0.into(),
+                },
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn view_terminal_empty_state(&self) -> Element<'_, Message> {
+        let card = container(
+            column![
+                text("No terminals open").size(22).color(TEXT_ACTIVE),
+                text("Create a terminal in this workspace to start working.")
+                    .size(13)
+                    .color(TEXT_SECONDARY),
+                button(text("Create terminal").size(13).color(BG_SECONDARY))
+                    .on_press(Message::NewTabRequested)
+                    .padding(Padding::from([8, 14]))
+                    .style(|_theme, status| {
+                        let background = match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                iced::Background::Color(PANE_FOCUSED_BORDER)
+                            }
+                            _ => iced::Background::Color(ACCENT),
+                        };
+
+                        button::Style {
+                            background: Some(background),
+                            text_color: BG_SECONDARY,
+                            border: iced::Border {
+                                color: iced::Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: 6.0.into(),
+                            },
+                            ..button::Style::default()
+                        }
+                    }),
+            ]
+            .spacing(12)
+            .width(Length::Fill),
+        )
+        .padding(Padding::from([18, 20]))
+        .width(Length::Fixed(EMPTY_STATE_CARD_WIDTH))
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(EMPTY_STATE_BG)),
+            border: iced::Border {
+                color: PANE_BORDER,
+                width: 1.0,
+                radius: 10.0.into(),
+            },
+            ..container::Style::default()
+        });
+
+        container(center(card))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     fn render_terminal_leaf_with_drop_overlay<'a>(
@@ -3913,6 +4124,148 @@ impl GodlyApp {
     fn has_selection(&self) -> bool {
         let (start, end) = self.selection.normalized();
         start != end
+    }
+}
+
+fn begin_sidebar_animation(
+    current_width: f32,
+    target_width: f32,
+    started_at_ms: u64,
+) -> Option<SidebarAnimation> {
+    if (current_width - target_width).abs() < 0.5 {
+        None
+    } else {
+        Some(SidebarAnimation {
+            from_width: current_width,
+            to_width: target_width,
+            started_at_ms,
+        })
+    }
+}
+
+fn sidebar_animation_progress(animation: SidebarAnimation, now_ms: u64) -> f32 {
+    let elapsed = now_ms.saturating_sub(animation.started_at_ms) as f32;
+    (elapsed / SIDEBAR_ANIMATION_DURATION_MS as f32).clamp(0.0, 1.0)
+}
+
+fn ease_in_out_cubic(progress: f32) -> f32 {
+    if progress < 0.5 {
+        4.0 * progress * progress * progress
+    } else {
+        1.0 - (-2.0 * progress + 2.0).powi(3) / 2.0
+    }
+}
+
+fn sidebar_animation_finished(animation: SidebarAnimation, now_ms: u64) -> bool {
+    sidebar_animation_progress(animation, now_ms) >= 1.0
+}
+
+fn resolved_sidebar_width(
+    sidebar_visible: bool,
+    sidebar_width: f32,
+    sidebar_animation: Option<SidebarAnimation>,
+    now_ms: u64,
+) -> f32 {
+    if let Some(animation) = sidebar_animation {
+        let eased = ease_in_out_cubic(sidebar_animation_progress(animation, now_ms));
+        return animation.from_width + (animation.to_width - animation.from_width) * eased;
+    }
+
+    if sidebar_visible {
+        sidebar_width
+    } else {
+        0.0
+    }
+}
+
+fn resolve_terminal_empty_state(
+    active_layout: Option<&LayoutNode>,
+    active_workspace_terminal_count: usize,
+) -> Option<TerminalEmptyState> {
+    match active_layout {
+        Some(layout) if layout.leaf_count() > 0 && active_workspace_terminal_count > 0 => None,
+        _ => Some(TerminalEmptyState::NoTerminalsOpen),
+    }
+}
+
+fn terminal_content_rect(window_width: f32, window_height: f32, sidebar_width: f32) -> PaneRect {
+    PaneRect::new(
+        sidebar_width.max(0.0),
+        TAB_BAR_HEIGHT,
+        (window_width - sidebar_width).max(1.0),
+        (window_height - TAB_BAR_HEIGHT).max(1.0),
+    )
+}
+
+fn split_ratio_to_portions(ratio: f32) -> (u16, u16) {
+    let clamped = ratio.clamp(0.01, 0.99);
+    let first = (clamped * 100.0).round() as u16;
+    (first, 100 - first)
+}
+
+fn pane_rect_for_terminal(
+    layout: &LayoutNode,
+    terminal_id: &str,
+    rect: PaneRect,
+) -> Option<PaneRect> {
+    match layout {
+        LayoutNode::Leaf {
+            terminal_id: leaf_id,
+        } => (leaf_id == terminal_id).then_some(rect),
+        LayoutNode::Split {
+            direction,
+            ratio,
+            first,
+            second,
+        } => {
+            let (first_portion, second_portion) = split_ratio_to_portions(*ratio);
+            let total_portions = (first_portion + second_portion) as f32;
+
+            let (first_rect, second_rect) = match direction {
+                SplitDirection::Horizontal => {
+                    let first_width = rect.width * first_portion as f32 / total_portions;
+                    let second_width = rect.width - first_width;
+                    (
+                        PaneRect::new(rect.x, rect.y, first_width, rect.height),
+                        PaneRect::new(rect.x + first_width, rect.y, second_width, rect.height),
+                    )
+                }
+                SplitDirection::Vertical => {
+                    let first_height = rect.height * first_portion as f32 / total_portions;
+                    let second_height = rect.height - first_height;
+                    (
+                        PaneRect::new(rect.x, rect.y, rect.width, first_height),
+                        PaneRect::new(rect.x, rect.y + first_height, rect.width, second_height),
+                    )
+                }
+            };
+
+            pane_rect_for_terminal(first, terminal_id, first_rect)
+                .or_else(|| pane_rect_for_terminal(second, terminal_id, second_rect))
+        }
+    }
+}
+
+fn inset_terminal_pane_rect(rect: PaneRect) -> PaneRect {
+    rect.inset(TERMINAL_VIEWPORT_INSET_X, TERMINAL_VIEWPORT_INSET_Y)
+}
+
+fn grid_dimensions_for_viewport(viewport: PaneRect, font_metrics: FontMetrics) -> (u16, u16) {
+    let rows = (viewport.height / font_metrics.cell_height)
+        .floor()
+        .max(1.0) as u16;
+    let cols = (viewport.width / font_metrics.cell_width).floor().max(1.0) as u16;
+    (rows, cols)
+}
+
+fn pointer_to_grid(point: Point, viewport: PaneRect, font_metrics: FontMetrics) -> GridPos {
+    let clamped = viewport.clamp_point(point);
+    let local_x = (clamped.x - viewport.x).max(0.0);
+    let local_y = (clamped.y - viewport.y).max(0.0);
+
+    GridPos {
+        row: (local_y / font_metrics.cell_height) as usize,
+        col: (local_x / font_metrics.cell_width) as usize,
     }
 }
 
@@ -4274,17 +4627,24 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 mod helper_tests {
     use super::tab_reducer::TabMruCycleDirection;
     use super::{
-        enqueue_toast_entry, mru_cycle_direction_from_shortcut_key, next_mru_switcher_selection,
-        next_tab_id_from_mru, normalize_ai_tool_field, normalize_flow_field,
-        normalize_mute_pattern, normalize_plugin_field, normalize_quick_claude_text,
-        normalize_remote_field, normalize_remote_port, parse_flow_steps, prune_expired_toasts,
-        quote_dropped_path, should_commit_mru_switcher_on_key_release,
-        should_commit_mru_switcher_on_modifiers_changed, toggle_flow_enabled,
+        begin_sidebar_animation, enqueue_toast_entry, grid_dimensions_for_viewport,
+        inset_terminal_pane_rect, mru_cycle_direction_from_shortcut_key,
+        next_mru_switcher_selection, next_tab_id_from_mru, normalize_ai_tool_field,
+        normalize_flow_field, normalize_mute_pattern, normalize_plugin_field,
+        normalize_quick_claude_text, normalize_remote_field, normalize_remote_port,
+        pane_rect_for_terminal, parse_flow_steps, pointer_to_grid, prune_expired_toasts,
+        quote_dropped_path, resolve_terminal_empty_state, resolved_sidebar_width,
+        should_commit_mru_switcher_on_key_release, should_commit_mru_switcher_on_modifiers_changed,
+        sidebar_animation_finished, terminal_content_rect, toggle_flow_enabled,
         toggle_plugin_enabled, toggle_remote_enabled, wildcard_matches,
-        workspace_matches_mute_patterns, FlowEntry, PluginEntry, RemoteAuthMode,
-        RemoteConnectionEntry, ToastNotification, MAX_ACTIVE_TOASTS, TOAST_TTL_MS,
+        workspace_matches_mute_patterns, FlowEntry, PaneRect, PluginEntry, RemoteAuthMode,
+        RemoteConnectionEntry, TerminalEmptyState, ToastNotification, MAX_ACTIVE_TOASTS,
+        SIDEBAR_ANIMATION_DURATION_MS, TOAST_TTL_MS,
     };
+    use super::{GridPos, LayoutNode, SplitDirection, TAB_BAR_HEIGHT};
+    use godly_terminal_surface::FontMetrics;
     use iced::keyboard::{key::Named, Key, Modifiers};
+    use iced::Point;
     use std::path::Path;
 
     #[test]
@@ -4595,5 +4955,112 @@ mod helper_tests {
             TabMruCycleDirection::Forward,
         );
         assert_eq!(next, Some("t-2".to_string()));
+    }
+
+    #[test]
+    fn sidebar_animation_interpolates_and_finishes_on_target_width() {
+        let animation = begin_sidebar_animation(220.0, 0.0, 1_000).expect("animation expected");
+
+        let mid_width = resolved_sidebar_width(true, 220.0, Some(animation), 1_100);
+        assert!(mid_width > 0.0);
+        assert!(mid_width < 220.0);
+        assert!(!sidebar_animation_finished(animation, 1_100));
+
+        let end_width = resolved_sidebar_width(
+            true,
+            220.0,
+            Some(animation),
+            1_000 + SIDEBAR_ANIMATION_DURATION_MS,
+        );
+        assert_eq!(end_width, 0.0);
+        assert!(sidebar_animation_finished(
+            animation,
+            1_000 + SIDEBAR_ANIMATION_DURATION_MS
+        ));
+    }
+
+    #[test]
+    fn terminal_empty_state_requires_layout_and_live_terminal() {
+        assert_eq!(
+            resolve_terminal_empty_state(None, 0),
+            Some(TerminalEmptyState::NoTerminalsOpen)
+        );
+
+        let layout = LayoutNode::Leaf {
+            terminal_id: "t1".to_string(),
+        };
+        assert_eq!(resolve_terminal_empty_state(Some(&layout), 1), None);
+        assert_eq!(
+            resolve_terminal_empty_state(Some(&layout), 0),
+            Some(TerminalEmptyState::NoTerminalsOpen)
+        );
+    }
+
+    #[test]
+    fn terminal_content_geometry_tracks_sidebar_and_split_ratios() {
+        let content_rect = terminal_content_rect(1_200.0, 800.0, 220.0);
+        assert_eq!(
+            content_rect,
+            PaneRect::new(220.0, TAB_BAR_HEIGHT, 980.0, 768.0)
+        );
+
+        let layout = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "left".to_string(),
+            }),
+            second: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.25,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: "top-right".to_string(),
+                }),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: "bottom-right".to_string(),
+                }),
+            }),
+        };
+
+        let top_right = pane_rect_for_terminal(&layout, "top-right", content_rect)
+            .expect("top-right pane should resolve");
+        assert_eq!(
+            top_right,
+            PaneRect::new(710.0, TAB_BAR_HEIGHT, 490.0, 192.0)
+        );
+
+        let bottom_right = pane_rect_for_terminal(&layout, "bottom-right", content_rect)
+            .expect("bottom-right pane should resolve");
+        assert_eq!(
+            bottom_right,
+            PaneRect::new(710.0, TAB_BAR_HEIGHT + 192.0, 490.0, 576.0)
+        );
+    }
+
+    #[test]
+    fn pointer_mapping_uses_inset_terminal_viewport_and_clamps_to_edges() {
+        let font_metrics = FontMetrics::default();
+        let viewport = inset_terminal_pane_rect(PaneRect::new(220.0, TAB_BAR_HEIGHT, 490.0, 200.0));
+
+        let pos = pointer_to_grid(
+            Point::new(
+                viewport.x + font_metrics.cell_width * 3.4,
+                viewport.y + font_metrics.cell_height * 2.2,
+            ),
+            viewport,
+            font_metrics,
+        );
+        assert_eq!(pos, GridPos { row: 2, col: 3 });
+
+        let edge = pointer_to_grid(
+            Point::new(viewport.x - 50.0, viewport.y - 50.0),
+            viewport,
+            font_metrics,
+        );
+        assert_eq!(edge, GridPos { row: 0, col: 0 });
+
+        let (rows, cols) = grid_dimensions_for_viewport(viewport, font_metrics);
+        assert!(rows >= 1);
+        assert!(cols >= 1);
     }
 }

@@ -15,4 +15,9 @@ pub const ACCENT_HOVER: Color = Color::from_rgb(0.8784, 0.7451, 0.5333); // #e0b
 pub const BORDER: Color = Color::from_rgb(0.1804, 0.1686, 0.1569); // #2e2b28
 pub const DANGER: Color = Color::from_rgb(0.7608, 0.4392, 0.4392); // #c27070
 
+pub const PANE_BG: Color = Color::from_rgb(0.0745, 0.0784, 0.0863); // #131416
+pub const PANE_BORDER: Color = Color::from_rgb(0.2471, 0.2235, 0.2039); // #3f3934
+pub const PANE_FOCUSED_BORDER: Color = Color::from_rgb(0.8784, 0.7451, 0.5333); // #e0be88
+pub const EMPTY_STATE_BG: Color = Color::from_rgb(0.1294, 0.1333, 0.1451); // #212225
+
 pub const BACKDROP: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.58);
