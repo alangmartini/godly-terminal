@@ -66,6 +66,9 @@ Always commit all staged and unstaged changes when making a commit. Do not leave
 
 Never add "Generated with Claude Code" or any similar attribution message to commits, PRs, or any other output.
 
+- Split work into atomic commits by change type/scope (`feat`, `fix`, `docs`, `test`, etc.) so each commit represents one logical unit.
+- Push branches and open/update PRs frequently for each atomic unit instead of batching multiple unrelated changes behind one large PR.
+
 ### Changelog Fragments
 
 Every `feat:` and `fix:` commit must include a changelog fragment file in `changelog/unreleased/`.
@@ -79,8 +82,8 @@ Every `feat:` and `fix:` commit must include a changelog fragment file in `chang
 
 ### PR Policy
 
-- **Features (`feat:`) and bug fixes (`fix:`)**: Create a feature branch, open a PR to master, and wait for merge.
-- **Documentation (`docs:`), chores (`chore:`), style (`style:`), and other minor changes**: Commit and push directly to master — no PR needed.
+- **All change types (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `style:`, `refactor:`)**: Create a branch, open a PR, and merge via PR review flow.
+- **No direct pushes to `master`** for routine implementation work.
 
 ## Debugging Principles
 

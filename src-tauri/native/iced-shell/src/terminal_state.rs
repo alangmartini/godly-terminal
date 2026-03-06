@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use godly_tabs_core::TabState;
 use godly_protocol::types::RichGridData;
+use godly_tabs_core::TabState;
 
 /// Information about a single terminal session.
 pub struct TerminalInfo {
@@ -53,6 +53,7 @@ impl TerminalInfo {
 pub struct TerminalCollection {
     terminals: HashMap<String, TerminalInfo>,
     tabs: TabState,
+    mru: Vec<String>,
     next_order: u32,
 }
 
@@ -62,6 +63,7 @@ impl TerminalCollection {
         Self {
             terminals: HashMap::new(),
             tabs: TabState::new(),
+            mru: Vec::new(),
             next_order: 0,
         }
     }
@@ -83,6 +85,8 @@ impl TerminalCollection {
             return;
         }
         self.terminals.remove(id);
+        self.remove_from_mru(id);
+        self.sync_active_to_mru();
     }
 
     /// Returns a reference to the active terminal, if any.
@@ -109,7 +113,9 @@ impl TerminalCollection {
 
     /// Sets the active terminal by id. No-op if id not found.
     pub fn set_active(&mut self, id: &str) {
-        let _ = self.tabs.activate(id);
+        if self.tabs.activate(id) {
+            self.touch_mru(id);
+        }
     }
 
     /// Returns the number of terminals in the collection.
@@ -140,11 +146,59 @@ impl TerminalCollection {
     /// Switch to the next terminal (wraps around).
     pub fn next(&mut self) {
         self.tabs.next();
+        self.sync_active_to_mru();
     }
 
     /// Switch to the previous terminal (wraps around).
     pub fn previous(&mut self) {
         self.tabs.previous();
+        self.sync_active_to_mru();
+    }
+
+    /// Returns terminal ids in most-recently-used order.
+    ///
+    /// The active terminal is always first when one exists.
+    pub fn mru_terminal_ids(&self) -> Vec<&str> {
+        self.mru
+            .iter()
+            .filter_map(|id| self.terminals.contains_key(id).then_some(id.as_str()))
+            .collect()
+    }
+
+    /// Returns the next MRU terminal after the active one, if any.
+    pub fn mru_next_after_active(&self) -> Option<&str> {
+        let active_id = self.active_id()?;
+        self.mru
+            .iter()
+            .map(String::as_str)
+            .find(|id| *id != active_id && self.terminals.contains_key(*id))
+    }
+
+    /// Reorder terminals by tab id.
+    ///
+    /// Returns false if either id is missing. Returns true with no changes when
+    /// from and to resolve to the same tab index.
+    pub fn reorder_by_ids(&mut self, from_id: &str, to_id: &str) -> bool {
+        let Some(from_index) = self.tabs.index_of(from_id) else {
+            return false;
+        };
+        let Some(to_index) = self.tabs.index_of(to_id) else {
+            return false;
+        };
+        if from_index == to_index {
+            return true;
+        }
+
+        let active_id = self.tabs.active_id().map(str::to_owned);
+        if !self.tabs.reorder(from_index, to_index) {
+            return false;
+        }
+
+        if let Some(active_id) = active_id {
+            let _ = self.tabs.activate(&active_id);
+        }
+
+        true
     }
 
     /// Adds a terminal to a specific workspace.
@@ -198,6 +252,11 @@ impl TerminalCollection {
                 custom_name: None,
             },
         );
+        if self.tabs.active_id() == Some(id.as_str()) {
+            self.touch_mru(&id);
+        } else {
+            self.mru.push(id.clone());
+        }
 
         self.terminals
             .get_mut(&id)
@@ -226,6 +285,25 @@ impl TerminalCollection {
         if let Some(term) = self.get_mut(terminal_id) {
             term.workspace_id = workspace_id;
         }
+    }
+
+    fn sync_active_to_mru(&mut self) {
+        let Some(active_id) = self.tabs.active_id().map(str::to_owned) else {
+            return;
+        };
+        self.touch_mru(&active_id);
+    }
+
+    fn touch_mru(&mut self, id: &str) {
+        if self.mru.first().is_some_and(|current| current == id) {
+            return;
+        }
+        self.remove_from_mru(id);
+        self.mru.insert(0, id.to_string());
+    }
+
+    fn remove_from_mru(&mut self, id: &str) {
+        self.mru.retain(|existing| existing != id);
     }
 }
 
@@ -589,5 +667,99 @@ mod tests {
             .map(|t| t.id.as_str())
             .collect();
         assert_eq!(ordered, vec!["t1", "t3"]);
+    }
+
+    #[test]
+    fn test_reorder_by_ids_rejects_missing_ids() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+
+        assert!(!col.reorder_by_ids("missing", "t1"));
+        assert!(!col.reorder_by_ids("t1", "missing"));
+
+        let ordered: Vec<&str> = col.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ordered, vec!["t1", "t2"]);
+    }
+
+    #[test]
+    fn test_reorder_by_ids_same_id_is_noop() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+
+        assert!(col.reorder_by_ids("t2", "t2"));
+        assert_eq!(col.active_id(), Some("t1"));
+
+        let ordered: Vec<&str> = col.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ordered, vec!["t1", "t2"]);
+    }
+
+    #[test]
+    fn test_reorder_by_ids_preserves_active_identity() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+        col.set_active("t2");
+
+        assert!(col.reorder_by_ids("t3", "t1"));
+        assert_eq!(col.active_id(), Some("t2"));
+
+        let ordered: Vec<&str> = col.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ordered, vec!["t3", "t1", "t2"]);
+    }
+
+    #[test]
+    fn test_next_previous_wrap_after_reorder() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+        assert!(col.reorder_by_ids("t3", "t1"));
+        // New order: t3, t1, t2.
+
+        col.set_active("t2");
+        col.next();
+        assert_eq!(col.active_id(), Some("t3"));
+
+        col.previous();
+        assert_eq!(col.active_id(), Some("t2"));
+    }
+
+    #[test]
+    fn test_mru_tracks_recent_activation_order() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+        assert_eq!(col.mru_terminal_ids(), vec!["t1", "t2", "t3"]);
+
+        col.set_active("t2");
+        assert_eq!(col.mru_terminal_ids(), vec!["t2", "t1", "t3"]);
+        assert_eq!(col.mru_next_after_active(), Some("t1"));
+
+        col.next();
+        assert_eq!(col.active_id(), Some("t3"));
+        assert_eq!(col.mru_terminal_ids(), vec!["t3", "t2", "t1"]);
+        assert_eq!(col.mru_next_after_active(), Some("t2"));
+    }
+
+    #[test]
+    fn test_mru_cleanup_removes_closed_ids_and_promotes_fallback_active() {
+        let mut col = TerminalCollection::new();
+        col.add("t1".into(), 24, 80);
+        col.add("t2".into(), 24, 80);
+        col.add("t3".into(), 24, 80);
+        col.set_active("t3");
+        assert_eq!(col.mru_terminal_ids(), vec!["t3", "t1", "t2"]);
+
+        col.remove("t2");
+        assert_eq!(col.mru_terminal_ids(), vec!["t3", "t1"]);
+
+        col.remove("t3");
+        assert_eq!(col.active_id(), Some("t1"));
+        assert_eq!(col.mru_terminal_ids(), vec!["t1"]);
+        assert_eq!(col.mru_next_after_active(), None);
     }
 }
