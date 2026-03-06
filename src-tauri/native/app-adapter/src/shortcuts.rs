@@ -26,6 +26,8 @@ pub enum AppAction {
     ToggleSidebar,
     OpenSettings,
     RenameTab,
+    TogglePerfOverlay,
+    Find,
 }
 
 pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> {
@@ -73,6 +75,8 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
         "c" if shift => Some(AppAction::Copy),
         "v" if shift => Some(AppAction::Paste),
         "a" if shift => Some(AppAction::SelectAll),
+        "o" if shift => Some(AppAction::TogglePerfOverlay),
+        "f" if !shift => Some(AppAction::Find),
         _ => None,
     }
 }

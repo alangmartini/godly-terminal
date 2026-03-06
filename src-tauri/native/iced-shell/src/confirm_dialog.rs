@@ -19,23 +19,23 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
     on_cancel: M,
     danger: bool,
 ) -> Element<'a, M> {
-    let title_text = text(title).size(16).color(TEXT_ACTIVE);
+    let title_text = text(title).size(16).color(TEXT_ACTIVE());
 
-    let confirm_color = if danger { DANGER } else { ACCENT };
+    let confirm_color = if danger { DANGER() } else { ACCENT() };
 
-    let cancel_btn = button(text(cancel_label).size(13).color(TEXT_PRIMARY))
+    let cancel_btn = button(text(cancel_label).size(13).color(TEXT_PRIMARY()))
         .on_press(on_cancel)
         .padding(Padding::from([7, 18]))
         .style(move |_theme, status| {
             let bg = match status {
-                button::Status::Hovered => BG_TERTIARY,
+                button::Status::Hovered => BG_TERTIARY(),
                 _ => Color::TRANSPARENT,
             };
             button::Style {
                 background: Some(Background::Color(bg)),
-                text_color: TEXT_PRIMARY,
+                text_color: TEXT_PRIMARY(),
                 border: Border {
-                    color: BORDER,
+                    color: BORDER(),
                     width: 1.0,
                     radius: RADIUS_MD.into(),
                 },
@@ -82,9 +82,9 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
         .padding(Padding::from([20, 24]))
         .width(Length::Fixed(440.0))
         .style(|_theme| container::Style {
-            background: Some(Background::Color(BG_SECONDARY)),
+            background: Some(Background::Color(BG_SECONDARY())),
             border: Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: RADIUS_LG.into(),
             },
@@ -100,7 +100,7 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(Background::Color(BACKDROP)),
+            background: Some(Background::Color(BACKDROP())),
             ..container::Style::default()
         })
         .into()
@@ -119,7 +119,7 @@ pub fn view_quit_confirm<'a, M: Clone + 'a>(
         terminal_count,
         if terminal_count == 1 { "" } else { "s" }
     );
-    let body = text(body_text).size(13).color(TEXT_PRIMARY).into();
+    let body = text(body_text).size(13).color(TEXT_PRIMARY()).into();
 
     view_confirm_dialog(
         "Quit Godly Terminal?",
@@ -148,18 +148,18 @@ pub fn view_copy_preview<'a, M: Clone + 'a>(
     let body = column![
         text(format!("Selection contains {} characters.", total_chars))
             .size(13)
-            .color(TEXT_SECONDARY),
+            .color(TEXT_SECONDARY()),
         Space::new().height(8.0),
         container(
-            scrollable(text(truncated).size(12).color(TEXT_PRIMARY))
+            scrollable(text(truncated).size(12).color(TEXT_PRIMARY()))
                 .height(Length::Fixed(200.0))
         )
         .padding(Padding::from([8, 10]))
         .width(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(Background::Color(BG_TERTIARY)),
+            background: Some(Background::Color(BG_TERTIARY())),
             border: Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: RADIUS_SM.into(),
             },
