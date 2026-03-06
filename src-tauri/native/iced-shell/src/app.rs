@@ -787,6 +787,8 @@ impl GodlyApp {
             .unwrap_or_else(|| inset_terminal_pane_rect(self.terminal_content_area()));
 
         grid_dimensions_for_viewport(viewport, self.font_metrics)
+    }
+
     /// G3: Detect if the cursor is currently over a URL in the terminal grid.
     fn detect_url_under_cursor(&self) -> Option<String> {
         let grid_pos = self.active_terminal_pointer_grid(false)?;
@@ -807,8 +809,6 @@ impl GodlyApp {
             })
             .collect();
         url_detector::url_at_col(&line, grid_pos.col as usize)
-    }
-
     }
 
     fn active_terminal_pointer_grid(&self, clamp_to_viewport: bool) -> Option<GridPos> {
@@ -1190,6 +1190,7 @@ impl GodlyApp {
                 }
             }
             Message::KeyboardEvent(keyboard::Event::ModifiersChanged(modifiers)) => {
+                self.ctrl_held = modifiers.control();
                 if should_commit_mru_switcher_on_modifiers_changed(
                     self.mru_switcher.is_some(),
                     modifiers,
@@ -1429,12 +1430,20 @@ impl GodlyApp {
                 if x != 0.0 || y != 0.0 {
                     self.cursor_position = Some(Point::new(x, y));
                 }
+                // G3: Ctrl+Click opens URL under cursor
+                if self.ctrl_held {
+                    if let Some(url) = self.detect_url_under_cursor() {
+                        return Task::done(Message::UrlClicked(url));
+                    }
+                }
                 if let Some(pos) = self.active_terminal_pointer_grid(false) {
                     self.selection.start(pos);
                 }
             }
             Message::SelectionUpdate { x, y } => {
                 self.cursor_position = Some(Point::new(x, y));
+                // G3: Track hovered URL for visual feedback
+                self.hovered_url = self.detect_url_under_cursor();
                 if self.sidebar_resizing {
                     self.sidebar_width = sidebar::clamp_sidebar_width(x);
                     return Task::none();
