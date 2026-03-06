@@ -314,7 +314,8 @@ Priority order is aligned with open P0/P1 parity blockers from `docs/native-pari
 13. ✅ L10: sidebar header icon polish (settings/new-workspace icons).
 14. ✅ L18/L19: settings modal + tab strip visual polish.
 15. ✅ L20/L21/L22: shortcuts tab spacing, control styling, and vertical-only scroll polish.
-16. ⚠️ E6: MRU keyboard cycling (Ctrl+Tab / Ctrl+Shift+Tab) is implemented; visual popup switcher remains pending until popup lane lands.
+16. ✅ E6: MRU Ctrl+Tab parity is complete, including keyboard semantics and the visual popup switcher.
+17. ✅ L4/L5/L6: tab bar spacing polish, "+" hover styling, and inactive-tab separators.
 
 ## 13) Completed Step: D2/D3/D4 Workspace Notifications + Audio
 
@@ -731,7 +732,7 @@ Status update (2026-03-05):
 - Batch landed and is test-green after fixing `iced::Pixels` spacing type usage in `shortcuts_tab`.
 - E6 foundation from this batch is now extended by the keyboard-semantic completion captured in Section 26.
 
-## 26) Completed Step: E6 MRU Keyboard Semantics (Popup Pending)
+## 26) Completed Step: E6 MRU Keyboard Semantics
 
 Goal:
 - Close the keyboard-semantic portion of E6 by wiring MRU behavior into tab switching shortcuts (Ctrl+Tab / Ctrl+Shift+Tab parity).
@@ -751,7 +752,7 @@ Acceptance criteria:
 - Ctrl+Tab and Ctrl+Shift+Tab follow MRU order rather than static index order.
 - MRU list remains consistent after tab close/new/split/workspace moves.
 - Existing tab navigation and layout flows remain green.
-- Visual popup switcher UX is explicitly out of scope for this step and remains pending until popup lane lands.
+- Visual popup switcher UX is handled separately by the follow-up batch captured in Section 27.
 
 Validation:
 - `cargo test --manifest-path src-tauri/Cargo.toml -p godly-iced-shell -p godly-features-shell -p godly-tabs-core`
@@ -763,5 +764,42 @@ Validation:
 Status update (2026-03-05):
 - Wired `AppAction::NextTab` / `AppAction::PreviousTab` to MRU cycling in native app action dispatch.
 - Added helper tests for MRU forward/backward/wrap and missing-current-id handling.
-- E6 visual popup switcher remains pending until popup lane lands.
+- Section 27 closes the visual popup follow-up that was still pending at the time this step landed.
+
+## 27) Completed Batch: E6 Visual Popup + L4/L5/L6 Tab Bar Polish
+
+Goal:
+- Close the remaining visible MRU parity gap and ship the next high-visibility tab bar polish slice.
+
+Scope:
+- `src-tauri/native/iced-shell/src/app.rs`
+- `src-tauri/native/iced-shell/src/mru_switcher.rs`
+- `src-tauri/native/iced-shell/src/tab_bar.rs`
+
+Implementation summary:
+1. E6: added the visual Ctrl+Tab MRU popup overlay and commit/cancel behavior while the modifier key is held.
+2. L4: tightened tab label/close-control spacing and alignment in the native tab chrome.
+3. L5: added hover/pressed styling for the `+` new-tab button.
+4. L6: rendered separator lines only between inactive tabs and backed the behavior with focused unit coverage.
+
+Validation:
+- PR `#585` merged to `master` on 2026-03-05 after carrying the code from PR `#586`.
+- QA checklist captured in `docs/qa/native-e6-ui-smoke.md`.
+
+Status update (2026-03-05):
+- PR `#586` (`feat: implement visual Ctrl+Tab MRU switcher popup`) merged at `2026-03-05T23:20:32Z`.
+- PR `#585` merged the containing branch to `master` at `2026-03-05T23:20:44Z`, which also carried the `native(tab-bar): polish spacing, separators, and + hover` commit.
+
+## 28) Status Audit: L14 + L24/L25/L26 Still Pending On Master
+
+Goal:
+- Keep the migration record aligned with the actual `master` branch after the March 6, 2026 follow-up docs/QA batch.
+
+Audit summary (2026-03-06):
+1. `L14` (smooth sidebar collapse/expand animation) is still pending on `master`.
+2. `L24` (focused pane chrome), `L25` (empty state CTA), and `L26` (terminal viewport inset/padding) are still pending on `master`.
+3. Docs/QA follow-up PRs `#587`, `#588`, and `#589` are open, but no merged native code PR has landed this sidebar/pane polish slice yet.
+
+Execution note:
+- This section is a status sync only. It does not claim code completion for `L14`, `L24`, `L25`, or `L26`.
 

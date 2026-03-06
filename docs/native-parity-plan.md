@@ -86,7 +86,7 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] E3. Dead terminal indicator (exit code overlay, dimmed styling)
 - [x] E4. Process icon detection (Claude 💬 / Codex 🤖 icons in tab)
 - [x] E5. Tab context menu (right-click: rename, pin, split, copy info, close)
-- [ ] E6. MRU tab switcher popup (visual list still open; keyboard MRU cycling semantics via Ctrl+Tab/Ctrl+Shift+Tab completed on 2026-03-05)
+- [x] E6. MRU tab switcher popup (keyboard semantics and visual popup both landed on 2026-03-05 via PRs #585/#586)
 
 ---
 
@@ -179,9 +179,9 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] L1. Rounded tab shapes with smooth hover/active transitions (not flat rectangles)
 - [x] L2. Active tab glow/accent underline (match TypeScript's gold accent bar)
 - [x] L3. Close button (×) hover highlight, only visible on hover or active tab
-- [ ] L4. Tab icon spacing and alignment (process icon + title + close button)
-- [ ] L5. "+" button styling with hover state
-- [ ] L6. Tab separator lines between inactive tabs
+- [x] L4. Tab icon spacing and alignment (process icon + title + close button)
+- [x] L5. "+" button styling with hover state
+- [x] L6. Tab separator lines between inactive tabs
 - [ ] L7. Smooth tab width transitions when opening/closing tabs
 
 ### Sidebar
@@ -298,12 +298,22 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 - Some non-blocking warnings remain from test enums and unused theme constants; build/test is green.
 
 ### Recommended next P0/P1 pickup order
-1. E6 visual MRU switcher popup (keyboard semantics completed on 2026-03-05)
-2. L4-L7, L14-L17, L24-L32 (remaining high-visibility UI polish backlog)
+1. L14 + L24/L25/L26 (sidebar animation and pane polish are still pending on `master` as of 2026-03-06)
+2. L7, L15-L17, L27-L32 (remaining high-visibility UI polish backlog after the 2026-03-05 tab bar/E6 batch)
 
 ## Progress Log — 2026-03-05 (Checklist Sync)
 
 ### Completed in this update
 - **Stream D**: D7 completed (native window attention request now uses critical attention on Windows for taskbar flash behavior when unfocused).
-- **Stream E**: E6 keyboard semantics completed (`Ctrl+Tab` / `Ctrl+Shift+Tab` MRU cycling); visual popup remains open.
-- **Stream L**: L10, L18, L19, L20, L21, L22 completed.
+- **Stream E**: E6 MRU parity completed end-to-end (`Ctrl+Tab` / `Ctrl+Shift+Tab` keyboard semantics plus visual popup switcher).
+- **Stream L**: L4, L5, L6, L10, L18, L19, L20, L21, L22 completed.
+
+## Progress Log — 2026-03-06 (Status Audit)
+
+### Completed in this update
+- Checklist sync updated to reflect that PR `#586` merged into the branch later merged by PR `#585` on 2026-03-05, so `E6` is fully complete on `master`.
+- Checklist sync updated to reflect that the 2026-03-05 tab bar polish commit landed `L4`, `L5`, and `L6` on `master`.
+
+### Still pending after audit
+- **Stream L**: `L14`, `L24`, `L25`, and `L26` remain open on `master` as of 2026-03-06.
+- Docs/QA follow-up PRs `#587`, `#588`, and `#589` are open, but they do not correspond to a merged native code PR for the sidebar/pane polish slice yet.
