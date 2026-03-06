@@ -148,6 +148,12 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] I4. Voice input (Whisper integration, Ctrl+Shift+M)
 - [x] I5. Recording UI (level bar, timer, transcription toast)
 - [ ] ~~I6. Figma pane embedding (iframe-like webview in split)~~ — Skipped (not worth implementing)
+- [x] I1. Quick Claude multi-agent launcher (preset system)
+- [x] I2. Launch step sequences (create terminal, run cmd, wait, send prompt)
+- [x] I3. Layout options for Quick Claude (single, vsplit, hsplit, 2x2)
+- [ ] I4. Voice input (Whisper integration, Ctrl+Shift+M)
+- [ ] I5. Recording UI (level bar, timer, transcription toast)
+- [ ] I6. Figma pane embedding (iframe-like webview in split)
 
 ---
 
@@ -157,15 +163,15 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Depends on**: Core features (A, B, E)
 **Priority**: P2
 
-- [ ] J1. Handle `focus-terminal` event
-- [ ] J2. Handle `switch-workspace` event
-- [ ] J3. Handle `terminal-renamed` event
-- [ ] J4. Handle `mcp-terminal-created` (add to Agent workspace)
-- [ ] J5. Handle `mcp-terminal-closed`
-- [ ] J6. Handle `mcp-terminal-moved`
-- [ ] J7. Handle `mcp-notify` (trigger notification)
-- [ ] J8. Handle `mcp-split-terminal` / `mcp-unsplit-terminal`
-- [ ] J9. Handle `mcp-swap-panes` / `mcp-zoom-pane`
+- [x] J1. Handle `focus-terminal` event
+- [x] J2. Handle `switch-workspace` event
+- [x] J3. Handle `terminal-renamed` event
+- [x] J4. Handle `mcp-terminal-created` (add to Agent workspace)
+- [x] J5. Handle `mcp-terminal-closed`
+- [x] J6. Handle `mcp-terminal-moved`
+- [x] J7. Handle `mcp-notify` (trigger notification)
+- [x] J8. Handle `mcp-split-terminal` / `mcp-unsplit-terminal`
+- [x] J9. Handle `mcp-swap-panes` / `mcp-zoom-pane`
 
 ---
 
@@ -331,3 +337,12 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 ### Completed in this update
 - **Stream I**: I4, I5 completed (WhisperService sidecar in app-adapter, recording overlay UI with level meter/timer/stop/cancel, mic button in tab bar, Ctrl+Shift+M shortcut, toast on transcription).
 - **Stream I**: I6 skipped (Figma pane embedding not worth implementing).
+
+## Progress Log -- 2026-03-06 (J1-J9 MCP Event Integration)
+
+### Completed in this update
+- **Stream J**: J1-J9 completed. MCP named pipe server in `app-adapter/src/mcp_pipe.rs` + event handler in `iced-shell/src/mcp_handler.rs`.
+  - Pipe server accepts `godly-mcp` connections, dispatches mutation requests as `McpEvent` through channel.
+  - Subscription bridges channel to iced update loop via `Message::McpEvent`.
+  - Handles: focus terminal, switch workspace, rename terminal, create/close terminal, move terminal between workspaces, toast notifications, split/unsplit, swap panes, zoom pane.
+  - Query-only requests (ListTerminals, ReadTerminal, etc.) return "Not yet implemented" for now.
