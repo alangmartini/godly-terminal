@@ -120,7 +120,10 @@ mod tests {
 
     #[test]
     fn test_truncate_output_tail_default() {
-        let text = (1..=200).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let text = (1..=200)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = truncate_output(&text, None, None);
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines.len(), 100);
@@ -130,7 +133,10 @@ mod tests {
 
     #[test]
     fn test_truncate_output_head() {
-        let text = (1..=200).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let text = (1..=200)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = truncate_output(&text, Some("head"), Some(5));
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines.len(), 5);

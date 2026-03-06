@@ -206,11 +206,7 @@ impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
                 };
                 let x = col_start as f32 * cell_w;
                 let width = ((col_end - col_start + 1) as f32) * cell_w;
-                frame.fill_rectangle(
-                    Point::new(x, y),
-                    Size::new(width, cell_h),
-                    selection_color,
-                );
+                frame.fill_rectangle(Point::new(x, y), Size::new(width, cell_h), selection_color);
             }
         }
 
@@ -219,10 +215,8 @@ impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
             let cursor_x = grid.cursor.col as f32 * cell_w;
             let cursor_y = grid.cursor.row as f32 * cell_h;
 
-            let cursor_path = canvas::Path::rectangle(
-                Point::new(cursor_x, cursor_y),
-                Size::new(cell_w, cell_h),
-            );
+            let cursor_path =
+                canvas::Path::rectangle(Point::new(cursor_x, cursor_y), Size::new(cell_w, cell_h));
             frame.stroke(
                 &cursor_path,
                 canvas::Stroke::default()

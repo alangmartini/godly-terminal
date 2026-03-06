@@ -44,6 +44,26 @@ impl TerminalInfo {
             "Terminal"
         }
     }
+
+    /// Returns a small icon glyph representing the process type.
+    pub fn tab_icon(&self) -> &'static str {
+        let name = self.process_name.to_ascii_lowercase();
+        if name.contains("claude") {
+            "\u{25C6}" // ◆
+        } else if name.contains("codex") {
+            "\u{25B6}" // ▶
+        } else if name.contains("node") || name.contains("npm") || name.contains("pnpm") {
+            "\u{25CB}" // ○
+        } else if name.contains("python") {
+            "\u{25CA}" // ◊
+        } else if name.contains("git") {
+            "\u{2387}" // ⎇
+        } else if name.contains("vim") || name.contains("nvim") {
+            "\u{25A0}" // ■
+        } else {
+            "\u{25B8}" // ▸ (default shell prompt)
+        }
+    }
 }
 
 /// Collection of terminal sessions with active tab tracking.
@@ -176,6 +196,7 @@ impl TerminalCollection {
             })
             .collect()
     }
+
     /// Returns the next MRU terminal after the active one, if any.
     pub fn mru_next_after_active(&self) -> Option<&str> {
         let active_id = self.active_id()?;
@@ -410,6 +431,27 @@ mod tests {
         // title set -> title takes priority
         info.title = "My Shell".into();
         assert_eq!(info.tab_label(), "My Shell");
+    }
+
+    #[test]
+    fn test_tab_icon_detects_process_type() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        info.process_name = "claude".into();
+        assert_eq!(info.tab_icon(), "\u{25C6}");
+
+        info.process_name = "codex".into();
+        assert_eq!(info.tab_icon(), "\u{25B6}");
+
+        info.process_name = "node".into();
+        assert_eq!(info.tab_icon(), "\u{25CB}");
+
+        info.process_name = "python3".into();
+        assert_eq!(info.tab_icon(), "\u{25CA}");
+
+        info.process_name = "pwsh".into();
+        assert_eq!(info.tab_icon(), "\u{25B8}");
     }
 
     #[test]
@@ -773,6 +815,7 @@ mod tests {
         assert_eq!(col.mru_terminal_ids(), vec!["t1"]);
         assert_eq!(col.mru_next_after_active(), None);
     }
+
     #[test]
     fn test_mru_terminal_ids_for_workspace_filters_to_active_scope() {
         let mut col = TerminalCollection::new();

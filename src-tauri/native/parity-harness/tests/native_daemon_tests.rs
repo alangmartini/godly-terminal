@@ -106,8 +106,7 @@ mod tests {
 
     #[test]
     fn resize() {
-        let mut fixture =
-            DaemonFixture::start("resize").expect("Failed to start daemon fixture");
+        let mut fixture = DaemonFixture::start("resize").expect("Failed to start daemon fixture");
 
         // Create and attach
         fixture

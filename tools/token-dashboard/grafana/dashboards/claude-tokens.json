@@ -1,0 +1,366 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "definition": "label_values(claude_code_token_usage_tokens_total, workspace)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "workspace",
+        "options": [],
+        "query": { "query": "label_values(claude_code_token_usage_tokens_total, workspace)" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+        "definition": "label_values(claude_code_token_usage_tokens_total, session_id)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "session_id",
+        "options": [],
+        "query": { "query": "label_values(claude_code_token_usage_tokens_total, session_id)" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Total Tokens",
+      "type": "stat",
+      "targets": [{
+        "expr": "sum(claude_code_token_usage_tokens_total{workspace=~\"$workspace\", session_id=~\"$session_id\"})",
+        "legendFormat": "total"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "max": 100, "min": 0,
+          "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 30 }, { "color": "green", "value": 60 }] },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "title": "Cache Hit Rate",
+      "type": "gauge",
+      "targets": [{
+        "expr": "sum(claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"}) / (sum(claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"}) + sum(claude_code_token_usage_tokens_total{type=\"input\", workspace=~\"$workspace\", session_id=~\"$session_id\"})) * 100",
+        "legendFormat": "cache hit %"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 5 }, { "color": "red", "value": 20 }] },
+          "unit": "currencyUSD", "decimals": 2
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Estimated Cost",
+      "description": "Uses claude_code_cost_usage_USD_total when available, otherwise estimates from token counts",
+      "type": "stat",
+      "targets": [{
+        "expr": "sum(claude_code_cost_usage_USD_total{workspace=~\"$workspace\", session_id=~\"$session_id\"})",
+        "legendFormat": "cost"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "blue", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 10,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Active Sessions",
+      "type": "stat",
+      "targets": [{
+        "expr": "count(count by (session_id) (claude_code_token_usage_tokens_total{workspace=~\"$workspace\", session_id=~\"$session_id\"}))",
+        "legendFormat": "sessions"
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "Token Usage by Type",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 30, "stacking": { "mode": "normal" }, "lineWidth": 1, "pointSize": 5 },
+          "unit": "short"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "input" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "output" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "cacheRead" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "cacheCreation" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "id": 4,
+      "title": "Tokens by Type (stacked)",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (type) (rate(claude_code_token_usage_tokens_total{workspace=~\"$workspace\", session_id=~\"$session_id\"}[1m]))",
+        "legendFormat": "{{type}}"
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 102,
+      "title": "By Workspace",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" }, "lineWidth": 0, "pointSize": 5 },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "id": 5,
+      "title": "Token Rate by Workspace",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (workspace) (rate(claude_code_token_usage_tokens_total{workspace=~\"$workspace\", session_id=~\"$session_id\"}[1m]))",
+        "legendFormat": "{{workspace}}"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "id": 6,
+      "title": "Tokens per Workspace",
+      "type": "table",
+      "targets": [
+        { "expr": "sum by (workspace) (claude_code_token_usage_tokens_total{type=\"input\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "input" },
+        { "expr": "sum by (workspace) (claude_code_token_usage_tokens_total{type=\"output\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "output" },
+        { "expr": "sum by (workspace) (claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "cacheRead" },
+        { "expr": "sum by (workspace) (claude_code_cost_usage_USD_total{workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "cost" }
+      ],
+      "transformations": [
+        { "id": "merge" },
+        { "id": "organize", "options": {
+          "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true },
+          "renameByName": { "Value #input": "Input", "Value #output": "Output", "Value #cacheRead": "Cache Read", "Value #cost": "Cost ($)" }
+        }}
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 103,
+      "title": "By Conversation (Session)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" }, "lineWidth": 0, "pointSize": 5 },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 11,
+      "title": "Token Rate by Session",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (session_id) (rate(claude_code_token_usage_tokens_total{workspace=~\"$workspace\", session_id=~\"$session_id\"}[1m]))",
+        "legendFormat": "{{session_id}}"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 7,
+      "title": "Tokens per Session",
+      "type": "table",
+      "targets": [
+        { "expr": "sum by (session_id, model) (claude_code_token_usage_tokens_total{type=\"input\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "input" },
+        { "expr": "sum by (session_id, model) (claude_code_token_usage_tokens_total{type=\"output\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "output" },
+        { "expr": "sum by (session_id, model) (claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "cacheRead" },
+        { "expr": "sum by (session_id, model) (claude_code_token_usage_tokens_total{type=\"cacheCreation\", workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "cacheCreation" },
+        { "expr": "sum by (session_id, model) (claude_code_cost_usage_USD_total{workspace=~\"$workspace\", session_id=~\"$session_id\"})", "format": "table", "instant": true, "refId": "cost" }
+      ],
+      "transformations": [
+        { "id": "merge" },
+        { "id": "organize", "options": {
+          "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true },
+          "indexByName": { "session_id": 0, "model": 1, "Value #input": 2, "Value #output": 3, "Value #cacheRead": 4, "Value #cacheCreation": 5, "Value #cost": 6 },
+          "renameByName": { "session_id": "Session", "model": "Model", "Value #input": "Input", "Value #output": "Output", "Value #cacheRead": "Cache Read", "Value #cacheCreation": "Cache Write", "Value #cost": "Cost ($)" }
+        }}
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 104,
+      "title": "Cache Efficiency",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5 },
+          "max": 1, "min": 0, "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "id": 8,
+      "title": "Cache Efficiency Over Time",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum(rate(claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"}[5m])) / (sum(rate(claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"}[5m])) + sum(rate(claude_code_token_usage_tokens_total{type=\"input\", workspace=~\"$workspace\", session_id=~\"$session_id\"}[5m])))",
+        "legendFormat": "cacheRead / (cacheRead + input)"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "pointSize": 5 },
+          "max": 1, "min": 0, "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "id": 9,
+      "title": "Cache Efficiency by Session",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (session_id) (rate(claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"}[5m])) / (sum by (session_id) (rate(claude_code_token_usage_tokens_total{type=\"cacheRead\", workspace=~\"$workspace\", session_id=~\"$session_id\"}[5m])) + sum by (session_id) (rate(claude_code_token_usage_tokens_total{type=\"input\", workspace=~\"$workspace\", session_id=~\"$session_id\"}[5m])))",
+        "legendFormat": "{{session_id}}"
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "id": 105,
+      "title": "Cost & Active Time",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5 },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "id": 12,
+      "title": "Cost Over Time",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum(claude_code_cost_usage_USD_total{workspace=~\"$workspace\", session_id=~\"$session_id\"})",
+        "legendFormat": "total cost"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5 },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "id": 13,
+      "title": "Active Time by Session",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (session_id) (claude_code_active_time_seconds_total{workspace=~\"$workspace\", session_id=~\"$session_id\"})",
+        "legendFormat": "{{session_id}}"
+      }]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["claude", "tokens", "ai"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Claude Code Token Dashboard",
+  "uid": "claude-code-tokens",
+  "version": 2
+}

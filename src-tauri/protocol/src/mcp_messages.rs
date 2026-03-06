@@ -34,8 +34,12 @@ pub enum McpRequest {
 
     // Terminal queries
     ListTerminals,
-    GetTerminal { terminal_id: String },
-    GetCurrentSession { session_id: String },
+    GetTerminal {
+        terminal_id: String,
+    },
+    GetCurrentSession {
+        session_id: String,
+    },
 
     // Terminal mutations
     CreateTerminal {
@@ -53,28 +57,57 @@ pub enum McpRequest {
         #[serde(default)]
         focus: Option<bool>,
     },
-    CloseTerminal { terminal_id: String },
-    RenameTerminal { terminal_id: String, name: String },
-    FocusTerminal { terminal_id: String },
+    CloseTerminal {
+        terminal_id: String,
+    },
+    RenameTerminal {
+        terminal_id: String,
+        name: String,
+    },
+    FocusTerminal {
+        terminal_id: String,
+    },
 
     // Workspace queries/mutations
     ListWorkspaces,
-    CreateWorkspace { name: String, folder_path: String },
-    DeleteWorkspace { workspace_id: String },
-    SwitchWorkspace { workspace_id: String },
-    RenameWorkspace { workspace_id: String, name: String },
-    ReorderWorkspaces { workspace_ids: Vec<String> },
-    GetWorkspaceDetails { workspace_id: String },
+    CreateWorkspace {
+        name: String,
+        folder_path: String,
+    },
+    DeleteWorkspace {
+        workspace_id: String,
+    },
+    SwitchWorkspace {
+        workspace_id: String,
+    },
+    RenameWorkspace {
+        workspace_id: String,
+        name: String,
+    },
+    ReorderWorkspaces {
+        workspace_ids: Vec<String>,
+    },
+    GetWorkspaceDetails {
+        workspace_id: String,
+    },
     GetActiveWorkspace,
     GetActiveTerminal,
     MoveTerminalToWorkspace {
         terminal_id: String,
         workspace_id: String,
     },
-    RemoveWorktree { worktree_path: String },
-    ToggleWorktreeMode { workspace_id: String },
-    ToggleClaudeCodeMode { workspace_id: String },
-    GetWorkspaceModes { workspace_id: String },
+    RemoveWorktree {
+        worktree_path: String,
+    },
+    ToggleWorktreeMode {
+        workspace_id: String,
+    },
+    ToggleClaudeCodeMode {
+        workspace_id: String,
+    },
+    GetWorkspaceModes {
+        workspace_id: String,
+    },
 
     // Terminal I/O
     WriteToTerminal {
@@ -99,7 +132,9 @@ pub enum McpRequest {
     },
 
     // Grid state (godly-vt parsed terminal)
-    ReadGrid { terminal_id: String },
+    ReadGrid {
+        terminal_id: String,
+    },
 
     // Wait/polling tools
     WaitForIdle {
@@ -205,10 +240,10 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
-
-
     // OS integration
-    OpenInExplorer { path: String },
+    OpenInExplorer {
+        path: String,
+    },
 
     // Split pane focus and resize (Pattern C — execute_js bridge)
     FocusPane {
@@ -237,8 +272,6 @@ pub enum McpRequest {
         workspace_id: Option<String>,
     },
 
-
-
     // Shell settings
     ListAvailableShells,
     GetDefaultShell,
@@ -252,12 +285,10 @@ pub enum McpRequest {
         custom_args: Option<Vec<String>>,
     },
 
-
     // JS bridge (execute JavaScript in WebView, return result)
     ExecuteJs {
         script: String,
     },
-
 
     // Scrollback control
     ScrollPageUp {
@@ -287,7 +318,6 @@ pub enum McpRequest {
     ZoomReset,
     GetFontSize,
 
-
     // Screenshot capture
     CaptureScreenshot {
         #[serde(default)]
@@ -299,9 +329,6 @@ pub enum McpRequest {
         #[serde(default)]
         terminal_id: Option<String>,
     },
-
-
-
 
     // Tab navigation
     NextTab {
@@ -326,7 +353,6 @@ pub enum McpRequest {
     SaveLayout,
     GetAppInfo,
 
-
     // Tab management
     ReorderTabs {
         workspace_id: String,
@@ -347,12 +373,12 @@ pub enum McpRequest {
         terminal_id: Option<String>,
     },
 
-
     // Theme management
     ListThemes,
     GetActiveTheme,
-    SetTheme { theme_name: String },
-
+    SetTheme {
+        theme_name: String,
+    },
 
     // Notifications
     Notify {
@@ -410,11 +436,19 @@ pub struct McpWorkspaceInfo {
 #[serde(tag = "type")]
 pub enum McpResponse {
     Ok,
-    Error { message: String },
+    Error {
+        message: String,
+    },
     Pong,
-    TerminalList { terminals: Vec<McpTerminalInfo> },
-    TerminalInfo { terminal: McpTerminalInfo },
-    WorkspaceList { workspaces: Vec<McpWorkspaceInfo> },
+    TerminalList {
+        terminals: Vec<McpTerminalInfo>,
+    },
+    TerminalInfo {
+        terminal: McpTerminalInfo,
+    },
+    WorkspaceList {
+        workspaces: Vec<McpWorkspaceInfo>,
+    },
     Created {
         id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -422,8 +456,13 @@ pub enum McpResponse {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         worktree_branch: Option<String>,
     },
-    NotificationStatus { enabled: bool, source: String },
-    TerminalOutput { content: String },
+    NotificationStatus {
+        enabled: bool,
+        source: String,
+    },
+    TerminalOutput {
+        content: String,
+    },
     WorkspaceDetails {
         name: String,
         folder_path: String,
@@ -491,10 +530,6 @@ pub enum McpResponse {
     Screenshot {
         path: String,
     },
-
-
-
-
 
     NotificationConfig {
         enabled: bool,

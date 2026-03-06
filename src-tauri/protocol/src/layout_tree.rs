@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Direction of a split in the layout tree.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -80,12 +80,8 @@ impl LayoutNode {
     pub fn count_leaves(&self) -> usize {
         match self {
             LayoutNode::Leaf { .. } => 1,
-            LayoutNode::Split { first, second, .. } => {
-                first.count_leaves() + second.count_leaves()
-            }
-            LayoutNode::Grid { children, .. } => {
-                children.iter().map(|c| c.count_leaves()).sum()
-            }
+            LayoutNode::Split { first, second, .. } => first.count_leaves() + second.count_leaves(),
+            LayoutNode::Grid { children, .. } => children.iter().map(|c| c.count_leaves()).sum(),
         }
     }
 
@@ -108,11 +104,12 @@ impl LayoutNode {
                     None
                 }
             }
-            LayoutNode::Split {
-                first, second, ..
-            } => {
+            LayoutNode::Split { first, second, .. } => {
                 // Check if the target is a direct child
-                if let LayoutNode::Leaf { terminal_id: ref id } = **first {
+                if let LayoutNode::Leaf {
+                    terminal_id: ref id,
+                } = **first
+                {
                     if id == terminal_id {
                         // Remove first, replace self with second
                         let sibling = *second.clone();
@@ -120,7 +117,10 @@ impl LayoutNode {
                         return Some(sibling);
                     }
                 }
-                if let LayoutNode::Leaf { terminal_id: ref id } = **second {
+                if let LayoutNode::Leaf {
+                    terminal_id: ref id,
+                } = **second
+                {
                     if id == terminal_id {
                         // Remove second, replace self with first
                         let sibling = *first.clone();
@@ -401,13 +401,13 @@ impl LayoutNode {
                             // Navigate to the grid neighbor based on direction.
                             let neighbor_idx = match (child_idx, direction, go_second) {
                                 // Horizontal (go_second=true = right, false = left)
-                                (0, SplitDirection::Horizontal, true) => Some(1),  // TL → TR
-                                (2, SplitDirection::Horizontal, true) => Some(3),  // BL → BR
+                                (0, SplitDirection::Horizontal, true) => Some(1), // TL → TR
+                                (2, SplitDirection::Horizontal, true) => Some(3), // BL → BR
                                 (1, SplitDirection::Horizontal, false) => Some(0), // TR → TL
                                 (3, SplitDirection::Horizontal, false) => Some(2), // BR → BL
                                 // Vertical (go_second=true = down, false = up)
-                                (0, SplitDirection::Vertical, true) => Some(2),  // TL → BL
-                                (1, SplitDirection::Vertical, true) => Some(3),  // TR → BR
+                                (0, SplitDirection::Vertical, true) => Some(2), // TL → BL
+                                (1, SplitDirection::Vertical, true) => Some(3), // TR → BR
                                 (2, SplitDirection::Vertical, false) => Some(0), // BL → TL
                                 (3, SplitDirection::Vertical, false) => Some(1), // BR → TR
                                 // Edge cases: no neighbor in that direction (propagate up)
@@ -499,10 +499,18 @@ impl LayoutNode {
                         };
                         let ratio = match dir {
                             SplitDirection::Horizontal => {
-                                if *i0 <= 1 { col_ratios[0] } else { col_ratios[1] }
+                                if *i0 <= 1 {
+                                    col_ratios[0]
+                                } else {
+                                    col_ratios[1]
+                                }
                             }
                             SplitDirection::Vertical => {
-                                if *i0 % 2 == 0 { row_ratios[0] } else { row_ratios[1] }
+                                if *i0 % 2 == 0 {
+                                    row_ratios[0]
+                                } else {
+                                    row_ratios[1]
+                                }
                             }
                         };
                         Some(LayoutNode::Split {
@@ -796,17 +804,24 @@ mod tests {
 
         match &tree {
             LayoutNode::Split {
-                direction, ratio, first, second,
+                direction,
+                ratio,
+                first,
+                second,
             } => {
                 assert_eq!(*direction, SplitDirection::Horizontal);
                 assert!((ratio - 0.5).abs() < f64::EPSILON);
                 assert_eq!(
                     **first,
-                    LayoutNode::Leaf { terminal_id: "t1".to_string() }
+                    LayoutNode::Leaf {
+                        terminal_id: "t1".to_string()
+                    }
                 );
                 assert_eq!(
                     **second,
-                    LayoutNode::Leaf { terminal_id: "t2".to_string() }
+                    LayoutNode::Leaf {
+                        terminal_id: "t2".to_string()
+                    }
                 );
             }
             _ => panic!("Expected Split node"),
@@ -838,7 +853,9 @@ mod tests {
         let mut tree = leaf("t1");
         tree.split_at("t1", "t2", SplitDirection::Vertical, 0.7);
         match &tree {
-            LayoutNode::Split { ratio, direction, .. } => {
+            LayoutNode::Split {
+                ratio, direction, ..
+            } => {
                 assert!((ratio - 0.7).abs() < f64::EPSILON);
                 assert_eq!(*direction, SplitDirection::Vertical);
             }
@@ -1109,7 +1126,9 @@ mod tests {
                 // Outer ratio unchanged
                 assert!((ratio - 0.5).abs() < f64::EPSILON);
                 match first.as_ref() {
-                    LayoutNode::Split { ratio: inner_ratio, .. } => {
+                    LayoutNode::Split {
+                        ratio: inner_ratio, ..
+                    } => {
                         assert!((inner_ratio - 0.6).abs() < f64::EPSILON);
                     }
                     _ => panic!("Expected inner Split"),
@@ -1452,12 +1471,7 @@ mod tests {
         LayoutNode::Grid {
             col_ratios,
             row_ratios,
-            children: [
-                Box::new(tl),
-                Box::new(tr),
-                Box::new(bl),
-                Box::new(br),
-            ],
+            children: [Box::new(tl), Box::new(tr), Box::new(bl), Box::new(br)],
         }
     }
 
@@ -1711,20 +1725,14 @@ mod tests {
             None
         );
         // TL has no up neighbor
-        assert_eq!(
-            g.find_adjacent("t1", SplitDirection::Vertical, false),
-            None
-        );
+        assert_eq!(g.find_adjacent("t1", SplitDirection::Vertical, false), None);
         // BR has no right neighbor
         assert_eq!(
             g.find_adjacent("t4", SplitDirection::Horizontal, true),
             None
         );
         // BR has no down neighbor
-        assert_eq!(
-            g.find_adjacent("t4", SplitDirection::Vertical, true),
-            None
-        );
+        assert_eq!(g.find_adjacent("t4", SplitDirection::Vertical, true), None);
     }
 
     #[test]
@@ -1737,8 +1745,10 @@ mod tests {
             leaf("t3"),
             leaf("t4"),
         );
-        let live: HashSet<String> =
-            ["t1", "t2", "t3", "t4"].iter().map(|s| s.to_string()).collect();
+        let live: HashSet<String> = ["t1", "t2", "t3", "t4"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let pruned = g.prune_stale_terminal_ids(&live);
         assert_eq!(pruned, Some(g));
     }

@@ -21,9 +21,9 @@ const TAG_EVENT_GRID_DIFF: u8 = 0x04;
 // Used for daemon <-> pty-shim communication. Different tag range (0x1x)
 // from daemon <-> client tags (0x0x) to avoid confusion.
 
-pub const TAG_SHIM_WRITE: u8 = 0x10;       // daemon -> shim: input bytes
+pub const TAG_SHIM_WRITE: u8 = 0x10; // daemon -> shim: input bytes
 pub const TAG_SHIM_BUFFER_DATA: u8 = 0x11; // shim -> daemon: ring buffer replay
-pub const TAG_SHIM_OUTPUT: u8 = 0x12;      // shim -> daemon: live PTY output
+pub const TAG_SHIM_OUTPUT: u8 = 0x12; // shim -> daemon: live PTY output
 
 /// Encode a binary frame: [tag][session_id_len][session_id bytes][data bytes]
 fn encode_binary_frame(tag: u8, session_id: &str, data: &[u8]) -> Vec<u8> {
@@ -99,7 +99,8 @@ fn read_length_prefixed<R: io::Read>(reader: &mut R) -> io::Result<Option<Vec<u8
 /// Write a length-prefixed JSON message to a writer.
 /// Format: 4-byte big-endian length + JSON bytes
 pub fn write_message<W: io::Write, T: Serialize>(writer: &mut W, msg: &T) -> io::Result<()> {
-    let json = serde_json::to_vec(msg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let json =
+        serde_json::to_vec(msg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     write_length_prefixed(writer, &json)
 }
 
@@ -204,10 +205,7 @@ pub fn read_daemon_message_ext<R: io::Read>(reader: &mut R) -> io::Result<ReadRe
     };
 
     if buf.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Empty message",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty message"));
     }
 
     if buf[0] == 0x7B {
@@ -336,10 +334,7 @@ pub fn read_request_with_id<R: io::Read>(
     };
 
     if buf.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Empty message",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty message"));
     }
 
     if buf[0] == 0x7B {
@@ -399,7 +394,10 @@ pub fn read_shim_frame<R: io::Read>(reader: &mut R) -> io::Result<Option<ShimFra
         None => return Ok(None),
     };
     if buf.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty shim frame"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Empty shim frame",
+        ));
     }
     if buf[0] == 0x7B {
         // JSON control message — could be ShimRequest or ShimResponse
@@ -536,7 +534,10 @@ mod tests {
         let mut cursor = Cursor::new(buf.clone());
         let result = read_daemon_message(&mut cursor).unwrap().unwrap();
         match result {
-            DaemonMessage::Event(Event::GridDiff { session_id, diff: decoded }) => {
+            DaemonMessage::Event(Event::GridDiff {
+                session_id,
+                diff: decoded,
+            }) => {
                 assert_eq!(session_id, "sess-diff");
                 assert_eq!(decoded.dirty_rows.len(), 1);
                 assert_eq!(decoded.dirty_rows[0].0, 3);
@@ -555,7 +556,10 @@ mod tests {
         // Test read_daemon_message_ext (raw bytes for zero-copy)
         let mut cursor = Cursor::new(buf.clone());
         match read_daemon_message_ext(&mut cursor).unwrap() {
-            ReadResult::RawGridDiff { session_id, binary_diff } => {
+            ReadResult::RawGridDiff {
+                session_id,
+                binary_diff,
+            } => {
                 assert_eq!(session_id, "sess-diff");
                 assert!(!binary_diff.is_empty());
                 // Verify the binary diff can be decoded
@@ -567,10 +571,14 @@ mod tests {
 
         // Verify binary is much smaller than JSON would be
         let mut json_buf = Vec::new();
-        write_message(&mut json_buf, &DaemonMessage::Event(Event::GridDiff {
-            session_id: "sess-diff".into(),
-            diff,
-        })).unwrap();
+        write_message(
+            &mut json_buf,
+            &DaemonMessage::Event(Event::GridDiff {
+                session_id: "sess-diff".into(),
+                diff,
+            }),
+        )
+        .unwrap();
         assert!(
             buf.len() < json_buf.len(),
             "Binary ({} bytes) should be smaller than JSON ({} bytes)",
@@ -597,15 +605,23 @@ mod tests {
 
         let mut buf = Vec::new();
         // Output (binary tag 0x01)
-        write_daemon_message(&mut buf, &DaemonMessage::Event(Event::Output {
-            session_id: "s1".into(),
-            data: vec![65],
-        })).unwrap();
+        write_daemon_message(
+            &mut buf,
+            &DaemonMessage::Event(Event::Output {
+                session_id: "s1".into(),
+                data: vec![65],
+            }),
+        )
+        .unwrap();
         // GridDiff (binary tag 0x04)
-        write_daemon_message(&mut buf, &DaemonMessage::Event(Event::GridDiff {
-            session_id: "s1".into(),
-            diff: diff.clone(),
-        })).unwrap();
+        write_daemon_message(
+            &mut buf,
+            &DaemonMessage::Event(Event::GridDiff {
+                session_id: "s1".into(),
+                diff: diff.clone(),
+            }),
+        )
+        .unwrap();
         // JSON (Pong)
         write_daemon_message(&mut buf, &DaemonMessage::Response(Response::Pong)).unwrap();
 
@@ -706,11 +722,7 @@ mod tests {
         )
         .unwrap();
 
-        write_daemon_message(
-            &mut buf,
-            &DaemonMessage::Response(Response::Pong),
-        )
-        .unwrap();
+        write_daemon_message(&mut buf, &DaemonMessage::Response(Response::Pong)).unwrap();
 
         write_daemon_message(
             &mut buf,
@@ -952,7 +964,12 @@ mod tests {
             ShimFrame::Json(json_bytes) => {
                 let deserialized: ShimResponse = serde_json::from_slice(&json_bytes).unwrap();
                 match deserialized {
-                    ShimResponse::StatusInfo { shell_pid, running, rows, cols } => {
+                    ShimResponse::StatusInfo {
+                        shell_pid,
+                        running,
+                        rows,
+                        cols,
+                    } => {
                         assert_eq!(shell_pid, 999);
                         assert!(running);
                         assert_eq!(rows, 30);
@@ -1014,16 +1031,27 @@ mod tests {
         // Binary: daemon writes input to shim
         write_shim_binary(&mut buf, TAG_SHIM_WRITE, b"ls\r\n").unwrap();
         // JSON: daemon sends resize
-        write_shim_json(&mut buf, &ShimRequest::Resize { rows: 50, cols: 132 }).unwrap();
+        write_shim_json(
+            &mut buf,
+            &ShimRequest::Resize {
+                rows: 50,
+                cols: 132,
+            },
+        )
+        .unwrap();
         // Binary: shim sends output
         write_shim_binary(&mut buf, TAG_SHIM_OUTPUT, b"file1.txt\nfile2.txt\n").unwrap();
         // JSON: shim sends status
-        write_shim_json(&mut buf, &ShimResponse::StatusInfo {
-            shell_pid: 42,
-            running: true,
-            rows: 50,
-            cols: 132,
-        }).unwrap();
+        write_shim_json(
+            &mut buf,
+            &ShimResponse::StatusInfo {
+                shell_pid: 42,
+                running: true,
+                rows: 50,
+                cols: 132,
+            },
+        )
+        .unwrap();
 
         let mut cursor = Cursor::new(buf);
 
@@ -1042,7 +1070,13 @@ mod tests {
         match f2 {
             ShimFrame::Json(json_bytes) => {
                 let req: ShimRequest = serde_json::from_slice(&json_bytes).unwrap();
-                assert!(matches!(req, ShimRequest::Resize { rows: 50, cols: 132 }));
+                assert!(matches!(
+                    req,
+                    ShimRequest::Resize {
+                        rows: 50,
+                        cols: 132
+                    }
+                ));
             }
             other => panic!("Expected Json frame, got {:?}", other),
         }
@@ -1063,7 +1097,9 @@ mod tests {
             ShimFrame::Json(json_bytes) => {
                 let resp: ShimResponse = serde_json::from_slice(&json_bytes).unwrap();
                 match resp {
-                    ShimResponse::StatusInfo { shell_pid, running, .. } => {
+                    ShimResponse::StatusInfo {
+                        shell_pid, running, ..
+                    } => {
                         assert_eq!(shell_pid, 42);
                         assert!(running);
                     }

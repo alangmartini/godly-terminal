@@ -1,0 +1,11 @@
+### Added
+- **Visual MRU tab switcher** — Ctrl+Tab/Ctrl+Shift+Tab shows a popup listing recently-used terminals with keyboard navigation
+- **Custom window title bar** — borderless window with themed title, minimize/maximize/close buttons, and drag-to-move (L15-L17)
+- **Process icons in tabs** — small glyph before tab label indicating process type (Claude, Codex, Node, Python, shell) (L4)
+- **Smooth tab entry animation** — new tabs slide in with a 200ms ease-out width transition (L7)
+- **Sidebar collapse/expand animation** — smooth easing when toggling sidebar with Ctrl+B (L14)
+- **Focused pane border** — subtle accent border on the active split pane (L24)
+- **Empty terminal state** — "No terminals open" card with create button when workspace is empty (L25)
+- **Terminal viewport padding** — small inset from pane edges for terminal content (L26)
+- **Design system tokens** — spacing scale, border radius scale, shadow elevation, font sizes, and transition timings (L27-L32)
+- **Shadow elevation** — context menus, toasts, and MRU switcher now have drop shadows (L31)
