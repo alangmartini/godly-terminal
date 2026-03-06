@@ -21,7 +21,7 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     let title_text = text(title)
         .size(12)
-        .color(TEXT_SECONDARY);
+        .color(TEXT_SECONDARY());
 
     let drag_area = mouse_area(
         container(title_text)

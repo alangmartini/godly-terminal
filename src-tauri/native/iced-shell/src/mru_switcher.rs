@@ -24,26 +24,26 @@ pub fn view_overlay<'a, Message: 'a>(
     }
 
     let mut list = column![
-        text("Recent Tabs").size(13).color(TEXT_SECONDARY),
+        text("Recent Tabs").size(13).color(TEXT_SECONDARY()),
         text("Release Ctrl to switch. Press Esc to cancel.")
             .size(11)
-            .color(TEXT_SECONDARY),
+            .color(TEXT_SECONDARY()),
     ]
     .spacing(6)
     .width(Length::Fixed(420.0));
 
     for entry in entries.into_iter().take(MAX_VISIBLE_ENTRIES) {
         let is_selected = Some(entry.terminal_id.as_str()) == selected_terminal_id;
-        let row_bg = if is_selected { BG_ACTIVE } else { BG_SECONDARY };
+        let row_bg = if is_selected { BG_ACTIVE() } else { BG_SECONDARY() };
         let label_color = if is_selected {
-            TEXT_ACTIVE
+            TEXT_ACTIVE()
         } else {
-            TEXT_PRIMARY
+            TEXT_PRIMARY()
         };
         let detail_color = if is_selected {
-            TEXT_PRIMARY
+            TEXT_PRIMARY()
         } else {
-            TEXT_SECONDARY
+            TEXT_SECONDARY()
         };
         let badge = if is_selected { "Selected" } else { "" };
 
@@ -67,7 +67,7 @@ pub fn view_overlay<'a, Message: 'a>(
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(row_bg)),
                     border: iced::Border {
-                        color: BORDER,
+                        color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -80,9 +80,9 @@ pub fn view_overlay<'a, Message: 'a>(
         .padding(Padding::from([12, 12]))
         .width(Length::Fixed(440.0))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             border: iced::Border {
-                color: BORDER,
+                color: BORDER(),
                 width: 1.0,
                 radius: RADIUS_MD.into(),
             },
@@ -98,7 +98,7 @@ pub fn view_overlay<'a, Message: 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BACKDROP)),
+            background: Some(iced::Background::Color(BACKDROP())),
             ..container::Style::default()
         })
         .into()
