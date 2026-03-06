@@ -1,3 +1,36 @@
+/// Placement of a new pane relative to the target pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitPlacement {
+    /// Place new pane to the left of target.
+    Left,
+    /// Place new pane to the right of target.
+    Right,
+    /// Place new pane above target.
+    Top,
+    /// Place new pane below target.
+    Bottom,
+}
+
+impl SplitPlacement {
+    fn direction(self) -> SplitDirection {
+        match self {
+            SplitPlacement::Left | SplitPlacement::Right => SplitDirection::Horizontal,
+            SplitPlacement::Top | SplitPlacement::Bottom => SplitDirection::Vertical,
+        }
+    }
+
+    fn new_leaf_is_first(self) -> bool {
+        matches!(self, SplitPlacement::Left | SplitPlacement::Top)
+    }
+
+    fn default_for_direction(direction: SplitDirection) -> Self {
+        match direction {
+            SplitDirection::Horizontal => SplitPlacement::Right,
+            SplitDirection::Vertical => SplitPlacement::Bottom,
+        }
+    }
+}
+
 /// Direction of a split pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitDirection {
@@ -67,6 +100,24 @@ impl LayoutNode {
         new_id: String,
         direction: SplitDirection,
     ) -> bool {
+        self.split_leaf_with_placement(
+            target_id,
+            new_id,
+            SplitPlacement::default_for_direction(direction),
+        )
+    }
+
+    /// Splits the leaf with `target_id` and inserts `new_id` according to
+    /// `placement` (`left`, `right`, `top`, `bottom`) around the target.
+    ///
+    /// Uses ratio 0.5 (equal split). Returns `true` if the target was found
+    /// and split, `false` otherwise.
+    pub fn split_leaf_with_placement(
+        &mut self,
+        target_id: &str,
+        new_id: String,
+        placement: SplitPlacement,
+    ) -> bool {
         match self {
             LayoutNode::Leaf { terminal_id } if terminal_id == target_id => {
                 let old = std::mem::replace(
@@ -75,20 +126,33 @@ impl LayoutNode {
                         terminal_id: String::new(),
                     },
                 );
+                let (first, second) = if placement.new_leaf_is_first() {
+                    (
+                        LayoutNode::Leaf {
+                            terminal_id: new_id,
+                        },
+                        old,
+                    )
+                } else {
+                    (
+                        old,
+                        LayoutNode::Leaf {
+                            terminal_id: new_id,
+                        },
+                    )
+                };
                 *self = LayoutNode::Split {
-                    direction,
+                    direction: placement.direction(),
                     ratio: 0.5,
-                    first: Box::new(old),
-                    second: Box::new(LayoutNode::Leaf {
-                        terminal_id: new_id,
-                    }),
+                    first: Box::new(first),
+                    second: Box::new(second),
                 };
                 true
             }
             LayoutNode::Leaf { .. } => false,
             LayoutNode::Split { first, second, .. } => {
-                first.split_leaf(target_id, new_id.clone(), direction)
-                    || second.split_leaf(target_id, new_id, direction)
+                first.split_leaf_with_placement(target_id, new_id.clone(), placement)
+                    || second.split_leaf_with_placement(target_id, new_id, placement)
             }
         }
     }
@@ -149,7 +213,28 @@ impl LayoutNode {
 
 #[cfg(test)]
 mod tests {
-    use super::{LayoutNode, SplitDirection};
+    use super::{LayoutNode, SplitDirection, SplitPlacement};
+
+    fn assert_split_shape(
+        node: &LayoutNode,
+        direction: SplitDirection,
+        first_id: &str,
+        second_id: &str,
+    ) {
+        match node {
+            LayoutNode::Split {
+                direction: actual_direction,
+                first,
+                second,
+                ..
+            } => {
+                assert_eq!(*actual_direction, direction);
+                assert_eq!(first.all_leaf_ids(), vec![first_id]);
+                assert_eq!(second.all_leaf_ids(), vec![second_id]);
+            }
+            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+        }
+    }
 
     #[test]
     fn split_and_unsplit_round_trip() {
@@ -172,6 +257,64 @@ mod tests {
         };
         assert!(!node.split_leaf("missing", "t2".into(), SplitDirection::Vertical));
         assert_eq!(node.leaf_count(), 1);
+    }
+
+    #[test]
+    fn split_leaf_with_left_places_new_leaf_first() {
+        let mut node = LayoutNode::Leaf {
+            terminal_id: "t1".into(),
+        };
+
+        assert!(node.split_leaf_with_placement("t1", "t2".into(), SplitPlacement::Left));
+        assert_split_shape(&node, SplitDirection::Horizontal, "t2", "t1");
+    }
+
+    #[test]
+    fn split_leaf_with_right_places_new_leaf_second() {
+        let mut node = LayoutNode::Leaf {
+            terminal_id: "t1".into(),
+        };
+
+        assert!(node.split_leaf_with_placement("t1", "t2".into(), SplitPlacement::Right));
+        assert_split_shape(&node, SplitDirection::Horizontal, "t1", "t2");
+    }
+
+    #[test]
+    fn split_leaf_with_top_places_new_leaf_first() {
+        let mut node = LayoutNode::Leaf {
+            terminal_id: "t1".into(),
+        };
+
+        assert!(node.split_leaf_with_placement("t1", "t2".into(), SplitPlacement::Top));
+        assert_split_shape(&node, SplitDirection::Vertical, "t2", "t1");
+    }
+
+    #[test]
+    fn split_leaf_with_bottom_places_new_leaf_second() {
+        let mut node = LayoutNode::Leaf {
+            terminal_id: "t1".into(),
+        };
+
+        assert!(node.split_leaf_with_placement("t1", "t2".into(), SplitPlacement::Bottom));
+        assert_split_shape(&node, SplitDirection::Vertical, "t1", "t2");
+    }
+
+    #[test]
+    fn split_leaf_with_placement_nonexistent_target_is_noop() {
+        let mut node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::Leaf {
+                terminal_id: "t2".into(),
+            }),
+        };
+        let before = node.clone();
+
+        assert!(!node.split_leaf_with_placement("missing", "t3".into(), SplitPlacement::Left));
+        assert_eq!(node, before);
     }
 
     #[test]
