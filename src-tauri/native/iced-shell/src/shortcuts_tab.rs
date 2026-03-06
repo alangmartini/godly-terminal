@@ -27,12 +27,12 @@ const TABS: &[ShortcutEntry] = &[
         keys: "Ctrl+W",
     },
     ShortcutEntry {
-        action: "Next Tab",
-        keys: "Ctrl+Tab",
+        action: "Recent Tab in Workspace",
+        keys: "Hold Ctrl+Tab",
     },
     ShortcutEntry {
-        action: "Previous Tab",
-        keys: "Ctrl+Shift+Tab",
+        action: "Recent Tab in Workspace (Reverse)",
+        keys: "Hold Ctrl+Shift+Tab",
     },
     ShortcutEntry {
         action: "Rename Tab",
@@ -196,14 +196,12 @@ pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
         // Separator between categories (not after the last one)
         if i + 1 < categories.len() {
             content = content.push(Space::new().height(4));
-            content = content.push(
-                rule::horizontal(1).style(move |_theme| rule::Style {
-                    color: SEPARATOR_COLOR,
-                    radius: 0.0.into(),
-                    fill_mode: rule::FillMode::Full,
-                    snap: true,
-                }),
-            );
+            content = content.push(rule::horizontal(1).style(move |_theme| rule::Style {
+                color: SEPARATOR_COLOR,
+                radius: 0.0.into(),
+                fill_mode: rule::FillMode::Full,
+                snap: true,
+            }));
             content = content.push(Space::new().height(4));
         }
     }
@@ -242,5 +240,18 @@ mod tests {
                 assert!(!entry.keys.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn test_tab_shortcuts_describe_workspace_recent_tab_popup_semantics() {
+        let tabs = shortcut_categories()
+            .into_iter()
+            .find(|category| category.name == "Tabs")
+            .expect("tabs category should exist");
+
+        assert_eq!(tabs.entries[2].action, "Recent Tab in Workspace");
+        assert_eq!(tabs.entries[2].keys, "Hold Ctrl+Tab");
+        assert_eq!(tabs.entries[3].action, "Recent Tab in Workspace (Reverse)");
+        assert_eq!(tabs.entries[3].keys, "Hold Ctrl+Shift+Tab");
     }
 }

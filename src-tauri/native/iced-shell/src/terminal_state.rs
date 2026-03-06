@@ -165,6 +165,17 @@ impl TerminalCollection {
             .collect()
     }
 
+    /// Returns terminal ids in MRU order, limited to a workspace assignment.
+    pub fn mru_terminal_ids_for_workspace(&self, workspace_id: Option<&str>) -> Vec<&str> {
+        self.mru
+            .iter()
+            .filter_map(|id| {
+                self.terminals.get(id).and_then(|terminal| {
+                    (terminal.workspace_id.as_deref() == workspace_id).then_some(id.as_str())
+                })
+            })
+            .collect()
+    }
     /// Returns the next MRU terminal after the active one, if any.
     pub fn mru_next_after_active(&self) -> Option<&str> {
         let active_id = self.active_id()?;
@@ -761,5 +772,27 @@ mod tests {
         assert_eq!(col.active_id(), Some("t1"));
         assert_eq!(col.mru_terminal_ids(), vec!["t1"]);
         assert_eq!(col.mru_next_after_active(), None);
+    }
+    #[test]
+    fn test_mru_terminal_ids_for_workspace_filters_to_active_scope() {
+        let mut col = TerminalCollection::new();
+        col.add_to_workspace("w1-a".into(), 24, 80, "w1".into());
+        col.add_to_workspace("w2-a".into(), 24, 80, "w2".into());
+        col.add_to_workspace("w1-b".into(), 24, 80, "w1".into());
+        col.add("no-workspace".into(), 24, 80);
+
+        col.set_active("w1-b");
+        col.set_active("w2-a");
+        col.set_active("no-workspace");
+
+        assert_eq!(
+            col.mru_terminal_ids_for_workspace(Some("w1")),
+            vec!["w1-b", "w1-a"]
+        );
+        assert_eq!(col.mru_terminal_ids_for_workspace(Some("w2")), vec!["w2-a"]);
+        assert_eq!(
+            col.mru_terminal_ids_for_workspace(None),
+            vec!["no-workspace"]
+        );
     }
 }
