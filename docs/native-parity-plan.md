@@ -194,9 +194,9 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] L14. Smooth sidebar collapse/expand animation (Ctrl+B)
 
 ### Title Bar
-- [ ] L15. Proper window title bar styling (process name — Godly Terminal)
-- [ ] L16. Window control buttons (minimize, maximize, close) matching theme
-- [ ] L17. Title bar drag area for window move
+- [x] L15. Proper window title bar styling (process name — Godly Terminal)
+- [x] L16. Window control buttons (minimize, maximize, close) matching theme
+- [x] L17. Title bar drag area for window move
 
 ### Settings Dialog
 - [x] L18. Rounded modal with backdrop blur/dim

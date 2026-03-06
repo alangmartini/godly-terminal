@@ -34,6 +34,7 @@ use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
 use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
+use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
     ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
@@ -471,6 +472,14 @@ pub enum Message {
         window_id: window::Id,
         focused: bool,
     },
+    /// Start dragging the window from the custom title bar.
+    TitleBarDragStart,
+    /// Minimize the window via the title bar button.
+    TitleBarMinimize,
+    /// Toggle maximize/restore via the title bar button.
+    TitleBarToggleMaximize,
+    /// Close the window via the title bar button.
+    TitleBarClose,
     /// Mouse wheel scrolled (for scrollback).
     MouseWheel { delta_y: f32 },
     /// Mouse button pressed at pixel position (starts selection).
@@ -1297,6 +1306,28 @@ impl GodlyApp {
                 self.window_id = Some(window_id);
             }
 
+            // --- Title bar actions ---
+            Message::TitleBarDragStart => {
+                if let Some(id) = self.window_id {
+                    return window::drag(id);
+                }
+            }
+            Message::TitleBarMinimize => {
+                if let Some(id) = self.window_id {
+                    return window::minimize(id, true);
+                }
+            }
+            Message::TitleBarToggleMaximize => {
+                if let Some(id) = self.window_id {
+                    return window::toggle_maximize(id);
+                }
+            }
+            Message::TitleBarClose => {
+                if let Some(id) = self.window_id {
+                    return window::close(id);
+                }
+            }
+
             // --- Window resize ---
             Message::WindowResized {
                 window_id,
@@ -1927,6 +1958,16 @@ impl GodlyApp {
             return center(text("Connecting to daemon...").size(18)).into();
         }
 
+        // Custom title bar — spans full window width above sidebar + main.
+        let title = self.title();
+        let title_bar_row = title_bar::view_title_bar(
+            title,
+            Message::TitleBarDragStart,
+            Message::TitleBarMinimize,
+            Message::TitleBarToggleMaximize,
+            Message::TitleBarClose,
+        );
+
         // Tab bar — show terminals for the active workspace.
         let active_id = self.active_focused();
         let ordered = self.active_workspace_terminals();
@@ -1964,7 +2005,7 @@ impl GodlyApp {
             .height(Length::Fill);
 
         let sidebar_width = self.current_sidebar_width();
-        let main_content: Element<'_, Message> = if sidebar_width > 0.0 {
+        let body_content: Element<'_, Message> = if sidebar_width > 0.0 {
             let notified_workspace_ids = self.notified_workspace_ids();
             let sidebar = sidebar::view_sidebar(
                 self.workspaces.as_slice(),
@@ -1989,6 +2030,11 @@ impl GodlyApp {
         } else {
             main_area.into()
         };
+
+        let main_content: Element<'_, Message> = column![title_bar_row, body_content]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
 
         // Overlay settings dialog if open.
         let with_settings: Element<'_, Message> = if self.settings_open {
@@ -4237,11 +4283,12 @@ fn resolve_terminal_empty_state(
 }
 
 fn terminal_content_rect(window_width: f32, window_height: f32, sidebar_width: f32) -> PaneRect {
+    let top = title_bar::TITLE_BAR_HEIGHT + TAB_BAR_HEIGHT;
     PaneRect::new(
         sidebar_width.max(0.0),
-        TAB_BAR_HEIGHT,
+        top,
         (window_width - sidebar_width).max(1.0),
-        (window_height - TAB_BAR_HEIGHT).max(1.0),
+        (window_height - top).max(1.0),
     )
 }
 
@@ -4695,6 +4742,7 @@ mod helper_tests {
     };
     use super::{GridPos, LayoutNode, SplitDirection, TAB_BAR_HEIGHT};
     use crate::terminal_state::TerminalCollection;
+    use crate::title_bar;
     use godly_terminal_surface::FontMetrics;
     use iced::keyboard::{key::Named, Key, Modifiers};
     use iced::Point;
@@ -5081,10 +5129,12 @@ mod helper_tests {
 
     #[test]
     fn terminal_content_geometry_tracks_sidebar_and_split_ratios() {
+        let top = title_bar::TITLE_BAR_HEIGHT + TAB_BAR_HEIGHT;
         let content_rect = terminal_content_rect(1_200.0, 800.0, 220.0);
+        let expected_h = 800.0 - top;
         assert_eq!(
             content_rect,
-            PaneRect::new(220.0, TAB_BAR_HEIGHT, 980.0, 768.0)
+            PaneRect::new(220.0, top, 980.0, expected_h)
         );
 
         let layout = LayoutNode::Split {
@@ -5105,18 +5155,21 @@ mod helper_tests {
             }),
         };
 
+        let quarter_h = expected_h * 0.25;
+        let three_quarter_h = expected_h - quarter_h;
+
         let top_right = pane_rect_for_terminal(&layout, "top-right", content_rect)
             .expect("top-right pane should resolve");
         assert_eq!(
             top_right,
-            PaneRect::new(710.0, TAB_BAR_HEIGHT, 490.0, 192.0)
+            PaneRect::new(710.0, top, 490.0, quarter_h)
         );
 
         let bottom_right = pane_rect_for_terminal(&layout, "bottom-right", content_rect)
             .expect("bottom-right pane should resolve");
         assert_eq!(
             bottom_right,
-            PaneRect::new(710.0, TAB_BAR_HEIGHT + 192.0, 490.0, 576.0)
+            PaneRect::new(710.0, top + quarter_h, 490.0, three_quarter_h)
         );
     }
 
