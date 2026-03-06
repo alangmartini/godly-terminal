@@ -26,6 +26,8 @@ pub enum AppAction {
     ToggleSidebar,
     OpenSettings,
     RenameTab,
+    TogglePerfOverlay,
+    Find,
 }
 
 pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> {
@@ -73,6 +75,8 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
         "c" if shift => Some(AppAction::Copy),
         "v" if shift => Some(AppAction::Paste),
         "a" if shift => Some(AppAction::SelectAll),
+        "o" if shift => Some(AppAction::TogglePerfOverlay),
+        "f" if !shift => Some(AppAction::Find),
         _ => None,
     }
 }
@@ -587,5 +591,37 @@ mod tests {
     #[test]
     fn alt_f2_is_not_shortcut() {
         assert_eq!(check_app_shortcut(&named_key(Named::F2), alt()), None);
+    }
+    // --- Find in terminal ---
+    #[test]
+    fn ctrl_f_is_find() {
+        assert_eq!(
+            check_app_shortcut(&char_key("f"), CTRL),
+            Some(AppAction::Find)
+        );
+    }
+    #[test]
+    fn ctrl_shift_f_is_not_find() {
+        assert_eq!(check_app_shortcut(&char_key("f"), ctrl_shift()), None);
+    }
+    #[test]
+    fn f_alone_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("f"), NONE), None);
+    }
+    // --- Performance overlay ---
+    #[test]
+    fn ctrl_shift_o_is_toggle_perf_overlay() {
+        assert_eq!(
+            check_app_shortcut(&char_key("o"), ctrl_shift()),
+            Some(AppAction::TogglePerfOverlay)
+        );
+    }
+    #[test]
+    fn ctrl_o_alone_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("o"), CTRL), None);
+    }
+    #[test]
+    fn o_alone_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("o"), NONE), None);
     }
 }
