@@ -347,6 +347,9 @@ pub struct GodlyApp {
     copy_preview_text: Option<String>,
     // --- F1-F4: Theme System ---
     active_theme: crate::theme::ThemeId,
+    // --- H1-H6: Shell Picker & Workspace Creation ---
+    shell_picker: ShellPickerState,
+    workspace_ai_modes: HashMap<String, AiToolMode>,
 }
 
 impl Default for GodlyApp {
@@ -420,6 +423,8 @@ impl Default for GodlyApp {
             quit_confirm_pending: false,
             copy_preview_text: None,
             active_theme: crate::theme::ThemeId::Dusk,
+            shell_picker: ShellPickerState::default(),
+            workspace_ai_modes: HashMap::new(),
         }
     }
 }
@@ -651,6 +656,18 @@ pub enum Message {
     CopyPreviewDismissed,
     // --- F1-F4: Theme System ---
     ThemeChanged(crate::theme::ThemeId),
+    // --- H1-H6: Shell Picker & Workspace Creation ---
+    ShellPickerOpen,
+    ShellPickerTabClicked(ShellPickerTab),
+    ShellPickerDistroSelected(Option<String>),
+    ShellPickerCustomProgramChanged(String),
+    ShellPickerCustomArgsChanged(String),
+    ShellPickerConfirmed,
+    ShellPickerCancelled,
+    WorkspaceAiModeChanged {
+        workspace_id: String,
+        mode: AiToolMode,
+    },
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -1141,6 +1158,36 @@ impl GodlyApp {
                     let _ = commands::write_to_terminal(client, &terminal_id, payload.as_bytes());
                 }
             }
+            // --- H1-H6: Shell Picker & Workspace Creation ---
+            Message::ShellPickerOpen => {
+                self.shell_picker.open();
+            }
+            Message::ShellPickerTabClicked(tab) => {
+                self.shell_picker.tab = tab;
+            }
+            Message::ShellPickerDistroSelected(distro) => {
+                self.shell_picker.selected_distro = distro;
+            }
+            Message::ShellPickerCustomProgramChanged(val) => {
+                self.shell_picker.custom_program = val;
+            }
+            Message::ShellPickerCustomArgsChanged(val) => {
+                self.shell_picker.custom_args = val;
+            }
+            Message::ShellPickerConfirmed => {
+                self.shell_picker.close();
+                return self.create_new_terminal();
+            }
+            Message::ShellPickerCancelled => {
+                self.shell_picker.close();
+            }
+            Message::WorkspaceAiModeChanged { workspace_id, mode } => {
+                if mode == AiToolMode::None {
+                    self.workspace_ai_modes.remove(&workspace_id);
+                } else {
+                    self.workspace_ai_modes.insert(workspace_id, mode);
+                }
+            }
 
             // --- Keyboard input (shortcut-first, then forward to PTY) ---
             Message::KeyboardEvent(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
@@ -1298,7 +1345,7 @@ impl GodlyApp {
                 self.dragging_tab_id = None;
             }
             Message::NewTabRequested => {
-                return self.create_new_terminal();
+                self.shell_picker.open();
             }
             Message::CloseTabRequested(id) => {
                 if self.dragging_tab_id.as_deref() == Some(id.as_str()) {
@@ -2114,6 +2161,14 @@ impl GodlyApp {
                             .iter()
                             .any(|id| id.as_str() == workspace_id)
                     },
+                    |workspace_id: &str| -> Option<&'static str> {
+                        match self.workspace_ai_modes.get(workspace_id) {
+                            Some(AiToolMode::Claude) => Some("[C]"),
+                            Some(AiToolMode::Codex) => Some("[X]"),
+                            Some(AiToolMode::Both) => Some("[CX]"),
+                            _ => None,
+                        }
+                    },
                 ),
                 sidebar_width,
                 Message::SidebarAction,
@@ -2237,7 +2292,7 @@ impl GodlyApp {
             with_tab_rename
         };
 
-        if let Some(ref preview_text) = self.copy_preview_text {
+        let with_copy_preview: Element<'_, Message> = if let Some(ref preview_text) = self.copy_preview_text {
             stack![
                 with_quit,
                 crate::confirm_dialog::view_copy_preview(
@@ -2250,8 +2305,23 @@ impl GodlyApp {
             .into()
         } else {
             with_quit
+        };
+
+        // Shell picker overlay (H1-H6)
+        if self.shell_picker.visible {
+            let picker = shell_picker::view_shell_picker(
+                &self.shell_picker,
+                Message::ShellPickerTabClicked,
+                Message::ShellPickerDistroSelected,
+                Message::ShellPickerCustomProgramChanged,
+                Message::ShellPickerCustomArgsChanged,
+                Message::ShellPickerConfirmed,
+                Message::ShellPickerCancelled,
+            );
+            stack![with_copy_preview, picker].into()
+        } else {
+            with_copy_preview
         }
-    }
 
     fn view_tab_context_menu(&self) -> Element<'_, Message> {
         let Some(tab_id) = self.tab_context_menu_id.as_deref() else {
