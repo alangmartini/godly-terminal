@@ -18,6 +18,11 @@ mod workspace_state;
 mod shell_picker;
 
 mod confirm_dialog;
+mod search;
+mod scrollbar;
+mod perf_overlay;
+mod url_detector;
+mod terminal_context_menu;
 
 use app::{GodlyApp, Message};
 
