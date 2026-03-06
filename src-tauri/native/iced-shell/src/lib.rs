@@ -1,6 +1,8 @@
 pub mod app;
+pub mod mcp_handler;
 pub mod notification_state;
 pub mod notifications;
+pub mod quick_claude;
 pub mod scrollback_restore;
 pub mod selection;
 pub mod settings_dialog;
