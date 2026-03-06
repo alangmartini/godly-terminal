@@ -39,6 +39,11 @@ impl TabState {
         &self.order
     }
 
+    /// Return the index of the tab id in the current order.
+    pub fn index_of(&self, id: &str) -> Option<usize> {
+        self.order.iter().position(|existing| existing == id)
+    }
+
     /// Open a new tab.
     ///
     /// Returns `true` if the tab was inserted, `false` if the id already
@@ -116,7 +121,11 @@ impl TabState {
         }
 
         if let Some(idx) = self.active_index() {
-            let prev_idx = if idx == 0 { self.order.len() - 1 } else { idx - 1 };
+            let prev_idx = if idx == 0 {
+                self.order.len() - 1
+            } else {
+                idx - 1
+            };
             self.active_id = Some(self.order[prev_idx].clone());
         }
     }
@@ -139,7 +148,7 @@ impl TabState {
 
     fn active_index(&self) -> Option<usize> {
         let id = self.active_id.as_deref()?;
-        self.order.iter().position(|existing| existing == id)
+        self.index_of(id)
     }
 }
 
@@ -248,6 +257,7 @@ mod tests {
 
         assert!(tabs.reorder(0, 2));
         assert_eq!(tabs.ids(), &["t2", "t3", "t1"]);
+        assert_eq!(tabs.active_id(), Some("t1"));
     }
 
     #[test]
@@ -259,5 +269,39 @@ mod tests {
         assert!(!tabs.reorder(2, 0));
         assert!(!tabs.reorder(0, 2));
         assert_eq!(tabs.ids(), &["t1", "t2"]);
+    }
+
+    #[test]
+    fn index_of_returns_position() {
+        let mut tabs = TabState::new();
+        tabs.open("t1");
+        tabs.open("t2");
+        tabs.open("t3");
+
+        assert_eq!(tabs.index_of("t1"), Some(0));
+        assert_eq!(tabs.index_of("t2"), Some(1));
+        assert_eq!(tabs.index_of("t3"), Some(2));
+        assert_eq!(tabs.index_of("missing"), None);
+    }
+
+    #[test]
+    fn navigation_wraps_after_reorder() {
+        let mut tabs = TabState::new();
+        tabs.open("t1");
+        tabs.open("t2");
+        tabs.open("t3");
+
+        assert!(tabs.reorder(2, 0));
+        assert_eq!(tabs.ids(), &["t3", "t1", "t2"]);
+
+        // Active remains t1 after reorder.
+        assert_eq!(tabs.active_id(), Some("t1"));
+
+        tabs.activate("t2");
+        tabs.next();
+        assert_eq!(tabs.active_id(), Some("t3"));
+
+        tabs.previous();
+        assert_eq!(tabs.active_id(), Some("t2"));
     }
 }

@@ -2,6 +2,8 @@ use iced::window;
 
 mod app;
 mod notification_state;
+mod notifications;
+mod scrollback_restore;
 mod selection;
 mod settings_dialog;
 mod shortcuts_tab;
