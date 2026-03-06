@@ -307,3 +307,8 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 - **Stream D**: D7 completed (native window attention request now uses critical attention on Windows for taskbar flash behavior when unfocused).
 - **Stream E**: E6 keyboard semantics completed (`Ctrl+Tab` / `Ctrl+Shift+Tab` MRU cycling); visual popup remains open.
 - **Stream L**: L10, L18, L19, L20, L21, L22 completed.
+
+## Progress Log — 2026-03-06 (L14 + L24-L26 Docs/QA Audit)
+
+### No checklist changes
+- Reviewed landed native-shell changes for L14 and L24-L26; checklist remains unchanged because the batch did not implement sidebar collapse/expand animation, focused-pane chrome, terminal empty-state hint, or terminal inset padding.
