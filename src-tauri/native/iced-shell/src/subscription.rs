@@ -111,6 +111,41 @@ pub fn daemon_events(
     subscription::from_recipe(DaemonEventRecipe { receiver })
 }
 
+/// Creates an iced Subscription that streams McpEvent values from a channel receiver.
+///
+/// Uses the same Arc<Mutex<Option<...>>> pattern as `daemon_events`.
+pub fn mcp_events(
+    receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
+) -> iced::Subscription<godly_app_adapter::mcp_pipe::McpEvent> {
+    use iced::advanced::subscription::{self, EventStream, Hasher, Recipe};
+    use std::hash::Hash;
+
+    struct McpEventRecipe {
+        receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
+    }
+
+    impl Recipe for McpEventRecipe {
+        type Output = godly_app_adapter::mcp_pipe::McpEvent;
+
+        fn hash(&self, state: &mut Hasher) {
+            std::any::TypeId::of::<Self>().hash(state);
+        }
+
+        fn stream(
+            self: Box<Self>,
+            _input: EventStream,
+        ) -> futures::stream::BoxStream<'static, Self::Output> {
+            if let Some(rx) = self.receiver.lock().take() {
+                Box::pin(rx)
+            } else {
+                Box::pin(futures::stream::pending())
+            }
+        }
+    }
+
+    subscription::from_recipe(McpEventRecipe { receiver })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
