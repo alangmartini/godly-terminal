@@ -12,7 +12,7 @@ Validated locally on 2026-03-05:
 Current summary:
 - Native frontend path is active and `FrontendMode::Native` is the default.
 - Core native shell functionality exists (sessions, tabs, splits, workspace state, daemon bridge).
-- Feature parity is not complete yet (several P0/P1 items remain open).
+- Feature parity is not complete yet (see Section 27 for the current L14 + L24-L26 shell-polish status).
 - Release-gate artifacts referenced in earlier notes (`migration/native-release-gates.md`, `.github/workflows/native-shadow.yml`) are not present in this worktree.
 
 ## 1) Goal
@@ -193,6 +193,7 @@ Exit criteria:
 - ⚠️ tab rename flow is still TODO in app action handling.
 - ⚠️ settings parity is partial (current runtime shows limited settings content).
 - ⚠️ notification UX/audio parity is partial (state logic exists, full UX/audio pipeline not complete).
+- ⚠️ high-visibility shell polish remains open (see Section 27 for the current L14 + L24-L26 sidebar/terminal gap).
 - ⚠️ several `docs/native-parity-plan.md` P0/P1 checklist items remain open.
 
 Exit criteria:
@@ -297,7 +298,12 @@ All should pass before declaring parity-complete and removing web fallback:
 
 ## 12) Current Backlog (Execution Focus)
 
-Priority order is aligned with open P0/P1 parity blockers from `docs/native-parity-plan.md`:
+Active backlog in this slice:
+
+1. ⚠️ E6: MRU keyboard cycling (Ctrl+Tab / Ctrl+Shift+Tab) is implemented; visual popup switcher remains pending until popup lane lands.
+2. ⚠️ L14 + L24-L26: smooth sidebar collapse/expand animation and terminal-area polish (focused pane highlight, explicit empty state/create hint, terminal padding) remain open in the current native shell.
+
+Recently closed in this execution order:
 
 1. ✅ B1: tab drag-drop reorder in tab bar.
 2. ✅ B3/B4: drag tab to split zones / sidebar workspace move.
@@ -314,7 +320,6 @@ Priority order is aligned with open P0/P1 parity blockers from `docs/native-pari
 13. ✅ L10: sidebar header icon polish (settings/new-workspace icons).
 14. ✅ L18/L19: settings modal + tab strip visual polish.
 15. ✅ L20/L21/L22: shortcuts tab spacing, control styling, and vertical-only scroll polish.
-16. ⚠️ E6: MRU keyboard cycling (Ctrl+Tab / Ctrl+Shift+Tab) is implemented; visual popup switcher remains pending until popup lane lands.
 
 ## 13) Completed Step: D2/D3/D4 Workspace Notifications + Audio
 
@@ -764,4 +769,41 @@ Status update (2026-03-05):
 - Wired `AppAction::NextTab` / `AppAction::PreviousTab` to MRU cycling in native app action dispatch.
 - Added helper tests for MRU forward/backward/wrap and missing-current-id handling.
 - E6 visual popup switcher remains pending until popup lane lands.
+
+## 27) Pending Batch: L14 + L24-L26 Sidebar + Terminal Area Polish
+
+Goal:
+- Close the remaining high-visibility native shell polish gaps for sidebar collapse/expand behavior and terminal-pane presentation without overstating current parity.
+
+Scope:
+- `src-tauri/native/iced-shell/src/app.rs`
+- `src-tauri/native/iced-shell/src/sidebar.rs`
+- `src-tauri/native/iced-shell/src/split_pane.rs`
+- `src-tauri/native/terminal-surface/src/surface.rs`
+- `src-tauri/native/app-adapter/src/shortcuts.rs` (only if shortcut plumbing needs adjustment)
+
+Implementation steps:
+1. Replace the current boolean-only sidebar toggle with smooth collapse/expand animation while preserving resize bounds and terminal reflow.
+2. Add a focused-pane affordance (subtle border/glow) that tracks active pane changes across mouse and keyboard focus movement.
+3. Replace the generic terminal fallback with an explicit "No terminals open" empty state that includes a create/new-terminal hint.
+4. Add a small terminal-content inset so pane chrome and rendered grid do not sit flush against pane edges, and verify hit-testing/selection math remains correct.
+
+Acceptance criteria:
+- `Ctrl+B` collapses and expands the sidebar with a smooth transition rather than an instant show/hide jump.
+- The active split pane is visually distinguishable without overpowering the terminal content.
+- Empty workspaces show a clear "No terminals open" placeholder with a create hint.
+- Terminal content renders with a small inset while preserving cursor, selection, drop-zone, and resize behavior.
+
+Validation when implemented:
+- `cargo test --manifest-path src-tauri/Cargo.toml -p godly-iced-shell -p godly-terminal-surface -p godly-features-shell -p godly-layout-core`
+- Manual smoke:
+  1. Press `Ctrl+B` repeatedly and confirm animated collapse/expand plus correct terminal resize/reflow.
+  2. Create a split layout, move focus between panes, and confirm the active-pane affordance follows focus deterministically.
+  3. Open or create a workspace with no terminals and confirm the placeholder copy plus create hint.
+  4. Verify terminal padding does not break text selection, cursor placement, drag/drop overlays, or split divider interactions.
+
+Status update (2026-03-06):
+- Current repo state has `Ctrl+B` sidebar visibility toggle plumbing, but not a smooth collapse/expand animation.
+- Terminal panes still render without the focused-pane chrome or inset padding called for by L24/L26.
+- Empty layouts currently fall back to a generic "No active terminal" message rather than the explicit L25 empty-state copy/hint.
 
