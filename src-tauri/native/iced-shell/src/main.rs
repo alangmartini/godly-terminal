@@ -23,6 +23,7 @@ mod scrollbar;
 mod perf_overlay;
 mod url_detector;
 mod terminal_context_menu;
+mod whisper_ui;
 
 use app::{GodlyApp, Message};
 
