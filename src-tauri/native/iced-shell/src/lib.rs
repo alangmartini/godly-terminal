@@ -14,3 +14,4 @@ pub mod title_bar;
 pub mod theme;
 pub mod workspace_state;
 pub mod confirm_dialog;
+pub mod shell_picker;
