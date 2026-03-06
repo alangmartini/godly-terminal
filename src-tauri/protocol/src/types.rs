@@ -40,8 +40,13 @@ pub enum ShellType {
     Windows,
     Pwsh,
     Cmd,
-    Wsl { distribution: Option<String> },
-    Custom { program: String, args: Option<Vec<String>> },
+    Wsl {
+        distribution: Option<String>,
+    },
+    Custom {
+        program: String,
+        args: Option<Vec<String>>,
+    },
 }
 
 impl ShellType {
@@ -54,13 +59,11 @@ impl ShellType {
             ShellType::Wsl { distribution } => {
                 distribution.clone().unwrap_or_else(|| "wsl".to_string())
             }
-            ShellType::Custom { program, .. } => {
-                std::path::Path::new(program)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(program)
-                    .to_string()
-            }
+            ShellType::Custom { program, .. } => std::path::Path::new(program)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(program)
+                .to_string(),
         }
     }
 }
@@ -250,7 +253,11 @@ mod tests {
 
     #[test]
     fn test_frontend_mode_serialization_roundtrip() {
-        for mode in [FrontendMode::Web, FrontendMode::Native, FrontendMode::Shadow] {
+        for mode in [
+            FrontendMode::Web,
+            FrontendMode::Native,
+            FrontendMode::Shadow,
+        ] {
             let json = serde_json::to_string(&mode).unwrap();
             let deserialized: FrontendMode = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, mode);
@@ -259,9 +266,18 @@ mod tests {
 
     #[test]
     fn test_frontend_mode_serde_values() {
-        assert_eq!(serde_json::to_string(&FrontendMode::Web).unwrap(), "\"web\"");
-        assert_eq!(serde_json::to_string(&FrontendMode::Native).unwrap(), "\"native\"");
-        assert_eq!(serde_json::to_string(&FrontendMode::Shadow).unwrap(), "\"shadow\"");
+        assert_eq!(
+            serde_json::to_string(&FrontendMode::Web).unwrap(),
+            "\"web\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FrontendMode::Native).unwrap(),
+            "\"native\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FrontendMode::Shadow).unwrap(),
+            "\"shadow\""
+        );
     }
 
     #[test]
@@ -293,7 +309,9 @@ mod tests {
 
     #[test]
     fn test_shell_type_wsl_serialization() {
-        let shell = ShellType::Wsl { distribution: Some("Ubuntu".to_string()) };
+        let shell = ShellType::Wsl {
+            distribution: Some("Ubuntu".to_string()),
+        };
         let json = serde_json::to_string(&shell).unwrap();
         assert!(json.contains("wsl"));
         assert!(json.contains("Ubuntu"));
@@ -344,19 +362,27 @@ mod tests {
         assert_eq!(ShellType::Pwsh.display_name(), "pwsh");
         assert_eq!(ShellType::Cmd.display_name(), "cmd");
         assert_eq!(
-            ShellType::Wsl { distribution: Some("Ubuntu".to_string()) }.display_name(),
+            ShellType::Wsl {
+                distribution: Some("Ubuntu".to_string())
+            }
+            .display_name(),
             "Ubuntu"
         );
+        assert_eq!(ShellType::Wsl { distribution: None }.display_name(), "wsl");
         assert_eq!(
-            ShellType::Wsl { distribution: None }.display_name(),
-            "wsl"
-        );
-        assert_eq!(
-            ShellType::Custom { program: "C:\\Program Files\\nu\\nu.exe".to_string(), args: None }.display_name(),
+            ShellType::Custom {
+                program: "C:\\Program Files\\nu\\nu.exe".to_string(),
+                args: None
+            }
+            .display_name(),
             "nu"
         );
         assert_eq!(
-            ShellType::Custom { program: "fish".to_string(), args: None }.display_name(),
+            ShellType::Custom {
+                program: "fish".to_string(),
+                args: None
+            }
+            .display_name(),
             "fish"
         );
     }
@@ -380,7 +406,10 @@ mod tests {
 
         assert_eq!(deserialized.session_id, "sess-abc-123");
         assert_eq!(deserialized.shim_pid, 12345);
-        assert_eq!(deserialized.shim_pipe_name, r"\\.\pipe\godly-shim-sess-abc-123");
+        assert_eq!(
+            deserialized.shim_pipe_name,
+            r"\\.\pipe\godly-shim-sess-abc-123"
+        );
         assert_eq!(deserialized.shell_pid, 67890);
         assert_eq!(deserialized.shell_type, ShellType::Windows);
         assert_eq!(deserialized.cwd, Some("C:\\Users\\test".to_string()));
@@ -396,7 +425,9 @@ mod tests {
             shim_pid: 111,
             shim_pipe_name: r"\\.\pipe\godly-shim-wsl-sess".to_string(),
             shell_pid: 222,
-            shell_type: ShellType::Wsl { distribution: Some("Ubuntu".to_string()) },
+            shell_type: ShellType::Wsl {
+                distribution: Some("Ubuntu".to_string()),
+            },
             cwd: None,
             rows: 30,
             cols: 120,
@@ -406,7 +437,12 @@ mod tests {
         let json = serde_json::to_string(&meta).unwrap();
         let deserialized: ShimMetadata = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.shell_type, ShellType::Wsl { distribution: Some("Ubuntu".to_string()) });
+        assert_eq!(
+            deserialized.shell_type,
+            ShellType::Wsl {
+                distribution: Some("Ubuntu".to_string())
+            }
+        );
         assert_eq!(deserialized.cwd, None);
     }
 
@@ -431,9 +467,12 @@ mod tests {
         let deserialized: ShimMetadata = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.session_id, "custom-sess");
-        assert_eq!(deserialized.shell_type, ShellType::Custom {
-            program: "nu.exe".to_string(),
-            args: Some(vec!["-l".to_string()]),
-        });
+        assert_eq!(
+            deserialized.shell_type,
+            ShellType::Custom {
+                program: "nu.exe".to_string(),
+                args: Some(vec!["-l".to_string()]),
+            }
+        );
     }
 }

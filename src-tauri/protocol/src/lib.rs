@@ -13,18 +13,22 @@ pub mod whisper;
 /// See `docs/frontend_contract_v1.md` for the full specification.
 pub const FRONTEND_CONTRACT_VERSION: &str = "1.0.0";
 
-pub use frame::{read_daemon_message, read_daemon_message_ext, read_message, read_request, read_request_with_id, write_daemon_message, write_daemon_message_with_id, write_message, write_request, write_request_with_id, ReadResult};
 pub use frame::{
-    read_shim_frame, write_shim_binary, write_shim_json, ShimFrame,
-    TAG_SHIM_WRITE, TAG_SHIM_BUFFER_DATA, TAG_SHIM_OUTPUT,
+    read_daemon_message, read_daemon_message_ext, read_message, read_request, read_request_with_id,
+    write_daemon_message, write_daemon_message_with_id, write_message, write_request,
+    write_request_with_id, ReadResult,
+};
+pub use frame::{
+    read_shim_frame, write_shim_binary, write_shim_json, ShimFrame, TAG_SHIM_BUFFER_DATA,
+    TAG_SHIM_OUTPUT, TAG_SHIM_WRITE,
 };
 pub use layout_tree::{LayoutNode, SplitDirection};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 pub use messages::{DaemonMessage, Event, Request, RequestEnvelope, Response};
 pub use messages::{ShimRequest, ShimResponse};
-pub use types::{GridData, SessionInfo, ShellType};
 pub use types::ShimMetadata;
-pub use types::{FrontendMode, frontend_mode};
+pub use types::{frontend_mode, FrontendMode};
+pub use types::{GridData, SessionInfo, ShellType};
 pub use whisper::{AudioDeviceInfo, WhisperRequest, WhisperResponse};
 
 /// Default named pipe path used by both daemon and client
@@ -214,10 +218,7 @@ mod tests {
 
     #[test]
     fn shim_pipe_name_default_without_instance() {
-        let result = run_in_subprocess(
-            &[("__SUBPROCESS_SESSION_ID", "abc-123")],
-            "shim_pipe_name",
-        );
+        let result = run_in_subprocess(&[("__SUBPROCESS_SESSION_ID", "abc-123")], "shim_pipe_name");
         assert_eq!(result, r"\\.\pipe\godly-shim-abc-123");
     }
 
@@ -235,14 +236,8 @@ mod tests {
 
     #[test]
     fn shim_pipe_name_unique_per_session() {
-        let result1 = run_in_subprocess(
-            &[("__SUBPROCESS_SESSION_ID", "sess-1")],
-            "shim_pipe_name",
-        );
-        let result2 = run_in_subprocess(
-            &[("__SUBPROCESS_SESSION_ID", "sess-2")],
-            "shim_pipe_name",
-        );
+        let result1 = run_in_subprocess(&[("__SUBPROCESS_SESSION_ID", "sess-1")], "shim_pipe_name");
+        let result2 = run_in_subprocess(&[("__SUBPROCESS_SESSION_ID", "sess-2")], "shim_pipe_name");
         assert_ne!(result1, result2);
         assert_eq!(result1, r"\\.\pipe\godly-shim-sess-1");
         assert_eq!(result2, r"\\.\pipe\godly-shim-sess-2");

@@ -52,7 +52,12 @@ impl GridSnapshotComparator {
 
         let row_count = expected.rows.len().min(actual.rows.len());
         for row_idx in 0..row_count {
-            Self::compare_rows(row_idx, &expected.rows[row_idx], &actual.rows[row_idx], &mut mismatches);
+            Self::compare_rows(
+                row_idx,
+                &expected.rows[row_idx],
+                &actual.rows[row_idx],
+                &mut mismatches,
+            );
         }
 
         if expected.rows.len() != actual.rows.len() {
@@ -68,10 +73,21 @@ impl GridSnapshotComparator {
         GridDiffResult { mismatches }
     }
 
-    fn compare_rows(row_idx: usize, expected: &RichGridRow, actual: &RichGridRow, mismatches: &mut Vec<CellMismatch>) {
+    fn compare_rows(
+        row_idx: usize,
+        expected: &RichGridRow,
+        actual: &RichGridRow,
+        mismatches: &mut Vec<CellMismatch>,
+    ) {
         let col_count = expected.cells.len().min(actual.cells.len());
         for col_idx in 0..col_count {
-            Self::compare_cells(row_idx, col_idx, &expected.cells[col_idx], &actual.cells[col_idx], mismatches);
+            Self::compare_cells(
+                row_idx,
+                col_idx,
+                &expected.cells[col_idx],
+                &actual.cells[col_idx],
+                mismatches,
+            );
         }
         if expected.cells.len() != actual.cells.len() {
             mismatches.push(CellMismatch {
@@ -84,12 +100,19 @@ impl GridSnapshotComparator {
         }
     }
 
-    fn compare_cells(row: usize, col: usize, expected: &RichGridCell, actual: &RichGridCell, mismatches: &mut Vec<CellMismatch>) {
+    fn compare_cells(
+        row: usize,
+        col: usize,
+        expected: &RichGridCell,
+        actual: &RichGridCell,
+        mismatches: &mut Vec<CellMismatch>,
+    ) {
         macro_rules! check {
             ($field:ident) => {
                 if expected.$field != actual.$field {
                     mismatches.push(CellMismatch {
-                        row, col,
+                        row,
+                        col,
                         field: stringify!($field),
                         expected: format!("{:?}", expected.$field),
                         actual: format!("{:?}", actual.$field),

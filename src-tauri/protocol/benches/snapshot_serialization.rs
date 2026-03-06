@@ -1,7 +1,5 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use godly_protocol::types::{
-    CursorState, GridDimensions, RichGridCell, RichGridData, RichGridRow,
-};
+use godly_protocol::types::{CursorState, GridDimensions, RichGridCell, RichGridData, RichGridRow};
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -21,8 +19,16 @@ fn make_cell(row: usize, col: usize) -> RichGridCell {
     let bi = (row.wrapping_mul(3) + col.wrapping_mul(11)) % PALETTE.len();
     RichGridCell {
         content: String::from(CHARS[ci] as char),
-        fg: if fi == 0 { "default".into() } else { PALETTE[fi].into() },
-        bg: if bi == 0 { "default".into() } else { PALETTE[bi].into() },
+        fg: if fi == 0 {
+            "default".into()
+        } else {
+            PALETTE[fi].into()
+        },
+        bg: if bi == 0 {
+            "default".into()
+        } else {
+            PALETTE[bi].into()
+        },
         bold: col % 17 == 0,
         dim: col % 23 == 0,
         italic: col % 19 == 0,
@@ -89,13 +95,27 @@ fn encode_binary(snapshot: &RichGridData) -> Vec<u8> {
             buf.push(cell.content.as_bytes().first().copied().unwrap_or(b' '));
             // Flags packed into one byte
             let mut flags: u8 = 0;
-            if cell.bold { flags |= 1; }
-            if cell.dim { flags |= 2; }
-            if cell.italic { flags |= 4; }
-            if cell.underline { flags |= 8; }
-            if cell.inverse { flags |= 16; }
-            if cell.wide { flags |= 32; }
-            if cell.wide_continuation { flags |= 64; }
+            if cell.bold {
+                flags |= 1;
+            }
+            if cell.dim {
+                flags |= 2;
+            }
+            if cell.italic {
+                flags |= 4;
+            }
+            if cell.underline {
+                flags |= 8;
+            }
+            if cell.inverse {
+                flags |= 16;
+            }
+            if cell.wide {
+                flags |= 32;
+            }
+            if cell.wide_continuation {
+                flags |= 64;
+            }
             buf.push(flags);
             // 4 bytes padding for alignment
             buf.extend_from_slice(&[0u8; 4]);
