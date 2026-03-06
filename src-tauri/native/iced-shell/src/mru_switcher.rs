@@ -1,8 +1,9 @@
 use iced::widget::{center, column, container, row, text, Space};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
-    BACKDROP, BG_ACTIVE, BG_SECONDARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    BACKDROP, BG_ACTIVE, BG_SECONDARY, BORDER, RADIUS_MD, SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY,
+    TEXT_SECONDARY,
 };
 
 const MAX_VISIBLE_ENTRIES: usize = 8;
@@ -83,7 +84,12 @@ pub fn view_overlay<'a, Message: 'a>(
             border: iced::Border {
                 color: BORDER,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: RADIUS_MD.into(),
+            },
+            shadow: Shadow {
+                color: SHADOW_COLOR,
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 16.0,
             },
             ..container::Style::default()
         });

@@ -13,6 +13,7 @@ mod subscription;
 mod tab_bar;
 mod terminal_state;
 mod theme;
+mod title_bar;
 mod workspace_state;
 
 use app::{GodlyApp, Message};
@@ -30,6 +31,7 @@ fn main() -> iced::Result {
         .window(window::Settings {
             size: iced::Size::new(1200.0, 800.0),
             min_size: Some(iced::Size::new(400.0, 300.0)),
+            decorations: false,
             ..Default::default()
         })
         .run()

@@ -112,23 +112,40 @@ pub enum Request {
 pub enum Response {
     // --- General ---
     Ok,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 
     // --- Session ---
-    SessionCreated { session: SessionInfo },
-    SessionList { sessions: Vec<SessionInfo> },
+    SessionCreated {
+        session: SessionInfo,
+    },
+    SessionList {
+        sessions: Vec<SessionInfo>,
+    },
 
     // --- Buffer/Grid ---
     /// Initial buffer replay when attaching to a session
-    Buffer { session_id: String, data: Vec<u8> },
+    Buffer {
+        session_id: String,
+        data: Vec<u8>,
+    },
     /// Grid snapshot from the godly-vt terminal state engine.
-    Grid { grid: crate::types::GridData },
+    Grid {
+        grid: crate::types::GridData,
+    },
     /// Rich grid snapshot with per-cell attributes for Canvas2D rendering.
-    RichGrid { grid: crate::types::RichGridData },
+    RichGrid {
+        grid: crate::types::RichGridData,
+    },
     /// Differential rich grid snapshot (only changed rows).
-    RichGridDiff { diff: crate::types::RichGridDiff },
+    RichGridDiff {
+        diff: crate::types::RichGridDiff,
+    },
     /// Text extracted from grid between two positions.
-    GridText { text: String },
+    GridText {
+        text: String,
+    },
 
     // --- Query results ---
     LastOutputTime {
@@ -139,7 +156,10 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_expected: Option<bool>,
     },
-    SearchResult { found: bool, running: bool },
+    SearchResult {
+        found: bool,
+        running: bool,
+    },
 
     // --- System ---
     Pong,
@@ -150,7 +170,10 @@ pub enum Response {
 #[ts(export)]
 #[serde(tag = "type")]
 pub enum Event {
-    Output { session_id: String, data: Vec<u8> },
+    Output {
+        session_id: String,
+        data: Vec<u8>,
+    },
     SessionClosed {
         session_id: String,
         /// Process exit code (e.g., 0 for success, non-zero for failure).
@@ -158,9 +181,17 @@ pub enum Event {
         #[serde(default)]
         exit_code: Option<i64>,
     },
-    ProcessChanged { session_id: String, process_name: String },
-    GridDiff { session_id: String, diff: crate::types::RichGridDiff },
-    Bell { session_id: String },
+    ProcessChanged {
+        session_id: String,
+        process_name: String,
+    },
+    GridDiff {
+        session_id: String,
+        diff: crate::types::RichGridDiff,
+    },
+    Bell {
+        session_id: String,
+    },
 }
 
 /// Top-level message from daemon to client (can be a response or async event)
@@ -232,9 +263,7 @@ pub enum ShimResponse {
         cols: u16,
     },
     /// Shell process exited
-    ShellExited {
-        exit_code: Option<i64>,
-    },
+    ShellExited { exit_code: Option<i64> },
 }
 
 #[cfg(test)]
@@ -299,7 +328,12 @@ mod tests {
         assert!(json.contains("\"running\":true"));
         let deserialized: ShimResponse = serde_json::from_str(&json).unwrap();
         match deserialized {
-            ShimResponse::StatusInfo { shell_pid, running, rows, cols } => {
+            ShimResponse::StatusInfo {
+                shell_pid,
+                running,
+                rows,
+                cols,
+            } => {
                 assert_eq!(shell_pid, 12345);
                 assert!(running);
                 assert_eq!(rows, 30);
@@ -337,7 +371,12 @@ mod tests {
         assert!(!json.contains("input_expected"));
         let deserialized: Response = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Response::LastOutputTime { epoch_ms, running, exit_code, input_expected } => {
+            Response::LastOutputTime {
+                epoch_ms,
+                running,
+                exit_code,
+                input_expected,
+            } => {
                 assert_eq!(epoch_ms, 1700000000000);
                 assert!(!running);
                 assert_eq!(exit_code, Some(1));
@@ -353,7 +392,12 @@ mod tests {
         let json = r#"{"type":"LastOutputTime","epoch_ms":1700000000000,"running":true}"#;
         let deserialized: Response = serde_json::from_str(json).unwrap();
         match deserialized {
-            Response::LastOutputTime { epoch_ms, running, exit_code, input_expected } => {
+            Response::LastOutputTime {
+                epoch_ms,
+                running,
+                exit_code,
+                input_expected,
+            } => {
                 assert_eq!(epoch_ms, 1700000000000);
                 assert!(running);
                 assert_eq!(exit_code, None);
@@ -375,7 +419,11 @@ mod tests {
         assert!(json.contains("\"input_expected\":true"));
         let deserialized: Response = serde_json::from_str(&json).unwrap();
         match deserialized {
-            Response::LastOutputTime { exit_code, input_expected, .. } => {
+            Response::LastOutputTime {
+                exit_code,
+                input_expected,
+                ..
+            } => {
                 assert_eq!(exit_code, None);
                 assert_eq!(input_expected, Some(true));
             }
@@ -444,7 +492,10 @@ mod tests {
 
         let read_env: DaemonMessageReadEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(read_env.request_id, Some(7));
-        assert!(matches!(read_env.message, DaemonMessage::Response(Response::Pong)));
+        assert!(matches!(
+            read_env.message,
+            DaemonMessage::Response(Response::Pong)
+        ));
     }
 
     #[test]
@@ -452,6 +503,9 @@ mod tests {
         let json = r#"{"kind":"Response","type":"Pong"}"#;
         let read_env: DaemonMessageReadEnvelope = serde_json::from_str(json).unwrap();
         assert_eq!(read_env.request_id, None);
-        assert!(matches!(read_env.message, DaemonMessage::Response(Response::Pong)));
+        assert!(matches!(
+            read_env.message,
+            DaemonMessage::Response(Response::Pong)
+        ));
     }
 }

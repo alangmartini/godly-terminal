@@ -123,7 +123,12 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: WhisperRequest = serde_json::from_str(&json).unwrap();
         match parsed {
-            WhisperRequest::LoadModel { model_path, use_gpu, gpu_device, language } => {
+            WhisperRequest::LoadModel {
+                model_path,
+                use_gpu,
+                gpu_device,
+                language,
+            } => {
                 assert_eq!(model_path, "/path/to/model.bin");
                 assert!(use_gpu);
                 assert_eq!(gpu_device, 1);
@@ -178,7 +183,13 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: WhisperResponse = serde_json::from_str(&json).unwrap();
         match parsed {
-            WhisperResponse::Status { state, model_loaded, model_name, gpu_available, gpu_in_use } => {
+            WhisperResponse::Status {
+                state,
+                model_loaded,
+                model_name,
+                gpu_available,
+                gpu_in_use,
+            } => {
                 assert_eq!(state, "idle");
                 assert!(model_loaded);
                 assert_eq!(model_name, Some("ggml-base.bin".to_string()));
@@ -198,7 +209,10 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: WhisperResponse = serde_json::from_str(&json).unwrap();
         match parsed {
-            WhisperResponse::ModelLoaded { model_name, gpu_in_use } => {
+            WhisperResponse::ModelLoaded {
+                model_name,
+                gpu_in_use,
+            } => {
                 assert_eq!(model_name, "ggml-large.bin");
                 assert!(gpu_in_use);
             }
@@ -216,7 +230,11 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: WhisperResponse = serde_json::from_str(&json).unwrap();
         match parsed {
-            WhisperResponse::AudioLevel { rms, peak, duration_ms } => {
+            WhisperResponse::AudioLevel {
+                rms,
+                peak,
+                duration_ms,
+            } => {
                 assert!((rms - 0.25).abs() < 1e-6);
                 assert!((peak - 0.8).abs() < 1e-6);
                 assert_eq!(duration_ms, 500);

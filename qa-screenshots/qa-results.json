@@ -1,0 +1,15 @@
+{
+  "issues": [
+    {
+      "severity": "major",
+      "title": "JavaScript console errors",
+      "detail": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "severity": "major",
+      "title": "JavaScript console errors",
+      "detail": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    }
+  ],
+  "timestamp": "2026-02-24T21:05:14.225Z"
+}

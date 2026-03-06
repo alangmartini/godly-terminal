@@ -11,8 +11,15 @@ pub mod contracts;
 pub enum DaemonCall {
     CreateSession(SessionSpec),
     CloseSession(String),
-    Write { session_id: String, bytes: Vec<u8> },
-    Resize { session_id: String, rows: u16, cols: u16 },
+    Write {
+        session_id: String,
+        bytes: Vec<u8>,
+    },
+    Resize {
+        session_id: String,
+        rows: u16,
+        cols: u16,
+    },
     ListSessions,
 }
 
@@ -197,7 +204,7 @@ mod tests {
         let mut notifications = FakeNotificationPort::default();
         let expected_sequence =
             run_notification_contract(&mut notifications, "Build done", "Terminal finished")
-            .expect("notification contract should pass");
+                .expect("notification contract should pass");
 
         assert_eq!(notifications.notifications, expected_sequence);
     }

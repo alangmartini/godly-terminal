@@ -196,15 +196,14 @@ fn notification_contract_is_shared_between_fake_and_adapter_ports() {
     let mut callback = CallbackNotificationPort::new({
         let recorded = Arc::clone(&recorded);
         move |title, body| {
-            recorded
-                .lock()
-                .push((title.to_string(), body.to_string()));
+            recorded.lock().push((title.to_string(), body.to_string()));
             Ok(())
         }
     });
 
-    let callback_sequence = run_notification_contract(&mut callback, "Build done", "Terminal finished")
-        .expect("callback notification contract should pass");
+    let callback_sequence =
+        run_notification_contract(&mut callback, "Build done", "Terminal finished")
+            .expect("callback notification contract should pass");
 
     let mut log_port = LogNotificationPort::new();
     let log_sequence = run_notification_contract(&mut log_port, "Build done", "Terminal finished")

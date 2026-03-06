@@ -56,8 +56,13 @@ const ROW_WRAPPED: u8 = 1 << 0;
 /// Encode a `RichGridDiff` into a compact binary format, appending to `buf`.
 pub fn encode_grid_diff_into(diff: &RichGridDiff, buf: &mut Vec<u8>) {
     // Estimate capacity: header ~25B + per row ~5B + per cell ~10B
-    let estimated = 25 + diff.dirty_rows.len() * 5
-        + diff.dirty_rows.iter().map(|(_, r)| r.cells.len() * 10).sum::<usize>();
+    let estimated = 25
+        + diff.dirty_rows.len() * 5
+        + diff
+            .dirty_rows
+            .iter()
+            .map(|(_, r)| r.cells.len() * 10)
+            .sum::<usize>();
     buf.reserve(estimated);
 
     // Header
@@ -525,7 +530,13 @@ mod tests {
                     "default",
                 ));
             }
-            dirty_rows.push((i, RichGridRow { cells, wrapped: false }));
+            dirty_rows.push((
+                i,
+                RichGridRow {
+                    cells,
+                    wrapped: false,
+                },
+            ));
         }
 
         let mut diff = make_diff(dirty_rows);

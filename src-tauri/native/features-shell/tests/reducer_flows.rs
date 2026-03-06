@@ -125,11 +125,12 @@ fn split_flow_keeps_active_tab_but_moves_workspace_focus() {
         .map(|workspace| workspace.layout.find_leaf(&new_terminal_id))
         .unwrap_or(false);
 
-    let created_decision = tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
-        session_id: split_decision.new_terminal_id,
-        active_workspace_id: workspaces.active_id().map(str::to_string),
-        terminal_in_active_layout,
-    });
+    let created_decision =
+        tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
+            session_id: split_decision.new_terminal_id,
+            active_workspace_id: workspaces.active_id().map(str::to_string),
+            terminal_in_active_layout,
+        });
 
     apply_terminal_created(&mut tabs, &mut workspaces, created_decision);
 
@@ -152,12 +153,11 @@ fn workspace_switch_flow_reads_target_workspace_focus() {
         .map(|ws| ws.focused_terminal.clone())
         .or_else(|| workspaces.active().map(|ws| ws.focused_terminal.clone()));
 
-    let decision = workspace_reducer::reduce_workspace_selection(
-        workspace_reducer::WorkspaceSelectionInput {
+    let decision =
+        workspace_reducer::reduce_workspace_selection(workspace_reducer::WorkspaceSelectionInput {
             workspace_id: "w-2".into(),
             focused_terminal_id,
-        },
-    );
+        });
 
     assert!(workspaces.set_active(&decision.workspace_id));
     if decision.clear_context_menu {
@@ -229,12 +229,11 @@ fn split_then_workspace_switch_then_delete_flow_keeps_cross_reducer_state_consis
         vec!["t-1", "t-2", "t-4"]
     );
 
-    let selection = workspace_reducer::reduce_workspace_selection(
-        workspace_reducer::WorkspaceSelectionInput {
+    let selection =
+        workspace_reducer::reduce_workspace_selection(workspace_reducer::WorkspaceSelectionInput {
             workspace_id: "w-2".into(),
             focused_terminal_id: workspaces.get("w-2").map(|ws| ws.focused_terminal.clone()),
-        },
-    );
+        });
     assert!(workspaces.set_active(&selection.workspace_id));
     assert_eq!(
         workspace_reducer::reduce_workspace_switch_read_target(selection.mark_terminal_read_id)
@@ -242,12 +241,11 @@ fn split_then_workspace_switch_then_delete_flow_keeps_cross_reducer_state_consis
         Some("t-3")
     );
 
-    let delete = workspace_reducer::reduce_delete_workspace(
-        workspace_reducer::DeleteWorkspaceInput {
+    let delete =
+        workspace_reducer::reduce_delete_workspace(workspace_reducer::DeleteWorkspaceInput {
             workspace_count: workspaces.count(),
             terminal_ids: vec!["t-3".into()],
-        },
-    );
+        });
     let deleting_workspace_id = workspaces
         .active_id()
         .expect("workspace should still be active")
@@ -258,14 +256,19 @@ fn split_then_workspace_switch_then_delete_flow_keeps_cross_reducer_state_consis
         }
         workspace_reducer::DeleteWorkspaceDecision::Delete { terminal_ids, .. } => {
             for terminal_id in terminal_ids {
-                assert!(tabs.close(&terminal_id), "terminal {terminal_id} should close");
+                assert!(
+                    tabs.close(&terminal_id),
+                    "terminal {terminal_id} should close"
+                );
             }
             assert!(workspaces.remove(&deleting_workspace_id));
         }
     }
 
     let post_delete = workspace_reducer::reduce_post_workspace_delete(
-        workspaces.active().map(|workspace| workspace.focused_terminal.clone()),
+        workspaces
+            .active()
+            .map(|workspace| workspace.focused_terminal.clone()),
     );
     assert_eq!(workspaces.active_id(), Some("w-1"));
     assert!(!tabs.contains("t-3"));
@@ -290,11 +293,12 @@ fn close_tab_then_delete_workspace_flow_retargets_focus_and_read_marking() {
     workspaces.add(workspace("w-2", "t-3", leaf("t-3")));
 
     let active_workspace = workspaces.active_mut().expect("active workspace");
-    let close_decision = layout_reducer::reduce_close_terminal(layout_reducer::CloseTerminalInput {
-        layout: active_workspace.layout.clone(),
-        focused_terminal_id: active_workspace.focused_terminal.clone(),
-        closing_terminal_id: "t-1".into(),
-    });
+    let close_decision =
+        layout_reducer::reduce_close_terminal(layout_reducer::CloseTerminalInput {
+            layout: active_workspace.layout.clone(),
+            focused_terminal_id: active_workspace.focused_terminal.clone(),
+            closing_terminal_id: "t-1".into(),
+        });
     active_workspace.layout = close_decision.next_layout;
     if let Some(next_focused_terminal_id) = close_decision.next_focused_terminal_id {
         active_workspace.focused_terminal = next_focused_terminal_id;
@@ -328,14 +332,19 @@ fn close_tab_then_delete_workspace_flow_retargets_focus_and_read_marking() {
         }
         workspace_reducer::DeleteWorkspaceDecision::Delete { terminal_ids, .. } => {
             for terminal_id in terminal_ids {
-                assert!(tabs.close(&terminal_id), "terminal {terminal_id} should close");
+                assert!(
+                    tabs.close(&terminal_id),
+                    "terminal {terminal_id} should close"
+                );
             }
             assert!(workspaces.remove(&deleting_workspace_id));
         }
     }
 
     let post_delete = workspace_reducer::reduce_post_workspace_delete(
-        workspaces.active().map(|workspace| workspace.focused_terminal.clone()),
+        workspaces
+            .active()
+            .map(|workspace| workspace.focused_terminal.clone()),
     );
 
     assert_eq!(workspaces.active_id(), Some("w-2"));

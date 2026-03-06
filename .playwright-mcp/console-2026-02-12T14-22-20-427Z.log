@@ -1,0 +1,19 @@
+[     295ms] [ERROR] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:1420/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=cd956039:22:37)
+    at listen (http://localhost:1420/node_modules/.vite/deps/chunk-LDCDX4M5.js?v=cd956039:37:14)
+    at TerminalService.init (http://localhost:1420/src/services/terminal-service.ts:14:34)
+    at App.init (http://localhost:1420/src/components/App.ts:214:27)
+    at http://localhost:1420/src/main.ts:8:5 @ :0
+[     528ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:1420/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=cd956039:22:37)
+    at listen (http://localhost:1420/node_modules/.vite/deps/chunk-LDCDX4M5.js?v=cd956039:37:14)
+    at WorktreePanel.setupCleanupListener (http://localhost:1420/src/components/WorktreePanel.ts:236:5)
+    at WorktreePanel.mount (http://localhost:1420/src/components/WorktreePanel.ts:273:10)
+    at new WorkspaceSidebar (http://localhost:1420/src/components/WorkspaceSidebar.ts:25:24)
+    at new App (http://localhost:1420/src/components/App.ts:35:20)
+    at http://localhost:1420/src/main.ts:7:13
+[     522ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:1420/favicon.ico:0
+[    8826ms] TypeError: Cannot read properties of undefined (reading 'invoke')
+    at invoke (http://localhost:1420/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=cd956039:109:37)
+    at open (http://localhost:1420/node_modules/.vite/deps/@tauri-apps_plugin-dialog.js?v=0bd16665:28:16)
+    at WorkspaceSidebar.handleAddWorkspace (http://localhost:1420/src/components/WorkspaceSidebar.ts:101:28)
