@@ -1,31 +1,70 @@
 use iced::Color;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+
+// ---------------------------------------------------------------------------
+// Serde helper for iced::Color (serializes as [r, g, b, a] array).
+// ---------------------------------------------------------------------------
+
+mod color_serde {
+    use iced::Color;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(c: &Color, s: S) -> Result<S::Ok, S::Error> {
+        [c.r, c.g, c.b, c.a].serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
+        let [r, g, b, a] = <[f32; 4]>::deserialize(d)?;
+        Ok(Color::from_rgba(r, g, b, a))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Terminal-specific color palette (16 ANSI colors + extras).
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TerminalPalette {
+    #[serde(with = "color_serde")]
     pub black: Color,
+    #[serde(with = "color_serde")]
     pub red: Color,
+    #[serde(with = "color_serde")]
     pub green: Color,
+    #[serde(with = "color_serde")]
     pub yellow: Color,
+    #[serde(with = "color_serde")]
     pub blue: Color,
+    #[serde(with = "color_serde")]
     pub magenta: Color,
+    #[serde(with = "color_serde")]
     pub cyan: Color,
+    #[serde(with = "color_serde")]
     pub white: Color,
+    #[serde(with = "color_serde")]
     pub bright_black: Color,
+    #[serde(with = "color_serde")]
     pub bright_red: Color,
+    #[serde(with = "color_serde")]
     pub bright_green: Color,
+    #[serde(with = "color_serde")]
     pub bright_yellow: Color,
+    #[serde(with = "color_serde")]
     pub bright_blue: Color,
+    #[serde(with = "color_serde")]
     pub bright_magenta: Color,
+    #[serde(with = "color_serde")]
     pub bright_cyan: Color,
+    #[serde(with = "color_serde")]
     pub bright_white: Color,
+    #[serde(with = "color_serde")]
     pub foreground: Color,
+    #[serde(with = "color_serde")]
     pub background: Color,
+    #[serde(with = "color_serde")]
     pub cursor: Color,
+    #[serde(with = "color_serde")]
     pub selection: Color,
 }
 
@@ -33,23 +72,39 @@ pub struct TerminalPalette {
 // Full UI + terminal theme palette.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ThemePalette {
+    #[serde(with = "color_serde")]
     pub bg_primary: Color,
+    #[serde(with = "color_serde")]
     pub bg_secondary: Color,
+    #[serde(with = "color_serde")]
     pub bg_tertiary: Color,
+    #[serde(with = "color_serde")]
     pub bg_active: Color,
+    #[serde(with = "color_serde")]
     pub text_primary: Color,
+    #[serde(with = "color_serde")]
     pub text_secondary: Color,
+    #[serde(with = "color_serde")]
     pub text_active: Color,
+    #[serde(with = "color_serde")]
     pub accent: Color,
+    #[serde(with = "color_serde")]
     pub accent_hover: Color,
+    #[serde(with = "color_serde")]
     pub border: Color,
+    #[serde(with = "color_serde")]
     pub danger: Color,
+    #[serde(with = "color_serde")]
     pub pane_bg: Color,
+    #[serde(with = "color_serde")]
     pub pane_border: Color,
+    #[serde(with = "color_serde")]
     pub pane_focused_border: Color,
+    #[serde(with = "color_serde")]
     pub empty_state_bg: Color,
+    #[serde(with = "color_serde")]
     pub backdrop: Color,
     pub terminal: TerminalPalette,
 }
@@ -141,6 +196,107 @@ fn active() -> ThemePalette {
 /// Returns the active theme's terminal palette.
 pub fn active_terminal_palette() -> TerminalPalette {
     active().terminal
+}
+
+// ---------------------------------------------------------------------------
+// Custom themes (F5: JSON import/export + persistence).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CustomTheme {
+    pub id: String,
+    pub name: String,
+    pub ui: ThemePalette,
+    pub terminal: TerminalPalette,
+}
+
+impl CustomTheme {
+    /// Preview swatch colors matching `ThemeId::preview_colors()`.
+    pub fn preview_colors(&self) -> [Color; 5] {
+        [
+            self.ui.bg_primary,
+            self.ui.accent,
+            self.ui.text_primary,
+            self.ui.border,
+            self.terminal.background,
+        ]
+    }
+}
+
+/// Set the active palette from a custom theme.
+pub fn set_active_custom_theme(theme: &CustomTheme) {
+    let mut p = theme.ui.clone();
+    p.terminal = theme.terminal.clone();
+    *ACTIVE_PALETTE.write().unwrap() = Some(p);
+}
+
+/// Parse and validate a JSON string as a `CustomTheme`.
+pub fn validate_custom_theme(json: &str) -> Result<CustomTheme, String> {
+    let theme: CustomTheme =
+        serde_json::from_str(json).map_err(|e| format!("Invalid theme JSON: {e}"))?;
+    if theme.id.is_empty() {
+        return Err("Theme 'id' must not be empty".into());
+    }
+    if theme.name.is_empty() {
+        return Err("Theme 'name' must not be empty".into());
+    }
+    Ok(theme)
+}
+
+const CUSTOM_THEMES_FILE: &str = "custom-themes.json";
+
+/// Default directory for custom theme persistence.
+pub fn custom_themes_dir() -> PathBuf {
+    let base = std::env::var("APPDATA")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let directory_name = format!("com.godly.terminal{}", godly_protocol::instance_suffix());
+    base.join(directory_name).join("native")
+}
+
+/// Load custom themes from `custom-themes.json` in `dir`.
+pub fn load_custom_themes(dir: &Path) -> Vec<CustomTheme> {
+    let path = dir.join(CUSTOM_THEMES_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+            log::warn!("Failed to parse {}: {}", path.display(), e);
+            Vec::new()
+        }),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Save custom themes to `custom-themes.json` in `dir`.
+pub fn save_custom_themes(dir: &Path, themes: &[CustomTheme]) -> Result<(), String> {
+    let path = dir.join(CUSTOM_THEMES_FILE);
+    std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create dir: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(themes).map_err(|e| format!("Serialization failed: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+/// Export a single custom theme to a file in `dir`, named `{name}.json`.
+pub fn export_theme_to_file(theme: &CustomTheme, dir: &Path) -> Result<PathBuf, String> {
+    let safe_name: String = theme
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let filename = format!("{}.json", safe_name.trim());
+    let path = dir.join(filename);
+    let json =
+        serde_json::to_string_pretty(theme).map_err(|e| format!("Serialization failed: {e}"))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    Ok(path)
 }
 
 // ---------------------------------------------------------------------------
