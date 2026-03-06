@@ -51,6 +51,10 @@ pub struct TerminalCanvas<'a> {
     /// Optional selection range (start, end) in reading order.
     /// When set, draws a semi-transparent blue overlay on selected cells.
     pub selection: Option<(GridPos, GridPos)>,
+    /// Default foreground color (overridable by theme).
+    pub default_fg: Color,
+    /// Default background color (overridable by theme).
+    pub default_bg: Color,
 }
 
 impl Default for TerminalCanvas<'_> {
@@ -59,6 +63,8 @@ impl Default for TerminalCanvas<'_> {
             grid: None,
             metrics: FontMetrics::default(),
             selection: None,
+            default_fg: DEFAULT_FG,
+            default_bg: DEFAULT_BG,
         }
     }
 }
@@ -70,6 +76,8 @@ impl<'a> TerminalCanvas<'a> {
             grid: None,
             metrics,
             selection: None,
+            default_fg: DEFAULT_FG,
+            default_bg: DEFAULT_BG,
         }
     }
 }
@@ -88,7 +96,7 @@ impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
         // Fill background
-        frame.fill_rectangle(Point::ORIGIN, bounds.size(), DEFAULT_BG);
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), self.default_bg);
 
         let grid = match &self.grid {
             Some(g) => g,
@@ -116,13 +124,13 @@ impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
                 // Resolve colors, handling inverse attribute
                 let (mut fg, bg) = if cell.inverse {
                     (
-                        parse_color(&cell.bg, DEFAULT_BG),
-                        parse_color(&cell.fg, DEFAULT_FG),
+                        parse_color(&cell.bg, self.default_bg),
+                        parse_color(&cell.fg, self.default_fg),
                     )
                 } else {
                     (
-                        parse_color(&cell.fg, DEFAULT_FG),
-                        parse_color(&cell.bg, DEFAULT_BG),
+                        parse_color(&cell.fg, self.default_fg),
+                        parse_color(&cell.bg, self.default_bg),
                     )
                 };
 
@@ -136,7 +144,7 @@ impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
                 }
 
                 // Draw background (only if non-default to avoid overdraw)
-                if bg.r != DEFAULT_BG.r || bg.g != DEFAULT_BG.g || bg.b != DEFAULT_BG.b {
+                if bg.r != self.default_bg.r || bg.g != self.default_bg.g || bg.b != self.default_bg.b {
                     frame.fill_rectangle(
                         Point::new(x, y),
                         Size::new(cell_w * char_width, cell_h),
