@@ -233,10 +233,10 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Depends on**: Nothing
 **Priority**: P3
 
-- [ ] K1. CLAUDE.md editor dialog (sidebar buttons for project + user)
+- [x] K1. CLAUDE.md editor dialog (sidebar buttons for project + user)
 - [ ] K2. Quit confirmation dialog (active sessions warning)
 - [ ] K3. Copy dialog (preview with clean/normal mode toggle)
-- [ ] K4. Figma URL prompt dialog
+- [ ] K4. Figma URL prompt dialog -- Skipped (tied to I6 Figma pane)
 
 ---
 
@@ -346,3 +346,7 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
   - Subscription bridges channel to iced update loop via `Message::McpEvent`.
   - Handles: focus terminal, switch workspace, rename terminal, create/close terminal, move terminal between workspaces, toast notifications, split/unsplit, swap panes, zoom pane.
   - Query-only requests (ListTerminals, ReadTerminal, etc.) return "Not yet implemented" for now.
+## Progress Log — 2026-03-06 (K1 CLAUDE.md Editor)
+
+### Completed in this update
+- **Stream K**: K1 completed (CLAUDE.md editor dialog with sidebar buttons, text editor + markdown preview, async file I/O, Ctrl+S save, Escape close).

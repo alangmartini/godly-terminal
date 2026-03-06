@@ -159,6 +159,8 @@ pub enum SidebarAction {
     MoveWorkspaceDown(String),
     NewWorkspace,
     ToggleSettings,
+    OpenProjectClaudeMd,
+    OpenUserClaudeMd,
 }
 
 /// Workspace-level signals used by the sidebar rendering.
@@ -592,7 +594,51 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .width(Length::Fill)
     .height(Length::Fill);
 
-    let sidebar_content = container(column![header, scrollable_list])
+    // --- K1: CLAUDE.md editor buttons ---
+    let claude_md_btn = |label: &'a str, action: SidebarAction| {
+        button(
+            text(label)
+                .size(11)
+                .color(TEXT_SECONDARY()),
+        )
+        .on_press(on_action(action))
+        .padding(Padding::from([4, 8]))
+        .width(Length::Fill)
+        .style(|_theme, status| {
+            let bg = match status {
+                button::Status::Hovered => iced::Background::Color(BG_TERTIARY()),
+                _ => iced::Background::Color(Color::TRANSPARENT),
+            };
+            button::Style {
+                background: Some(bg),
+                text_color: TEXT_SECONDARY(),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+                ..button::Style::default()
+            }
+        })
+    };
+
+    let claude_md_footer = container(
+        column![
+            rule::horizontal(1).style(|_theme| rule::Style {
+                color: BORDER(),
+                radius: 0.0.into(),
+                fill_mode: rule::FillMode::Full,
+                snap: true,
+            }),
+            claude_md_btn("Project CLAUDE.md", SidebarAction::OpenProjectClaudeMd),
+            claude_md_btn("User CLAUDE.md", SidebarAction::OpenUserClaudeMd),
+        ]
+        .spacing(2),
+    )
+    .padding(Padding::from([4, 8]))
+    .width(Length::Fill);
+
+    let sidebar_content = container(column![header, scrollable_list, claude_md_footer])
         .width(Length::Fixed(sidebar_content_width))
         .height(Length::Fill)
         .clip(true)
