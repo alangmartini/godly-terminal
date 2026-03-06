@@ -218,13 +218,15 @@ pub struct GodlyApp {
     /// Daemon client (shared with bridge thread).
     client: Option<Arc<NativeDaemonClient>>,
     /// All terminal sessions (global, with workspace_id tracking).
-    terminals: TerminalCollection,
+    pub(crate) terminals: TerminalCollection,
     /// Workspace collection — each workspace owns its layout tree and focused terminal.
-    workspaces: WorkspaceCollection,
+    pub(crate) workspaces: WorkspaceCollection,
     /// Error message to display if initialization failed.
     init_error: Option<String>,
     /// Event receiver for the daemon subscription (taken once by the subscription).
     event_receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<DaemonEventMsg>>>>,
+    /// Event receiver for MCP pipe events (taken once by the subscription).
+    mcp_event_receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
     /// Window dimensions in logical pixels.
     window_width: f32,
     window_height: f32,
@@ -349,9 +351,14 @@ pub struct GodlyApp {
     copy_preview_text: Option<String>,
     // --- F1-F4: Theme System ---
     active_theme: crate::theme::ThemeId,
+    // --- F5: Custom Theme Import/Export ---
+    custom_themes: Vec<crate::theme::CustomTheme>,
+    active_custom_theme_id: Option<String>,
     // --- H1-H6: Shell Picker & Workspace Creation ---
     shell_picker: ShellPickerState,
     workspace_ai_modes: HashMap<String, AiToolMode>,
+    // --- I1-I3: Quick Claude Launcher ---
+    quick_claude_launch: Option<crate::quick_claude::LaunchState>,
     // --- G1/G2: Terminal Context Menu ---
     terminal_context_menu_pos: Option<(f32, f32)>,
     terminal_context_menu_terminal_id: Option<String>,
@@ -362,6 +369,8 @@ pub struct GodlyApp {
     search: SearchState,
     // --- G6/G7: Scrollbar + Performance Overlay ---
     perf_overlay_visible: bool,
+    // --- K1: CLAUDE.md Editor ---
+    claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
 }
 
 impl Default for GodlyApp {
@@ -372,6 +381,7 @@ impl Default for GodlyApp {
             workspaces: WorkspaceCollection::new(),
             init_error: None,
             event_receiver: Arc::new(parking_lot::Mutex::new(None)),
+            mcp_event_receiver: Arc::new(parking_lot::Mutex::new(None)),
             window_width: 1200.0,
             window_height: 800.0,
             window_id: None,
@@ -435,14 +445,18 @@ impl Default for GodlyApp {
             quit_confirm_pending: false,
             copy_preview_text: None,
             active_theme: crate::theme::ThemeId::Dusk,
+            custom_themes: crate::theme::load_custom_themes(&crate::theme::custom_themes_dir()),
+            active_custom_theme_id: None,
             shell_picker: ShellPickerState::default(),
             workspace_ai_modes: HashMap::new(),
+            quick_claude_launch: None,
             terminal_context_menu_pos: None,
             terminal_context_menu_terminal_id: None,
             hovered_url: None,
             ctrl_held: false,
             search: SearchState::default(),
             perf_overlay_visible: false,
+            claude_md_editor: None,
         }
     }
 }
@@ -584,6 +598,12 @@ pub enum Message {
     QuickClaudeDeletePreset(usize),
     /// Clear Quick Claude preset editor state.
     QuickClaudeClearEditor,
+    /// Launch a Quick Claude preset by index.
+    QuickClaudeLaunchPreset(usize),
+    /// A launch step completed (Ok) or failed (Err).
+    QuickClaudeLaunchStepComplete(Result<crate::quick_claude::StepResult, String>),
+    /// Cancel a running Quick Claude launch.
+    QuickClaudeLaunchCancel,
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
     /// AI tool command input changed.
@@ -674,6 +694,13 @@ pub enum Message {
     CopyPreviewDismissed,
     // --- F1-F4: Theme System ---
     ThemeChanged(crate::theme::ThemeId),
+    // --- F5: Custom Theme Import/Export ---
+    ThemeImportRequested,
+    ThemeImported(Result<crate::theme::CustomTheme, String>),
+    ThemeExportRequested(String),
+    ThemeExported(Result<String, String>),
+    ThemeDeleteCustom(String),
+    ThemeSelectCustom(String),
     // --- H1-H6: Shell Picker & Workspace Creation ---
     ShellPickerOpen,
     ShellPickerTabClicked(ShellPickerTab),
@@ -699,6 +726,16 @@ pub enum Message {
     SearchToggleRegex,
     // --- G6/G7: Scrollbar + Performance Overlay ---
     TogglePerfOverlay,
+    // --- K1: CLAUDE.md Editor ---
+    ClaudeMdOpen { path: std::path::PathBuf },
+    ClaudeMdLoaded { content: String, path: std::path::PathBuf },
+    ClaudeMdLoadFailed(String),
+    ClaudeMdEditorAction(iced::widget::text_editor::Action),
+    ClaudeMdSave,
+    ClaudeMdSaved(Result<(), String>),
+    ClaudeMdClose,
+    // --- J1-J9: MCP Event Integration ---
+    McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -1234,6 +1271,18 @@ impl GodlyApp {
                     return Task::none();
                 }
 
+                // K1: CLAUDE.md editor intercepts Ctrl+S and Escape
+                if self.claude_md_editor.is_some() {
+                    if modifiers.control() && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s") {
+                        return self.update(Message::ClaudeMdSave);
+                    }
+                    if is_escape_key(&key) {
+                        self.claude_md_editor = None;
+                        return Task::none();
+                    }
+                    return Task::none();
+                }
+
                 // Check app shortcuts first.
                 if let Some(action) = shortcuts::check_app_shortcut(&key, modifiers) {
                     return self.handle_app_action(action);
@@ -1723,6 +1772,57 @@ impl GodlyApp {
                 self.quick_claude_prompt_input.clear();
                 self.quick_claude_layout = QuickClaudeLayout::Single;
             }
+            Message::QuickClaudeLaunchPreset(index) => {
+                if self.quick_claude_launch.is_some() {
+                    return Task::none();
+                }
+                let Some(preset) = self.quick_claude_presets.get(index).cloned() else {
+                    return Task::none();
+                };
+                let num_agents = match preset.layout {
+                    QuickClaudeLayout::Single => 1,
+                    QuickClaudeLayout::VSplit | QuickClaudeLayout::HSplit => 2,
+                    QuickClaudeLayout::Grid2x2 => 4,
+                };
+                let steps = crate::quick_claude::default_launch_steps(num_agents, &preset.prompt_template);
+
+                let ws_id = uuid::Uuid::new_v4().to_string();
+                let ws_name = format!("QC: {}", preset.name);
+                let placeholder_id = uuid::Uuid::new_v4().to_string();
+                let rows = self.calculate_rows();
+                let cols = self.calculate_cols();
+                self.terminals.add_to_workspace(
+                    placeholder_id.clone(),
+                    rows,
+                    cols,
+                    ws_id.clone(),
+                );
+                self.workspaces.add(
+                    ws_id.clone(),
+                    ws_name,
+                    placeholder_id.clone(),
+                );
+                self.workspaces.set_active(&ws_id);
+                self.terminals.set_active(&placeholder_id);
+                self.next_workspace_num += 1;
+
+                let mut launch_state = crate::quick_claude::LaunchState::new(
+                    preset.name.clone(),
+                    steps,
+                    num_agents,
+                    ws_id,
+                );
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+
+                self.quick_claude_launch = Some(launch_state);
+                return self.execute_next_launch_step();
+            }
+            Message::QuickClaudeLaunchStepComplete(result) => {
+                return self.handle_launch_step_result(result);
+            }
+            Message::QuickClaudeLaunchCancel => {
+                self.quick_claude_launch = None;
+            }
             Message::AiToolNameInputChanged(value) => {
                 self.ai_tool_name_input = value;
             }
@@ -2118,7 +2218,94 @@ impl GodlyApp {
             }
             Message::ThemeChanged(id) => {
                 self.active_theme = id;
+                self.active_custom_theme_id = None;
                 crate::theme::set_active_theme(id);
+            }
+            // --- F5: Custom Theme Import/Export ---
+            Message::ThemeImportRequested => {
+                return Task::perform(
+                    async {
+                        let file = rfd::AsyncFileDialog::new()
+                            .add_filter("JSON", &["json"])
+                            .set_title("Import Custom Theme")
+                            .pick_file()
+                            .await;
+                        match file {
+                            Some(f) => {
+                                let bytes = f.read().await;
+                                let json = String::from_utf8(bytes)
+                                    .map_err(|e| format!("Invalid UTF-8: {e}"))?;
+                                crate::theme::validate_custom_theme(&json)
+                            }
+                            None => Err("Cancelled".into()),
+                        }
+                    },
+                    Message::ThemeImported,
+                );
+            }
+            Message::ThemeImported(Ok(theme)) => {
+                self.custom_themes.retain(|t| t.id != theme.id);
+                self.custom_themes.push(theme.clone());
+                let dir = crate::theme::custom_themes_dir();
+                if let Err(e) = crate::theme::save_custom_themes(&dir, &self.custom_themes) {
+                    log::error!("Failed to save custom themes: {e}");
+                }
+                self.enqueue_toast(
+                    "Theme Imported".into(),
+                    format!("\"{}\" added to custom themes.", theme.name),
+                );
+            }
+            Message::ThemeImported(Err(e)) => {
+                if e != "Cancelled" {
+                    self.enqueue_toast("Import Failed".into(), e);
+                }
+            }
+            Message::ThemeExportRequested(id) => {
+                if let Some(theme) = self.custom_themes.iter().find(|t| t.id == id).cloned() {
+                    return Task::perform(
+                        async move {
+                            let dir = rfd::AsyncFileDialog::new()
+                                .set_title("Export Theme - Choose Folder")
+                                .pick_folder()
+                                .await;
+                            match dir {
+                                Some(d) => {
+                                    let path = d.path().to_path_buf();
+                                    crate::theme::export_theme_to_file(&theme, &path)
+                                        .map(|p| p.display().to_string())
+                                }
+                                None => Err("Cancelled".into()),
+                            }
+                        },
+                        Message::ThemeExported,
+                    );
+                }
+            }
+            Message::ThemeExported(Ok(path)) => {
+                self.enqueue_toast("Theme Exported".into(), format!("Saved to {path}"));
+            }
+            Message::ThemeExported(Err(e)) => {
+                if e != "Cancelled" {
+                    self.enqueue_toast("Export Failed".into(), e);
+                }
+            }
+            Message::ThemeDeleteCustom(id) => {
+                self.custom_themes.retain(|t| t.id != id);
+                let dir = crate::theme::custom_themes_dir();
+                if let Err(e) = crate::theme::save_custom_themes(&dir, &self.custom_themes) {
+                    log::error!("Failed to save custom themes after delete: {e}");
+                }
+                if self.active_custom_theme_id.as_deref() == Some(&id) {
+                    self.active_custom_theme_id = None;
+                    self.active_theme = crate::theme::ThemeId::Dusk;
+                    crate::theme::set_active_theme(crate::theme::ThemeId::Dusk);
+                }
+            }
+            Message::ThemeSelectCustom(id) => {
+                if let Some(theme) = self.custom_themes.iter().find(|t| t.id == id) {
+                    self.active_custom_theme_id = Some(id);
+                    crate::theme::set_active_custom_theme(theme);
+                }
             }
             // --- G1/G2: Terminal Context Menu ---
             Message::TerminalContextOpen { id, x, y } => {
@@ -2197,6 +2384,88 @@ impl GodlyApp {
             // --- G6/G7: Performance Overlay ---
             Message::TogglePerfOverlay => {
                 self.perf_overlay_visible = !self.perf_overlay_visible;
+            }
+
+            // --- K1: CLAUDE.md Editor ---
+            Message::ClaudeMdOpen { path } => {
+                let p = path.clone();
+                return Task::perform(
+                    async move {
+                        let (tx, rx) = futures_channel::oneshot::channel();
+                        std::thread::spawn(move || {
+                            let result = if p.exists() {
+                                std::fs::read_to_string(&p)
+                            } else {
+                                if let Some(parent) = p.parent() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                                let _ = std::fs::write(&p, "");
+                                Ok(String::new())
+                            };
+                            let _ = tx.send((result, p));
+                        });
+                        rx.await.unwrap_or_else(|_| (Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "Background thread panicked",
+                        )), path))
+                    },
+                    |(result, path)| match result {
+                        Ok(content) => Message::ClaudeMdLoaded { content, path },
+                        Err(e) => Message::ClaudeMdLoadFailed(e.to_string()),
+                    },
+                );
+            }
+            Message::ClaudeMdLoaded { content, path } => {
+                self.claude_md_editor =
+                    Some(crate::claude_md_editor::ClaudeMdEditorState::new(&content, path));
+            }
+            Message::ClaudeMdLoadFailed(err) => {
+                self.enqueue_toast("CLAUDE.md Error".into(), err);
+            }
+            Message::ClaudeMdEditorAction(action) => {
+                if let Some(ref mut state) = self.claude_md_editor {
+                    state.content.perform(action);
+                    state.dirty = true;
+                }
+            }
+            Message::ClaudeMdSave => {
+                if let Some(ref state) = self.claude_md_editor {
+                    let text = state.text();
+                    let path = state.file_path.clone();
+                    return Task::perform(
+                        async move {
+                            let (tx, rx) = futures_channel::oneshot::channel();
+                            std::thread::spawn(move || {
+                                let result = std::fs::write(&path, &text)
+                                    .map_err(|e| e.to_string());
+                                let _ = tx.send(result);
+                            });
+                            rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                        },
+                        Message::ClaudeMdSaved,
+                    );
+                }
+            }
+            Message::ClaudeMdSaved(result) => {
+                match result {
+                    Ok(()) => {
+                        if let Some(ref mut state) = self.claude_md_editor {
+                            state.dirty = false;
+                        }
+                        self.enqueue_toast("Saved".into(), "CLAUDE.md saved successfully".into());
+                    }
+                    Err(e) => {
+                        self.enqueue_toast("Save Failed".into(), e);
+                    }
+                }
+            }
+            Message::ClaudeMdClose => {
+                self.claude_md_editor = None;
+            }
+
+            // --- J1-J9: MCP Event Integration ---
+            Message::McpEvent(event) => {
+                return self.handle_mcp_event(event);
             }
         }
         Task::none()
@@ -2432,6 +2701,19 @@ impl GodlyApp {
             with_copy_preview
         };
 
+        // --- K1: CLAUDE.md Editor overlay ---
+        let with_claude_md: Element<'_, Message> = if let Some(ref editor_state) = self.claude_md_editor {
+            let editor_overlay = crate::claude_md_editor::view_claude_md_editor(
+                editor_state,
+                Message::ClaudeMdEditorAction,
+                Message::ClaudeMdSave,
+                Message::ClaudeMdClose,
+            );
+            stack![with_shell_picker, editor_overlay].into()
+        } else {
+            with_shell_picker
+        };
+
         // --- G1/G2: Terminal Context Menu overlay ---
         let with_ctx_menu: Element<'_, Message> = if let Some((x, y)) = self.terminal_context_menu_pos {
             let ctx_menu = terminal_context_menu::view_terminal_context_menu(
@@ -2440,9 +2722,9 @@ impl GodlyApp {
                 |action| Message::TerminalContextAction(action),
                 Message::TerminalContextClose,
             );
-            stack![with_shell_picker, ctx_menu].into()
+            stack![with_claude_md, ctx_menu].into()
         } else {
-            with_shell_picker
+            with_claude_md
         };
 
         // --- G4: Search bar overlay (top-right, non-blocking) ---
@@ -2686,18 +2968,19 @@ impl GodlyApp {
 
     /// Render the Appearance tab (theme selection grid with preview swatches).
     fn view_appearance_tab(&self) -> Element<'_, Message> {
-        use crate::theme::ThemeId;
+        use crate::theme::{ThemeId, RADIUS_MD};
         use iced::widget::{button, row, scrollable, text, Space};
         use iced::Theme;
+
+        let has_custom_active = self.active_custom_theme_id.is_some();
 
         let all_themes = ThemeId::all();
         let mut grid_children: Vec<Element<'_, Message>> = Vec::new();
 
         for &theme_id in all_themes {
             let colors = theme_id.preview_colors();
-            let is_active = self.active_theme == theme_id;
+            let is_active = !has_custom_active && self.active_theme == theme_id;
 
-            // Build swatch row
             let mut swatches = row![].spacing(2);
             for c in &colors {
                 let color_val = *c;
@@ -2740,7 +3023,6 @@ impl GodlyApp {
             grid_children.push(theme_button.width(Length::FillPortion(1)).into());
         }
 
-        // Arrange in rows of 3
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
         for chunk in grid_children.chunks_mut(3) {
             let mut r = row![].spacing(8);
@@ -2763,6 +3045,121 @@ impl GodlyApp {
         for r in rows {
             col = col.push(r);
         }
+
+        // --- Custom themes section ---
+        if !self.custom_themes.is_empty() {
+            col = col.push(Space::new().height(12));
+            col = col.push(text("Custom Themes").size(14).color(TEXT_PRIMARY()));
+
+            let mut custom_grid: Vec<Element<'_, Message>> = Vec::new();
+            for ct in &self.custom_themes {
+                let colors = ct.preview_colors();
+                let is_active = self.active_custom_theme_id.as_deref() == Some(&ct.id);
+                let ct_id = ct.id.clone();
+                let ct_id_export = ct.id.clone();
+                let ct_id_delete = ct.id.clone();
+
+                let mut swatches = row![].spacing(2);
+                for c in &colors {
+                    let cv = *c;
+                    swatches = swatches.push(
+                        container(Space::new().width(16).height(16))
+                            .style(move |_t: &Theme| container::Style {
+                                background: Some(iced::Background::Color(cv)),
+                                border: iced::Border {
+                                    radius: 2.0.into(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            }),
+                    );
+                }
+
+                let label = text(ct.name.as_str())
+                    .size(13)
+                    .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
+
+                let action_btns = row![
+                    button(text("Export").size(11))
+                        .on_press(Message::ThemeExportRequested(ct_id_export))
+                        .padding(Padding::from([2, 6]))
+                        .style(move |_t: &Theme, _s| button::Style {
+                            background: Some(iced::Background::Color(BG_TERTIARY())),
+                            text_color: TEXT_SECONDARY(),
+                            border: iced::Border {
+                                radius: 3.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                    button(text("Delete").size(11))
+                        .on_press(Message::ThemeDeleteCustom(ct_id_delete))
+                        .padding(Padding::from([2, 6]))
+                        .style(move |_t: &Theme, _s| button::Style {
+                            background: Some(iced::Background::Color(BG_TERTIARY())),
+                            text_color: DANGER(),
+                            border: iced::Border {
+                                radius: 3.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                ]
+                .spacing(4);
+
+                let btn_content = column![label, swatches, action_btns].spacing(4).padding(8);
+                let border_color = if is_active { ACCENT() } else { BORDER() };
+                let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+
+                let theme_button = button(btn_content)
+                    .on_press(Message::ThemeSelectCustom(ct_id))
+                    .padding(0)
+                    .style(move |_t: &Theme, _status| button::Style {
+                        background: Some(iced::Background::Color(bg_color)),
+                        border: iced::Border {
+                            color: border_color,
+                            width: if is_active { 2.0 } else { 1.0 },
+                            radius: RADIUS_MD.into(),
+                        },
+                        text_color: TEXT_PRIMARY(),
+                        ..Default::default()
+                    });
+
+                custom_grid.push(theme_button.width(Length::FillPortion(1)).into());
+            }
+
+            let mut custom_rows: Vec<Element<'_, Message>> = Vec::new();
+            for chunk in custom_grid.chunks_mut(3) {
+                let mut r = row![].spacing(8);
+                for child in chunk.iter_mut() {
+                    let taken = std::mem::replace(child, Space::new().width(0).height(0).into());
+                    r = r.push(taken);
+                }
+                custom_rows.push(r.into());
+            }
+            for r in custom_rows {
+                col = col.push(r);
+            }
+        }
+
+        // --- Import button ---
+        col = col.push(Space::new().height(12));
+        let import_btn = button(
+            text("Import Theme...").size(13).color(TEXT_PRIMARY()),
+        )
+        .on_press(Message::ThemeImportRequested)
+        .padding(Padding::from([8, 16]))
+        .style(move |_t: &Theme, _s| button::Style {
+            background: Some(iced::Background::Color(BG_TERTIARY())),
+            border: iced::Border {
+                color: BORDER(),
+                width: 1.0,
+                radius: RADIUS_MD.into(),
+            },
+            text_color: TEXT_PRIMARY(),
+            ..Default::default()
+        });
+        col = col.push(import_btn);
 
         scrollable(col).height(Length::Fill).into()
     }
@@ -2953,10 +3350,22 @@ impl GodlyApp {
                 } else {
                     BG_SECONDARY()
                 };
+                let is_launching = self.quick_claude_launch.is_some();
+                let launch_button: Element<'_, Message> = if is_launching {
+                    button(text("...").size(11).color(TEXT_SECONDARY()))
+                        .padding(Padding::from([2, 7]))
+                        .into()
+                } else {
+                    button(text("Launch").size(11).color(ACCENT()))
+                        .on_press(Message::QuickClaudeLaunchPreset(index))
+                        .padding(Padding::from([2, 7]))
+                        .into()
+                };
                 let card = container(column![
                     row![
                         text(&preset.name).size(13).color(TEXT_ACTIVE()),
                         Space::new().width(Length::Fill),
+                        launch_button,
                         button(text("Edit").size(11).color(TEXT_PRIMARY()))
                             .on_press(Message::QuickClaudeEditPreset(index))
                             .padding(Padding::from([2, 7])),
@@ -3012,6 +3421,31 @@ impl GodlyApp {
                 ]
                 .spacing(8),
                 text("Saved Presets").size(12).color(TEXT_SECONDARY()),
+                {
+                    let launch_status: Element<'_, Message> = if let Some(launch) = &self.quick_claude_launch {
+                        let step = launch.current_step;
+                        let total = launch.total_steps();
+                        if let Some(ref err) = launch.error {
+                            column![
+                                text(format!("Launch failed: {}", err)).size(11).color(iced::Color::from_rgb(0.9, 0.3, 0.3)),
+                                button(text("Dismiss").size(11).color(TEXT_PRIMARY()))
+                                    .on_press(Message::QuickClaudeLaunchCancel)
+                                    .padding(Padding::from([2, 7])),
+                            ].spacing(4).into()
+                        } else {
+                            row![
+                                text(format!("Launching {}... step {}/{}", launch.preset_name, step + 1, total))
+                                    .size(11).color(ACCENT()),
+                                button(text("Cancel").size(11).color(TEXT_PRIMARY()))
+                                    .on_press(Message::QuickClaudeLaunchCancel)
+                                    .padding(Padding::from([2, 7])),
+                            ].spacing(8).align_y(iced::Alignment::Center).into()
+                        }
+                    } else {
+                        Space::new().height(0).into()
+                    };
+                    launch_status
+                },
                 presets_list,
             ]
             .spacing(10)
@@ -3481,6 +3915,8 @@ impl GodlyApp {
             keyboard::listen().map(Message::KeyboardEvent),
             // Daemon events via channel.
             daemon_events(Arc::clone(&self.event_receiver)).map(Message::DaemonEvent),
+            // MCP pipe events via channel.
+            crate::subscription::mcp_events(Arc::clone(&self.mcp_event_receiver)).map(Message::McpEvent),
             // Window + mouse events.
             event::listen_with(|ev, status, window_id| match ev {
                 event::Event::Window(window::Event::Opened { .. }) => {
@@ -3897,6 +4333,23 @@ impl GodlyApp {
             SidebarAction::ToggleSettings => {
                 self.settings_open = !self.settings_open;
                 Task::none()
+            }
+            SidebarAction::OpenProjectClaudeMd => {
+                let folder = self
+                    .workspaces
+                    .active()
+                    .map(|ws| ws.folder_path.clone())
+                    .unwrap_or_else(|| ".".to_string());
+                let path = std::path::PathBuf::from(folder).join("CLAUDE.md");
+                self.update(Message::ClaudeMdOpen { path })
+            }
+            SidebarAction::OpenUserClaudeMd => {
+                let home = std::env::var("USERPROFILE")
+                    .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| ".".into()));
+                let path = std::path::PathBuf::from(home)
+                    .join(".claude")
+                    .join("CLAUDE.md");
+                self.update(Message::ClaudeMdOpen { path })
             }
         }
     }
@@ -4416,6 +4869,214 @@ impl GodlyApp {
     }
 
     // -----------------------------------------------------------------------
+    // Quick Claude Launcher
+    // -----------------------------------------------------------------------
+
+    fn execute_next_launch_step(&mut self) -> Task<Message> {
+        let launch = match &self.quick_claude_launch {
+            Some(l) if !l.completed && l.error.is_none() => l,
+            _ => return Task::none(),
+        };
+
+        let step_index = launch.current_step;
+        if step_index >= launch.steps.len() {
+            return self.finalize_launch();
+        }
+
+        let step = launch.steps[step_index].clone();
+        let agent_ids = launch.agent_terminal_ids.clone();
+
+        let Some(client) = &self.client else {
+            return Task::none();
+        };
+        let client = Arc::clone(client);
+        let (rows, cols) = self.terminal_grid_size(None);
+
+        Task::perform(
+            async move {
+                let (tx, rx) = futures_channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result = crate::quick_claude::execute_step(
+                        client, step, agent_ids, rows, cols,
+                    );
+                    let _ = tx.send(result);
+                });
+                rx.await.unwrap_or_else(|_| Err("Launch step thread panicked".into()))
+            },
+            Message::QuickClaudeLaunchStepComplete,
+        )
+    }
+
+    fn handle_launch_step_result(
+        &mut self,
+        result: Result<crate::quick_claude::StepResult, String>,
+    ) -> Task<Message> {
+        if self.quick_claude_launch.is_none() {
+            return Task::none();
+        }
+
+        match result {
+            Ok(step_result) => {
+                let (agent_index_opt, placeholder_opt, ws_id) = {
+                    let launch = self.quick_claude_launch.as_ref().unwrap();
+                    let si = launch.current_step;
+                    let ai = launch.steps.get(si).and_then(|step| {
+                        if let crate::quick_claude::LaunchStep::CreateTerminal { agent_index } = step {
+                            Some(*agent_index)
+                        } else {
+                            None
+                        }
+                    });
+                    let ph = if ai == Some(0) {
+                        launch.agent_terminal_ids.get(0).and_then(|o| o.clone())
+                    } else {
+                        None
+                    };
+                    let wid = launch.workspace_id.clone();
+                    (ai, ph, wid)
+                };
+
+                if let crate::quick_claude::StepResult::TerminalCreated(ref session_id) = step_result {
+                    if let Some(agent_index) = agent_index_opt {
+                        if agent_index == 0 {
+                            if let Some(placeholder) = placeholder_opt {
+                                if let Some(ws) = self.workspaces.get_mut(&ws_id) {
+                                    replace_leaf_in_layout(
+                                        &mut ws.layout,
+                                        &placeholder,
+                                        session_id.clone(),
+                                    );
+                                    ws.focused_terminal = session_id.clone();
+                                }
+                                self.terminals.remove(&placeholder);
+                            }
+                        }
+
+                        if let Some(launch) = &mut self.quick_claude_launch {
+                            launch.agent_terminal_ids[agent_index] = Some(session_id.clone());
+                        }
+
+                        let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
+                        self.terminals.add_to_workspace(
+                            session_id.clone(),
+                            rows,
+                            cols,
+                            ws_id,
+                        );
+                        self.terminals.set_active(session_id);
+                        self.entering_tabs
+                            .insert(session_id.clone(), Self::now_ms());
+                    }
+                }
+
+                if let Some(launch) = &mut self.quick_claude_launch {
+                    launch.current_step += 1;
+                }
+                self.execute_next_launch_step()
+            }
+            Err(e) => {
+                log::error!("Quick Claude launch step failed: {}", e);
+                if let Some(launch) = &mut self.quick_claude_launch {
+                    launch.error = Some(e);
+                }
+                Task::none()
+            }
+        }
+    }
+
+    fn finalize_launch(&mut self) -> Task<Message> {
+        let launch = match &mut self.quick_claude_launch {
+            Some(l) => l,
+            None => return Task::none(),
+        };
+        launch.completed = true;
+
+        let terminal_ids: Vec<String> = launch
+            .agent_terminal_ids
+            .iter()
+            .filter_map(|opt| opt.clone())
+            .collect();
+
+        if terminal_ids.is_empty() {
+            self.quick_claude_launch = None;
+            return Task::none();
+        }
+
+        let num_agents = terminal_ids.len();
+        let ws_id = launch.workspace_id.clone();
+
+        let two_agent_direction = {
+            let preset_name = launch.preset_name.clone();
+            let matching_preset = self
+                .quick_claude_presets
+                .iter()
+                .find(|p| p.name == preset_name);
+            match matching_preset.map(|p| p.layout) {
+                Some(QuickClaudeLayout::HSplit) => SplitDirection::Vertical,
+                _ => SplitDirection::Horizontal,
+            }
+        };
+
+        if let Some(ws) = self.workspaces.get_mut(&ws_id) {
+            match num_agents {
+                1 => {
+                    ws.layout = LayoutNode::Leaf {
+                        terminal_id: terminal_ids[0].clone(),
+                    };
+                    ws.focused_terminal = terminal_ids[0].clone();
+                }
+                2 => {
+                    ws.layout = LayoutNode::Leaf {
+                        terminal_id: terminal_ids[0].clone(),
+                    };
+                    ws.layout.split_leaf(
+                        &terminal_ids[0],
+                        terminal_ids[1].clone(),
+                        two_agent_direction,
+                    );
+                    ws.focused_terminal = terminal_ids[0].clone();
+                }
+                4 => {
+                    ws.layout = LayoutNode::Split {
+                        direction: SplitDirection::Horizontal,
+                        ratio: 0.5,
+                        first: Box::new(LayoutNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: 0.5,
+                            first: Box::new(LayoutNode::Leaf {
+                                terminal_id: terminal_ids[0].clone(),
+                            }),
+                            second: Box::new(LayoutNode::Leaf {
+                                terminal_id: terminal_ids[2].clone(),
+                            }),
+                        }),
+                        second: Box::new(LayoutNode::Split {
+                            direction: SplitDirection::Vertical,
+                            ratio: 0.5,
+                            first: Box::new(LayoutNode::Leaf {
+                                terminal_id: terminal_ids[1].clone(),
+                            }),
+                            second: Box::new(LayoutNode::Leaf {
+                                terminal_id: terminal_ids[3].clone(),
+                            }),
+                        }),
+                    };
+                    ws.focused_terminal = terminal_ids[0].clone();
+                }
+                _ => {
+                    ws.layout = LayoutNode::Leaf {
+                        terminal_id: terminal_ids[0].clone(),
+                    };
+                    ws.focused_terminal = terminal_ids[0].clone();
+                }
+            }
+        }
+
+        self.quick_claude_launch = None;
+        self.resize_all_terminals()
+    }
+
+    // -----------------------------------------------------------------------
     // Clipboard
     // -----------------------------------------------------------------------
 
@@ -4837,6 +5498,19 @@ fn normalize_mute_pattern(pattern: &str) -> Option<String> {
         None
     } else {
         Some(trimmed.to_ascii_lowercase())
+    }
+}
+
+fn replace_leaf_in_layout(layout: &mut LayoutNode, old_id: &str, new_id: String) {
+    match layout {
+        LayoutNode::Leaf { terminal_id } if terminal_id == old_id => {
+            *terminal_id = new_id;
+        }
+        LayoutNode::Split { first, second, .. } => {
+            replace_leaf_in_layout(first, old_id, new_id.clone());
+            replace_leaf_in_layout(second, old_id, new_id);
+        }
+        _ => {}
     }
 }
 

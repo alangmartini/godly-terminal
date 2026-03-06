@@ -100,8 +100,8 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [ ] F2. Implement 11 built-in themes (Tokyo Night, Dracula, Nord, etc.)
 - [ ] F3. Dynamic theme switching without restart
 - [ ] F4. Terminal palette colors (16 ANSI + bright variants) per theme
-- [ ] F5. Custom theme JSON import/export
-- [ ] F6. CSS-variable-like design token system for UI + terminal colors
+- [x] F5. Custom theme JSON import/export
+- [x] F6. CSS-variable-like design token system for UI + terminal colors (Done — Rust `BG_PRIMARY()`, `TEXT_PRIMARY()`, spacing constants are the Iced equivalent of CSS variables)
 
 ---
 
@@ -308,7 +308,21 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 - **Stream E**: E6 MRU parity completed end-to-end (`Ctrl+Tab` / `Ctrl+Shift+Tab` keyboard semantics plus visual popup switcher).
 - **Stream L**: L4, L5, L6, L10, L18, L19, L20, L21, L22 completed.
 
+## Progress Log — 2026-03-06 (I1-I3 Quick Claude Preset Launcher)
+
+### Completed in this update
+- **Stream I**: I1, I2, I3 completed (Quick Claude preset launcher with multi-agent support, launch step sequences, and layout arrangements).
+- New module `quick_claude.rs` with LaunchStep enum, default_launch_steps builder, and step execution logic.
+- Launch button on preset cards, status indicator during launch, cancel support.
+- Layout finalization: Single, VSplit (horizontal), HSplit (vertical), Grid2x2.
+
 ## Progress Log — 2026-03-06 (L14 + L24-L32 UI Polish)
 
 ### Completed in this update
 - **Stream L**: L7, L14, L15-L17, L24-L32 completed (tab animation, title bar, sidebar animation, pane borders, empty state, design tokens).
+
+## Progress Log — 2026-03-06 (F5+F6 Custom Theme Import/Export)
+
+### Completed in this update
+- **F5**: Custom theme JSON import/export with serde support for `iced::Color`, file dialog via `rfd`, persistence to `custom-themes.json`, and full UI in Appearance settings tab.
+- **F6**: Marked done — Rust `BG_PRIMARY()`, `TEXT_PRIMARY()`, spacing/radius constants are the Iced equivalent of CSS variables.
