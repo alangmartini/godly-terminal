@@ -751,6 +751,8 @@ pub enum Message {
     WhisperLevelUpdate(f32),
     WhisperTimerTick,
     WhisperCancel,
+    // --- J1-J9: MCP Event Integration ---
+    McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -948,7 +950,7 @@ impl GodlyApp {
         self.set_sidebar_visible(!self.sidebar_visible)
     }
 
-    fn enqueue_toast(&mut self, title: String, message: String) {
+    pub(crate) fn enqueue_toast(&mut self, title: String, message: String) {
         let now_ms = Self::now_ms();
         enqueue_toast_entry(
             self.toasts.as_mut(),
@@ -975,7 +977,7 @@ impl GodlyApp {
         self.enqueue_toast(title, message);
     }
 
-    fn play_notification_sound_if_allowed(&mut self, terminal_id: &str) {
+    pub(crate) fn play_notification_sound_if_allowed(&mut self, terminal_id: &str) {
         if !self.notification_sounds_enabled
             || self.notification_sound_preset == NotificationSoundPreset::None
         {
@@ -2547,6 +2549,9 @@ impl GodlyApp {
                 }
                 self.whisper_service = None;
                 self.whisper_state = None;
+            // --- J1-J9: MCP Event Integration ---
+            Message::McpEvent(event) => {
+                return self.handle_mcp_event(event);
             }
         }
         Task::none()
@@ -5947,6 +5952,13 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
     }
 
     app.client = Some(Arc::clone(&client));
+
+    // Start the MCP named pipe server for godly-mcp integration (J1-J9).
+    {
+        let (mcp_tx, mcp_rx) = mpsc::unbounded();
+        *app.mcp_event_receiver.lock() = Some(mcp_rx);
+        godly_app_adapter::mcp_pipe::start_mcp_server(mcp_tx);
+    }
 
     let rows = app.calculate_rows();
     let cols = app.calculate_cols();

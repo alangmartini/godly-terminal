@@ -7,6 +7,7 @@ pub mod ports;
 pub mod shortcuts;
 pub mod sound;
 pub mod whisper;
+pub mod mcp_pipe;
 
 pub use ports::{
     connect_daemon_port, system_clipboard_port, system_clock_port, system_notification_port,
