@@ -212,12 +212,12 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] L26. Terminal padding (small inset from edges, like real terminal apps)
 
 ### General
-- [ ] L27. Consistent font family across UI (Inter/system-ui for chrome, monospace for terminal)
-- [ ] L28. Color contrast audit: ensure all text meets WCAG AA on its background
-- [ ] L29. Spacing system: consistent 4/8/12/16/24px spacing scale
-- [ ] L30. Border radius system: consistent 4/6/8px radii
-- [ ] L31. Shadow/elevation for floating elements (context menus, dialogs, toasts)
-- [ ] L32. Transition/animation timing: 150ms ease for hovers, 200ms for state changes
+- [x] L27. Consistent font family across UI (Inter/system-ui for chrome, monospace for terminal)
+- [x] L28. Color contrast audit: ensure all text meets WCAG AA on its background
+- [x] L29. Spacing system: consistent 4/8/12/16/24px spacing scale
+- [x] L30. Border radius system: consistent 4/6/8px radii
+- [x] L31. Shadow/elevation for floating elements (context menus, dialogs, toasts)
+- [x] L32. Transition/animation timing: 150ms ease for hovers, 200ms for state changes
 
 ---
 

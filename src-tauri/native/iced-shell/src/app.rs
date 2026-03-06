@@ -8,7 +8,7 @@ use iced::keyboard;
 use iced::widget::{
     button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
 };
-use iced::{event, window, Element, Length, Padding, Point, Subscription, Task};
+use iced::{event, window, Element, Length, Padding, Point, Shadow, Subscription, Task, Vector};
 
 use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
@@ -38,7 +38,8 @@ use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
     ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
-    PANE_FOCUSED_BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_LG, SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY,
+    TEXT_SECONDARY,
 };
 use crate::workspace_state::WorkspaceCollection;
 
@@ -2187,7 +2188,12 @@ impl GodlyApp {
             border: iced::Border {
                 color: BORDER,
                 width: 1.0,
-                radius: 6.0.into(),
+                radius: RADIUS_MD.into(),
+            },
+            shadow: Shadow {
+                color: SHADOW_COLOR,
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 12.0,
             },
             ..container::Style::default()
         });
@@ -2332,7 +2338,12 @@ impl GodlyApp {
                 border: iced::Border {
                     color: BORDER,
                     width: 1.0,
-                    radius: 5.0.into(),
+                    radius: RADIUS_MD.into(),
+                },
+                shadow: Shadow {
+                    color: SHADOW_COLOR,
+                    offset: Vector::new(0.0, 2.0),
+                    blur_radius: 8.0,
                 },
                 ..container::Style::default()
             });
