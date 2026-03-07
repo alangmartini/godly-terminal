@@ -510,7 +510,7 @@ mod tests {
                     wrapped: false,
                 },
             )],
-            cursor: CursorState { row: 3, col: 1 },
+            cursor: CursorState { row: 3, col: 1, cursor_style: Default::default() },
             dimensions: GridDimensions { rows: 24, cols: 80 },
             alternate_screen: false,
             cursor_hidden: false,
@@ -593,7 +593,7 @@ mod tests {
 
         let diff = RichGridDiff {
             dirty_rows: vec![],
-            cursor: CursorState { row: 0, col: 0 },
+            cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
             dimensions: GridDimensions { rows: 24, cols: 80 },
             alternate_screen: false,
             cursor_hidden: false,

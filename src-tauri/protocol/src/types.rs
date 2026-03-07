@@ -178,6 +178,19 @@ pub struct RichGridCell {
     pub wide_continuation: bool,
 }
 
+/// Cursor shape style from DECSCUSR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub enum CursorShape {
+    #[default]
+    BlinkBlock,
+    SteadyBlock,
+    BlinkUnderline,
+    SteadyUnderline,
+    BlinkBar,
+    SteadyBar,
+}
+
 /// Cursor state for rendering.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export)]
@@ -186,6 +199,9 @@ pub struct CursorState {
     pub row: u16,
     /// Cursor column (0-based).
     pub col: u16,
+    /// Cursor shape style.
+    #[serde(default)]
+    pub cursor_style: CursorShape,
 }
 
 /// Terminal grid dimensions.

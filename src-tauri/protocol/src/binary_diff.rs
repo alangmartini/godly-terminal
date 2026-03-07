@@ -323,6 +323,7 @@ pub fn decode_grid_diff(data: &[u8]) -> Result<(RichGridDiff, usize), DecodeErro
         cursor: CursorState {
             row: cursor_row,
             col: cursor_col,
+            cursor_style: Default::default(),
         },
         dimensions: GridDimensions {
             rows: grid_rows,
@@ -387,7 +388,7 @@ mod tests {
     fn make_diff(dirty_rows: Vec<(u16, RichGridRow)>) -> RichGridDiff {
         RichGridDiff {
             dirty_rows,
-            cursor: CursorState { row: 5, col: 10 },
+            cursor: CursorState { row: 5, col: 10, cursor_style: Default::default() },
             dimensions: GridDimensions { rows: 24, cols: 80 },
             alternate_screen: false,
             cursor_hidden: false,
