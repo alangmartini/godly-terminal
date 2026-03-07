@@ -233,7 +233,7 @@ mod tests {
         let num_cols = lines.first().map(|l| l.len()).unwrap_or(0);
         RichGridData {
             rows,
-            cursor: CursorState { row: 0, col: 0 },
+            cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
             dimensions: GridDimensions {
                 rows: num_rows as u16,
                 cols: num_cols as u16,
