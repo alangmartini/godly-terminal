@@ -96,10 +96,10 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Depends on**: Nothing (but integrates with C2 for settings UI)
 **Priority**: P1
 
-- [ ] F1. Extract all hardcoded Dusk colors into a Theme trait/struct
-- [ ] F2. Implement 11 built-in themes (Tokyo Night, Dracula, Nord, etc.)
-- [ ] F3. Dynamic theme switching without restart
-- [ ] F4. Terminal palette colors (16 ANSI + bright variants) per theme
+- [x] F1. Extract all hardcoded Dusk colors into a Theme trait/struct
+- [x] F2. Implement 11 built-in themes (Tokyo Night, Dracula, Nord, etc.)
+- [x] F3. Dynamic theme switching without restart
+- [x] F4. Terminal palette colors (16 ANSI + bright variants) per theme
 - [x] F5. Custom theme JSON import/export
 - [x] F6. CSS-variable-like design token system for UI + terminal colors (Done — Rust `BG_PRIMARY()`, `TEXT_PRIMARY()`, spacing constants are the Iced equivalent of CSS variables)
 
@@ -111,13 +111,13 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Depends on**: Nothing
 **Priority**: P2
 
-- [ ] G1. Terminal right-click context menu (copy, paste, select all, clear)
-- [ ] G2. Copy clean mode (strip ANSI codes)
-- [ ] G3. URL detection + hover highlighting + click-to-open
-- [ ] G4. Search/find in terminal (Ctrl+F, regex support)
-- [ ] G5. Cursor style rendering (block, underline, bar)
-- [ ] G6. Visual scrollbar on right edge (draggable)
-- [ ] G7. Performance overlay toggle (Ctrl+Shift+O)
+- [x] G1. Terminal right-click context menu (copy, paste, select all, clear)
+- [x] G2. Copy clean mode (strip ANSI codes)
+- [x] G3. URL detection + hover highlighting + click-to-open
+- [x] G4. Search/find in terminal (Ctrl+F, regex support)
+- [x] G5. Cursor style rendering (block, underline, bar)
+- [x] G6. Visual scrollbar on right edge (draggable)
+- [x] G7. Performance overlay toggle (Ctrl+Shift+O)
 
 ---
 
@@ -127,12 +127,12 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Depends on**: Nothing (but integrates with C1)
 **Priority**: P1
 
-- [ ] H1. Shell type selection dialog on workspace creation (Windows/PS7/Cmd/WSL/Custom)
-- [ ] H2. WSL distribution picker (enumerate installed distros)
-- [ ] H3. Custom shell program + arguments input
-- [ ] H4. AI tool mode per workspace (none/claude/codex/both)
-- [ ] H5. Auto-launch Claude/Codex on terminal create when mode set
-- [ ] H6. Workspace icon in sidebar reflecting mode (💬/🤖/⚡)
+- [x] H1. Shell type selection dialog on workspace creation (Windows/PS7/Cmd/WSL/Custom)
+- [x] H2. WSL distribution picker (enumerate installed distros)
+- [x] H3. Custom shell program + arguments input
+- [x] H4. AI tool mode per workspace (none/claude/codex/both)
+- [x] H5. Auto-launch Claude/Codex on terminal create when mode set
+- [x] H6. Workspace icon in sidebar reflecting mode (💬/🤖/⚡)
 
 ---
 
@@ -142,18 +142,12 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Depends on**: H4-H5 (AI tool mode)
 **Priority**: P2
 
-- [ ] I1. Quick Claude multi-agent launcher (preset system)
-- [ ] I2. Launch step sequences (create terminal, run cmd, wait, send prompt)
-- [ ] I3. Layout options for Quick Claude (single, vsplit, hsplit, 2x2)
-- [x] I4. Voice input (Whisper integration, Ctrl+Shift+M)
-- [x] I5. Recording UI (level bar, timer, transcription toast)
-- [ ] ~~I6. Figma pane embedding (iframe-like webview in split)~~ — Skipped (not worth implementing)
 - [x] I1. Quick Claude multi-agent launcher (preset system)
 - [x] I2. Launch step sequences (create terminal, run cmd, wait, send prompt)
 - [x] I3. Layout options for Quick Claude (single, vsplit, hsplit, 2x2)
-- [ ] I4. Voice input (Whisper integration, Ctrl+Shift+M)
-- [ ] I5. Recording UI (level bar, timer, transcription toast)
-- [ ] I6. Figma pane embedding (iframe-like webview in split)
+- [x] I4. Voice input (Whisper integration, Ctrl+Shift+M)
+- [x] I5. Recording UI (level bar, timer, transcription toast)
+- [ ] ~~I6. Figma pane embedding (iframe-like webview in split)~~ — Skipped (not worth implementing)
 
 ---
 
@@ -234,9 +228,9 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 **Priority**: P3
 
 - [x] K1. CLAUDE.md editor dialog (sidebar buttons for project + user)
-- [ ] K2. Quit confirmation dialog (active sessions warning)
-- [ ] K3. Copy dialog (preview with clean/normal mode toggle)
-- [ ] K4. Figma URL prompt dialog -- Skipped (tied to I6 Figma pane)
+- [x] K2. Quit confirmation dialog (active sessions warning)
+- [x] K3. Copy dialog (preview with clean/normal mode toggle)
+- [ ] ~~K4. Figma URL prompt dialog~~ — Skipped (depends on I6 which was skipped)
 
 ---
 
@@ -332,6 +326,7 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 ### Completed in this update
 - **F5**: Custom theme JSON import/export with serde support for `iced::Color`, file dialog via `rfd`, persistence to `custom-themes.json`, and full UI in Appearance settings tab.
 - **F6**: Marked done — Rust `BG_PRIMARY()`, `TEXT_PRIMARY()`, spacing/radius constants are the Iced equivalent of CSS variables.
+
 ## Progress Log — 2026-03-06 (I4-I5 Voice/Whisper Integration)
 
 ### Completed in this update
@@ -346,7 +341,15 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
   - Subscription bridges channel to iced update loop via `Message::McpEvent`.
   - Handles: focus terminal, switch workspace, rename terminal, create/close terminal, move terminal between workspaces, toast notifications, split/unsplit, swap panes, zoom pane.
   - Query-only requests (ListTerminals, ReadTerminal, etc.) return "Not yet implemented" for now.
-## Progress Log — 2026-03-06 (K1 CLAUDE.md Editor)
+
+## Progress Log — 2026-03-07 (Final Parity Sprint)
 
 ### Completed in this update
-- **Stream K**: K1 completed (CLAUDE.md editor dialog with sidebar buttons, text editor + markdown preview, async file I/O, Ctrl+S save, Escape close).
+- **Stream F**: F1-F4 marked done (theme system with extracted colors, built-in themes, dynamic switching, per-theme ANSI palettes — all implemented in PRs #600-#605).
+- **Stream G**: G1-G7 all marked done (terminal context menu, copy clean, URL detection, find-in-terminal, cursor style rendering, scrollbar, perf overlay — PRs #604, current session).
+- **Stream H**: H1-H6 all marked done (shell picker dialog, WSL distro picker, custom shell, AI tool mode, auto-launch, workspace icons — PRs #604, #606, current session).
+- **Stream K**: K1 merged (CLAUDE.md editor with sidebar buttons), K2-K3 done (quit/copy dialogs — PR #604), K4 skipped (depends on I6).
+- **Pre-existing compilation bugs fixed**: duplicate McpEvent variant, missing closing braces in WhisperCancel/McpEvent handlers, missing DANGER import, missing module declarations in main.rs.
+
+### Status: ALL ITEMS COMPLETE (or intentionally skipped)
+Only I6 and K4 are skipped — both related to Figma embedding which was deemed not worth implementing.

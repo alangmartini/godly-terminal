@@ -278,7 +278,7 @@ fn make_test_rich_grid() -> RichGridData {
             cells: vec![make_test_cell("H"), make_test_cell("i")],
             wrapped: false,
         }],
-        cursor: CursorState { row: 0, col: 2 },
+        cursor: CursorState { row: 0, col: 2, cursor_style: Default::default() },
         dimensions: GridDimensions { rows: 24, cols: 80 },
         alternate_screen: false,
         cursor_hidden: false,
@@ -291,7 +291,7 @@ fn make_test_rich_grid() -> RichGridData {
 fn make_test_rich_grid_diff() -> RichGridDiff {
     RichGridDiff {
         dirty_rows: vec![],
-        cursor: CursorState { row: 0, col: 0 },
+        cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
         dimensions: GridDimensions { rows: 24, cols: 80 },
         alternate_screen: false,
         cursor_hidden: false,

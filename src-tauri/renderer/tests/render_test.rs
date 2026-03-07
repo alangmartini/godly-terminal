@@ -92,7 +92,7 @@ fn make_test_grid() -> RichGridData {
             RichGridRow { cells: pad_row(cells1, cols), wrapped: false },
             RichGridRow { cells: pad_row(cells2, cols), wrapped: false },
         ],
-        cursor: CursorState { row: 0, col: 0 },
+        cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
         dimensions: GridDimensions { rows: 3, cols: cols as u16 },
         alternate_screen: false,
         cursor_hidden: false,
@@ -114,7 +114,7 @@ fn make_empty_grid() -> RichGridData {
                 wrapped: false,
             })
             .collect(),
-        cursor: CursorState { row: 0, col: 0 },
+        cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
         dimensions: GridDimensions {
             rows: rows as u16,
             cols: cols as u16,
