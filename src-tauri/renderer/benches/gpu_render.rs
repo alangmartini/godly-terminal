@@ -46,7 +46,7 @@ fn make_snapshot(rows: u16, cols: u16) -> RichGridData {
 
     RichGridData {
         rows: grid_rows,
-        cursor: CursorState { row: 0, col: 0 },
+        cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
         dimensions: GridDimensions { rows, cols },
         alternate_screen: false,
         cursor_hidden: false,
@@ -91,7 +91,7 @@ fn make_sparse_snapshot(rows: u16, cols: u16) -> RichGridData {
 
     RichGridData {
         rows: grid_rows,
-        cursor: CursorState { row: rows - 1, col: 2 },
+        cursor: CursorState { row: rows - 1, col: 2, cursor_style: Default::default() },
         dimensions: GridDimensions { rows, cols },
         alternate_screen: false,
         cursor_hidden: false,
@@ -134,7 +134,7 @@ fn make_dense_snapshot(rows: u16, cols: u16) -> RichGridData {
 
     RichGridData {
         rows: grid_rows,
-        cursor: CursorState { row: rows - 1, col: 0 },
+        cursor: CursorState { row: rows - 1, col: 0, cursor_style: Default::default() },
         dimensions: GridDimensions { rows, cols },
         alternate_screen: false,
         cursor_hidden: false,

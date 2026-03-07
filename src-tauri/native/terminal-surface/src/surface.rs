@@ -222,15 +222,34 @@ impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
         if !grid.cursor_hidden {
             let cursor_x = grid.cursor.col as f32 * cell_w;
             let cursor_y = grid.cursor.row as f32 * cell_h;
+            let cursor_color = Color::from_rgba(1.0, 1.0, 1.0, 0.8);
 
-            let cursor_path =
-                canvas::Path::rectangle(Point::new(cursor_x, cursor_y), Size::new(cell_w, cell_h));
-            frame.stroke(
-                &cursor_path,
-                canvas::Stroke::default()
-                    .with_color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                    .with_width(1.5),
-            );
+            use godly_protocol::types::CursorShape;
+            match grid.cursor.cursor_style {
+                CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
+                    frame.fill_rectangle(
+                        Point::new(cursor_x, cursor_y),
+                        Size::new(cell_w, cell_h),
+                        cursor_color,
+                    );
+                }
+                CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
+                    let underline_h = 2.0_f32;
+                    frame.fill_rectangle(
+                        Point::new(cursor_x, cursor_y + cell_h - underline_h),
+                        Size::new(cell_w, underline_h),
+                        cursor_color,
+                    );
+                }
+                CursorShape::BlinkBar | CursorShape::SteadyBar => {
+                    let bar_w = 2.0_f32;
+                    frame.fill_rectangle(
+                        Point::new(cursor_x, cursor_y),
+                        Size::new(bar_w, cell_h),
+                        cursor_color,
+                    );
+                }
+            }
         }
 
         vec![frame.into_geometry()]

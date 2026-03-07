@@ -1320,6 +1320,7 @@ impl DaemonSession {
             cursor: godly_protocol::types::CursorState {
                 row: cursor_row,
                 col: cursor_col,
+                cursor_style: vt_cursor_to_protocol(screen.cursor_style()),
             },
             dimensions: godly_protocol::types::GridDimensions {
                 rows: num_rows,
@@ -1400,6 +1401,7 @@ impl DaemonSession {
             cursor: godly_protocol::types::CursorState {
                 row: cursor_row,
                 col: cursor_col,
+                cursor_style: vt_cursor_to_protocol(screen.cursor_style()),
             },
             dimensions: godly_protocol::types::GridDimensions {
                 rows: num_rows,
@@ -1735,6 +1737,7 @@ fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDif
         cursor: godly_protocol::types::CursorState {
             row: cursor_row,
             col: cursor_col,
+            cursor_style: vt_cursor_to_protocol(screen.cursor_style()),
         },
         dimensions: godly_protocol::types::GridDimensions {
             rows: num_rows,
@@ -1746,6 +1749,17 @@ fn extract_diff(vt: &mut godly_vt::Parser) -> godly_protocol::types::RichGridDif
         scrollback_offset: screen.scrollback(),
         total_scrollback: screen.scrollback_count(),
         full_repaint,
+    }
+}
+
+fn vt_cursor_to_protocol(style: godly_vt::CursorStyle) -> godly_protocol::types::CursorShape {
+    match style {
+        godly_vt::CursorStyle::BlinkBlock => godly_protocol::types::CursorShape::BlinkBlock,
+        godly_vt::CursorStyle::SteadyBlock => godly_protocol::types::CursorShape::SteadyBlock,
+        godly_vt::CursorStyle::BlinkUnderline => godly_protocol::types::CursorShape::BlinkUnderline,
+        godly_vt::CursorStyle::SteadyUnderline => godly_protocol::types::CursorShape::SteadyUnderline,
+        godly_vt::CursorStyle::BlinkBar => godly_protocol::types::CursorShape::BlinkBar,
+        godly_vt::CursorStyle::SteadyBar => godly_protocol::types::CursorShape::SteadyBar,
     }
 }
 

@@ -52,7 +52,7 @@ fn make_snapshot(rows: u16, cols: u16) -> RichGridData {
 
     RichGridData {
         rows: grid_rows,
-        cursor: CursorState { row: 0, col: 0 },
+        cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
         dimensions: GridDimensions { rows, cols },
         alternate_screen: false,
         cursor_hidden: false,
