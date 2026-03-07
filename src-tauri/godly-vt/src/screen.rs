@@ -55,6 +55,24 @@ pub enum MouseProtocolEncoding {
     // Urxvt,
 }
 
+/// Cursor shape as set by DECSCUSR (CSI Ps SP q).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CursorStyle {
+    /// Blinking block (Ps=0 or 1, default).
+    #[default]
+    BlinkBlock,
+    /// Steady block (Ps=2).
+    SteadyBlock,
+    /// Blinking underline (Ps=3).
+    BlinkUnderline,
+    /// Steady underline (Ps=4).
+    SteadyUnderline,
+    /// Blinking bar / I-beam (Ps=5).
+    BlinkBar,
+    /// Steady bar / I-beam (Ps=6).
+    SteadyBar,
+}
+
 /// Represents the overall terminal state.
 #[derive(Clone, Debug)]
 pub struct Screen {
@@ -76,6 +94,8 @@ pub struct Screen {
     /// alternate screen during command execution would destroy the user's
     /// scroll position (Bug #202).
     saved_scrollback_offset: usize,
+
+    cursor_style: CursorStyle,
 
     pub(crate) bell_pending: bool,
 }
@@ -102,6 +122,8 @@ impl Screen {
             window_icon_name: String::new(),
 
             saved_scrollback_offset: 0,
+
+            cursor_style: CursorStyle::default(),
 
             bell_pending: false,
         }
@@ -662,6 +684,16 @@ impl Screen {
     #[must_use]
     pub fn hide_cursor(&self) -> bool {
         self.mode(MODE_HIDE_CURSOR)
+    }
+
+    /// Returns the current cursor style (shape).
+    #[must_use]
+    pub fn cursor_style(&self) -> CursorStyle {
+        self.cursor_style
+    }
+
+    pub(crate) fn set_cursor_style(&mut self, style: CursorStyle) {
+        self.cursor_style = style;
     }
 
     /// Returns whether the terminal should be in bracketed paste mode.

@@ -68,7 +68,7 @@ pub use attrs::Color;
 pub use callbacks::Callbacks;
 pub use cell::{Cell, CellContent};
 pub use parser::Parser;
-pub use screen::{MouseProtocolEncoding, MouseProtocolMode, Screen};
+pub use screen::{CursorStyle, MouseProtocolEncoding, MouseProtocolMode, Screen};
 
 #[cfg(feature = "images")]
 pub use image::{assign_image_to_cells, DecodedImage, ImageCellRef, ImageStore};

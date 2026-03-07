@@ -205,6 +205,31 @@ impl<CB: crate::callbacks::Callbacks> crate::state_machine::Perform for WrappedS
                     );
                 }
             },
+            Some(b' ') => match c {
+                'q' => {
+                    // DECSCUSR — Set Cursor Style
+                    let ps = canonicalize_params_1(params, 0);
+                    let style = match ps {
+                        0 | 1 => crate::screen::CursorStyle::BlinkBlock,
+                        2 => crate::screen::CursorStyle::SteadyBlock,
+                        3 => crate::screen::CursorStyle::BlinkUnderline,
+                        4 => crate::screen::CursorStyle::SteadyUnderline,
+                        5 => crate::screen::CursorStyle::BlinkBar,
+                        6 => crate::screen::CursorStyle::SteadyBar,
+                        _ => crate::screen::CursorStyle::BlinkBlock,
+                    };
+                    self.screen.set_cursor_style(style);
+                }
+                _ => {
+                    self.callbacks.unhandled_csi(
+                        &mut self.screen,
+                        Some(b' '),
+                        intermediates.get(1).copied(),
+                        &params.iter().collect::<Vec<_>>(),
+                        c,
+                    );
+                }
+            },
             Some(i) => {
                 self.callbacks.unhandled_csi(
                     &mut self.screen,
