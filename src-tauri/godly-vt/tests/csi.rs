@@ -86,3 +86,39 @@ fn xtwinops() {
         "bbbbbcccccccccccccccccccc"
     );
 }
+
+#[test]
+fn decscusr_cursor_style() {
+    use godly_vt::CursorStyle;
+
+    let mut parser = godly_vt::Parser::new(24, 80, 0);
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::BlinkBlock);
+
+    // CSI 2 SP q → steady block
+    parser.process(b"\x1b[2 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::SteadyBlock);
+
+    // CSI 4 SP q → steady underline
+    parser.process(b"\x1b[4 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::SteadyUnderline);
+
+    // CSI 5 SP q → blink bar
+    parser.process(b"\x1b[5 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::BlinkBar);
+
+    // CSI 6 SP q → steady bar
+    parser.process(b"\x1b[6 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::SteadyBar);
+
+    // CSI 0 SP q → reset to blink block (default)
+    parser.process(b"\x1b[0 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::BlinkBlock);
+
+    // CSI 1 SP q → blink block
+    parser.process(b"\x1b[1 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::BlinkBlock);
+
+    // CSI 3 SP q → blink underline
+    parser.process(b"\x1b[3 q");
+    assert_eq!(parser.screen().cursor_style(), CursorStyle::BlinkUnderline);
+}
