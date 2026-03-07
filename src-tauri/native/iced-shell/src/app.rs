@@ -1499,6 +1499,28 @@ impl GodlyApp {
                 // Start tab entry animation.
                 self.entering_tabs
                     .insert(decision.session_id.clone(), Self::now_ms());
+
+                // Auto-launch AI tool if workspace has a mode set.
+                if let Some(ws_id) = &ws_id {
+                    if let Some(client) = &self.client {
+                        let cmd = match self.workspace_ai_modes.get(ws_id) {
+                            Some(AiToolMode::Claude) => Some("claude\r"),
+                            Some(AiToolMode::Codex) => Some("codex\r"),
+                            Some(AiToolMode::Both) => Some("claude\r"),
+                            Some(AiToolMode::None) | None => None,
+                        };
+                        if let Some(cmd) = cmd {
+                            if let Err(e) = commands::write_to_terminal(
+                                client,
+                                &decision.session_id,
+                                cmd.as_bytes(),
+                            ) {
+                                log::warn!("Failed to auto-launch AI tool: {e}");
+                            }
+                        }
+                    }
+                }
+
                 return self.fetch_grid(&decision.fetch_grid_terminal_id);
             }
             Message::TerminalCreated(Err(e)) => {
