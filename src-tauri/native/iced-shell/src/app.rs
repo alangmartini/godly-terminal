@@ -39,7 +39,7 @@ use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
-    ACCENT, BACKDROP, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, BORDER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
+    ACCENT, BACKDROP, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
     PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_LG, SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY,
     TEXT_SECONDARY,
 };
@@ -376,7 +376,6 @@ pub struct GodlyApp {
     whisper_available: bool,
     whisper_state: Option<whisper_ui::WhisperState>,
     whisper_service: Option<Arc<parking_lot::Mutex<Option<godly_app_adapter::whisper::WhisperService>>>>,
->>>>>>> 36a81930 (feat(native): add CLAUDE.md editor dialog with sidebar buttons (K1))
 }
 
 impl Default for GodlyApp {
@@ -463,11 +462,9 @@ impl Default for GodlyApp {
             search: SearchState::default(),
             perf_overlay_visible: false,
             claude_md_editor: None,
-<<<<<<< HEAD
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
             whisper_state: None,
             whisper_service: None,
-=======
         }
     }
 }
@@ -754,9 +751,6 @@ pub enum Message {
     WhisperLevelUpdate(f32),
     WhisperTimerTick,
     WhisperCancel,
-    // --- J1-J9: MCP Event Integration ---
-    McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
->>>>>>> 36a81930 (feat(native): add CLAUDE.md editor dialog with sidebar buttons (K1))
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -2428,9 +2422,6 @@ impl GodlyApp {
             Message::TogglePerfOverlay => {
                 self.perf_overlay_visible = !self.perf_overlay_visible;
             }
-<<<<<<< HEAD
-
-=======
             // --- K1: CLAUDE.md Editor ---
             Message::ClaudeMdOpen { path } => {
                 let p = path.clone();
@@ -2507,11 +2498,6 @@ impl GodlyApp {
             Message::ClaudeMdClose => {
                 self.claude_md_editor = None;
             }
-<<<<<<< HEAD
-
-            // --- J1-J9: MCP Event Integration ---
-            Message::McpEvent(event) => {
-                return self.handle_mcp_event(event);
             // --- I4/I5: Voice/Whisper Integration ---
             Message::WhisperToggle => {
                 if !self.whisper_available {
@@ -2578,12 +2564,11 @@ impl GodlyApp {
                 }
                 self.whisper_service = None;
                 self.whisper_state = None;
+            }
             // --- J1-J9: MCP Event Integration ---
             Message::McpEvent(event) => {
                 return self.handle_mcp_event(event);
             }
-=======
->>>>>>> 36a81930 (feat(native): add CLAUDE.md editor dialog with sidebar buttons (K1))
         }
         Task::none()
     }

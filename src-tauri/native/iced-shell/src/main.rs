@@ -2,6 +2,7 @@ use iced::window;
 
 mod app;
 mod claude_md_editor;
+mod mcp_handler;
 mod notification_state;
 mod notifications;
 mod scrollback_restore;
@@ -25,6 +26,7 @@ mod perf_overlay;
 mod url_detector;
 mod terminal_context_menu;
 mod whisper_ui;
+mod quick_claude;
 
 use app::{GodlyApp, Message};
 
