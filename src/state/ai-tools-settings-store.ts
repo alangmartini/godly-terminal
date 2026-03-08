@@ -119,7 +119,7 @@ class AiToolsSettingsStore {
     return { ...this.settings.branchSuffixes };
   }
 
-  /** Returns all available tool options (built-in + custom) for Quick Claude dialog. */
+  /** Returns all available tool options (built-in + custom) for Quick Prompt dialog. */
   getAllToolOptions(): { id: string; name: string; builtin: boolean }[] {
     const options: { id: string; name: string; builtin: boolean }[] = [
       { id: 'claude', name: 'Claude Code', builtin: true },

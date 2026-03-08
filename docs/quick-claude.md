@@ -1,4 +1,4 @@
-# Quick Claude: Instant Idea Capture
+# Quick Prompt: Instant Idea Capture
 
 ## Status: Implemented
 
@@ -8,7 +8,7 @@ The workflow of opening a new terminal with worktree, starting Claude Code, and 
 
 ## Solution
 
-Added "Quick Claude" — a fire-and-forget feature with 3 entry points:
+Added "Quick Prompt" — a fire-and-forget feature with 3 entry points:
 
 ### 1. Keyboard Shortcut (`Ctrl+Shift+Q`)
 - Opens a dialog with a textarea for the prompt and optional branch name
