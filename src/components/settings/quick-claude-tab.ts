@@ -40,7 +40,7 @@ const LAYOUT_ICONS: Record<PresetLayout, string> = {
 
 export class QuickClaudeTab implements SettingsTabProvider {
   id = 'quick-claude';
-  label = 'Quick Claude';
+  label = 'Quick Prompt';
 
   buildContent(_dialog: SettingsDialogContext): HTMLDivElement {
     const content = document.createElement('div');
@@ -115,7 +115,7 @@ export class QuickClaudeTab implements SettingsTabProvider {
 
     const desc = document.createElement('div');
     desc.className = 'settings-description';
-    desc.textContent = 'Configure AI agents available for Quick Claude presets. Edit built-in agents or add your own custom tools.';
+    desc.textContent = 'Configure AI agents available for Quick Prompt presets. Edit built-in agents or add your own custom tools.';
     section.appendChild(desc);
 
     const agentsList = document.createElement('div');
@@ -274,7 +274,7 @@ export class QuickClaudeTab implements SettingsTabProvider {
 
     const title = document.createElement('div');
     title.className = 'settings-section-title';
-    title.textContent = 'Quick Claude Presets';
+    title.textContent = 'Quick Prompt Presets';
     title.style.marginBottom = '0';
     header.appendChild(title);
 
@@ -308,7 +308,7 @@ export class QuickClaudeTab implements SettingsTabProvider {
 
     const desc = document.createElement('div');
     desc.className = 'settings-description';
-    desc.textContent = 'Named launch configurations for Quick Claude. Each preset defines which agents to launch, their layout, and step sequence.';
+    desc.textContent = 'Named launch configurations for Quick Prompt. Each preset defines which agents to launch, their layout, and step sequence.';
     container.appendChild(desc);
 
     const presets = quickClaudeSettingsStore.getPresets();

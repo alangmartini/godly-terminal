@@ -302,7 +302,7 @@ export function showFigmaUrlPrompt(): Promise<string | null> {
 }
 
 /**
- * Quick Claude dialog: capture an idea to dispatch to a new Claude Code session.
+ * Quick Prompt dialog: capture an idea to dispatch to a new Claude Code session.
  * Returns { prompt, branchName? } or null if cancelled.
  */
 export interface QuickClaudeInput {
@@ -344,7 +344,7 @@ export function showQuickClaudeDialog(options: QuickClaudeOptions): Promise<Quic
 
     const title = document.createElement('div');
     title.className = 'dialog-title';
-    title.textContent = 'Quick Claude';
+    title.textContent = 'Quick Prompt';
     dialog.appendChild(title);
 
     const hint = document.createElement('div');

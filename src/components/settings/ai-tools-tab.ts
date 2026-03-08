@@ -32,7 +32,7 @@ export class AiToolsTab implements SettingsTabProvider {
 
     const desc = document.createElement('div');
     desc.className = 'settings-description';
-    desc.textContent = 'Add custom AI tool binaries that appear in the Quick Claude dialog alongside Claude Code and Codex.';
+    desc.textContent = 'Add custom AI tool binaries that appear in the Quick Prompt dialog alongside Claude Code and Codex.';
     section.appendChild(desc);
 
     const toolList = document.createElement('div');
@@ -185,7 +185,7 @@ export class AiToolsTab implements SettingsTabProvider {
 
     const desc = document.createElement('div');
     desc.className = 'settings-description';
-    desc.textContent = 'Configure the suffix appended to branch names when launching AI tools via Quick Claude. Used to distinguish branches when running multiple tools in parallel.';
+    desc.textContent = 'Configure the suffix appended to branch names when launching AI tools via Quick Prompt. Used to distinguish branches when running multiple tools in parallel.';
     section.appendChild(desc);
 
     const builtinTools = [
@@ -230,7 +230,7 @@ export class AiToolsTab implements SettingsTabProvider {
 
     const desc = document.createElement('div');
     desc.className = 'settings-description';
-    desc.textContent = 'Maximum number of AI tools to launch in parallel from Quick Claude. The "Both" option launches 2; increase this to run up to 4 tools simultaneously.';
+    desc.textContent = 'Maximum number of AI tools to launch in parallel from Quick Prompt. The "Both" option launches 2; increase this to run up to 4 tools simultaneously.';
     section.appendChild(desc);
 
     const row = document.createElement('div');

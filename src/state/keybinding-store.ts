@@ -297,7 +297,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   },
   {
     id: 'tabs.quickClaude',
-    label: 'Quick Claude',
+    label: 'Quick Prompt',
     category: 'Tabs',
     type: 'app',
     defaultChord: { ctrlKey: true, shiftKey: true, altKey: false, key: 'q' },

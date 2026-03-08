@@ -520,7 +520,7 @@ pub async fn quick_claude(
 
     let terminal_name = worktree_branch
         .clone()
-        .unwrap_or_else(|| "Quick Claude".to_string());
+        .unwrap_or_else(|| "Quick Prompt".to_string());
 
     state.add_terminal(Terminal {
         id: terminal_id.clone(),
