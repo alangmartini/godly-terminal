@@ -2701,7 +2701,7 @@ impl GodlyApp {
                 },
                 SettingsTab {
                     id: "quick-claude",
-                    label: "Quick Claude",
+                    label: "Quick Prompt",
                 },
                 SettingsTab {
                     id: "ai-tools",
@@ -3468,7 +3468,7 @@ impl GodlyApp {
         let mut presets_list = column![].spacing(8).width(Length::Fill);
         if self.quick_claude_presets.is_empty() {
             presets_list = presets_list.push(
-                text("No Quick Claude presets yet.")
+                text("No Quick Prompt presets yet.")
                     .size(11)
                     .color(TEXT_SECONDARY()),
             );
@@ -3527,7 +3527,7 @@ impl GodlyApp {
 
         container(
             column![
-                text("Quick Claude Presets").size(14).color(TEXT_ACTIVE()),
+                text("Quick Prompt Presets").size(14).color(TEXT_ACTIVE()),
                 text("Configure reusable launch presets.")
                     .size(12)
                     .color(TEXT_PRIMARY()),

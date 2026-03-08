@@ -446,7 +446,7 @@ export class VoiceToTextPlugin implements GodlyPlugin {
 
     const vocabHint = document.createElement('div');
     vocabHint.style.cssText = 'padding: 0 12px 6px; font-size: 10px; color: var(--text-secondary);';
-    vocabHint.textContent = 'Add comma-separated terms to improve recognition of project-specific words. Built-in terms (Quick Claude, Shift+V, etc.) are always included.';
+    vocabHint.textContent = 'Add comma-separated terms to improve recognition of project-specific words. Built-in terms (Quick Prompt, Shift+V, etc.) are always included.';
     vocabSection.appendChild(vocabHint);
 
     const vocabRow = document.createElement('div');

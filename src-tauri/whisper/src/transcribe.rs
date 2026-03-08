@@ -4,7 +4,7 @@ use std::time::Instant;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// Built-in vocabulary hints for domain-specific terms.
-const BUILTIN_VOCABULARY: &str = "Godly Terminal, Quick Claude, Claude Code, workspace, scrollback, \
+const BUILTIN_VOCABULARY: &str = "Godly Terminal, Quick Prompt, Claude Code, workspace, scrollback, \
 Shift+V, Ctrl+Shift, terminal, daemon, PTY, split pane, tab, \
 keybinding, shortcut, MCP, sidecar, whisper";
 

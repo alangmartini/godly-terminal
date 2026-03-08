@@ -563,7 +563,7 @@ export function setupKeyboardShortcuts(deps: KeyboardDeps): void {
             store.addTerminal({
               id: result.terminal_id,
               workspaceId: input.workspaceId,
-              name: result.worktree_branch ?? 'Quick Claude',
+              name: result.worktree_branch ?? 'Quick Prompt',
               processName: shellTypeToProcessName(terminalSettingsStore.getDefaultShell()),
               order: 0,
             }, { background: true });
