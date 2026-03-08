@@ -176,11 +176,17 @@ export class WorkspaceSidebar {
       return; // User cancelled
     }
 
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: 'Select workspace folder',
-    });
+    let selected: string | string[] | null;
+    try {
+      selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select workspace folder',
+      });
+    } catch (err) {
+      console.error('[WorkspaceSidebar] Failed to open folder picker:', err);
+      return;
+    }
 
     if (selected && typeof selected === 'string') {
       const folderName = selected.split(/[/\\]/).pop() || 'New Workspace';
