@@ -668,7 +668,7 @@ pub fn handle_mcp_request(
 
             let terminal_name = worktree_branch_result
                 .clone()
-                .unwrap_or_else(|| "Quick Claude".to_string());
+                .unwrap_or_else(|| "Quick Prompt".to_string());
 
             app_state.add_terminal(crate::state::Terminal {
                 id: terminal_id.clone(),

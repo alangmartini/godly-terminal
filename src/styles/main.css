@@ -608,7 +608,7 @@ body.dragging-active * {
   outline-offset: 2px;
 }
 
-/* Quick Claude step indicators */
+/* Quick Prompt step indicators */
 .qc-steps {
   display: flex;
   align-items: center;
@@ -2348,7 +2348,7 @@ body.dragging-active * {
   font-style: italic;
 }
 
-/* Quick Claude dialog voice button */
+/* Quick Prompt dialog voice button */
 .quick-claude-voice-btn {
   min-width: 60px;
 }
@@ -2359,7 +2359,7 @@ body.dragging-active * {
   animation: mic-pulse 1.5s ease-in-out infinite;
 }
 
-/* Quick Claude image drag-and-drop */
+/* Quick Prompt image drag-and-drop */
 .dialog.quick-claude-drag-over {
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
@@ -2925,7 +2925,7 @@ body.dragging-active * {
   margin-bottom: 8px;
 }
 
-/* ── Quick Claude Presets ─────────────────────────────── */
+/* ── Quick Prompt Presets ─────────────────────────────── */
 
 .qc-layout-badge {
   font-size: 11px;
@@ -3101,7 +3101,7 @@ body.dragging-active * {
   padding: 3px 6px;
 }
 
-/* Quick Claude dialog preset selector */
+/* Quick Prompt dialog preset selector */
 .qc-preset-select {
   margin-bottom: 8px;
 }
