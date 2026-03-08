@@ -214,7 +214,7 @@ describe('Store', () => {
     });
 
     it('should add terminal in background without switching focus', () => {
-      // Bug: Quick Claude (Ctrl+Shift+Q) steals focus from the current tab
+      // Bug: Quick Prompt (Ctrl+Shift+Q) steals focus from the current tab
       // because addTerminal always sets activeTerminalId to the new terminal.
       store.addWorkspace({
         id: 'ws-1', name: 'Test', folderPath: 'C:\\', tabOrder: [],
@@ -227,9 +227,9 @@ describe('Store', () => {
       });
       expect(store.getState().activeTerminalId).toBe('term-1');
 
-      // Add a Quick Claude terminal in background — should NOT change active tab
+      // Add a Quick Prompt terminal in background — should NOT change active tab
       store.addTerminal({
-        id: 'term-claude', workspaceId: 'ws-1', name: 'Quick Claude',
+        id: 'term-claude', workspaceId: 'ws-1', name: 'Quick Prompt',
         processName: 'powershell.exe', order: 0,
       }, { background: true });
 
