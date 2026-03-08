@@ -147,7 +147,7 @@ export const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
   'split': 'Split / Layout',
   'workspace': 'Workspace',
   'voice': 'Voice',
-  'quick-claude': 'Quick Claude',
+  'quick-claude': 'Quick Prompt',
   'control-flow': 'Control Flow',
   'data': 'Data',
 };
