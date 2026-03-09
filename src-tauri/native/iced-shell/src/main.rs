@@ -33,8 +33,8 @@ use app::{GodlyApp, Message};
 fn main() -> iced::Result {
     env_logger::init();
     log::info!(
-        "Starting Godly Terminal (Native) — contract v{}",
-        godly_protocol::FRONTEND_CONTRACT_VERSION,
+        "Starting Godly Terminal (Native) — v{}",
+        env!("GODLY_APP_VERSION"),
     );
 
     iced::application(boot, GodlyApp::update, GodlyApp::view)
