@@ -30,7 +30,7 @@ pub fn detect_urls(line: &str) -> Vec<UrlSpan> {
         } else if remaining.starts_with("http://") {
             7
         } else {
-            i += 1;
+            i += line[i..].chars().next().map_or(1, |c| c.len_utf8());
             continue;
         };
 
@@ -222,5 +222,13 @@ mod tests {
             spans[0].url,
             "https://github.com/user/repo/issues/123#issuecomment-456"
         );
+    }
+
+    #[test]
+    fn multibyte_utf8_before_url() {
+        // Multi-byte UTF-8 character (emoji or non-ASCII) before URL should not panic
+        let spans = detect_urls("café https://example.com");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].url, "https://example.com");
     }
 }
