@@ -556,6 +556,8 @@ pub enum Message {
     WorkspaceClicked(String),
     /// User requested a new workspace.
     NewWorkspaceRequested,
+    /// Folder picker result for new workspace.
+    FolderPickedForNewWorkspace(Option<String>),
     /// Sidebar-level action (click / right-click / context command).
     SidebarAction(SidebarAction),
     /// Toggle the sidebar visibility.
@@ -1056,8 +1058,8 @@ impl GodlyApp {
             }
         }
         format!(
-            "Godly Terminal (Native) — contract v{}",
-            godly_protocol::FRONTEND_CONTRACT_VERSION
+            "Godly Terminal (Native) — v{}",
+            env!("GODLY_APP_VERSION")
         )
     }
 
@@ -1657,7 +1659,13 @@ impl GodlyApp {
                 self.tab_context_menu_id = None;
             }
             Message::NewWorkspaceRequested => {
-                return self.create_new_workspace();
+                return self.create_new_workspace(None);
+            }
+            Message::FolderPickedForNewWorkspace(Some(path)) => {
+                return self.create_new_workspace(Some(path));
+            }
+            Message::FolderPickedForNewWorkspace(None) => {
+                // User cancelled folder picker
             }
             Message::SidebarAction(action) => {
                 return self.handle_sidebar_action(action);
@@ -4522,7 +4530,18 @@ impl GodlyApp {
                 let _ = self.workspaces.move_down(&id);
                 Task::none()
             }
-            SidebarAction::NewWorkspace => self.create_new_workspace(),
+            SidebarAction::NewWorkspace => {
+                return Task::perform(
+                    async {
+                        let dir = rfd::AsyncFileDialog::new()
+                            .set_title("Select workspace folder")
+                            .pick_folder()
+                            .await;
+                        dir.map(|d| d.path().display().to_string())
+                    },
+                    Message::FolderPickedForNewWorkspace,
+                );
+            }
             SidebarAction::ToggleSettings => {
                 self.settings_open = !self.settings_open;
                 Task::none()
@@ -4715,7 +4734,10 @@ impl GodlyApp {
     }
 
     /// Create a new workspace with a fresh terminal.
-    fn create_new_workspace(&mut self) -> Task<Message> {
+    ///
+    /// If `folder_path` is provided, uses it as the workspace name (last
+    /// component) and CWD for the first terminal.
+    fn create_new_workspace(&mut self, folder_path: Option<String>) -> Task<Message> {
         let decision =
             workspace_reducer::reduce_new_workspace(workspace_reducer::NewWorkspaceInput {
                 workspace_id: uuid::Uuid::new_v4().to_string(),
@@ -4723,6 +4745,14 @@ impl GodlyApp {
                 next_workspace_num: self.next_workspace_num,
             });
         self.next_workspace_num = decision.next_workspace_num;
+
+        let workspace_name = if let Some(ref path) = folder_path {
+            path.split(['/', '\\']).filter(|s| !s.is_empty()).last()
+                .unwrap_or(&decision.workspace_name)
+                .to_string()
+        } else {
+            decision.workspace_name
+        };
 
         let rows = self.calculate_rows();
         let cols = self.calculate_cols();
@@ -4733,16 +4763,19 @@ impl GodlyApp {
             cols,
             decision.workspace_id.clone(),
         );
-        self.workspaces.add(
+        let ws = self.workspaces.add(
             decision.workspace_id.clone(),
-            decision.workspace_name,
+            workspace_name,
             decision.session_id.clone(),
         );
+        if let Some(ref path) = folder_path {
+            ws.folder_path = path.clone();
+        }
         self.workspaces.set_active(&decision.workspace_id);
         self.terminals.set_active(&decision.session_id);
         self.workspace_context_menu_id = None;
 
-        self.create_terminal_task(decision.session_id)
+        self.create_terminal_task_with_cwd(decision.session_id, folder_path)
     }
 
     // -----------------------------------------------------------------------
@@ -4906,6 +4939,38 @@ impl GodlyApp {
                         &session_id,
                         godly_protocol::ShellType::Windows,
                         None,
+                        rows,
+                        cols,
+                    )
+                    .map(|_| session_id);
+                    let _ = tx.send(result);
+                });
+                rx.await
+                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
+            },
+            Message::TerminalCreated,
+        )
+    }
+
+    fn create_terminal_task_with_cwd(&self, session_id: String, cwd: Option<String>) -> Task<Message> {
+        let Some(client) = &self.client else {
+            return Task::done(Message::TerminalCreated(Err(
+                "No daemon connection".to_string()
+            )));
+        };
+
+        let client = Arc::clone(client);
+        let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
+
+        Task::perform(
+            async move {
+                let (tx, rx) = futures_channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result = commands::create_terminal(
+                        &client,
+                        &session_id,
+                        godly_protocol::ShellType::Windows,
+                        cwd.as_deref(),
                         rows,
                         cols,
                     )
