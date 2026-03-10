@@ -1,4 +1,4 @@
-import { defineFixture, resetProfile, getActiveWorkspaceId, listTerminalIds } from './types';
+import { defineFixture, extractToolData, resetProfile, getActiveWorkspaceId, listTerminalIds } from './types';
 import { twoTerminals } from './two-terminals';
 
 export const splitBasic = defineFixture({
@@ -13,7 +13,7 @@ export const splitBasic = defineFixture({
     const terminalIds = await listTerminalIds(client);
     if (terminalIds.length < 2) throw new Error('Need at least 2 terminals for split fixture');
 
-    await client.call('split_terminal', {
+    await client.callTool('split_terminal', {
       workspace_id: workspaceId,
       target_terminal_id: terminalIds[0],
       new_terminal_id: terminalIds[1],
@@ -24,9 +24,10 @@ export const splitBasic = defineFixture({
 
   async verifyReady(client) {
     const workspaceId = await getActiveWorkspaceId(client);
-    const layout = await client.call('get_layout_tree', { workspace_id: workspaceId }) as
-      { tree?: { type?: string; Split?: unknown } } | null;
-    return layout?.tree?.type === 'split' || layout?.tree?.Split !== undefined;
+    const layout = extractToolData(
+      await client.callTool('get_layout_tree', { workspace_id: workspaceId }),
+    ) as { layout_tree?: { type?: string; Split?: unknown } } | null;
+    return layout?.layout_tree?.type === 'split' || layout?.layout_tree?.Split !== undefined;
   },
 
   async tearDown(client) {

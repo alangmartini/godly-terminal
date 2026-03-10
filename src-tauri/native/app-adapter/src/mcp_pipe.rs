@@ -4,6 +4,10 @@ use godly_protocol::{McpRequest, McpResponse};
 /// MCP events forwarded from the pipe server to the Iced app for state mutations.
 #[derive(Debug, Clone)]
 pub enum McpEvent {
+    Request {
+        request: McpRequest,
+        reply: std::sync::mpsc::Sender<McpResponse>,
+    },
     FocusTerminal { terminal_id: String },
     SwitchWorkspace { workspace_id: String },
     RenameTerminal { terminal_id: String, name: String },
@@ -166,6 +170,38 @@ fn dispatch_request(
     match request {
         McpRequest::Ping => McpResponse::Pong,
 
+        McpRequest::ListTerminals
+        | McpRequest::CreateTerminal { .. }
+        | McpRequest::ListWorkspaces
+        | McpRequest::CreateWorkspace { .. }
+        | McpRequest::DeleteWorkspace { .. }
+        | McpRequest::GetActiveWorkspace
+        | McpRequest::GetActiveTerminal
+        | McpRequest::SaveLayout
+        | McpRequest::GetAppInfo
+        | McpRequest::TestHarnessStatus
+        | McpRequest::ResetStagingProfile
+        | McpRequest::ExportStateDump
+        | McpRequest::UiQuery { .. }
+        | McpRequest::UiAct { .. } => forward_request(event_tx, request.clone()),
+
+        McpRequest::WaitForAppReady { timeout_ms } => {
+            wait_for_app_ready(event_tx, timeout_ms.unwrap_or(30_000))
+        }
+
+        McpRequest::UiWait {
+            condition,
+            timeout_ms,
+            poll_interval_ms,
+            args,
+        } => wait_for_ui_condition(
+            event_tx,
+            condition.clone(),
+            timeout_ms.unwrap_or(10_000),
+            poll_interval_ms.unwrap_or(250),
+            args.clone(),
+        ),
+
         // --- J1: Focus Terminal ---
         McpRequest::FocusTerminal { terminal_id } => {
             send_event(event_tx, McpEvent::FocusTerminal {
@@ -185,20 +221,6 @@ fn dispatch_request(
             send_event(event_tx, McpEvent::RenameTerminal {
                 terminal_id: terminal_id.clone(),
                 name: name.clone(),
-            })
-        }
-
-        // --- J4: Create Terminal ---
-        McpRequest::CreateTerminal {
-            workspace_id,
-            shell_type,
-            cwd,
-            ..
-        } => {
-            send_event(event_tx, McpEvent::CreateTerminal {
-                workspace_id: workspace_id.clone(),
-                shell_type: shell_type.clone(),
-                cwd: cwd.clone(),
             })
         }
 
@@ -299,5 +321,116 @@ fn send_event(
         }
     } else {
         McpResponse::Ok
+    }
+}
+
+fn forward_request(
+    event_tx: &mpsc::UnboundedSender<McpEvent>,
+    request: McpRequest,
+) -> McpResponse {
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    if event_tx
+        .unbounded_send(McpEvent::Request {
+            request,
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return McpResponse::Error {
+            message: "App event channel closed".to_string(),
+        };
+    }
+
+    match reply_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(response) => response,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => McpResponse::Error {
+            message: "Timed out waiting for app response".to_string(),
+        },
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => McpResponse::Error {
+            message: "App response channel closed".to_string(),
+        },
+    }
+}
+
+fn wait_for_app_ready(
+    event_tx: &mpsc::UnboundedSender<McpEvent>,
+    timeout_ms: u64,
+) -> McpResponse {
+    let start = std::time::Instant::now();
+    loop {
+        match forward_request(event_tx, McpRequest::TestHarnessStatus) {
+            McpResponse::TestHarnessStatus { ready, .. } if ready => {
+                return forward_request(event_tx, McpRequest::TestHarnessStatus);
+            }
+            response if start.elapsed().as_millis() as u64 >= timeout_ms => return response,
+            _ => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+}
+
+fn wait_for_ui_condition(
+    event_tx: &mpsc::UnboundedSender<McpEvent>,
+    condition: String,
+    timeout_ms: u64,
+    poll_interval_ms: u64,
+    args: Option<serde_json::Value>,
+) -> McpResponse {
+    let start = std::time::Instant::now();
+    loop {
+        let response = forward_request(
+            event_tx,
+            McpRequest::UiWait {
+                condition: condition.clone(),
+                timeout_ms: None,
+                poll_interval_ms: None,
+                args: args.clone(),
+            },
+        );
+
+        match response {
+            McpResponse::WaitCompleted {
+                ok: true,
+                timed_out: false,
+                ..
+            } => return McpResponse::WaitCompleted {
+                ok: true,
+                condition,
+                timed_out: false,
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                error: None,
+            },
+            McpResponse::WaitCompleted { error, .. }
+                if start.elapsed().as_millis() as u64 >= timeout_ms =>
+            {
+                return McpResponse::WaitCompleted {
+                    ok: false,
+                    condition,
+                    timed_out: true,
+                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    error: error.or_else(|| Some("Timed out".to_string())),
+                };
+            }
+            other => {
+                if start.elapsed().as_millis() as u64 >= timeout_ms {
+                    return match other {
+                        McpResponse::Error { message } => McpResponse::WaitCompleted {
+                            ok: false,
+                            condition,
+                            timed_out: true,
+                            elapsed_ms: start.elapsed().as_millis() as u64,
+                            error: Some(message),
+                        },
+                        _ => McpResponse::WaitCompleted {
+                            ok: false,
+                            condition,
+                            timed_out: true,
+                            elapsed_ms: start.elapsed().as_millis() as u64,
+                            error: Some("Timed out".to_string()),
+                        },
+                    };
+                }
+                std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms.max(10)));
+            }
+        }
     }
 }
