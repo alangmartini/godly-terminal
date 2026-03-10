@@ -24,3 +24,6 @@ pub mod perf_overlay;
 pub mod url_detector;
 pub mod terminal_context_menu;
 pub mod whisper_ui;
+
+#[cfg(any(feature = "staging", test))]
+pub mod testing;
