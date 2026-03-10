@@ -5,6 +5,7 @@ pub mod keys;
 pub mod layout_tree;
 pub mod mcp_messages;
 pub mod messages;
+pub mod testing;
 pub mod types;
 pub mod whisper;
 
