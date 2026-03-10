@@ -55,9 +55,7 @@ app.init().then(async () => {
 
   // Initialize test harness bridge when in test mode (staging only)
   if ((window as any).__GODLY_TEST_MODE__ || new URLSearchParams(window.location.search).has('test-harness')) {
-    import('./testing/test-harness-bridge').then(({ TestHarnessBridge }) => {
-      const bridge = new TestHarnessBridge();
-      bridge.init();
-    });
+    const { WebTestAdapter } = await import('./testing/web-adapter');
+    new WebTestAdapter().initBridge();
   }
 }).catch(console.error);
