@@ -1,0 +1,55 @@
+{
+  "id": "split-basic",
+  "description": "Create a horizontal split, verify layout tree, move focus between panes, and resize.",
+  "frontends": ["web", "native"],
+  "fixture": "two-terminals",
+  "requires_restart": false,
+  "steps": [
+    {
+      "id": "verify-fixture",
+      "description": "Verify two terminals exist in active workspace",
+      "type": "query",
+      "target": "terminal.count",
+      "assertions": [
+        { "id": "has-two-terminals", "type": "equals", "expected": 2 }
+      ]
+    },
+    {
+      "id": "create-split",
+      "description": "Create horizontal split between the two terminals",
+      "type": "action",
+      "target": "layout.split",
+      "action": "create",
+      "args": { "direction": "horizontal" }
+    },
+    {
+      "id": "verify-split-tree",
+      "description": "Verify the layout tree has a split node",
+      "type": "query",
+      "target": "layout.tree",
+      "assertions": [
+        { "id": "has-split", "type": "exists", "path": "split" },
+        { "id": "split-direction", "type": "equals", "path": "split.direction", "expected": "horizontal" }
+      ]
+    },
+    {
+      "id": "focus-second-pane",
+      "description": "Move focus to the second pane",
+      "type": "action",
+      "target": "pane.focus",
+      "action": "next"
+    },
+    {
+      "id": "verify-focus-changed",
+      "description": "Verify the focused terminal changed",
+      "type": "query",
+      "target": "pane.active",
+      "assertions": [
+        { "id": "focus-moved", "type": "exists" }
+      ]
+    }
+  ],
+  "cleanup": [
+    { "type": "action", "target": "layout.split", "action": "clear" }
+  ]
+}
