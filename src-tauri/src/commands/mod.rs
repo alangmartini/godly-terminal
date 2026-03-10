@@ -8,6 +8,7 @@ pub mod shell;
 pub mod sounds;
 pub mod soundpacks;
 pub mod terminal;
+pub mod testing;
 pub mod whisper;
 pub mod worktree;
 pub mod workspace;
