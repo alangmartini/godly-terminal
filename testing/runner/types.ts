@@ -24,4 +24,42 @@ export interface AssertionResult {
   message?: string;
 }
 
-export type FailureType = 'assertion' | 'timeout' | 'crash' | 'infrastructure' | 'unknown';
+export interface Assertion {
+  id: string;
+  type: string;
+  path?: string;
+  expected?: unknown;
+  pattern?: string;
+  tolerance?: number;
+  message?: string;
+}
+
+export interface Step {
+  id: string;
+  description: string;
+  type: string;
+  target?: string;
+  action?: string;
+  condition?: string;
+  args?: Record<string, unknown>;
+  assertions?: Assertion[];
+  timeout_ms?: number;
+  on_failure?: string;
+}
+
+export interface CleanupStep {
+  type: string;
+  target?: string;
+  action?: string;
+  args?: Record<string, unknown>;
+}
+
+export interface Contract {
+  id: string;
+  description: string;
+  frontends: string[];
+  fixture: string;
+  requires_restart: boolean;
+  steps: Step[];
+  cleanup: CleanupStep[];
+}

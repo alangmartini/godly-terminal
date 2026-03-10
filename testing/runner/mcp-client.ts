@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { resolve as resolvePath } from 'path';
+import { existsSync } from 'fs';
 
 export class McpClient {
   private process: ChildProcess | null = null;
@@ -23,11 +24,14 @@ export class McpClient {
     this.process.stdout!.setEncoding('utf-8');
     this.process.stdout!.on('data', (data: string) => this.handleData(data));
     this.process.stderr!.on('data', (data: Buffer) => {
-      // Log MCP stderr for debugging
       process.stderr.write(`[mcp] ${data}`);
     });
 
-    // Send initialize request
+    this.process.on('exit', (code) => {
+      this.rejectAll(new Error(`MCP process exited with code ${code}`));
+      this.process = null;
+    });
+
     await this.call('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
@@ -39,23 +43,29 @@ export class McpClient {
     if (!this.process) throw new Error('Not connected');
 
     const id = ++this.requestId;
-    const request = {
-      jsonrpc: '2.0' as const,
-      id,
-      method,
-      params,
-    };
+    const msg = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      const msg = JSON.stringify(request);
       this.process!.stdin!.write(`Content-Length: ${Buffer.byteLength(msg)}\r\n\r\n${msg}`);
     });
   }
 
   async callTool(tool: string, args: Record<string, unknown> = {}): Promise<unknown> {
-    const result = await this.call('tools/call', { name: tool, arguments: args });
-    return result;
+    return this.call('tools/call', { name: tool, arguments: args });
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.process) {
+      this.process.kill();
+      this.process = null;
+    }
+    this.rejectAll(new Error('Client disconnected'));
+  }
+
+  private rejectAll(error: Error): void {
+    for (const { reject } of this.pending.values()) reject(error);
+    this.pending.clear();
   }
 
   private handleData(chunk: string) {
@@ -70,10 +80,15 @@ export class McpClient {
       }
       const length = parseInt(match[1], 10);
       const bodyStart = headerEnd + 4;
-      if (this.buffer.length < bodyStart + length) break;
+      // Content-Length is byte count, but buffer is a decoded string.
+      // For ASCII-only JSON-RPC this is equivalent; for multi-byte content
+      // we convert to bytes to check correctly.
+      const bodyBytes = Buffer.byteLength(this.buffer.substring(bodyStart));
+      if (bodyBytes < length) break;
 
-      const body = this.buffer.substring(bodyStart, bodyStart + length);
-      this.buffer = this.buffer.substring(bodyStart + length);
+      // Extract exactly `length` bytes worth of string characters
+      const body = extractByteSlice(this.buffer, bodyStart, length);
+      this.buffer = this.buffer.substring(bodyStart + body.length);
 
       try {
         const response = JSON.parse(body);
@@ -87,26 +102,33 @@ export class McpClient {
           }
         }
       } catch {
-        // Ignore parse errors
+        // Malformed JSON -- skip this message
       }
     }
   }
 
   private findMcpBinary(): string {
-    // Look for the staging MCP binary
     const candidates = [
-      resolvePath(__dirname, '../../src-tauri/target/debug/godly-mcp.exe'),
       resolvePath(__dirname, '../../src-tauri/target/release/godly-mcp.exe'),
+      resolvePath(__dirname, '../../src-tauri/target/debug/godly-mcp.exe'),
     ];
-    // Return first candidate — actual existence check happens at spawn time
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+    // Fall back to first candidate; spawn will produce a clear error
     return candidates[0];
   }
+}
 
-  async disconnect(): Promise<void> {
-    if (this.process) {
-      this.process.kill();
-      this.process = null;
-    }
-    this.pending.clear();
+/** Extract a substring that is exactly `byteLen` bytes of UTF-8 from `str` starting at char index `start`. */
+function extractByteSlice(str: string, start: number, byteLen: number): string {
+  let bytes = 0;
+  let i = start;
+  while (i < str.length && bytes < byteLen) {
+    const code = str.codePointAt(i)!;
+    const charBytes = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+    bytes += charBytes;
+    i += code > 0xffff ? 2 : 1; // surrogate pair takes 2 JS chars
   }
+  return str.substring(start, i);
 }

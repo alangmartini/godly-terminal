@@ -1,122 +1,69 @@
-import type { AssertionResult } from './types.js';
-
-interface Assertion {
-  id: string;
-  type: string;
-  path?: string;
-  expected?: unknown;
-  pattern?: string;
-  tolerance?: number;
-  message?: string;
-}
+import type { Assertion, AssertionResult } from './types.js';
 
 export function evaluateAssertion(assertion: Assertion, data: unknown): AssertionResult {
   const actual = assertion.path ? getByPath(data, assertion.path) : data;
+  const { passed, expected } = evaluate(assertion, actual);
+  return {
+    assertion_id: assertion.id,
+    passed,
+    expected,
+    actual,
+    message: assertion.message,
+  };
+}
 
-  switch (assertion.type) {
+function evaluate(a: Assertion, actual: unknown): { passed: boolean; expected: unknown } {
+  switch (a.type) {
     case 'equals':
-      return {
-        assertion_id: assertion.id,
-        passed: deepEqual(actual, assertion.expected),
-        expected: assertion.expected,
-        actual,
-        message: assertion.message,
-      };
+      return { passed: deepEqual(actual, a.expected), expected: a.expected };
 
     case 'contains':
       return {
-        assertion_id: assertion.id,
-        passed: typeof actual === 'string' && actual.includes(String(assertion.expected)),
-        expected: assertion.expected,
-        actual,
-        message: assertion.message,
+        passed: typeof actual === 'string' && actual.includes(String(a.expected)),
+        expected: a.expected,
       };
 
-    case 'regex': {
-      const re = new RegExp(assertion.pattern || '');
+    case 'regex':
       return {
-        assertion_id: assertion.id,
-        passed: typeof actual === 'string' && re.test(actual),
-        expected: assertion.pattern,
-        actual,
-        message: assertion.message,
+        passed: typeof actual === 'string' && new RegExp(a.pattern || '').test(actual),
+        expected: a.pattern,
       };
-    }
 
     case 'exists':
-      return {
-        assertion_id: assertion.id,
-        passed: actual !== undefined && actual !== null,
-        expected: 'exists',
-        actual,
-        message: assertion.message,
-      };
+      return { passed: actual !== undefined && actual !== null, expected: 'exists' };
 
     case 'not_exists':
-      return {
-        assertion_id: assertion.id,
-        passed: actual === undefined || actual === null,
-        expected: 'not_exists',
-        actual,
-        message: assertion.message,
-      };
+      return { passed: actual === undefined || actual === null, expected: 'not_exists' };
 
     case 'gt':
-      return {
-        assertion_id: assertion.id,
-        passed: typeof actual === 'number' && actual > (assertion.expected as number),
-        expected: `> ${assertion.expected}`,
-        actual,
-        message: assertion.message,
-      };
+      return { passed: typeof actual === 'number' && actual > (a.expected as number), expected: `> ${a.expected}` };
 
     case 'lt':
-      return {
-        assertion_id: assertion.id,
-        passed: typeof actual === 'number' && actual < (assertion.expected as number),
-        expected: `< ${assertion.expected}`,
-        actual,
-        message: assertion.message,
-      };
+      return { passed: typeof actual === 'number' && actual < (a.expected as number), expected: `< ${a.expected}` };
 
     case 'threshold':
       return {
-        assertion_id: assertion.id,
-        passed: typeof actual === 'number' && Math.abs(actual - (assertion.expected as number)) <= (assertion.tolerance ?? 0),
-        expected: `${assertion.expected} +/- ${assertion.tolerance}`,
-        actual,
-        message: assertion.message,
+        passed: typeof actual === 'number' && Math.abs(actual - (a.expected as number)) <= (a.tolerance ?? 0),
+        expected: `${a.expected} +/- ${a.tolerance}`,
       };
 
     case 'bounds': {
-      const bounds = assertion.expected as { x: number; y: number; width: number; height: number };
-      const actualBounds = actual as { x: number; y: number; width: number; height: number } | null;
+      const bounds = a.expected as { x: number; y: number; width: number; height: number };
+      const ab = actual as { x: number; y: number; width: number; height: number } | null;
       return {
-        assertion_id: assertion.id,
-        passed: actualBounds != null &&
-          actualBounds.x >= bounds.x &&
-          actualBounds.y >= bounds.y &&
-          actualBounds.width <= bounds.width &&
-          actualBounds.height <= bounds.height,
+        passed: ab != null && ab.x >= bounds.x && ab.y >= bounds.y && ab.width <= bounds.width && ab.height <= bounds.height,
         expected: bounds,
-        actual: actualBounds,
-        message: assertion.message,
       };
     }
 
     default:
-      return {
-        assertion_id: assertion.id,
-        passed: false,
-        message: `Unknown assertion type: ${assertion.type}`,
-      };
+      return { passed: false, expected: `Unknown assertion type: ${a.type}` };
   }
 }
 
 function getByPath(obj: unknown, path: string): unknown {
-  const parts = path.split('.');
   let current: unknown = obj;
-  for (const part of parts) {
+  for (const part of path.split('.')) {
     if (current == null || typeof current !== 'object') return undefined;
     current = (current as Record<string, unknown>)[part];
   }
@@ -127,8 +74,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
   if (typeof a !== typeof b) return false;
-  if (typeof a === 'object') {
-    return JSON.stringify(a) === JSON.stringify(b);
-  }
+  if (typeof a === 'object') return JSON.stringify(a) === JSON.stringify(b);
   return false;
 }

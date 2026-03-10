@@ -1,10 +1,11 @@
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import type { RunResult, StepResult } from './types.js';
 
 export class ArtifactBundle {
   private dir: string;
   private files: string[] = [];
+  private contractId = '';
 
   constructor(baseDir: string, runId: string) {
     this.dir = join(baseDir, runId);
@@ -18,8 +19,9 @@ export class ArtifactBundle {
   }
 
   writeManifest(contractId: string): void {
+    this.contractId = contractId;
     const manifest = {
-      run_id: this.dir.split(/[/\\]/).pop(),
+      run_id: basename(this.dir),
       contract_id: contractId,
       created_at: new Date().toISOString(),
       artifact_dir: this.dir,
@@ -47,7 +49,8 @@ export class ArtifactBundle {
     }
   }
 
-  finalize(): string[] {
-    return [...this.files];
+  finalize(): void {
+    // Update manifest with final file list
+    this.writeManifest(this.contractId);
   }
 }
