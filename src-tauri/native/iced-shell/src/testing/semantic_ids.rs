@@ -2,75 +2,56 @@
 /// These mirror the web frontend's semantic-ids.ts so test contracts can
 /// reference the same IDs regardless of frontend type.
 
-// Workspace IDs
-pub const WORKSPACE_SIDEBAR: &str = "workspace.sidebar";
-pub const WORKSPACE_SIDEBAR_TOGGLE: &str = "workspace.sidebar.toggle";
-pub const WORKSPACE_LIST: &str = "workspace.list";
-pub const WORKSPACE_ACTIVE: &str = "workspace.active";
-pub const WORKSPACE_ADD: &str = "workspace.add";
+/// All known static semantic IDs. Used for both public constants and validation.
+pub const ALL_STATIC_IDS: &[&str] = &[
+    // Workspace
+    "workspace.sidebar",
+    "workspace.sidebar.toggle",
+    "workspace.list",
+    "workspace.active",
+    "workspace.add",
+    // Tabs
+    "tab.bar",
+    "tab.active",
+    "tab.add",
+    // Panes
+    "pane.active",
+    "pane.container",
+    // Terminal
+    "terminal.surface",
+    // Settings
+    "settings.dialog",
+    "settings.theme.select",
+    // Quick Claude
+    "quick-claude.prompt",
+];
 
-// Tab IDs
-pub const TAB_BAR: &str = "tab.bar";
-pub const TAB_ACTIVE: &str = "tab.active";
-pub const TAB_ADD: &str = "tab.add";
+/// Dynamic ID prefixes for parameterized elements.
+const DYNAMIC_PREFIXES: &[&str] = &[
+    "terminal.surface:",
+    "tab.close:",
+    "pane.divider:",
+];
 
-// Pane IDs
-pub const PANE_ACTIVE: &str = "pane.active";
-pub const PANE_CONTAINER: &str = "pane.container";
-
-// Terminal IDs
-pub const TERMINAL_SURFACE: &str = "terminal.surface";
-
-// Settings IDs
-pub const SETTINGS_DIALOG: &str = "settings.dialog";
-pub const SETTINGS_THEME_SELECT: &str = "settings.theme.select";
-
-// Quick Claude IDs
-pub const QUICK_CLAUDE_PROMPT: &str = "quick-claude.prompt";
-
-/// Generate a dynamic terminal surface ID for a specific terminal
+/// Generate a dynamic terminal surface ID for a specific terminal.
 pub fn terminal_surface_id(terminal_id: &str) -> String {
-    format!("terminal.surface:{}", terminal_id)
+    format!("terminal.surface:{terminal_id}")
 }
 
-/// Generate a dynamic tab close button ID
+/// Generate a dynamic tab close button ID.
 pub fn tab_close_id(terminal_id: &str) -> String {
-    format!("tab.close:{}", terminal_id)
+    format!("tab.close:{terminal_id}")
 }
 
-/// Generate a dynamic pane divider ID
+/// Generate a dynamic pane divider ID.
 pub fn pane_divider_id(workspace_id: &str) -> String {
-    format!("pane.divider:{}", workspace_id)
+    format!("pane.divider:{workspace_id}")
 }
 
-/// Check if a semantic ID is valid (known static ID or valid dynamic pattern)
+/// Check if a semantic ID is valid (known static ID or valid dynamic pattern).
 pub fn is_valid_semantic_id(id: &str) -> bool {
-    // Check static IDs
-    let static_ids = [
-        WORKSPACE_SIDEBAR,
-        WORKSPACE_SIDEBAR_TOGGLE,
-        WORKSPACE_LIST,
-        WORKSPACE_ACTIVE,
-        WORKSPACE_ADD,
-        TAB_BAR,
-        TAB_ACTIVE,
-        TAB_ADD,
-        PANE_ACTIVE,
-        PANE_CONTAINER,
-        TERMINAL_SURFACE,
-        SETTINGS_DIALOG,
-        SETTINGS_THEME_SELECT,
-        QUICK_CLAUDE_PROMPT,
-    ];
-
-    if static_ids.contains(&id) {
-        return true;
-    }
-
-    // Check dynamic patterns
-    id.starts_with("terminal.surface:")
-        || id.starts_with("tab.close:")
-        || id.starts_with("pane.divider:")
+    ALL_STATIC_IDS.contains(&id)
+        || DYNAMIC_PREFIXES.iter().any(|prefix| id.starts_with(prefix))
 }
 
 #[cfg(test)]
@@ -79,10 +60,9 @@ mod tests {
 
     #[test]
     fn static_ids_are_valid() {
-        assert!(is_valid_semantic_id(WORKSPACE_SIDEBAR));
-        assert!(is_valid_semantic_id(TAB_ACTIVE));
-        assert!(is_valid_semantic_id(PANE_ACTIVE));
-        assert!(is_valid_semantic_id(SETTINGS_DIALOG));
+        for &id in ALL_STATIC_IDS {
+            assert!(is_valid_semantic_id(id), "static ID should be valid: {id}");
+        }
     }
 
     #[test]
@@ -97,5 +77,15 @@ mod tests {
         assert!(!is_valid_semantic_id("unknown.id"));
         assert!(!is_valid_semantic_id(""));
         assert!(!is_valid_semantic_id("random"));
+    }
+
+    #[test]
+    fn all_static_ids_use_dot_notation() {
+        for &id in ALL_STATIC_IDS {
+            assert!(
+                id.contains('.') || id.contains('-'),
+                "static ID should use dot/dash notation: {id}"
+            );
+        }
     }
 }
