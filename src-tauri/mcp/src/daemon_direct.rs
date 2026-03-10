@@ -842,6 +842,16 @@ impl Backend for DaemonDirectBackend {
             McpRequest::ZoomReset => Ok(Self::app_only_error("zoom_reset")),
             McpRequest::GetFontSize => Ok(Self::app_only_error("get_font_size")),
 
+            // Test harness — requires the app, not available in daemon-direct mode
+            McpRequest::TestHarnessStatus => Ok(Self::app_only_error("test_harness_status")),
+            McpRequest::ResetStagingProfile => Ok(Self::app_only_error("reset_staging_profile")),
+            McpRequest::CollectArtifactBundle { .. } => Ok(Self::app_only_error("collect_artifact_bundle")),
+            McpRequest::ExportStateDump => Ok(Self::app_only_error("export_state_dump")),
+            McpRequest::WaitForAppReady { .. } => Ok(Self::app_only_error("wait_for_app_ready")),
+            McpRequest::UiQuery { .. } => Ok(Self::app_only_error("ui_query")),
+            McpRequest::UiAct { .. } => Ok(Self::app_only_error("ui_act")),
+            McpRequest::UiWait { .. } => Ok(Self::app_only_error("ui_wait")),
+
         }
     }
 

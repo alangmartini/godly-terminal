@@ -3416,6 +3416,73 @@ pub fn handle_mcp_request(
 
             McpResponse::TerminalOutput { content: snippet }
         }
+
+        // --- Test harness ---
+
+        McpRequest::TestHarnessStatus => {
+            McpResponse::TestHarnessStatus {
+                ready: true,
+                frontend_type: "web".to_string(),
+                harness_mode: std::env::var("GODLY_TEST_HARNESS").is_ok(),
+                run_id: None,
+                uptime_ms: 0,
+            }
+        }
+
+        McpRequest::ResetStagingProfile => McpResponse::Ok,
+
+        McpRequest::CollectArtifactBundle { run_id: _ } => {
+            McpResponse::Error {
+                message: "Artifact collection not yet implemented via MCP handler".to_string(),
+            }
+        }
+
+        McpRequest::ExportStateDump => {
+            let dump = crate::testing::state_dump::dump_app_state(app_state);
+            McpResponse::StateDump {
+                dump: serde_json::to_value(dump).unwrap_or_default(),
+            }
+        }
+
+        McpRequest::WaitForAppReady { timeout_ms: _ } => {
+            McpResponse::TestHarnessStatus {
+                ready: true,
+                frontend_type: "web".to_string(),
+                harness_mode: std::env::var("GODLY_TEST_HARNESS").is_ok(),
+                run_id: None,
+                uptime_ms: 0,
+            }
+        }
+
+        McpRequest::UiQuery { target, args: _ } => {
+            McpResponse::QueryResult {
+                ok: false,
+                target: target.clone(),
+                data: None,
+                error: Some("UI query not yet connected to web adapter".to_string()),
+                timestamp_ms: 0,
+            }
+        }
+
+        McpRequest::UiAct { target, action, args: _ } => {
+            McpResponse::ActionResult {
+                ok: false,
+                target: target.clone(),
+                action: action.clone(),
+                error: Some("UI action not yet connected to web adapter".to_string()),
+                timestamp_ms: 0,
+            }
+        }
+
+        McpRequest::UiWait { condition, timeout_ms: _, poll_interval_ms: _, args: _ } => {
+            McpResponse::WaitCompleted {
+                ok: false,
+                condition: condition.clone(),
+                timed_out: true,
+                elapsed_ms: 0,
+                error: Some("UI wait not yet connected to web adapter".to_string()),
+            }
+        }
     }
 }
 

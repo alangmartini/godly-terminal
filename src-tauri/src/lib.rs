@@ -9,6 +9,7 @@ mod persistence;
 mod pty;
 mod sidecar;
 mod state;
+pub mod testing;
 mod utils;
 mod whisper_client;
 mod whisper_state;
@@ -79,6 +80,7 @@ pub fn run() {
     let process_monitor = ProcessMonitor::new();
     let llm_state = Arc::new(LlmState::new());
     let whisper_state = Arc::new(WhisperState::new());
+    let test_harness = Arc::new(testing::harness::TestHarnessService::new());
 
     // Connect to daemon (or launch one)
     let daemon_client = Arc::new(
@@ -228,6 +230,7 @@ pub fn run() {
         .manage(llm_state.clone())
         .manage(whisper_state.clone())
         .manage(gpu_renderer_manager)
+        .manage(test_harness)
         .manage(JsCallbackState {
             senders: Mutex::new(HashMap::new()),
         })
@@ -356,6 +359,11 @@ pub fn run() {
             window_lifecycle::cancel_quit,
             // --- MCP ---
             mcp_js_result,
+            // --- Testing ---
+            commands::testing::test_harness_status,
+            commands::testing::reset_staging_profile,
+            commands::testing::export_state_dump,
+            commands::testing::collect_artifact_bundle,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

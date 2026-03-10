@@ -1322,6 +1322,127 @@ pub fn list_tools() -> Value {
                     "properties": {},
                     "required": []
                 }
+            },
+            {
+                "name": "test_harness_status",
+                "description": "Get the current status of the staging test harness (ready state, frontend type, run ID, uptime).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "reset_staging_profile",
+                "description": "Reset the staging profile to a clean state (clear persisted layout, scrollback, etc.).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "collect_artifact_bundle",
+                "description": "Collect test artifacts (screenshots, state dumps, logs) into a bundle for the given run.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "run_id": {
+                            "type": "string",
+                            "description": "Test run ID. If omitted, uses the current run or creates a new one."
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "export_state_dump",
+                "description": "Export a full dump of the application state (workspaces, terminals, layout trees, active IDs).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "wait_for_app_ready",
+                "description": "Wait until the Godly Terminal app is fully initialized and ready for testing.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Maximum time to wait in milliseconds. Default: 30000."
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "ui_query",
+                "description": "Query a UI element using a semantic target identifier (e.g. 'workspace.active', 'tab.active', 'terminal.grid').",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "description": "Semantic target identifier for the UI element to query."
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "Optional arguments for the query."
+                        }
+                    },
+                    "required": ["target"]
+                }
+            },
+            {
+                "name": "ui_act",
+                "description": "Perform an action on a UI element using a semantic target and action name (e.g. target='workspace', action='create').",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "description": "Semantic target identifier for the UI element to act on."
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "Action to perform (e.g. 'click', 'create', 'delete', 'rename')."
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "Optional arguments for the action."
+                        }
+                    },
+                    "required": ["target", "action"]
+                }
+            },
+            {
+                "name": "ui_wait",
+                "description": "Wait for a UI condition to become true (e.g. 'workspace.count >= 2', 'terminal.output.contains').",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "condition": {
+                            "type": "string",
+                            "description": "Condition expression to wait for."
+                        },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Maximum time to wait in milliseconds. Default: 10000."
+                        },
+                        "poll_interval_ms": {
+                            "type": "integer",
+                            "description": "How often to check the condition in milliseconds. Default: 250."
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "Optional arguments for the condition evaluation."
+                        }
+                    },
+                    "required": ["condition"]
+                }
             }
         ]
     })
@@ -2135,6 +2256,52 @@ pub fn call_tool(
         "zoom_reset" => McpRequest::ZoomReset,
         "get_font_size" => McpRequest::GetFontSize,
 
+        // Test harness tools
+        "test_harness_status" => McpRequest::TestHarnessStatus,
+        "reset_staging_profile" => McpRequest::ResetStagingProfile,
+        "collect_artifact_bundle" => {
+            let run_id = args.get("run_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::CollectArtifactBundle { run_id }
+        }
+        "export_state_dump" => McpRequest::ExportStateDump,
+        "wait_for_app_ready" => {
+            let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
+            McpRequest::WaitForAppReady { timeout_ms }
+        }
+        "ui_query" => {
+            let target = args
+                .get("target")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing target")?
+                .to_string();
+            let query_args = args.get("args").cloned();
+            McpRequest::UiQuery { target, args: query_args }
+        }
+        "ui_act" => {
+            let target = args
+                .get("target")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing target")?
+                .to_string();
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing action")?
+                .to_string();
+            let act_args = args.get("args").cloned();
+            McpRequest::UiAct { target, action, args: act_args }
+        }
+        "ui_wait" => {
+            let condition = args
+                .get("condition")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing condition")?
+                .to_string();
+            let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
+            let poll_interval_ms = args.get("poll_interval_ms").and_then(|v| v.as_u64());
+            let wait_args = args.get("args").cloned();
+            McpRequest::UiWait { condition, timeout_ms, poll_interval_ms, args: wait_args }
+        }
 
         _ => return Err(format!("Unknown tool: {}", name)),
     };
@@ -2380,6 +2547,72 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         }
         McpResponse::FontSize { size } => Ok(json!({
             "font_size": size,
+        })),
+
+        // Test harness responses
+        McpResponse::TestHarnessStatus {
+            ready,
+            frontend_type,
+            harness_mode,
+            run_id,
+            uptime_ms,
+        } => Ok(json!({
+            "ready": ready,
+            "frontend_type": frontend_type,
+            "harness_mode": harness_mode,
+            "run_id": run_id,
+            "uptime_ms": uptime_ms,
+        })),
+        McpResponse::StateDump { dump } => Ok(json!({
+            "state": dump,
+        })),
+        McpResponse::ArtifactBundle {
+            run_id,
+            artifact_dir,
+            manifest,
+        } => Ok(json!({
+            "run_id": run_id,
+            "artifact_dir": artifact_dir,
+            "manifest": manifest,
+        })),
+        McpResponse::QueryResult {
+            ok,
+            target,
+            data,
+            error,
+            timestamp_ms,
+        } => Ok(json!({
+            "ok": ok,
+            "target": target,
+            "data": data,
+            "error": error,
+            "timestamp_ms": timestamp_ms,
+        })),
+        McpResponse::ActionResult {
+            ok,
+            target,
+            action,
+            error,
+            timestamp_ms,
+        } => Ok(json!({
+            "ok": ok,
+            "target": target,
+            "action": action,
+            "error": error,
+            "timestamp_ms": timestamp_ms,
+        })),
+        McpResponse::WaitCompleted {
+            ok,
+            condition,
+            timed_out,
+            elapsed_ms,
+            error,
+        } => Ok(json!({
+            "ok": ok,
+            "condition": condition,
+            "timed_out": timed_out,
+            "elapsed_ms": elapsed_ms,
+            "error": error,
         })),
     }
 }

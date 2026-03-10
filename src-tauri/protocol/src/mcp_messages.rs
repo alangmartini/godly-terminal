@@ -412,6 +412,41 @@ pub enum McpRequest {
         pattern: String,
     },
     ListMutePatterns,
+
+    // Test harness lifecycle
+    TestHarnessStatus,
+    ResetStagingProfile,
+    CollectArtifactBundle {
+        #[serde(default)]
+        run_id: Option<String>,
+    },
+    ExportStateDump,
+    WaitForAppReady {
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+
+    // Semantic testing API
+    UiQuery {
+        target: String,
+        #[serde(default)]
+        args: Option<serde_json::Value>,
+    },
+    UiAct {
+        target: String,
+        action: String,
+        #[serde(default)]
+        args: Option<serde_json::Value>,
+    },
+    UiWait {
+        condition: String,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+        #[serde(default)]
+        poll_interval_ms: Option<u64>,
+        #[serde(default)]
+        args: Option<serde_json::Value>,
+    },
 }
 
 /// Terminal info returned by MCP queries
@@ -569,5 +604,43 @@ pub enum McpResponse {
     },
     FontSize {
         size: u32,
+    },
+
+    // Test harness responses
+    TestHarnessStatus {
+        ready: bool,
+        frontend_type: String,
+        harness_mode: bool,
+        run_id: Option<String>,
+        uptime_ms: u64,
+    },
+    StateDump {
+        dump: serde_json::Value,
+    },
+    ArtifactBundle {
+        run_id: String,
+        artifact_dir: String,
+        manifest: serde_json::Value,
+    },
+    QueryResult {
+        ok: bool,
+        target: String,
+        data: Option<serde_json::Value>,
+        error: Option<String>,
+        timestamp_ms: u64,
+    },
+    ActionResult {
+        ok: bool,
+        target: String,
+        action: String,
+        error: Option<String>,
+        timestamp_ms: u64,
+    },
+    WaitCompleted {
+        ok: bool,
+        condition: String,
+        timed_out: bool,
+        elapsed_ms: u64,
+        error: Option<String>,
     },
 }
