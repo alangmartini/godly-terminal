@@ -37,15 +37,35 @@ impl WorkspaceCollection {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| ".".to_string());
         let focused = initial_terminal_id.clone();
+        self.add_with_details(
+            id,
+            name,
+            folder_path,
+            false,
+            LayoutNode::Leaf {
+                terminal_id: initial_terminal_id,
+            },
+            focused,
+        )
+    }
+
+    /// Adds a workspace with explicit metadata and layout.
+    pub fn add_with_details(
+        &mut self,
+        id: String,
+        name: String,
+        folder_path: String,
+        worktree_mode: bool,
+        layout: LayoutNode,
+        focused_terminal: String,
+    ) -> &mut WorkspaceInfo {
         let workspace = WorkspaceInfo {
             id,
             name,
             folder_path,
-            worktree_mode: false,
-            layout: LayoutNode::Leaf {
-                terminal_id: initial_terminal_id,
-            },
-            focused_terminal: focused,
+            worktree_mode,
+            layout,
+            focused_terminal,
         };
         self.inner.add(workspace)
     }
