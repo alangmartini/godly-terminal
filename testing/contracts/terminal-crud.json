@@ -1,6 +1,6 @@
 {
   "id": "terminal-crud",
-  "description": "Create a terminal, verify it exists, rename it, and close it.",
+  "description": "Create a terminal, verify it exists, and close it.",
   "frontends": ["web", "native"],
   "fixture": "clean-profile",
   "requires_restart": false,

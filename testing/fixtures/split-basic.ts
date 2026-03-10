@@ -1,24 +1,18 @@
-import type { Fixture, McpClient } from './types';
+import { defineFixture, resetProfile, getActiveWorkspaceId, listTerminalIds } from './types';
 import { twoTerminals } from './two-terminals';
 
-export const splitBasic: Fixture = {
+export const splitBasic = defineFixture({
   name: 'split-basic',
   description: 'Two terminals with a horizontal split already created',
 
-  async create(client: McpClient): Promise<void> {
-    // First set up two terminals
+  async create(client) {
     await twoTerminals.create(client);
     await twoTerminals.verifyReady(client);
 
-    // Get workspace and terminal IDs
-    const workspace = await client.call('get_active_workspace') as any;
-    const workspaceId = workspace?.workspace?.id;
-    const terminals = await client.call('list_terminals') as any;
-    const terminalIds = terminals?.terminals?.map((t: any) => t.id) ?? [];
-
+    const workspaceId = await getActiveWorkspaceId(client);
+    const terminalIds = await listTerminalIds(client);
     if (terminalIds.length < 2) throw new Error('Need at least 2 terminals for split fixture');
 
-    // Create the split
     await client.call('split_terminal', {
       workspace_id: workspaceId,
       target_terminal_id: terminalIds[0],
@@ -28,21 +22,14 @@ export const splitBasic: Fixture = {
     });
   },
 
-  async verifyReady(client: McpClient): Promise<boolean> {
-    const workspace = await client.call('get_active_workspace') as any;
-    const workspaceId = workspace?.workspace?.id;
-    if (!workspaceId) return false;
-
-    const layout = await client.call('get_layout_tree', { workspace_id: workspaceId }) as any;
+  async verifyReady(client) {
+    const workspaceId = await getActiveWorkspaceId(client);
+    const layout = await client.call('get_layout_tree', { workspace_id: workspaceId }) as
+      { tree?: { type?: string; Split?: unknown } } | null;
     return layout?.tree?.type === 'split' || layout?.tree?.Split !== undefined;
   },
 
-  async tearDown(client: McpClient): Promise<void> {
-    await client.call('reset_staging_profile');
+  async tearDown(client) {
+    await resetProfile(client);
   },
-
-  async reset(client: McpClient): Promise<void> {
-    await this.tearDown(client);
-    await this.create(client);
-  },
-};
+});
