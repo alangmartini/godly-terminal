@@ -73,3 +73,53 @@ After testing, ensure:
 | No `resize_terminal` via MCP | The daemon supports resize but MCP doesn't expose it | `resize_terminal` |
 | Silent success on invalid IDs | `close`, `switch_workspace`, `rename`, `focus`, `move` return `{success: true}` for nonexistent IDs | Add ID validation in Tauri MCP handler before dispatching |
 | No error case testing docs | Error format inconsistent between daemon-routed and Tauri-routed tools | Standardize error responses across all tools |
+
+## Contract-Based Testing (Staging)
+
+The autonomous testing infrastructure adds a contract-based testing workflow on top of the existing MCP tools. Contracts define deterministic test scenarios with structured assertions.
+
+### New MCP Tools for Testing
+
+| Tool | Description |
+|------|-------------|
+| `test_harness_status` | Check if staging is in test-harness mode |
+| `reset_staging_profile` | Reset staging to a clean profile |
+| `wait_for_app_ready` | Wait for app to be fully initialized |
+| `collect_artifact_bundle` | Collect logs, state dumps, and screenshots |
+| `export_state_dump` | Export current app state as JSON |
+| `ui_query` | Query app state by semantic ID |
+| `ui_act` | Perform a semantic action |
+| `ui_wait` | Wait for a semantic condition |
+
+### Running a Test Contract
+
+From the external runner:
+```bash
+cd testing && npx tsx runner/index.ts contracts/split-basic.json
+```
+
+Or via MCP tools (for AI agent testing):
+1. `test_harness_status` — verify staging is in test mode
+2. `reset_staging_profile` — clean state
+3. `wait_for_app_ready` — wait for initialization
+4. Execute contract steps using `ui_query`, `ui_act`, `ui_wait`
+5. `collect_artifact_bundle` — gather results
+
+### Semantic IDs
+
+Test contracts reference UI elements by semantic ID, not DOM selectors:
+- `workspace.active` — currently active workspace
+- `tab.active` — currently active tab
+- `pane.active` — currently focused pane
+- `terminal.surface:<id>` — specific terminal surface
+- `layout.tree` — workspace layout structure
+
+See `src/testing/semantic-ids.ts` for the full registry.
+
+### Artifact Bundles
+
+Every test run produces an artifact bundle containing:
+- `manifest.json` — run metadata
+- `result.json` — pass/fail with step details
+- `steps/` — per-step trace data
+- Screenshots and state dumps as captured
