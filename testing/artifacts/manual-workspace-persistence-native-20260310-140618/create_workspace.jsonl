@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","id":0,"result":{"capabilities":{"tools":{}},"protocolVersion":"2024-11-05","serverInfo":{"name":"godly-terminal","version":"0.1.0"}}}
+{"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"Error: Not yet implemented in native shell","type":"text"}],"isError":true}}
+
