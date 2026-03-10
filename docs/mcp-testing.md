@@ -73,3 +73,9 @@ After testing, ensure:
 | No `resize_terminal` via MCP | The daemon supports resize but MCP doesn't expose it | `resize_terminal` |
 | Silent success on invalid IDs | `close`, `switch_workspace`, `rename`, `focus`, `move` return `{success: true}` for nonexistent IDs | Add ID validation in Tauri MCP handler before dispatching |
 | No error case testing docs | Error format inconsistent between daemon-routed and Tauri-routed tools | Standardize error responses across all tools |
+
+## Contract-Based Testing (Planned)
+
+An autonomous test harness for staging is planned but not yet implemented. It will add contract-based testing with deterministic assertions on top of the existing MCP tools. See `docs/staging-autonomous-testing-plan.md` for the full design and task breakdown.
+
+Planned MCP tools: `test_harness_status`, `reset_staging_profile`, `wait_for_app_ready`, `ui_query`, `ui_act`, `ui_wait`, `export_state_dump`, `collect_artifact_bundle`.
