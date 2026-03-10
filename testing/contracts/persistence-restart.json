@@ -1,7 +1,7 @@
 {
   "id": "persistence-restart",
   "description": "Create terminals, save layout, restart app, verify sessions reconnect.",
-  "frontends": ["web"],
+  "frontends": ["web", "native"],
   "fixture": "two-terminals",
   "requires_restart": true,
   "steps": [

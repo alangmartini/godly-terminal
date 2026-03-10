@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
@@ -29,6 +29,7 @@ use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCan
 use crate::notification_state::NotificationTracker;
 use crate::notifications;
 use crate::scrollback_restore;
+use crate::session_persistence;
 use crate::selection::{GridPos, SelectionState};
 use crate::settings_dialog::{self, SettingsTab};
 use crate::shortcuts_tab;
@@ -217,7 +218,7 @@ enum TerminalEmptyState {
 /// Main Iced application state — multi-terminal with event-driven updates.
 pub struct GodlyApp {
     /// Daemon client (shared with bridge thread).
-    client: Option<Arc<NativeDaemonClient>>,
+    pub(crate) client: Option<Arc<NativeDaemonClient>>,
     /// All terminal sessions (global, with workspace_id tracking).
     pub(crate) terminals: TerminalCollection,
     /// Workspace collection — each workspace owns its layout tree and focused terminal.
@@ -257,8 +258,14 @@ pub struct GodlyApp {
     settings_tab: String,
     /// Notification tracker for terminals.
     notifications: NotificationTracker,
+    /// Startup timestamp used for test harness uptime reporting.
+    pub(crate) started_at_ms: u64,
     /// Counter for generating workspace names.
-    next_workspace_num: u32,
+    pub(crate) next_workspace_num: u32,
+    /// Last workspace touched by the semantic test harness.
+    pub(crate) last_test_workspace_id: Option<String>,
+    /// Last terminal touched by the semantic test harness.
+    pub(crate) last_test_terminal_id: Option<String>,
     /// Which workspace currently has its context actions opened.
     workspace_context_menu_id: Option<String>,
     /// Workspace currently being renamed.
@@ -402,7 +409,10 @@ impl Default for GodlyApp {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             notifications: NotificationTracker::new(),
+            started_at_ms: Self::now_ms(),
             next_workspace_num: 2, // First workspace is "Workspace 1"
+            last_test_workspace_id: None,
+            last_test_terminal_id: None,
             workspace_context_menu_id: None,
             rename_workspace_id: None,
             rename_workspace_value: String::new(),
@@ -761,8 +771,8 @@ pub enum InitResult {
     /// Existing daemon sessions were recovered (app restart / reconnect).
     Recovered {
         session_ids: Vec<String>,
-        first_id: String,
         restored_scrollback_offsets: HashMap<String, usize>,
+        merged_session_state: Option<session_persistence::MergedSessionState>,
     },
 }
 
@@ -834,7 +844,7 @@ impl GodlyApp {
         )
     }
 
-    fn now_ms() -> u64 {
+    pub(crate) fn now_ms() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -1046,6 +1056,80 @@ impl GodlyApp {
         }
     }
 
+    fn clear_runtime_state(&mut self) {
+        self.terminals = TerminalCollection::new();
+        self.workspaces = WorkspaceCollection::new();
+        self.init_error = None;
+        self.selection = SelectionState::default();
+        self.sidebar_visible = true;
+        self.sidebar_width = SIDEBAR_WIDTH;
+        self.sidebar_animation = None;
+        self.sidebar_resizing = false;
+        self.entering_tabs.clear();
+        self.cursor_position = None;
+        self.settings_open = false;
+        self.settings_tab = "shortcuts".to_string();
+        self.notifications = NotificationTracker::new();
+        self.next_workspace_num = 2;
+        self.last_test_workspace_id = None;
+        self.last_test_terminal_id = None;
+        self.workspace_context_menu_id = None;
+        self.rename_workspace_id = None;
+        self.rename_workspace_value.clear();
+        self.tab_context_menu_id = None;
+        self.rename_tab_id = None;
+        self.rename_tab_value.clear();
+        self.last_terminal_sound_ms.clear();
+        self.last_global_sound_ms = None;
+        self.last_attention_request_ms = None;
+        self.toasts.clear();
+        self.dragging_tab_id = None;
+        self.mru_switcher = None;
+        self.quit_confirm_pending = false;
+        self.copy_preview_text = None;
+        self.terminal_context_menu_pos = None;
+        self.terminal_context_menu_terminal_id = None;
+        self.hovered_url = None;
+        self.ctrl_held = false;
+        self.search = SearchState::default();
+    }
+
+    fn build_persisted_session_state(&self) -> session_persistence::PersistedSessionState {
+        session_persistence::PersistedSessionState {
+            version: session_persistence::PERSISTENCE_VERSION,
+            sidebar_visible: self.sidebar_visible,
+            settings_open: self.settings_open,
+            settings_tab: self.settings_tab.clone(),
+            font_size: self.font_metrics.font_size,
+            next_workspace_num: self.next_workspace_num,
+            active_workspace_id: self.workspaces.active_id().map(str::to_string),
+            active_terminal_id: self.terminals.active_id().map(str::to_string),
+            workspaces: self
+                .workspaces
+                .iter()
+                .map(|workspace| session_persistence::PersistedWorkspaceState {
+                    id: workspace.id.clone(),
+                    name: workspace.name.clone(),
+                    folder_path: workspace.folder_path.clone(),
+                    worktree_mode: workspace.worktree_mode,
+                    focused_terminal: workspace.focused_terminal.clone(),
+                    layout: session_persistence::PersistedLayoutNode::from_layout(&workspace.layout),
+                })
+                .collect(),
+        }
+    }
+
+    pub(crate) fn save_layout_for_testing(&self) -> Result<(), String> {
+        self.persist_scrollback_offsets();
+        session_persistence::save_to_default_path(&self.build_persisted_session_state())
+    }
+
+    fn persist_before_close(&self) {
+        if let Err(error) = self.save_layout_for_testing() {
+            log::warn!("Failed to persist native session state: {}", error);
+        }
+    }
+
     pub fn title(&self) -> String {
         if let Some(tid) = self.active_focused() {
             if let Some(term) = self.terminals.get(tid) {
@@ -1065,84 +1149,7 @@ impl GodlyApp {
         match message {
             // --- Initialization ---
             Message::Initialized(Ok(result)) => {
-                let rows = self.calculate_rows();
-                let cols = self.calculate_cols();
-
-                match result {
-                    InitResult::Fresh { session_id } => {
-                        self.terminals.add_to_workspace(
-                            session_id.clone(),
-                            rows,
-                            cols,
-                            "w-default".to_string(),
-                        );
-                        self.workspaces.add(
-                            "w-default".to_string(),
-                            "Workspace 1".to_string(),
-                            session_id.clone(),
-                        );
-                        self.terminals.set_active(&session_id);
-                        return self.fetch_grid(&session_id);
-                    }
-                    InitResult::Recovered {
-                        session_ids,
-                        first_id,
-                        restored_scrollback_offsets,
-                    } => {
-                        for id in &session_ids {
-                            self.terminals.add_to_workspace(
-                                id.clone(),
-                                rows,
-                                cols,
-                                "w-default".to_string(),
-                            );
-                            if let Some(offset) = restored_scrollback_offsets.get(id) {
-                                if let Some(term) = self.terminals.get_mut(id) {
-                                    term.scrollback_offset = *offset;
-                                }
-                            }
-                        }
-                        self.terminals.set_active(&first_id);
-                        // Create default workspace with first session's layout.
-                        self.workspaces.add(
-                            "w-default".to_string(),
-                            "Workspace 1".to_string(),
-                            first_id.clone(),
-                        );
-                        // Add remaining sessions to the workspace's layout.
-                        if let Some(ws) = self.workspaces.get_mut("w-default") {
-                            for id in session_ids.iter().skip(1) {
-                                ws.layout.split_leaf(
-                                    &first_id,
-                                    id.clone(),
-                                    SplitDirection::Vertical,
-                                );
-                            }
-                        }
-                        // Fetch grids for all recovered sessions.
-                        let plan = scrollback_restore::build_recovery_fetch_plan(
-                            &session_ids,
-                            &restored_scrollback_offsets,
-                        );
-                        let mut tasks: Vec<Task<Message>> = Vec::with_capacity(plan.len());
-                        for action in plan {
-                            match action {
-                                scrollback_restore::RecoveryFetchAction::FetchGrid {
-                                    session_id,
-                                } => {
-                                    tasks.push(self.fetch_grid(&session_id));
-                                }
-                                scrollback_restore::RecoveryFetchAction::ScrollFetch {
-                                    session_id,
-                                    offset,
-                                } => {
-                                    tasks.push(self.scroll_fetch(&session_id, offset));
-                                }
-                            }
-                        }
-                        return Task::batch(tasks);
-                    }
-                }
+                return self.apply_init_result(result);
             }
             Message::Initialized(Err(e)) => {
                 log::error!("Initialization failed: {}", e);
@@ -1546,6 +1553,7 @@ impl GodlyApp {
                 if terminal_count > 0 {
                     self.quit_confirm_pending = true;
                 } else if let Some(id) = self.window_id {
+                    self.persist_before_close();
                     return window::close(id);
                 }
             }
@@ -2232,6 +2240,7 @@ impl GodlyApp {
             }
             Message::QuitConfirmed => {
                 self.quit_confirm_pending = false;
+                self.persist_before_close();
                 if let Some(id) = self.window_id {
                     return window::close(id);
                 }
@@ -4547,7 +4556,7 @@ impl GodlyApp {
         }
     }
 
-    fn delete_workspace(&mut self, workspace_id: &str) -> Task<Message> {
+    pub(crate) fn delete_workspace(&mut self, workspace_id: &str) -> Task<Message> {
         let terminal_ids: Vec<String> = self
             .terminals
             .terminals_for_workspace(workspace_id)
@@ -4745,6 +4754,218 @@ impl GodlyApp {
         self.create_terminal_task(decision.session_id)
     }
 
+    fn apply_init_result(&mut self, result: InitResult) -> Task<Message> {
+        self.clear_runtime_state();
+
+        match result {
+            InitResult::Fresh { session_id } => {
+                let rows = self.calculate_rows();
+                let cols = self.calculate_cols();
+                self.terminals.add_to_workspace(
+                    session_id.clone(),
+                    rows,
+                    cols,
+                    "w-default".to_string(),
+                );
+                self.workspaces.add(
+                    "w-default".to_string(),
+                    "Workspace 1".to_string(),
+                    session_id.clone(),
+                );
+                self.workspaces.set_active("w-default");
+                self.terminals.set_active(&session_id);
+                self.last_test_workspace_id = Some("w-default".to_string());
+                self.last_test_terminal_id = Some(session_id.clone());
+                self.fetch_grid(&session_id)
+            }
+            InitResult::Recovered {
+                session_ids,
+                restored_scrollback_offsets,
+                merged_session_state,
+            } => {
+                if let Some(merged) = merged_session_state.as_ref() {
+                    self.sidebar_visible = merged.sidebar_visible;
+                    self.settings_open = merged.settings_open;
+                    self.settings_tab = merged.settings_tab.clone();
+                    self.font_metrics = FontMetrics::from_font_size(merged.font_size);
+                    self.next_workspace_num = merged.next_workspace_num;
+                }
+
+                let rows = self.calculate_rows();
+                let cols = self.calculate_cols();
+                let mut assigned_terminal_ids = HashSet::new();
+
+                if let Some(merged) = merged_session_state {
+                    for workspace in merged.workspaces {
+                        for terminal_id in workspace.layout.all_leaf_ids() {
+                            let terminal_id = terminal_id.to_string();
+                            if !assigned_terminal_ids.insert(terminal_id.clone()) {
+                                continue;
+                            }
+                            self.terminals.add_to_workspace(
+                                terminal_id.clone(),
+                                rows,
+                                cols,
+                                workspace.id.clone(),
+                            );
+                            if let Some(offset) = restored_scrollback_offsets.get(&terminal_id) {
+                                if let Some(term) = self.terminals.get_mut(&terminal_id) {
+                                    term.scrollback_offset = *offset;
+                                }
+                            }
+                        }
+
+                        self.workspaces.add_with_details(
+                            workspace.id.clone(),
+                            workspace.name,
+                            workspace.folder_path,
+                            workspace.worktree_mode,
+                            workspace.layout,
+                            workspace.focused_terminal,
+                        );
+                    }
+
+                    if !merged.missing_live_terminal_ids.is_empty() {
+                        if self.workspaces.count() == 0 {
+                            if let Some(first_id) = merged.missing_live_terminal_ids.first() {
+                                self.terminals.add_to_workspace(
+                                    first_id.clone(),
+                                    rows,
+                                    cols,
+                                    "w-default".to_string(),
+                                );
+                                self.workspaces.add_with_details(
+                                    "w-default".to_string(),
+                                    "Workspace 1".to_string(),
+                                    default_workspace_folder(),
+                                    false,
+                                    LayoutNode::Leaf {
+                                        terminal_id: first_id.clone(),
+                                    },
+                                    first_id.clone(),
+                                );
+                                assigned_terminal_ids.insert(first_id.clone());
+                            }
+                        }
+
+                        let target_workspace_id = merged
+                            .active_workspace_id
+                            .clone()
+                            .or_else(|| self.workspaces.active_id().map(str::to_string))
+                            .unwrap_or_else(|| "w-default".to_string());
+
+                        for terminal_id in merged.missing_live_terminal_ids {
+                            if !assigned_terminal_ids.insert(terminal_id.clone()) {
+                                continue;
+                            }
+                            self.terminals.add_to_workspace(
+                                terminal_id.clone(),
+                                rows,
+                                cols,
+                                target_workspace_id.clone(),
+                            );
+                            if let Some(offset) = restored_scrollback_offsets.get(&terminal_id) {
+                                if let Some(term) = self.terminals.get_mut(&terminal_id) {
+                                    term.scrollback_offset = *offset;
+                                }
+                            }
+                            if let Some(workspace) = self.workspaces.get_mut(&target_workspace_id) {
+                                if let Some(anchor) = workspace
+                                    .layout
+                                    .all_leaf_ids()
+                                    .first()
+                                    .map(|id| (*id).to_string())
+                                {
+                                    workspace.layout.split_leaf(
+                                        &anchor,
+                                        terminal_id.clone(),
+                                        SplitDirection::Vertical,
+                                    );
+                                } else {
+                                    workspace.layout = LayoutNode::Leaf {
+                                        terminal_id: terminal_id.clone(),
+                                    };
+                                }
+                                workspace.focused_terminal = terminal_id.clone();
+                            }
+                        }
+                    }
+
+                    let first_workspace_id =
+                        self.workspaces.iter().next().map(|workspace| workspace.id.clone());
+
+                    if let Some(active_workspace_id) = merged.active_workspace_id {
+                        self.workspaces.set_active(&active_workspace_id);
+                        self.last_test_workspace_id = Some(active_workspace_id);
+                    } else if let Some(first_workspace_id) = first_workspace_id {
+                        self.workspaces.set_active(&first_workspace_id);
+                        self.last_test_workspace_id = Some(first_workspace_id);
+                    }
+
+                    if let Some(active_terminal_id) = merged.active_terminal_id {
+                        self.terminals.set_active(&active_terminal_id);
+                        self.last_test_terminal_id = Some(active_terminal_id);
+                    } else if let Some(active_workspace) = self.workspaces.active() {
+                        self.terminals.set_active(&active_workspace.focused_terminal);
+                    }
+                }
+
+                if self.workspaces.count() == 0 && !session_ids.is_empty() {
+                    let first_id = session_ids[0].clone();
+                    for terminal_id in &session_ids {
+                        self.terminals.add_to_workspace(
+                            terminal_id.clone(),
+                            rows,
+                            cols,
+                            "w-default".to_string(),
+                        );
+                        if let Some(offset) = restored_scrollback_offsets.get(terminal_id) {
+                            if let Some(term) = self.terminals.get_mut(terminal_id) {
+                                term.scrollback_offset = *offset;
+                            }
+                        }
+                    }
+                    self.workspaces.add(
+                        "w-default".to_string(),
+                        "Workspace 1".to_string(),
+                        first_id.clone(),
+                    );
+                    if let Some(workspace) = self.workspaces.get_mut("w-default") {
+                        for terminal_id in session_ids.iter().skip(1) {
+                            workspace.layout.split_leaf(
+                                &first_id,
+                                terminal_id.clone(),
+                                SplitDirection::Vertical,
+                            );
+                        }
+                    }
+                    self.workspaces.set_active("w-default");
+                    self.terminals.set_active(&first_id);
+                    self.last_test_workspace_id = Some("w-default".to_string());
+                    self.last_test_terminal_id = Some(first_id);
+                }
+
+                let plan = scrollback_restore::build_recovery_fetch_plan(
+                    &session_ids,
+                    &restored_scrollback_offsets,
+                );
+                let tasks: Vec<Task<Message>> = plan
+                    .into_iter()
+                    .map(|action| match action {
+                        scrollback_restore::RecoveryFetchAction::FetchGrid { session_id } => {
+                            self.fetch_grid(&session_id)
+                        }
+                        scrollback_restore::RecoveryFetchAction::ScrollFetch {
+                            session_id,
+                            offset,
+                        } => self.scroll_fetch(&session_id, offset),
+                    })
+                    .collect();
+                Task::batch(tasks)
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Scrollback
     // -----------------------------------------------------------------------
@@ -4919,7 +5140,153 @@ impl GodlyApp {
         )
     }
 
-    fn close_terminal(&mut self, session_id: &str) -> Task<Message> {
+    pub(crate) fn create_workspace_for_testing(
+        &mut self,
+        name: String,
+        folder_path: String,
+    ) -> Result<(String, Task<Message>), String> {
+        let client = Arc::clone(
+            self.client
+                .as_ref()
+                .ok_or_else(|| "No daemon connection".to_string())?,
+        );
+        let workspace_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
+
+        commands::create_terminal(
+            &client,
+            &session_id,
+            godly_protocol::ShellType::Windows,
+            Some(folder_path.as_str()),
+            rows,
+            cols,
+        )?;
+
+        self.terminals.add_to_workspace(
+            session_id.clone(),
+            rows,
+            cols,
+            workspace_id.clone(),
+        );
+        self.workspaces.add_with_details(
+            workspace_id.clone(),
+            name,
+            folder_path,
+            false,
+            LayoutNode::Leaf {
+                terminal_id: session_id.clone(),
+            },
+            session_id.clone(),
+        );
+        self.workspaces.set_active(&workspace_id);
+        self.terminals.set_active(&session_id);
+        self.next_workspace_num = self.next_workspace_num.saturating_add(1);
+        self.last_test_workspace_id = Some(workspace_id.clone());
+        self.last_test_terminal_id = Some(session_id.clone());
+
+        Ok((workspace_id, self.fetch_grid(&session_id)))
+    }
+
+    pub(crate) fn create_terminal_for_testing(
+        &mut self,
+        workspace_id: &str,
+        cwd: Option<String>,
+        name: Option<String>,
+    ) -> Result<(String, Task<Message>), String> {
+        let folder_path = self
+            .workspaces
+            .get(workspace_id)
+            .map(|workspace| workspace.folder_path.clone())
+            .ok_or_else(|| format!("Workspace {} not found", workspace_id))?;
+        let client = Arc::clone(
+            self.client
+                .as_ref()
+                .ok_or_else(|| "No daemon connection".to_string())?,
+        );
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
+        let effective_cwd = cwd.unwrap_or(folder_path);
+
+        commands::create_terminal(
+            &client,
+            &session_id,
+            godly_protocol::ShellType::Windows,
+            Some(effective_cwd.as_str()),
+            rows,
+            cols,
+        )?;
+
+        self.terminals.add_to_workspace(
+            session_id.clone(),
+            rows,
+            cols,
+            workspace_id.to_string(),
+        );
+        if let Some(custom_name) = name {
+            self.terminals.rename(&session_id, Some(custom_name));
+        }
+        if let Some(workspace) = self.workspaces.get_mut(workspace_id) {
+            workspace.layout = LayoutNode::Leaf {
+                terminal_id: session_id.clone(),
+            };
+            workspace.focused_terminal = session_id.clone();
+        }
+        self.workspaces.set_active(workspace_id);
+        self.terminals.set_active(&session_id);
+        self.last_test_workspace_id = Some(workspace_id.to_string());
+        self.last_test_terminal_id = Some(session_id.clone());
+
+        Ok((session_id.clone(), self.fetch_grid(&session_id)))
+    }
+
+    pub(crate) fn reset_staging_profile_for_testing(&mut self) -> Result<Task<Message>, String> {
+        let client = Arc::clone(
+            self.client
+                .as_ref()
+                .ok_or_else(|| "No daemon connection".to_string())?,
+        );
+        for session in commands::list_sessions(&client)?
+            .into_iter()
+            .filter(|session| session.running)
+        {
+            if let Err(error) = commands::close_terminal(&client, &session.id) {
+                log::warn!("Failed to close session {} during reset: {}", session.id, error);
+            }
+        }
+
+        session_persistence::clear_default_path()?;
+        scrollback_restore::clear_offsets()?;
+
+        let result = InitResult::Fresh {
+            session_id: create_fresh_session(
+                &client,
+                self.calculate_rows(),
+                self.calculate_cols(),
+            )?,
+        };
+        Ok(self.apply_init_result(result))
+    }
+
+    pub(crate) fn perform_test_restart(&mut self) -> Result<Task<Message>, String> {
+        let client = Arc::clone(
+            self.client
+                .as_ref()
+                .ok_or_else(|| "No daemon connection".to_string())?,
+        );
+        self.save_layout_for_testing()?;
+        let session_ids: Vec<String> = self.terminals.iter().map(|term| term.id.clone()).collect();
+        commands::detach_all_sessions(&client, &session_ids)?;
+
+        let result = collect_init_result_sync(
+            &client,
+            self.calculate_rows(),
+            self.calculate_cols(),
+        )?;
+        Ok(self.apply_init_result(result))
+    }
+
+    pub(crate) fn close_terminal(&mut self, session_id: &str) -> Task<Message> {
         if self.dragging_tab_id.as_deref() == Some(session_id) {
             self.dragging_tab_id = None;
         }
@@ -5950,6 +6317,96 @@ fn next_tab_id_from_mru(
 // Initialization
 // ---------------------------------------------------------------------------
 
+fn default_workspace_folder() -> String {
+    std::env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_string())
+}
+
+fn collect_init_result_sync(
+    client: &NativeDaemonClient,
+    rows: u16,
+    cols: u16,
+) -> Result<InitResult, String> {
+    if let Some(recovered) = collect_recovered_init_result(client)? {
+        return Ok(recovered);
+    }
+
+    let session_id = create_fresh_session(client, rows, cols)?;
+    Ok(InitResult::Fresh { session_id })
+}
+
+fn collect_recovered_init_result(
+    client: &NativeDaemonClient,
+) -> Result<Option<InitResult>, String> {
+    let sessions = commands::list_sessions(client)?;
+    let live_session_ids: Vec<String> = sessions
+        .into_iter()
+        .filter(|session| session.running)
+        .map(|session| session.id)
+        .collect();
+
+    if live_session_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let mut recovered_ids = Vec::new();
+    for session_id in &live_session_ids {
+        match commands::attach_session(client, session_id) {
+            Ok(()) => {
+                log::info!("Recovered session: {}", session_id);
+                recovered_ids.push(session_id.clone());
+            }
+            Err(error) => {
+                log::warn!("Failed to recover session {}: {}", session_id, error);
+            }
+        }
+    }
+
+    if recovered_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let persisted_offsets = scrollback_restore::load_offsets();
+    let pruned_offsets =
+        scrollback_restore::prune_offsets_for_live_sessions(&persisted_offsets, &live_session_ids);
+    if pruned_offsets != persisted_offsets {
+        if let Err(error) = scrollback_restore::save_offsets(&pruned_offsets) {
+            log::warn!("Failed to persist pruned scrollback offsets: {}", error);
+        }
+    }
+
+    let restored_scrollback_offsets =
+        scrollback_restore::restored_offsets_for_recovered_sessions(&pruned_offsets, &recovered_ids);
+    let merged_session_state = session_persistence::load_from_default_path().map(|persisted| {
+        session_persistence::merge_with_live_sessions(&persisted, &recovered_ids)
+    });
+
+    Ok(Some(InitResult::Recovered {
+        session_ids: recovered_ids,
+        restored_scrollback_offsets,
+        merged_session_state,
+    }))
+}
+
+fn create_fresh_session(
+    client: &NativeDaemonClient,
+    rows: u16,
+    cols: u16,
+) -> Result<String, String> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    commands::create_terminal(
+        client,
+        &session_id,
+        godly_protocol::ShellType::Windows,
+        None,
+        rows,
+        cols,
+    )?;
+    Ok(session_id)
+}
+
 /// Initialize the app: connect to daemon, set up bridge, recover or create sessions.
 pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
     let client = match NativeDaemonClient::connect_or_launch() {
@@ -5983,71 +6440,7 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
         async move {
             let (tx, rx) = futures_channel::oneshot::channel();
             std::thread::spawn(move || {
-                let sessions = match client.send_request(&godly_protocol::Request::ListSessions) {
-                    Ok(godly_protocol::Response::SessionList { sessions }) => sessions,
-                    _ => vec![],
-                };
-
-                let live_sessions: Vec<_> = sessions.into_iter().filter(|s| s.running).collect();
-
-                if !live_sessions.is_empty() {
-                    let mut recovered_ids = Vec::new();
-                    for session in &live_sessions {
-                        match commands::attach_session(&client, &session.id) {
-                            Ok(()) => {
-                                log::info!("Recovered session: {}", session.id);
-                                recovered_ids.push(session.id.clone());
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to recover session {}: {}", session.id, e);
-                            }
-                        }
-                    }
-
-                    if !recovered_ids.is_empty() {
-                        let first_id = recovered_ids[0].clone();
-                        let persisted_offsets = scrollback_restore::load_offsets();
-                        let live_session_ids: Vec<String> = live_sessions
-                            .iter()
-                            .map(|session| session.id.clone())
-                            .collect();
-                        let pruned_offsets = scrollback_restore::prune_offsets_for_live_sessions(
-                            &persisted_offsets,
-                            &live_session_ids,
-                        );
-                        if pruned_offsets != persisted_offsets {
-                            if let Err(error) = scrollback_restore::save_offsets(&pruned_offsets) {
-                                log::warn!(
-                                    "Failed to persist pruned scrollback offsets: {}",
-                                    error
-                                );
-                            }
-                        }
-                        let restored_scrollback_offsets =
-                            scrollback_restore::restored_offsets_for_recovered_sessions(
-                                &pruned_offsets,
-                                &recovered_ids,
-                            );
-                        let _ = tx.send(Ok(InitResult::Recovered {
-                            session_ids: recovered_ids,
-                            first_id,
-                            restored_scrollback_offsets,
-                        }));
-                        return;
-                    }
-                }
-
-                let session_id = uuid::Uuid::new_v4().to_string();
-                let sid = session_id.clone();
-                let result = commands::create_terminal(
-                    &client,
-                    &sid,
-                    godly_protocol::ShellType::Windows,
-                    None,
-                    rows,
-                    cols,
-                )
-                .map(|_| InitResult::Fresh { session_id: sid });
+                let result = collect_init_result_sync(&client, rows, cols);
                 let _ = tx.send(result);
             });
             rx.await

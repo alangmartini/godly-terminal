@@ -27,6 +27,7 @@ mod url_detector;
 mod terminal_context_menu;
 mod whisper_ui;
 mod quick_claude;
+mod session_persistence;
 
 use app::{GodlyApp, Message};
 

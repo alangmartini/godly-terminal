@@ -1,0 +1,9 @@
+{
+  "Id": 204212,
+  "ProcessName": "godly-native",
+  "MainWindowTitle": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe — Godly Terminal (Native)",
+  "MainWindowHandle": {
+    "value": 7279776
+  },
+  "Path": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\src-tauri\\target\\release\\godly-native.exe"
+}

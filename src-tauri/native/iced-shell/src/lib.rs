@@ -5,6 +5,7 @@ pub mod notification_state;
 pub mod notifications;
 pub mod quick_claude;
 pub mod scrollback_restore;
+pub mod session_persistence;
 pub mod selection;
 pub mod settings_dialog;
 pub mod shortcuts_tab;
