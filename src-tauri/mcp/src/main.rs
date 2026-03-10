@@ -525,7 +525,6 @@ fn run_mcp_server() {
             break;
         }
 
-
         mcp_log!("Response sent successfully");
     }
 

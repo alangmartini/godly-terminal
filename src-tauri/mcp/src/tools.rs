@@ -2250,7 +2250,6 @@ pub fn call_tool(
             }
         }
 
-
         "zoom_in" => McpRequest::ZoomIn,
         "zoom_out" => McpRequest::ZoomOut,
         "zoom_reset" => McpRequest::ZoomReset,

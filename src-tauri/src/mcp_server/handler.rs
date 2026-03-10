@@ -3419,11 +3419,11 @@ pub fn handle_mcp_request(
 
         // --- Test harness ---
 
-        McpRequest::TestHarnessStatus => {
+        McpRequest::TestHarnessStatus | McpRequest::WaitForAppReady { .. } => {
             McpResponse::TestHarnessStatus {
                 ready: true,
                 frontend_type: "web".to_string(),
-                harness_mode: std::env::var("GODLY_TEST_HARNESS").is_ok(),
+                harness_mode: std::env::var("GODLY_TEST_HARNESS").map(|v| v == "1").unwrap_or(false),
                 run_id: None,
                 uptime_ms: 0,
             }
@@ -3441,16 +3441,6 @@ pub fn handle_mcp_request(
             let dump = crate::testing::state_dump::dump_app_state(app_state);
             McpResponse::StateDump {
                 dump: serde_json::to_value(dump).unwrap_or_default(),
-            }
-        }
-
-        McpRequest::WaitForAppReady { timeout_ms: _ } => {
-            McpResponse::TestHarnessStatus {
-                ready: true,
-                frontend_type: "web".to_string(),
-                harness_mode: std::env::var("GODLY_TEST_HARNESS").is_ok(),
-                run_id: None,
-                uptime_ms: 0,
             }
         }
 
@@ -3485,8 +3475,6 @@ pub fn handle_mcp_request(
         }
     }
 }
-
-
 
 /// Execute a JavaScript snippet in the main webview and return the result.
 ///

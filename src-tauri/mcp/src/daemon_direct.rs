@@ -774,9 +774,6 @@ impl Backend for DaemonDirectBackend {
             }
 
 
-
-
-
             McpRequest::NextTab { .. } => Ok(Self::app_only_error("next_tab")),
             McpRequest::PreviousTab { .. } => Ok(Self::app_only_error("previous_tab")),
             McpRequest::GoToTab { .. } => Ok(Self::app_only_error("go_to_tab")),
@@ -809,17 +806,14 @@ impl Backend for DaemonDirectBackend {
             McpRequest::SaveLayout => Ok(Self::app_only_error("save_layout")),
             McpRequest::GetAppInfo => Ok(Self::app_only_error("get_app_info")),
 
-
             McpRequest::ReorderTabs { .. } => Ok(Self::app_only_error("reorder_tabs")),
             McpRequest::GetTabOrder { .. } => Ok(Self::app_only_error("get_tab_order")),
             McpRequest::CopyToClipboard { .. } => Ok(Self::app_only_error("copy_to_clipboard")),
             McpRequest::GetSelectedText { .. } => Ok(Self::app_only_error("get_selected_text")),
 
-
             McpRequest::ListThemes => Ok(Self::app_only_error("list_themes")),
             McpRequest::GetActiveTheme => Ok(Self::app_only_error("get_active_theme")),
             McpRequest::SetTheme { .. } => Ok(Self::app_only_error("set_theme")),
-
 
             McpRequest::ListAvailableShells => {
                 // Pure data — can be handled without the app
@@ -835,7 +829,6 @@ impl Backend for DaemonDirectBackend {
             }
             McpRequest::GetDefaultShell => Ok(Self::app_only_error("get_default_shell")),
             McpRequest::SetDefaultShell { .. } => Ok(Self::app_only_error("set_default_shell")),
-
 
             McpRequest::ZoomIn => Ok(Self::app_only_error("zoom_in")),
             McpRequest::ZoomOut => Ok(Self::app_only_error("zoom_out")),

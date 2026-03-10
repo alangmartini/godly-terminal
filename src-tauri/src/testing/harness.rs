@@ -13,6 +13,12 @@ pub struct TestHarnessService {
     current_run_id: RwLock<Option<String>>,
 }
 
+impl Default for TestHarnessService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestHarnessService {
     /// Create a new test harness service.
     /// Reads `GODLY_TEST_HARNESS` from the environment to determine if
