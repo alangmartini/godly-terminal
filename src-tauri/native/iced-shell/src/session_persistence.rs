@@ -214,6 +214,10 @@ pub fn save_to_default_path(state: &PersistedSessionState) -> Result<(), String>
     save_to_path(&default_persistence_path(), state)
 }
 
+pub fn clear_default_path() -> Result<(), String> {
+    clear_path(&default_persistence_path())
+}
+
 pub fn save_to_path(path: &Path, state: &PersistedSessionState) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -228,6 +232,14 @@ pub fn save_to_path(path: &Path, state: &PersistedSessionState) -> Result<(), St
     std::fs::write(path, json)
         .map_err(|error| format!("Failed to write {}: {}", path.display(), error))?;
     Ok(())
+}
+
+pub fn clear_path(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Failed to remove {}: {}", path.display(), error)),
+    }
 }
 
 pub fn merge_with_live_sessions(

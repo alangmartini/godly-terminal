@@ -43,11 +43,11 @@ export class McpClient {
     if (!this.process) throw new Error('Not connected');
 
     const id = ++this.requestId;
-    const msg = JSON.stringify({ jsonrpc: '2.0', id, method, params });
+    const msg = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.process!.stdin!.write(`Content-Length: ${Buffer.byteLength(msg)}\r\n\r\n${msg}`);
+      this.process!.stdin!.write(msg);
     });
   }
 
@@ -70,25 +70,13 @@ export class McpClient {
 
   private handleData(chunk: string) {
     this.buffer += chunk;
-    while (this.buffer.includes('\r\n\r\n')) {
-      const headerEnd = this.buffer.indexOf('\r\n\r\n');
-      const header = this.buffer.substring(0, headerEnd);
-      const match = header.match(/Content-Length:\s*(\d+)/i);
-      if (!match) {
-        this.buffer = this.buffer.substring(headerEnd + 4);
-        continue;
-      }
-      const length = parseInt(match[1], 10);
-      const bodyStart = headerEnd + 4;
-      // Content-Length is byte count, but buffer is a decoded string.
-      // For ASCII-only JSON-RPC this is equivalent; for multi-byte content
-      // we convert to bytes to check correctly.
-      const bodyBytes = Buffer.byteLength(this.buffer.substring(bodyStart));
-      if (bodyBytes < length) break;
+    while (true) {
+      const newlineIndex = this.buffer.indexOf('\n');
+      if (newlineIndex === -1) break;
 
-      // Extract exactly `length` bytes worth of string characters
-      const body = extractByteSlice(this.buffer, bodyStart, length);
-      this.buffer = this.buffer.substring(bodyStart + body.length);
+      const body = this.buffer.substring(0, newlineIndex).trim();
+      this.buffer = this.buffer.substring(newlineIndex + 1);
+      if (!body) continue;
 
       try {
         const response = JSON.parse(body);
@@ -118,17 +106,4 @@ export class McpClient {
     // Fall back to first candidate; spawn will produce a clear error
     return candidates[0];
   }
-}
-
-/** Extract a substring that is exactly `byteLen` bytes of UTF-8 from `str` starting at char index `start`. */
-function extractByteSlice(str: string, start: number, byteLen: number): string {
-  let bytes = 0;
-  let i = start;
-  while (i < str.length && bytes < byteLen) {
-    const code = str.codePointAt(i)!;
-    const charBytes = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
-    bytes += charBytes;
-    i += code > 0xffff ? 2 : 1; // surrogate pair takes 2 JS chars
-  }
-  return str.substring(start, i);
 }

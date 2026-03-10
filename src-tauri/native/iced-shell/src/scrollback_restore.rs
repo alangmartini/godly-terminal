@@ -24,6 +24,15 @@ fn default_offsets_path() -> PathBuf {
         .join(PERSISTENCE_FILE_NAME)
 }
 
+pub fn clear_offsets() -> Result<(), String> {
+    let path = default_offsets_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Failed to remove {}: {}", path.display(), error)),
+    }
+}
+
 pub fn load_offsets() -> HashMap<String, usize> {
     load_offsets_from_path(&default_offsets_path()).unwrap_or_default()
 }

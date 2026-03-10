@@ -1,0 +1,71 @@
+{
+  "contract_id": "persistence-restart",
+  "passed": true,
+  "steps": [
+    {
+      "step_id": "fixture:two-terminals",
+      "passed": true,
+      "duration_ms": 420,
+      "assertions": [],
+      "skipped": false
+    },
+    {
+      "step_id": "verify-initial-state",
+      "passed": true,
+      "duration_ms": 3,
+      "assertions": [
+        {
+          "assertion_id": "has-terminals",
+          "passed": true,
+          "expected": 2,
+          "actual": 2
+        }
+      ],
+      "skipped": false
+    },
+    {
+      "step_id": "save-layout",
+      "passed": true,
+      "duration_ms": 3,
+      "assertions": [],
+      "skipped": false
+    },
+    {
+      "step_id": "record-workspace",
+      "passed": true,
+      "duration_ms": 3,
+      "assertions": [],
+      "skipped": false
+    },
+    {
+      "step_id": "restart-app",
+      "passed": true,
+      "duration_ms": 29,
+      "assertions": [],
+      "skipped": false
+    },
+    {
+      "step_id": "wait-app-ready",
+      "passed": true,
+      "duration_ms": 2,
+      "assertions": [],
+      "skipped": false
+    },
+    {
+      "step_id": "verify-terminals-restored",
+      "passed": true,
+      "duration_ms": 3,
+      "assertions": [
+        {
+          "assertion_id": "terminals-restored",
+          "passed": true,
+          "expected": 2,
+          "actual": 2
+        }
+      ],
+      "skipped": false
+    }
+  ],
+  "total_duration_ms": 798,
+  "artifact_dir": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\testing\\artifacts\\persistence-restart-1773167765176"
+}

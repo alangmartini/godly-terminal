@@ -1,0 +1,17 @@
+{
+  "run_id": "persistence-restart-1773167765176",
+  "contract_id": "persistence-restart",
+  "created_at": "2026-03-10T18:36:05.977Z",
+  "artifact_dir": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\testing\\artifacts\\persistence-restart-1773167765176",
+  "files": [
+    "manifest.json",
+    "steps/fixture:two-terminals.json",
+    "steps/verify-initial-state.json",
+    "steps/save-layout.json",
+    "steps/record-workspace.json",
+    "steps/restart-app.json",
+    "steps/wait-app-ready.json",
+    "steps/verify-terminals-restored.json",
+    "result.json"
+  ]
+}
