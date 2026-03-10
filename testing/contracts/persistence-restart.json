@@ -1,0 +1,57 @@
+{
+  "id": "persistence-restart",
+  "description": "Create terminals, save layout, restart app, verify sessions reconnect.",
+  "frontends": ["web"],
+  "fixture": "two-terminals",
+  "requires_restart": true,
+  "steps": [
+    {
+      "id": "verify-initial-state",
+      "description": "Verify two terminals exist before restart",
+      "type": "query",
+      "target": "terminal.count",
+      "assertions": [
+        { "id": "has-terminals", "type": "equals", "expected": 2 }
+      ]
+    },
+    {
+      "id": "save-layout",
+      "description": "Trigger layout save",
+      "type": "action",
+      "target": "app",
+      "action": "save_layout"
+    },
+    {
+      "id": "record-workspace",
+      "description": "Record active workspace for post-restart verification",
+      "type": "query",
+      "target": "workspace.active"
+    },
+    {
+      "id": "restart-app",
+      "description": "Gracefully restart the staging app",
+      "type": "action",
+      "target": "app.lifecycle",
+      "action": "restart"
+    },
+    {
+      "id": "wait-app-ready",
+      "description": "Wait for app to be ready after restart",
+      "type": "wait",
+      "condition": "app.ready",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "verify-terminals-restored",
+      "description": "Verify terminals were restored after restart",
+      "type": "query",
+      "target": "terminal.count",
+      "assertions": [
+        { "id": "terminals-restored", "type": "equals", "expected": 2 }
+      ]
+    }
+  ],
+  "cleanup": [
+    { "type": "reset" }
+  ]
+}
