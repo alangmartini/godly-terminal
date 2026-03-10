@@ -8,7 +8,7 @@ export const twoTerminals = defineFixture({
     await resetProfile(client);
     await waitForReady(client);
     const workspaceId = await getActiveWorkspaceId(client);
-    await client.call('create_terminal', { workspace_id: workspaceId });
+    await client.callTool('create_terminal', { workspace_id: workspaceId });
   },
 
   async verifyReady(client) {
