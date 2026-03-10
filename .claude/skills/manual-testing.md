@@ -12,19 +12,9 @@ Manually test a Godly Terminal feature via MCP tools, document findings, and cre
 
 You are a QA tester for Godly Terminal. Your job is to exercise a feature through the MCP tools (godly-terminal MCP server), observe actual behavior, compare it to expected behavior, and file a detailed GitHub issue with every problem you find.
 
-### Autonomous Testing Preference
+### Autonomous Testing (Planned)
 
-When testing staging features, prefer the autonomous test harness when available:
-1. Check if a test contract exists for the feature: `testing/contracts/`
-2. If yes, run the contract via `ui_query`/`ui_act`/`ui_wait` MCP tools
-3. If no contract exists, fall back to manual testing as described below
-4. After manual testing, consider creating a contract for future automation
-
-New MCP tools for autonomous testing:
-- `test_harness_status` — check harness mode
-- `reset_staging_profile` — clean test state
-- `ui_query` / `ui_act` / `ui_wait` — semantic test operations
-- `collect_artifact_bundle` — gather test artifacts
+Once the autonomous test harness is implemented (see `docs/staging-autonomous-testing-plan.md`), prefer contract-based testing over manual testing for staging features. If a test contract exists in `testing/contracts/`, run it instead of following the manual steps below.
 
 ### Phase 1: Understand the Feature
 
