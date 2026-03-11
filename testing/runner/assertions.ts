@@ -36,6 +36,7 @@ function evaluate(a: Assertion, actual: unknown): { passed: boolean; expected: u
       };
 
     case 'exists':
+    case 'not_null':
       return { passed: actual !== undefined && actual !== null, expected: 'exists' };
 
     case 'not_exists':
