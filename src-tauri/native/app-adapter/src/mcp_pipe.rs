@@ -183,7 +183,8 @@ fn dispatch_request(
         | McpRequest::ResetStagingProfile
         | McpRequest::ExportStateDump
         | McpRequest::UiQuery { .. }
-        | McpRequest::UiAct { .. } => forward_request(event_tx, request.clone()),
+        | McpRequest::UiAct { .. }
+        | McpRequest::CaptureScreenshot { .. } => forward_request(event_tx, request.clone()),
 
         McpRequest::WaitForAppReady { timeout_ms } => {
             wait_for_app_ready(event_tx, timeout_ms.unwrap_or(30_000))
