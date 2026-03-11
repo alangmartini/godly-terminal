@@ -18,6 +18,12 @@ function evaluate(a: Assertion, actual: unknown): { passed: boolean; expected: u
       return { passed: deepEqual(actual, a.expected), expected: a.expected };
 
     case 'contains':
+      if (Array.isArray(actual)) {
+        return {
+          passed: actual.some(el => el === a.expected || (typeof el === 'string' && el.includes(String(a.expected)))),
+          expected: a.expected,
+        };
+      }
       return {
         passed: typeof actual === 'string' && actual.includes(String(a.expected)),
         expected: a.expected,
@@ -62,9 +68,18 @@ function evaluate(a: Assertion, actual: unknown): { passed: boolean; expected: u
 }
 
 function getByPath(obj: unknown, path: string): unknown {
+  const parts = path.split('.');
   let current: unknown = obj;
-  for (const part of path.split('.')) {
-    if (current == null || typeof current !== 'object') return undefined;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (current == null) return undefined;
+    if (part === '[*]') {
+      if (!Array.isArray(current)) return undefined;
+      const rest = parts.slice(i + 1).join('.');
+      if (!rest) return current;
+      return current.map(el => getByPath(el, rest));
+    }
+    if (typeof current !== 'object') return undefined;
     current = (current as Record<string, unknown>)[part];
   }
   return current;
