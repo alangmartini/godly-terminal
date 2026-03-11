@@ -71,7 +71,7 @@ describe('Bug #498: split layout persistence round-trip', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   const deps = {
