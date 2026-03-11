@@ -39,6 +39,7 @@
     "test:integration": "vitest run --project integration",
     "test:e2e": "wdio run e2e/wdio.conf.ts",
     "test:e2e:no-build": "cross-env SKIP_BUILD=1 wdio run e2e/wdio.conf.ts",
+    "test:contracts:validate": "pnpm --dir testing run validate-contracts",
     "test:all": "pnpm run test && pnpm run test:rust && pnpm run test:e2e",
     "check:persistence": "pnpm exec ts-node e2e/check-persistence.ts",
     "version:bump": "node scripts/bump-version.mjs",

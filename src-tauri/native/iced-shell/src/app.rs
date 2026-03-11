@@ -719,6 +719,8 @@ pub enum Message {
     ThemeExported(Result<String, String>),
     ThemeDeleteCustom(String),
     ThemeSelectCustom(String),
+    // --- Folder Picker for New Workspace ---
+    FolderPickerResult(Option<std::path::PathBuf>),
     // --- H1-H6: Shell Picker & Workspace Creation ---
     ShellPickerOpen,
     ShellPickerTabClicked(ShellPickerTab),
@@ -2334,6 +2336,19 @@ impl GodlyApp {
                 if e != "Cancelled" {
                     self.enqueue_toast("Export Failed".into(), e);
                 }
+            }
+            Message::FolderPickerResult(Some(path)) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| {
+                        format!("Workspace {}", self.next_workspace_num)
+                    });
+                let folder = path.display().to_string();
+                return self.create_new_workspace_with_folder(name, folder);
+            }
+            Message::FolderPickerResult(None) => {
+                // User cancelled the folder picker dialog
             }
             Message::ThemeDeleteCustom(id) => {
                 self.custom_themes.retain(|t| t.id != id);
@@ -4531,7 +4546,18 @@ impl GodlyApp {
                 let _ = self.workspaces.move_down(&id);
                 Task::none()
             }
-            SidebarAction::NewWorkspace => self.create_new_workspace(),
+            SidebarAction::NewWorkspace => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Select Workspace Folder")
+                            .pick_folder()
+                            .await
+                            .map(|h| h.path().to_path_buf())
+                    },
+                    Message::FolderPickerResult,
+                );
+            }
             SidebarAction::ToggleSettings => {
                 self.settings_open = !self.settings_open;
                 Task::none()
@@ -4752,6 +4778,42 @@ impl GodlyApp {
         self.workspace_context_menu_id = None;
 
         self.create_terminal_task(decision.session_id)
+    }
+
+    /// Create a new workspace with a folder path (from the folder picker).
+    fn create_new_workspace_with_folder(
+        &mut self,
+        name: String,
+        folder_path: String,
+    ) -> Task<Message> {
+        let workspace_id = uuid::Uuid::new_v4().to_string();
+        let session_id = uuid::Uuid::new_v4().to_string();
+
+        let rows = self.calculate_rows();
+        let cols = self.calculate_cols();
+
+        self.terminals.add_to_workspace(
+            session_id.clone(),
+            rows,
+            cols,
+            workspace_id.clone(),
+        );
+        self.workspaces.add_with_details(
+            workspace_id.clone(),
+            name,
+            folder_path.clone(),
+            false,
+            LayoutNode::Leaf {
+                terminal_id: session_id.clone(),
+            },
+            session_id.clone(),
+        );
+        self.workspaces.set_active(&workspace_id);
+        self.terminals.set_active(&session_id);
+        self.workspace_context_menu_id = None;
+        self.next_workspace_num = self.next_workspace_num.saturating_add(1);
+
+        self.create_terminal_task_with_cwd(session_id, Some(folder_path))
     }
 
     fn apply_init_result(&mut self, result: InitResult) -> Task<Message> {
@@ -5109,6 +5171,14 @@ impl GodlyApp {
     }
 
     fn create_terminal_task(&self, session_id: String) -> Task<Message> {
+        self.create_terminal_task_with_cwd(session_id, None)
+    }
+
+    fn create_terminal_task_with_cwd(
+        &self,
+        session_id: String,
+        cwd: Option<String>,
+    ) -> Task<Message> {
         let Some(client) = &self.client else {
             return Task::done(Message::TerminalCreated(Err(
                 "No daemon connection".to_string()
@@ -5126,7 +5196,7 @@ impl GodlyApp {
                         &client,
                         &session_id,
                         godly_protocol::ShellType::Windows,
-                        None,
+                        cwd.as_deref(),
                         rows,
                         cols,
                     )
