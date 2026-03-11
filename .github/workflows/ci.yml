@@ -43,16 +43,14 @@ jobs:
         run: pnpm exec tsx testing/runner/validate-contracts.ts
         timeout-minutes: 1
       # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
+      # Excluded: godly-whisper (ALSA), godly-pty-shim (Win32 pipes), godly-renderer (Vulkan)
       - name: Cargo check (library crates)
         run: >
           cd src-tauri && cargo check
           -p godly-protocol
           -p godly-vt
           -p godly-daemon
-          -p godly-pty-shim
           -p godly-llm
-          -p godly-whisper
-          -p godly-renderer
         timeout-minutes: 8
 
   # ---------------------------------------------------------------------------
