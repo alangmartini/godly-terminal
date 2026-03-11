@@ -283,6 +283,7 @@ function hasAllTerminals(node: LayoutNode, liveIds: Set<string>): boolean {
 
 /** Sync a layout tree to the backend for persistence. Fire-and-forget. */
 export function syncLayoutTreeToBackend(workspaceId: string, tree: LayoutNode): void {
+  if (typeof window === 'undefined') return; // Skip in non-browser (test) environments
   import('@tauri-apps/api/core').then(({ invoke }) => {
     invoke('set_layout_tree', { workspaceId, tree }).catch((error: unknown) => {
       console.error('[App] Failed to sync layout tree to backend:', error);
@@ -297,6 +298,7 @@ export async function syncSplitToBackend(
   workspaceId: string,
   split: { leftTerminalId: string; rightTerminalId: string; direction: string; ratio: number },
 ): Promise<void> {
+  if (typeof window === 'undefined') return; // Skip in non-browser (test) environments
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('set_split_view', {
