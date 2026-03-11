@@ -136,7 +136,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     // Version footer
     let version = format!(
         "Godly Terminal (Native) \u{2014} v{}",
-        godly_protocol::FRONTEND_CONTRACT_VERSION
+        env!("GODLY_APP_VERSION")
     );
     let footer = container(text(version).size(11).color(TEXT_SECONDARY()))
         .padding(Padding::from([8, 16]))
