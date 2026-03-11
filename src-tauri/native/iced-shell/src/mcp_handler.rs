@@ -2,6 +2,7 @@ use godly_app_adapter::mcp_pipe::McpEvent;
 use godly_layout_core::SplitDirection;
 use godly_protocol::testing::StateDump;
 use godly_protocol::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
+use iced::window;
 use serde_json::{json, Value};
 
 use crate::app::{GodlyApp, Message};
@@ -14,6 +15,19 @@ impl GodlyApp {
     pub(crate) fn handle_mcp_event(&mut self, event: McpEvent) -> iced::Task<Message> {
         match event {
             McpEvent::Request { request, reply } => {
+                // CaptureScreenshot is async — defer the reply until iced
+                // delivers the screenshot via Message::ScreenshotCaptured.
+                if matches!(request, McpRequest::CaptureScreenshot { .. }) {
+                    let Some(wid) = self.window_id else {
+                        let _ = reply.send(McpResponse::Error {
+                            message: "Window not yet initialized".to_string(),
+                        });
+                        return iced::Task::none();
+                    };
+                    self.pending_screenshot_reply = Some(reply);
+                    return window::screenshot(wid).map(Message::ScreenshotCaptured);
+                }
+
                 let (response, task) = self.handle_mcp_request(request);
                 let _ = reply.send(response);
                 task

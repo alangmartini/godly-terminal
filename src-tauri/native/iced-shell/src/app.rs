@@ -23,6 +23,7 @@ use godly_features_shell::tabs as tab_reducer;
 use godly_features_shell::workspaces as workspace_reducer;
 use godly_layout_core::SplitPlacement;
 use godly_protocol::types::RichGridData;
+use godly_protocol::McpResponse;
 
 use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCanvas};
 
@@ -233,7 +234,7 @@ pub struct GodlyApp {
     window_width: f32,
     window_height: f32,
     /// Native window id captured from runtime events.
-    window_id: Option<window::Id>,
+    pub(crate) window_id: Option<window::Id>,
     /// Whether the app window is currently focused.
     window_focused: bool,
     /// Font metrics for cell sizing and grid dimension calculations.
@@ -385,6 +386,8 @@ pub struct GodlyApp {
     whisper_available: bool,
     whisper_state: Option<whisper_ui::WhisperState>,
     whisper_service: Option<Arc<parking_lot::Mutex<Option<godly_app_adapter::whisper::WhisperService>>>>,
+    /// Pending reply channel for async screenshot capture.
+    pub(crate) pending_screenshot_reply: Option<std::sync::mpsc::Sender<McpResponse>>,
 }
 
 impl Default for GodlyApp {
@@ -478,6 +481,7 @@ impl Default for GodlyApp {
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
             whisper_state: None,
             whisper_service: None,
+            pending_screenshot_reply: None,
         }
     }
 }
@@ -770,6 +774,8 @@ pub enum Message {
     WhisperLevelUpdate(f32),
     WhisperTimerTick,
     WhisperCancel,
+    /// Screenshot captured via iced window API.
+    ScreenshotCaptured(iced::window::Screenshot),
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -2603,12 +2609,67 @@ impl GodlyApp {
                 self.whisper_service = None;
                 self.whisper_state = None;
             }
+            // --- Screenshot captured (async MCP reply) ---
+            Message::ScreenshotCaptured(screenshot) => {
+                if let Some(reply) = self.pending_screenshot_reply.take() {
+                    let response = Self::encode_screenshot_to_file(&screenshot);
+                    let _ = reply.send(response);
+                }
+            }
             // --- J1-J9: MCP Event Integration ---
             Message::McpEvent(event) => {
                 return self.handle_mcp_event(event);
             }
         }
         Task::none()
+    }
+
+    /// Encode an iced Screenshot as PNG and save to a temp file.
+    fn encode_screenshot_to_file(screenshot: &iced::window::Screenshot) -> McpResponse {
+        let size = screenshot.size;
+        let bytes = &screenshot.rgba;
+
+        let temp_dir = std::env::temp_dir().join("godly-screenshots");
+        if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+            return McpResponse::Error {
+                message: format!("Failed to create screenshot dir: {}", e),
+            };
+        }
+
+        let id = uuid::Uuid::new_v4();
+        let path = temp_dir.join(format!("screenshot-{}.png", &id.to_string()[..8]));
+
+        let file = match std::fs::File::create(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                return McpResponse::Error {
+                    message: format!("Failed to create screenshot file: {}", e),
+                };
+            }
+        };
+        let writer = std::io::BufWriter::new(file);
+        let mut encoder = png::Encoder::new(writer, size.width, size.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        match encoder.write_header() {
+            Ok(mut png_writer) => {
+                if let Err(e) = png_writer.write_image_data(bytes) {
+                    return McpResponse::Error {
+                        message: format!("Failed to write PNG data: {}", e),
+                    };
+                }
+            }
+            Err(e) => {
+                return McpResponse::Error {
+                    message: format!("Failed to write PNG header: {}", e),
+                };
+            }
+        }
+
+        McpResponse::Screenshot {
+            path: path.to_string_lossy().to_string(),
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
