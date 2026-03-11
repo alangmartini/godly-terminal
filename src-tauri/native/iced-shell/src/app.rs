@@ -259,6 +259,8 @@ pub struct GodlyApp {
     pub(crate) settings_tab: String,
     /// Which shortcut badge is in capture mode (flat index), if any.
     pub(crate) shortcut_capturing_index: Option<usize>,
+    /// Custom shortcut overrides (flat index → display string).
+    pub(crate) shortcut_overrides: HashMap<usize, String>,
     /// Notification tracker for terminals.
     notifications: NotificationTracker,
     /// Startup timestamp used for test harness uptime reporting.
@@ -414,6 +416,7 @@ impl Default for GodlyApp {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             shortcut_capturing_index: None,
+            shortcut_overrides: HashMap::new(),
             notifications: NotificationTracker::new(),
             started_at_ms: Self::now_ms(),
             next_workspace_num: 2, // First workspace is "Workspace 1"
@@ -1297,6 +1300,33 @@ impl GodlyApp {
 
             // --- Keyboard input (shortcut-first, then forward to PTY) ---
             Message::KeyboardEvent(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                // Shortcut capture mode: intercept all keys before normal handling
+                if let Some(cap_index) = self.shortcut_capturing_index {
+                    if is_escape_key(&key) {
+                        self.shortcut_capturing_index = None;
+                        return Task::none();
+                    }
+                    // Ignore modifier-only presses
+                    if matches!(
+                        key,
+                        keyboard::Key::Named(
+                            keyboard::key::Named::Control
+                                | keyboard::key::Named::Shift
+                                | keyboard::key::Named::Alt
+                                | keyboard::key::Named::Super
+                        )
+                    ) {
+                        return Task::none();
+                    }
+                    // Require at least Ctrl or Alt for a valid shortcut
+                    if modifiers.control() || modifiers.alt() {
+                        let display = format_key_chord(&key, modifiers);
+                        self.shortcut_overrides.insert(cap_index, display);
+                    }
+                    self.shortcut_capturing_index = None;
+                    return Task::none();
+                }
+
                 if let Some(direction) = mru_cycle_direction_from_shortcut_key(&key, modifiers) {
                     self.open_or_cycle_mru_switcher(direction);
                     return Task::none();
@@ -2829,6 +2859,7 @@ impl GodlyApp {
                 "remote" => self.view_remote_tab(),
                 _ => shortcuts_tab::view_shortcuts_tab(
                     self.shortcut_capturing_index,
+                    &self.shortcut_overrides,
                     |idx| Message::ShortcutBadgeClicked(idx),
                 ),
             };
@@ -6392,6 +6423,68 @@ fn workspace_matches_mute_patterns(
         wildcard_matches(&normalized_pattern, &normalized_id)
             || wildcard_matches(&normalized_pattern, &normalized_name)
     })
+}
+
+/// Format a key + modifiers into a display string like "Ctrl+Alt+\".
+fn format_key_chord(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if modifiers.control() {
+        parts.push("Ctrl");
+    }
+    if modifiers.shift() {
+        parts.push("Shift");
+    }
+    if modifiers.alt() {
+        parts.push("Alt");
+    }
+    match key {
+        keyboard::Key::Character(ch) => {
+            // Character keys: uppercase for display, append separately
+            let upper = ch.as_str().to_uppercase();
+            let prefix = parts.join("+");
+            if prefix.is_empty() {
+                upper
+            } else {
+                format!("{prefix}+{upper}")
+            }
+        }
+        keyboard::Key::Named(named) => {
+            let name = match named {
+                keyboard::key::Named::Tab => "Tab",
+                keyboard::key::Named::Enter => "Enter",
+                keyboard::key::Named::Space => "Space",
+                keyboard::key::Named::Backspace => "Backspace",
+                keyboard::key::Named::Delete => "Delete",
+                keyboard::key::Named::Home => "Home",
+                keyboard::key::Named::End => "End",
+                keyboard::key::Named::PageUp => "PageUp",
+                keyboard::key::Named::PageDown => "PageDown",
+                keyboard::key::Named::ArrowUp => "Up",
+                keyboard::key::Named::ArrowDown => "Down",
+                keyboard::key::Named::ArrowLeft => "Left",
+                keyboard::key::Named::ArrowRight => "Right",
+                keyboard::key::Named::F1 => "F1",
+                keyboard::key::Named::F2 => "F2",
+                keyboard::key::Named::F3 => "F3",
+                keyboard::key::Named::F4 => "F4",
+                keyboard::key::Named::F5 => "F5",
+                keyboard::key::Named::F6 => "F6",
+                keyboard::key::Named::F7 => "F7",
+                keyboard::key::Named::F8 => "F8",
+                keyboard::key::Named::F9 => "F9",
+                keyboard::key::Named::F10 => "F10",
+                keyboard::key::Named::F11 => "F11",
+                keyboard::key::Named::F12 => "F12",
+                _ => "?",
+            };
+            parts.push(name);
+            parts.join("+")
+        }
+        keyboard::Key::Unidentified => {
+            parts.push("?");
+            parts.join("+")
+        }
+    }
 }
 
 fn is_escape_key(key: &keyboard::Key) -> bool {
