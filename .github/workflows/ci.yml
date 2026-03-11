@@ -125,6 +125,7 @@ jobs:
           -p godly-pty-shim
           -p godly-remote
           -p godly-whisper
+          -p godly-iced-shell
         timeout-minutes: 15
       - name: Build app crate tests
         run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci --no-run
