@@ -1255,10 +1255,20 @@ impl GodlyApp {
             }
             // --- G3: URL Click-to-Open ---
             Message::UrlClicked(url) => {
-                let _ = std::process::Command::new("cmd")
-                    .args(["/C", "start", "", &url])
-                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                    .spawn();
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", "start", "", &url])
+                        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                        .spawn();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(&url)
+                        .spawn();
+                }
             }
             Message::FileDropped(path) => {
                 let target_terminal = self.target_terminal_id().map(str::to_string);
