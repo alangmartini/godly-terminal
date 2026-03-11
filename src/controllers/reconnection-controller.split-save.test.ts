@@ -68,10 +68,16 @@ describe('Bug #498: split layout persistence round-trip', () => {
     if (typeof globalThis.window === 'undefined') {
       (globalThis as any).window = {};
     }
+    // Fallback: on Linux CI the dynamic import('@tauri-apps/api/core') inside
+    // restoreLayout may bypass vi.mock() and load the real module, which calls
+    // window.__TAURI_INTERNALS__.invoke(). Wire it to our mock so both paths work.
+    (globalThis as any).window.__TAURI_INTERNALS__ = {
+      invoke: (...args: any[]) => mockedInvoke(...args),
+    };
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   const deps = {

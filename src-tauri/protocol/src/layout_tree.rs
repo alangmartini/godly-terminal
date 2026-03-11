@@ -1821,11 +1821,11 @@ mod tests {
     #[test]
     fn old_json_without_grid_still_deserializes() {
         let json = r#"{
-            "type": "Split",
+            "type": "split",
             "direction": "horizontal",
             "ratio": 0.5,
-            "first": {"type": "Leaf", "terminal_id": "t1"},
-            "second": {"type": "Leaf", "terminal_id": "t2"}
+            "first": {"type": "leaf", "terminal_id": "t1"},
+            "second": {"type": "leaf", "terminal_id": "t2"}
         }"#;
         let node: LayoutNode = serde_json::from_str(json).unwrap();
         assert_eq!(node.count_leaves(), 2);

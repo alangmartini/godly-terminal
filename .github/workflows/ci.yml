@@ -23,24 +23,34 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
       - name: Install dependencies
-        run: npm install
+        run: pnpm install
         timeout-minutes: 3
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: pnpm exec tsc --noEmit
         timeout-minutes: 3
       - name: Frontend tests
-        run: npm test
+        run: pnpm test
         timeout-minutes: 3
       - name: Validate contract schemas
-        run: npx --yes tsx testing/runner/validate-contracts.ts
+        run: pnpm exec tsx testing/runner/validate-contracts.ts
         timeout-minutes: 1
       # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
-      - name: Cargo check
-        run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon -p godly-pty-shim -p godly-llm -p godly-whisper
+      # Excluded: godly-whisper (ALSA), godly-pty-shim (Win32 pipes), godly-renderer (Vulkan)
+      - name: Cargo check (library crates)
+        run: >
+          cd src-tauri && cargo check
+          -p godly-protocol
+          -p godly-vt
+          -p godly-daemon
+          -p godly-llm
         timeout-minutes: 8
 
   # ---------------------------------------------------------------------------
@@ -52,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [godly-protocol, godly-vt, godly-pty-shim]
+        crate: [godly-protocol, godly-vt]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -65,11 +75,11 @@ jobs:
         timeout-minutes: 8
 
   # ---------------------------------------------------------------------------
-  # Job 3: Daemon integration tests (3 partitions, ~5-8 min each)
+  # Job 3: Daemon integration tests (Windows — tests are #[cfg(windows)])
   # ---------------------------------------------------------------------------
   daemon-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: windows-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -83,7 +93,7 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Pre-build daemon and pty-shim
         run: cd src-tauri && cargo build -p godly-daemon -p godly-pty-shim
-        timeout-minutes: 8
+        timeout-minutes: 12
       - name: Daemon tests (partition ${{ matrix.partition }}/3)
         run: >
           cd src-tauri && cargo nextest run -p godly-daemon --profile ci
@@ -92,40 +102,11 @@ jobs:
         timeout-minutes: 10
 
   # ---------------------------------------------------------------------------
-  # Job 4: Build release binaries and upload as artifact (~10 min)
-  # ---------------------------------------------------------------------------
-  build-release-binaries:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "src-tauri -> target"
-      - name: Build release binaries
-        run: cd src-tauri && cargo build -p godly-daemon -p godly-mcp -p godly-notify -p godly-pty-shim -p godly-remote -p godly-whisper --release
-        timeout-minutes: 15
-      - name: Upload release binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-binaries
-          path: |
-            src-tauri/target/release/godly-daemon
-            src-tauri/target/release/godly-mcp
-            src-tauri/target/release/godly-notify
-            src-tauri/target/release/godly-pty-shim
-            src-tauri/target/release/godly-remote
-            src-tauri/target/release/godly-whisper
-          retention-days: 1
-
-  # ---------------------------------------------------------------------------
-  # Job 5: App crate tests + production frontend build (~10 min)
+  # Job 4: Build release binaries + app crate tests + frontend build (Windows)
   # ---------------------------------------------------------------------------
   build-and-app-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: build-release-binaries
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -133,29 +114,39 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
       - uses: taiki-e/install-action@nextest
-      - name: Download release binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: release-binaries
-          path: src-tauri/target/release/
+      - name: Build release binaries
+        run: >
+          cd src-tauri && cargo build --release
+          -p godly-daemon
+          -p godly-mcp
+          -p godly-notify
+          -p godly-pty-shim
+          -p godly-remote
+          -p godly-whisper
+          -p godly-iced-shell
+        timeout-minutes: 15
       - name: Build app crate tests
         run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci --no-run
         timeout-minutes: 15
       - name: Run app crate tests
         run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci -E "not test(test_cleanup_all_worktrees_with_progress)"
         timeout-minutes: 5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
       - name: Install dependencies
-        run: npm install
+        run: pnpm install
         timeout-minutes: 3
       - name: Production build
-        run: npm run build
+        run: pnpm run build
         timeout-minutes: 8
 
   # ---------------------------------------------------------------------------
-  # Job 6: Native frontend — cargo check all new crates (~5 min)
+  # Job 5: Native frontend — cargo check all native crates (~5 min)
   # ---------------------------------------------------------------------------
   native-build:
     runs-on: ubuntu-latest
@@ -166,6 +157,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libvulkan-dev
       - name: Check native crates
         run: >
           cd src-tauri && cargo check
@@ -173,10 +166,16 @@ jobs:
           -p godly-iced-shell
           -p godly-terminal-surface
           -p godly-parity-harness
+          -p godly-layout-core
+          -p godly-features-shell
+          -p godly-ports
+          -p godly-tabs-core
+          -p godly-testkit
+          -p godly-workspaces-core
         timeout-minutes: 12
 
   # ---------------------------------------------------------------------------
-  # Job 7: Contract tests — parity-harness test suite (~3 min)
+  # Job 6: Contract tests — parity-harness test suite (~3 min)
   # ---------------------------------------------------------------------------
   contract-tests:
     runs-on: ubuntu-latest

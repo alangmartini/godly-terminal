@@ -1,0 +1,3 @@
+# Terminal fixture recordings contain raw bytes (CR, escape sequences, etc.)
+# that must be preserved exactly. Prevent git from converting line endings.
+src-tauri/godly-vt/tests/data/fixtures/**/*.typescript binary
