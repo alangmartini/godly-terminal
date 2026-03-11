@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Length, Padding};
 
 use crate::theme::{ACCENT, BG_PRIMARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY};
@@ -177,27 +177,82 @@ pub fn shortcut_categories() -> Vec<ShortcutCategory> {
     CATEGORIES.to_vec()
 }
 
+/// Returns `(action_name, display_text, is_capturing)` for the badge at the
+/// given flat index across all categories, or `None` if out of range.
+pub fn get_badge_info(
+    index: usize,
+    capturing_index: Option<usize>,
+) -> Option<(String, String, bool)> {
+    let mut flat = 0usize;
+    for cat in CATEGORIES {
+        for entry in cat.entries {
+            if flat == index {
+                let is_capturing = capturing_index == Some(index);
+                let display = if is_capturing {
+                    "Press a key...".to_string()
+                } else {
+                    entry.keys.to_string()
+                };
+                return Some((entry.action.to_string(), display, is_capturing));
+            }
+            flat += 1;
+        }
+    }
+    None
+}
+
 /// Renders the shortcuts tab content as a scrollable list of categories.
-pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
+///
+/// `capturing_index` — if `Some(n)`, the badge at flat index `n` is in
+/// key-capture mode and shows "Press a key..." instead of the binding.
+/// `on_badge_click` — called with the flat index when a badge is clicked.
+pub fn view_shortcuts_tab<'a, M: Clone + 'a>(
+    capturing_index: Option<usize>,
+    on_badge_click: impl Fn(usize) -> M + 'a,
+) -> Element<'a, M> {
     let mut content = column![]
         .spacing(SECTION_SPACING)
         .padding(Padding::from([2, 2]));
+
+    let mut flat_index: usize = 0;
 
     for cat in CATEGORIES {
         let mut entries = column![].spacing(ENTRY_SPACING).width(Length::Fill);
 
         for entry in cat.entries {
-            let key_badge = container(text(entry.keys).size(12).color(ACCENT()))
-                .padding(Padding::from([3, 8]))
-                .style(|_theme| container::Style {
-                    background: Some(Background::Color(tint(BG_PRIMARY(), 0.7))),
-                    border: Border {
-                        color: BORDER(),
-                        width: 1.0,
-                        radius: KEY_BADGE_RADIUS.into(),
-                    },
-                    ..container::Style::default()
-                });
+            let is_capturing = capturing_index == Some(flat_index);
+            let badge_text = if is_capturing {
+                "Press a key..."
+            } else {
+                entry.keys
+            };
+            let badge_color = if is_capturing { TEXT_PRIMARY() } else { ACCENT() };
+            let badge_border_color = if is_capturing { ACCENT() } else { BORDER() };
+            let badge_bg_alpha = if is_capturing { 0.15 } else { 0.7 };
+
+            let badge_label =
+                container(text(badge_text).size(12).color(badge_color))
+                    .padding(Padding::from([3, 8]))
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(tint(BG_PRIMARY(), badge_bg_alpha))),
+                        border: Border {
+                            color: badge_border_color,
+                            width: 1.0,
+                            radius: KEY_BADGE_RADIUS.into(),
+                        },
+                        ..container::Style::default()
+                    });
+
+            let msg = on_badge_click(flat_index);
+            let key_badge: Element<'_, M> = button(badge_label)
+                .on_press(msg)
+                .padding(0)
+                .style(|_theme, _status| button::Style {
+                    background: None,
+                    border: Border::default(),
+                    ..button::Style::default()
+                })
+                .into();
 
             let entry_row = row![
                 text(entry.action)
@@ -212,6 +267,7 @@ pub fn view_shortcuts_tab<'a, M: 'a>() -> Element<'a, M> {
             .width(Length::Fill);
 
             entries = entries.push(entry_row);
+            flat_index += 1;
         }
 
         let section = container(
@@ -278,6 +334,28 @@ mod tests {
                 assert!(!entry.keys.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn test_get_badge_info_normal() {
+        // Index 0 = first entry of Tabs = "New Tab" / "Ctrl+T"
+        let (action, keys, capturing) = get_badge_info(0, None).unwrap();
+        assert_eq!(action, "New Tab");
+        assert_eq!(keys, "Ctrl+T");
+        assert!(!capturing);
+    }
+
+    #[test]
+    fn test_get_badge_info_capturing() {
+        let (action, keys, capturing) = get_badge_info(0, Some(0)).unwrap();
+        assert_eq!(action, "New Tab");
+        assert_eq!(keys, "Press a key...");
+        assert!(capturing);
+    }
+
+    #[test]
+    fn test_get_badge_info_out_of_range() {
+        assert!(get_badge_info(9999, None).is_none());
     }
 
     #[test]

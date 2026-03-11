@@ -1,7 +1,0 @@
-{
-  "step_id": "wait-app-ready",
-  "passed": true,
-  "duration_ms": 2,
-  "assertions": [],
-  "skipped": false
-}
