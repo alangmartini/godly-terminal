@@ -1,6 +1,6 @@
 # Test Frameworks Reference
 
-Six test tiers, each targeting a different layer of the stack. When reproducing a bug, pick the tier that exercises the real failure point — not the one that's easiest to write.
+Seven test tiers, each targeting a different layer of the stack. When reproducing a bug, pick the tier that exercises the real failure point — not the one that's easiest to write.
 
 ## Quick Reference
 
@@ -9,6 +9,7 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 | **Unit** | `*.test.ts` | `pnpm test` | Node/jsdom | Tauri APIs | Store logic, services, pure functions, keyboard routing |
 | **Browser** | `*.browser.test.ts` | `pnpm test:browser` | Real Chromium | Tauri APIs | Canvas2D rendering, pixel correctness, real layout, pointer events |
 | **Integration** | `*.integration.test.ts` | `pnpm test:integration` | Node + spawned daemon | Nothing | Daemon protocol, session lifecycle, Quick Claude flow, IPC correctness |
+| **Contract** | `contracts/*.json` | `pnpm --dir testing run run-contract contracts/<id>.json` | Godly Staging + MCP | Nothing | Feature acceptance, persistence across restart, regression coverage |
 | **E2E** | `e2e/specs/*.e2e.ts` | `pnpm test:e2e` | Full Tauri app + WebdriverIO | Nothing | Full user workflows, persistence across restarts, input latency |
 | **Daemon** | `daemon/tests/*.rs` | `cargo nextest run -p godly-daemon` | Isolated daemon process | Nothing | Concurrency, lock contention, memory leaks, pipe saturation, handler starvation |
 | **Crate** | `#[test]` in `*.rs` | `cargo nextest run -p <crate>` | Rust unit | — | Parser correctness, serialization, data structures |
@@ -44,7 +45,19 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 - **Key infrastructure**: `DaemonFixture` (spawns isolated daemon), `DaemonClient` (TypeScript wire protocol), `SessionHandle` (high-level session API)
 - **Examples**: `smoke.integration.test.ts`, `quick-claude.integration.test.ts`
 
-### 4. E2E Tests (`pnpm test:e2e`)
+### 4. Contract Tests (`pnpm --dir testing run run-contract`)
+- **Location**: `testing/contracts/*.json`
+- **Environment**: Running Godly Staging instance + godly-mcp stdio bridge
+- **What's real**: Everything — full app, daemon, MCP tools, persistence, restarts
+- **What's mocked**: Nothing
+- **Catches**: Feature acceptance (does the feature work end-to-end?), workspace/terminal state bugs, persistence across app restart, regression when refactoring
+- **Cannot catch**: Pixel-level rendering, sub-second timing, keyboard shortcut routing (contracts use MCP semantic actions, not raw input)
+- **Key infrastructure**: `ContractRunner` (executes steps), `McpClient` (stdio bridge to godly-mcp), fixtures (`testing/fixtures/`)
+- **Examples**: `workspace-folder-path.json` (folder CWD + persistence), `workspace-persistence.json` (workspace survive restart), `split-basic.json` (split pane operations)
+- **List all contracts**: `pwsh testing/list-contracts.ps1`
+- See [`testing/README.md`](../testing/README.md) for full contract architecture docs
+
+### 5. E2E Tests (`pnpm test:e2e`)
 - **Location**: `e2e/specs/**/*.e2e.ts`
 - **Environment**: Full Tauri debug binary + WebdriverIO + tauri-driver + WebView2
 - **What's real**: Everything — full app, daemon, renderer, persistence, IPC
@@ -54,7 +67,7 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 - **Gotchas**: Use `browser.execute()` for DOM queries (not `browser.$()`), use `invoke('write_to_terminal')` for input (not `browser.keys()`)
 - **Examples**: `session-persistence.e2e.ts`, `input-latency.e2e.ts`, `keyboard-shortcuts.e2e.ts`
 
-### 5. Daemon Tests (`cargo nextest run -p godly-daemon`)
+### 6. Daemon Tests (`cargo nextest run -p godly-daemon`)
 - **Location**: `src-tauri/daemon/tests/**/*.rs`
 - **Environment**: Isolated daemon process per test (unique pipe, unique instance, non-detached)
 - **What's real**: Daemon binary, PTY sessions, ring buffers, godly-vt parser, named pipe IPC
@@ -64,7 +77,7 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 - **CRITICAL isolation rules**: unique `GODLY_PIPE_NAME` + `GODLY_INSTANCE` + `GODLY_NO_DETACH=1` + kill by PID (never `taskkill /IM`). See `DaemonFixture` pattern in `handler_starvation.rs`.
 - **Examples**: `handler_starvation.rs` (lock contention), `input_latency.rs` (I/O bottleneck), `memory_stress.rs` (RSS tracking)
 
-### 6. Crate Tests (`cargo nextest run -p <crate>`)
+### 7. Crate Tests (`cargo nextest run -p <crate>`)
 - **Location**: Inline `#[test]` blocks in crate source + `tests/` dirs
 - **Environment**: Standard Rust unit tests
 - **Catches**: VT parser state machine bugs, ANSI sequence handling, grid/cursor operations, binary frame serialization, image protocol (Kitty/iTerm2/Sixel) decoding
@@ -82,7 +95,8 @@ Six test tiers, each targeting a different layer of the stack. When reproducing 
 | Daemon freezes, all terminals unresponsive | **Daemon** | Lock contention / handler starvation |
 | High input latency, slow typing | **Daemon** or **E2E** | Daemon for I/O bottleneck, E2E for full pipeline measurement |
 | Memory leak over time | **Daemon** | RSS monitoring with `GetProcessMemoryInfo` |
-| Workspace/tab state bug | **Unit** or **E2E** | Unit for store logic, E2E for persistence |
+| Workspace/tab state bug | **Unit** or **Contract** | Unit for store logic, Contract for persistence + acceptance |
+| Feature acceptance / regression | **Contract** | Declarative steps against running staging app |
 | Quick Claude flow broken | **Integration** | DaemonFixture + SessionHandle exercises real CLI |
 | Protocol parsing error | **Crate** | godly-protocol unit tests |
 | VT escape sequence mishandled | **Crate** | godly-vt parser tests |

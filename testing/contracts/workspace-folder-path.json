@@ -1,0 +1,121 @@
+{
+  "id": "workspace-folder-path",
+  "description": "Verify that creating a workspace with a folder path stores the path, terminals inherit it as CWD, and the path persists across restart.",
+  "frontends": ["web", "native"],
+  "fixture": "clean-profile",
+  "requires_restart": true,
+  "steps": [
+    {
+      "id": "create-workspace-with-folder",
+      "description": "Create a workspace with an explicit folder path",
+      "type": "action",
+      "target": "workspace",
+      "action": "create",
+      "args": { "name": "my-project", "folder_path": "C:\\Users\\Public" }
+    },
+    {
+      "id": "switch-to-new-workspace",
+      "description": "Switch to the newly created workspace",
+      "type": "action",
+      "target": "workspace",
+      "action": "switch",
+      "args": { "name": "my-project" }
+    },
+    {
+      "id": "wait-workspace-switched",
+      "description": "Wait for workspace switch to complete",
+      "type": "wait",
+      "condition": "workspace.switched",
+      "timeout_ms": 5000
+    },
+    {
+      "id": "verify-folder-path-stored",
+      "description": "Verify the workspace has the correct folder path via workspace details",
+      "type": "query",
+      "target": "workspace.details",
+      "assertions": [
+        { "id": "folder-path-set", "type": "equals", "path": "folder_path", "expected": "C:\\Users\\Public" }
+      ]
+    },
+    {
+      "id": "create-terminal-in-workspace",
+      "description": "Create a terminal in the folder-bound workspace",
+      "type": "action",
+      "target": "terminal",
+      "action": "create"
+    },
+    {
+      "id": "wait-terminal-ready",
+      "description": "Wait for terminal to be idle after shell startup",
+      "type": "wait",
+      "condition": "terminal.idle",
+      "timeout_ms": 10000
+    },
+    {
+      "id": "verify-terminal-cwd",
+      "description": "Verify the terminal started in the workspace folder path",
+      "type": "query",
+      "target": "terminal.cwd",
+      "assertions": [
+        { "id": "cwd-matches-folder", "type": "contains", "expected": "Users\\Public" }
+      ]
+    },
+    {
+      "id": "save-layout",
+      "description": "Trigger layout save before restart",
+      "type": "action",
+      "target": "app",
+      "action": "save_layout"
+    },
+    {
+      "id": "restart-app",
+      "description": "Restart the app to test persistence",
+      "type": "action",
+      "target": "app.lifecycle",
+      "action": "restart"
+    },
+    {
+      "id": "wait-app-ready",
+      "description": "Wait for app to be ready after restart",
+      "type": "wait",
+      "condition": "app.ready",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "verify-workspace-exists-after-restart",
+      "description": "Verify the workspace with folder path still exists",
+      "type": "query",
+      "target": "workspace.list",
+      "assertions": [
+        { "id": "workspace-persisted", "type": "contains", "path": "[*].name", "expected": "my-project" }
+      ]
+    },
+    {
+      "id": "switch-to-workspace-after-restart",
+      "description": "Switch to the folder workspace after restart",
+      "type": "action",
+      "target": "workspace",
+      "action": "switch",
+      "args": { "name": "my-project" }
+    },
+    {
+      "id": "wait-switched-after-restart",
+      "description": "Wait for workspace switch after restart",
+      "type": "wait",
+      "condition": "workspace.switched",
+      "timeout_ms": 5000
+    },
+    {
+      "id": "verify-folder-path-persisted",
+      "description": "Verify the folder path survived the restart",
+      "type": "query",
+      "target": "workspace.details",
+      "assertions": [
+        { "id": "folder-path-persisted", "type": "equals", "path": "folder_path", "expected": "C:\\Users\\Public" }
+      ]
+    }
+  ],
+  "cleanup": [
+    { "type": "reset" }
+  ]
+}
