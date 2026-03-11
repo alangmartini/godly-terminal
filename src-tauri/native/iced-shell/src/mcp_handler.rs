@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use crate::app::{GodlyApp, Message};
 use crate::session_persistence::PersistedLayoutNode;
+use crate::shortcuts_tab;
 
 impl GodlyApp {
     /// Handle an incoming MCP event by mutating app state and returning any
@@ -631,6 +632,66 @@ impl GodlyApp {
                     iced::Task::none(),
                 ),
             },
+            "settings.open" => {
+                self.settings_open = true;
+                if let Some(tab) = self.string_arg(args, "tab") {
+                    self.settings_tab = tab;
+                }
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            "settings.close" => {
+                self.settings_open = false;
+                self.shortcut_capturing_index = None;
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            "settings.shortcuts.badge.click" => {
+                let index = args
+                    .and_then(|v| v.get("index"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                self.shortcut_capturing_index = Some(index);
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            "settings.shortcuts.badge.cancel_capture" => {
+                self.shortcut_capturing_index = None;
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
             _ => (
                 McpResponse::ActionResult {
                     ok: false,
@@ -751,6 +812,22 @@ impl GodlyApp {
                     .unwrap_or(".");
                 Ok(Value::String(folder_path.to_string()))
             }
+            "settings.shortcuts.badge" => {
+                let index = args
+                    .and_then(|v| v.get("index"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                match shortcuts_tab::get_badge_info(index, self.shortcut_capturing_index) {
+                    Some((action, text, capturing)) => Ok(json!({
+                        "action": action,
+                        "text": text,
+                        "capturing": capturing,
+                        "clickable": true,
+                        "cursor": "pointer",
+                    })),
+                    None => Err(format!("Badge index {} out of range", index)),
+                }
+            }
             _ => Err(format!("Unknown query target: {}", target)),
         }
     }
@@ -758,6 +835,7 @@ impl GodlyApp {
     fn check_ui_condition(&self, condition: &str, args: Option<&Value>) -> Result<bool, String> {
         match condition {
             "app.ready" => Ok(self.workspaces.count() > 0 && self.terminals.count() > 0),
+            "settings.visible" => Ok(self.settings_open),
             "terminal.created" => {
                 let terminal_id = self.resolve_terminal_id_from_args(args, true);
                 Ok(terminal_id
