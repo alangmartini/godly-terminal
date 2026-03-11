@@ -253,9 +253,11 @@ pub struct GodlyApp {
     /// Last known global cursor position in logical pixels.
     cursor_position: Option<Point>,
     /// Whether the settings dialog is open.
-    settings_open: bool,
+    pub(crate) settings_open: bool,
     /// Active tab in the settings dialog.
-    settings_tab: String,
+    pub(crate) settings_tab: String,
+    /// Which shortcut badge is in capture mode (flat index), if any.
+    pub(crate) shortcut_capturing_index: Option<usize>,
     /// Notification tracker for terminals.
     notifications: NotificationTracker,
     /// Startup timestamp used for test harness uptime reporting.
@@ -408,6 +410,7 @@ impl Default for GodlyApp {
             cursor_position: None,
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
+            shortcut_capturing_index: None,
             notifications: NotificationTracker::new(),
             started_at_ms: Self::now_ms(),
             next_workspace_num: 2, // First workspace is "Workspace 1"
@@ -694,6 +697,10 @@ pub enum Message {
     ToggleSettings,
     /// User clicked a settings tab.
     SettingsTabClicked(String),
+    /// User clicked a shortcut badge to enter capture mode.
+    ShortcutBadgeClicked(usize),
+    /// User cancelled shortcut capture (e.g. pressed Escape).
+    ShortcutCaptureCancelled,
     /// Clipboard text read successfully in background — write to terminal.
     ClipboardPasted { terminal_id: String, text: String },
     /// Clipboard read failed in background.
@@ -1071,6 +1078,7 @@ impl GodlyApp {
         self.cursor_position = None;
         self.settings_open = false;
         self.settings_tab = "shortcuts".to_string();
+        self.shortcut_capturing_index = None;
         self.notifications = NotificationTracker::new();
         self.next_workspace_num = 2;
         self.last_test_workspace_id = None;
@@ -2236,6 +2244,12 @@ impl GodlyApp {
             Message::SettingsTabClicked(tab_id) => {
                 self.settings_tab = tab_id;
             }
+            Message::ShortcutBadgeClicked(index) => {
+                self.shortcut_capturing_index = Some(index);
+            }
+            Message::ShortcutCaptureCancelled => {
+                self.shortcut_capturing_index = None;
+            }
             // --- K2/K3: Quit Confirmation + Copy Preview ---
             Message::QuitConfirmShow => {
                 self.quit_confirm_pending = true;
@@ -2752,7 +2766,10 @@ impl GodlyApp {
                 "plugins" => self.view_plugins_tab(),
                 "flows" => self.view_flows_tab(),
                 "remote" => self.view_remote_tab(),
-                _ => shortcuts_tab::view_shortcuts_tab(),
+                _ => shortcuts_tab::view_shortcuts_tab(
+                    self.shortcut_capturing_index,
+                    |idx| Message::ShortcutBadgeClicked(idx),
+                ),
             };
             let settings_overlay = settings_dialog::view_settings_dialog(
                 tabs,
