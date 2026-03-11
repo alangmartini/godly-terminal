@@ -59,11 +59,11 @@ impl ShellType {
             ShellType::Wsl { distribution } => {
                 distribution.clone().unwrap_or_else(|| "wsl".to_string())
             }
-            ShellType::Custom { program, .. } => std::path::Path::new(program)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(program)
-                .to_string(),
+            ShellType::Custom { program, .. } => {
+                // Handle both `/` and `\` separators so Windows paths work on all platforms
+                let filename = program.rsplit(['\\', '/']).next().unwrap_or(program);
+                filename.strip_suffix(".exe").unwrap_or(filename).to_string()
+            }
         }
     }
 }
