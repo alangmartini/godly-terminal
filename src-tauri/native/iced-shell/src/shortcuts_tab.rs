@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Length, Padding};
 
@@ -182,6 +184,7 @@ pub fn shortcut_categories() -> Vec<ShortcutCategory> {
 pub fn get_badge_info(
     index: usize,
     capturing_index: Option<usize>,
+    overrides: &HashMap<usize, String>,
 ) -> Option<(String, String, bool)> {
     let mut flat = 0usize;
     for cat in CATEGORIES {
@@ -190,6 +193,8 @@ pub fn get_badge_info(
                 let is_capturing = capturing_index == Some(index);
                 let display = if is_capturing {
                     "Press a key...".to_string()
+                } else if let Some(custom) = overrides.get(&index) {
+                    custom.clone()
                 } else {
                     entry.keys.to_string()
                 };
@@ -208,6 +213,7 @@ pub fn get_badge_info(
 /// `on_badge_click` — called with the flat index when a badge is clicked.
 pub fn view_shortcuts_tab<'a, M: Clone + 'a>(
     capturing_index: Option<usize>,
+    overrides: &'a HashMap<usize, String>,
     on_badge_click: impl Fn(usize) -> M + 'a,
 ) -> Element<'a, M> {
     let mut content = column![]
@@ -221,13 +227,22 @@ pub fn view_shortcuts_tab<'a, M: Clone + 'a>(
 
         for entry in cat.entries {
             let is_capturing = capturing_index == Some(flat_index);
+            let override_text = overrides.get(&flat_index);
+            let default_keys: &str = override_text.map(|s| s.as_str()).unwrap_or(entry.keys);
             let badge_text = if is_capturing {
                 "Press a key..."
             } else {
-                entry.keys
+                default_keys
             };
+            let is_overridden = override_text.is_some();
             let badge_color = if is_capturing { TEXT_PRIMARY() } else { ACCENT() };
-            let badge_border_color = if is_capturing { ACCENT() } else { BORDER() };
+            let badge_border_color = if is_capturing {
+                ACCENT()
+            } else if is_overridden {
+                ACCENT()
+            } else {
+                BORDER()
+            };
             let badge_bg_alpha = if is_capturing { 0.15 } else { 0.7 };
 
             let badge_label =
@@ -338,8 +353,9 @@ mod tests {
 
     #[test]
     fn test_get_badge_info_normal() {
+        let empty = HashMap::new();
         // Index 0 = first entry of Tabs = "New Tab" / "Ctrl+T"
-        let (action, keys, capturing) = get_badge_info(0, None).unwrap();
+        let (action, keys, capturing) = get_badge_info(0, None, &empty).unwrap();
         assert_eq!(action, "New Tab");
         assert_eq!(keys, "Ctrl+T");
         assert!(!capturing);
@@ -347,7 +363,8 @@ mod tests {
 
     #[test]
     fn test_get_badge_info_capturing() {
-        let (action, keys, capturing) = get_badge_info(0, Some(0)).unwrap();
+        let empty = HashMap::new();
+        let (action, keys, capturing) = get_badge_info(0, Some(0), &empty).unwrap();
         assert_eq!(action, "New Tab");
         assert_eq!(keys, "Press a key...");
         assert!(capturing);
@@ -355,7 +372,18 @@ mod tests {
 
     #[test]
     fn test_get_badge_info_out_of_range() {
-        assert!(get_badge_info(9999, None).is_none());
+        let empty = HashMap::new();
+        assert!(get_badge_info(9999, None, &empty).is_none());
+    }
+
+    #[test]
+    fn test_get_badge_info_with_override() {
+        let mut overrides = HashMap::new();
+        overrides.insert(0, "Ctrl+Shift+N".to_string());
+        let (action, keys, capturing) = get_badge_info(0, None, &overrides).unwrap();
+        assert_eq!(action, "New Tab");
+        assert_eq!(keys, "Ctrl+Shift+N");
+        assert!(!capturing);
     }
 
     #[test]
