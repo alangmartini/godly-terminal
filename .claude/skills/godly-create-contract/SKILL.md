@@ -107,3 +107,8 @@ Summarize:
 - Whether any fixture was added or changed
 - Typecheck result
 - Any missing semantic adapter work that blocks full execution
+
+Always end with the command to run the contract:
+```
+pnpm --dir testing run run-contract contracts/<id>.json
+```

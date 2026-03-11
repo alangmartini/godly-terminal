@@ -1,4 +1,0 @@
-{
-  "root_cause_hypothesis": "The native shell MCP server does not implement test-harness, semantic query/wait, or workspace-management requests; it returns Not yet implemented in native shell for all of them.",
-  "passed": false
-}

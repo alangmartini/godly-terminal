@@ -132,6 +132,14 @@ export class ContractRunner {
     });
     const error = extractToolError(raw);
     if (error) return failResult(step.id, error);
+
+    // Also check if the action result indicates failure
+    const data = extractMcpData(raw) as Record<string, unknown> | undefined;
+    if (data?.ok === false) {
+      const actionError = typeof data.error === 'string' ? data.error : 'Action failed';
+      return failResult(step.id, actionError);
+    }
+
     return passResult(step.id);
   }
 
