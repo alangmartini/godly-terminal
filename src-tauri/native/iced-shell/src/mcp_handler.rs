@@ -831,7 +831,7 @@ impl GodlyApp {
                     .and_then(|v| v.get("index"))
                     .and_then(Value::as_u64)
                     .unwrap_or(0) as usize;
-                match shortcuts_tab::get_badge_info(index, self.shortcut_capturing_index) {
+                match shortcuts_tab::get_badge_info(index, self.shortcut_capturing_index, &self.shortcut_overrides) {
                     Some((action, text, capturing)) => Ok(json!({
                         "action": action,
                         "text": text,
