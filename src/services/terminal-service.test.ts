@@ -301,9 +301,13 @@ describe('TerminalService', () => {
             start(ctrl) { ctrl.close(); },
           }));
         }
-        // Third call: fail again → delay should be base (1000) + jitter (500) (reset)
+        if (callCount === 3) {
+          // Third call: fail again → delay should be base (1000) + jitter (500) (reset)
+          throw new Error('refused');
+        }
+        // Fourth call: abort to exit the loop
         controller.abort();
-        throw new Error('refused');
+        throw new Error('aborted');
       });
 
       await terminalService._consumeStream('test', controller.signal, vi.fn());
