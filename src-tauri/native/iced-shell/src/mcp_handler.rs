@@ -670,6 +670,15 @@ impl GodlyApp {
                 .active()
                 .map(Self::workspace_json)
                 .unwrap_or(Value::Null)),
+            "workspace.details" => {
+                let workspace_id = self.resolve_workspace_id_from_args(args, true, true);
+                let workspace = workspace_id
+                    .as_deref()
+                    .and_then(|id| self.workspaces.get(id));
+                Ok(workspace
+                    .map(Self::workspace_json)
+                    .unwrap_or(Value::Null))
+            }
             "workspace.list" => Ok(Value::Array(
                 self.workspaces.iter().map(Self::workspace_json).collect(),
             )),
@@ -728,6 +737,20 @@ impl GodlyApp {
                         .collect(),
                 ))
             }
+            "terminal.cwd" => {
+                let terminal_id = self
+                    .resolve_terminal_id_from_args(args, true)
+                    .or_else(|| self.terminals.active_id().map(str::to_string));
+                let workspace_id = terminal_id
+                    .as_deref()
+                    .and_then(|id| self.find_workspace_for_terminal(id));
+                let folder_path = workspace_id
+                    .as_deref()
+                    .and_then(|id| self.workspaces.get(id))
+                    .map(|ws| ws.folder_path.as_str())
+                    .unwrap_or(".");
+                Ok(Value::String(folder_path.to_string()))
+            }
             _ => Err(format!("Unknown query target: {}", target)),
         }
     }
@@ -754,6 +777,16 @@ impl GodlyApp {
                     _ => false,
                 })
             }
+            "terminal.idle" => {
+                let terminal_id = self
+                    .resolve_terminal_id_from_args(args, true)
+                    .or_else(|| self.terminals.active_id().map(str::to_string));
+                Ok(terminal_id
+                    .as_deref()
+                    .and_then(|id| self.terminals.get(id))
+                    .map(|t| !t.fetching && t.grid.is_some())
+                    .unwrap_or(false))
+            }
             "terminal.count" => {
                 let Some(expected) = args.and_then(|value| value.get("count")).and_then(Value::as_u64) else {
                     return Err("count required".to_string());
@@ -776,6 +809,12 @@ impl GodlyApp {
         let explicit = self.string_arg(args, "workspace_id");
         if explicit.is_some() {
             return explicit;
+        }
+        // Resolve by name if provided
+        if let Some(name) = self.string_arg(args, "name") {
+            if let Some(workspace) = self.workspaces.iter().find(|ws| ws.name == name) {
+                return Some(workspace.id.clone());
+            }
         }
         if allow_last && self.bool_arg(args, "use_last") {
             if let Some(workspace_id) = self.last_test_workspace_id.clone() {
