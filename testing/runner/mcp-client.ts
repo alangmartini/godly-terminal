@@ -1,6 +1,10 @@
 import { spawn, ChildProcess } from 'child_process';
-import { resolve as resolvePath } from 'path';
+import { resolve as resolvePath, dirname } from 'path';
 import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export class McpClient {
   private process: ChildProcess | null = null;
