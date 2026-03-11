@@ -110,7 +110,12 @@ describe('SmolLM2Plugin', () => {
 
   it('renderSettings shows Active status when API key is set', async () => {
     mockInvoke.mockResolvedValue(true);
-    const ctx = createMockContext();
+    const ctx = createMockContext({
+      getSetting: vi.fn().mockImplementation((key: string, defaultValue: any) => {
+        if (key === 'llmApiKey.gemini' || key === 'geminiApiKey') return 'fake-key';
+        return defaultValue;
+      }),
+    });
     await plugin.init(ctx);
 
     const el = plugin.renderSettings!();
