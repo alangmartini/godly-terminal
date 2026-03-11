@@ -211,7 +211,9 @@ export async function restoreLayout(deps: ReconnectionDeps): Promise<void> {
     }
   } catch (error) {
     console.error('[App] Error loading layout:', error);
-    (window as any).__app_init_error = String(error);
+    if (typeof window !== 'undefined') {
+      (window as any).__app_init_error = String(error);
+    }
 
     // Layout failed — close all daemon sessions since none are in use
     await closeAllDaemonSessions();
