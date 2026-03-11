@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "run-contract": "tsx runner/index.ts"
+    "run-contract": "tsx runner/index.ts",
+    "validate-contracts": "tsx runner/validate-contracts.ts"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

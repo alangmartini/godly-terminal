@@ -24,11 +24,6 @@
       "path": "skills/component.md"
     },
     {
-      "name": "feature",
-      "description": "Orchestrate feature development: GitHub issue, parallelizable plan, multi-agent spawning (Claude Code or Codex), PR, and staging build. Use for any new feature or improvement.",
-      "path": "skills/feature.md"
-    },
-    {
       "name": "tauri-command",
       "description": "Add new Tauri IPC commands with Rust handler and TS service",
       "path": "skills/tauri-command.md"
