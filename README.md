@@ -14,12 +14,15 @@ A Windows terminal built for AI-assisted development workflows. Run 10-20 concur
 
 ## Getting Started
 
+Download the latest installer from [Releases](https://github.com/alangmartini/godly-terminal/releases). Windows 10/11 required.
+
+## Building from Source
+
 ### Prerequisites
 
-- **Node.js** 20+ and **pnpm**
+- **Node.js** 20+ and **pnpm** (frontend toolchain only)
 - **Rust** stable toolchain (via `rustup`)
 - **cargo-nextest**: `cargo install cargo-nextest`
-- Windows 10/11
 
 ### Development
 
