@@ -35,6 +35,9 @@ jobs:
       - name: Frontend tests
         run: npm test
         timeout-minutes: 3
+      - name: Validate contract schemas
+        run: npx --yes tsx testing/runner/validate-contracts.ts
+        timeout-minutes: 1
       # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
       - name: Cargo check
         run: cd src-tauri && cargo check -p godly-protocol -p godly-vt -p godly-daemon -p godly-pty-shim -p godly-llm -p godly-whisper
