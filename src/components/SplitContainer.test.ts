@@ -228,7 +228,7 @@ describe('SplitContainer', () => {
 
       // Move mouse to 60% position
       document.dispatchEvent(new MouseEvent('mousemove', {
-        clientX: 480, clientY: 300,
+        clientX: 480, clientY: 300, buttons: 1,
       }));
 
       expect(onRatioChange).toHaveBeenCalledWith([], 0.6);
@@ -255,7 +255,7 @@ describe('SplitContainer', () => {
 
       // Move to 5% — should clamp to 0.15
       document.dispatchEvent(new MouseEvent('mousemove', {
-        clientX: 40, clientY: 300,
+        clientX: 40, clientY: 300, buttons: 1,
       }));
 
       expect(onRatioChange).toHaveBeenCalledWith([], 0.15);
