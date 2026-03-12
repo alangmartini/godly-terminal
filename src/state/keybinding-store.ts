@@ -513,6 +513,18 @@ export class KeybindingStore {
     this.notify();
   }
 
+  /** Swap the chords of two actions (no shadow bindings). */
+  swapBinding(actionA: ActionId, actionB: ActionId): void {
+    const chordA = this.bindings.get(actionA);
+    const chordB = this.bindings.get(actionB);
+    if (!chordA || !chordB) return;
+    this.bindings.set(actionA, { ...chordB });
+    this.bindings.set(actionB, { ...chordA });
+    this.rebuildIndex();
+    this.saveToStorage();
+    this.notify();
+  }
+
   /** Reset a single action to its default. */
   resetBinding(actionId: ActionId): void {
     const def = DEFAULT_SHORTCUTS.find((d) => d.id === actionId);
@@ -530,6 +542,31 @@ export class KeybindingStore {
     this.rebuildIndex();
     this.saveToStorage();
     this.notify();
+  }
+
+  /**
+   * Returns true if any action has a binding that is shadowed by another
+   * action (same chord, later in iteration order wins in the chordIndex).
+   */
+  hasShadowBindings(): boolean {
+    return this.getShadowedActions().length > 0;
+  }
+
+  /**
+   * Returns action IDs whose chord is overridden by another action in the
+   * chordIndex (the action has a chord, but matchAction would return a
+   * different action for that chord).
+   */
+  getShadowedActions(): ActionId[] {
+    const shadowed: ActionId[] = [];
+    for (const [actionId, chord] of this.bindings) {
+      const str = chordToString(chord);
+      const winner = this.chordIndex.get(str);
+      if (winner && winner !== actionId) {
+        shadowed.push(actionId);
+      }
+    }
+    return shadowed;
   }
 
   // ── Subscriptions ──────────────────────────────────────────────────

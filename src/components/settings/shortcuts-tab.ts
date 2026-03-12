@@ -116,14 +116,17 @@ export class ShortcutsTab implements SettingsTabProvider {
       if (conflict) {
         const conflictDef = DEFAULT_SHORTCUTS.find((d) => d.id === conflict);
         const conflictLabel = conflictDef?.label ?? conflict;
+        const currentChord = keybindingStore.getBinding(actionId);
         const proceed = confirm(
-          `"${formatChord(chord)}" is already bound to "${conflictLabel}".\n\nOverwrite? The conflicting shortcut will be reset to its default.`
+          `"${formatChord(chord)}" is already bound to "${conflictLabel}".\n\nSwap? "${conflictLabel}" will be reassigned to "${formatChord(currentChord)}".`
         );
         if (!proceed) {
           this.stopCapture();
           return;
         }
-        keybindingStore.resetBinding(conflict);
+        // Swap: give the conflicting action the current chord of the action being edited.
+        // This avoids shadow bindings where both actions claim the same chord.
+        keybindingStore.swapBinding(actionId, conflict);
       }
 
       keybindingStore.setBinding(actionId, chord);
