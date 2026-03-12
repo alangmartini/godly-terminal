@@ -1,5 +1,5 @@
 use godly_app_adapter::mcp_pipe::McpEvent;
-use godly_layout_core::SplitDirection;
+use godly_layout_core::{LayoutNode, SplitDirection};
 use godly_protocol::testing::StateDump;
 use godly_protocol::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 use iced::window;
@@ -695,6 +695,146 @@ impl GodlyApp {
             }
             "settings.shortcuts.badge.cancel_capture" => {
                 self.shortcut_capturing_index = None;
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            "layout.split.create" => {
+                let direction = self
+                    .string_arg(args, "direction")
+                    .unwrap_or_else(|| "horizontal".to_string());
+                let dir = match direction.as_str() {
+                    "vertical" => SplitDirection::Vertical,
+                    _ => SplitDirection::Horizontal,
+                };
+                let Some(workspace_id) = self
+                    .resolve_workspace_id_from_args(args, true, true)
+                    .or_else(|| self.workspaces.active_id().map(str::to_string))
+                else {
+                    return (
+                        McpResponse::ActionResult {
+                            ok: false,
+                            target: target.to_string(),
+                            action: action.to_string(),
+                            error: Some("No active workspace".to_string()),
+                            timestamp_ms: Self::now_ms(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                let Some(workspace) = self.workspaces.get_mut(&workspace_id) else {
+                    return (
+                        McpResponse::ActionResult {
+                            ok: false,
+                            target: target.to_string(),
+                            action: action.to_string(),
+                            error: Some(format!("Workspace {} not found", workspace_id)),
+                            timestamp_ms: Self::now_ms(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                let leaf_ids: Vec<String> = workspace.layout.all_leaf_ids().into_iter().map(str::to_string).collect();
+                let all_terminals = self.terminals.terminals_for_workspace(&workspace_id);
+                let unlisted: Option<String> = all_terminals
+                    .iter()
+                    .find(|t| !leaf_ids.contains(&t.id))
+                    .map(|t| t.id.clone());
+                let Some(other_id) = unlisted else {
+                    return (
+                        McpResponse::ActionResult {
+                            ok: false,
+                            target: target.to_string(),
+                            action: action.to_string(),
+                            error: Some("No unlisted terminal to split with".to_string()),
+                            timestamp_ms: Self::now_ms(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                let focused = workspace.focused_terminal.clone();
+                workspace.layout.split_leaf(&focused, other_id, dir);
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            "layout.split.clear" => {
+                let Some(workspace_id) = self
+                    .resolve_workspace_id_from_args(args, true, true)
+                    .or_else(|| self.workspaces.active_id().map(str::to_string))
+                else {
+                    return (
+                        McpResponse::ActionResult {
+                            ok: false,
+                            target: target.to_string(),
+                            action: action.to_string(),
+                            error: Some("No active workspace".to_string()),
+                            timestamp_ms: Self::now_ms(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                if let Some(workspace) = self.workspaces.get_mut(&workspace_id) {
+                    let focused = workspace.focused_terminal.clone();
+                    workspace.layout = LayoutNode::Leaf {
+                        terminal_id: focused,
+                    };
+                }
+                (
+                    McpResponse::ActionResult {
+                        ok: true,
+                        target: target.to_string(),
+                        action: action.to_string(),
+                        error: None,
+                        timestamp_ms: Self::now_ms(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            "pane.focus.next" => {
+                let Some(workspace_id) = self.workspaces.active_id().map(str::to_string) else {
+                    return (
+                        McpResponse::ActionResult {
+                            ok: false,
+                            target: target.to_string(),
+                            action: action.to_string(),
+                            error: Some("No active workspace".to_string()),
+                            timestamp_ms: Self::now_ms(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                let Some(workspace) = self.workspaces.get_mut(&workspace_id) else {
+                    return (
+                        McpResponse::ActionResult {
+                            ok: false,
+                            target: target.to_string(),
+                            action: action.to_string(),
+                            error: Some("Workspace not found".to_string()),
+                            timestamp_ms: Self::now_ms(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                let current = workspace.focused_terminal.clone();
+                if let Some(next) = workspace.layout.next_leaf_id(&current) {
+                    workspace.focused_terminal = next.to_string();
+                    self.terminals.set_active(&workspace.focused_terminal);
+                }
                 (
                     McpResponse::ActionResult {
                         ok: true,

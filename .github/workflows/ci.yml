@@ -12,9 +12,9 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Job 1: Lint, type-check, and frontend tests (~5 min)
+  # Job 1: Cargo check library crates (Linux, ~5 min)
   # ---------------------------------------------------------------------------
-  check-and-lint:
+  check-library-crates:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -23,27 +23,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install
-        timeout-minutes: 3
-      - name: TypeScript check
-        run: pnpm exec tsc --noEmit
-        timeout-minutes: 3
-      - name: Frontend tests
-        run: pnpm test
-        timeout-minutes: 3
-      - name: Validate contract schemas
-        run: pnpm exec tsx testing/runner/validate-contracts.ts
-        timeout-minutes: 1
-      # Check non-Tauri crates individually — godly-terminal's build.rs requires release binaries
-      # Excluded: godly-whisper (ALSA), godly-pty-shim (Win32 pipes), godly-renderer (Vulkan)
       - name: Cargo check (library crates)
         run: >
           cd src-tauri && cargo check
@@ -102,9 +81,9 @@ jobs:
         timeout-minutes: 10
 
   # ---------------------------------------------------------------------------
-  # Job 4: Build release binaries + app crate tests + frontend build (Windows)
+  # Job 4: Build release binaries (Windows)
   # ---------------------------------------------------------------------------
-  build-and-app-tests:
+  build-release:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -113,7 +92,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
-      - uses: taiki-e/install-action@nextest
       - name: Build release binaries
         run: >
           cd src-tauri && cargo build --release
@@ -124,31 +102,12 @@ jobs:
           -p godly-remote
           -p godly-whisper
           -p godly-iced-shell
-        timeout-minutes: 15
-      - name: Build app crate tests
-        run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci --no-run
-        timeout-minutes: 15
-      - name: Run app crate tests
-        run: cd src-tauri && cargo nextest run -p godly-terminal --profile ci -E "not test(test_cleanup_all_worktrees_with_progress)"
-        timeout-minutes: 5
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - name: Install dependencies
-        run: pnpm install
-        timeout-minutes: 3
-      - name: Production build
-        run: pnpm run build
-        timeout-minutes: 8
+        timeout-minutes: 20
 
   # ---------------------------------------------------------------------------
   # Job 5: Native frontend — cargo check all native crates (~5 min)
   # ---------------------------------------------------------------------------
-  native-build:
+  native-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

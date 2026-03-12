@@ -1,4 +1,4 @@
-# Feature Skill
+# Implement a planned feature end-to-end with parallel agents
 
 Orchestrate full feature development: GitHub issue, parallelizable plan, multi-agent execution (Claude Code or Codex), PR, and staging build. Use this whenever the user asks to implement a feature, add new functionality, or says `/feature`.
 
