@@ -1,4 +1,5 @@
 import { store, type Terminal } from '../state/store';
+import { keybindingStore, chordToString, eventToChord } from '../state/keybinding-store';
 
 export interface RecencySwitcherEntry {
   terminalId: string;
@@ -9,8 +10,9 @@ export interface RecencySwitcherEntry {
 
 /**
  * Modal overlay that shows tabs ordered by most-recently-used.
- * Opens on Ctrl+Tab, cycles with repeated Tab presses while Ctrl is held,
- * and commits the selection when Ctrl is released.
+ * Opens on the tab-switching shortcut, cycles with repeated presses while
+ * the primary modifier is held, and commits the selection when the modifier
+ * is released. Dynamically reads keybindings so custom shortcuts work.
  */
 export class RecencySwitcher {
   private overlay: HTMLElement;
@@ -20,6 +22,8 @@ export class RecencySwitcher {
   private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
   private keyupHandler: ((e: KeyboardEvent) => void) | null = null;
   private visible = false;
+  /** The modifier key whose release commits the selection. */
+  private commitModifier: string = 'Control';
 
   constructor() {
     this.overlay = document.createElement('div');
@@ -56,7 +60,7 @@ export class RecencySwitcher {
 
   /**
    * Show the switcher with MRU-ordered entries.
-   * @param reverse If true, start selection at the end (Ctrl+Shift+Tab).
+   * @param reverse If true, start selection at the end (Shift+Tab direction).
    */
   show(reverse = false): void {
     const state = store.getState();
@@ -68,6 +72,15 @@ export class RecencySwitcher {
     const workspace = state.workspaces.find(w => w.id === wsId);
 
     if (wsTerminals.length < 2) return;
+
+    // Determine the commit modifier from the actual keybinding
+    const chord = reverse
+      ? keybindingStore.getBinding('tabs.previousTab')
+      : keybindingStore.getBinding('tabs.nextTab');
+    this.commitModifier = chord.ctrlKey ? 'Control'
+      : chord.altKey ? 'Alt'
+      : chord.shiftKey ? 'Shift'
+      : 'Control'; // fallback
 
     // Build entries in MRU order, falling back to tab order for terminals not in history
     const ordered = this.buildMruList(accessHistory, wsTerminals);
@@ -170,7 +183,13 @@ export class RecencySwitcher {
   }
 
   private attachListeners(): void {
-    // Capture keydown to intercept Tab while Ctrl is held
+    // Read the actual chords for tab cycling
+    const nextChord = keybindingStore.getBinding('tabs.nextTab');
+    const prevChord = keybindingStore.getBinding('tabs.previousTab');
+    const nextStr = chordToString(nextChord);
+    const prevStr = chordToString(prevChord);
+
+    // Capture keydown to intercept cycle keys
     this.keydownHandler = (e: KeyboardEvent) => {
       if (!this.visible) return;
 
@@ -181,22 +200,24 @@ export class RecencySwitcher {
         return;
       }
 
-      // Tab while Ctrl held = cycle
-      if (e.key === 'Tab' && e.ctrlKey) {
+      // Match against the actual keybindings for cycling
+      const chord = eventToChord(e);
+      const str = chordToString(chord);
+      if (str === nextStr) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (e.shiftKey) {
-          this.cyclePrev();
-        } else {
-          this.cycleNext();
-        }
+        this.cycleNext();
+      } else if (str === prevStr) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.cyclePrev();
       }
     };
 
-    // keyup on Control = commit selection
+    // Commit selection when the primary modifier key is released
     this.keyupHandler = (e: KeyboardEvent) => {
       if (!this.visible) return;
-      if (e.key === 'Control') {
+      if (e.key === this.commitModifier) {
         e.preventDefault();
         this.commit();
       }
