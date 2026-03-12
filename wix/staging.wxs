@@ -1,0 +1,212 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Godly Terminal (Staging) WiX installer manifest.
+  Identical to main.wxs but with separate identity for full isolation.
+-->
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product
+        Id='*'
+        Name='Godly Terminal (Staging)'
+        UpgradeCode='C2D3E4F5-A6B7-8901-CDEF-123456789ABC'
+        Manufacturer='Godly Terminal'
+        Language='1033'
+        Codepage='1252'
+        Version='$(var.Version)'>
+
+        <Package Id='*'
+            Keywords='Installer'
+            Description='Godly Terminal (Staging) — isolated test instance'
+            Manufacturer='Godly Terminal'
+            InstallerVersion='450'
+            Languages='1033'
+            Compressed='yes'
+            InstallScope='perUser'
+            SummaryCodepage='1252' />
+
+        <MajorUpgrade
+            Schedule='afterInstallInitialize'
+            DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.' />
+
+        <MediaTemplate EmbedCab='yes' />
+
+        <Icon Id='ProductICO' SourceFile='src-tauri\icons\icon.ico' />
+        <Property Id='ARPPRODUCTICON' Value='ProductICO' />
+
+        <!-- ============================================================== -->
+        <!-- Directory structure — separate from production                  -->
+        <!-- ============================================================== -->
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='LocalAppDataFolder'>
+                <Directory Id='APPLICATIONFOLDER' Name='Godly Terminal (Staging)'>
+                    <Directory Id='SoundsFolder' Name='sounds' />
+                    <Directory Id='SoundpacksFolder' Name='soundpacks'>
+                        <Directory Id='DefaultSoundpackFolder' Name='default' />
+                    </Directory>
+                </Directory>
+            </Directory>
+
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='Godly Terminal (Staging)' />
+            </Directory>
+
+            <Directory Id='DesktopFolder' Name='Desktop' />
+        </Directory>
+
+        <!-- ============================================================== -->
+        <!-- Binaries                                                        -->
+        <!-- ============================================================== -->
+        <DirectoryRef Id='APPLICATIONFOLDER'>
+            <Component Id='MainExecutable' Guid='D2E3F4A5-1111-2222-3333-444455556666'>
+                <File Id='GodlyNativeEXE'
+                    Name='godly-native.exe'
+                    Source='src-tauri\target\release\godly-native.exe'
+                    KeyPath='yes' />
+                <!-- Set GODLY_INSTANCE env var for staging isolation -->
+                <Environment Id='StagingInstance'
+                    Name='GODLY_INSTANCE'
+                    Value='staging'
+                    Permanent='no'
+                    Part='all'
+                    Action='set'
+                    System='no' />
+            </Component>
+
+            <Component Id='DaemonBinary' Guid='D2E3F4A5-1111-2222-3333-444455557777'>
+                <File Id='GodlyDaemonEXE'
+                    Name='godly-daemon.exe'
+                    Source='src-tauri\target\release\godly-daemon.exe'
+                    KeyPath='yes' />
+            </Component>
+
+            <Component Id='McpBinary' Guid='D2E3F4A5-1111-2222-3333-444455558888'>
+                <File Id='GodlyMcpEXE'
+                    Name='godly-mcp.exe'
+                    Source='src-tauri\target\release\godly-mcp.exe'
+                    KeyPath='yes' />
+            </Component>
+
+            <Component Id='NotifyBinary' Guid='D2E3F4A5-1111-2222-3333-444455559999'>
+                <File Id='GodlyNotifyEXE'
+                    Name='godly-notify.exe'
+                    Source='src-tauri\target\release\godly-notify.exe'
+                    KeyPath='yes' />
+            </Component>
+
+            <Component Id='PtyShimBinary' Guid='D2E3F4A5-1111-2222-3333-44445555AAAA'>
+                <File Id='GodlyPtyShimEXE'
+                    Name='godly-pty-shim.exe'
+                    Source='src-tauri\target\release\godly-pty-shim.exe'
+                    KeyPath='yes' />
+            </Component>
+
+            <Component Id='RemoteBinary' Guid='D2E3F4A5-1111-2222-3333-44445555BBBB'>
+                <File Id='GodlyRemoteEXE'
+                    Name='godly-remote.exe'
+                    Source='src-tauri\target\release\godly-remote.exe'
+                    KeyPath='yes' />
+            </Component>
+
+            <Component Id='IconFile' Guid='D2E3F4A5-1111-2222-3333-44445555CCCC'>
+                <File Id='AppIcon'
+                    Name='icon.ico'
+                    Source='src-tauri\icons\icon.ico'
+                    KeyPath='yes' />
+            </Component>
+        </DirectoryRef>
+
+        <!-- ============================================================== -->
+        <!-- Sounds                                                          -->
+        <!-- ============================================================== -->
+        <DirectoryRef Id='SoundsFolder'>
+            <Component Id='SoundFiles' Guid='D2E3F4A5-1111-2222-3333-44445555DDDD'>
+                <File Id='WorkCompleteMP3'
+                    Name='work_complete.mp3'
+                    Source='sounds\work_complete.mp3'
+                    KeyPath='yes' />
+            </Component>
+        </DirectoryRef>
+
+        <DirectoryRef Id='DefaultSoundpackFolder'>
+            <Component Id='DefaultSoundpack' Guid='D2E3F4A5-1111-2222-3333-44445555EEEE'>
+                <File Id='SP_manifest' Name='manifest.json' Source='soundpacks\default\manifest.json' KeyPath='yes' />
+                <File Id='SP_PeonAngry1' Name='PeonAngry1.wav' Source='soundpacks\default\PeonAngry1.wav' />
+                <File Id='SP_PeonAngry2' Name='PeonAngry2.wav' Source='soundpacks\default\PeonAngry2.wav' />
+                <File Id='SP_PeonAngry3' Name='PeonAngry3.wav' Source='soundpacks\default\PeonAngry3.wav' />
+                <File Id='SP_PeonAngry4' Name='PeonAngry4.wav' Source='soundpacks\default\PeonAngry4.wav' />
+                <File Id='SP_PeonDeath' Name='PeonDeath.wav' Source='soundpacks\default\PeonDeath.wav' />
+                <File Id='SP_PeonReady1' Name='PeonReady1.wav' Source='soundpacks\default\PeonReady1.wav' />
+                <File Id='SP_PeonWarcry1' Name='PeonWarcry1.wav' Source='soundpacks\default\PeonWarcry1.wav' />
+                <File Id='SP_PeonWhat1' Name='PeonWhat1.wav' Source='soundpacks\default\PeonWhat1.wav' />
+                <File Id='SP_PeonWhat2' Name='PeonWhat2.wav' Source='soundpacks\default\PeonWhat2.wav' />
+                <File Id='SP_PeonWhat3' Name='PeonWhat3.wav' Source='soundpacks\default\PeonWhat3.wav' />
+                <File Id='SP_PeonWhat4' Name='PeonWhat4.wav' Source='soundpacks\default\PeonWhat4.wav' />
+                <File Id='SP_PeonYes1' Name='PeonYes1.wav' Source='soundpacks\default\PeonYes1.wav' />
+                <File Id='SP_PeonYes2' Name='PeonYes2.wav' Source='soundpacks\default\PeonYes2.wav' />
+                <File Id='SP_PeonYes3' Name='PeonYes3.wav' Source='soundpacks\default\PeonYes3.wav' />
+                <File Id='SP_PeonYes4' Name='PeonYes4.wav' Source='soundpacks\default\PeonYes4.wav' />
+                <File Id='SP_PeonYesAttack1' Name='PeonYesAttack1.wav' Source='soundpacks\default\PeonYesAttack1.wav' />
+                <File Id='SP_PeonYesAttack2' Name='PeonYesAttack2.wav' Source='soundpacks\default\PeonYesAttack2.wav' />
+                <File Id='SP_PeonYesAttack3' Name='PeonYesAttack3.wav' Source='soundpacks\default\PeonYesAttack3.wav' />
+            </Component>
+        </DirectoryRef>
+
+        <!-- ============================================================== -->
+        <!-- Shortcuts                                                       -->
+        <!-- ============================================================== -->
+        <DirectoryRef Id='ApplicationProgramsFolder'>
+            <Component Id='ApplicationShortcut' Guid='D2E3F4A5-1111-2222-3333-44445555FF00'>
+                <Shortcut Id='ApplicationStartMenuShortcut'
+                    Name='Godly Terminal (Staging)'
+                    Description='Godly Terminal — staging instance'
+                    Target='[APPLICATIONFOLDER]godly-native.exe'
+                    WorkingDirectory='APPLICATIONFOLDER'
+                    Icon='ProductICO' />
+                <RemoveFolder Id='CleanUpShortcutFolder'
+                    Directory='ApplicationProgramsFolder'
+                    On='uninstall' />
+                <RegistryValue Root='HKCU'
+                    Key='Software\GodlyTerminalStaging'
+                    Name='installed'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes' />
+            </Component>
+        </DirectoryRef>
+
+        <DirectoryRef Id='DesktopFolder'>
+            <Component Id='DesktopShortcut' Guid='D2E3F4A5-1111-2222-3333-44445555FF11'>
+                <Shortcut Id='DesktopShortcutLink'
+                    Name='Godly Terminal (Staging)'
+                    Description='Godly Terminal — staging instance'
+                    Target='[APPLICATIONFOLDER]godly-native.exe'
+                    WorkingDirectory='APPLICATIONFOLDER'
+                    Icon='ProductICO' />
+                <RegistryValue Root='HKCU'
+                    Key='Software\GodlyTerminalStaging'
+                    Name='desktopShortcut'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes' />
+            </Component>
+        </DirectoryRef>
+
+        <!-- ============================================================== -->
+        <!-- Feature tree                                                    -->
+        <!-- ============================================================== -->
+        <Feature Id='Binaries' Title='Godly Terminal (Staging)' Level='1'>
+            <ComponentRef Id='MainExecutable' />
+            <ComponentRef Id='DaemonBinary' />
+            <ComponentRef Id='McpBinary' />
+            <ComponentRef Id='NotifyBinary' />
+            <ComponentRef Id='PtyShimBinary' />
+            <ComponentRef Id='RemoteBinary' />
+            <ComponentRef Id='IconFile' />
+            <ComponentRef Id='SoundFiles' />
+            <ComponentRef Id='DefaultSoundpack' />
+            <ComponentRef Id='ApplicationShortcut' />
+            <ComponentRef Id='DesktopShortcut' />
+        </Feature>
+
+    </Product>
+</Wix>
