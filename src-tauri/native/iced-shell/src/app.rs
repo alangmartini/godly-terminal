@@ -16,7 +16,7 @@ use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
 use godly_app_adapter::daemon_client::NativeDaemonClient;
 use godly_app_adapter::keys::key_to_pty_bytes;
-use godly_app_adapter::shortcuts::{self, AppAction};
+use godly_app_adapter::shortcuts::{self, AppAction, ShortcutResolver};
 use godly_app_adapter::sound::{self, NotificationSoundPreset};
 use godly_features_shell::layout as layout_reducer;
 use godly_features_shell::tabs as tab_reducer;
@@ -30,6 +30,7 @@ use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCan
 use crate::notification_state::NotificationTracker;
 use crate::notifications;
 use crate::scrollback_restore;
+use crate::keybinding_persistence;
 use crate::session_persistence;
 use crate::selection::{GridPos, SelectionState};
 use crate::settings_dialog::{self, SettingsTab};
@@ -261,6 +262,8 @@ pub struct GodlyApp {
     pub(crate) shortcut_capturing_index: Option<usize>,
     /// Custom shortcut overrides (flat index → display string).
     pub(crate) shortcut_overrides: HashMap<usize, String>,
+    /// Resolver that routes key events through custom overrides + defaults.
+    shortcut_resolver: ShortcutResolver,
     /// Notification tracker for terminals.
     notifications: NotificationTracker,
     /// Startup timestamp used for test harness uptime reporting.
@@ -416,7 +419,8 @@ impl Default for GodlyApp {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             shortcut_capturing_index: None,
-            shortcut_overrides: HashMap::new(),
+            shortcut_overrides: keybinding_persistence::load_keybindings(),
+            shortcut_resolver: ShortcutResolver::empty(), // rebuilt below
             notifications: NotificationTracker::new(),
             started_at_ms: Self::now_ms(),
             next_workspace_num: 2, // First workspace is "Workspace 1"
@@ -1330,8 +1334,11 @@ impl GodlyApp {
                     }
                     // Require at least Ctrl or Alt for a valid shortcut
                     if modifiers.control() || modifiers.alt() {
-                        let display = format_key_chord(&key, modifiers);
+                        let display = shortcuts::normalize_chord(&key, modifiers);
                         self.shortcut_overrides.insert(cap_index, display);
+                        self.shortcut_resolver =
+                            ShortcutResolver::from_overrides(&self.shortcut_overrides);
+                        keybinding_persistence::save_keybindings(&self.shortcut_overrides);
                     }
                     self.shortcut_capturing_index = None;
                     return Task::none();
@@ -1361,8 +1368,8 @@ impl GodlyApp {
                     return Task::none();
                 }
 
-                // Check app shortcuts first.
-                if let Some(action) = shortcuts::check_app_shortcut(&key, modifiers) {
+                // Check app shortcuts (custom overrides first, then defaults).
+                if let Some(action) = self.shortcut_resolver.resolve(&key, modifiers) {
                     return self.handle_app_action(action);
                 }
 
@@ -6435,68 +6442,6 @@ fn workspace_matches_mute_patterns(
     })
 }
 
-/// Format a key + modifiers into a display string like "Ctrl+Alt+\".
-fn format_key_chord(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    if modifiers.control() {
-        parts.push("Ctrl");
-    }
-    if modifiers.shift() {
-        parts.push("Shift");
-    }
-    if modifiers.alt() {
-        parts.push("Alt");
-    }
-    match key {
-        keyboard::Key::Character(ch) => {
-            // Character keys: uppercase for display, append separately
-            let upper = ch.as_str().to_uppercase();
-            let prefix = parts.join("+");
-            if prefix.is_empty() {
-                upper
-            } else {
-                format!("{prefix}+{upper}")
-            }
-        }
-        keyboard::Key::Named(named) => {
-            let name = match named {
-                keyboard::key::Named::Tab => "Tab",
-                keyboard::key::Named::Enter => "Enter",
-                keyboard::key::Named::Space => "Space",
-                keyboard::key::Named::Backspace => "Backspace",
-                keyboard::key::Named::Delete => "Delete",
-                keyboard::key::Named::Home => "Home",
-                keyboard::key::Named::End => "End",
-                keyboard::key::Named::PageUp => "PageUp",
-                keyboard::key::Named::PageDown => "PageDown",
-                keyboard::key::Named::ArrowUp => "Up",
-                keyboard::key::Named::ArrowDown => "Down",
-                keyboard::key::Named::ArrowLeft => "Left",
-                keyboard::key::Named::ArrowRight => "Right",
-                keyboard::key::Named::F1 => "F1",
-                keyboard::key::Named::F2 => "F2",
-                keyboard::key::Named::F3 => "F3",
-                keyboard::key::Named::F4 => "F4",
-                keyboard::key::Named::F5 => "F5",
-                keyboard::key::Named::F6 => "F6",
-                keyboard::key::Named::F7 => "F7",
-                keyboard::key::Named::F8 => "F8",
-                keyboard::key::Named::F9 => "F9",
-                keyboard::key::Named::F10 => "F10",
-                keyboard::key::Named::F11 => "F11",
-                keyboard::key::Named::F12 => "F12",
-                _ => "?",
-            };
-            parts.push(name);
-            parts.join("+")
-        }
-        keyboard::Key::Unidentified => {
-            parts.push("?");
-            parts.join("+")
-        }
-    }
-}
-
 fn is_escape_key(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
 }
@@ -6660,6 +6605,9 @@ fn create_fresh_session(
 
 /// Initialize the app: connect to daemon, set up bridge, recover or create sessions.
 pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
+    // Build the shortcut resolver from persisted overrides loaded in Default.
+    app.shortcut_resolver = ShortcutResolver::from_overrides(&app.shortcut_overrides);
+
     let client = match NativeDaemonClient::connect_or_launch() {
         Ok(c) => Arc::new(c),
         Err(e) => {
