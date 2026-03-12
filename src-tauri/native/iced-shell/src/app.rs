@@ -1314,63 +1314,66 @@ impl GodlyApp {
 
             // --- Keyboard input (shortcut-first, then forward to PTY) ---
             Message::KeyboardEvent(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                // Shortcut capture mode: intercept all keys before normal handling
-                if let Some(cap_index) = self.shortcut_capturing_index {
-                    if is_escape_key(&key) {
-                        self.shortcut_capturing_index = None;
+                let mut capture = CaptureState {
+                    capturing_index: self.shortcut_capturing_index,
+                    overrides: self.shortcut_overrides.clone(),
+                    resolver: self.shortcut_resolver.clone(),
+                };
+                let result = resolve_key_event(
+                    &key,
+                    modifiers,
+                    &mut capture,
+                    self.mru_switcher.is_some(),
+                    self.claude_md_editor.is_some(),
+                );
+
+                // Write capture mutations back.
+                let overrides_changed = capture.overrides != self.shortcut_overrides;
+                self.shortcut_capturing_index = capture.capturing_index;
+                self.shortcut_overrides = capture.overrides;
+                self.shortcut_resolver = capture.resolver;
+                if overrides_changed {
+                    keybinding_persistence::save_keybindings(&self.shortcut_overrides);
+                }
+
+                match result {
+                    KeyRoutingResult::Action(action) => {
+                        return self.handle_app_action(action);
+                    }
+                    KeyRoutingResult::CapturedBinding => {
                         return Task::none();
                     }
-                    // Ignore modifier-only presses
-                    if matches!(
-                        key,
-                        keyboard::Key::Named(
-                            keyboard::key::Named::Control
-                                | keyboard::key::Named::Shift
-                                | keyboard::key::Named::Alt
-                                | keyboard::key::Named::Super
-                        )
-                    ) {
+                    KeyRoutingResult::Intercepted => {
+                        // Re-run the interceptor side-effects that
+                        // resolve_key_event cannot perform (it's pure).
+                        if let Some(direction) =
+                            mru_cycle_direction_from_shortcut_key(&key, modifiers)
+                        {
+                            self.open_or_cycle_mru_switcher(direction);
+                            return Task::none();
+                        }
+                        if self.mru_switcher.is_some() {
+                            if is_escape_key(&key) {
+                                self.cancel_mru_switcher();
+                            }
+                            return Task::none();
+                        }
+                        if self.claude_md_editor.is_some() {
+                            if modifiers.control()
+                                && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s")
+                            {
+                                return self.update(Message::ClaudeMdSave);
+                            }
+                            if is_escape_key(&key) {
+                                self.claude_md_editor = None;
+                            }
+                            return Task::none();
+                        }
                         return Task::none();
                     }
-                    // Require at least Ctrl or Alt for a valid shortcut
-                    if modifiers.control() || modifiers.alt() {
-                        let display = shortcuts::normalize_chord(&key, modifiers);
-                        self.shortcut_overrides.insert(cap_index, display);
-                        self.shortcut_resolver =
-                            ShortcutResolver::from_overrides(&self.shortcut_overrides);
-                        keybinding_persistence::save_keybindings(&self.shortcut_overrides);
+                    KeyRoutingResult::ForwardToPty => {
+                        // fall through to PTY forwarding below
                     }
-                    self.shortcut_capturing_index = None;
-                    return Task::none();
-                }
-
-                if let Some(direction) = mru_cycle_direction_from_shortcut_key(&key, modifiers) {
-                    self.open_or_cycle_mru_switcher(direction);
-                    return Task::none();
-                }
-
-                if self.mru_switcher.is_some() {
-                    if is_escape_key(&key) {
-                        self.cancel_mru_switcher();
-                    }
-                    return Task::none();
-                }
-
-                // K1: CLAUDE.md editor intercepts Ctrl+S and Escape
-                if self.claude_md_editor.is_some() {
-                    if modifiers.control() && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s") {
-                        return self.update(Message::ClaudeMdSave);
-                    }
-                    if is_escape_key(&key) {
-                        self.claude_md_editor = None;
-                        return Task::none();
-                    }
-                    return Task::none();
-                }
-
-                // Check app shortcuts (custom overrides first, then defaults).
-                if let Some(action) = self.shortcut_resolver.resolve(&key, modifiers) {
-                    return self.handle_app_action(action);
                 }
 
                 // Any keypress clears selection.
@@ -6446,6 +6449,89 @@ fn is_escape_key(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape))
 }
 
+// ---------------------------------------------------------------------------
+// Pure keyboard-routing logic — extracted for testability
+// ---------------------------------------------------------------------------
+
+/// Result of processing a key event through the shortcut capture/resolve pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KeyRoutingResult {
+    /// A shortcut action should fire.
+    Action(AppAction),
+    /// Key was consumed by capture mode (binding recorded or cancelled).
+    CapturedBinding,
+    /// Key was consumed by an interceptor (MRU switcher, CLAUDE.md editor, etc.).
+    Intercepted,
+    /// No shortcut matched — forward to PTY.
+    ForwardToPty,
+}
+
+/// Mutable state that the capture step may modify.
+struct CaptureState {
+    capturing_index: Option<usize>,
+    overrides: HashMap<usize, String>,
+    resolver: ShortcutResolver,
+}
+
+/// Pure function that determines what a key press should do.
+///
+/// Mirrors the logic in the `Message::KeyboardEvent(KeyPressed { .. })` arm of
+/// `update()` but operates on minimal state so it can be tested without
+/// constructing a full `GodlyApp`.
+fn resolve_key_event(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+    capture: &mut CaptureState,
+    mru_switcher_open: bool,
+    claude_md_editor_open: bool,
+) -> KeyRoutingResult {
+    // 1. Capture mode
+    if let Some(cap_index) = capture.capturing_index {
+        if is_escape_key(key) {
+            capture.capturing_index = None;
+            return KeyRoutingResult::CapturedBinding;
+        }
+        if matches!(
+            key,
+            keyboard::Key::Named(
+                keyboard::key::Named::Control
+                    | keyboard::key::Named::Shift
+                    | keyboard::key::Named::Alt
+                    | keyboard::key::Named::Super
+            )
+        ) {
+            return KeyRoutingResult::CapturedBinding;
+        }
+        if modifiers.control() || modifiers.alt() {
+            let display = shortcuts::normalize_chord(key, modifiers);
+            capture.overrides.insert(cap_index, display);
+            capture.resolver = ShortcutResolver::from_overrides(&capture.overrides);
+        }
+        capture.capturing_index = None;
+        return KeyRoutingResult::CapturedBinding;
+    }
+
+    // 2. MRU switcher intercepts Ctrl+Tab
+    if mru_cycle_direction_from_shortcut_key(key, modifiers).is_some() {
+        return KeyRoutingResult::Intercepted;
+    }
+    if mru_switcher_open {
+        return KeyRoutingResult::Intercepted;
+    }
+
+    // 3. CLAUDE.md editor intercepts Ctrl+S and Escape
+    if claude_md_editor_open {
+        return KeyRoutingResult::Intercepted;
+    }
+
+    // 4. Shortcut resolution (custom overrides first, then defaults)
+    if let Some(action) = capture.resolver.resolve(key, modifiers) {
+        return KeyRoutingResult::Action(action);
+    }
+
+    KeyRoutingResult::ForwardToPty
+}
+
 fn is_control_key(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Control))
 }
@@ -7125,5 +7211,203 @@ mod helper_tests {
         let (rows, cols) = grid_dimensions_for_viewport(viewport, font_metrics);
         assert!(rows >= 1);
         assert!(cols >= 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard routing integration tests — exercises the same resolve_key_event()
+// function that the real update() loop uses.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod keyboard_routing_tests {
+    use super::{
+        resolve_key_event, CaptureState, KeyRoutingResult, ShortcutResolver,
+    };
+    use godly_app_adapter::shortcuts::AppAction;
+    use iced::keyboard::{key::Named, Key, Modifiers};
+    use std::collections::HashMap;
+
+    fn char_key(s: &str) -> Key {
+        Key::Character(s.into())
+    }
+
+    fn ctrl_shift() -> Modifiers {
+        Modifiers::CTRL.union(Modifiers::SHIFT)
+    }
+
+    fn make_capture() -> CaptureState {
+        CaptureState {
+            capturing_index: None,
+            overrides: HashMap::new(),
+            resolver: ShortcutResolver::empty(),
+        }
+    }
+
+    // --- The exact bug scenario: rebind split-right to Ctrl+Shift+/, then press it ---
+
+    #[test]
+    fn rebind_split_right_and_press_triggers_split() {
+        let mut cap = make_capture();
+
+        // Step 1: enter capture mode for SplitRight (flat index 5).
+        cap.capturing_index = Some(5);
+
+        // Step 2: user presses Ctrl+Shift+/ while in capture mode.
+        let result = resolve_key_event(
+            &char_key("/"),
+            ctrl_shift(),
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::CapturedBinding);
+        // Override was recorded.
+        assert_eq!(cap.overrides.get(&5), Some(&"Ctrl+Shift+/".to_string()));
+        // Capture mode exited.
+        assert!(cap.capturing_index.is_none());
+
+        // Step 3: user presses Ctrl+Shift+/ again (no longer in capture mode).
+        let result = resolve_key_event(
+            &char_key("/"),
+            ctrl_shift(),
+            &mut cap,
+            false,
+            false,
+        );
+        // The custom binding should fire SplitRight.
+        assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
+    }
+
+    #[test]
+    fn rebind_split_right_disables_original_default() {
+        let mut cap = make_capture();
+
+        // Rebind SplitRight from Ctrl+\ to Ctrl+Shift+/.
+        cap.capturing_index = Some(5);
+        resolve_key_event(&char_key("/"), ctrl_shift(), &mut cap, false, false);
+
+        // Original Ctrl+\ should no longer trigger SplitRight.
+        let result = resolve_key_event(
+            &char_key("\\"),
+            Modifiers::CTRL,
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::ForwardToPty);
+    }
+
+    #[test]
+    fn default_split_right_works_without_override() {
+        let mut cap = make_capture();
+
+        // Without any overrides, Ctrl+\ should trigger SplitRight.
+        let result = resolve_key_event(
+            &char_key("\\"),
+            Modifiers::CTRL,
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
+    }
+
+    #[test]
+    fn capture_mode_escape_cancels_without_recording() {
+        let mut cap = make_capture();
+        cap.capturing_index = Some(5);
+
+        let result = resolve_key_event(
+            &Key::Named(Named::Escape),
+            Modifiers::empty(),
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::CapturedBinding);
+        // No override recorded.
+        assert!(cap.overrides.is_empty());
+        assert!(cap.capturing_index.is_none());
+    }
+
+    #[test]
+    fn capture_mode_ignores_modifier_only_presses() {
+        let mut cap = make_capture();
+        cap.capturing_index = Some(5);
+
+        let result = resolve_key_event(
+            &Key::Named(Named::Control),
+            Modifiers::CTRL,
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::CapturedBinding);
+        // Still in capture mode — modifier-only press didn't exit.
+        assert_eq!(cap.capturing_index, Some(5));
+        assert!(cap.overrides.is_empty());
+    }
+
+    #[test]
+    fn multiple_actions_can_be_rebound() {
+        let mut cap = make_capture();
+
+        // Rebind SplitRight (5) to Ctrl+Shift+/
+        cap.capturing_index = Some(5);
+        resolve_key_event(&char_key("/"), ctrl_shift(), &mut cap, false, false);
+
+        // Rebind SplitDown (6) to Ctrl+Shift+.
+        cap.capturing_index = Some(6);
+        resolve_key_event(&char_key("."), ctrl_shift(), &mut cap, false, false);
+
+        // Both custom bindings fire.
+        assert_eq!(
+            resolve_key_event(&char_key("/"), ctrl_shift(), &mut cap, false, false),
+            KeyRoutingResult::Action(AppAction::SplitRight)
+        );
+        assert_eq!(
+            resolve_key_event(&char_key("."), ctrl_shift(), &mut cap, false, false),
+            KeyRoutingResult::Action(AppAction::SplitDown)
+        );
+
+        // Both original defaults are disabled.
+        assert_eq!(
+            resolve_key_event(&char_key("\\"), Modifiers::CTRL, &mut cap, false, false),
+            KeyRoutingResult::ForwardToPty
+        );
+        assert_eq!(
+            resolve_key_event(
+                &char_key("\\"),
+                Modifiers::CTRL.union(Modifiers::ALT),
+                &mut cap,
+                false,
+                false
+            ),
+            KeyRoutingResult::ForwardToPty
+        );
+
+        // Unrelated defaults still work.
+        assert_eq!(
+            resolve_key_event(&char_key("t"), Modifiers::CTRL, &mut cap, false, false),
+            KeyRoutingResult::Action(AppAction::NewTab)
+        );
+    }
+
+    #[test]
+    fn non_modifier_key_in_capture_exits_without_recording() {
+        let mut cap = make_capture();
+        cap.capturing_index = Some(5);
+
+        // Press a plain letter (no Ctrl/Alt) — should exit capture without recording.
+        let result = resolve_key_event(
+            &char_key("a"),
+            Modifiers::empty(),
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::CapturedBinding);
+        assert!(cap.overrides.is_empty());
+        assert!(cap.capturing_index.is_none());
     }
 }
