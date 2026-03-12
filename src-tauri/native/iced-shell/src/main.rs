@@ -28,6 +28,7 @@ mod terminal_context_menu;
 mod whisper_ui;
 mod quick_claude;
 mod session_persistence;
+mod keybinding_persistence;
 
 use app::{GodlyApp, Message};
 
