@@ -323,6 +323,50 @@ describe('KeybindingStore', () => {
     });
   });
 
+  describe('shadow binding detection', () => {
+    it('hasShadowBindings returns true when two actions share the same chord', () => {
+      const store = new KeybindingStore();
+      // Give split.splitRight the same chord as tabs.previousTab (Ctrl+Shift+Tab)
+      const prevTabChord = store.getBinding('tabs.previousTab');
+      store.setBinding('split.splitRight', prevTabChord);
+
+      // tabs.previousTab has a binding but it's not reachable via matchAction
+      expect(store.hasShadowBindings()).toBe(true);
+    });
+
+    it('getShadowedActions returns actions whose chord is overridden by another', () => {
+      const store = new KeybindingStore();
+      const prevTabChord = store.getBinding('tabs.previousTab');
+      store.setBinding('split.splitRight', prevTabChord);
+
+      const shadowed = store.getShadowedActions();
+      expect(shadowed).toContain('tabs.previousTab');
+      expect(shadowed).not.toContain('split.splitRight');
+    });
+
+    it('no shadow bindings exist with default shortcuts', () => {
+      const store = new KeybindingStore();
+      expect(store.hasShadowBindings()).toBe(false);
+    });
+
+    it('swapBinding correctly exchanges two actions chords', () => {
+      const store = new KeybindingStore();
+      const splitChord = store.getBinding('split.splitRight');  // Ctrl+\
+      const prevTabChord = store.getBinding('tabs.previousTab'); // Ctrl+Shift+Tab
+
+      store.swapBinding('split.splitRight', 'tabs.previousTab');
+
+      // After swap: split gets Ctrl+Shift+Tab, previousTab gets Ctrl+\
+      expect(chordToString(store.getBinding('split.splitRight'))).toBe(chordToString(prevTabChord));
+      expect(chordToString(store.getBinding('tabs.previousTab'))).toBe(chordToString(splitChord));
+
+      // Both should be reachable
+      expect(store.matchAction({ ...prevTabChord, type: 'keydown' })).toBe('split.splitRight');
+      expect(store.matchAction({ ...splitChord, type: 'keydown' })).toBe('tabs.previousTab');
+      expect(store.hasShadowBindings()).toBe(false);
+    });
+  });
+
   describe('subscribe', () => {
     it('notifies on setBinding', () => {
       const store = new KeybindingStore();
