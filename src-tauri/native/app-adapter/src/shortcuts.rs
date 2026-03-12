@@ -1,7 +1,9 @@
+use std::collections::{HashMap, HashSet};
+
 use iced::keyboard::{key::Named, Key, Modifiers};
 
 /// App-level actions triggered by keyboard shortcuts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppAction {
     NewTab,
     CloseTab,
@@ -30,6 +32,184 @@ pub enum AppAction {
     Find,
     WhisperToggle,
 }
+
+/// Flat index order matching the categories in `shortcuts_tab.rs`.
+///
+/// Tabs:       0=NewTab, 1=CloseTab, 2=NextTab, 3=PreviousTab, 4=RenameTab
+/// Split:      5=SplitRight, 6=SplitDown, 7=Unsplit, 8=FocusNextPane
+/// Clipboard:  9=Copy, 10=Paste, 11=SelectAll
+/// Scrollback: 12=ScrollPageUp, 13=ScrollPageDown, 14=ScrollToTop, 15=ScrollToBottom
+/// Zoom:       16=ZoomIn, 17=ZoomOut, 18=ZoomReset
+/// Workspaces: 19=NextWorkspace, 20=PrevWorkspace, 21=ToggleSidebar, 22=OpenSettings
+const FLAT_ACTION_ORDER: &[AppAction] = &[
+    // Tabs
+    AppAction::NewTab,
+    AppAction::CloseTab,
+    AppAction::NextTab,
+    AppAction::PreviousTab,
+    AppAction::RenameTab,
+    // Split Panes
+    AppAction::SplitRight,
+    AppAction::SplitDown,
+    AppAction::Unsplit,
+    AppAction::FocusNextPane,
+    // Clipboard
+    AppAction::Copy,
+    AppAction::Paste,
+    AppAction::SelectAll,
+    // Scrollback
+    AppAction::ScrollPageUp,
+    AppAction::ScrollPageDown,
+    AppAction::ScrollToTop,
+    AppAction::ScrollToBottom,
+    // Zoom
+    AppAction::ZoomIn,
+    AppAction::ZoomOut,
+    AppAction::ZoomReset,
+    // Workspaces
+    AppAction::NextWorkspace,
+    AppAction::PrevWorkspace,
+    AppAction::ToggleSidebar,
+    AppAction::OpenSettings,
+];
+
+/// Maps a flat category index to the corresponding `AppAction`.
+pub fn flat_index_to_action(index: usize) -> Option<AppAction> {
+    FLAT_ACTION_ORDER.get(index).copied()
+}
+
+// ---------------------------------------------------------------------------
+// Chord normalisation
+// ---------------------------------------------------------------------------
+
+/// Normalises a key+modifiers into a canonical display string like `"Ctrl+Shift+/"`.
+///
+/// This MUST produce the same output as `format_key_chord` in `app.rs` so that
+/// the chord captured during rebinding matches the chord produced at resolution
+/// time.
+pub fn normalize_chord(key: &Key, modifiers: Modifiers) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if modifiers.control() {
+        parts.push("Ctrl");
+    }
+    if modifiers.shift() {
+        parts.push("Shift");
+    }
+    if modifiers.alt() {
+        parts.push("Alt");
+    }
+    match key {
+        Key::Character(ch) => {
+            let upper = ch.as_str().to_uppercase();
+            let prefix = parts.join("+");
+            if prefix.is_empty() {
+                upper
+            } else {
+                format!("{prefix}+{upper}")
+            }
+        }
+        Key::Named(named) => {
+            let name = named_key_label(named);
+            parts.push(name);
+            parts.join("+")
+        }
+        Key::Unidentified => {
+            parts.push("?");
+            parts.join("+")
+        }
+    }
+}
+
+fn named_key_label(named: &Named) -> &'static str {
+    match named {
+        Named::Tab => "Tab",
+        Named::Enter => "Enter",
+        Named::Space => "Space",
+        Named::Backspace => "Backspace",
+        Named::Delete => "Delete",
+        Named::Home => "Home",
+        Named::End => "End",
+        Named::PageUp => "PageUp",
+        Named::PageDown => "PageDown",
+        Named::ArrowUp => "Up",
+        Named::ArrowDown => "Down",
+        Named::ArrowLeft => "Left",
+        Named::ArrowRight => "Right",
+        Named::F1 => "F1",
+        Named::F2 => "F2",
+        Named::F3 => "F3",
+        Named::F4 => "F4",
+        Named::F5 => "F5",
+        Named::F6 => "F6",
+        Named::F7 => "F7",
+        Named::F8 => "F8",
+        Named::F9 => "F9",
+        Named::F10 => "F10",
+        Named::F11 => "F11",
+        Named::F12 => "F12",
+        _ => "?",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shortcut resolver (override-aware)
+// ---------------------------------------------------------------------------
+
+/// Resolves keyboard shortcuts with support for custom overrides.
+///
+/// Custom bindings take priority over defaults.  When an action is rebound,
+/// its original default binding no longer triggers that action.
+#[derive(Debug, Clone)]
+pub struct ShortcutResolver {
+    /// Custom chord string → action.
+    custom: HashMap<String, AppAction>,
+    /// Actions whose default binding has been overridden.
+    rebound: HashSet<AppAction>,
+}
+
+impl ShortcutResolver {
+    /// An empty resolver with no custom bindings (all defaults active).
+    pub fn empty() -> Self {
+        Self {
+            custom: HashMap::new(),
+            rebound: HashSet::new(),
+        }
+    }
+
+    /// Builds a resolver from the flat-index → display-chord override map.
+    pub fn from_overrides(overrides: &HashMap<usize, String>) -> Self {
+        let mut custom = HashMap::new();
+        let mut rebound = HashSet::new();
+        for (&index, chord) in overrides {
+            if let Some(action) = flat_index_to_action(index) {
+                custom.insert(chord.clone(), action);
+                rebound.insert(action);
+            }
+        }
+        Self { custom, rebound }
+    }
+
+    /// Resolves a key event to an `AppAction`, checking custom bindings first.
+    pub fn resolve(&self, key: &Key, modifiers: Modifiers) -> Option<AppAction> {
+        let chord = normalize_chord(key, modifiers);
+
+        // Custom bindings take priority.
+        if let Some(&action) = self.custom.get(&chord) {
+            return Some(action);
+        }
+
+        // Fall back to defaults, but not for actions that have been rebound.
+        let default = check_app_shortcut(key, modifiers);
+        match default {
+            Some(action) if self.rebound.contains(&action) => None,
+            other => other,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Default shortcut table (unchanged)
+// ---------------------------------------------------------------------------
 
 pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> {
     let ctrl = modifiers.control();
@@ -144,6 +324,10 @@ mod tests {
             .union(Modifiers::ALT)
             .union(Modifiers::SHIFT)
     }
+
+    // -----------------------------------------------------------------------
+    // Default shortcut tests (unchanged)
+    // -----------------------------------------------------------------------
 
     #[test]
     fn ctrl_t_is_new_tab() {
@@ -593,5 +777,155 @@ mod tests {
     #[test]
     fn alt_f2_is_not_shortcut() {
         assert_eq!(check_app_shortcut(&named_key(Named::F2), alt()), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Flat index mapping tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flat_index_0_is_new_tab() {
+        assert_eq!(flat_index_to_action(0), Some(AppAction::NewTab));
+    }
+
+    #[test]
+    fn flat_index_5_is_split_right() {
+        assert_eq!(flat_index_to_action(5), Some(AppAction::SplitRight));
+    }
+
+    #[test]
+    fn flat_index_7_is_unsplit() {
+        assert_eq!(flat_index_to_action(7), Some(AppAction::Unsplit));
+    }
+
+    #[test]
+    fn flat_index_out_of_range_is_none() {
+        assert_eq!(flat_index_to_action(999), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // normalize_chord tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn normalize_ctrl_backslash() {
+        assert_eq!(normalize_chord(&char_key("\\"), CTRL), "Ctrl+\\");
+    }
+
+    #[test]
+    fn normalize_ctrl_shift_slash() {
+        assert_eq!(normalize_chord(&char_key("/"), ctrl_shift()), "Ctrl+Shift+/");
+    }
+
+    #[test]
+    fn normalize_ctrl_t() {
+        assert_eq!(normalize_chord(&char_key("t"), CTRL), "Ctrl+T");
+    }
+
+    #[test]
+    fn normalize_f2_no_modifiers() {
+        assert_eq!(normalize_chord(&named_key(Named::F2), NONE), "F2");
+    }
+
+    #[test]
+    fn normalize_ctrl_alt_left() {
+        assert_eq!(
+            normalize_chord(&named_key(Named::ArrowLeft), ctrl_alt()),
+            "Ctrl+Alt+Left"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ShortcutResolver tests — the core regression tests for this bug
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolver_empty_uses_defaults() {
+        let r = ShortcutResolver::empty();
+        assert_eq!(r.resolve(&char_key("t"), CTRL), Some(AppAction::NewTab));
+        assert_eq!(
+            r.resolve(&char_key("\\"), CTRL),
+            Some(AppAction::SplitRight)
+        );
+    }
+
+    #[test]
+    fn resolver_custom_binding_triggers_action() {
+        // Rebind SplitRight (index 5) from Ctrl+\ to Ctrl+Shift+/
+        let mut overrides = HashMap::new();
+        overrides.insert(5, "Ctrl+Shift+/".to_string());
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        // Custom chord triggers SplitRight
+        assert_eq!(
+            r.resolve(&char_key("/"), ctrl_shift()),
+            Some(AppAction::SplitRight)
+        );
+    }
+
+    #[test]
+    fn resolver_default_disabled_after_rebind() {
+        // Rebind SplitRight (index 5) to Ctrl+Shift+/
+        let mut overrides = HashMap::new();
+        overrides.insert(5, "Ctrl+Shift+/".to_string());
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        // Default Ctrl+\ no longer triggers SplitRight
+        assert_eq!(r.resolve(&char_key("\\"), CTRL), None);
+    }
+
+    #[test]
+    fn resolver_non_rebound_defaults_still_work() {
+        let mut overrides = HashMap::new();
+        overrides.insert(5, "Ctrl+Shift+/".to_string());
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        // Other defaults unaffected
+        assert_eq!(r.resolve(&char_key("t"), CTRL), Some(AppAction::NewTab));
+        assert_eq!(r.resolve(&char_key("w"), CTRL), Some(AppAction::CloseTab));
+    }
+
+    #[test]
+    fn resolver_custom_overrides_conflicting_default() {
+        // Rebind SplitRight to Ctrl+T (conflicts with NewTab default)
+        let mut overrides = HashMap::new();
+        overrides.insert(5, "Ctrl+T".to_string());
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        // Custom binding wins over default
+        assert_eq!(
+            r.resolve(&char_key("T"), CTRL),
+            Some(AppAction::SplitRight)
+        );
+    }
+
+    #[test]
+    fn resolver_multiple_overrides() {
+        let mut overrides = HashMap::new();
+        overrides.insert(5, "Ctrl+Shift+/".to_string());  // SplitRight
+        overrides.insert(6, "Ctrl+Shift+.".to_string());  // SplitDown
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        assert_eq!(
+            r.resolve(&char_key("/"), ctrl_shift()),
+            Some(AppAction::SplitRight)
+        );
+        assert_eq!(
+            r.resolve(&char_key("."), ctrl_shift()),
+            Some(AppAction::SplitDown)
+        );
+        // Both defaults disabled
+        assert_eq!(r.resolve(&char_key("\\"), CTRL), None);
+        assert_eq!(r.resolve(&char_key("\\"), ctrl_alt()), None);
+    }
+
+    #[test]
+    fn resolver_invalid_flat_index_ignored() {
+        let mut overrides = HashMap::new();
+        overrides.insert(999, "Ctrl+X".to_string());
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        // Ctrl+X should not trigger anything (999 is out of range)
+        assert_eq!(r.resolve(&char_key("X"), CTRL), None);
     }
 }
