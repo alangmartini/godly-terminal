@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    ".", "protocol", "daemon", "mcp", "notify", "godly-vt", "remote", "llm", "pty-shim", "renderer", "whisper",
+    "protocol", "daemon", "mcp", "notify", "godly-vt", "remote", "llm", "pty-shim", "renderer", "whisper",
     "native/app-adapter",
     "native/iced-shell",
     "native/terminal-surface",
@@ -41,54 +41,6 @@ features = [
     "jobapi2",
     "processenv",
 ]
-
-[package]
-name = "godly-terminal"
-version = "0.12.0"
-description = "A Windows terminal application with workspaces"
-authors = ["you"]
-edition = "2021"
-license = "BUSL-1.1"
-
-[lib]
-name = "godly_terminal_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-[features]
-leak-check = ["dhat"]
-staging = []
-native-frontend = []
-
-[build-dependencies]
-tauri-build = { version = "2.0", features = [] }
-
-[dependencies]
-dhat = { version = "0.3", optional = true }
-tauri = { version = "2.0", features = [] }
-tauri-plugin-store = "2.0"
-tauri-plugin-dialog = "2.0"
-tauri-plugin-opener = "2"
-tauri-plugin-notification = "2"
-base64 = "0.22"
-godly-protocol.workspace = true
-godly-llm = { path = "llm" }
-godly-renderer = { path = "renderer" }
-uuid.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tokio = { version = "1.0", features = ["rt"] }
-parking_lot.workspace = true
-dashmap = "6"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-zip = "2"
-tempfile = "3"
-
-[target.'cfg(windows)'.dependencies]
-winapi.workspace = true
-webview2-com = "0.38"
-
-[dev-dependencies]
-tempfile = "3"
 
 [profile.dev]
 opt-level = 0

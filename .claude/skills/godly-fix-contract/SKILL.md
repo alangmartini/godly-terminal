@@ -1,4 +1,4 @@
-# Fix Contract
+# Run a contract, diagnose failures, and fix until green
 
 Run a test contract against Godly Staging, diagnose failures, fix the code, and loop until the contract passes. Use this to fix bugs caught by contracts or to validate that a feature works end-to-end.
 

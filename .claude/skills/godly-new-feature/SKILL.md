@@ -1,4 +1,4 @@
-# New Feature
+# Design a new feature: interview, spec, plan, and contract
 
 Describe a feature through a brief interview, define acceptance criteria, create an implementation plan, and generate a test contract. Use this when starting a new feature from scratch — it produces a full spec before any code is written.
 
