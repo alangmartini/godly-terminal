@@ -122,32 +122,32 @@
             <Component Id='SoundFiles' Guid='D2E3F4A5-1111-2222-3333-44445555DDDD'>
                 <File Id='WorkCompleteMP3'
                     Name='work_complete.mp3'
-                    Source='sounds\work_complete.mp3'
+                    Source='src-tauri\sounds\work_complete.mp3'
                     KeyPath='yes' />
             </Component>
         </DirectoryRef>
 
         <DirectoryRef Id='DefaultSoundpackFolder'>
             <Component Id='DefaultSoundpack' Guid='D2E3F4A5-1111-2222-3333-44445555EEEE'>
-                <File Id='SP_manifest' Name='manifest.json' Source='soundpacks\default\manifest.json' KeyPath='yes' />
-                <File Id='SP_PeonAngry1' Name='PeonAngry1.wav' Source='soundpacks\default\PeonAngry1.wav' />
-                <File Id='SP_PeonAngry2' Name='PeonAngry2.wav' Source='soundpacks\default\PeonAngry2.wav' />
-                <File Id='SP_PeonAngry3' Name='PeonAngry3.wav' Source='soundpacks\default\PeonAngry3.wav' />
-                <File Id='SP_PeonAngry4' Name='PeonAngry4.wav' Source='soundpacks\default\PeonAngry4.wav' />
-                <File Id='SP_PeonDeath' Name='PeonDeath.wav' Source='soundpacks\default\PeonDeath.wav' />
-                <File Id='SP_PeonReady1' Name='PeonReady1.wav' Source='soundpacks\default\PeonReady1.wav' />
-                <File Id='SP_PeonWarcry1' Name='PeonWarcry1.wav' Source='soundpacks\default\PeonWarcry1.wav' />
-                <File Id='SP_PeonWhat1' Name='PeonWhat1.wav' Source='soundpacks\default\PeonWhat1.wav' />
-                <File Id='SP_PeonWhat2' Name='PeonWhat2.wav' Source='soundpacks\default\PeonWhat2.wav' />
-                <File Id='SP_PeonWhat3' Name='PeonWhat3.wav' Source='soundpacks\default\PeonWhat3.wav' />
-                <File Id='SP_PeonWhat4' Name='PeonWhat4.wav' Source='soundpacks\default\PeonWhat4.wav' />
-                <File Id='SP_PeonYes1' Name='PeonYes1.wav' Source='soundpacks\default\PeonYes1.wav' />
-                <File Id='SP_PeonYes2' Name='PeonYes2.wav' Source='soundpacks\default\PeonYes2.wav' />
-                <File Id='SP_PeonYes3' Name='PeonYes3.wav' Source='soundpacks\default\PeonYes3.wav' />
-                <File Id='SP_PeonYes4' Name='PeonYes4.wav' Source='soundpacks\default\PeonYes4.wav' />
-                <File Id='SP_PeonYesAttack1' Name='PeonYesAttack1.wav' Source='soundpacks\default\PeonYesAttack1.wav' />
-                <File Id='SP_PeonYesAttack2' Name='PeonYesAttack2.wav' Source='soundpacks\default\PeonYesAttack2.wav' />
-                <File Id='SP_PeonYesAttack3' Name='PeonYesAttack3.wav' Source='soundpacks\default\PeonYesAttack3.wav' />
+                <File Id='SP_manifest' Name='manifest.json' Source='src-tauri\soundpacks\default\manifest.json' KeyPath='yes' />
+                <File Id='SP_PeonAngry1' Name='PeonAngry1.wav' Source='src-tauri\soundpacks\default\PeonAngry1.wav' />
+                <File Id='SP_PeonAngry2' Name='PeonAngry2.wav' Source='src-tauri\soundpacks\default\PeonAngry2.wav' />
+                <File Id='SP_PeonAngry3' Name='PeonAngry3.wav' Source='src-tauri\soundpacks\default\PeonAngry3.wav' />
+                <File Id='SP_PeonAngry4' Name='PeonAngry4.wav' Source='src-tauri\soundpacks\default\PeonAngry4.wav' />
+                <File Id='SP_PeonDeath' Name='PeonDeath.wav' Source='src-tauri\soundpacks\default\PeonDeath.wav' />
+                <File Id='SP_PeonReady1' Name='PeonReady1.wav' Source='src-tauri\soundpacks\default\PeonReady1.wav' />
+                <File Id='SP_PeonWarcry1' Name='PeonWarcry1.wav' Source='src-tauri\soundpacks\default\PeonWarcry1.wav' />
+                <File Id='SP_PeonWhat1' Name='PeonWhat1.wav' Source='src-tauri\soundpacks\default\PeonWhat1.wav' />
+                <File Id='SP_PeonWhat2' Name='PeonWhat2.wav' Source='src-tauri\soundpacks\default\PeonWhat2.wav' />
+                <File Id='SP_PeonWhat3' Name='PeonWhat3.wav' Source='src-tauri\soundpacks\default\PeonWhat3.wav' />
+                <File Id='SP_PeonWhat4' Name='PeonWhat4.wav' Source='src-tauri\soundpacks\default\PeonWhat4.wav' />
+                <File Id='SP_PeonYes1' Name='PeonYes1.wav' Source='src-tauri\soundpacks\default\PeonYes1.wav' />
+                <File Id='SP_PeonYes2' Name='PeonYes2.wav' Source='src-tauri\soundpacks\default\PeonYes2.wav' />
+                <File Id='SP_PeonYes3' Name='PeonYes3.wav' Source='src-tauri\soundpacks\default\PeonYes3.wav' />
+                <File Id='SP_PeonYes4' Name='PeonYes4.wav' Source='src-tauri\soundpacks\default\PeonYes4.wav' />
+                <File Id='SP_PeonYesAttack1' Name='PeonYesAttack1.wav' Source='src-tauri\soundpacks\default\PeonYesAttack1.wav' />
+                <File Id='SP_PeonYesAttack2' Name='PeonYesAttack2.wav' Source='src-tauri\soundpacks\default\PeonYesAttack2.wav' />
+                <File Id='SP_PeonYesAttack3' Name='PeonYesAttack3.wav' Source='src-tauri\soundpacks\default\PeonYesAttack3.wav' />
             </Component>
         </DirectoryRef>
 
