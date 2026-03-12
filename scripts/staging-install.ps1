@@ -5,56 +5,66 @@ $ErrorActionPreference = "Stop"
 function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "   $msg" -ForegroundColor Green }
 
-# ── Read version from package.json ───────────────────────────────────────
+# ── Read version from version.txt ──────────────────────────────────────
 
 $repoRoot = Split-Path $PSScriptRoot
-$packageJson = Get-Content (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
-$version = $packageJson.version
+$version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw).Trim()
 
 Write-Host "Godly Terminal (Staging) installer  v$version" -ForegroundColor Magenta
 
-# ── Locate staging installer ─────────────────────────────────────────────
+# ── Locate staging binaries ────────────────────────────────────────────
 
-$outDir = Join-Path $repoRoot "installations\staging"
+$srcDir = Join-Path $repoRoot "installations\staging"
 
-$nsisExe = Get-ChildItem "$outDir\*setup*.exe" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-
-$msiFile = Get-ChildItem "$outDir\*.msi" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-
-if ($nsisExe) {
-    $installerPath = $nsisExe.FullName
-    $installerType = "NSIS"
-} elseif ($msiFile) {
-    $installerPath = $msiFile.FullName
-    $installerType = "MSI"
-} else {
-    Write-Host "`nNo staging installer found in: $outDir" -ForegroundColor Red
-    Write-Host "Run 'npm run staging:build' first." -ForegroundColor Yellow
+if (-not (Test-Path (Join-Path $srcDir "godly-native.exe"))) {
+    Write-Host "`nNo staging binaries found in: $srcDir" -ForegroundColor Red
+    Write-Host "Run 'pwsh scripts/staging-build.ps1' first." -ForegroundColor Yellow
     exit 1
 }
 
-Write-Ok "Found $installerType installer: $installerPath"
+# ── Install to %LOCALAPPDATA%/godly-terminal-staging/ ──────────────────
 
-# ── Stop staging daemon (uses staging pipe name) ─────────────────────────
-# The staging daemon uses a different pipe name, but the process name is
-# still godly-daemon.exe. We can't kill by name without also killing
-# production. Instead, check if a staging daemon is listening and send a
-# shutdown request, or just let the installer handle it.
+$installDir = Join-Path $env:LOCALAPPDATA "godly-terminal-staging"
 
-Write-Step "Note: Staging daemon (if running) uses isolated pipes."
-Write-Host "   The installer will handle binary replacement via NSIS hooks." -ForegroundColor DarkGray
-
-# ── Run the installer ────────────────────────────────────────────────────
-
-Write-Step "Installing Godly Terminal (Staging) v$version ($installerType)..."
-
-if ($installerType -eq "NSIS") {
-    Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
-} else {
-    Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet" -Wait
+if (-not (Test-Path $installDir)) {
+    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 }
 
-Write-Host "`nGodly Terminal (Staging) v$version installed." -ForegroundColor Green
-Write-Host "It runs with isolated pipes (GODLY_INSTANCE=staging) and separate app data." -ForegroundColor DarkGray
+Write-Step "Installing to $installDir..."
+
+$binaries = @("godly-native.exe", "godly-daemon.exe", "godly-mcp.exe", "godly-notify.exe", "godly-pty-shim.exe", "godly-remote.exe")
+
+foreach ($bin in $binaries) {
+    $src = Join-Path $srcDir $bin
+    if (Test-Path $src) {
+        $dst = Join-Path $installDir $bin
+        # Rename locked binary if in use
+        if (Test-Path $dst) {
+            $old = "$dst.old"
+            if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
+            try {
+                Rename-Item $dst $old -Force -ErrorAction Stop
+            } catch {
+                Write-Host "   $bin is locked — kill the process first" -ForegroundColor Yellow
+                continue
+            }
+        }
+        Copy-Item $src $dst -Force
+        Write-Ok $bin
+    }
+}
+
+# ── Copy sound assets if present ───────────────────────────────────────
+
+$soundsSrc = Join-Path $repoRoot "sounds"
+if (Test-Path $soundsSrc) {
+    $soundsDst = Join-Path $installDir "sounds"
+    if (-not (Test-Path $soundsDst)) {
+        New-Item -ItemType Directory -Path $soundsDst -Force | Out-Null
+    }
+    Copy-Item "$soundsSrc\*" $soundsDst -Force -Recurse
+    Write-Ok "sounds/"
+}
+
+Write-Host "`nGodly Terminal (Staging) v$version installed to: $installDir" -ForegroundColor Green
+Write-Host "Run with: GODLY_INSTANCE=staging $installDir\godly-native.exe" -ForegroundColor DarkGray

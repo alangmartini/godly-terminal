@@ -12,63 +12,67 @@ function Assert-ExitCode {
     }
 }
 
-# ── Read version from package.json ───────────────────────────────────────
+# ── Read version from version.txt ──────────────────────────────────────
 
 $repoRoot = Split-Path $PSScriptRoot
-$packageJson = Get-Content (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
-$version = $packageJson.version
+$version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw).Trim()
 
 Write-Host "Godly Terminal build  v$version" -ForegroundColor Magenta
 
-# ── Install dependencies ──────────────────────────────────────────────────
-
-Write-Step "Installing dependencies..."
-Push-Location $repoRoot
-pnpm install
-Assert-ExitCode
-
-# ── Unlock binaries ──────────────────────────────────────────────────────
+# ── Unlock binaries ────────────────────────────────────────────────────
 
 Write-Step "Unlocking release binaries..."
-pnpm run unlock -- --release
+Push-Location $repoRoot
+node scripts/unlock-binaries.js --release
 Assert-ExitCode
 
-# ── Build Tauri production bundle ─────────────────────────────────────────
+# ── Build all release binaries ─────────────────────────────────────────
 
-Write-Step "Building Tauri production bundle..."
+Write-Step "Building native release binaries..."
 
-pnpm exec tauri build
-Assert-ExitCode
+Push-Location (Join-Path $repoRoot "src-tauri")
 
-# ── Copy artifacts to installations/production/ ──────────────────────────
+$crates = @(
+    "godly-daemon",
+    "godly-pty-shim",
+    "godly-mcp",
+    "godly-notify",
+    "godly-remote",
+    "godly-iced-shell"
+)
 
-$bundleDir = Join-Path $repoRoot "src-tauri\target\release\bundle"
+foreach ($crate in $crates) {
+    Write-Host "   Building $crate..." -ForegroundColor DarkGray
+    cargo build --release -p $crate
+    Assert-ExitCode
+}
+
+Pop-Location
+
+# ── Copy artifacts to installations/production/ ────────────────────────
+
+$targetDir = Join-Path $repoRoot "src-tauri\target\release"
 $outDir = Join-Path $repoRoot "installations\production"
 
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 }
 
-Write-Step "Copying artifacts to installations\production\..."
+Write-Step "Copying binaries to installations\production\..."
 
-$nsisExe = Get-ChildItem "$bundleDir\nsis\*.exe" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$msiFile = Get-ChildItem "$bundleDir\msi\*.msi" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$binaries = @("godly-native.exe", "godly-daemon.exe", "godly-mcp.exe", "godly-notify.exe", "godly-pty-shim.exe", "godly-remote.exe")
 
-if ($nsisExe) {
-    Copy-Item $nsisExe.FullName $outDir -Force
-    Write-Ok "NSIS: $($nsisExe.Name)  ($([math]::Round($nsisExe.Length / 1MB, 1)) MB)"
-}
-if ($msiFile) {
-    Copy-Item $msiFile.FullName $outDir -Force
-    Write-Ok "MSI:  $($msiFile.Name)  ($([math]::Round($msiFile.Length / 1MB, 1)) MB)"
-}
-
-if (-not $nsisExe -and -not $msiFile) {
-    Write-Host "   No installers found in $bundleDir" -ForegroundColor Yellow
+foreach ($bin in $binaries) {
+    $src = Join-Path $targetDir $bin
+    if (Test-Path $src) {
+        Copy-Item $src $outDir -Force
+        $size = [math]::Round((Get-Item $src).Length / 1MB, 1)
+        Write-Ok "$bin ($size MB)"
+    } else {
+        Write-Host "   $bin not found (skipped)" -ForegroundColor Yellow
+    }
 }
 
 Pop-Location
 
-Write-Host "`nProduction build complete. Artifacts in: $outDir" -ForegroundColor Green
+Write-Host "`nProduction build complete. Binaries in: $outDir" -ForegroundColor Green

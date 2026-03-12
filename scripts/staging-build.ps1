@@ -12,69 +12,76 @@ function Assert-ExitCode {
     }
 }
 
-# ── Read version from package.json ───────────────────────────────────────
+# ── Read version from version.txt ──────────────────────────────────────
 
 $repoRoot = Split-Path $PSScriptRoot
-$packageJson = Get-Content (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
-$version = $packageJson.version
+$version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw).Trim()
 
 Write-Host "Godly Terminal (Staging) build  v$version" -ForegroundColor Magenta
 
-# ── Install dependencies ──────────────────────────────────────────────────
-
-Write-Step "Installing dependencies..."
-Push-Location $repoRoot
-pnpm install
-Assert-ExitCode
-
-# ── Unlock binaries ──────────────────────────────────────────────────────
+# ── Unlock binaries ────────────────────────────────────────────────────
 
 Write-Step "Unlocking release binaries..."
-pnpm run unlock -- --release
+Push-Location $repoRoot
+node scripts/unlock-binaries.js --release
 Assert-ExitCode
 
-# ── Build Tauri staging bundle ───────────────────────────────────────────
-# Uses --features staging to bake GODLY_INSTANCE=staging into the binary,
-# and --config to override identifier/productName/title for full isolation.
+# ── Build all release binaries with staging feature ────────────────────
 
-Write-Step "Building Tauri staging bundle..."
+Write-Step "Building native staging binaries..."
 Write-Host "   Features: staging (isolated pipes, metadata, app data)" -ForegroundColor DarkGray
-Write-Host "   Config:   tauri.conf.staging.json (separate identity)" -ForegroundColor DarkGray
 
 $env:GODLY_INSTANCE = "staging"
-pnpm exec tauri build --features staging --config src-tauri/tauri.conf.staging.json
-Assert-ExitCode
+
+Push-Location (Join-Path $repoRoot "src-tauri")
+
+$crates = @(
+    "godly-daemon",
+    "godly-pty-shim",
+    "godly-mcp",
+    "godly-notify",
+    "godly-remote",
+    "godly-iced-shell"
+)
+
+foreach ($crate in $crates) {
+    Write-Host "   Building $crate..." -ForegroundColor DarkGray
+    if ($crate -eq "godly-iced-shell") {
+        cargo build --release -p $crate --features staging
+    } else {
+        cargo build --release -p $crate
+    }
+    Assert-ExitCode
+}
+
+Pop-Location
 Remove-Item Env:\GODLY_INSTANCE -ErrorAction SilentlyContinue
 
-# ── Copy artifacts to installations/staging/ ─────────────────────────────
+# ── Copy artifacts to installations/staging/ ───────────────────────────
 
-$bundleDir = Join-Path $repoRoot "src-tauri\target\release\bundle"
+$targetDir = Join-Path $repoRoot "src-tauri\target\release"
 $outDir = Join-Path $repoRoot "installations\staging"
 
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 }
 
-Write-Step "Copying artifacts to installations\staging\..."
+Write-Step "Copying binaries to installations\staging\..."
 
-$nsisExe = Get-ChildItem "$bundleDir\nsis\*.exe" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$msiFile = Get-ChildItem "$bundleDir\msi\*.msi" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$binaries = @("godly-native.exe", "godly-daemon.exe", "godly-mcp.exe", "godly-notify.exe", "godly-pty-shim.exe", "godly-remote.exe")
 
-if ($nsisExe) {
-    Copy-Item $nsisExe.FullName $outDir -Force
-    Write-Ok "NSIS: $($nsisExe.Name)  ($([math]::Round($nsisExe.Length / 1MB, 1)) MB)"
-}
-if ($msiFile) {
-    Copy-Item $msiFile.FullName $outDir -Force
-    Write-Ok "MSI:  $($msiFile.Name)  ($([math]::Round($msiFile.Length / 1MB, 1)) MB)"
-}
-
-if (-not $nsisExe -and -not $msiFile) {
-    Write-Host "   No installers found in $bundleDir" -ForegroundColor Yellow
+foreach ($bin in $binaries) {
+    $src = Join-Path $targetDir $bin
+    if (Test-Path $src) {
+        Copy-Item $src $outDir -Force
+        $size = [math]::Round((Get-Item $src).Length / 1MB, 1)
+        Write-Ok "$bin ($size MB)"
+    } else {
+        Write-Host "   $bin not found (skipped)" -ForegroundColor Yellow
+    }
 }
 
 Pop-Location
 
-Write-Host "`nStaging build complete. Artifacts in: $outDir" -ForegroundColor Green
+Write-Host "`nStaging build complete. Binaries in: $outDir" -ForegroundColor Green
+Write-Host "Run 'pwsh scripts/staging-install.ps1' to install." -ForegroundColor DarkGray
