@@ -81,7 +81,7 @@ Write-Host "   Compiling WiX manifest..." -ForegroundColor DarkGray
 Assert-ExitCode
 
 Write-Host "   Linking MSI..." -ForegroundColor DarkGray
-& $light -o $msiPath $wixObj
+& $light -sice:ICE38 -sice:ICE64 -sice:ICE91 -o $msiPath $wixObj
 Assert-ExitCode
 
 # Clean up intermediate files
