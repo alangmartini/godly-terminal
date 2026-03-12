@@ -77,7 +77,7 @@ $wixObj = Join-Path $outDir "main.wixobj"
 $msiPath = Join-Path $outDir "Godly Terminal_${version}_x64.msi"
 
 Write-Host "   Compiling WiX manifest..." -ForegroundColor DarkGray
-& $candle -dVersion=$version -o $wixObj (Join-Path $repoRoot "wix\main.wxs")
+& $candle "-dVersion=$version" -o $wixObj (Join-Path $repoRoot "wix\main.wxs")
 Assert-ExitCode
 
 Write-Host "   Linking MSI..." -ForegroundColor DarkGray
