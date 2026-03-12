@@ -1,4 +1,4 @@
-# Create Test Contract
+# Write a test contract for an existing or new feature
 
 Create or update a staging test contract in `testing/contracts/`, including fixture work in `testing/fixtures/` when needed.
 
