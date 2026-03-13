@@ -447,6 +447,132 @@ mod tests {
     }
 
     #[test]
+    fn vertical_split_direction_round_trips_through_persistence() {
+        // Bug #639: vertical splits became horizontal after restart.
+        // Full round-trip: LayoutNode → PersistedLayoutNode → JSON → PersistedLayoutNode → LayoutNode
+        let original = LayoutNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: 0.6,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t-1".to_string(),
+            }),
+            second: Box::new(LayoutNode::Leaf {
+                terminal_id: "t-2".to_string(),
+            }),
+        };
+
+        let persisted = PersistedLayoutNode::from_layout(&original);
+        let json = serde_json::to_string(&persisted).expect("serialize");
+        let decoded: PersistedLayoutNode = serde_json::from_str(&json).expect("deserialize");
+
+        let live_ids: HashSet<&str> = ["t-1", "t-2"].into_iter().collect();
+        let restored = decoded
+            .to_layout_filtered(&live_ids)
+            .expect("both terminals are live");
+
+        match &restored {
+            LayoutNode::Split { direction, ratio, .. } => {
+                assert_eq!(*direction, SplitDirection::Vertical, "direction must survive round-trip");
+                assert!((ratio - 0.6).abs() < 0.01, "ratio must survive round-trip");
+            }
+            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+        }
+    }
+
+    #[test]
+    fn horizontal_split_direction_round_trips_through_persistence() {
+        let original = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t-1".to_string(),
+            }),
+            second: Box::new(LayoutNode::Leaf {
+                terminal_id: "t-2".to_string(),
+            }),
+        };
+
+        let persisted = PersistedLayoutNode::from_layout(&original);
+        let json = serde_json::to_string(&persisted).expect("serialize");
+        let decoded: PersistedLayoutNode = serde_json::from_str(&json).expect("deserialize");
+
+        let live_ids: HashSet<&str> = ["t-1", "t-2"].into_iter().collect();
+        let restored = decoded
+            .to_layout_filtered(&live_ids)
+            .expect("both terminals are live");
+
+        match &restored {
+            LayoutNode::Split { direction, .. } => {
+                assert_eq!(*direction, SplitDirection::Horizontal, "direction must survive round-trip");
+            }
+            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+        }
+    }
+
+    #[test]
+    fn nested_split_directions_round_trip_through_merge() {
+        // Nested: Horizontal split with a Vertical sub-split.
+        // Verify both directions survive the full persist → merge path.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 13.0,
+            next_workspace_num: 2,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
+            workspaces: vec![PersistedWorkspaceState {
+                id: "w-1".to_string(),
+                name: "Main".to_string(),
+                folder_path: ".".to_string(),
+                worktree_mode: false,
+                focused_terminal: "t-1".to_string(),
+                layout: PersistedLayoutNode::Split {
+                    direction: PersistedSplitDirection::Horizontal,
+                    ratio: 0.5,
+                    first: Box::new(PersistedLayoutNode::Leaf {
+                        terminal_id: "t-1".to_string(),
+                    }),
+                    second: Box::new(PersistedLayoutNode::Split {
+                        direction: PersistedSplitDirection::Vertical,
+                        ratio: 0.4,
+                        first: Box::new(PersistedLayoutNode::Leaf {
+                            terminal_id: "t-2".to_string(),
+                        }),
+                        second: Box::new(PersistedLayoutNode::Leaf {
+                            terminal_id: "t-3".to_string(),
+                        }),
+                    }),
+                },
+            }],
+        };
+
+        let live = vec!["t-1".to_string(), "t-2".to_string(), "t-3".to_string()];
+        let merged = merge_with_live_sessions(&persisted, &live);
+
+        let ws = &merged.workspaces[0];
+        match &ws.layout {
+            LayoutNode::Split {
+                direction,
+                first,
+                second,
+                ..
+            } => {
+                assert_eq!(*direction, SplitDirection::Horizontal, "outer direction");
+                match second.as_ref() {
+                    LayoutNode::Split { direction, .. } => {
+                        assert_eq!(*direction, SplitDirection::Vertical, "inner direction");
+                    }
+                    _ => panic!("inner node should be a split"),
+                }
+                assert!(matches!(first.as_ref(), LayoutNode::Leaf { terminal_id } if terminal_id == "t-1"));
+            }
+            _ => panic!("expected split layout"),
+        }
+    }
+
+    #[test]
     fn load_returns_none_for_corrupt_payload() {
         let path = std::env::temp_dir().join(format!(
             "iced-shell-session-corrupt-{}.json",
