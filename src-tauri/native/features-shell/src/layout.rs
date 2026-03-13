@@ -61,6 +61,20 @@ pub fn reduce_cycle_focus(
     layout.next_leaf_id(focused_terminal_id).map(str::to_string)
 }
 
+/// Returns the terminal ID to focus when a pane is clicked,
+/// or `None` if the terminal doesn't exist in the layout.
+pub fn reduce_pane_clicked(
+    layout: Option<&LayoutNode>,
+    clicked_terminal_id: &str,
+) -> Option<String> {
+    let layout = layout?;
+    if layout.find_leaf(clicked_terminal_id) {
+        Some(clicked_terminal_id.to_string())
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloseTerminalInput {
     pub layout: LayoutNode,
@@ -153,7 +167,7 @@ pub fn reduce_drop_tab_into_split_zone(
 mod tests {
     use super::{
         reduce_close_terminal, reduce_cycle_focus, reduce_drop_tab_into_split_zone,
-        reduce_split_focused, reduce_unsplit_focused, CloseTerminalInput,
+        reduce_pane_clicked, reduce_split_focused, reduce_unsplit_focused, CloseTerminalInput,
         DropTabIntoSplitZoneInput, SplitFocusedInput, UnsplitFocusedInput,
     };
     use godly_layout_core::{LayoutNode, SplitDirection, SplitPlacement};
@@ -464,6 +478,36 @@ mod tests {
             placement: SplitPlacement::Left,
         });
         assert!(missing_target.is_none());
+    }
+
+    // --- Pane click focus tests ---
+
+    #[test]
+    fn pane_click_switches_focus_to_clicked_terminal() {
+        let layout = split_layout();
+        // Clicking t-2 (which is in the layout) should return t-2 as new focus
+        let result = reduce_pane_clicked(Some(&layout), "t-2");
+        assert_eq!(result.as_deref(), Some("t-2"));
+    }
+
+    #[test]
+    fn pane_click_returns_same_terminal_if_already_focused() {
+        let layout = split_layout();
+        let result = reduce_pane_clicked(Some(&layout), "t-1");
+        assert_eq!(result.as_deref(), Some("t-1"));
+    }
+
+    #[test]
+    fn pane_click_rejects_nonexistent_terminal() {
+        let layout = split_layout();
+        let result = reduce_pane_clicked(Some(&layout), "missing");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn pane_click_returns_none_for_no_layout() {
+        let result = reduce_pane_clicked(None, "t-1");
+        assert!(result.is_none());
     }
 
     #[test]
