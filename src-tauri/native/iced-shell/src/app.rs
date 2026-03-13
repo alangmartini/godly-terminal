@@ -578,6 +578,8 @@ pub enum Message {
     UnsplitPane,
     /// Cycle focus to the next pane in the layout tree.
     FocusNextPane,
+    /// User clicked on a specific pane in the split layout.
+    PaneClicked(String),
     /// User clicked a workspace in the sidebar.
     WorkspaceClicked(String),
     /// User requested a new workspace.
@@ -934,6 +936,20 @@ impl GodlyApp {
             })
             .collect();
         url_detector::url_at_col(&line, grid_pos.col as usize)
+    }
+
+    /// Find which terminal pane the cursor is currently over.
+    fn find_terminal_at_cursor(&self) -> Option<String> {
+        let cursor = self.cursor_position?;
+        let layout = self.active_layout()?;
+        for terminal_id in layout.all_leaf_ids() {
+            if let Some(rect) = self.terminal_pane_rect(terminal_id) {
+                if rect.contains(cursor) {
+                    return Some(terminal_id.to_string());
+                }
+            }
+        }
+        None
     }
 
     fn active_terminal_pointer_grid(&self, clamp_to_viewport: bool) -> Option<GridPos> {
@@ -1315,7 +1331,12 @@ impl GodlyApp {
             }
 
             // --- Keyboard input (shortcut-first, then forward to PTY) ---
-            Message::KeyboardEvent(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+            Message::KeyboardEvent(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                physical_key,
+                ..
+            }) => {
                 let mut capture = CaptureState {
                     capturing_index: self.shortcut_capturing_index,
                     overrides: self.shortcut_overrides.clone(),
@@ -1324,6 +1345,7 @@ impl GodlyApp {
                 let result = resolve_key_event(
                     &key,
                     modifiers,
+                    &physical_key,
                     &mut capture,
                     self.mru_switcher.is_some(),
                     self.claude_md_editor.is_some(),
@@ -1661,6 +1683,15 @@ impl GodlyApp {
                 if x != 0.0 || y != 0.0 {
                     self.cursor_position = Some(Point::new(x, y));
                 }
+                // Switch focus to the pane under the cursor.
+                if let Some(clicked_id) = self.find_terminal_at_cursor() {
+                    if self.active_focused() != Some(clicked_id.as_str()) {
+                        self.notifications.mark_read(&clicked_id);
+                        if let Some(ws) = self.workspaces.active_mut() {
+                            ws.focused_terminal = clicked_id;
+                        }
+                    }
+                }
                 // G3: Ctrl+Click opens URL under cursor
                 if self.ctrl_held {
                     if let Some(url) = self.detect_url_under_cursor() {
@@ -1703,6 +1734,16 @@ impl GodlyApp {
             }
             Message::FocusNextPane => {
                 self.cycle_focus();
+            }
+            Message::PaneClicked(terminal_id) => {
+                if let Some(new_focus) =
+                    layout_reducer::reduce_pane_clicked(self.active_layout(), &terminal_id)
+                {
+                    self.notifications.mark_read(&new_focus);
+                    if let Some(ws) = self.workspaces.active_mut() {
+                        ws.focused_terminal = new_focus;
+                    }
+                }
             }
 
             // --- Workspace operations ---
@@ -5968,7 +6009,7 @@ impl GodlyApp {
             PANE_BORDER()
         };
 
-        container(canvas(tc).width(Length::Fill).height(Length::Fill))
+        let pane = container(canvas(tc).width(Length::Fill).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(Padding::from([
@@ -5983,7 +6024,11 @@ impl GodlyApp {
                     radius: 8.0.into(),
                 },
                 ..container::Style::default()
-            })
+            });
+
+        let tid = terminal_id.to_string();
+        mouse_area(pane)
+            .on_press(Message::PaneClicked(tid))
             .into()
     }
 
@@ -6483,6 +6528,7 @@ struct CaptureState {
 fn resolve_key_event(
     key: &keyboard::Key,
     modifiers: keyboard::Modifiers,
+    physical_key: &keyboard::key::Physical,
     capture: &mut CaptureState,
     mru_switcher_open: bool,
     claude_md_editor_open: bool,
@@ -6527,7 +6573,7 @@ fn resolve_key_event(
     }
 
     // 4. Shortcut resolution (custom overrides first, then defaults)
-    if let Some(action) = capture.resolver.resolve(key, modifiers) {
+    if let Some(action) = capture.resolver.resolve(key, modifiers, Some(physical_key)) {
         return KeyRoutingResult::Action(action);
     }
 
@@ -7226,7 +7272,7 @@ mod keyboard_routing_tests {
         resolve_key_event, CaptureState, KeyRoutingResult, ShortcutResolver,
     };
     use godly_app_adapter::shortcuts::AppAction;
-    use iced::keyboard::{key::Named, Key, Modifiers};
+    use iced::keyboard::{key, key::Named, Key, Modifiers};
     use std::collections::HashMap;
 
     fn char_key(s: &str) -> Key {
@@ -7236,6 +7282,9 @@ mod keyboard_routing_tests {
     fn ctrl_shift() -> Modifiers {
         Modifiers::CTRL.union(Modifiers::SHIFT)
     }
+
+    /// Default physical key for tests that don't care about layout.
+    const PHYS_UNIDENT: key::Physical = key::Physical::Unidentified(key::NativeCode::Unidentified);
 
     fn make_capture() -> CaptureState {
         CaptureState {
@@ -7258,6 +7307,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("/"),
             ctrl_shift(),
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7272,6 +7322,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("/"),
             ctrl_shift(),
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7286,12 +7337,13 @@ mod keyboard_routing_tests {
 
         // Rebind SplitRight from Ctrl+\ to Ctrl+Shift+/.
         cap.capturing_index = Some(5);
-        resolve_key_event(&char_key("/"), ctrl_shift(), &mut cap, false, false);
+        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false);
 
         // Original Ctrl+\ should no longer trigger SplitRight.
         let result = resolve_key_event(
             &char_key("\\"),
             Modifiers::CTRL,
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7307,6 +7359,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("\\"),
             Modifiers::CTRL,
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7322,6 +7375,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &Key::Named(Named::Escape),
             Modifiers::empty(),
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7340,6 +7394,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &Key::Named(Named::Control),
             Modifiers::CTRL,
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7356,31 +7411,32 @@ mod keyboard_routing_tests {
 
         // Rebind SplitRight (5) to Ctrl+Shift+/
         cap.capturing_index = Some(5);
-        resolve_key_event(&char_key("/"), ctrl_shift(), &mut cap, false, false);
+        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false);
 
         // Rebind SplitDown (6) to Ctrl+Shift+.
         cap.capturing_index = Some(6);
-        resolve_key_event(&char_key("."), ctrl_shift(), &mut cap, false, false);
+        resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false);
 
         // Both custom bindings fire.
         assert_eq!(
-            resolve_key_event(&char_key("/"), ctrl_shift(), &mut cap, false, false),
+            resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false),
             KeyRoutingResult::Action(AppAction::SplitRight)
         );
         assert_eq!(
-            resolve_key_event(&char_key("."), ctrl_shift(), &mut cap, false, false),
+            resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false),
             KeyRoutingResult::Action(AppAction::SplitDown)
         );
 
         // Both original defaults are disabled.
         assert_eq!(
-            resolve_key_event(&char_key("\\"), Modifiers::CTRL, &mut cap, false, false),
+            resolve_key_event(&char_key("\\"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false),
             KeyRoutingResult::ForwardToPty
         );
         assert_eq!(
             resolve_key_event(
                 &char_key("\\"),
                 Modifiers::CTRL.union(Modifiers::ALT),
+                &PHYS_UNIDENT,
                 &mut cap,
                 false,
                 false
@@ -7390,7 +7446,7 @@ mod keyboard_routing_tests {
 
         // Unrelated defaults still work.
         assert_eq!(
-            resolve_key_event(&char_key("t"), Modifiers::CTRL, &mut cap, false, false),
+            resolve_key_event(&char_key("t"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false),
             KeyRoutingResult::Action(AppAction::NewTab)
         );
     }
@@ -7406,6 +7462,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("\x1c"),
             Modifiers::CTRL,
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7421,6 +7478,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("\x1c"),
             Modifiers::CTRL,
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7433,6 +7491,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("\x1c"),
             Modifiers::CTRL,
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
@@ -7449,6 +7508,7 @@ mod keyboard_routing_tests {
         let result = resolve_key_event(
             &char_key("a"),
             Modifiers::empty(),
+            &PHYS_UNIDENT,
             &mut cap,
             false,
             false,
