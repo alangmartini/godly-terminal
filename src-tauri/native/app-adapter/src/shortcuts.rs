@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use iced::keyboard::{key::Named, Key, Modifiers};
+use iced::keyboard::{key, key::Named, Key, Modifiers};
 
 /// App-level actions triggered by keyboard shortcuts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -195,7 +195,15 @@ impl ShortcutResolver {
     }
 
     /// Resolves a key event to an `AppAction`, checking custom bindings first.
-    pub fn resolve(&self, key: &Key, modifiers: Modifiers) -> Option<AppAction> {
+    ///
+    /// When `physical_key` is provided, it's used as a fallback for
+    /// layout-independent shortcuts (e.g. backslash on ABNT2 keyboards).
+    pub fn resolve(
+        &self,
+        key: &Key,
+        modifiers: Modifiers,
+        physical_key: Option<&key::Physical>,
+    ) -> Option<AppAction> {
         let chord = normalize_chord(key, modifiers);
 
         // Custom bindings take priority.
@@ -207,7 +215,19 @@ impl ShortcutResolver {
         let default = check_app_shortcut(key, modifiers);
         match default {
             Some(action) if self.rebound.contains(&action) => None,
-            other => other,
+            Some(action) => Some(action),
+            None => {
+                // Physical key fallback for non-US layouts.
+                if let Some(physical_key) = physical_key {
+                    let physical = check_physical_key_shortcut(physical_key, modifiers);
+                    match physical {
+                        Some(action) if self.rebound.contains(&action) => None,
+                        other => other,
+                    }
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -271,6 +291,38 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
         "f" if !shift => Some(AppAction::Find),
         "m" if shift => Some(AppAction::WhisperToggle),
         _ => None,
+    }
+}
+
+/// Fallback shortcut check using physical key position.
+///
+/// On non-US layouts (e.g. ABNT2), `Ctrl+\` produces `Key::Character("/")`
+/// instead of `Key::Character("\\")`. The physical key position is
+/// layout-independent, so we use it as a fallback for backslash-based
+/// shortcuts when the character-based check doesn't match.
+pub fn check_physical_key_shortcut(
+    physical_key: &key::Physical,
+    modifiers: Modifiers,
+) -> Option<AppAction> {
+    let is_backslash = matches!(physical_key, key::Physical::Code(key::Code::Backslash));
+    if !is_backslash {
+        return None;
+    }
+
+    let ctrl = modifiers.control();
+    let shift = modifiers.shift();
+    let alt = modifiers.alt();
+
+    if alt && !ctrl && !shift {
+        Some(AppAction::FocusNextPane)
+    } else if ctrl && alt && !shift {
+        Some(AppAction::SplitDown)
+    } else if ctrl && shift && !alt {
+        Some(AppAction::Unsplit)
+    } else if ctrl && !shift && !alt {
+        Some(AppAction::SplitRight)
+    } else {
+        None
     }
 }
 
@@ -861,9 +913,9 @@ mod tests {
     #[test]
     fn resolver_empty_uses_defaults() {
         let r = ShortcutResolver::empty();
-        assert_eq!(r.resolve(&char_key("t"), CTRL), Some(AppAction::NewTab));
+        assert_eq!(r.resolve(&char_key("t"), CTRL, None), Some(AppAction::NewTab));
         assert_eq!(
-            r.resolve(&char_key("\\"), CTRL),
+            r.resolve(&char_key("\\"), CTRL, None),
             Some(AppAction::SplitRight)
         );
     }
@@ -877,7 +929,7 @@ mod tests {
 
         // Custom chord triggers SplitRight
         assert_eq!(
-            r.resolve(&char_key("/"), ctrl_shift()),
+            r.resolve(&char_key("/"), ctrl_shift(), None),
             Some(AppAction::SplitRight)
         );
     }
@@ -890,7 +942,7 @@ mod tests {
         let r = ShortcutResolver::from_overrides(&overrides);
 
         // Default Ctrl+\ no longer triggers SplitRight
-        assert_eq!(r.resolve(&char_key("\\"), CTRL), None);
+        assert_eq!(r.resolve(&char_key("\\"), CTRL, None), None);
     }
 
     #[test]
@@ -900,8 +952,8 @@ mod tests {
         let r = ShortcutResolver::from_overrides(&overrides);
 
         // Other defaults unaffected
-        assert_eq!(r.resolve(&char_key("t"), CTRL), Some(AppAction::NewTab));
-        assert_eq!(r.resolve(&char_key("w"), CTRL), Some(AppAction::CloseTab));
+        assert_eq!(r.resolve(&char_key("t"), CTRL, None), Some(AppAction::NewTab));
+        assert_eq!(r.resolve(&char_key("w"), CTRL, None), Some(AppAction::CloseTab));
     }
 
     #[test]
@@ -913,7 +965,7 @@ mod tests {
 
         // Custom binding wins over default
         assert_eq!(
-            r.resolve(&char_key("T"), CTRL),
+            r.resolve(&char_key("T"), CTRL, None),
             Some(AppAction::SplitRight)
         );
     }
@@ -926,16 +978,16 @@ mod tests {
         let r = ShortcutResolver::from_overrides(&overrides);
 
         assert_eq!(
-            r.resolve(&char_key("/"), ctrl_shift()),
+            r.resolve(&char_key("/"), ctrl_shift(), None),
             Some(AppAction::SplitRight)
         );
         assert_eq!(
-            r.resolve(&char_key("."), ctrl_shift()),
+            r.resolve(&char_key("."), ctrl_shift(), None),
             Some(AppAction::SplitDown)
         );
         // Both defaults disabled
-        assert_eq!(r.resolve(&char_key("\\"), CTRL), None);
-        assert_eq!(r.resolve(&char_key("\\"), ctrl_alt()), None);
+        assert_eq!(r.resolve(&char_key("\\"), CTRL, None), None);
+        assert_eq!(r.resolve(&char_key("\\"), ctrl_alt(), None), None);
     }
 
     #[test]
@@ -945,7 +997,79 @@ mod tests {
         let r = ShortcutResolver::from_overrides(&overrides);
 
         // Ctrl+X should not trigger anything (999 is out of range)
-        assert_eq!(r.resolve(&char_key("X"), CTRL), None);
+        assert_eq!(r.resolve(&char_key("X"), CTRL, None), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Physical key fallback tests — ABNT2/non-US layouts (#639)
+    // -----------------------------------------------------------------------
+    //
+    // On ABNT2 (Brazilian) keyboard, Ctrl+\ produces Key::Character("/")
+    // instead of Key::Character("\\"). The physical key position is
+    // layout-independent, so we use it as a fallback.
+
+    fn backslash_physical() -> key::Physical {
+        key::Physical::Code(key::Code::Backslash)
+    }
+
+    #[test]
+    fn physical_key_fallback_ctrl_backslash_is_split_right() {
+        // ABNT2: Ctrl+\ sends Character("/"), but physical key is Backslash
+        let r = ShortcutResolver::empty();
+        assert_eq!(
+            r.resolve(&char_key("/"), CTRL, Some(&backslash_physical())),
+            Some(AppAction::SplitRight),
+        );
+    }
+
+    #[test]
+    fn physical_key_fallback_alt_backslash_is_focus_next_pane() {
+        let r = ShortcutResolver::empty();
+        assert_eq!(
+            r.resolve(&char_key("/"), alt(), Some(&backslash_physical())),
+            Some(AppAction::FocusNextPane),
+        );
+    }
+
+    #[test]
+    fn physical_key_fallback_ctrl_alt_backslash_is_split_down() {
+        let r = ShortcutResolver::empty();
+        assert_eq!(
+            r.resolve(&char_key("/"), ctrl_alt(), Some(&backslash_physical())),
+            Some(AppAction::SplitDown),
+        );
+    }
+
+    #[test]
+    fn physical_key_fallback_ctrl_shift_backslash_is_unsplit() {
+        let r = ShortcutResolver::empty();
+        assert_eq!(
+            r.resolve(&char_key("/"), ctrl_shift(), Some(&backslash_physical())),
+            Some(AppAction::Unsplit),
+        );
+    }
+
+    #[test]
+    fn physical_key_fallback_respects_rebind() {
+        // Rebind SplitRight — physical fallback should also be disabled
+        let mut overrides = HashMap::new();
+        overrides.insert(5, "Ctrl+Shift+/".to_string());
+        let r = ShortcutResolver::from_overrides(&overrides);
+
+        assert_eq!(
+            r.resolve(&char_key("/"), CTRL, Some(&backslash_physical())),
+            None,
+        );
+    }
+
+    #[test]
+    fn physical_key_fallback_not_used_when_character_matches() {
+        // US layout: Ctrl+\ sends Character("\\") — character match takes precedence
+        let r = ShortcutResolver::empty();
+        assert_eq!(
+            r.resolve(&char_key("\\"), CTRL, Some(&backslash_physical())),
+            Some(AppAction::SplitRight),
+        );
     }
 
     // -----------------------------------------------------------------------
