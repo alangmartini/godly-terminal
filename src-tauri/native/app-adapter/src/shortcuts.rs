@@ -100,7 +100,12 @@ pub fn normalize_chord(key: &Key, modifiers: Modifiers) -> String {
     }
     match key {
         Key::Character(ch) => {
-            let upper = ch.as_str().to_uppercase();
+            // On Windows, Ctrl+\ produces 0x1C (File Separator) instead of "\".
+            // Normalize it back to the display character so capture and resolve
+            // produce identical chord strings.
+            let raw = ch.as_str();
+            let display = if raw == "\x1c" { "\\" } else { raw };
+            let upper = display.to_uppercase();
             let prefix = parts.join("+");
             if prefix.is_empty() {
                 upper
@@ -223,22 +228,28 @@ pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> 
 }
 
 fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Option<AppAction> {
+    // On Windows, Ctrl+\ produces the File Separator control character (0x1C)
+    // instead of the literal backslash. Treat both representations identically.
+    let is_backslash = s == "\\" || s == "\x1c";
+
     if alt && !ctrl && !shift {
-        return match s {
-            "\\" => Some(AppAction::FocusNextPane),
-            _ => None,
+        return if is_backslash {
+            Some(AppAction::FocusNextPane)
+        } else {
+            None
         };
     }
     if ctrl && alt && !shift {
-        return match s {
-            "\\" => Some(AppAction::SplitDown),
-            _ => None,
+        return if is_backslash {
+            Some(AppAction::SplitDown)
+        } else {
+            None
         };
     }
     if !ctrl || alt {
         return None;
     }
-    if s == "\\" {
+    if is_backslash {
         return if !shift {
             Some(AppAction::SplitRight)
         } else {
@@ -813,6 +824,14 @@ mod tests {
     }
 
     #[test]
+    fn normalize_ctrl_backslash_control_char() {
+        // On Windows, Ctrl+\ sends 0x1C. normalize_chord must produce the same
+        // display string as the literal backslash variant so that capture and
+        // resolve produce matching chord keys.
+        assert_eq!(normalize_chord(&char_key("\x1c"), CTRL), "Ctrl+\\");
+    }
+
+    #[test]
     fn normalize_ctrl_shift_slash() {
         assert_eq!(normalize_chord(&char_key("/"), ctrl_shift()), "Ctrl+Shift+/");
     }
@@ -927,5 +946,47 @@ mod tests {
 
         // Ctrl+X should not trigger anything (999 is out of range)
         assert_eq!(r.resolve(&char_key("X"), CTRL), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug #639 — Windows control character regression tests
+    // -----------------------------------------------------------------------
+    //
+    // On Windows, Ctrl+\ may produce Key::Character("\x1c") (File Separator)
+    // instead of Key::Character("\\"). The default shortcut table must handle
+    // both representations.
+
+    #[test]
+    fn ctrl_backslash_control_char_is_split_right() {
+        // Windows may report Ctrl+\ as the FS control character (0x1C)
+        assert_eq!(
+            check_app_shortcut(&char_key("\x1c"), CTRL),
+            Some(AppAction::SplitRight),
+        );
+    }
+
+    #[test]
+    fn ctrl_alt_backslash_control_char_is_split_down() {
+        assert_eq!(
+            check_app_shortcut(&char_key("\x1c"), ctrl_alt()),
+            Some(AppAction::SplitDown),
+        );
+    }
+
+    #[test]
+    fn ctrl_shift_backslash_control_char_is_unsplit() {
+        assert_eq!(
+            check_app_shortcut(&char_key("\x1c"), ctrl_shift()),
+            Some(AppAction::Unsplit),
+        );
+    }
+
+    #[test]
+    fn alt_backslash_control_char_is_focus_next_pane() {
+        // Alt+\ should not produce a control char, but test defensively
+        assert_eq!(
+            check_app_shortcut(&char_key("\x1c"), alt()),
+            Some(AppAction::FocusNextPane),
+        );
     }
 }
