@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-# ── Helpers ──────────────────────────────────────────────────────────────
+# Helpers
 
 function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "   $msg" -ForegroundColor Green }
@@ -12,21 +12,21 @@ function Assert-ExitCode {
     }
 }
 
-# ── Read version from version.txt ──────────────────────────────────────
+# Read version from version.txt
 
 $repoRoot = Split-Path $PSScriptRoot
 $version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw).Trim()
 
 Write-Host "Godly Terminal (Staging) build  v$version" -ForegroundColor Magenta
 
-# ── Unlock binaries ────────────────────────────────────────────────────
+# Unlock binaries
 
 Write-Step "Unlocking release binaries..."
 Push-Location $repoRoot
 node scripts/unlock-binaries.js --release
 Assert-ExitCode
 
-# ── Build all release binaries with staging feature ────────────────────
+# Build all release binaries with staging feature
 
 Write-Step "Building native staging binaries..."
 Write-Host "   Features: staging (isolated pipes, metadata, app data)" -ForegroundColor DarkGray
@@ -57,7 +57,7 @@ foreach ($crate in $crates) {
 Pop-Location
 Remove-Item Env:\GODLY_INSTANCE -ErrorAction SilentlyContinue
 
-# ── Generate MSI installer ─────────────────────────────────────────────
+# Generate MSI installer
 
 Write-Step "Generating MSI installer..."
 
@@ -101,10 +101,9 @@ if ($msiFile) {
     $size = [math]::Round($msiFile.Length / 1MB, 1)
     Write-Ok "MSI: $($msiFile.Name) ($size MB)"
 } else {
-    Write-Host "   MSI generation failed — check output above" -ForegroundColor Yellow
+    Write-Host "   MSI generation failed - check output above" -ForegroundColor Yellow
 }
 
 Pop-Location
 
-Write-Host "`nStaging build complete. Installer in: $outDir" -ForegroundColor Green
-Write-Host "Install with: msiexec /i `"$msiPath`"" -ForegroundColor DarkGray
+Write-Host "Staging build complete. Installer in: $outDir" -ForegroundColor Green
