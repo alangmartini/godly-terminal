@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+
+
 use futures_channel::mpsc;
 use iced::keyboard;
 use iced::widget::{
@@ -7391,6 +7393,51 @@ mod keyboard_routing_tests {
             resolve_key_event(&char_key("t"), Modifiers::CTRL, &mut cap, false, false),
             KeyRoutingResult::Action(AppAction::NewTab)
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug #639 — Windows Ctrl+\ sends 0x1C control char
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn default_ctrl_backslash_control_char_triggers_split_right() {
+        let mut cap = make_capture();
+        // On Windows, Ctrl+\ produces Key::Character("\x1c") (File Separator).
+        let result = resolve_key_event(
+            &char_key("\x1c"),
+            Modifiers::CTRL,
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
+    }
+
+    #[test]
+    fn capture_ctrl_backslash_control_char_then_resolve() {
+        let mut cap = make_capture();
+        // Capture mode: bind SplitRight (5) by pressing Ctrl+\ (as 0x1C).
+        cap.capturing_index = Some(5);
+        let result = resolve_key_event(
+            &char_key("\x1c"),
+            Modifiers::CTRL,
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::CapturedBinding);
+        // Should normalize 0x1C to "\" in the stored chord.
+        assert_eq!(cap.overrides.get(&5), Some(&"Ctrl+\\".to_string()));
+
+        // Now press Ctrl+\ again — should resolve to SplitRight via custom binding.
+        let result = resolve_key_event(
+            &char_key("\x1c"),
+            Modifiers::CTRL,
+            &mut cap,
+            false,
+            false,
+        );
+        assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
 
     #[test]
