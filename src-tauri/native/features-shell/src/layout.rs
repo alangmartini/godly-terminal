@@ -1,4 +1,4 @@
-use godly_layout_core::{LayoutNode, SplitDirection, SplitPlacement};
+use godly_layout_core::{FocusDirection, LayoutNode, SplitDirection, SplitPlacement};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitFocusedInput {
@@ -59,6 +59,18 @@ pub fn reduce_cycle_focus(
     let layout = layout?;
     let focused_terminal_id = focused_terminal_id?;
     layout.next_leaf_id(focused_terminal_id).map(str::to_string)
+}
+
+pub fn reduce_directional_focus(
+    layout: Option<&LayoutNode>,
+    focused_terminal_id: Option<&str>,
+    direction: FocusDirection,
+) -> Option<String> {
+    let layout = layout?;
+    let focused_terminal_id = focused_terminal_id?;
+    layout
+        .neighbor_in_direction(focused_terminal_id, direction)
+        .map(str::to_string)
 }
 
 /// Returns the terminal ID to focus when a pane is clicked,
