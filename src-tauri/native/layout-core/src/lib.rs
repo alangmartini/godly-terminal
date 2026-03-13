@@ -40,6 +40,30 @@ pub enum SplitDirection {
     Vertical,
 }
 
+/// Direction for spatial pane focus navigation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl FocusDirection {
+    /// The split axis that this direction moves along.
+    pub fn split_direction(self) -> SplitDirection {
+        match self {
+            FocusDirection::Left | FocusDirection::Right => SplitDirection::Horizontal,
+            FocusDirection::Up | FocusDirection::Down => SplitDirection::Vertical,
+        }
+    }
+
+    /// Whether this direction moves toward the second child of a matching split.
+    pub fn moves_to_second(self) -> bool {
+        matches!(self, FocusDirection::Right | FocusDirection::Down)
+    }
+}
+
 /// A binary tree of terminal panes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayoutNode {
@@ -208,6 +232,48 @@ impl LayoutNode {
         let pos = ids.iter().position(|&id| id == current_id)?;
         let next_pos = (pos + 1) % ids.len();
         Some(ids[next_pos])
+    }
+
+    /// Returns the leftmost/topmost leaf ID (first in depth-first order).
+    pub fn first_leaf_id(&self) -> &str {
+        match self {
+            LayoutNode::Leaf { terminal_id } => terminal_id,
+            LayoutNode::Split { first, .. } => first.first_leaf_id(),
+        }
+    }
+
+    /// Returns the rightmost/bottommost leaf ID (last in depth-first order).
+    pub fn last_leaf_id(&self) -> &str {
+        match self {
+            LayoutNode::Leaf { terminal_id } => terminal_id,
+            LayoutNode::Split { second, .. } => second.last_leaf_id(),
+        }
+    }
+
+    /// Returns the spatial neighbor of `current_id` in the given direction,
+    /// or `None` if there is no neighbor in that direction.
+    pub fn neighbor_in_direction(&self, current_id: &str, direction: FocusDirection) -> Option<&str> {
+        match self {
+            LayoutNode::Leaf { .. } => None,
+            LayoutNode::Split {
+                direction: split_dir,
+                first,
+                second,
+                ..
+            } => {
+                if *split_dir == direction.split_direction() {
+                    if direction.moves_to_second() && first.find_leaf(current_id) {
+                        return Some(second.first_leaf_id());
+                    }
+                    if !direction.moves_to_second() && second.find_leaf(current_id) {
+                        return Some(first.last_leaf_id());
+                    }
+                }
+                first
+                    .neighbor_in_direction(current_id, direction)
+                    .or_else(|| second.neighbor_in_direction(current_id, direction))
+            }
+        }
     }
 }
 

@@ -22,6 +22,10 @@ pub enum AppAction {
     SplitDown,
     Unsplit,
     FocusNextPane,
+    FocusLeft,
+    FocusRight,
+    FocusUp,
+    FocusDown,
     SelectAll,
     NextWorkspace,
     PrevWorkspace,
@@ -36,11 +40,12 @@ pub enum AppAction {
 /// Flat index order matching the categories in `shortcuts_tab.rs`.
 ///
 /// Tabs:       0=NewTab, 1=CloseTab, 2=NextTab, 3=PreviousTab, 4=RenameTab
-/// Split:      5=SplitRight, 6=SplitDown, 7=Unsplit, 8=FocusNextPane
-/// Clipboard:  9=Copy, 10=Paste, 11=SelectAll
-/// Scrollback: 12=ScrollPageUp, 13=ScrollPageDown, 14=ScrollToTop, 15=ScrollToBottom
-/// Zoom:       16=ZoomIn, 17=ZoomOut, 18=ZoomReset
-/// Workspaces: 19=NextWorkspace, 20=PrevWorkspace, 21=ToggleSidebar, 22=OpenSettings
+/// Split:      5=SplitRight, 6=SplitDown, 7=Unsplit, 8=FocusNextPane,
+///             9=FocusLeft, 10=FocusRight, 11=FocusUp, 12=FocusDown
+/// Clipboard:  13=Copy, 14=Paste, 15=SelectAll
+/// Scrollback: 16=ScrollPageUp, 17=ScrollPageDown, 18=ScrollToTop, 19=ScrollToBottom
+/// Zoom:       20=ZoomIn, 21=ZoomOut, 22=ZoomReset
+/// Workspaces: 23=NextWorkspace, 24=PrevWorkspace, 25=ToggleSidebar, 26=OpenSettings
 const FLAT_ACTION_ORDER: &[AppAction] = &[
     // Tabs
     AppAction::NewTab,
@@ -53,6 +58,10 @@ const FLAT_ACTION_ORDER: &[AppAction] = &[
     AppAction::SplitDown,
     AppAction::Unsplit,
     AppAction::FocusNextPane,
+    AppAction::FocusLeft,
+    AppAction::FocusRight,
+    AppAction::FocusUp,
+    AppAction::FocusDown,
     // Clipboard
     AppAction::Copy,
     AppAction::Paste,
@@ -339,6 +348,16 @@ fn check_named_shortcut(named: &Named, ctrl: bool, shift: bool, alt: bool) -> Op
     if !ctrl && !shift && !alt {
         return match named {
             Named::F2 => Some(AppAction::RenameTab),
+            _ => None,
+        };
+    }
+    // Alt (no Ctrl, no Shift) — directional pane focus.
+    if alt && !ctrl && !shift {
+        return match named {
+            Named::ArrowLeft => Some(AppAction::FocusLeft),
+            Named::ArrowRight => Some(AppAction::FocusRight),
+            Named::ArrowUp => Some(AppAction::FocusUp),
+            Named::ArrowDown => Some(AppAction::FocusDown),
             _ => None,
         };
     }
@@ -769,10 +788,10 @@ mod tests {
         );
     }
     #[test]
-    fn alt_right_alone_is_not_shortcut() {
+    fn alt_right_is_focus_right() {
         assert_eq!(
             check_app_shortcut(&named_key(Named::ArrowRight), alt()),
-            None
+            Some(AppAction::FocusRight)
         );
     }
     #[test]
@@ -859,6 +878,21 @@ mod tests {
     #[test]
     fn flat_index_7_is_unsplit() {
         assert_eq!(flat_index_to_action(7), Some(AppAction::Unsplit));
+    }
+
+    #[test]
+    fn flat_index_9_is_focus_left() {
+        assert_eq!(flat_index_to_action(9), Some(AppAction::FocusLeft));
+    }
+
+    #[test]
+    fn flat_index_12_is_focus_down() {
+        assert_eq!(flat_index_to_action(12), Some(AppAction::FocusDown));
+    }
+
+    #[test]
+    fn flat_index_13_is_copy() {
+        assert_eq!(flat_index_to_action(13), Some(AppAction::Copy));
     }
 
     #[test]
@@ -1111,6 +1145,42 @@ mod tests {
         assert_eq!(
             check_app_shortcut(&char_key("\x1c"), alt()),
             Some(AppAction::FocusNextPane),
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Directional focus shortcut tests (#642)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn alt_left_is_focus_left() {
+        assert_eq!(
+            check_app_shortcut(&named_key(Named::ArrowLeft), alt()),
+            Some(AppAction::FocusLeft)
+        );
+    }
+
+    #[test]
+    fn alt_up_is_focus_up() {
+        assert_eq!(
+            check_app_shortcut(&named_key(Named::ArrowUp), alt()),
+            Some(AppAction::FocusUp)
+        );
+    }
+
+    #[test]
+    fn alt_down_is_focus_down() {
+        assert_eq!(
+            check_app_shortcut(&named_key(Named::ArrowDown), alt()),
+            Some(AppAction::FocusDown)
+        );
+    }
+
+    #[test]
+    fn alt_shift_arrow_is_not_shortcut() {
+        assert_eq!(
+            check_app_shortcut(&named_key(Named::ArrowRight), alt_shift()),
+            None
         );
     }
 }

@@ -63,6 +63,22 @@ const SPLIT_PANES: &[ShortcutEntry] = &[
         action: "Focus Next Pane",
         keys: "Alt+\\",
     },
+    ShortcutEntry {
+        action: "Focus Left",
+        keys: "Alt+Left",
+    },
+    ShortcutEntry {
+        action: "Focus Right",
+        keys: "Alt+Right",
+    },
+    ShortcutEntry {
+        action: "Focus Up",
+        keys: "Alt+Up",
+    },
+    ShortcutEntry {
+        action: "Focus Down",
+        keys: "Alt+Down",
+    },
 ];
 
 const CLIPBOARD: &[ShortcutEntry] = &[
