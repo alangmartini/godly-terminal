@@ -23,7 +23,7 @@ use godly_app_adapter::sound::{self, NotificationSoundPreset};
 use godly_features_shell::layout as layout_reducer;
 use godly_features_shell::tabs as tab_reducer;
 use godly_features_shell::workspaces as workspace_reducer;
-use godly_layout_core::SplitPlacement;
+use godly_layout_core::{FocusDirection, SplitPlacement};
 use godly_protocol::types::RichGridData;
 use godly_protocol::McpResponse;
 
@@ -578,6 +578,11 @@ pub enum Message {
     UnsplitPane,
     /// Cycle focus to the next pane in the layout tree.
     FocusNextPane,
+    /// Move focus to the pane in a specific direction.
+    FocusLeft,
+    FocusRight,
+    FocusUp,
+    FocusDown,
     /// User clicked on a specific pane in the split layout.
     PaneClicked(String),
     /// User clicked a workspace in the sidebar.
@@ -1735,6 +1740,10 @@ impl GodlyApp {
             Message::FocusNextPane => {
                 self.cycle_focus();
             }
+            Message::FocusLeft => self.focus_in_direction(FocusDirection::Left),
+            Message::FocusRight => self.focus_in_direction(FocusDirection::Right),
+            Message::FocusUp => self.focus_in_direction(FocusDirection::Up),
+            Message::FocusDown => self.focus_in_direction(FocusDirection::Down),
             Message::PaneClicked(terminal_id) => {
                 if let Some(new_focus) =
                     layout_reducer::reduce_pane_clicked(self.active_layout(), &terminal_id)
@@ -4459,6 +4468,22 @@ impl GodlyApp {
                 self.cycle_focus();
                 Task::none()
             }
+            AppAction::FocusLeft => {
+                self.focus_in_direction(FocusDirection::Left);
+                Task::none()
+            }
+            AppAction::FocusRight => {
+                self.focus_in_direction(FocusDirection::Right);
+                Task::none()
+            }
+            AppAction::FocusUp => {
+                self.focus_in_direction(FocusDirection::Up);
+                Task::none()
+            }
+            AppAction::FocusDown => {
+                self.focus_in_direction(FocusDirection::Down);
+                Task::none()
+            }
             AppAction::SelectAll => {
                 self.select_all();
                 Task::none()
@@ -5662,6 +5687,20 @@ impl GodlyApp {
     fn cycle_focus(&mut self) {
         let next_id =
             layout_reducer::reduce_cycle_focus(self.active_layout(), self.active_focused());
+        if let Some(next_id) = next_id {
+            self.notifications.mark_read(&next_id);
+            if let Some(ws) = self.workspaces.active_mut() {
+                ws.focused_terminal = next_id;
+            }
+        }
+    }
+
+    fn focus_in_direction(&mut self, direction: FocusDirection) {
+        let next_id = layout_reducer::reduce_directional_focus(
+            self.active_layout(),
+            self.active_focused(),
+            direction,
+        );
         if let Some(next_id) = next_id {
             self.notifications.mark_read(&next_id);
             if let Some(ws) = self.workspaces.active_mut() {
