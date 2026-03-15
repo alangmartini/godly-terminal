@@ -1421,7 +1421,7 @@ impl GodlyApp {
                     &key,
                     modifiers,
                 ) {
-                    self.commit_mru_switcher();
+                    return self.commit_mru_switcher();
                 }
             }
             Message::KeyboardEvent(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -1430,7 +1430,7 @@ impl GodlyApp {
                     self.mru_switcher.is_some(),
                     modifiers,
                 ) {
-                    self.commit_mru_switcher();
+                    return self.commit_mru_switcher();
                 }
             }
 
@@ -1442,7 +1442,7 @@ impl GodlyApp {
 
             // --- Tab management ---
             Message::TabClicked(id) => {
-                self.activate_tab_via_reducer(id);
+                return self.activate_tab_via_reducer(id);
             }
             Message::TabContextToggle(id) => {
                 self.tab_context_menu_id = tab_reducer::reduce_tab_context_toggle(
@@ -4339,13 +4339,13 @@ impl GodlyApp {
     // App action dispatch
     // -----------------------------------------------------------------------
 
-    fn activate_tab_via_reducer(&mut self, terminal_id: String) {
+    fn activate_tab_via_reducer(&mut self, terminal_id: String) -> Task<Message> {
         let in_active_layout = self
             .active_layout()
             .map(|layout| layout.find_leaf(&terminal_id))
             .unwrap_or(false);
         let decision = tab_reducer::reduce_tab_click(tab_reducer::TabClickInput {
-            terminal_id,
+            terminal_id: terminal_id.clone(),
             terminal_in_active_layout: in_active_layout,
         });
 
@@ -4354,14 +4354,27 @@ impl GodlyApp {
             if let Some(ws) = self.workspaces.active_mut() {
                 ws.focused_terminal = focus_terminal_id;
             }
+        } else if !in_active_layout {
+            // Terminal is not in the layout (e.g., switching tabs in a
+            // non-split workspace). Update the layout to show this terminal.
+            if let Some(ws) = self.workspaces.active_mut() {
+                ws.layout = LayoutNode::Leaf {
+                    terminal_id: terminal_id.clone(),
+                };
+                ws.focused_terminal = terminal_id.clone();
+            }
         }
         self.notifications
             .mark_read(&decision.mark_terminal_read_id);
         self.tab_context_menu_id = None;
         self.mru_switcher = None;
+
+        // Fetch the grid for the newly focused terminal so the canvas renders
+        // up-to-date content immediately.
+        self.fetch_grid(&terminal_id)
     }
 
-    fn cycle_tabs_by_mru(&mut self, direction: tab_reducer::TabMruCycleDirection) {
+    fn cycle_tabs_by_mru(&mut self, direction: tab_reducer::TabMruCycleDirection) -> Task<Message> {
         let mru_terminal_ids = self.active_workspace_mru_terminal_ids();
         let current_terminal_id = self
             .active_focused()
@@ -4369,9 +4382,9 @@ impl GodlyApp {
         let next_terminal_id =
             next_tab_id_from_mru(mru_terminal_ids, current_terminal_id, direction);
         let Some(next_terminal_id) = next_terminal_id else {
-            return;
+            return Task::none();
         };
-        self.activate_tab_via_reducer(next_terminal_id);
+        self.activate_tab_via_reducer(next_terminal_id)
     }
 
     fn open_or_cycle_mru_switcher(&mut self, direction: tab_reducer::TabMruCycleDirection) {
@@ -4394,21 +4407,21 @@ impl GodlyApp {
         self.tab_context_menu_id = None;
     }
 
-    fn commit_mru_switcher(&mut self) {
+    fn commit_mru_switcher(&mut self) -> Task<Message> {
         let selected_terminal_id = self
             .mru_switcher
             .take()
             .map(|state| state.selected_terminal_id);
         let Some(selected_terminal_id) = selected_terminal_id else {
-            return;
+            return Task::none();
         };
         if !self
             .active_workspace_mru_terminal_ids()
             .contains(&selected_terminal_id.as_str())
         {
-            return;
+            return Task::none();
         }
-        self.activate_tab_via_reducer(selected_terminal_id);
+        self.activate_tab_via_reducer(selected_terminal_id)
     }
 
     fn cancel_mru_switcher(&mut self) {
@@ -4426,12 +4439,10 @@ impl GodlyApp {
                 }
             }
             AppAction::NextTab => {
-                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Forward);
-                Task::none()
+                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Forward)
             }
             AppAction::PreviousTab => {
-                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward);
-                Task::none()
+                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward)
             }
             AppAction::ZoomIn => {
                 self.font_metrics = FontMetrics::from_font_size(self.font_metrics.font_size + 1.0);
@@ -5580,6 +5591,26 @@ impl GodlyApp {
         }
 
         self.terminals.remove(session_id);
+
+        // If the layout still references the closed terminal (root leaf case
+        // where unsplit_leaf is a no-op), point it at the next available
+        // workspace terminal instead.
+        if let Some(ws) = self.workspaces.active_mut() {
+            if ws.layout.find_leaf(session_id) {
+                let next_id = self
+                    .terminals
+                    .terminals_for_workspace(&ws.id)
+                    .first()
+                    .map(|t| t.id.clone());
+                if let Some(next_id) = next_id {
+                    ws.layout = LayoutNode::Leaf {
+                        terminal_id: next_id.clone(),
+                    };
+                    ws.focused_terminal = next_id;
+                }
+                // If no terminals remain, the empty state renders naturally.
+            }
+        }
         self.notifications.clear(session_id);
         self.last_terminal_sound_ms.remove(session_id);
         self.persist_scrollback_offsets();
