@@ -3,7 +3,7 @@ use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
     ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, RADIUS_LG, RADIUS_MD, RADIUS_SM,
-    TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    SHADOW_ACCENT, SHADOW_DANGER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 
 /// Render a centered modal confirmation dialog.
@@ -35,8 +35,8 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
                 background: Some(Background::Color(bg)),
                 text_color: TEXT_PRIMARY(),
                 border: Border {
-                    color: BORDER(),
-                    width: 1.0,
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
                     radius: RADIUS_MD.into(),
                 },
                 ..button::Style::default()
@@ -68,7 +68,7 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
             }
         });
 
-    let footer = row![Space::new().width(Length::Fill), cancel_btn, confirm_btn].spacing(10);
+    let footer = row![Space::new().width(Length::Fill), cancel_btn, confirm_btn].spacing(8);
 
     let dialog_content = column![
         title_text,
@@ -78,18 +78,25 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
         footer,
     ];
 
+    let shadow_color = if danger { SHADOW_DANGER() } else { SHADOW_ACCENT() };
+    let border_color = if danger {
+        Color::from_rgba(DANGER().r, DANGER().g, DANGER().b, 0.25)
+    } else {
+        Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.6)
+    };
+
     let dialog = container(dialog_content)
         .padding(Padding::from([20, 24]))
         .width(Length::Fixed(440.0))
-        .style(|_theme| container::Style {
+        .style(move |_theme| container::Style {
             background: Some(Background::Color(BG_SECONDARY())),
             border: Border {
-                color: BORDER(),
-                width: 1.0,
+                color: border_color,
+                width: 0.5,
                 radius: RADIUS_LG.into(),
             },
             shadow: Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                color: shadow_color,
                 offset: Vector::new(0.0, 8.0),
                 blur_radius: 24.0,
             },
