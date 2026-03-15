@@ -159,8 +159,8 @@ const TOAST_TICK_INTERVAL_MS: u64 = 250;
 const MAX_ACTIVE_TOASTS: usize = 6;
 const SIDEBAR_ANIMATION_DURATION_MS: u64 = 200;
 const SIDEBAR_ANIMATION_TICK_MS: u64 = 16;
-const TERMINAL_VIEWPORT_INSET_X: f32 = 12.0;
-const TERMINAL_VIEWPORT_INSET_Y: f32 = 10.0;
+const TERMINAL_VIEWPORT_INSET_X: f32 = 4.0;
+const TERMINAL_VIEWPORT_INSET_Y: f32 = 2.0;
 const EMPTY_STATE_CARD_WIDTH: f32 = 400.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2852,7 +2852,7 @@ impl GodlyApp {
             .and_then(|tid| self.terminals.get(tid))
             .map(|term| status_bar::StatusBarInfo {
                 shell_label: status_bar::shell_label(&term.process_name),
-                cwd: term.tab_label(),
+                cwd: term.extract_cwd().unwrap_or(""),
                 cols: term.cols,
                 rows: term.rows,
             });
@@ -6114,42 +6114,37 @@ impl GodlyApp {
             default_bg: term_palette.background,
         };
 
-        let border_color = if is_focused {
+        let accent_color = if is_focused {
             PANE_FOCUSED_BORDER()
         } else {
-            Color::from_rgba(PANE_BORDER().r, PANE_BORDER().g, PANE_BORDER().b, 0.5)
+            Color::TRANSPARENT
         };
 
-        let shadow = if is_focused {
-            Shadow {
-                color: Color::from_rgba(
-                    PANE_FOCUSED_BORDER().r * 0.3,
-                    PANE_FOCUSED_BORDER().g * 0.3,
-                    PANE_FOCUSED_BORDER().b * 0.3,
-                    0.25,
-                ),
-                offset: Vector::new(0.0, 0.0),
-                blur_radius: 4.0,
-            }
-        } else {
-            Shadow::default()
-        };
+        let accent_bar = container(Space::new().width(Length::Fill).height(Length::Fixed(
+            if is_focused { 1.0 } else { 0.0 },
+        )))
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(accent_color)),
+            ..container::Style::default()
+        });
 
-        let pane = container(canvas(tc).width(Length::Fill).height(Length::Fill))
+        let inner = column![
+            accent_bar,
+            canvas(tc).width(Length::Fill).height(Length::Fill),
+        ];
+
+        let pane = container(inner)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(Padding::from([
-                TERMINAL_VIEWPORT_INSET_Y,
-                TERMINAL_VIEWPORT_INSET_X,
-            ]))
+            .padding(Padding {
+                top: TERMINAL_VIEWPORT_INSET_Y,
+                right: TERMINAL_VIEWPORT_INSET_X,
+                bottom: TERMINAL_VIEWPORT_INSET_Y,
+                left: TERMINAL_VIEWPORT_INSET_X,
+            })
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(PANE_BG())),
-                border: iced::Border {
-                    color: border_color,
-                    width: if is_focused { 2.0 } else { 0.5 },
-                    radius: 6.0.into(),
-                },
-                shadow,
                 ..container::Style::default()
             });
 
