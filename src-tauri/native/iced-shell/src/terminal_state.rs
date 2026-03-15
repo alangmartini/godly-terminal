@@ -27,22 +27,76 @@ pub struct TerminalInfo {
 }
 
 impl TerminalInfo {
-    /// Returns the display label for this terminal's tab.
+    /// Returns a friendly display name derived from `process_name`.
     ///
-    /// Priority: custom_name > title > process_name > "Terminal"
-    pub fn tab_label(&self) -> &str {
-        if let Some(ref name) = self.custom_name {
-            if !name.is_empty() {
-                return name;
+    /// Strips directory prefixes and `.exe` suffix, then maps known basenames
+    /// to human-readable labels (e.g. `pwsh` → "PowerShell").
+    pub fn display_name(&self) -> String {
+        let raw = self
+            .process_name
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&self.process_name);
+        let basename = raw
+            .strip_suffix(".exe")
+            .or_else(|| raw.strip_suffix(".EXE"))
+            .unwrap_or(raw);
+
+        if basename.is_empty() {
+            return "Terminal".to_string();
+        }
+
+        let lower = basename.to_ascii_lowercase();
+        match lower.as_str() {
+            "pwsh" | "powershell" => "PowerShell".to_string(),
+            "cmd" => "Command Prompt".to_string(),
+            "bash" => "Bash".to_string(),
+            "zsh" => "Zsh".to_string(),
+            "fish" => "Fish".to_string(),
+            "sh" => "Shell".to_string(),
+            "wsl" => "WSL".to_string(),
+            "nu" | "nushell" => "Nushell".to_string(),
+            "node" => "Node.js".to_string(),
+            "python" | "python3" => "Python".to_string(),
+            "ruby" | "irb" => "Ruby".to_string(),
+            "claude" => "Claude".to_string(),
+            "codex" => "Codex".to_string(),
+            _ => {
+                let mut chars = basename.chars();
+                match chars.next() {
+                    Some(c) => {
+                        let mut name = c.to_uppercase().collect::<String>();
+                        name.push_str(chars.as_str());
+                        name
+                    }
+                    None => "Terminal".to_string(),
+                }
             }
         }
-        if !self.title.is_empty() {
-            &self.title
-        } else if !self.process_name.is_empty() {
-            &self.process_name
+    }
+
+    /// Extracts a working directory from `title` if it looks like a filesystem path.
+    ///
+    /// PowerShell and many shells set the OSC window title to the current directory.
+    pub fn extract_cwd(&self) -> Option<&str> {
+        let t = self.title.trim();
+        if t.contains(":\\") || t.starts_with('/') {
+            Some(t)
         } else {
-            "Terminal"
+            None
         }
+    }
+
+    /// Returns the display label for this terminal's tab.
+    ///
+    /// Priority: custom_name > display_name (from process_name) > "Terminal"
+    pub fn tab_label(&self) -> String {
+        if let Some(ref name) = self.custom_name {
+            if !name.is_empty() {
+                return name.clone();
+            }
+        }
+        self.display_name()
     }
 
     /// Returns a small icon glyph representing the process type.
@@ -424,13 +478,13 @@ mod tests {
         let info = col.add("t1".into(), 24, 80);
         assert_eq!(info.tab_label(), "Terminal");
 
-        // process_name set, no title -> process_name
+        // process_name set -> display_name (friendly label)
         info.process_name = "pwsh".into();
-        assert_eq!(info.tab_label(), "pwsh");
+        assert_eq!(info.tab_label(), "PowerShell");
 
-        // title set -> title takes priority
-        info.title = "My Shell".into();
-        assert_eq!(info.tab_label(), "My Shell");
+        // title set -> still uses display_name (title is for CWD extraction)
+        info.title = "C:\\Users\\test".into();
+        assert_eq!(info.tab_label(), "PowerShell");
     }
 
     #[test]
@@ -636,8 +690,8 @@ mod tests {
         let mut col = TerminalCollection::new();
         let info = col.add("t1".into(), 24, 80);
         info.custom_name = Some(String::new());
-        info.title = "Title".into();
-        assert_eq!(info.tab_label(), "Title");
+        info.process_name = "bash".into();
+        assert_eq!(info.tab_label(), "Bash");
     }
 
     #[test]
@@ -837,5 +891,56 @@ mod tests {
             col.mru_terminal_ids_for_workspace(None),
             vec!["no-workspace"]
         );
+    }
+
+    #[test]
+    fn test_display_name_strips_path_and_exe() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        info.process_name = "C:\\Program Files\\PowerShell\\7\\pwsh.exe".into();
+        assert_eq!(info.display_name(), "PowerShell");
+
+        info.process_name = "/usr/bin/bash".into();
+        assert_eq!(info.display_name(), "Bash");
+
+        info.process_name = "cmd.exe".into();
+        assert_eq!(info.display_name(), "Command Prompt");
+
+        info.process_name = "zsh".into();
+        assert_eq!(info.display_name(), "Zsh");
+
+        info.process_name = "fish".into();
+        assert_eq!(info.display_name(), "Fish");
+
+        info.process_name = "node".into();
+        assert_eq!(info.display_name(), "Node.js");
+
+        info.process_name = "python3".into();
+        assert_eq!(info.display_name(), "Python");
+
+        info.process_name = "some-tool".into();
+        assert_eq!(info.display_name(), "Some-tool");
+
+        info.process_name = String::new();
+        assert_eq!(info.display_name(), "Terminal");
+    }
+
+    #[test]
+    fn test_extract_cwd_detects_paths() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        info.title = "C:\\Users\\test\\project".into();
+        assert_eq!(info.extract_cwd(), Some("C:\\Users\\test\\project"));
+
+        info.title = "/home/user/project".into();
+        assert_eq!(info.extract_cwd(), Some("/home/user/project"));
+
+        info.title = "My Shell".into();
+        assert_eq!(info.extract_cwd(), None);
+
+        info.title = String::new();
+        assert_eq!(info.extract_cwd(), None);
     }
 }
