@@ -4,7 +4,7 @@ use iced::{Border, Color, Element, Length, Padding};
 use crate::theme::{BG_SECONDARY, BORDER, TEXT_PRIMARY, TEXT_SECONDARY};
 
 /// Height of the status bar in logical pixels.
-pub const STATUS_BAR_HEIGHT: f32 = 24.0;
+pub const STATUS_BAR_HEIGHT: f32 = 20.0;
 
 /// Information needed to render the status bar.
 pub struct StatusBarInfo<'a> {
@@ -14,25 +14,25 @@ pub struct StatusBarInfo<'a> {
     pub rows: u16,
 }
 
-/// Derive a short shell type label from a process name.
+/// Derive a friendly shell type label from a process name.
 pub fn shell_label(process_name: &str) -> &'static str {
     let lower = process_name.to_ascii_lowercase();
     if lower.contains("pwsh") || lower.contains("powershell") {
-        "PS"
+        "PowerShell"
     } else if lower.contains("bash") {
-        "bash"
+        "Bash"
     } else if lower.contains("zsh") {
-        "zsh"
+        "Zsh"
     } else if lower.contains("fish") {
-        "fish"
+        "Fish"
     } else if lower == "cmd" || lower.contains("cmd.exe") {
-        "cmd"
+        "Command Prompt"
     } else if lower.contains("wsl") {
         "WSL"
     } else if lower.contains("sh") {
-        "sh"
+        "Shell"
     } else {
-        "term"
+        "Terminal"
     }
 }
 
@@ -46,7 +46,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
             } else {
                 info.cwd.to_string()
             },
-            format!("{}x{}", info.cols, info.rows),
+            format!("{}\u{00D7}{}", info.cols, info.rows),
         ),
         None => (String::new(), String::new(), String::new()),
     };
@@ -80,7 +80,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(BG_SECONDARY())),
             border: Border {
-                color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.5),
+                color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.08),
                 width: 0.5,
                 radius: 0.0.into(),
             },
@@ -95,14 +95,14 @@ mod tests {
 
     #[test]
     fn shell_label_maps_known_shells() {
-        assert_eq!(shell_label("pwsh"), "PS");
-        assert_eq!(shell_label("PowerShell"), "PS");
-        assert_eq!(shell_label("bash"), "bash");
-        assert_eq!(shell_label("zsh"), "zsh");
-        assert_eq!(shell_label("cmd.exe"), "cmd");
-        assert_eq!(shell_label("fish"), "fish");
+        assert_eq!(shell_label("pwsh"), "PowerShell");
+        assert_eq!(shell_label("PowerShell"), "PowerShell");
+        assert_eq!(shell_label("bash"), "Bash");
+        assert_eq!(shell_label("zsh"), "Zsh");
+        assert_eq!(shell_label("cmd.exe"), "Command Prompt");
+        assert_eq!(shell_label("fish"), "Fish");
         assert_eq!(shell_label("wsl"), "WSL");
-        assert_eq!(shell_label("unknown"), "term");
+        assert_eq!(shell_label("unknown"), "Terminal");
     }
 
     #[derive(Clone)]
