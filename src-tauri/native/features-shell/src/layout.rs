@@ -98,11 +98,20 @@ pub struct CloseTerminalInput {
 pub struct CloseTerminalDecision {
     pub next_layout: LayoutNode,
     pub next_focused_terminal_id: Option<String>,
+    /// `true` when the closing terminal was the sole root leaf — `unsplit_leaf`
+    /// is a no-op in this case, so the caller must replace the layout with the
+    /// next available workspace terminal (or render the empty state).
+    pub root_leaf_removed: bool,
 }
 
 pub fn reduce_close_terminal(input: CloseTerminalInput) -> CloseTerminalDecision {
     let mut next_layout = input.layout;
     let _ = next_layout.unsplit_leaf(&input.closing_terminal_id);
+
+    // unsplit_leaf is a no-op when the target is a root leaf. Detect this case
+    // and signal the caller via `root_leaf_removed` so it can replace the
+    // layout with the next available workspace terminal.
+    let root_leaf_removed = next_layout.find_leaf(&input.closing_terminal_id);
 
     let next_focused_terminal_id = if input.focused_terminal_id == input.closing_terminal_id {
         Some(
@@ -119,6 +128,7 @@ pub fn reduce_close_terminal(input: CloseTerminalInput) -> CloseTerminalDecision
     CloseTerminalDecision {
         next_layout,
         next_focused_terminal_id,
+        root_leaf_removed,
     }
 }
 
@@ -303,6 +313,7 @@ mod tests {
 
         assert_eq!(decision.next_layout.all_leaf_ids(), vec!["t-2"]);
         assert_eq!(decision.next_focused_terminal_id.as_deref(), Some("t-2"));
+        assert!(!decision.root_leaf_removed);
     }
 
     #[test]
@@ -315,6 +326,23 @@ mod tests {
 
         assert_eq!(decision.next_layout.all_leaf_ids(), vec!["t-1"]);
         assert_eq!(decision.next_focused_terminal_id, None);
+        assert!(!decision.root_leaf_removed);
+    }
+
+    #[test]
+    fn close_terminal_reducer_signals_root_leaf_removed_for_sole_leaf() {
+        let decision = reduce_close_terminal(CloseTerminalInput {
+            layout: LayoutNode::Leaf {
+                terminal_id: "t-1".into(),
+            },
+            focused_terminal_id: "t-1".into(),
+            closing_terminal_id: "t-1".into(),
+        });
+
+        // unsplit_leaf is a no-op on root leaves, so the layout still
+        // references the closed terminal — caller must replace it.
+        assert!(decision.root_leaf_removed);
+        assert!(decision.next_layout.find_leaf("t-1"));
     }
 
     #[test]
