@@ -4350,10 +4350,11 @@ impl GodlyApp {
         });
 
         self.terminals.set_active(&decision.activate_terminal_id);
-        if let Some(focus_terminal_id) = decision.focus_workspace_terminal_id {
+        let layout_changed = if let Some(focus_terminal_id) = decision.focus_workspace_terminal_id {
             if let Some(ws) = self.workspaces.active_mut() {
                 ws.focused_terminal = focus_terminal_id;
             }
+            true
         } else if !in_active_layout {
             // Terminal is not in the layout (e.g., switching tabs in a
             // non-split workspace). Update the layout to show this terminal.
@@ -4363,15 +4364,22 @@ impl GodlyApp {
                 };
                 ws.focused_terminal = terminal_id.clone();
             }
-        }
+            true
+        } else {
+            false
+        };
         self.notifications
             .mark_read(&decision.mark_terminal_read_id);
         self.tab_context_menu_id = None;
         self.mru_switcher = None;
 
-        // Fetch the grid for the newly focused terminal so the canvas renders
-        // up-to-date content immediately.
-        self.fetch_grid(&terminal_id)
+        if layout_changed {
+            // Fetch the grid for the newly focused terminal so the canvas
+            // renders up-to-date content immediately.
+            self.fetch_grid(&terminal_id)
+        } else {
+            Task::none()
+        }
     }
 
     fn cycle_tabs_by_mru(&mut self, direction: tab_reducer::TabMruCycleDirection) -> Task<Message> {
@@ -5577,6 +5585,7 @@ impl GodlyApp {
         }
 
         // Remove from workspace layout.
+        let mut root_leaf_removed = false;
         if let Some(ws) = self.workspaces.active_mut() {
             let decision =
                 layout_reducer::reduce_close_terminal(layout_reducer::CloseTerminalInput {
@@ -5585,6 +5594,7 @@ impl GodlyApp {
                     closing_terminal_id: session_id.to_string(),
                 });
             ws.layout = decision.next_layout;
+            root_leaf_removed = decision.root_leaf_removed;
             if let Some(next_focused_terminal_id) = decision.next_focused_terminal_id {
                 ws.focused_terminal = next_focused_terminal_id;
             }
@@ -5592,11 +5602,11 @@ impl GodlyApp {
 
         self.terminals.remove(session_id);
 
-        // If the layout still references the closed terminal (root leaf case
-        // where unsplit_leaf is a no-op), point it at the next available
-        // workspace terminal instead.
-        if let Some(ws) = self.workspaces.active_mut() {
-            if ws.layout.find_leaf(session_id) {
+        // The closing terminal was the sole root leaf — replace the layout
+        // with the next available workspace terminal, or clear focus for the
+        // empty state.
+        if root_leaf_removed {
+            if let Some(ws) = self.workspaces.active_mut() {
                 let next_id = self
                     .terminals
                     .terminals_for_workspace(&ws.id)
@@ -5607,8 +5617,9 @@ impl GodlyApp {
                         terminal_id: next_id.clone(),
                     };
                     ws.focused_terminal = next_id;
+                } else {
+                    ws.focused_terminal = String::new();
                 }
-                // If no terminals remain, the empty state renders naturally.
             }
         }
         self.notifications.clear(session_id);
