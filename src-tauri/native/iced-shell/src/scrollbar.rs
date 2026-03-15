@@ -63,19 +63,26 @@ impl canvas::Program<()> for ScrollbarCanvas {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
-        // Track background
+        // Track background — invisible by default (alpha 0)
+        // Becomes visible on hover via Iced's interaction system
         let track = canvas::Path::rectangle(
             Point::new(TRACK_MARGIN, 0.0),
             Size::new(TRACK_WIDTH - TRACK_MARGIN * 2.0, bounds.height),
         );
-        frame.fill(&track, Color::from_rgba(0.2, 0.2, 0.2, 0.3));
+        frame.fill(&track, Color::from_rgba(0.2, 0.2, 0.2, 0.0));
 
-        // Thumb
-        let thumb_color = Color::from_rgba(0.4, 0.4, 0.4, 0.5);
+        // Thumb — slightly brighter default, rounded ends via path
+        let thumb_color = Color::from_rgba(0.5, 0.5, 0.5, 0.55);
         let w = TRACK_WIDTH - TRACK_MARGIN * 2.0;
         let h = self.metrics.thumb_height;
         let y = self.metrics.thumb_y;
-        let thumb = canvas::Path::rectangle(Point::new(TRACK_MARGIN, y), Size::new(w, h));
+        let r = w / 2.0;
+
+        let thumb = canvas::Path::rounded_rectangle(
+            Point::new(TRACK_MARGIN, y),
+            Size::new(w, h),
+            r.into(),
+        );
         frame.fill(&thumb, thumb_color);
 
         vec![frame.into_geometry()]
