@@ -284,8 +284,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         };
         let worktree_indicator = container(
             Space::new()
-                .width(Length::Fixed(6.0))
-                .height(Length::Fixed(6.0)),
+                .width(Length::Fixed(4.0))
+                .height(Length::Fixed(4.0)),
         )
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(worktree_indicator_bg)),
@@ -353,8 +353,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     background: Some(iced::Background::Color(bg)),
                     text_color: row_text,
                     border: Border {
-                        color: if is_active { ACCENT_HOVER() } else { Color::TRANSPARENT },
-                        width: if is_active { 2.0 } else { 0.0 },
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
                         radius: 4.0.into(),
                     },
                     ..button::Style::default()
@@ -526,22 +526,6 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         }
     }
 
-    let workspaces_badge = container(
-        text(format!("{}", workspaces.len()))
-            .size(10)
-            .color(TEXT_SECONDARY()),
-    )
-    .padding(Padding::from([1, 7]))
-    .style(|_theme| container::Style {
-        background: Some(iced::Background::Color(BG_TERTIARY())),
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 10.0.into(),
-        },
-        ..container::Style::default()
-    });
-
     let settings_btn = button(
         canvas(SidebarHeaderIcon::settings(TEXT_PRIMARY()))
             .width(Length::Fixed(HEADER_ICON_SIZE))
@@ -562,9 +546,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let header = container(
         row![
-            text("WORKSPACES").size(11).color(TEXT_SECONDARY()),
+            text("Workspaces").size(10).color(TEXT_SECONDARY()),
             Space::new().width(Length::Fill),
-            workspaces_badge,
             settings_btn,
             new_btn,
         ]
@@ -599,7 +582,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     // --- K1: CLAUDE.md editor buttons ---
     let claude_md_btn = |label: &'a str, action: SidebarAction| {
-        let prefixed = format!("\u{00b7} {}", label);
+        let prefixed = label.to_string();
         button(
             text(prefixed)
                 .size(10)
@@ -652,7 +635,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         });
 
     let divider = rule::vertical(1).style(move |_theme| rule::Style {
-        color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.15),
+        color: Color::TRANSPARENT,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
