@@ -1421,7 +1421,7 @@ impl GodlyApp {
                     &key,
                     modifiers,
                 ) {
-                    self.commit_mru_switcher();
+                    return self.commit_mru_switcher();
                 }
             }
             Message::KeyboardEvent(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -1430,7 +1430,7 @@ impl GodlyApp {
                     self.mru_switcher.is_some(),
                     modifiers,
                 ) {
-                    self.commit_mru_switcher();
+                    return self.commit_mru_switcher();
                 }
             }
 
@@ -1442,7 +1442,7 @@ impl GodlyApp {
 
             // --- Tab management ---
             Message::TabClicked(id) => {
-                self.activate_tab_via_reducer(id);
+                return self.activate_tab_via_reducer(id);
             }
             Message::TabContextToggle(id) => {
                 self.tab_context_menu_id = tab_reducer::reduce_tab_context_toggle(
@@ -4339,29 +4339,50 @@ impl GodlyApp {
     // App action dispatch
     // -----------------------------------------------------------------------
 
-    fn activate_tab_via_reducer(&mut self, terminal_id: String) {
+    fn activate_tab_via_reducer(&mut self, terminal_id: String) -> Task<Message> {
         let in_active_layout = self
             .active_layout()
             .map(|layout| layout.find_leaf(&terminal_id))
             .unwrap_or(false);
         let decision = tab_reducer::reduce_tab_click(tab_reducer::TabClickInput {
-            terminal_id,
+            terminal_id: terminal_id.clone(),
             terminal_in_active_layout: in_active_layout,
         });
 
         self.terminals.set_active(&decision.activate_terminal_id);
-        if let Some(focus_terminal_id) = decision.focus_workspace_terminal_id {
+        let layout_changed = if let Some(focus_terminal_id) = decision.focus_workspace_terminal_id {
             if let Some(ws) = self.workspaces.active_mut() {
                 ws.focused_terminal = focus_terminal_id;
             }
-        }
+            true
+        } else if !in_active_layout {
+            // Terminal is not in the layout (e.g., switching tabs in a
+            // non-split workspace). Update the layout to show this terminal.
+            if let Some(ws) = self.workspaces.active_mut() {
+                ws.layout = LayoutNode::Leaf {
+                    terminal_id: terminal_id.clone(),
+                };
+                ws.focused_terminal = terminal_id.clone();
+            }
+            true
+        } else {
+            false
+        };
         self.notifications
             .mark_read(&decision.mark_terminal_read_id);
         self.tab_context_menu_id = None;
         self.mru_switcher = None;
+
+        if layout_changed {
+            // Fetch the grid for the newly focused terminal so the canvas
+            // renders up-to-date content immediately.
+            self.fetch_grid(&terminal_id)
+        } else {
+            Task::none()
+        }
     }
 
-    fn cycle_tabs_by_mru(&mut self, direction: tab_reducer::TabMruCycleDirection) {
+    fn cycle_tabs_by_mru(&mut self, direction: tab_reducer::TabMruCycleDirection) -> Task<Message> {
         let mru_terminal_ids = self.active_workspace_mru_terminal_ids();
         let current_terminal_id = self
             .active_focused()
@@ -4369,9 +4390,9 @@ impl GodlyApp {
         let next_terminal_id =
             next_tab_id_from_mru(mru_terminal_ids, current_terminal_id, direction);
         let Some(next_terminal_id) = next_terminal_id else {
-            return;
+            return Task::none();
         };
-        self.activate_tab_via_reducer(next_terminal_id);
+        self.activate_tab_via_reducer(next_terminal_id)
     }
 
     fn open_or_cycle_mru_switcher(&mut self, direction: tab_reducer::TabMruCycleDirection) {
@@ -4394,21 +4415,21 @@ impl GodlyApp {
         self.tab_context_menu_id = None;
     }
 
-    fn commit_mru_switcher(&mut self) {
+    fn commit_mru_switcher(&mut self) -> Task<Message> {
         let selected_terminal_id = self
             .mru_switcher
             .take()
             .map(|state| state.selected_terminal_id);
         let Some(selected_terminal_id) = selected_terminal_id else {
-            return;
+            return Task::none();
         };
         if !self
             .active_workspace_mru_terminal_ids()
             .contains(&selected_terminal_id.as_str())
         {
-            return;
+            return Task::none();
         }
-        self.activate_tab_via_reducer(selected_terminal_id);
+        self.activate_tab_via_reducer(selected_terminal_id)
     }
 
     fn cancel_mru_switcher(&mut self) {
@@ -4426,12 +4447,10 @@ impl GodlyApp {
                 }
             }
             AppAction::NextTab => {
-                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Forward);
-                Task::none()
+                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Forward)
             }
             AppAction::PreviousTab => {
-                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward);
-                Task::none()
+                self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward)
             }
             AppAction::ZoomIn => {
                 self.font_metrics = FontMetrics::from_font_size(self.font_metrics.font_size + 1.0);
@@ -5566,6 +5585,7 @@ impl GodlyApp {
         }
 
         // Remove from workspace layout.
+        let mut root_leaf_removed = false;
         if let Some(ws) = self.workspaces.active_mut() {
             let decision =
                 layout_reducer::reduce_close_terminal(layout_reducer::CloseTerminalInput {
@@ -5574,12 +5594,34 @@ impl GodlyApp {
                     closing_terminal_id: session_id.to_string(),
                 });
             ws.layout = decision.next_layout;
+            root_leaf_removed = decision.root_leaf_removed;
             if let Some(next_focused_terminal_id) = decision.next_focused_terminal_id {
                 ws.focused_terminal = next_focused_terminal_id;
             }
         }
 
         self.terminals.remove(session_id);
+
+        // The closing terminal was the sole root leaf — replace the layout
+        // with the next available workspace terminal, or clear focus for the
+        // empty state.
+        if root_leaf_removed {
+            if let Some(ws) = self.workspaces.active_mut() {
+                let next_id = self
+                    .terminals
+                    .terminals_for_workspace(&ws.id)
+                    .first()
+                    .map(|t| t.id.clone());
+                if let Some(next_id) = next_id {
+                    ws.layout = LayoutNode::Leaf {
+                        terminal_id: next_id.clone(),
+                    };
+                    ws.focused_terminal = next_id;
+                } else {
+                    ws.focused_terminal = String::new();
+                }
+            }
+        }
         self.notifications.clear(session_id);
         self.last_terminal_sound_ms.remove(session_id);
         self.persist_scrollback_offsets();
