@@ -362,6 +362,11 @@ pub struct GodlyApp {
     next_toast_id: u64,
     /// Tab ID currently being dragged for reorder.
     dragging_tab_id: Option<String>,
+    /// Cursor position when the tab drag started. `Some` means the drag has
+    /// not yet "committed" (mouse hasn't moved beyond threshold). Once the
+    /// cursor moves ≥5 px, this is cleared to `None`, and the split-zone
+    /// drop overlay becomes visible.
+    tab_drag_start_pos: Option<Point>,
     /// Ctrl+Tab MRU switcher popup state while modifier is held.
     mru_switcher: Option<MruSwitcherState>,
     // --- K2/K3: Quit Confirmation + Copy Preview ---
@@ -471,6 +476,7 @@ impl Default for GodlyApp {
             toasts: Vec::new(),
             next_toast_id: 1,
             dragging_tab_id: None,
+            tab_drag_start_pos: None,
             mru_switcher: None,
             quit_confirm_pending: false,
             copy_preview_text: None,
@@ -1130,6 +1136,7 @@ impl GodlyApp {
         self.last_attention_request_ms = None;
         self.toasts.clear();
         self.dragging_tab_id = None;
+        self.tab_drag_start_pos = None;
         self.mru_switcher = None;
         self.quit_confirm_pending = false;
         self.copy_preview_text = None;
@@ -1501,11 +1508,13 @@ impl GodlyApp {
             }
             Message::TabDragStart(tab_id) => {
                 self.dragging_tab_id = Some(tab_id);
+                self.tab_drag_start_pos = self.cursor_position;
                 self.tab_context_menu_id = None;
             }
             Message::TabDragHover(target_id) => {
                 if let Some(source_id) = self.dragging_tab_id.clone() {
                     if source_id != target_id {
+                        self.tab_drag_start_pos = None; // commit drag
                         let _ = self.terminals.reorder_by_ids(&source_id, &target_id);
                     }
                 }
@@ -1534,12 +1543,14 @@ impl GodlyApp {
                         self.notifications
                             .mark_read(&decision.next_focused_terminal_id);
                         self.dragging_tab_id = None;
+                        self.tab_drag_start_pos = None;
                         return self.fetch_grid(&decision.next_focused_terminal_id);
                     }
                 }
             }
             Message::TabDragEnd => {
                 self.dragging_tab_id = None;
+                self.tab_drag_start_pos = None;
             }
             Message::NewTabRequested => {
                 self.shell_picker.open();
@@ -1547,6 +1558,7 @@ impl GodlyApp {
             Message::CloseTabRequested(id) => {
                 if self.dragging_tab_id.as_deref() == Some(id.as_str()) {
                     self.dragging_tab_id = None;
+                    self.tab_drag_start_pos = None;
                 }
                 return self.close_terminal(&id);
             }
@@ -1709,6 +1721,14 @@ impl GodlyApp {
             }
             Message::SelectionUpdate { x, y } => {
                 self.cursor_position = Some(Point::new(x, y));
+                // Commit tab drag after mouse moves ≥5 px from press origin.
+                if let Some(start) = self.tab_drag_start_pos {
+                    let dx = x - start.x;
+                    let dy = y - start.y;
+                    if dx * dx + dy * dy > 25.0 {
+                        self.tab_drag_start_pos = None;
+                    }
+                }
                 // G3: Track hovered URL for visual feedback
                 self.hovered_url = self.detect_url_under_cursor();
                 if self.sidebar_resizing {
@@ -1728,6 +1748,7 @@ impl GodlyApp {
                 }
                 self.selection.finish();
                 self.dragging_tab_id = None;
+                self.tab_drag_start_pos = None;
             }
 
             // --- Split pane operations ---
@@ -4716,6 +4737,7 @@ impl GodlyApp {
                     self.notifications.mark_read(&moved_terminal_id);
                     self.workspace_context_menu_id = None;
                     self.dragging_tab_id = None;
+                    self.tab_drag_start_pos = None;
 
                     return self.fetch_grid(&moved_terminal_id);
                 }
@@ -5575,6 +5597,7 @@ impl GodlyApp {
     pub(crate) fn close_terminal(&mut self, session_id: &str) -> Task<Message> {
         if self.dragging_tab_id.as_deref() == Some(session_id) {
             self.dragging_tab_id = None;
+            self.tab_drag_start_pos = None;
         }
         if self.tab_context_menu_id.as_deref() == Some(session_id) {
             self.tab_context_menu_id = None;
@@ -6174,6 +6197,10 @@ impl GodlyApp {
         let Some(dragged_terminal_id) = self.dragging_tab_id.as_deref() else {
             return base;
         };
+        // Don't show overlay until drag is committed (mouse moved ≥5 px).
+        if self.tab_drag_start_pos.is_some() {
+            return base;
+        }
         if dragged_terminal_id == terminal_id {
             return base;
         }
