@@ -4,7 +4,7 @@ use iced::widget::{button, container, mouse_area, row, rule, text};
 use iced::{Border, Color, Element, Length, Padding};
 
 use crate::terminal_state::TerminalInfo;
-use crate::theme::{ACCENT, BG_PRIMARY};
+use crate::theme::{BG_SECONDARY, PANE_BG};
 
 /// Height of the tab bar in logical pixels.
 pub const TAB_BAR_HEIGHT: f32 = 32.0;
@@ -14,8 +14,6 @@ pub const TAB_ENTRY_DURATION_MS: u64 = 200;
 const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 
 // Colors
-const TAB_BAR_BG: Color = Color::from_rgb(0.08, 0.08, 0.10);
-const INACTIVE_TAB_BG: Color = Color::from_rgb(0.12, 0.12, 0.15);
 const TAB_TEXT_COLOR: Color = Color::from_rgb(0.85, 0.85, 0.85);
 const TAB_SEPARATOR_COLOR: Color = Color::from_rgba(0.55, 0.55, 0.62, 0.30);
 const PROCESS_BADGE_BG: Color = Color::from_rgb(0.13, 0.13, 0.17);
@@ -168,9 +166,9 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     for (index, &terminal) in terminals.iter().enumerate() {
         let is_active = active_id == Some(terminal.id.as_str());
         let bg = if is_active {
-            BG_PRIMARY()
+            PANE_BG()
         } else {
-            INACTIVE_TAB_BG
+            BG_SECONDARY()
         };
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
@@ -222,26 +220,14 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .push(container(label).padding(Padding::from([0, 1])))
             .push(close_btn);
 
-        let accent_color = ACCENT();
         let tab_btn = button(tab_content)
             .padding(Padding::from([4, 10]))
             .height(Length::Fixed(TAB_BUTTON_HEIGHT))
-            .style(move |_theme, _status| {
-                let border = if is_active {
-                    Border {
-                        color: accent_color,
-                        width: 2.0,
-                        radius: 0.0.into(),
-                    }
-                } else {
-                    Border::default()
-                };
-                button::Style {
-                    background: Some(iced::Background::Color(bg)),
-                    text_color: TAB_TEXT_COLOR,
-                    border,
-                    ..button::Style::default()
-                }
+            .style(move |_theme, _status| button::Style {
+                background: Some(iced::Background::Color(bg)),
+                text_color: TAB_TEXT_COLOR,
+                border: Border::default(),
+                ..button::Style::default()
             });
 
         let click_id = terminal.id.clone();
@@ -325,7 +311,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(TAB_BAR_BG)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             ..container::Style::default()
         })
         .into()
