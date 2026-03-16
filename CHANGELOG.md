@@ -361,7 +361,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Toast notifications** with workspace name and click-to-navigate (#75, #168)
 - **CMD aliases editor** in Settings with AutoRun registry setup (#121)
 - **Shell selection** in Settings dialog with Custom shell type support (#119, #126)
-- **Figma embed pane** with godly-figma-mCP integration (#122)
 - **Frontend file-based logger** with log rotation (#109)
 - **godly-notify** — lightweight CLI for fast hook notifications (#62)
 - **Daemon direct fallback** for godly-mcp (#94)
