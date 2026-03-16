@@ -10,12 +10,12 @@ These are defined in `.claude/settings.json` and scoped to godly-terminal.
 |-------|-------|---------|
 | `/build` | `/build [dev\|prod\|preview]` | Build and run Godly Terminal in development or production mode |
 | `/component` | `/component <Name> [desc]` | Generate a new TypeScript UI component following the project's vanilla DOM + Canvas2D pattern |
-| `/feature` | `/feature <name> [desc]` | Orchestrate feature development: GitHub issue → parallelizable plan → multi-agent spawning (Claude/Codex) → merge → PR → staging build |
+| `/feature` | `/feature <name> [desc]` | Orchestrate feature development: GitHub issue → parallelizable plan → multi-agent spawning (Claude/Codex) → merge → PR |
 | `/tauri-command` | `/tauri-command <name> [desc]` | Scaffold the full Tauri IPC chain: Rust handler + register in lib.rs + TypeScript service wrapper |
 | `/tidy-up-docs` | `/tidy-up-docs` | Audit `docs/`, classify status (resolved/active/reference), build index, distill lessons into MEMORY.md, archive stale docs |
 | `/manual-testing` | `/manual-testing <feature>` | QA a feature via MCP tools: design test matrix, execute tests, take screenshots, analyze UX, file a GitHub issue with all findings |
 | `/fix-integration` | `/fix-integration [filter]` | Run integration tests in a loop, diagnose and fix real failures until green (max 5 iterations). Never masks failures. |
-| `/godly:create-contract` | `/godly:create-contract <feature>` | Create or update a staging test contract in `testing/contracts/`, with fixtures and validation |
+| `/godly:create-contract` | `/godly:create-contract <feature>` | Create or update a test contract in `testing/contracts/`, with fixtures and validation |
 | `/godly:new-feature` | `/godly:new-feature <name> [desc]` | Describe a feature, define acceptance criteria, analyze affected areas, and create a test contract before implementation |
 
 **Unregistered** (in `skills/` but not in `settings.json`):
