@@ -1,9 +1,17 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-static LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
+struct LogState {
+    file: File,
+    path: PathBuf,
+    prev_path: PathBuf,
+    bytes_written: u64,
+}
+
+static LOG_FILE: OnceLock<Mutex<LogState>> = OnceLock::new();
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 
 /// Maximum log file size before rotation (2MB).
@@ -41,6 +49,9 @@ pub fn init() {
         }
     }
 
+    // Read current file size so bytes_written starts correct (we append)
+    let initial_size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
     let file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -48,16 +59,32 @@ pub fn init() {
 
     match file {
         Ok(f) => {
-            LOG_FILE.get_or_init(|| Mutex::new(f));
+            LOG_FILE.get_or_init(|| {
+                Mutex::new(LogState {
+                    file: f,
+                    path: path.clone(),
+                    prev_path: prev_path.clone(),
+                    bytes_written: initial_size,
+                })
+            });
         }
         Err(e) => {
-            let fallback = std::env::temp_dir().join("godly-daemon-debug.log");
+            let fallback_path = std::env::temp_dir().join("godly-daemon-debug.log");
+            let fallback_prev = std::env::temp_dir().join("godly-daemon-debug.prev.log");
             if let Ok(f) = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&fallback)
+                .open(&fallback_path)
             {
-                LOG_FILE.get_or_init(|| Mutex::new(f));
+                let initial = fs::metadata(&fallback_path).map(|m| m.len()).unwrap_or(0);
+                LOG_FILE.get_or_init(|| {
+                    Mutex::new(LogState {
+                        file: f,
+                        path: fallback_path,
+                        prev_path: fallback_prev,
+                        bytes_written: initial,
+                    })
+                });
             } else {
                 eprintln!("[daemon] Failed to open debug log: {}", e);
             }
@@ -102,7 +129,7 @@ pub fn install_panic_hook() {
 /// Write a log line with timestamp (wall clock + monotonic elapsed).
 pub fn log(msg: &str) {
     if let Some(mutex) = LOG_FILE.get() {
-        if let Ok(mut file) = mutex.lock() {
+        if let Ok(mut state) = mutex.lock() {
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default();
@@ -110,16 +137,35 @@ pub fn log(msg: &str) {
                 .get()
                 .map(|s| s.elapsed())
                 .unwrap_or_default();
-            let _ = writeln!(
-                file,
-                "[{}.{:03}] [{:>8.3}s] {}",
+            let line = format!(
+                "[{}.{:03}] [{:>8.3}s] {}\n",
                 ts.as_secs(),
                 ts.subsec_millis(),
                 elapsed.as_secs_f64(),
                 msg
             );
-            let _ = file.flush();
+            let _ = state.file.write_all(line.as_bytes());
+            let _ = state.file.flush();
+            state.bytes_written += line.len() as u64;
+
+            if state.bytes_written > MAX_LOG_SIZE {
+                rotate(&mut state);
+            }
         }
+    }
+}
+
+/// Rotate: copy current → .prev.log, truncate current, reset counter.
+fn rotate(state: &mut LogState) {
+    let _ = fs::copy(&state.path, &state.prev_path);
+    let _ = fs::remove_file(&state.path);
+    if let Ok(f) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&state.path)
+    {
+        state.file = f;
+        state.bytes_written = 0;
     }
 }
 
@@ -155,12 +201,12 @@ pub fn install_exception_handler() {
 
         // Use try_lock to avoid deadlock if exception occurs during logging
         if let Some(mutex) = LOG_FILE.get() {
-            if let Ok(mut file) = mutex.try_lock() {
+            if let Ok(mut state) = mutex.try_lock() {
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default();
                 let _ = writeln!(
-                    file,
+                    state.file,
                     "[{}.{:03}] FATAL EXCEPTION: code=0x{:08X} ({}) address=0x{:X}",
                     ts.as_secs(),
                     ts.subsec_millis(),
@@ -168,7 +214,7 @@ pub fn install_exception_handler() {
                     code_name,
                     address
                 );
-                let _ = file.flush();
+                let _ = state.file.flush();
             }
         }
 

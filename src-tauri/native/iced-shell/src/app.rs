@@ -2759,6 +2759,21 @@ impl GodlyApp {
             };
         }
 
+        // Clean up screenshots older than 1 hour (best-effort)
+        let one_hour = std::time::Duration::from_secs(3600);
+        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+            let now = std::time::SystemTime::now();
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        if now.duration_since(modified).unwrap_or_default() > one_hour {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+
         let id = uuid::Uuid::new_v4();
         let path = temp_dir.join(format!("screenshot-{}.png", &id.to_string()[..8]));
 
