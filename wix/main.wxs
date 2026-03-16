@@ -3,8 +3,7 @@
   Godly Terminal WiX installer manifest.
   Bundles all native binaries, sounds, and soundpacks into a single MSI.
 
-  Build: cargo wix -p godly-iced-shell --nocapture
-  Or:    pwsh scripts/staging-build.ps1  (handles everything)
+  Build: pwsh scripts/production-build.ps1
 -->
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 
