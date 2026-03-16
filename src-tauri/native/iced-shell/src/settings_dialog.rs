@@ -94,7 +94,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     }
 
     // Header: "Settings" title + close button
-    let close_btn = button(text("\u{2715}").size(16))
+    let close_btn = button(text("\u{2715}").size(15))
         .on_press(on_close)
         .padding(Padding::from([4, 8]))
         .style(|_theme, status| {
@@ -120,7 +120,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
 
     let header = container(
         row![
-            text("Settings").size(18).color(TEXT_ACTIVE()),
+            text("Settings").size(20).color(TEXT_ACTIVE()),
             Space::new().width(Length::Fill),
             close_btn,
         ]
@@ -139,7 +139,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         env!("GODLY_APP_VERSION")
     );
     let footer = container(text(version).size(11).color(TEXT_SECONDARY()))
-        .padding(Padding::from([8, 16]))
+        .padding(Padding::from([10, 16]))
         .style(|_theme| container::Style {
             background: Some(Background::Color(tint(BG_PRIMARY(), 0.68))),
             ..container::Style::default()
@@ -177,7 +177,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         container(tab_content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(Padding::from([10, 16])),
+            .padding(Padding::from([16, 16])),
         footer,
     ])
     .width(Length::Fill)
@@ -185,7 +185,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     .style(|_theme| container::Style {
         background: Some(Background::Color(BG_SECONDARY())),
         border: Border {
-            color: tint(BG_PRIMARY(), 0.88),
+            color: tint(BG_PRIMARY(), 0.60),
             width: 1.0,
             radius: DIALOG_RADIUS.into(),
         },
