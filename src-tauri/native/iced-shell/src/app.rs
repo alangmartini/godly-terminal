@@ -1219,6 +1219,11 @@ impl GodlyApp {
             // --- Daemon events (channel-driven, no polling) ---
             Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
                 if let Some(term) = self.terminals.get_mut(&session_id) {
+                    // Already dirty + fetching → this event is redundant, skip all work.
+                    // This coalesces bursts of output events into a single grid fetch.
+                    if term.dirty && term.fetching {
+                        return Task::none();
+                    }
                     term.dirty = true;
                 }
                 // Track notifications for non-focused terminals.
@@ -1695,10 +1700,32 @@ impl GodlyApp {
                 self.window_focused = focused;
                 if !focused {
                     self.cancel_mru_switcher();
+                    // Pause all sessions to prevent event backlog while window
+                    // is not visible (minimized, alt-tabbed, etc). The VT parser
+                    // keeps running so no output is lost.
+                    if let Some(client) = &self.client {
+                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        commands::pause_all_sessions(client, &ids);
+                    }
                 }
                 if focused {
                     self.last_attention_request_ms = None;
-                    return window::request_user_attention(window_id, None);
+                    // Resume all sessions and refresh grids to show latest state.
+                    if let Some(client) = &self.client {
+                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        commands::resume_all_sessions(client, &ids);
+                    }
+                    let grid_tasks: Vec<Task<Message>> = self
+                        .terminals
+                        .iter()
+                        .map(|t| t.id.clone())
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .map(|id| self.fetch_grid(&id))
+                        .collect();
+                    let mut tasks = grid_tasks;
+                    tasks.push(window::request_user_attention(window_id, None));
+                    return Task::batch(tasks);
                 }
             }
 
