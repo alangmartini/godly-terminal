@@ -26,11 +26,6 @@ Every `feat:` and `fix:` commit must include a changelog fragment file in `chang
 - **All change types (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `style:`, `refactor:`)**: Create a branch, open a PR, and merge via PR review flow.
 - **No direct pushes to `master`** for routine implementation work.
 
-## Staging Testing
-
-- **Never launch Godly Staging from within production Godly Terminal.** The staging executable will connect to the same daemon and mirror/hijack production tabs, making the user unable to type. Always launch staging from the Start Menu or an external terminal (Windows Terminal, cmd.exe).
-- To capture stderr for debugging, tell the user to run from an external terminal: `& "$env:LOCALAPPDATA/Godly Terminal (Staging)/godly-native.exe" 2> debug.log`
-
 ## Debugging Principles
 
 - **Never mask errors.** Don't add retry loops, fallback handlers, or auto-recovery that hides the root cause of a crash or failure. If something crashes, the priority is understanding WHY — not papering over it so the user doesn't notice.
