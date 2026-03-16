@@ -60,8 +60,6 @@ For each test case, use the godly-terminal MCP tools directly. Available tools i
 **Visual verification:**
 - `capture_screenshot` — screenshot a terminal canvas
 - `read_grid` — read the character grid for text verification
-- `get_screenshot` (pencil MCP) — compare against design specs
-
 **Advanced:**
 - `execute_js` — run JS in the WebView to inspect DOM/store state
 - `quick_claude` — spawn a Quick Claude session

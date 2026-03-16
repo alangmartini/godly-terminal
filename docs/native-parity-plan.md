@@ -147,7 +147,7 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] I3. Layout options for Quick Claude (single, vsplit, hsplit, 2x2)
 - [x] I4. Voice input (Whisper integration, Ctrl+Shift+M)
 - [x] I5. Recording UI (level bar, timer, transcription toast)
-- [ ] ~~I6. Figma pane embedding (iframe-like webview in split)~~ — Skipped (not worth implementing)
+- [ ] ~~I6. Figma pane embedding~~ — Removed (UI switched to Iced)
 
 ---
 
@@ -230,7 +230,7 @@ Tasks are grouped into **independent work streams** that can run simultaneously.
 - [x] K1. CLAUDE.md editor dialog (sidebar buttons for project + user)
 - [x] K2. Quit confirmation dialog (active sessions warning)
 - [x] K3. Copy dialog (preview with clean/normal mode toggle)
-- [ ] ~~K4. Figma URL prompt dialog~~ — Skipped (depends on I6 which was skipped)
+- [ ] ~~K4. Figma URL prompt dialog~~ — Removed (depends on I6)
 
 ---
 
@@ -331,7 +331,7 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 
 ### Completed in this update
 - **Stream I**: I4, I5 completed (WhisperService sidecar in app-adapter, recording overlay UI with level meter/timer/stop/cancel, mic button in tab bar, Ctrl+Shift+M shortcut, toast on transcription).
-- **Stream I**: I6 skipped (Figma pane embedding not worth implementing).
+- **Stream I**: I6 removed (Figma pane embedding — UI switched to Iced).
 
 ## Progress Log -- 2026-03-06 (J1-J9 MCP Event Integration)
 
@@ -352,4 +352,4 @@ Parity is achieved when a user cannot distinguish the Iced shell from the TypeSc
 - **Pre-existing compilation bugs fixed**: duplicate McpEvent variant, missing closing braces in WhisperCancel/McpEvent handlers, missing DANGER import, missing module declarations in main.rs.
 
 ### Status: ALL ITEMS COMPLETE (or intentionally skipped)
-Only I6 and K4 are skipped — both related to Figma embedding which was deemed not worth implementing.
+Only I6 and K4 are skipped — both related to Figma embedding which was removed when the UI switched to Iced.
