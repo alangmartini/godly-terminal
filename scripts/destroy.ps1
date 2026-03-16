@@ -2,6 +2,7 @@
 
 $processes = @(
     "godly-terminal"
+    "godly-native"
     "godly-daemon"
     "godly-pty-shim"
     "godly-mcp"
