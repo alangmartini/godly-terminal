@@ -16,13 +16,8 @@ const VERSION_FILES = [
     field: "version",
   },
   {
-    path: "src-tauri/tauri.conf.json",
-    type: "json",
-    field: "version",
-  },
-  {
-    path: "src-tauri/Cargo.toml",
-    type: "cargo",
+    path: "version.txt",
+    type: "text",
   },
   {
     path: "src-tauri/protocol/Cargo.toml",
@@ -42,6 +37,14 @@ const VERSION_FILES = [
   },
   {
     path: "src-tauri/notify/Cargo.toml",
+    type: "cargo",
+  },
+  {
+    path: "src-tauri/native/iced-shell/Cargo.toml",
+    type: "cargo",
+  },
+  {
+    path: "src-tauri/native/app-adapter/Cargo.toml",
     type: "cargo",
   },
 ];
@@ -132,6 +135,9 @@ console.log(`Bumping version: ${oldVersion} -> ${newVersion}\n`);
 for (const file of VERSION_FILES) {
   if (file.type === "json") {
     updateJsonFile(file.path, file.field, newVersion);
+    console.log(`  Updated ${file.path} -> ${newVersion}`);
+  } else if (file.type === "text") {
+    writeFileSync(join(root, file.path), newVersion + "\n", "utf-8");
     console.log(`  Updated ${file.path} -> ${newVersion}`);
   } else {
     const crateOld = readCargoVersion(file.path);

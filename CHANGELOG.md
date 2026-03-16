@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-03-15
+
+### Added
+- **Native Iced frontend** — Full native terminal app built on Iced 0.14 + wgpu, replacing the Tauri WebView frontend as the default. Includes multi-terminal tabs, split panes, workspace sidebar, settings dialog, keyboard shortcuts, clipboard, text selection, mouse scrollback, font zoom, session recovery, bold/italic rendering, cursor style rendering (block/underline/bar via DECSCUSR), notification state tracking, and MCP pipe server (#541)
+- **Theme system** — 11 built-in color themes (Dusk, Tokyo Night, Dracula, Nord, Gruvbox Dark, One Dark, Catppuccin, Solarized Dark, Monokai, Ayu Dark, Rose Pine) with full UI + terminal ANSI palettes, Appearance settings tab with color preview swatches, and dynamic theme switching via global RwLock
+- **Custom theme JSON import/export** — Import and export custom terminal themes via JSON files in the Appearance settings tab, persisted to `custom-themes.json`
+- **Shell picker dialog** — New terminal creation shows a tabbed dialog to choose PowerShell, WSL (with distro picker), or Custom shell program/args
+- **Visual MRU tab switcher** — Ctrl+Tab/Ctrl+Shift+Tab shows a popup listing recently-used terminals with keyboard navigation
+- **Custom window title bar** — Borderless window with themed title, minimize/maximize/close buttons, and drag-to-move
+- **Terminal context menu** — Right-click opens a context menu with Copy, Copy (Clean), Paste, Select All, Clear, Split Right, and Split Down actions
+- **URL detection in terminal** — Detects http/https URLs in terminal output with hover tracking and Ctrl+Click to open in default browser
+- **Find in Terminal** — Ctrl+F opens a search bar overlay with case-insensitive text search, next/prev match navigation, regex mode toggle, and Escape to close
+- **Visual scrollbar** — Thin scrollbar widget on the right edge of terminal panes with proportional thumb sizing
+- **Performance overlay** — Ctrl+Shift+O toggles a transparent FPS/frame-time/terminal-count overlay
+- **Quick Prompt preset launcher** — Launch presets create terminals, arrange layouts (Single/VSplit/HSplit/Grid2x2), and execute step sequences
+- **Voice/Whisper integration** — Ctrl+Shift+M toggles voice recording via the `godly-whisper` sidecar with level meter, elapsed timer, and transcription to active terminal
+- **MCP pipe server for native shell** — Named pipe handler for focus, rename, create/close, move, notify, split/unsplit, swap, and zoom events
+- **CLAUDE.md editor dialog** — Modal editor with split view (text editor + markdown preview) for project and user CLAUDE.md files
+- **Auto-launch AI tool on terminal create** — Workspaces with an AI tool mode set automatically launch the configured tool for new terminals
+- **AI tool mode per workspace** — Workspaces can be tagged with an AI tool mode (Claude, Codex, Both, or None) with sidebar icons
+- **Quit confirmation dialog** — Shows active session count when closing with terminals running
+- **Copy preview dialog** — Previews large selections (>500 chars) before copying to clipboard
+- **Directional pane focus navigation** — Alt+Arrow keys to move focus to the adjacent split pane (#642)
+- **Workspace folder picker dialog** — Clicking "New Workspace" opens an OS-native folder picker; selected folder becomes the workspace root (#627)
+- **Native `capture_screenshot` MCP tool** — Captures native Iced shell window screenshots to PNG for inspection/testing (#629)
+- **Shortcut capture mode** — Settings shortcuts tab allows clicking keybinding badges to rebind shortcuts by pressing a key
+- **Staging test harness** — Semantic IDs, web adapter, protocol types, MCP tools, and Tauri commands for autonomous staging tests
+- **Contract testing framework** — Comprehensive testing infrastructure for native Iced shell with contract definitions, fixtures, and assertions (#627)
+- **Frontend mode dispatch** — Tauri app checks `GODLY_FRONTEND_MODE` and routes to native Iced shell or legacy web frontend
+- **Status bar** — Bottom bar displays shell type, current working directory, and terminal dimensions
+- **Friendly terminal labels** — `display_name()` strips executable paths and maps shell types to user-friendly names; `extract_cwd()` extracts CWD from OSC title
+- **Process icons in tabs** — Small glyph before tab label indicating process type (Claude, Codex, Node, Python, shell)
+- **Smooth tab entry animation** — New tabs slide in with a 200ms ease-out width transition
+- **Sidebar collapse/expand animation** — Smooth easing when toggling sidebar with Ctrl+B
+- **Focused pane border** — Subtle accent border on the active split pane
+- **Empty terminal state** — "No terminals in this workspace" card with Ctrl+T hint when workspace is empty
+- **Design system tokens** — Spacing scale, border radius scale, shadow elevation, font sizes, and transition timings
+- **Shadow elevation** — Context menus, toasts, and MRU switcher now have drop shadows
+
+### Changed
+- **Native frontend is now the default** — `FrontendMode` defaults to `Native` instead of `Web`. Set `GODLY_FRONTEND_MODE=web` to use the legacy Tauri frontend
+- **Native-first build workflow** — `pnpm dev:native` runs the native Iced shell, `pnpm dev:web` runs the legacy Tauri frontend
+- **Iced version bumped from 0.13 to 0.14** — Enables wgpu 27, Canvas widget, and reactive rendering
+- **HashMap-based TerminalCollection** — Replace Vec with HashMap for O(1) terminal lookups, improving frame rendering performance with split panes
+- **Eliminate grid clone in render path** — Use borrowed references instead of cloning RichGridData per pane per frame
+- **Background clipboard paste** — Moved clipboard read to background thread via Task::perform(), preventing frame jank on slow clipboard access
+- **MCP auto-focus disabled by default** — MCP tools no longer auto-focus the terminal in the UI; pass `focus: true` to opt in (#534)
+- **Rename Quick Claude to Quick Prompt** — All user-facing strings updated from "Quick Claude" to "Quick Prompt" (#611)
+- **Title bar redesign** — Terminal icon via canvas, workspace name display, 30-to-34px height, subtle gradient background
+- **Tab bar visual upgrade** — Tab text truncation at 30 chars, expanded process badges, active tab matches terminal content background, inactive tabs use BG_SECONDARY
+- **Sidebar polish** — "Workspaces" header (lowercase, 10px), removed count badge, transparent divider, reduced worktree dot (4px), hidden 0-count badges, low-alpha accent badge background, CLAUDE.md footer with dot prefix
+- **Theme color tuning** — Dusk bg_primary warmth increased, success color added to ThemePalette, border alpha softened, shadow accessors added
+- **Toast polish** — 3px left accent border, body uses TEXT_SECONDARY, accent-tinted shadow
+- **Scrollbar polish** — Invisible track by default, brighter thumb, rounded thumb ends
+- **Settings dialog** — Larger header (20px), increased content padding (16px), softer outer border
+- **Confirm dialog** — Cancel button rendered borderless, danger mode tints border/shadow, tightened button spacing
+- **Status bar** — Compact 20px height, friendly shell labels, proper multiplication sign for dimensions, hairline border
+- **Viewport insets** — Reduced padding (4px X / 2px Y) for tighter content layout
+- **Pane border design** — 1px accent top bar on focused pane replaces thick borders and glow shadows
+- **Event-driven rendering** — Replaced 60fps AtomicBool polling with channel-based daemon event delivery
+- **App architecture rewrite** — `GodlyApp` now manages `TerminalCollection` with workspace-scoped layout trees
+
+### Fixed
+- **Split layout persistence** — Fixed serde case mismatch (PascalCase vs lowercase) causing split pane layouts to not survive restarts (fixes #498)
+- **Split view 2x2 resize** — In a 4-way split, dragging a divider now affects only adjacent panes via new `GridNode` type (#524)
+- **FPS counter always 0** — PerfOverlay now runs its own requestAnimationFrame loop (#531)
+- **MCP write_to_terminal timeout** — Switched to fire-and-forget for write operations, preventing 15-second timeouts under load (#534)
+- **MCP create_terminal duplicate command execution** — Command now written after waiting for shell prompt readiness (#534)
+- **MCP worktree cleanup on terminal close** — Closing a worktree terminal now automatically removes the worktree in a background thread (#534)
+- **Orphaned pty-shim processes** — Daemon `close()` now kills shim processes directly as a safety net; shim joins ConnectNamedPipe thread before returning; added 60-second daemon idle timeout
+- **Stuck mouse drag on window blur** — Split divider resize, scrollbar drag, text selection, and tab/workspace drag no longer get stuck when mouse released outside the app (#581)
+- **Staging isolation broken by native frontend mode** — Moved `GODLY_INSTANCE=staging` env var setup to `main()` before frontend mode dispatch
+- **URL detector UTF-8 panic** — Character iteration now advances by full UTF-8 character width instead of 1 byte (#617)
+- **Folder picker error handling** — Native folder picker `open()` wrapped in try-catch so COM/permission errors are logged (#612)
+- **Custom keybindings resolve correctly** — Added ShortcutResolver that checks custom overrides before defaults; keybindings persist to `keybindings.json`
+- **Keybinding conflict shadow bindings** — Custom keybindings that conflict with other actions now swap bindings instead of resetting
+- **RecencySwitcher hardcoded keybindings** — Tab cycling now respects user's custom tab-switching shortcuts
+- **Shortcut rebinding in settings** — Key presses during capture mode now properly intercepted; Escape cancels capture
+- **Windows Ctrl+\ keyboard shortcut routing** — Shortcut resolver correctly matches both control character and literal backslash representations (#639)
+- **ABNT2 keyboard layout shortcut resolution** — Physical key position fallback for Ctrl+Backslash on non-US layouts (#639)
+- **Split pane focus on click** — Clicking a terminal pane now correctly switches focus and allows immediate text selection (#639)
+- **Tab switching renders wrong content** — Switching to a previous tab now properly updates layout and fetches the terminal grid (#644)
+- **Closing tab causes "Session not found"** — Layout updated to show next available terminal when closing the only leaf (#644)
+- **Tab click split-zone overlay flash** — Split-zone overlays suppressed until cursor moves 5px from click origin
+- **Daemon and MCP debug log disk leaks** — Runtime log rotation at 2MB with `.prev.log` backup prevents unbounded growth
+- **Screenshot temp file accumulation** — Cleanup of screenshot temp files older than 1 hour on each capture
+- **godly-vt fixture tests fail on Linux CI** — Marked .typescript fixture files as binary in .gitattributes to preserve CR bytes
+
+### Tests
+- Browser tests for 2x2 grid resize, unit tests for GridNode, and 22 Rust tests for Grid variant serde/adjacency/removal (#524)
+- 12 tests for ShortcutResolver (custom bindings, conflicts, chord normalization, flat index mapping) plus persistence round-trip tests
+- Split direction persistence regression tests (#639)
+
 ## [0.12.0] - 2026-03-02
 
 ### Added
