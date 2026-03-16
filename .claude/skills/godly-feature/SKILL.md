@@ -1,6 +1,6 @@
 # Implement a planned feature end-to-end with parallel agents
 
-Orchestrate full feature development: GitHub issue, parallelizable plan, multi-agent execution (Claude Code or Codex), PR, and staging build. Use this whenever the user asks to implement a feature, add new functionality, or says `/feature`.
+Orchestrate full feature development: GitHub issue, parallelizable plan, multi-agent execution (Claude Code or Codex), and PR. Use this whenever the user asks to implement a feature, add new functionality, or says `/feature`.
 
 ## Usage
 
@@ -285,25 +285,17 @@ EOF
 
 ### Phase 8: Build Staging
 
-Ask the user if they want to build Godly Staging to test the feature:
+Ask the user if they want to build and test the feature:
 
-> Feature is ready. Want to build Godly Staging to test it?
+> Feature is ready. Want to build and install to test it?
 
 If yes, run in background:
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File scripts/staging-build.ps1
+pnpm production:build && pnpm production:install
 ```
 
-When the build completes, install silently:
-
-```bash
-powershell.exe -Command "Start-Process -FilePath 'installations/staging/Godly Terminal (Staging)_*_x64-setup.exe' -ArgumentList '/S' -Wait"
-```
-
-Then notify the user: "Staging is installed. Open 'Godly Terminal (Staging)' from the Start Menu to test."
-
-Optionally offer to run `/manual-testing <feature>` on the staging build.
+Optionally offer to run `/manual-testing <feature>` after the build.
 
 ---
 

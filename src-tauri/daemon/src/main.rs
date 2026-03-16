@@ -40,16 +40,6 @@ async fn main() {
     #[cfg(feature = "leak-check")]
     let _profiler = dhat::Profiler::new_heap();
 
-    // Parse --instance arg (must happen before any protocol calls).
-    // WMI-launched processes don't inherit env vars, so CLI args are the
-    // only reliable way to pass the instance name through that path.
-    let args: Vec<String> = std::env::args().collect();
-    if let Some(pos) = args.iter().position(|a| a == "--instance") {
-        if let Some(name) = args.get(pos + 1) {
-            unsafe { std::env::set_var("GODLY_INSTANCE", name) };
-        }
-    }
-
     // Set Windows timer resolution to 1ms. Without this, thread::sleep(1ms)
     // actually sleeps ~15ms due to the default 15.625ms timer resolution.
     // The daemon I/O thread uses adaptive polling with sleep(1ms) fallback;

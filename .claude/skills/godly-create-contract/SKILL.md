@@ -1,6 +1,6 @@
 # Write a test contract for an existing or new feature
 
-Create or update a staging test contract in `testing/contracts/`, including fixture work in `testing/fixtures/` when needed.
+Create or update a test contract in `testing/contracts/`, including fixture work in `testing/fixtures/` when needed.
 
 ## Usage
 

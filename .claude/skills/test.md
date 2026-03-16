@@ -100,7 +100,6 @@ If any tests fail:
 ### Rules
 
 - **Always clean up** — never leave test terminals or workspaces behind
-- **Test on staging when possible** — if `pnpm staging:dev` is running, prefer testing there
 - **Record exact outputs** — don't paraphrase MCP responses, show the actual data
 - **Be fast** — this is a quick functional check, not a deep QA audit. Use `/manual-testing` for thorough investigation.
 - **Load MCP tools first** — use ToolSearch to load godly-terminal MCP tools before calling them

@@ -217,18 +217,11 @@ impl NativeDaemonClient {
         let mut cmd = Command::new(&daemon_path);
         cmd.creation_flags(base_flags | breakaway_flag);
 
-        if let Ok(instance) = std::env::var("GODLY_INSTANCE") {
-            cmd.args(["--instance", &instance]);
-        }
-
         match cmd.spawn() {
             Ok(_) => Ok(()),
             Err(ref e) if e.raw_os_error() == Some(5) => {
                 let mut cmd2 = Command::new(&daemon_path);
                 cmd2.creation_flags(base_flags);
-                if let Ok(instance) = std::env::var("GODLY_INSTANCE") {
-                    cmd2.args(["--instance", &instance]);
-                }
                 cmd2.spawn()
                     .map(|_| ())
                     .map_err(|e| format!("Failed to launch daemon: {}", e))
