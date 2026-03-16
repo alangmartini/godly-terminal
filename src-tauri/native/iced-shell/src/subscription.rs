@@ -21,6 +21,25 @@ pub enum DaemonEventMsg {
     },
     /// Bell character received.
     Bell { session_id: String },
+    /// Heartbeat — keeps the Iced event loop alive when the window is minimized.
+    /// Sent by a dedicated background thread, not by Iced subscriptions (which
+    /// stop being polled when the window is invisible).
+    Heartbeat,
+}
+
+/// Spawn a background thread that sends `DaemonEventMsg::Heartbeat` every second
+/// through the given channel. This keeps the Iced event loop alive even when
+/// the window is minimized and Iced stops polling its own subscriptions.
+pub fn spawn_heartbeat_thread(sender: mpsc::UnboundedSender<DaemonEventMsg>) {
+    std::thread::Builder::new()
+        .name("iced-heartbeat".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if sender.unbounded_send(DaemonEventMsg::Heartbeat).is_err() {
+                break; // Channel closed, app shutting down
+            }
+        })
+        .expect("Failed to spawn heartbeat thread");
 }
 
 /// Event sink that sends daemon events through an mpsc channel to iced.

@@ -40,6 +40,24 @@ fn main() -> iced::Result {
         env!("GODLY_APP_VERSION"),
     );
 
+    // Install a Win32 timer on the main thread that fires every second.
+    // This generates WM_TIMER messages in the thread's message queue, which
+    // keeps winit's event loop alive even when the window is minimized.
+    // Without this, Iced stops polling all subscriptions and streams,
+    // causing the terminal to freeze on restore.
+    #[cfg(windows)]
+    unsafe {
+        extern "system" {
+            fn SetTimer(
+                hwnd: *mut std::ffi::c_void,
+                id: usize,
+                elapse: u32,
+                callback: *const std::ffi::c_void,
+            ) -> usize;
+        }
+        SetTimer(std::ptr::null_mut(), 0, 1000, std::ptr::null());
+    }
+
     iced::application(boot, GodlyApp::update, GodlyApp::view)
         .title(GodlyApp::title)
         .subscription(GodlyApp::subscription)
@@ -53,6 +71,8 @@ fn main() -> iced::Result {
 }
 
 fn boot() -> (GodlyApp, iced::Task<Message>) {
+    app::diag::init();
+    app::diag::log("BOOT: app starting");
     let mut app = GodlyApp::default();
     let task = app::initialize(&mut app);
     (app, task)

@@ -1,2 +1,2 @@
 ### Fixed
-- **Terminal freeze after minimizing window** — When the window loses focus, all sessions are paused to prevent event backlog buildup. Sessions are resumed when the window regains focus, and grids are refreshed to show the latest state. Added early-return coalescing for redundant TerminalOutput events to prevent overwhelming the UI (#652)
+- **Terminal freeze after minimizing window** — Win32 SetTimer keeps the Iced event loop alive during minimize. Heartbeat message handler with focus detection via GetForegroundWindow prevents event backlog. Degenerate resize guard skips invalid terminal size computations when minimized. Event coalescing reduces redundant TerminalOutput updates. Diagnostic logging included for future debugging (#652)
