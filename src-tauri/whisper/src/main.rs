@@ -22,15 +22,6 @@ fn main() {
                     pipe_name = args[i].clone();
                 }
             }
-            "--instance" => {
-                i += 1;
-                // Instance is handled via GODLY_INSTANCE env var by the caller,
-                // but we accept it as CLI arg for completeness
-                if i < args.len() {
-                    std::env::set_var("GODLY_INSTANCE", &args[i]);
-                    pipe_name = godly_protocol::whisper_pipe_name();
-                }
-            }
             "--models-dir" => {
                 i += 1;
                 if i < args.len() {
@@ -54,8 +45,7 @@ fn main() {
                 eprintln!("    godly-whisper [OPTIONS]");
                 eprintln!();
                 eprintln!("OPTIONS:");
-                eprintln!("    --pipe <NAME>        Named pipe path (default: auto from GODLY_INSTANCE)");
-                eprintln!("    --instance <NAME>    Instance name for pipe isolation");
+                eprintln!("    --pipe <NAME>        Named pipe path");
                 eprintln!("    --models-dir <PATH>  Directory containing whisper model files");
                 eprintln!("    --version            Print version info as JSON and exit");
                 eprintln!("    --help               Show this help");

@@ -12,10 +12,6 @@ Manually test a Godly Terminal feature via MCP tools, document findings, and cre
 
 You are a QA tester for Godly Terminal. Your job is to exercise a feature through the MCP tools (godly-terminal MCP server), observe actual behavior, compare it to expected behavior, and file a detailed GitHub issue with every problem you find.
 
-### Autonomous Testing (Planned)
-
-Once the autonomous test harness is implemented (see `docs/staging-autonomous-testing-plan.md`), prefer contract-based testing over manual testing for staging features. If a test contract exists in `testing/contracts/`, run it instead of following the manual steps below.
-
 ### Phase 1: Understand the Feature
 
 1. **Search the codebase** for all files related to the feature. Use Explore agent or Grep/Glob to find:
@@ -227,5 +223,3 @@ When the `pyautogui-mcp` server is registered, you have real mouse/keyboard cont
 4. Use `capture_screenshot` or PyAutoGUI `screenshot` to verify the result
 5. Use `execute_js` to verify state changes in the store
 
-#### Testing on Staging
-Prefer running tests on the Godly Staging instance (`pnpm staging:dev`) to avoid disrupting the production app. The staging instance uses `GODLY_INSTANCE=staging` for full isolation.
