@@ -4,7 +4,7 @@ use iced::widget::{button, container, mouse_area, row, rule, text};
 use iced::{Border, Color, Element, Length, Padding};
 
 use crate::terminal_state::TerminalInfo;
-use crate::theme::ACCENT;
+use crate::theme::{BG_SECONDARY, PANE_BG};
 
 /// Height of the tab bar in logical pixels.
 pub const TAB_BAR_HEIGHT: f32 = 32.0;
@@ -14,15 +14,11 @@ pub const TAB_ENTRY_DURATION_MS: u64 = 200;
 const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 
 // Colors
-const TAB_BAR_BG: Color = Color::from_rgb(0.08, 0.08, 0.10);
-const ACTIVE_TAB_BG: Color = Color::from_rgb(0.2, 0.2, 0.25);
-const INACTIVE_TAB_BG: Color = Color::from_rgb(0.12, 0.12, 0.15);
 const TAB_TEXT_COLOR: Color = Color::from_rgb(0.85, 0.85, 0.85);
 const TAB_SEPARATOR_COLOR: Color = Color::from_rgba(0.55, 0.55, 0.62, 0.30);
-const PROCESS_BADGE_BG: Color = Color::from_rgb(0.16, 0.16, 0.20);
-const PROCESS_BADGE_ACTIVE_BG: Color = Color::from_rgb(0.25, 0.21, 0.14);
-const PROCESS_BADGE_BORDER: Color = Color::from_rgba(0.72, 0.72, 0.82, 0.30);
-const PROCESS_BADGE_TEXT: Color = Color::from_rgb(0.90, 0.90, 0.94);
+const PROCESS_BADGE_BG: Color = Color::from_rgb(0.13, 0.13, 0.17);
+const PROCESS_BADGE_ACTIVE_BG: Color = Color::from_rgb(0.20, 0.18, 0.13);
+const PROCESS_BADGE_TEXT: Color = Color::from_rgb(0.72, 0.72, 0.78);
 const CLOSE_HOVER_BG: Color = Color::from_rgb(0.35, 0.15, 0.15);
 const TAB_BUTTON_HEIGHT: f32 = 26.0;
 const CLOSE_BUTTON_SIZE: f32 = 20.0;
@@ -30,9 +26,18 @@ const SEPARATOR_HEIGHT: f32 = 14.0;
 const NEW_TAB_HOVER_BG: Color = Color::from_rgb(0.16, 0.16, 0.20);
 const NEW_TAB_PRESSED_BG: Color = Color::from_rgb(0.19, 0.19, 0.24);
 const NEW_TAB_BORDER_COLOR: Color = Color::from_rgba(0.60, 0.60, 0.72, 0.45);
-const NEW_TAB_BG: Color = Color::from_rgb(0.13, 0.13, 0.17);
-const NEW_TAB_IDLE_BORDER_COLOR: Color = Color::from_rgba(0.48, 0.48, 0.58, 0.32);
 const NEW_TAB_TEXT_COLOR: Color = Color::from_rgb(0.92, 0.92, 0.96);
+
+/// Truncate a label to at most `max_chars` characters, appending "..." if truncated.
+fn truncate_label(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{truncated}\u{2026}")
+    }
+}
 
 fn contains_ascii_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
@@ -73,6 +78,26 @@ fn process_badge_label(process_name: &str) -> Option<&'static str> {
             .is_some_and(|suffix| suffix.eq_ignore_ascii_case("/sh"))
     {
         "SH"
+    } else if contains_ascii_insensitive(trimmed, "node") {
+        "ND"
+    } else if contains_ascii_insensitive(trimmed, "python")
+        || contains_ascii_insensitive(trimmed, "python3")
+    {
+        "PY"
+    } else if contains_ascii_insensitive(trimmed, "vim")
+        || contains_ascii_insensitive(trimmed, "nvim")
+    {
+        "VI"
+    } else if contains_ascii_insensitive(trimmed, "ssh") {
+        "SS"
+    } else if trimmed.eq_ignore_ascii_case("git")
+        || contains_ascii_insensitive(trimmed, "git.exe")
+    {
+        "GI"
+    } else if contains_ascii_insensitive(trimmed, "ruby")
+        || contains_ascii_insensitive(trimmed, "irb")
+    {
+        "RB"
     } else {
         "TM"
     };
@@ -141,12 +166,13 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     for (index, &terminal) in terminals.iter().enumerate() {
         let is_active = active_id == Some(terminal.id.as_str());
         let bg = if is_active {
-            ACTIVE_TAB_BG
+            PANE_BG()
         } else {
-            INACTIVE_TAB_BG
+            BG_SECONDARY()
         };
 
-        let label = text(terminal.tab_label()).size(13).color(TAB_TEXT_COLOR);
+        let truncated = truncate_label(&terminal.tab_label(), 30);
+        let label = text(truncated).size(13).color(TAB_TEXT_COLOR);
         let process_badge = process_badge_label(&terminal.process_name).map(|badge| {
             let badge_bg = if is_active {
                 PROCESS_BADGE_ACTIVE_BG
@@ -154,13 +180,13 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                 PROCESS_BADGE_BG
             };
 
-            container(text(badge).size(10).color(PROCESS_BADGE_TEXT))
-                .padding(Padding::from([2, 5]))
+            container(text(badge).size(9).color(PROCESS_BADGE_TEXT))
+                .padding(Padding::from([1, 5]))
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(badge_bg)),
                     border: Border {
-                        color: PROCESS_BADGE_BORDER,
-                        width: 1.0,
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
                         radius: 999.0.into(),
                     },
                     ..container::Style::default()
@@ -259,7 +285,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             let (bg_color, border_color, border_width) = match status {
                 button::Status::Hovered => (NEW_TAB_HOVER_BG, NEW_TAB_BORDER_COLOR, 1.0),
                 button::Status::Pressed => (NEW_TAB_PRESSED_BG, NEW_TAB_BORDER_COLOR, 1.0),
-                _ => (NEW_TAB_BG, NEW_TAB_IDLE_BORDER_COLOR, 1.0),
+                _ => (Color::TRANSPARENT, Color::TRANSPARENT, 0.0),
             };
             button::Style {
                 background: Some(iced::Background::Color(bg_color)),
@@ -285,7 +311,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(TAB_BAR_BG)),
+            background: Some(iced::Background::Color(BG_SECONDARY())),
             ..container::Style::default()
         })
         .into()
@@ -296,7 +322,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        contains_ascii_insensitive, process_badge_label, separator_after_tab, view_tab_bar,
+        contains_ascii_insensitive, process_badge_label, separator_after_tab, truncate_label,
+        view_tab_bar,
     };
     use crate::terminal_state::TerminalInfo;
 
@@ -343,7 +370,33 @@ mod tests {
         assert_eq!(process_badge_label("zsh"), Some("SH"));
         assert_eq!(process_badge_label("claude"), Some("CC"));
         assert_eq!(process_badge_label("codex"), Some("CX"));
+        assert_eq!(process_badge_label("node"), Some("ND"));
+        assert_eq!(process_badge_label("node.exe"), Some("ND"));
+        assert_eq!(process_badge_label("python"), Some("PY"));
+        assert_eq!(process_badge_label("python3"), Some("PY"));
+        assert_eq!(process_badge_label("vim"), Some("VI"));
+        assert_eq!(process_badge_label("nvim"), Some("VI"));
+        assert_eq!(process_badge_label("ssh"), Some("SS"));
+        assert_eq!(process_badge_label("git"), Some("GI"));
+        assert_eq!(process_badge_label("git.exe"), Some("GI"));
+        assert_eq!(process_badge_label("ruby"), Some("RB"));
+        assert_eq!(process_badge_label("irb"), Some("RB"));
         assert_eq!(process_badge_label("some-custom-tool"), Some("TM"));
+    }
+
+    #[test]
+    fn truncate_label_short_strings_unchanged() {
+        assert_eq!(truncate_label("hello", 30), "hello");
+        assert_eq!(truncate_label("", 30), "");
+        assert_eq!(truncate_label("exactly 30 chars long padded!!", 30), "exactly 30 chars long padded!!");
+    }
+
+    #[test]
+    fn truncate_label_long_strings_truncated() {
+        let long = "a]".repeat(20); // 40 chars
+        let result = truncate_label(&long, 30);
+        assert!(result.chars().count() <= 30);
+        assert!(result.ends_with('\u{2026}'));
     }
 
     #[test]

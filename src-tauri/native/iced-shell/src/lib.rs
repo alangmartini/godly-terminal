@@ -22,6 +22,7 @@ pub mod confirm_dialog;
 pub mod shell_picker;
 pub mod search;
 pub mod scrollbar;
+pub mod status_bar;
 pub mod perf_overlay;
 pub mod url_detector;
 pub mod terminal_context_menu;

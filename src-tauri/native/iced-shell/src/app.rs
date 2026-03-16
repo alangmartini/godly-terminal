@@ -12,7 +12,7 @@ use iced::keyboard;
 use iced::widget::{
     button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
 };
-use iced::{event, window, Element, Length, Padding, Point, Shadow, Subscription, Task, Vector};
+use iced::{event, window, Color, Element, Length, Padding, Point, Shadow, Subscription, Task, Vector};
 
 use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
@@ -38,15 +38,16 @@ use crate::selection::{GridPos, SelectionState};
 use crate::settings_dialog::{self, SettingsTab};
 use crate::shortcuts_tab;
 use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
+use crate::status_bar;
 use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
-    ACCENT, BACKDROP, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, PANE_BG, PANE_BORDER,
-    PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_LG, SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY,
-    TEXT_SECONDARY,
+    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, PANE_BG,
+    PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_MD, SHADOW_ACCENT, SHADOW_COLOR, TEXT_ACTIVE,
+    TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::url_detector;
 use crate::workspace_state::WorkspaceCollection;
@@ -158,9 +159,9 @@ const TOAST_TICK_INTERVAL_MS: u64 = 250;
 const MAX_ACTIVE_TOASTS: usize = 6;
 const SIDEBAR_ANIMATION_DURATION_MS: u64 = 200;
 const SIDEBAR_ANIMATION_TICK_MS: u64 = 16;
-const TERMINAL_VIEWPORT_INSET_X: f32 = 12.0;
-const TERMINAL_VIEWPORT_INSET_Y: f32 = 10.0;
-const EMPTY_STATE_CARD_WIDTH: f32 = 360.0;
+const TERMINAL_VIEWPORT_INSET_X: f32 = 4.0;
+const TERMINAL_VIEWPORT_INSET_Y: f32 = 2.0;
+const EMPTY_STATE_CARD_WIDTH: f32 = 400.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SidebarAnimation {
@@ -1184,18 +1185,24 @@ impl GodlyApp {
     }
 
     pub fn title(&self) -> String {
+        let workspace_name = self
+            .workspaces
+            .active()
+            .map(|ws| ws.name.as_str())
+            .unwrap_or("Default");
+
         if let Some(tid) = self.active_focused() {
             if let Some(term) = self.terminals.get(tid) {
                 let label = term.tab_label();
                 if label != "Terminal" {
-                    return format!("{} — Godly Terminal (Native)", label);
+                    return format!(
+                        "Godly Terminal \u{2014} {} \u{2014} {}",
+                        workspace_name, label
+                    );
                 }
             }
         }
-        format!(
-            "Godly Terminal (Native) — contract v{}",
-            godly_protocol::FRONTEND_CONTRACT_VERSION
-        )
+        format!("Godly Terminal \u{2014} {}", workspace_name)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -2877,9 +2884,23 @@ impl GodlyApp {
             self.view_terminal_empty_state()
         };
 
-        let main_area = column![tab_bar, container(terminal_view).height(Length::Fill)]
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let status_info = focused_id
+            .and_then(|tid| self.terminals.get(tid))
+            .map(|term| status_bar::StatusBarInfo {
+                shell_label: status_bar::shell_label(&term.process_name),
+                cwd: term.extract_cwd().unwrap_or(""),
+                cols: term.cols,
+                rows: term.rows,
+            });
+        let status_bar_el: Element<'_, Message> = status_bar::view_status_bar(status_info);
+
+        let main_area = column![
+            tab_bar,
+            container(terminal_view).height(Length::Fill),
+            status_bar_el,
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill);
 
         let sidebar_width = self.current_sidebar_width();
         let body_content: Element<'_, Message> = if sidebar_width > 0.0 {
@@ -3538,23 +3559,32 @@ impl GodlyApp {
     fn view_toast_overlay(&self) -> Element<'_, Message> {
         let mut toasts_column = column![].spacing(8).width(Length::Fixed(320.0));
         for toast in &self.toasts {
-            let card = container(column![
+            let accent_border = container(Space::new().width(3.0).height(Length::Fill))
+                .style(|_theme| container::Style {
+                    background: Some(iced::Background::Color(ACCENT())),
+                    ..container::Style::default()
+                });
+            let card_content = column![
                 text(&toast.title).size(13).color(TEXT_ACTIVE()),
-                text(&toast.message).size(11).color(TEXT_PRIMARY()),
-            ])
-            .padding(Padding::from([8, 10]))
+                text(&toast.message).size(11).color(TEXT_SECONDARY()),
+            ]
+            .spacing(2);
+            let card = container(
+                row![accent_border, container(card_content).padding(Padding::from([10, 14]))]
+                    .spacing(0),
+            )
             .width(Length::Fill)
             .style(|_theme| container::Style {
                 background: Some(iced::Background::Color(BG_SECONDARY())),
                 border: iced::Border {
-                    color: BORDER(),
-                    width: 1.0,
+                    color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.6),
+                    width: 0.5,
                     radius: RADIUS_MD.into(),
                 },
                 shadow: Shadow {
-                    color: SHADOW_COLOR,
-                    offset: Vector::new(0.0, 2.0),
-                    blur_radius: 8.0,
+                    color: SHADOW_ACCENT(),
+                    offset: Vector::new(0.0, 3.0),
+                    blur_radius: 10.0,
                 },
                 ..container::Style::default()
             });
@@ -6122,26 +6152,37 @@ impl GodlyApp {
             default_bg: term_palette.background,
         };
 
-        let border_color = if is_focused {
+        let accent_color = if is_focused {
             PANE_FOCUSED_BORDER()
         } else {
-            PANE_BORDER()
+            Color::TRANSPARENT
         };
 
-        let pane = container(canvas(tc).width(Length::Fill).height(Length::Fill))
+        let accent_bar = container(Space::new().width(Length::Fill).height(Length::Fixed(
+            if is_focused { 1.0 } else { 0.0 },
+        )))
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(accent_color)),
+            ..container::Style::default()
+        });
+
+        let inner = column![
+            accent_bar,
+            canvas(tc).width(Length::Fill).height(Length::Fill),
+        ];
+
+        let pane = container(inner)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(Padding::from([
-                TERMINAL_VIEWPORT_INSET_Y,
-                TERMINAL_VIEWPORT_INSET_X,
-            ]))
+            .padding(Padding {
+                top: TERMINAL_VIEWPORT_INSET_Y,
+                right: TERMINAL_VIEWPORT_INSET_X,
+                bottom: TERMINAL_VIEWPORT_INSET_Y,
+                left: TERMINAL_VIEWPORT_INSET_X,
+            })
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(PANE_BG())),
-                border: iced::Border {
-                    color: border_color,
-                    width: if is_focused { 2.0 } else { 1.0 },
-                    radius: 8.0.into(),
-                },
                 ..container::Style::default()
             });
 
@@ -6154,9 +6195,14 @@ impl GodlyApp {
     fn view_terminal_empty_state(&self) -> Element<'_, Message> {
         let card = container(
             column![
-                text("No terminals open").size(22).color(TEXT_ACTIVE()),
-                text("Create a terminal in this workspace to start working.")
+                text("No terminals in this workspace")
+                    .size(22)
+                    .color(TEXT_ACTIVE()),
+                text("Create a terminal to start working.")
                     .size(13)
+                    .color(TEXT_SECONDARY()),
+                text("Press Ctrl+T to create one")
+                    .size(11)
                     .color(TEXT_SECONDARY()),
                 button(text("Create terminal").size(13).color(BG_SECONDARY()))
                     .on_press(Message::NewTabRequested)
@@ -6184,13 +6230,13 @@ impl GodlyApp {
             .spacing(12)
             .width(Length::Fill),
         )
-        .padding(Padding::from([18, 20]))
+        .padding(Padding::from([28, 20]))
         .width(Length::Fixed(EMPTY_STATE_CARD_WIDTH))
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(EMPTY_STATE_BG())),
             border: iced::Border {
-                color: PANE_BORDER(),
-                width: 1.0,
+                color: Color::from_rgba(PANE_BORDER().r, PANE_BORDER().g, PANE_BORDER().b, 0.5),
+                width: 0.5,
                 radius: 10.0.into(),
             },
             ..container::Style::default()
