@@ -106,7 +106,13 @@ pub struct ThemePalette {
     pub empty_state_bg: Color,
     #[serde(with = "color_serde")]
     pub backdrop: Color,
+    #[serde(with = "color_serde", default = "default_success")]
+    pub success: Color,
     pub terminal: TerminalPalette,
+}
+
+fn default_success() -> Color {
+    Color::from_rgb(0.40, 0.78, 0.45)
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +375,10 @@ pub fn EMPTY_STATE_BG() -> Color {
 pub fn BACKDROP() -> Color {
     active().backdrop
 }
+#[allow(non_snake_case)]
+pub fn SUCCESS() -> Color {
+    active().success
+}
 
 // ---------------------------------------------------------------------------
 // Design system tokens (theme-independent, stay as pub const).
@@ -393,6 +403,20 @@ pub const RADIUS_XL: f32 = 12.0;
 
 pub const SHADOW_COLOR: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.40);
 pub const SHADOW_LIGHT: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.20);
+
+/// Returns a shadow color tinted with the active theme's accent.
+#[allow(non_snake_case)]
+pub fn SHADOW_ACCENT() -> Color {
+    let a = active().accent;
+    Color::from_rgba(a.r * 0.3, a.g * 0.3, a.b * 0.3, 0.35)
+}
+
+/// Returns a shadow color tinted with the active theme's danger color.
+#[allow(non_snake_case)]
+pub fn SHADOW_DANGER() -> Color {
+    let d = active().danger;
+    Color::from_rgba(d.r * 0.3, d.g * 0.3, d.b * 0.3, 0.35)
+}
 
 pub const TRANSITION_HOVER_MS: u64 = 150;
 pub const TRANSITION_STATE_MS: u64 = 200;
@@ -419,7 +443,7 @@ pub fn palette(id: ThemeId) -> ThemePalette {
 
 fn dusk() -> ThemePalette {
     ThemePalette {
-        bg_primary: Color::from_rgb(0.1137, 0.1216, 0.1294),
+        bg_primary: Color::from_rgb(0.1137, 0.1137, 0.1216),
         bg_secondary: Color::from_rgb(0.0941, 0.1020, 0.1059),
         bg_tertiary: Color::from_rgb(0.1804, 0.1686, 0.1569),
         bg_active: Color::from_rgb(0.2392, 0.2157, 0.2000),
@@ -428,13 +452,14 @@ fn dusk() -> ThemePalette {
         text_active: Color::from_rgb(0.7725, 0.7529, 0.7137),
         accent: Color::from_rgb(0.8314, 0.6627, 0.4157),
         accent_hover: Color::from_rgb(0.8784, 0.7451, 0.5333),
-        border: Color::from_rgb(0.1804, 0.1686, 0.1569),
+        border: Color::from_rgba(0.1804, 0.1686, 0.1569, 0.75),
         danger: Color::from_rgb(0.7608, 0.4392, 0.4392),
         pane_bg: Color::from_rgb(0.0745, 0.0784, 0.0863),
         pane_border: Color::from_rgb(0.2471, 0.2235, 0.2039),
         pane_focused_border: Color::from_rgb(0.8784, 0.7451, 0.5333),
         empty_state_bg: Color::from_rgb(0.1294, 0.1333, 0.1451),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb(0.71, 0.74, 0.41),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x1d, 0x1f, 0x21),
             red: Color::from_rgb8(0xcc, 0x66, 0x66),
@@ -478,6 +503,7 @@ fn tokyo_night() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0x7a, 0xa2, 0xf7),
         empty_state_bg: Color::from_rgb8(0x1e, 0x20, 0x30),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0x9e, 0xce, 0x6a),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x15, 0x16, 0x1e),
             red: Color::from_rgb8(0xf7, 0x76, 0x8e),
@@ -521,6 +547,7 @@ fn dracula() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xbd, 0x93, 0xf9),
         empty_state_bg: Color::from_rgb8(0x28, 0x2a, 0x36),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0x50, 0xfa, 0x7b),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x21, 0x22, 0x2c),
             red: Color::from_rgb8(0xff, 0x55, 0x55),
@@ -564,6 +591,7 @@ fn nord() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0x88, 0xc0, 0xd0),
         empty_state_bg: Color::from_rgb8(0x2e, 0x34, 0x40),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0xa3, 0xbe, 0x8c),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x3b, 0x42, 0x52),
             red: Color::from_rgb8(0xbf, 0x61, 0x6a),
@@ -607,6 +635,7 @@ fn gruvbox_dark() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xfe, 0x80, 0x19),
         empty_state_bg: Color::from_rgb8(0x28, 0x28, 0x28),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0xb8, 0xbb, 0x26),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x28, 0x28, 0x28),
             red: Color::from_rgb8(0xcc, 0x24, 0x1d),
@@ -650,6 +679,7 @@ fn one_dark() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0x61, 0xaf, 0xef),
         empty_state_bg: Color::from_rgb8(0x28, 0x2c, 0x34),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0x98, 0xc3, 0x79),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x28, 0x2c, 0x34),
             red: Color::from_rgb8(0xe0, 0x6c, 0x75),
@@ -693,6 +723,7 @@ fn catppuccin() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xcb, 0xa6, 0xf7),
         empty_state_bg: Color::from_rgb8(0x1e, 0x1e, 0x2e),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0xa6, 0xe3, 0xa1),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x45, 0x47, 0x5a),
             red: Color::from_rgb8(0xf3, 0x8b, 0xa8),
@@ -736,6 +767,7 @@ fn solarized_dark() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xb5, 0x89, 0x00),
         empty_state_bg: Color::from_rgb8(0x00, 0x2b, 0x36),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0x85, 0x99, 0x00),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x07, 0x36, 0x42),
             red: Color::from_rgb8(0xdc, 0x32, 0x2f),
@@ -779,6 +811,7 @@ fn monokai() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xf4, 0xbf, 0x75),
         empty_state_bg: Color::from_rgb8(0x27, 0x28, 0x22),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0xa6, 0xe2, 0x2e),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x27, 0x28, 0x22),
             red: Color::from_rgb8(0xf9, 0x26, 0x72),
@@ -822,6 +855,7 @@ fn ayu_dark() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xff, 0xb4, 0x54),
         empty_state_bg: Color::from_rgb8(0x0a, 0x0e, 0x14),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0x91, 0xb3, 0x62),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x01, 0x06, 0x0e),
             red: Color::from_rgb8(0xea, 0x6c, 0x73),
@@ -865,6 +899,7 @@ fn rose_pine() -> ThemePalette {
         pane_focused_border: Color::from_rgb8(0xeb, 0xbc, 0xba),
         empty_state_bg: Color::from_rgb8(0x19, 0x17, 0x24),
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
+        success: Color::from_rgb8(0x31, 0x74, 0x8f),
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x26, 0x23, 0x3a),
             red: Color::from_rgb8(0xeb, 0x6f, 0x92),
@@ -908,7 +943,7 @@ mod tests {
         let p = palette(ThemeId::Dusk);
         assert_eq!(
             format!("{:?}", p.bg_primary),
-            format!("{:?}", Color::from_rgb(0.1137, 0.1216, 0.1294))
+            format!("{:?}", Color::from_rgb(0.1137, 0.1137, 0.1216))
         );
         assert_eq!(
             format!("{:?}", p.accent),
