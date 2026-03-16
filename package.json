@@ -23,8 +23,6 @@
     "test:smart": "bash scripts/test-smart.sh",
     "version:bump": "node scripts/bump-version.mjs",
     "phone": "pwsh scripts/setup-phone.ps1",
-    "staging:build": "pwsh scripts/staging-build.ps1",
-    "staging:install": "pwsh scripts/staging-install.ps1",
     "production:build": "pwsh scripts/production-build.ps1",
     "production:install": "pwsh scripts/production-install.ps1"
   },

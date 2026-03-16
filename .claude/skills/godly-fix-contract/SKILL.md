@@ -37,17 +37,17 @@ Contracts test real behavior through MCP tools against a running Godly Staging i
 2. If the argument is a path, resolve it relative to the project root
 3. Read the contract file and report: contract ID, description, step count, fixture, requires_restart
 
-### Phase 2: Ensure Staging is Running
+### Phase 2: Ensure Godly Terminal is Running
 
-Before running the contract, verify Godly Staging is accessible:
+Before running the contract, verify Godly Terminal is accessible:
 
 1. Run a quick MCP probe:
    ```bash
    pnpm --dir testing run run-contract contracts/<id>.json 2>&1 | head -5
    ```
 2. If connection fails, tell the user:
-   > "Godly Staging must be running. Launch 'Godly Terminal (Staging)' from the Start Menu, then try again."
-3. Do NOT proceed until staging is confirmed reachable.
+   > "Godly Terminal must be running. Launch it, then try again."
+3. Do NOT proceed until the app is confirmed reachable.
 
 ### Phase 3: Run Contract (First Run)
 
@@ -110,16 +110,16 @@ cd src-tauri && cargo check -p <modified-crate>
 pnpm test  # if unit tests exist for the changed code
 ```
 
-**If the fix requires a staging rebuild:**
+**If the fix requires a production rebuild:**
 Ask the user before rebuilding:
-> "The fix requires changes to [daemon/backend/MCP]. Need to rebuild staging. Proceed?"
+> "The fix requires changes to [daemon/backend/MCP]. Need to rebuild and reinstall. Proceed?"
 
 If approved:
 ```bash
-pnpm staging:build && pnpm staging:install
+pnpm production:build && pnpm production:install
 ```
 
-Wait for staging to restart before re-running the contract.
+Wait for the app to restart before re-running the contract.
 
 #### 4e. Re-run the contract
 
@@ -200,4 +200,4 @@ Use the git-workflow-manager agent for commits and PR creation.
 pnpm --dir testing run run-contract contracts/<id>.json
 ```
 
-Requires Godly Staging to be running (installed via `pnpm staging:build && pnpm staging:install`).
+Requires Godly Terminal to be running.
