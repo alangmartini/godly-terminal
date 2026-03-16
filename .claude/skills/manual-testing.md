@@ -72,7 +72,7 @@ For each test case:
 
 When the feature has any UI or visual component (dialogs, tabs, terminal rendering, sidebar changes, etc.), take screenshots and analyze the appearance and UX.
 
-1. **Take screenshots** using the `read_grid` MCP tool for terminal-rendered content, or ask the user to focus the relevant part of the app and use the system screenshot capabilities. If there's a design file (`.pen`), use pencil MCP tools to compare against the design spec.
+1. **Take screenshots** using the `read_grid` MCP tool for terminal-rendered content, or ask the user to focus the relevant part of the app and use the system screenshot capabilities.
 
 2. **Evaluate the visual output** for each relevant state of the feature:
    - Does the UI match the expected design / layout?
@@ -198,7 +198,6 @@ Resources cleaned: <count> terminals, <count> worktrees
 - Use `execute_command` to run verification commands inside test terminals (e.g., `git branch` to check branch name)
 - Use `read_grid` to capture terminal screen state for visual verification of terminal-rendered UI
 - Use `resize_terminal` to test responsive behavior at different sizes
-- For features with a `.pen` design file, use pencil MCP tools (`get_screenshot`, `batch_get`) to compare implementation against the design spec
 - If a feature requires the Tauri app to be running (not just the daemon), note which tests are MCP-only vs require the full app
 - Search for existing issues before creating a new one: `gh issue list --search "<keywords>" --state all`
 
