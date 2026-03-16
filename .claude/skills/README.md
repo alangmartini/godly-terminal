@@ -22,7 +22,6 @@ These are defined in `.claude/settings.json` and scoped to godly-terminal.
 
 | Skill | Purpose |
 |-------|---------|
-| `/figma-design` | Create/modify Figma designs via Playwright + Plugin API (bypasses MCP call limits) |
 | `/bump-version` | Bump the project version and create a git tag |
 
 ## User-Scoped Skills (Plugins)
