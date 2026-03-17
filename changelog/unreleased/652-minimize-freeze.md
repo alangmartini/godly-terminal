@@ -1,0 +1,2 @@
+### Fixed
+- **Terminal freeze after minimizing window** — Win32 SetTimer keeps the Iced event loop alive during minimize. Heartbeat message handler with focus detection via GetForegroundWindow prevents event backlog. Degenerate resize guard skips invalid terminal size computations when minimized. Event coalescing reduces redundant TerminalOutput updates. Diagnostic logging included for future debugging (#652)

@@ -175,6 +175,45 @@ pub fn list_sessions(client: &NativeDaemonClient) -> Result<Vec<SessionInfo>, St
     }
 }
 
+/// Pause output streaming for a session (fire-and-forget).
+///
+/// The VT parser keeps running so grid state stays current,
+/// but no Output/Bell events are sent to the client.
+pub fn pause_session(client: &NativeDaemonClient, session_id: &str) -> Result<(), String> {
+    client.send_fire_and_forget(&Request::PauseSession {
+        session_id: session_id.to_string(),
+    })
+}
+
+/// Resume output streaming for a previously paused session (fire-and-forget).
+pub fn resume_session(client: &NativeDaemonClient, session_id: &str) -> Result<(), String> {
+    client.send_fire_and_forget(&Request::ResumeSession {
+        session_id: session_id.to_string(),
+    })
+}
+
+/// Pause all sessions (fire-and-forget, best-effort).
+///
+/// Used when the window loses focus to prevent event backlog buildup.
+pub fn pause_all_sessions(client: &NativeDaemonClient, session_ids: &[String]) {
+    for id in session_ids {
+        if let Err(e) = pause_session(client, id) {
+            log::warn!("Failed to pause session {}: {}", id, e);
+        }
+    }
+}
+
+/// Resume all sessions (fire-and-forget, best-effort).
+///
+/// Used when the window regains focus to restart event streaming.
+pub fn resume_all_sessions(client: &NativeDaemonClient, session_ids: &[String]) {
+    for id in session_ids {
+        if let Err(e) = resume_session(client, id) {
+            log::warn!("Failed to resume session {}: {}", id, e);
+        }
+    }
+}
+
 /// Detach from all sessions for clean shutdown.
 ///
 /// Errors are logged but not propagated — best-effort cleanup.
