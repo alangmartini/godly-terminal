@@ -21,6 +21,25 @@ pub enum DaemonEventMsg {
     },
     /// Bell character received.
     Bell { session_id: String },
+    /// Heartbeat — keeps the Iced event loop alive when the window is minimized.
+    /// Sent by a dedicated background thread, not by Iced subscriptions (which
+    /// stop being polled when the window is invisible).
+    Heartbeat,
+}
+
+/// Spawn a background thread that sends `DaemonEventMsg::Heartbeat` every second
+/// through the given channel. This keeps the Iced event loop alive even when
+/// the window is minimized and Iced stops polling its own subscriptions.
+pub fn spawn_heartbeat_thread(sender: mpsc::UnboundedSender<DaemonEventMsg>) {
+    std::thread::Builder::new()
+        .name("iced-heartbeat".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if sender.unbounded_send(DaemonEventMsg::Heartbeat).is_err() {
+                break; // Channel closed, app shutting down
+            }
+        })
+        .expect("Failed to spawn heartbeat thread");
 }
 
 /// Event sink that sends daemon events through an mpsc channel to iced.
@@ -74,9 +93,10 @@ impl FrontendEventSink for ChannelEventSink {
 
 /// Creates an iced Subscription that streams DaemonEventMsg values from a channel receiver.
 ///
-/// The receiver is wrapped in an `Arc<parking_lot::Mutex<Option<...>>>` so it can be
-/// taken exactly once by the subscription stream. Subsequent calls (from iced's
-/// subscription deduplication) will produce an empty stream since the receiver is gone.
+/// The receiver is wrapped in an `Arc<parking_lot::Mutex<Option<...>>>`. When the
+/// subscription stream is dropped (e.g., Iced recreates it after dormancy), the
+/// receiver is **put back** so the next `stream()` call can take it again. This
+/// prevents the subscription from permanently dying after minimize/restore.
 pub fn daemon_events(
     receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<DaemonEventMsg>>>>,
 ) -> iced::Subscription<DaemonEventMsg> {
@@ -98,11 +118,15 @@ pub fn daemon_events(
             self: Box<Self>,
             _input: EventStream,
         ) -> futures::stream::BoxStream<'static, Self::Output> {
-            if let Some(rx) = self.receiver.lock().take() {
-                Box::pin(rx)
+            let rx = self.receiver.lock().take();
+            if let Some(rx) = rx {
+                // Wrap the receiver in a stream that puts it back on drop.
+                Box::pin(RestoringStream {
+                    inner: rx,
+                    storage: self.receiver,
+                })
             } else {
-                // Receiver already taken — return an empty stream that never completes.
-                // This keeps the subscription alive (iced won't re-create it).
+                // Receiver already taken by another active stream — wait for it.
                 Box::pin(futures::stream::pending())
             }
         }
@@ -111,9 +135,39 @@ pub fn daemon_events(
     subscription::from_recipe(DaemonEventRecipe { receiver })
 }
 
+/// A stream wrapper that returns the inner receiver to shared storage on drop.
+/// This allows the subscription to be recreated after Iced drops it (e.g., during
+/// window minimize/restore dormancy cycles).
+struct RestoringStream<T> {
+    inner: mpsc::UnboundedReceiver<T>,
+    storage: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<T>>>>,
+}
+
+impl<T> futures::Stream for RestoringStream<T> {
+    type Item = T;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
+
+impl<T> Drop for RestoringStream<T> {
+    fn drop(&mut self) {
+        // Put the receiver back so the subscription can be recreated.
+        // Safety: we need to move `inner` out, but we're in drop so self is
+        // going away. Use a dummy receiver via a fresh channel.
+        let (_, dummy) = mpsc::unbounded();
+        let real = std::mem::replace(&mut self.inner, dummy);
+        *self.storage.lock() = Some(real);
+    }
+}
+
 /// Creates an iced Subscription that streams McpEvent values from a channel receiver.
 ///
-/// Uses the same Arc<Mutex<Option<...>>> pattern as `daemon_events`.
+/// Uses the same restoring-stream pattern as `daemon_events`.
 pub fn mcp_events(
     receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
 ) -> iced::Subscription<godly_app_adapter::mcp_pipe::McpEvent> {
@@ -135,8 +189,12 @@ pub fn mcp_events(
             self: Box<Self>,
             _input: EventStream,
         ) -> futures::stream::BoxStream<'static, Self::Output> {
-            if let Some(rx) = self.receiver.lock().take() {
-                Box::pin(rx)
+            let rx = self.receiver.lock().take();
+            if let Some(rx) = rx {
+                Box::pin(RestoringStream {
+                    inner: rx,
+                    storage: self.receiver,
+                })
             } else {
                 Box::pin(futures::stream::pending())
             }

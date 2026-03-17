@@ -5,6 +5,43 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// Lightweight diagnostic logger for freeze debugging.
+/// Writes timestamped events to a file in the app data directory.
+pub mod diag {
+    use std::io::Write;
+    use std::sync::Mutex;
+
+    static LOG: Mutex<Option<std::fs::File>> = Mutex::new(None);
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+    pub fn init() {
+        START.get_or_init(std::time::Instant::now);
+        let base = match std::env::var("APPDATA") {
+            Ok(v) => std::path::PathBuf::from(v),
+            Err(_) => return,
+        };
+        let path = base.join("com.godly.terminal").join("iced-diag.log");
+        if let Ok(f) = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+        {
+            *LOG.lock().unwrap() = Some(f);
+        }
+    }
+
+    pub fn log(msg: &str) {
+        if let Ok(mut guard) = LOG.lock() {
+            if let Some(f) = guard.as_mut() {
+                let elapsed = START.get().map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+                let _ = writeln!(f, "[{:>8.3}] {}", elapsed, msg);
+                let _ = f.flush();
+            }
+        }
+    }
+}
+
 
 
 use futures_channel::mpsc;
@@ -720,6 +757,9 @@ pub enum Message {
     RemoteClearEditor,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
+    /// Heartbeat tick — keeps the event loop alive when window is unfocused/minimized
+    /// so that the Focused event is reliably delivered on restore.
+    Heartbeat,
     /// Toggle the settings dialog.
     ToggleSettings,
     /// User clicked a settings tab.
@@ -1206,6 +1246,29 @@ impl GodlyApp {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        // Diagnostic: log key messages for freeze debugging
+        match &message {
+            Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
+                diag::log(&format!("UPDATE: TerminalOutput({})", &session_id[..8.min(session_id.len())]));
+            }
+            Message::GridFetched { session_id, .. } => {
+                diag::log(&format!("UPDATE: GridFetched({})", &session_id[..8.min(session_id.len())]));
+            }
+            Message::GridFetchFailed { session_id, ref error } => {
+                diag::log(&format!("UPDATE: GridFetchFailed({}) err={}", &session_id[..8.min(session_id.len())], error));
+            }
+            Message::WindowFocusChanged { focused, .. } => {
+                diag::log(&format!("UPDATE: WindowFocusChanged(focused={})", focused));
+            }
+            Message::Heartbeat => {
+                diag::log("UPDATE: Heartbeat(RedrawRequested)");
+            }
+            Message::KeyboardEvent(_) => {
+                diag::log("UPDATE: KeyboardEvent");
+            }
+            _ => {}
+        }
+
         match message {
             // --- Initialization ---
             Message::Initialized(Ok(result)) => {
@@ -1219,6 +1282,11 @@ impl GodlyApp {
             // --- Daemon events (channel-driven, no polling) ---
             Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
                 if let Some(term) = self.terminals.get_mut(&session_id) {
+                    // Already dirty + fetching → this event is redundant, skip all work.
+                    // This coalesces bursts of output events into a single grid fetch.
+                    if term.dirty && term.fetching {
+                        return Task::none();
+                    }
                     term.dirty = true;
                 }
                 // Track notifications for non-focused terminals.
@@ -1255,6 +1323,38 @@ impl GodlyApp {
                 self.play_notification_sound_if_allowed(&session_id);
                 log::debug!("Bell from session {}", session_id);
                 return self.request_window_attention_if_allowed();
+            }
+            Message::DaemonEvent(DaemonEventMsg::Heartbeat) => {
+                // Heartbeat from background thread — keeps event loop alive.
+                // Also detect focus via Win32 API since Iced events are unreliable.
+                #[cfg(windows)]
+                {
+                    extern "system" {
+                        fn GetForegroundWindow() -> *mut std::ffi::c_void;
+                        fn GetWindowThreadProcessId(hwnd: *mut std::ffi::c_void, pid: *mut u32) -> u32;
+                        fn GetCurrentProcessId() -> u32;
+                    }
+                    let is_actually_focused = unsafe {
+                        let fg = GetForegroundWindow();
+                        if fg.is_null() {
+                            false
+                        } else {
+                            let mut pid: u32 = 0;
+                            GetWindowThreadProcessId(fg, &mut pid);
+                            pid == GetCurrentProcessId()
+                        }
+                    };
+                    if is_actually_focused != self.window_focused {
+                        diag::log(&format!(
+                            "HEARTBEAT: focus correction — OS={} iced={}",
+                            is_actually_focused, self.window_focused
+                        ));
+                        self.window_focused = is_actually_focused;
+                        if is_actually_focused {
+                            self.last_attention_request_ms = None;
+                        }
+                    }
+                }
             }
 
             // --- Grid fetch results ---
@@ -1678,6 +1778,8 @@ impl GodlyApp {
                 width,
                 height,
             } => {
+                diag::log(&format!("UPDATE: WindowResized({}x{})", width, height));
+
                 let (old_rows, old_cols) = self.terminal_grid_size(self.target_terminal_id());
 
                 self.window_id = Some(window_id);
@@ -1686,8 +1788,34 @@ impl GodlyApp {
 
                 let (new_rows, new_cols) = self.terminal_grid_size(self.target_terminal_id());
 
-                if new_cols != old_cols || new_rows != old_rows {
-                    return self.resize_all_terminals();
+                // Ignore degenerate grid sizes (e.g., when minimized on Windows
+                // Iced may report tiny pixel dimensions that compute to ≤2 rows/cols).
+                // Resizing terminals to near-zero destroys viewport content.
+                if new_rows <= 2 || new_cols <= 2 {
+                    diag::log(&format!("RESIZE: ignored — degenerate grid {}x{} (minimized?)", new_cols, new_rows));
+                    // Revert stored dimensions so the next real resize computes correctly.
+                    self.window_width = old_cols as f32 * self.font_metrics.cell_width;
+                    self.window_height = old_rows as f32 * self.font_metrics.cell_height;
+                } else if new_cols != old_cols || new_rows != old_rows {
+                    diag::log(&format!("RESIZE: {}x{} -> {}x{}", old_cols, old_rows, new_cols, new_rows));
+                    // Resize terminals AND force-fetch all grids. After minimize/restore
+                    // the subscription stream may be dead, so this is the only way to
+                    // get fresh content. Clear fetching flags to bypass coalescing.
+                    let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                    for id in &ids {
+                        if let Some(t) = self.terminals.get_mut(id) {
+                            t.fetching = false;
+                            t.dirty = true;
+                        }
+                    }
+                    let resize_task = self.resize_all_terminals();
+                    let fetch_tasks: Vec<Task<Message>> = ids
+                        .into_iter()
+                        .map(|id| self.fetch_grid(&id))
+                        .collect();
+                    let mut tasks = vec![resize_task];
+                    tasks.extend(fetch_tasks);
+                    return Task::batch(tasks);
                 }
             }
             Message::WindowFocusChanged { window_id, focused } => {
@@ -1695,9 +1823,27 @@ impl GodlyApp {
                 self.window_focused = focused;
                 if !focused {
                     self.cancel_mru_switcher();
+                    // Pause background sessions (not the active one) to reduce
+                    // event traffic while the window isn't visible.
+                    // Only pause if we can identify the active terminal — if we
+                    // can't, don't pause anything (safe default).
+                    if let (Some(active_id), Some(client)) = (self.active_focused().map(str::to_string), &self.client) {
+                        let bg_ids: Vec<String> = self.terminals.iter()
+                            .filter(|t| t.id != active_id)
+                            .map(|t| t.id.clone())
+                            .collect();
+                        if !bg_ids.is_empty() {
+                            commands::pause_all_sessions(client, &bg_ids);
+                        }
+                    }
                 }
                 if focused {
                     self.last_attention_request_ms = None;
+                    // Resume all sessions that may have been paused on unfocus.
+                    if let Some(client) = &self.client {
+                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        commands::resume_all_sessions(client, &ids);
+                    }
                     return window::request_user_attention(window_id, None);
                 }
             }
@@ -2342,6 +2488,62 @@ impl GodlyApp {
                 let now_ms = Self::now_ms();
                 let _ = prune_expired_toasts(self.toasts.as_mut(), now_ms);
             }
+            Message::Heartbeat => {
+                // Detect actual focus via Win32 API — Iced's Focused/Unfocused
+                // events are unreliable on Windows (missed on minimize, stolen
+                // on restore). This runs from RedrawRequested + WM_TIMER.
+                #[cfg(windows)]
+                {
+                    extern "system" {
+                        fn GetForegroundWindow() -> *mut std::ffi::c_void;
+                        fn GetWindowThreadProcessId(hwnd: *mut std::ffi::c_void, pid: *mut u32) -> u32;
+                        fn GetCurrentProcessId() -> u32;
+                    }
+                    let is_actually_focused = unsafe {
+                        let fg = GetForegroundWindow();
+                        if fg.is_null() {
+                            false
+                        } else {
+                            let mut pid: u32 = 0;
+                            GetWindowThreadProcessId(fg, &mut pid);
+                            pid == GetCurrentProcessId()
+                        }
+                    };
+                    if is_actually_focused != self.window_focused {
+                        diag::log(&format!(
+                            "HEARTBEAT: focus correction — OS={} iced={}",
+                            is_actually_focused, self.window_focused
+                        ));
+                        self.window_focused = is_actually_focused;
+                        if is_actually_focused {
+                            self.last_attention_request_ms = None;
+                            // Resume any paused sessions
+                            if let Some(client) = &self.client {
+                                let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                                commands::resume_all_sessions(client, &ids);
+                            }
+                        }
+                    }
+                    // Periodic grid poll: when focused, fetch grids for all terminals.
+                    // This compensates for the daemon event subscription dying after
+                    // minimize/restore (bridge pipe can break during dormancy).
+                    if is_actually_focused && self.client.is_some() {
+                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        for id in &ids {
+                            if let Some(t) = self.terminals.get_mut(id) {
+                                t.fetching = false; // Force-allow fetch
+                            }
+                        }
+                        let tasks: Vec<Task<Message>> = ids
+                            .into_iter()
+                            .map(|id| self.fetch_grid(&id))
+                            .collect();
+                        if !tasks.is_empty() {
+                            return Task::batch(tasks);
+                        }
+                    }
+                }
+            }
 
             // --- Sidebar + Settings ---
             Message::ToggleSidebar => {
@@ -2818,6 +3020,7 @@ impl GodlyApp {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        diag::log(&format!("VIEW: focused={} terminals={}", self.window_focused, self.terminals.count()));
         if let Some(ref err) = self.init_error {
             return center(text(format!("Initialization error: {}", err)).size(18)).into();
         }
@@ -4340,6 +4543,11 @@ impl GodlyApp {
                         focused: false,
                     })
                 }
+                // RedrawRequested fires from WM_TIMER when minimized/unfocused.
+                // Route it through update() so the Win32 focus check can run.
+                event::Event::Window(window::Event::RedrawRequested(_)) => {
+                    Some(Message::Heartbeat)
+                }
                 event::Event::Window(window::Event::FileDropped(path)) => {
                     Some(Message::FileDropped(path))
                 }
@@ -4368,6 +4576,10 @@ impl GodlyApp {
                 _ => None,
             }),
         ];
+
+        // NOTE: Heartbeat is sent via a background thread (spawn_heartbeat_thread)
+        // through the daemon event channel, NOT via an Iced subscription. Iced
+        // stops polling subscriptions when the window is minimized/invisible.
 
         if !self.toasts.is_empty() {
             subscriptions.push(
@@ -6150,6 +6362,7 @@ impl GodlyApp {
             selection,
             default_fg: term_palette.foreground,
             default_bg: term_palette.background,
+            on_redraw: Some(Message::Heartbeat),
         };
 
         let accent_color = if is_focused {
@@ -6920,6 +7133,11 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 
     let (tx, rx) = mpsc::unbounded();
     *app.event_receiver.lock() = Some(rx);
+
+    // Spawn heartbeat thread that keeps the event loop alive via the same
+    // channel. Iced subscriptions stop being polled when the window is
+    // minimized, so we need an external thread to prevent dormancy.
+    crate::subscription::spawn_heartbeat_thread(tx.clone());
 
     let sink = Arc::new(ChannelEventSink::new(tx));
     if let Err(e) = client.setup_bridge(sink) {

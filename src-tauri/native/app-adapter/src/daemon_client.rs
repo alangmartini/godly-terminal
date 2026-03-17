@@ -373,19 +373,47 @@ fn bridge_io_loop<S: FrontendEventSink>(
     sink: Arc<S>,
 ) {
     let mut pending_responses: HashMap<u32, mpsc::Sender<Response>> = HashMap::new();
+    let start = std::time::Instant::now();
+    let mut iterations: u64 = 0;
+    let mut reads: u64 = 0;
+    let mut writes: u64 = 0;
+
+    // Helper: write bridge exit reason to file for post-mortem
+    let bridge_exit = |reason: &str, iters: u64, r: u64, w: u64, elapsed: f64| {
+        if let Ok(base) = std::env::var("APPDATA") {
+            let path = std::path::PathBuf::from(base)
+                .join("com.godly.terminal")
+                .join("bridge-exit.log");
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                use std::io::Write;
+                let _ = writeln!(
+                    f,
+                    "[{:.3}s] EXIT: {} (iters={}, reads={}, writes={})",
+                    elapsed, reason, iters, r, w
+                );
+            }
+        }
+    };
 
     loop {
+        iterations += 1;
+
         // Phase 1: drain and write all pending requests
         loop {
             match request_rx.try_recv() {
                 Ok(bridge_req) => {
+                    writes += 1;
                     if let Err(e) = write_request_with_id(
                         &mut writer,
                         &bridge_req.request,
                         bridge_req.request_id,
                     ) {
-                        log::error!("Bridge: failed to write request: {}", e);
-                        return; // Pipe broken
+                        bridge_exit(&format!("write_request failed: {}", e), iterations, reads, writes, start.elapsed().as_secs_f64());
+                        return;
                     }
                     if let (Some(id), Some(tx)) = (bridge_req.request_id, bridge_req.response_tx) {
                         pending_responses.insert(id, tx);
@@ -393,7 +421,7 @@ fn bridge_io_loop<S: FrontendEventSink>(
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    log::info!("Bridge: request channel disconnected, shutting down");
+                    bridge_exit("request_rx disconnected", iterations, reads, writes, start.elapsed().as_secs_f64());
                     return;
                 }
             }
@@ -416,7 +444,7 @@ fn bridge_io_loop<S: FrontendEventSink>(
             };
 
             if result == 0 {
-                log::error!("Bridge: PeekNamedPipe failed, pipe likely broken");
+                bridge_exit("PeekNamedPipe failed (pipe broken)", iterations, reads, writes, start.elapsed().as_secs_f64());
                 return;
             }
 
@@ -424,7 +452,7 @@ fn bridge_io_loop<S: FrontendEventSink>(
         };
 
         if data_available {
-            // Read and dispatch messages
+            reads += 1;
             match read_daemon_message_ext(&mut reader) {
                 Ok(ReadResult::Message(DaemonMessage::Event(event))) => {
                     dispatch_event(&*sink, event);
@@ -446,20 +474,18 @@ fn bridge_io_loop<S: FrontendEventSink>(
                     sink.on_grid_diff(&session_id, &binary_diff);
                 }
                 Ok(ReadResult::Eof) => {
-                    log::info!("Bridge: daemon pipe EOF");
+                    bridge_exit("daemon pipe EOF", iterations, reads, writes, start.elapsed().as_secs_f64());
                     return;
                 }
                 Ok(ReadResult::Message(DaemonMessage::Response(response))) => {
-                    // Response without request_id routing — drop it
                     log::warn!("Bridge: unroutable response: {:?}", response);
                 }
                 Err(e) => {
-                    log::error!("Bridge: read error: {}", e);
+                    bridge_exit(&format!("read error: {}", e), iterations, reads, writes, start.elapsed().as_secs_f64());
                     return;
                 }
             }
         } else {
-            // No data available, sleep briefly to avoid busy-spinning
             thread::sleep(Duration::from_millis(1));
         }
     }
