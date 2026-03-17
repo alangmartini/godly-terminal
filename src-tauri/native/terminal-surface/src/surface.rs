@@ -35,15 +35,25 @@ pub const DEFAULT_BG: Color = Color {
 /// Grid data and font metrics live on [`TerminalCanvas`] itself so that the
 /// parent widget can update them directly. This struct exists only to satisfy
 /// the `Program::State` associated type.
-#[derive(Debug, Default)]
-pub struct TerminalCanvasState;
+#[derive(Debug)]
+pub struct TerminalCanvasState {
+    last_heartbeat: std::time::Instant,
+}
+
+impl Default for TerminalCanvasState {
+    fn default() -> Self {
+        Self {
+            last_heartbeat: std::time::Instant::now(),
+        }
+    }
+}
 
 /// Terminal canvas program that renders a RichGridData snapshot.
 ///
 /// Grid data is borrowed for the duration of the render, avoiding a full clone
 /// of `RichGridData` per pane per frame. Font metrics and selection state are
 /// cheap `Copy` types carried by value.
-pub struct TerminalCanvas<'a> {
+pub struct TerminalCanvas<'a, Message = ()> {
     /// Borrowed grid data from the daemon (avoids cloning per frame).
     pub grid: Option<&'a RichGridData>,
     /// Font metrics for cell sizing.
@@ -55,9 +65,14 @@ pub struct TerminalCanvas<'a> {
     pub default_fg: Color,
     /// Default background color (overridable by theme).
     pub default_bg: Color,
+    /// Message published on every RedrawRequested event. Used to keep the
+    /// app's update() loop alive after minimize/restore when Iced subscriptions
+    /// are dead. The canvas widget dispatches events through the widget tree
+    /// (not subscriptions), so this path survives dormancy.
+    pub on_redraw: Option<Message>,
 }
 
-impl Default for TerminalCanvas<'_> {
+impl<Message> Default for TerminalCanvas<'_, Message> {
     fn default() -> Self {
         Self {
             grid: None,
@@ -65,11 +80,12 @@ impl Default for TerminalCanvas<'_> {
             selection: None,
             default_fg: DEFAULT_FG,
             default_bg: DEFAULT_BG,
+            on_redraw: None,
         }
     }
 }
 
-impl<'a> TerminalCanvas<'a> {
+impl<'a, Message> TerminalCanvas<'a, Message> {
     /// Create a new terminal canvas with the given font metrics.
     pub fn new(metrics: FontMetrics) -> Self {
         Self {
@@ -78,12 +94,33 @@ impl<'a> TerminalCanvas<'a> {
             selection: None,
             default_fg: DEFAULT_FG,
             default_bg: DEFAULT_BG,
+            on_redraw: None,
         }
     }
 }
 
-impl<Message> canvas::Program<Message> for TerminalCanvas<'_> {
+impl<Message: Clone> canvas::Program<Message> for TerminalCanvas<'_, Message> {
     type State = TerminalCanvasState;
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &canvas::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        use iced::window;
+        if let canvas::Event::Window(window::Event::RedrawRequested(_)) = event {
+            // Throttle to 1 heartbeat per second to avoid infinite render loops.
+            if state.last_heartbeat.elapsed() >= std::time::Duration::from_secs(1) {
+                state.last_heartbeat = std::time::Instant::now();
+                if let Some(msg) = &self.on_redraw {
+                    return Some(canvas::Action::publish(msg.clone()));
+                }
+            }
+        }
+        None
+    }
 
     fn draw(
         &self,
