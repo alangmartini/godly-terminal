@@ -134,8 +134,47 @@ Write-Host "6. Typing 'world' after restore..." -ForegroundColor Yellow
 [System.Windows.Forms.SendKeys]::SendWait("world{ENTER}")
 Start-Sleep -Seconds 3
 
+# 7b. Check shim diagnostic logs
+Write-Host "`n=== Shim Diagnostic Logs ===" -ForegroundColor Cyan
+$shimLogs = Get-ChildItem "$env:APPDATA\com.godly.terminal\godly-shim-diag-*.log" -ErrorAction SilentlyContinue
+if ($shimLogs) {
+    foreach ($sl in $shimLogs) {
+        Write-Host "`n--- $($sl.Name) ---" -ForegroundColor Yellow
+        $shimLines = Get-Content $sl.FullName
+        # Show all lines (shim logs are small and focused)
+        $shimLines | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+
+        # Check for idle timeout
+        $idleTimeout = $shimLines | Select-String "IDLE TIMEOUT"
+        if ($idleTimeout) {
+            Write-Host "  ** IDLE TIMEOUT DETECTED -- shim disconnected due to daemon silence **" -ForegroundColor Red
+        }
+        $orphanTimeout = $shimLines | Select-String "ORPHAN TIMEOUT"
+        if ($orphanTimeout) {
+            Write-Host "  ** ORPHAN TIMEOUT DETECTED -- shim self-terminated **" -ForegroundColor Red
+        }
+    }
+} else {
+    Write-Host "No shim diagnostic logs found" -ForegroundColor Yellow
+}
+
+# Also check daemon log for pause/resume
+Write-Host "`n=== Daemon Log (pause/resume) ===" -ForegroundColor Cyan
+$daemonLog = "$env:APPDATA\com.godly.terminal\godly-daemon-debug.log"
+if (Test-Path $daemonLog) {
+    $daemonLines = Get-Content $daemonLog
+    $pauseResume = $daemonLines | Select-String "PAUSED|RESUMED"
+    if ($pauseResume) {
+        $pauseResume | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    } else {
+        Write-Host "  No pause/resume events found" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  Daemon log not found" -ForegroundColor Yellow
+}
+
 # 8. Check diagnostic log
-Write-Host "`n=== Diagnostic Log Analysis ===" -ForegroundColor Cyan
+Write-Host "`n=== Iced Diagnostic Log Analysis ===" -ForegroundColor Cyan
 
 if (-not (Test-Path $diagLog)) {
     Write-Host "FAIL: Diagnostic log not found" -ForegroundColor Red

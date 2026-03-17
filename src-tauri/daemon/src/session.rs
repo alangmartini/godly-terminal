@@ -651,6 +651,11 @@ impl DaemonSession {
             let mut coalesce_buf: Vec<u8> = Vec::new();
             let mut coalesce_start: Option<Instant> = None;
 
+            // Keepalive: send periodic messages to prevent the shim's
+            // DAEMON_IDLE_TIMEOUT (60s) from firing during idle periods.
+            const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+            let mut last_shim_write = Instant::now();
+
             while reader_running.load(Ordering::Relaxed) {
                 let mut did_work = false;
 
@@ -669,6 +674,7 @@ impl DaemonSession {
                                 reader_running.store(false, Ordering::Relaxed);
                                 break;
                             }
+                            last_shim_write = Instant::now();
                             did_work = true;
                         }
                         Ok(ShimIoMessage::Control(req)) => {
@@ -681,6 +687,7 @@ impl DaemonSession {
                                 reader_running.store(false, Ordering::Relaxed);
                                 break;
                             }
+                            last_shim_write = Instant::now();
                             did_work = true;
                         }
                         Err(std_mpsc::TryRecvError::Empty) => break,
@@ -744,6 +751,21 @@ impl DaemonSession {
                         diff_interval,
                         &reader_paused,
                     );
+
+                    // Send keepalive to prevent shim idle timeout during
+                    // idle periods (window minimized, no user input).
+                    if last_shim_write.elapsed() > KEEPALIVE_INTERVAL {
+                        if let Err(e) = write_shim_json(&mut pipe, &ShimRequest::Keepalive) {
+                            daemon_log!(
+                                "Session {} I/O: keepalive write error: {}",
+                                session_id,
+                                e
+                            );
+                            reader_running.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                        last_shim_write = Instant::now();
+                    }
 
                     if !did_work {
                         thread::sleep(Duration::from_millis(1));
@@ -1018,10 +1040,12 @@ impl DaemonSession {
     }
 
     pub fn pause(&self) {
+        daemon_log!("Session {} PAUSED — no more writes to shim pipe", self.id);
         self.is_paused_flag.store(true, Ordering::Relaxed);
     }
 
     pub fn resume(&self) {
+        daemon_log!("Session {} RESUMED", self.id);
         self.is_paused_flag.store(false, Ordering::Relaxed);
     }
 

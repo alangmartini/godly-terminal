@@ -13,6 +13,7 @@ pub enum ShimControlRequest {
     Status,
     Shutdown,
     DrainBuffer,
+    Keepalive,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

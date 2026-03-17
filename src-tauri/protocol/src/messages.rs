@@ -249,6 +249,10 @@ pub enum ShimRequest {
     Shutdown,
     /// Ask the shim to drain its ring buffer
     DrainBuffer,
+    /// Keepalive — resets the shim's daemon idle timeout.
+    /// Sent periodically by the daemon I/O thread to prevent the shim from
+    /// disconnecting during idle periods (e.g., window minimized).
+    Keepalive,
 }
 
 /// Responses/events sent from a pty-shim to the daemon
