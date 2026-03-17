@@ -1,8 +1,10 @@
+mod diag;
 mod metadata;
 mod protocol;
 mod pty;
 mod ring_buffer;
 
+use diag::shim_log;
 use metadata::ShimMetadata;
 use protocol::{
     parse_incoming_frame, write_binary_frame, write_json, ShimControlRequest,
@@ -118,6 +120,15 @@ fn main() {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
+    // Initialize diagnostic file logger (writes to %APPDATA%/com.godly.terminal/)
+    diag::init(&args.session_id);
+    shim_log!(
+        "SHIM START pid={} session={} shell={}",
+        std::process::id(),
+        args.session_id,
+        args.shell_type
+    );
+
     let pipe_name = args
         .pipe_name
         .unwrap_or_else(|| format!(r"\\.\pipe\godly-shim-{}", args.session_id));
@@ -127,6 +138,13 @@ fn run() -> Result<(), String> {
         pty::open_pty(&args.shell_type, args.cwd.as_deref(), args.rows, args.cols, None)?;
     let shell_pid = pty_parts.shell_pid;
 
+    shim_log!(
+        "PTY OPEN shell_pid={} pipe={} rows={} cols={}",
+        shell_pid,
+        pipe_name,
+        args.rows,
+        args.cols
+    );
     eprintln!(
         "godly-pty-shim: session={} shell_pid={} pipe={}",
         args.session_id, shell_pid, pipe_name
@@ -273,7 +291,13 @@ fn main_loop(
 
         // Orphan timeout: if no daemon has connected for ORPHAN_TIMEOUT_SECS,
         // self-terminate to prevent indefinite resource consumption.
-        if last_daemon_connected.elapsed() > Duration::from_secs(ORPHAN_TIMEOUT_SECS) {
+        let orphan_elapsed = last_daemon_connected.elapsed().as_secs();
+        if orphan_elapsed > ORPHAN_TIMEOUT_SECS {
+            shim_log!(
+                "ORPHAN TIMEOUT elapsed={}s limit={}s — self-terminating",
+                orphan_elapsed,
+                ORPHAN_TIMEOUT_SECS
+            );
             eprintln!(
                 "godly-pty-shim: no daemon connection for {}s, self-terminating",
                 ORPHAN_TIMEOUT_SECS
@@ -339,6 +363,7 @@ fn main_loop(
             }
         };
 
+        shim_log!("DAEMON CONNECTED on {}", pipe_name);
         eprintln!("godly-pty-shim: daemon connected on {}", pipe_name);
         last_daemon_connected = std::time::Instant::now();
 
@@ -358,6 +383,7 @@ fn main_loop(
         // Bidirectional I/O loop
         let mut disconnected = false;
         let mut last_daemon_activity = Instant::now();
+        let mut last_idle_log = Instant::now();
 
         loop {
             if shutdown_requested.load(Ordering::SeqCst) {
@@ -405,9 +431,13 @@ fn main_loop(
             // Read daemon→shim messages (non-blocking)
             match pipe::try_read_frame(&handle) {
                 Ok(Some(frame_data)) => {
+                    let idle_was = last_daemon_activity.elapsed().as_secs();
                     last_daemon_activity = Instant::now();
                     match parse_incoming_frame(&frame_data) {
                         Ok(ShimFrame::Binary { tag, data }) if tag == TAG_WRITE => {
+                            if idle_was > 5 {
+                                shim_log!("DAEMON FRAME tag=WRITE len={} (idle was {}s)", data.len(), idle_was);
+                            }
                             let _ = input_tx.send(data);
                         }
                         Ok(ShimFrame::Control(ShimControlRequest::Resize { rows, cols })) => {
@@ -416,6 +446,7 @@ fn main_loop(
                             let _ = resize_tx.send((rows, cols));
                         }
                         Ok(ShimFrame::Control(ShimControlRequest::Status)) => {
+                            shim_log!("DAEMON FRAME tag=Status (idle was {}s)", idle_was);
                             let resp = ShimControlResponse::StatusInfo {
                                 shell_pid,
                                 running: shell_running.load(Ordering::SeqCst),
@@ -429,6 +460,7 @@ fn main_loop(
                             }
                         }
                         Ok(ShimFrame::Control(ShimControlRequest::Shutdown)) => {
+                            shim_log!("DAEMON FRAME tag=Shutdown");
                             shutdown_requested.store(true, Ordering::SeqCst);
                             handle.disconnect_and_close();
                             return Ok(());
@@ -470,10 +502,26 @@ fn main_loop(
                 break;
             }
 
+            // Periodic idle status log (every 10s when idle > 5s)
+            let idle_secs = last_daemon_activity.elapsed().as_secs();
+            if idle_secs > 5 && last_idle_log.elapsed() > Duration::from_secs(10) {
+                shim_log!(
+                    "IDLE STATUS daemon_idle={}s / {}s limit",
+                    idle_secs,
+                    DAEMON_IDLE_TIMEOUT_SECS
+                );
+                last_idle_log = Instant::now();
+            }
+
             // Daemon idle timeout: if the daemon hasn't sent any messages
             // (writes, control, status) for DAEMON_IDLE_TIMEOUT_SECS, assume
             // it crashed or was force-killed without closing the pipe.
-            if last_daemon_activity.elapsed() > Duration::from_secs(DAEMON_IDLE_TIMEOUT_SECS) {
+            if idle_secs > DAEMON_IDLE_TIMEOUT_SECS {
+                shim_log!(
+                    "IDLE TIMEOUT elapsed={}s limit={}s — disconnecting pipe",
+                    idle_secs,
+                    DAEMON_IDLE_TIMEOUT_SECS
+                );
                 eprintln!(
                     "godly-pty-shim: no daemon activity for {}s, assuming disconnected",
                     DAEMON_IDLE_TIMEOUT_SECS
@@ -486,6 +534,7 @@ fn main_loop(
         }
 
         handle.disconnect_and_close();
+        shim_log!("DAEMON DISCONNECTED — back to waiting for reconnection");
         eprintln!("godly-pty-shim: daemon disconnected, buffering output");
 
         // Drain any output that arrived during the session into the ring buffer

@@ -1018,10 +1018,12 @@ impl DaemonSession {
     }
 
     pub fn pause(&self) {
+        daemon_log!("Session {} PAUSED — no more writes to shim pipe", self.id);
         self.is_paused_flag.store(true, Ordering::Relaxed);
     }
 
     pub fn resume(&self) {
+        daemon_log!("Session {} RESUMED", self.id);
         self.is_paused_flag.store(false, Ordering::Relaxed);
     }
 
