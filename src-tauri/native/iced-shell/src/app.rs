@@ -1254,8 +1254,14 @@ impl GodlyApp {
             Message::GridFetched { session_id, .. } => {
                 diag::log(&format!("UPDATE: GridFetched({})", &session_id[..8.min(session_id.len())]));
             }
+            Message::GridFetchFailed { session_id, ref error } => {
+                diag::log(&format!("UPDATE: GridFetchFailed({}) err={}", &session_id[..8.min(session_id.len())], error));
+            }
             Message::WindowFocusChanged { focused, .. } => {
                 diag::log(&format!("UPDATE: WindowFocusChanged(focused={})", focused));
+            }
+            Message::Heartbeat => {
+                diag::log("UPDATE: Heartbeat(RedrawRequested)");
             }
             Message::KeyboardEvent(_) => {
                 diag::log("UPDATE: KeyboardEvent");
@@ -1792,7 +1798,24 @@ impl GodlyApp {
                     self.window_height = old_rows as f32 * self.font_metrics.cell_height;
                 } else if new_cols != old_cols || new_rows != old_rows {
                     diag::log(&format!("RESIZE: {}x{} -> {}x{}", old_cols, old_rows, new_cols, new_rows));
-                    return self.resize_all_terminals();
+                    // Resize terminals AND force-fetch all grids. After minimize/restore
+                    // the subscription stream may be dead, so this is the only way to
+                    // get fresh content. Clear fetching flags to bypass coalescing.
+                    let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                    for id in &ids {
+                        if let Some(t) = self.terminals.get_mut(id) {
+                            t.fetching = false;
+                            t.dirty = true;
+                        }
+                    }
+                    let resize_task = self.resize_all_terminals();
+                    let fetch_tasks: Vec<Task<Message>> = ids
+                        .into_iter()
+                        .map(|id| self.fetch_grid(&id))
+                        .collect();
+                    let mut tasks = vec![resize_task];
+                    tasks.extend(fetch_tasks);
+                    return Task::batch(tasks);
                 }
             }
             Message::WindowFocusChanged { window_id, focused } => {
@@ -2499,6 +2522,24 @@ impl GodlyApp {
                                 let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
                                 commands::resume_all_sessions(client, &ids);
                             }
+                        }
+                    }
+                    // Periodic grid poll: when focused, fetch grids for all terminals.
+                    // This compensates for the daemon event subscription dying after
+                    // minimize/restore (bridge pipe can break during dormancy).
+                    if is_actually_focused && self.client.is_some() {
+                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        for id in &ids {
+                            if let Some(t) = self.terminals.get_mut(id) {
+                                t.fetching = false; // Force-allow fetch
+                            }
+                        }
+                        let tasks: Vec<Task<Message>> = ids
+                            .into_iter()
+                            .map(|id| self.fetch_grid(&id))
+                            .collect();
+                        if !tasks.is_empty() {
+                            return Task::batch(tasks);
                         }
                     }
                 }
@@ -6321,6 +6362,7 @@ impl GodlyApp {
             selection,
             default_fg: term_palette.foreground,
             default_bg: term_palette.background,
+            on_redraw: Some(Message::Heartbeat),
         };
 
         let accent_color = if is_focused {

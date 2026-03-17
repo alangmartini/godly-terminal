@@ -57,9 +57,70 @@ Write-Host "3. Minimizing window..." -ForegroundColor Yellow
 [Win32]::ShowWindow($hwnd, [Win32]::SW_MINIMIZE) | Out-Null
 Start-Sleep -Seconds 1
 
-# 5. Wait 15 seconds (simulating user away)
-Write-Host "4. Waiting 15 seconds while minimized..." -ForegroundColor Yellow
-Start-Sleep -Seconds 15
+# 5. Wait 60 seconds — poll shim/daemon/shell processes every 5s to catch when they die
+Write-Host "4. Waiting 60 seconds while minimized (monitoring processes)..." -ForegroundColor Yellow
+
+# Snapshot PIDs before minimize
+$shimsBefore = Get-Process godly-pty-shim -ErrorAction SilentlyContinue
+$daemonBefore = Get-Process godly-daemon -ErrorAction SilentlyContinue
+$shellsBefore = Get-Process powershell, pwsh, cmd -ErrorAction SilentlyContinue | Where-Object {
+    # Filter to shells that started after our app (rough heuristic)
+    $_.StartTime -gt $proc.StartTime
+}
+
+Write-Host "   Processes at minimize:" -ForegroundColor Gray
+Write-Host "     godly-pty-shim: $($shimsBefore.Count) (PIDs: $($shimsBefore.Id -join ', '))" -ForegroundColor Gray
+Write-Host "     godly-daemon:   $($daemonBefore.Count) (PIDs: $($daemonBefore.Id -join ', '))" -ForegroundColor Gray
+Write-Host "     shells:         $($shellsBefore.Count) (PIDs: $($shellsBefore.Id -join ', '))" -ForegroundColor Gray
+
+for ($t = 5; $t -le 60; $t += 5) {
+    Start-Sleep -Seconds 5
+    $shimsNow = Get-Process godly-pty-shim -ErrorAction SilentlyContinue
+    $daemonNow = Get-Process godly-daemon -ErrorAction SilentlyContinue
+    $shellsNow = Get-Process powershell, pwsh, cmd -ErrorAction SilentlyContinue | Where-Object {
+        $_.StartTime -gt $proc.StartTime
+    }
+
+    $shimDied = $shimsBefore | Where-Object { $_.Id -notin @($shimsNow.Id) }
+    $shellDied = $shellsBefore | Where-Object { $_.Id -notin @($shellsNow.Id) }
+
+    $status = "[${t}s]"
+    if ($shimDied) {
+        $status += " SHIM DIED (PIDs: $($shimDied.Id -join ', '))"
+        Write-Host "   $status" -ForegroundColor Red
+
+        # Check Windows Event Log for termination reason
+        $shimPid = $shimDied[0].Id
+        $events = Get-WinEvent -FilterHashtable @{
+            LogName='System','Application','Security'
+            Level=1,2,3,4
+        } -MaxEvents 20 -ErrorAction SilentlyContinue | Where-Object {
+            $_.Message -match "$shimPid|godly-pty-shim"
+        }
+        if ($events) {
+            Write-Host "   Event Log entries:" -ForegroundColor Yellow
+            $events | ForEach-Object {
+                Write-Host "     [$($_.TimeCreated)] $($_.ProviderName): $($_.Message.Substring(0, [Math]::Min(200, $_.Message.Length)))" -ForegroundColor Yellow
+            }
+        }
+
+        # Check shim exit code if possible
+        try {
+            $shimProc = $shimDied[0]
+            if ($shimProc.HasExited) {
+                Write-Host "   Shim exit code: $($shimProc.ExitCode)" -ForegroundColor Red
+            }
+        } catch {}
+    }
+    elseif ($shellDied) {
+        $status += " SHELL DIED (PIDs: $($shellDied.Id -join ', ')) shims=$($shimsNow.Count)"
+        Write-Host "   $status" -ForegroundColor Red
+    }
+    else {
+        $status += " all alive: shims=$($shimsNow.Count) daemon=$($daemonNow.Count) shells=$($shellsNow.Count)"
+        Write-Host "   $status" -ForegroundColor Gray
+    }
+}
 
 # 6. Restore
 Write-Host "5. Restoring window..." -ForegroundColor Yellow
@@ -109,11 +170,18 @@ foreach ($line in $lines) {
 
 $postRestoreKeyboard = 0
 $postRestoreOutput = 0
+$postRestoreGridFetch = 0
 foreach ($line in $lines) {
     if ($line -match "\[\s*([\d.]+)\].*KeyboardEvent") {
         $t = [float]$Matches[1]
         if ($restoreTime -and $t -gt $restoreTime) {
             $postRestoreKeyboard++
+        }
+    }
+    if ($line -match "\[\s*([\d.]+)\].*GridFetched") {
+        $t = [float]$Matches[1]
+        if ($restoreTime -and $t -gt $restoreTime) {
+            $postRestoreGridFetch++
         }
     }
     if ($line -match "\[\s*([\d.]+)\].*TerminalOutput") {
@@ -125,9 +193,13 @@ foreach ($line in $lines) {
 }
 
 Write-Host "`nPost-restore keyboard events: $postRestoreKeyboard" -ForegroundColor $(if ($postRestoreKeyboard -gt 0) { "Green" } else { "Red" })
-Write-Host "Post-restore terminal output: $postRestoreOutput" -ForegroundColor $(if ($postRestoreOutput -gt 0) { "Green" } else { "Red" })
+Write-Host "Post-restore terminal output: $postRestoreOutput" -ForegroundColor $(if ($postRestoreOutput -gt 0) { "Green" } else { "Yellow" })
+Write-Host "Post-restore grid fetches: $postRestoreGridFetch" -ForegroundColor $(if ($postRestoreGridFetch -gt 0) { "Green" } else { "Red" })
 
-if ($postRestoreKeyboard -gt 0 -and $postRestoreOutput -gt 0) {
+# Terminal is responsive if keyboard works AND either streaming events or grid polling works
+$terminalAlive = $postRestoreKeyboard -gt 0 -and ($postRestoreOutput -gt 0 -or $postRestoreGridFetch -gt 0)
+
+if ($terminalAlive) {
     Write-Host "`nRESULT: PASS - Terminal responsive after restore" -ForegroundColor Green
 } else {
     Write-Host "`nRESULT: FAIL - Terminal not responsive after restore" -ForegroundColor Red
