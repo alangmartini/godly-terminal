@@ -477,6 +477,9 @@ fn main_loop(
                                 }
                             }
                         }
+                        Ok(ShimFrame::Control(ShimControlRequest::Keepalive)) => {
+                            // No response needed — just resets last_daemon_activity above
+                        }
                         Ok(ShimFrame::Binary { tag, .. }) => {
                             eprintln!("godly-pty-shim: unknown binary tag: 0x{:02x}", tag);
                         }
