@@ -5666,7 +5666,11 @@ impl GodlyApp {
     }
 
     fn create_terminal_task(&self, session_id: String) -> Task<Message> {
-        self.create_terminal_task_with_cwd(session_id, None)
+        let cwd = self
+            .workspaces
+            .active()
+            .map(|ws| ws.folder_path.clone());
+        self.create_terminal_task_with_cwd(session_id, cwd)
     }
 
     fn create_terminal_task_with_cwd(
