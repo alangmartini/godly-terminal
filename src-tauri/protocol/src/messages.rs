@@ -448,6 +448,106 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shim_response_shell_exited_negative_code() {
+        let resp = ShimResponse::ShellExited {
+            exit_code: Some(-9),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"exit_code\":-9"));
+        let deserialized: ShimResponse = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            ShimResponse::ShellExited { exit_code } => {
+                assert_eq!(exit_code, Some(-9));
+            }
+            other => panic!("Expected ShellExited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_response_shell_exited_large_windows_code() {
+        let resp = ShimResponse::ShellExited {
+            exit_code: Some(3221225477),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: ShimResponse = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            ShimResponse::ShellExited { exit_code } => {
+                assert_eq!(exit_code, Some(3221225477));
+            }
+            other => panic!("Expected ShellExited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn shim_response_shell_exited_zero_is_not_none() {
+        let json_zero = r#"{"type":"shell_exited","exit_code":0}"#;
+        let parsed: ShimResponse = serde_json::from_str(json_zero).unwrap();
+        match parsed {
+            ShimResponse::ShellExited { exit_code } => {
+                assert_eq!(exit_code, Some(0));
+            }
+            other => panic!("Expected ShellExited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_session_closed_with_exit_code() {
+        let event = Event::SessionClosed {
+            session_id: "sess-001".to_string(),
+            exit_code: Some(42),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"exit_code\":42"));
+        let deserialized: Event = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Event::SessionClosed {
+                session_id,
+                exit_code,
+            } => {
+                assert_eq!(session_id, "sess-001");
+                assert_eq!(exit_code, Some(42));
+            }
+            other => panic!("Expected SessionClosed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_session_closed_backward_compat_no_exit_code() {
+        let json = r#"{"type":"SessionClosed","session_id":"sess-old"}"#;
+        let deserialized: Event = serde_json::from_str(json).unwrap();
+        match deserialized {
+            Event::SessionClosed {
+                session_id,
+                exit_code,
+            } => {
+                assert_eq!(session_id, "sess-old");
+                assert_eq!(exit_code, None);
+            }
+            other => panic!("Expected SessionClosed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_session_closed_negative_exit_code() {
+        let event = Event::SessionClosed {
+            session_id: "sess-crash".to_string(),
+            exit_code: Some(-11),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: Event = serde_json::from_str(&json).unwrap();
+        match deserialized {
+            Event::SessionClosed {
+                session_id,
+                exit_code,
+            } => {
+                assert_eq!(session_id, "sess-crash");
+                assert_eq!(exit_code, Some(-11));
+            }
+            other => panic!("Expected SessionClosed, got {:?}", other),
+        }
+    }
+
     // ── RequestEnvelope tests ───────────────────────────────────────────
 
     #[test]
