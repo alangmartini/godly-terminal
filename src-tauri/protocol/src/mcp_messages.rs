@@ -648,3 +648,186 @@ pub enum McpResponse {
         error: Option<String>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_terminal_info(exited: bool, exit_code: Option<i64>) -> McpTerminalInfo {
+        McpTerminalInfo {
+            id: "term-abc-123".to_string(),
+            workspace_id: "ws-001".to_string(),
+            name: "powershell".to_string(),
+            process_name: "powershell".to_string(),
+            exited,
+            exit_code,
+        }
+    }
+
+    #[test]
+    fn mcp_terminal_info_running_roundtrip() {
+        let info = make_terminal_info(false, None);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exited\":false"));
+        assert!(
+            !json.contains("exit_code"),
+            "exit_code should be omitted when None, got: {}",
+            json
+        );
+        let d: McpTerminalInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.id, "term-abc-123");
+        assert!(!d.exited);
+        assert_eq!(d.exit_code, None);
+    }
+
+    #[test]
+    fn mcp_terminal_info_exited_with_code_zero() {
+        let info = make_terminal_info(true, Some(0));
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exited\":true"));
+        assert!(json.contains("\"exit_code\":0"));
+        let d: McpTerminalInfo = serde_json::from_str(&json).unwrap();
+        assert!(d.exited);
+        assert_eq!(d.exit_code, Some(0));
+    }
+
+    #[test]
+    fn mcp_terminal_info_exited_with_nonzero_code() {
+        let info = make_terminal_info(true, Some(1));
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exit_code\":1"));
+        let d: McpTerminalInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.exit_code, Some(1));
+    }
+
+    #[test]
+    fn mcp_terminal_info_exited_with_negative_code() {
+        let info = make_terminal_info(true, Some(-9));
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exit_code\":-9"));
+        let d: McpTerminalInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.exit_code, Some(-9));
+    }
+
+    #[test]
+    fn mcp_terminal_info_exited_without_code() {
+        let info = make_terminal_info(true, None);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exited\":true"));
+        assert!(
+            !json.contains("exit_code"),
+            "exit_code should be omitted when None, got: {}",
+            json
+        );
+        let d: McpTerminalInfo = serde_json::from_str(&json).unwrap();
+        assert!(d.exited);
+        assert_eq!(d.exit_code, None);
+    }
+
+    #[test]
+    fn mcp_terminal_info_backward_compat_no_exited_field() {
+        let json = r#"{
+            "id": "term-old",
+            "workspace_id": "ws-old",
+            "name": "bash",
+            "process_name": "bash"
+        }"#;
+        let d: McpTerminalInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(d.id, "term-old");
+        assert!(!d.exited);
+        assert_eq!(d.exit_code, None);
+    }
+
+    #[test]
+    fn mcp_terminal_info_backward_compat_exited_only() {
+        let json = r#"{
+            "id": "term-v2",
+            "workspace_id": "ws-1",
+            "name": "pwsh",
+            "process_name": "pwsh",
+            "exited": true
+        }"#;
+        let d: McpTerminalInfo = serde_json::from_str(json).unwrap();
+        assert!(d.exited);
+        assert_eq!(d.exit_code, None);
+    }
+
+    #[test]
+    fn mcp_terminal_info_large_windows_exit_code() {
+        let info = make_terminal_info(true, Some(3221225477));
+        let json = serde_json::to_string(&info).unwrap();
+        let d: McpTerminalInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.exit_code, Some(3221225477));
+    }
+
+    #[test]
+    fn mcp_response_terminal_list_with_exit_info() {
+        let terminals = vec![
+            make_terminal_info(false, None),
+            make_terminal_info(true, Some(0)),
+            make_terminal_info(true, Some(1)),
+        ];
+        let resp = McpResponse::TerminalList { terminals };
+        let json = serde_json::to_string(&resp).unwrap();
+        let d: McpResponse = serde_json::from_str(&json).unwrap();
+        match d {
+            McpResponse::TerminalList { terminals } => {
+                assert_eq!(terminals.len(), 3);
+                assert!(!terminals[0].exited);
+                assert_eq!(terminals[0].exit_code, None);
+                assert!(terminals[1].exited);
+                assert_eq!(terminals[1].exit_code, Some(0));
+                assert!(terminals[2].exited);
+                assert_eq!(terminals[2].exit_code, Some(1));
+            }
+            other => panic!("Expected TerminalList, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mcp_response_terminal_info_with_exit_code() {
+        let info = make_terminal_info(true, Some(42));
+        let resp = McpResponse::TerminalInfo { terminal: info };
+        let json = serde_json::to_string(&resp).unwrap();
+        let d: McpResponse = serde_json::from_str(&json).unwrap();
+        match d {
+            McpResponse::TerminalInfo { terminal } => {
+                assert!(terminal.exited);
+                assert_eq!(terminal.exit_code, Some(42));
+                assert_eq!(terminal.name, "powershell");
+            }
+            other => panic!("Expected TerminalInfo, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mcp_response_active_terminal_none() {
+        let resp = McpResponse::ActiveTerminal { terminal: None };
+        let json = serde_json::to_string(&resp).unwrap();
+        let d: McpResponse = serde_json::from_str(&json).unwrap();
+        match d {
+            McpResponse::ActiveTerminal { terminal } => {
+                assert!(terminal.is_none());
+            }
+            other => panic!("Expected ActiveTerminal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn mcp_response_active_terminal_exited() {
+        let info = make_terminal_info(true, Some(130));
+        let resp = McpResponse::ActiveTerminal {
+            terminal: Some(info),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let d: McpResponse = serde_json::from_str(&json).unwrap();
+        match d {
+            McpResponse::ActiveTerminal { terminal } => {
+                let t = terminal.unwrap();
+                assert!(t.exited);
+                assert_eq!(t.exit_code, Some(130));
+            }
+            other => panic!("Expected ActiveTerminal, got {:?}", other),
+        }
+    }
+}
