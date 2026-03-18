@@ -189,17 +189,25 @@ fn command_for_platform(
 // ---------------------------------------------------------------------------
 
 /// Resolve the default soundpack directory relative to the running executable.
-/// Works for both development (`target/debug/soundpacks/default/`) and
-/// production (`%LOCALAPPDATA%/Godly Terminal/soundpacks/default/`).
+/// Checks `soundpacks/default/` (production WiX layout) then `soundpacks/`
+/// (development — files are copied flat into target/debug/soundpacks/).
 fn resolve_soundpack_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
-    let dir = exe_dir.join("soundpacks").join("default");
-    if dir.is_dir() {
-        Some(dir)
-    } else {
-        Option::None
+
+    // Production: soundpacks/default/
+    let prod = exe_dir.join("soundpacks").join("default");
+    if prod.join("manifest.json").is_file() {
+        return Some(prod);
     }
+
+    // Development: soundpacks/ (flat)
+    let dev = exe_dir.join("soundpacks");
+    if dev.join("manifest.json").is_file() {
+        return Some(dev);
+    }
+
+    Option::None
 }
 
 /// Pick a random WAV from the "complete" category of the default soundpack.
