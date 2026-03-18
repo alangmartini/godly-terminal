@@ -1100,7 +1100,7 @@ pub fn list_tools() -> Value {
             },
             {
                 "name": "set_notification_sound",
-                "description": "Set the notification sound preset (e.g., 'chime', 'bell', 'ping', 'none').",
+                "description": "Set the notification sound preset (e.g., 'chime', 'bell', 'ping', 'peon', 'none'). The 'peon' preset plays Warcraft Peon voice lines.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
