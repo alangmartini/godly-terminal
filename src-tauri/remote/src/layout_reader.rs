@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use godly_protocol::types::ShellType;
 use serde::{Deserialize, Serialize};
 
 /// TTL for cached layout data.
@@ -10,17 +11,6 @@ const CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// Layout store key (matches Tauri app's LAYOUT_KEY).
 const LAYOUT_KEY: &str = "layout";
-
-/// Shell type (mirrors state/models.rs to avoid coupling remote to Tauri app crate).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ShellType {
-    Windows,
-    Pwsh,
-    Cmd,
-    Wsl { distribution: Option<String> },
-    Custom { program: String, args: Option<Vec<String>> },
-}
 
 /// AI tool mode (mirrors state/models.rs).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -35,32 +25,6 @@ pub enum AiToolMode {
 impl Default for AiToolMode {
     fn default() -> Self {
         AiToolMode::None
-    }
-}
-
-impl ShellType {
-    pub fn display_name(&self) -> String {
-        match self {
-            ShellType::Windows => "powershell".to_string(),
-            ShellType::Pwsh => "pwsh".to_string(),
-            ShellType::Cmd => "cmd".to_string(),
-            ShellType::Wsl { distribution } => {
-                distribution.clone().unwrap_or_else(|| "wsl".to_string())
-            }
-            ShellType::Custom { program, .. } => {
-                std::path::Path::new(program)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(program)
-                    .to_string()
-            }
-        }
-    }
-}
-
-impl Default for ShellType {
-    fn default() -> Self {
-        ShellType::Windows
     }
 }
 
