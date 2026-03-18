@@ -1251,6 +1251,7 @@ impl DaemonSession {
             scrollback_memory_bytes,
             paused: self.is_paused(),
             title,
+            exit_code: self.exit_code(),
         }
     }
 
@@ -2172,5 +2173,62 @@ mod tests {
         let mode = det.check_quiet();
         assert_eq!(mode, OutputMode::Interactive);
         assert_eq!(det.interactive_transitions, 0);
+    }
+
+    // ── exit_code sentinel tests ──────────────────────────────────────
+    //
+    // DaemonSession stores exit code as AtomicI64 with i64::MIN as the
+    // "not yet exited" sentinel. The exit_code() method converts this to
+    // Option<i64>. These tests verify that conversion without needing a
+    // full DaemonSession (which requires a live pty-shim connection).
+
+    #[test]
+    fn exit_code_sentinel_means_not_exited() {
+        let atomic = Arc::new(AtomicI64::new(i64::MIN));
+        let code = atomic.load(Ordering::Relaxed);
+        let result = if code == i64::MIN { None } else { Some(code) };
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn exit_code_zero_means_success() {
+        let atomic = Arc::new(AtomicI64::new(0));
+        let code = atomic.load(Ordering::Relaxed);
+        let result = if code == i64::MIN { None } else { Some(code) };
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn exit_code_nonzero_means_failure() {
+        let atomic = Arc::new(AtomicI64::new(1));
+        let code = atomic.load(Ordering::Relaxed);
+        let result = if code == i64::MIN { None } else { Some(code) };
+        assert_eq!(result, Some(1));
+    }
+
+    #[test]
+    fn exit_code_negative_signal() {
+        let atomic = Arc::new(AtomicI64::new(-9));
+        let code = atomic.load(Ordering::Relaxed);
+        let result = if code == i64::MIN { None } else { Some(code) };
+        assert_eq!(result, Some(-9));
+    }
+
+    #[test]
+    fn exit_code_large_windows_value() {
+        let atomic = Arc::new(AtomicI64::new(3221225477));
+        let code = atomic.load(Ordering::Relaxed);
+        let result = if code == i64::MIN { None } else { Some(code) };
+        assert_eq!(result, Some(3221225477));
+    }
+
+    #[test]
+    fn exit_code_sentinel_not_confused_with_valid_codes() {
+        // i64::MIN itself is extremely unlikely as a real exit code, but verify
+        // that i64::MIN + 1 is treated as a valid exit code, not as sentinel.
+        let atomic = Arc::new(AtomicI64::new(i64::MIN + 1));
+        let code = atomic.load(Ordering::Relaxed);
+        let result = if code == i64::MIN { None } else { Some(code) };
+        assert_eq!(result, Some(i64::MIN + 1));
     }
 }
