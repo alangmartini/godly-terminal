@@ -1136,6 +1136,8 @@ impl GodlyApp {
             workspace_id: terminal.workspace_id.clone().unwrap_or_default(),
             name: terminal.tab_label().to_string(),
             process_name: terminal.process_name.clone(),
+            exited: terminal.exited,
+            exit_code: terminal.exit_code,
         }
     }
 
@@ -1153,6 +1155,8 @@ impl GodlyApp {
             "workspace_id": terminal.workspace_id,
             "name": terminal.tab_label(),
             "process_name": terminal.process_name,
+            "exited": terminal.exited,
+            "exit_code": terminal.exit_code,
         })
     }
 

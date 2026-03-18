@@ -456,6 +456,10 @@ pub struct McpTerminalInfo {
     pub workspace_id: String,
     pub name: String,
     pub process_name: String,
+    #[serde(default)]
+    pub exited: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
 }
 
 /// Workspace info returned by MCP queries
