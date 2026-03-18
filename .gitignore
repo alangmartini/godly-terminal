@@ -10,9 +10,11 @@ plugin/bin/
 src-tauri/gen/
 src/generated/*.ts
 
-# Lock files (optional - remove if you want to track)
+# Lock files
 package-lock.json
-Cargo.lock
+
+# Cargo worker build cache
+src-tauri/.cargo-worker/
 
 # IDE / Editor
 .vscode/
