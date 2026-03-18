@@ -1,0 +1,34 @@
+name: "Workspace create, switch, delete"
+tags: [workspace, crud]
+---
+- resetApp
+- waitForReady
+
+# Remember initial workspace count
+- listWorkspaces:
+  store: initialWs
+
+# Create a new workspace
+- createWorkspace:
+    name: "Test CRUD"
+    folder_path: "C:/tmp"
+  store: ws
+
+- assertNotEmpty:
+    var: ws
+    field: workspace_id
+
+# Switch to the new workspace
+- switchWorkspace:
+    workspace_id: $ws.workspace_id
+
+- assertActiveWorkspace:
+    workspace_id: $ws.workspace_id
+
+# Verify workspace count increased
+- assertWorkspaceCount:
+    min: 2
+
+# Delete the workspace
+- deleteWorkspace:
+    workspace_id: $ws.workspace_id
