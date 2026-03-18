@@ -6594,11 +6594,12 @@ fn resolve_terminal_empty_state(
 
 fn terminal_content_rect(window_width: f32, window_height: f32, sidebar_width: f32) -> PaneRect {
     let top = title_bar::TITLE_BAR_HEIGHT + TAB_BAR_HEIGHT;
+    let bottom = status_bar::STATUS_BAR_HEIGHT;
     PaneRect::new(
         sidebar_width.max(0.0),
         top,
         (window_width - sidebar_width).max(1.0),
-        (window_height - top).max(1.0),
+        (window_height - top - bottom).max(1.0),
     )
 }
 
