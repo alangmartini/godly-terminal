@@ -327,9 +327,9 @@ pub struct GodlyApp {
     /// Current value in the rename tab input.
     rename_tab_value: String,
     /// Whether audible notification sounds are enabled.
-    notification_sounds_enabled: bool,
+    pub(crate) notification_sounds_enabled: bool,
     /// Active notification sound preset.
-    notification_sound_preset: NotificationSoundPreset,
+    pub(crate) notification_sound_preset: NotificationSoundPreset,
     /// Last terminal-local sound timestamps for debounce.
     last_terminal_sound_ms: HashMap<String, u64>,
     /// Last global sound timestamp for debounce.
@@ -337,7 +337,7 @@ pub struct GodlyApp {
     /// Last native attention request timestamp for debounce.
     last_attention_request_ms: Option<u64>,
     /// Workspace name/id mute patterns for notification sounds.
-    workspace_mute_patterns: Vec<String>,
+    pub(crate) workspace_mute_patterns: Vec<String>,
     /// Current input value for adding a workspace mute pattern.
     workspace_mute_pattern_input: String,
     /// Quick Claude preset editor input: preset name.
@@ -478,7 +478,7 @@ impl Default for GodlyApp {
             rename_tab_id: None,
             rename_tab_value: String::new(),
             notification_sounds_enabled: true,
-            notification_sound_preset: NotificationSoundPreset::Bell,
+            notification_sound_preset: NotificationSoundPreset::Peon,
             last_terminal_sound_ms: HashMap::new(),
             last_global_sound_ms: None,
             last_attention_request_ms: None,

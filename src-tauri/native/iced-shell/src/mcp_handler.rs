@@ -1,4 +1,5 @@
 use godly_app_adapter::mcp_pipe::McpEvent;
+use godly_app_adapter::sound;
 use godly_layout_core::{LayoutNode, SplitDirection};
 use godly_protocol::testing::StateDump;
 use godly_protocol::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
@@ -326,6 +327,63 @@ impl GodlyApp {
                 self.handle_ui_wait(&condition, args.as_ref()),
                 iced::Task::none(),
             ),
+
+            // -- Notification settings --
+            McpRequest::GetNotificationConfig => (
+                McpResponse::NotificationConfig {
+                    enabled: self.notification_sounds_enabled,
+                    sound_preset: self.notification_sound_preset.label().to_string(),
+                    volume: 1.0,
+                },
+                iced::Task::none(),
+            ),
+            McpRequest::SetNotificationSound { preset } => {
+                match sound::NotificationSoundPreset::from_label(&preset) {
+                    Some(p) => {
+                        self.notification_sound_preset = p;
+                        (McpResponse::Ok, iced::Task::none())
+                    }
+                    None => (
+                        McpResponse::Error {
+                            message: format!(
+                                "Unknown preset '{}'. Valid: none, chime, bell, ping, peon",
+                                preset
+                            ),
+                        },
+                        iced::Task::none(),
+                    ),
+                }
+            }
+            McpRequest::SetNotificationEnabled {
+                enabled, ..
+            } => {
+                self.notification_sounds_enabled = enabled;
+                (McpResponse::Ok, iced::Task::none())
+            }
+            McpRequest::GetNotificationStatus { .. } => (
+                McpResponse::NotificationStatus {
+                    enabled: self.notification_sounds_enabled,
+                    source: "global".to_string(),
+                },
+                iced::Task::none(),
+            ),
+            McpRequest::AddMutePattern { pattern } => {
+                if !self.workspace_mute_patterns.contains(&pattern) {
+                    self.workspace_mute_patterns.push(pattern);
+                }
+                (McpResponse::Ok, iced::Task::none())
+            }
+            McpRequest::RemoveMutePattern { pattern } => {
+                self.workspace_mute_patterns.retain(|p| p != &pattern);
+                (McpResponse::Ok, iced::Task::none())
+            }
+            McpRequest::ListMutePatterns => (
+                McpResponse::MutePatterns {
+                    patterns: self.workspace_mute_patterns.clone(),
+                },
+                iced::Task::none(),
+            ),
+
             other => (
                 McpResponse::Error {
                     message: format!("Unsupported native MCP request: {:?}", other),
@@ -1136,6 +1194,8 @@ impl GodlyApp {
             workspace_id: terminal.workspace_id.clone().unwrap_or_default(),
             name: terminal.tab_label().to_string(),
             process_name: terminal.process_name.clone(),
+            exited: terminal.exited,
+            exit_code: terminal.exit_code,
         }
     }
 
@@ -1153,6 +1213,8 @@ impl GodlyApp {
             "workspace_id": terminal.workspace_id,
             "name": terminal.tab_label(),
             "process_name": terminal.process_name,
+            "exited": terminal.exited,
+            "exit_code": terminal.exit_code,
         })
     }
 

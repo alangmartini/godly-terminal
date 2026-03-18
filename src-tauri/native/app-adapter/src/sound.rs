@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,11 +8,12 @@ pub enum NotificationSoundPreset {
     Chime,
     Bell,
     Ping,
+    Peon,
 }
 
 impl NotificationSoundPreset {
-    pub fn all() -> [Self; 4] {
-        [Self::None, Self::Chime, Self::Bell, Self::Ping]
+    pub fn all() -> [Self; 5] {
+        [Self::None, Self::Chime, Self::Bell, Self::Ping, Self::Peon]
     }
 
     pub fn label(self) -> &'static str {
@@ -24,6 +26,19 @@ impl NotificationSoundPreset {
             Self::Chime => "Chime",
             Self::Bell => "Bell",
             Self::Ping => "Ping",
+            Self::Peon => "Peon",
+        }
+    }
+
+    /// Parse a preset from a case-insensitive string label.
+    pub fn from_label(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "chime" => Some(Self::Chime),
+            "bell" => Some(Self::Bell),
+            "ping" => Some(Self::Ping),
+            "peon" => Some(Self::Peon),
+            _ => Option::None,
         }
     }
 }
@@ -75,6 +90,10 @@ const LINUX_BELL_ARGS: &[&str] = &["-c", "printf '\\a'"];
 const LINUX_PING_ARGS: &[&str] = &["-c", "printf '\\a'; sleep 0.03; printf '\\a'"];
 
 pub fn play_notification_sound_async(preset: NotificationSoundPreset) -> Result<(), String> {
+    if preset == NotificationSoundPreset::Peon {
+        return play_peon_sound_async();
+    }
+
     let Some(command_spec) = command_for_platform(preset, current_platform()) else {
         return Ok(());
     };
@@ -118,7 +137,7 @@ fn command_for_platform(
 ) -> Option<SoundCommandSpec> {
     match platform {
         SoundPlatform::Windows => match preset {
-            NotificationSoundPreset::None => None,
+            NotificationSoundPreset::None | NotificationSoundPreset::Peon => None,
             NotificationSoundPreset::Chime => Some(SoundCommandSpec {
                 program: "powershell",
                 args: WINDOWS_CHIME_ARGS,
@@ -133,7 +152,7 @@ fn command_for_platform(
             }),
         },
         SoundPlatform::MacOs => match preset {
-            NotificationSoundPreset::None => None,
+            NotificationSoundPreset::None | NotificationSoundPreset::Peon => None,
             NotificationSoundPreset::Chime => Some(SoundCommandSpec {
                 program: "afplay",
                 args: MAC_CHIME_ARGS,
@@ -148,7 +167,7 @@ fn command_for_platform(
             }),
         },
         SoundPlatform::Linux => match preset {
-            NotificationSoundPreset::None => None,
+            NotificationSoundPreset::None | NotificationSoundPreset::Peon => None,
             NotificationSoundPreset::Chime => Some(SoundCommandSpec {
                 program: "sh",
                 args: LINUX_CHIME_ARGS,
@@ -165,6 +184,97 @@ fn command_for_platform(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Peon soundpack playback
+// ---------------------------------------------------------------------------
+
+/// Resolve the default soundpack directory relative to the running executable.
+/// Works for both development (`target/debug/soundpacks/default/`) and
+/// production (`%LOCALAPPDATA%/Godly Terminal/soundpacks/default/`).
+fn resolve_soundpack_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    let dir = exe_dir.join("soundpacks").join("default");
+    if dir.is_dir() {
+        Some(dir)
+    } else {
+        Option::None
+    }
+}
+
+/// Pick a random WAV from the "complete" category of the default soundpack.
+fn pick_peon_sound() -> Option<PathBuf> {
+    let dir = resolve_soundpack_dir()?;
+    let manifest_path = dir.join("manifest.json");
+    let manifest = std::fs::read_to_string(&manifest_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+    let complete = json.get("sounds")?.get("complete")?.as_array()?;
+    if complete.is_empty() {
+        return Option::None;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    let idx = (now.subsec_nanos() as usize) % complete.len();
+    let filename = complete[idx].as_str()?;
+    Some(dir.join(filename))
+}
+
+fn play_peon_sound_async() -> Result<(), String> {
+    let path = pick_peon_sound().ok_or("Could not resolve Peon soundpack file")?;
+    play_wav_file_async(&path)
+}
+
+/// Play a WAV file using platform-native tooling.
+fn play_wav_file_async(path: &Path) -> Result<(), String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "Sound file path contains invalid characters".to_string())?;
+
+    let mut command = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!(
+                "(New-Object System.Media.SoundPlayer '{}').PlaySync()",
+                path_str
+            ),
+        ]);
+        cmd
+    } else if cfg!(target_os = "macos") {
+        let mut cmd = Command::new("afplay");
+        cmd.arg(path_str);
+        cmd
+    } else {
+        let mut cmd = Command::new("aplay");
+        cmd.args(["-q", path_str]);
+        cmd
+    };
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let mut child = command.spawn().map_err(|error| {
+        format!(
+            "Failed to play sound file '{}': {}",
+            path.display(),
+            error
+        )
+    })?;
+
+    let _ = std::thread::Builder::new()
+        .name("peon-sound-reaper".to_string())
+        .spawn(move || {
+            let _ = child.wait();
+        });
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +285,33 @@ mod tests {
         assert_eq!(NotificationSoundPreset::Chime.display_label(), "Chime");
         assert_eq!(NotificationSoundPreset::Bell.display_label(), "Bell");
         assert_eq!(NotificationSoundPreset::Ping.display_label(), "Ping");
+        assert_eq!(NotificationSoundPreset::Peon.display_label(), "Peon");
         assert_eq!(NotificationSoundPreset::Ping.to_string(), "Ping");
+    }
+
+    #[test]
+    fn from_label_round_trips() {
+        for preset in NotificationSoundPreset::all() {
+            let parsed = NotificationSoundPreset::from_label(preset.label());
+            assert_eq!(parsed, Some(preset));
+        }
+    }
+
+    #[test]
+    fn from_label_is_case_insensitive() {
+        assert_eq!(
+            NotificationSoundPreset::from_label("PEON"),
+            Some(NotificationSoundPreset::Peon)
+        );
+        assert_eq!(
+            NotificationSoundPreset::from_label("pEoN"),
+            Some(NotificationSoundPreset::Peon)
+        );
+    }
+
+    #[test]
+    fn from_label_returns_none_for_unknown() {
+        assert_eq!(NotificationSoundPreset::from_label("unknown"), Option::None);
     }
 
     #[test]
@@ -242,6 +378,22 @@ mod tests {
         );
         assert_eq!(
             command_for_platform(NotificationSoundPreset::None, SoundPlatform::Linux),
+            None
+        );
+    }
+
+    #[test]
+    fn peon_preset_does_not_use_beep_command() {
+        assert_eq!(
+            command_for_platform(NotificationSoundPreset::Peon, SoundPlatform::Windows),
+            None
+        );
+        assert_eq!(
+            command_for_platform(NotificationSoundPreset::Peon, SoundPlatform::MacOs),
+            None
+        );
+        assert_eq!(
+            command_for_platform(NotificationSoundPreset::Peon, SoundPlatform::Linux),
             None
         );
     }

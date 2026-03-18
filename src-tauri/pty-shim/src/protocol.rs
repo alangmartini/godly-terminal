@@ -389,4 +389,85 @@ mod tests {
         assert_eq!(result.len(), 65536);
         assert!(result.iter().all(|&b| b == 0xAA));
     }
+
+    // ── ShellExited exit code edge cases ─────────────────────────────
+
+    #[test]
+    fn test_shell_exited_negative_exit_code() {
+        let resp = ShimControlResponse::ShellExited {
+            exit_code: Some(-9),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            json.contains("\"exit_code\":-9"),
+            "Expected exit_code:-9 in JSON, got: {}",
+            json
+        );
+        let parsed: ShimControlResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, resp);
+    }
+
+    #[test]
+    fn test_shell_exited_large_windows_exit_code() {
+        let resp = ShimControlResponse::ShellExited {
+            exit_code: Some(3221225477),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ShimControlResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, resp);
+    }
+
+    #[test]
+    fn test_shell_exited_wire_format() {
+        let resp = ShimControlResponse::ShellExited {
+            exit_code: Some(1),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert_eq!(json, r#"{"type":"shell_exited","exit_code":1}"#);
+    }
+
+    #[test]
+    fn test_shell_exited_none_wire_format() {
+        let resp = ShimControlResponse::ShellExited { exit_code: None };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert_eq!(json, r#"{"type":"shell_exited","exit_code":null}"#);
+    }
+
+    #[test]
+    fn test_shell_exited_frame_roundtrip() {
+        let resp = ShimControlResponse::ShellExited {
+            exit_code: Some(42),
+        };
+        let mut buf = Vec::new();
+        write_json(&mut buf, &resp).unwrap();
+
+        let mut cursor = Cursor::new(&buf);
+        let frame_data = read_frame(&mut cursor).unwrap().unwrap();
+        let parsed: ShimControlResponse = serde_json::from_slice(&frame_data).unwrap();
+        assert_eq!(parsed, resp);
+    }
+
+    #[test]
+    fn test_shell_exited_null_exit_code_from_json() {
+        let json = r#"{"type":"shell_exited","exit_code":null}"#;
+        let parsed: ShimControlResponse = serde_json::from_str(json).unwrap();
+        match parsed {
+            ShimControlResponse::ShellExited { exit_code } => {
+                assert_eq!(exit_code, None);
+            }
+            other => panic!("Expected ShellExited, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_shell_exited_explicit_zero() {
+        let json = r#"{"type":"shell_exited","exit_code":0}"#;
+        let parsed: ShimControlResponse = serde_json::from_str(json).unwrap();
+        match parsed {
+            ShimControlResponse::ShellExited { exit_code } => {
+                assert_eq!(exit_code, Some(0));
+            }
+            other => panic!("Expected ShellExited, got {:?}", other),
+        }
+    }
 }

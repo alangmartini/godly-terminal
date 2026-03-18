@@ -96,6 +96,9 @@ pub struct SessionInfo {
     /// OSC window title set by the running program (e.g. Claude Code sets "claude: <task>").
     #[serde(default)]
     pub title: String,
+    /// Process exit code. Only set when `running` is false and the exit code was captured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
 }
 
 /// Grid snapshot from the godly-vt terminal state engine.
@@ -490,5 +493,116 @@ mod tests {
                 args: Some(vec!["-l".to_string()]),
             }
         );
+    }
+
+    // ── SessionInfo exit_code serialization tests ────────────────────
+
+    /// Helper to construct a SessionInfo with all required fields.
+    fn make_session_info(exit_code: Option<i64>, running: bool) -> SessionInfo {
+        SessionInfo {
+            id: "sess-test-001".to_string(),
+            shell_type: ShellType::Windows,
+            pid: 12345,
+            rows: 24,
+            cols: 80,
+            cwd: Some("C:\\Users\\test".to_string()),
+            created_at: 1700000000,
+            attached: false,
+            running,
+            scrollback_rows: 500,
+            scrollback_memory_bytes: 32768,
+            paused: false,
+            title: String::new(),
+            exit_code,
+        }
+    }
+
+    #[test]
+    fn session_info_exit_code_roundtrip_success() {
+        let info = make_session_info(Some(0), false);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exit_code\":0"));
+        let deserialized: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.exit_code, Some(0));
+        assert!(!deserialized.running);
+    }
+
+    #[test]
+    fn session_info_exit_code_roundtrip_failure() {
+        let info = make_session_info(Some(127), false);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exit_code\":127"));
+        let deserialized: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.exit_code, Some(127));
+    }
+
+    #[test]
+    fn session_info_exit_code_roundtrip_negative() {
+        let info = make_session_info(Some(-9), false);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"exit_code\":-9"));
+        let deserialized: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.exit_code, Some(-9));
+    }
+
+    #[test]
+    fn session_info_exit_code_none_omitted_from_json() {
+        let info = make_session_info(None, true);
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(
+            !json.contains("exit_code"),
+            "exit_code should be omitted when None, but JSON was: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn session_info_backward_compat_no_exit_code_field() {
+        let json = r#"{
+            "id": "sess-old",
+            "shell_type": "windows",
+            "pid": 999,
+            "rows": 24,
+            "cols": 80,
+            "cwd": null,
+            "created_at": 1700000000,
+            "attached": false,
+            "running": true,
+            "scrollback_rows": 0,
+            "scrollback_memory_bytes": 0,
+            "paused": false,
+            "title": ""
+        }"#;
+        let deserialized: SessionInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(deserialized.exit_code, None);
+        assert_eq!(deserialized.id, "sess-old");
+        assert!(deserialized.running);
+    }
+
+    #[test]
+    fn session_info_exit_code_large_windows_value() {
+        let info = make_session_info(Some(3221225477), false);
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.exit_code, Some(3221225477));
+    }
+
+    #[test]
+    fn session_info_full_roundtrip_all_fields() {
+        let info = make_session_info(Some(42), false);
+        let json = serde_json::to_string(&info).unwrap();
+        let d: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(d.id, "sess-test-001");
+        assert_eq!(d.pid, 12345);
+        assert_eq!(d.rows, 24);
+        assert_eq!(d.cols, 80);
+        assert_eq!(d.cwd, Some("C:\\Users\\test".to_string()));
+        assert_eq!(d.created_at, 1700000000);
+        assert!(!d.attached);
+        assert!(!d.running);
+        assert_eq!(d.scrollback_rows, 500);
+        assert_eq!(d.scrollback_memory_bytes, 32768);
+        assert!(!d.paused);
+        assert_eq!(d.exit_code, Some(42));
     }
 }
