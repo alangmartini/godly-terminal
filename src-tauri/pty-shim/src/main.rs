@@ -184,13 +184,19 @@ fn run() -> Result<(), String> {
     // PTY reader thread: reads from ConPTY → output channel
     let shell_running_r = shell_running.clone();
     let mut pty_reader = pty_parts.reader;
+    let mut child = pty_parts.child;
     let pty_reader_thread = std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match pty_reader.read(&mut buf) {
                 Ok(0) => {
                     shell_running_r.store(false, Ordering::SeqCst);
-                    let _ = exit_tx.send(None);
+                    // Capture the real exit code from the child process
+                    let exit_code = match child.wait() {
+                        Ok(status) => Some(status.exit_code() as i64),
+                        Err(_) => None,
+                    };
+                    let _ = exit_tx.send(exit_code);
                     break;
                 }
                 Ok(n) => {
@@ -201,7 +207,13 @@ fn run() -> Result<(), String> {
                 Err(e) => {
                     eprintln!("godly-pty-shim: PTY read error: {}", e);
                     shell_running_r.store(false, Ordering::SeqCst);
-                    let _ = exit_tx.send(None);
+                    // Try to get exit code even on read error
+                    let exit_code = child
+                        .try_wait()
+                        .ok()
+                        .flatten()
+                        .map(|s| s.exit_code() as i64);
+                    let _ = exit_tx.send(exit_code);
                     break;
                 }
             }

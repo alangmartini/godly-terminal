@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 
 /// The result of opening a PTY, split into separately-owned parts
@@ -8,6 +8,8 @@ pub struct PtyParts {
     pub writer: Box<dyn Write + Send>,
     pub reader: Box<dyn Read + Send>,
     pub shell_pid: u32,
+    /// Child process handle — used to retrieve the real exit code after the shell exits.
+    pub child: Box<dyn Child + Send + Sync>,
 }
 
 /// Open a new PTY with the given shell type and dimensions.
@@ -102,5 +104,6 @@ pub fn open_pty(
         writer,
         reader,
         shell_pid,
+        child,
     })
 }

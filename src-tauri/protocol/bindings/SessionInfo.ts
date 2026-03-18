@@ -8,4 +8,8 @@ export type SessionInfo = { id: string, shell_type: ShellType, pid: number, rows
 /**
  * OSC window title set by the running program (e.g. Claude Code sets "claude: <task>").
  */
-title: string, };
+title: string, 
+/**
+ * Process exit code. Only set when `running` is false and the exit code was captured.
+ */
+exit_code: bigint | null, };

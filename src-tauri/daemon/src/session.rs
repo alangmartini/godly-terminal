@@ -1251,6 +1251,7 @@ impl DaemonSession {
             scrollback_memory_bytes,
             paused: self.is_paused(),
             title,
+            exit_code: self.exit_code(),
         }
     }
 

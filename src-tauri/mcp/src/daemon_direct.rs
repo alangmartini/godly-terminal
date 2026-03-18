@@ -103,6 +103,8 @@ impl DaemonDirectBackend {
                             workspace_id: String::new(),
                             name: format!("Session {}", &s.id[..8.min(s.id.len())]),
                             process_name: s.shell_type.display_name(),
+                            exited: !s.running,
+                            exit_code: s.exit_code,
                         },
                     }),
                     None => Ok(McpResponse::Error {
@@ -153,6 +155,8 @@ impl Backend for DaemonDirectBackend {
                                 workspace_id: String::new(), // unknown in direct mode
                                 name: format!("Session {}", &s.id[..8.min(s.id.len())]),
                                 process_name: s.shell_type.display_name(),
+                                exited: !s.running,
+                                exit_code: s.exit_code,
                             })
                             .collect();
                         Ok(McpResponse::TerminalList { terminals })
