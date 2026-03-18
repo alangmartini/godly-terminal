@@ -96,6 +96,9 @@ pub struct SessionInfo {
     /// OSC window title set by the running program (e.g. Claude Code sets "claude: <task>").
     #[serde(default)]
     pub title: String,
+    /// Process exit code. Only set when `running` is false and the exit code was captured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
 }
 
 /// Grid snapshot from the godly-vt terminal state engine.
