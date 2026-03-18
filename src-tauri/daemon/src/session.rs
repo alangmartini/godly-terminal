@@ -198,11 +198,7 @@ pub struct DaemonSession {
     #[cfg(windows)]
     pub pid: u32,
     /// PID of the pty-shim process
-    #[allow(dead_code)]
     shim_pid: u32,
-    /// Named pipe name for shim communication
-    #[allow(dead_code)]
-    shim_pipe_name: String,
     /// Writer to the shim pipe for user input (sends TAG_SHIM_WRITE binary frames).
     /// Uses a channel-based writer that routes through the I/O thread to avoid
     /// the DuplicateHandle deadlock (see ShimIoMessage doc comment).
@@ -357,7 +353,6 @@ impl DaemonSession {
             #[cfg(windows)]
             pid: shell_pid,
             shim_pid: meta.shim_pid,
-            shim_pipe_name: meta.shim_pipe_name,
             shim_writer,
             shim_io_tx,
             running,
@@ -545,7 +540,6 @@ impl DaemonSession {
             #[cfg(windows)]
             pid: shell_pid,
             shim_pid: meta.shim_pid,
-            shim_pipe_name: meta.shim_pipe_name,
             shim_writer,
             shim_io_tx,
             running,
@@ -1266,15 +1260,6 @@ impl DaemonSession {
         self.last_output_epoch_ms.load(Ordering::Relaxed)
     }
 
-    /// Get the current epoch ms (helper for callers computing idle time).
-    #[allow(dead_code)]
-    pub fn current_epoch_ms() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-
     /// Read the godly-vt grid state as a GridData snapshot.
     /// Returns plain-text rows (no ANSI escapes) plus cursor position.
     pub fn read_grid(&self) -> godly_protocol::GridData {
@@ -1495,16 +1480,6 @@ impl DaemonSession {
         self.ring_buffer.lock().len()
     }
 
-    #[cfg(windows)]
-    #[allow(dead_code)]
-    pub fn get_pid(&self) -> u32 {
-        self.pid
-    }
-
-    #[allow(dead_code)]
-    pub fn get_shell_type(&self) -> &ShellType {
-        &self.shell_type
-    }
 }
 
 impl Drop for DaemonSession {
