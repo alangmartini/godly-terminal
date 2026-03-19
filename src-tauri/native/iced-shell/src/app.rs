@@ -5675,11 +5675,19 @@ impl GodlyApp {
     }
 
     fn create_new_terminal(&self) -> Task<Message> {
-        self.create_terminal_task(uuid::Uuid::new_v4().to_string())
+        let cwd = self
+            .workspaces
+            .active()
+            .map(|ws| ws.folder_path.clone());
+        self.create_terminal_task_with_cwd(uuid::Uuid::new_v4().to_string(), cwd)
     }
 
     fn create_terminal_task(&self, session_id: String) -> Task<Message> {
-        self.create_terminal_task_with_cwd(session_id, None)
+        let cwd = self
+            .workspaces
+            .active()
+            .map(|ws| ws.folder_path.clone());
+        self.create_terminal_task_with_cwd(session_id, cwd)
     }
 
     fn create_terminal_task_with_cwd(
