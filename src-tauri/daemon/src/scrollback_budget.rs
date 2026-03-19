@@ -38,25 +38,6 @@ impl ScrollbackBudget {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn register_session(&mut self, id: String, cols: u16) {
-        self.sessions.insert(
-            id,
-            SessionInfo {
-                scrollback_rows: 0,
-                cols,
-                is_paused: false,
-                last_output_epoch_ms: 0,
-                current_scrollback_len: DEFAULT_SCROLLBACK_LEN,
-            },
-        );
-    }
-
-    #[allow(dead_code)]
-    pub fn remove_session(&mut self, id: &str) {
-        self.sessions.remove(id);
-    }
-
     /// Remove entries for sessions that no longer exist.
     pub fn retain_sessions(&mut self, active_ids: &[String]) {
         self.sessions.retain(|id, _| active_ids.contains(id));
