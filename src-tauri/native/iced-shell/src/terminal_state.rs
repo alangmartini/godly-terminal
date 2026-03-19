@@ -89,12 +89,19 @@ impl TerminalInfo {
 
     /// Returns the display label for this terminal's tab.
     ///
-    /// Priority: custom_name > display_name (from process_name) > "Terminal"
+    /// Priority: custom_name > OSC title (if not a bare path) > display_name > "Terminal"
     pub fn tab_label(&self) -> String {
         if let Some(ref name) = self.custom_name {
             if !name.is_empty() {
                 return name.clone();
             }
+        }
+        // Use the OSC window title when the running program has set one,
+        // unless it looks like a bare filesystem path (shells often set
+        // the title to the CWD, which is not a useful tab label).
+        let t = self.title.trim();
+        if !t.is_empty() && self.extract_cwd().is_none() {
+            return t.to_string();
         }
         self.display_name()
     }
@@ -482,8 +489,16 @@ mod tests {
         info.process_name = "pwsh".into();
         assert_eq!(info.tab_label(), "PowerShell");
 
-        // title set -> still uses display_name (title is for CWD extraction)
+        // title set to a CWD path -> still uses display_name
         info.title = "C:\\Users\\test".into();
+        assert_eq!(info.tab_label(), "PowerShell");
+
+        // title set to a non-path string -> uses OSC title
+        info.title = "claude: fixing bug #42".into();
+        assert_eq!(info.tab_label(), "claude: fixing bug #42");
+
+        // Unix-style CWD path -> still uses display_name
+        info.title = "/home/user/project".into();
         assert_eq!(info.tab_label(), "PowerShell");
     }
 
@@ -692,6 +707,10 @@ mod tests {
         info.custom_name = Some(String::new());
         info.process_name = "bash".into();
         assert_eq!(info.tab_label(), "Bash");
+
+        // With a non-path OSC title, empty custom_name falls through to title
+        info.title = "vim main.rs".into();
+        assert_eq!(info.tab_label(), "vim main.rs");
     }
 
     #[test]
