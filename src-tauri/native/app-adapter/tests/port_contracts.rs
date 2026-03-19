@@ -79,6 +79,7 @@ impl DaemonRunner for RecordingRunner {
             scrollback_memory_bytes: 0,
             paused: false,
             title: String::new(),
+            exit_code: None,
         });
         Ok(())
     }
