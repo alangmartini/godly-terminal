@@ -1,0 +1,12 @@
+{
+  "name": "godly-test",
+  "version": "0.1.0",
+  "description": "Maestro-like YAML testing framework for Godly Terminal",
+  "type": "module",
+  "bin": {
+    "godly-test": "./godly-test.mjs"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
