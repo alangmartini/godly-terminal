@@ -1,0 +1,55 @@
+name: "Bug #669: New terminal inherits workspace CWD"
+tags: [workspace, cwd, bug-669]
+---
+- resetApp
+- waitForReady
+
+# Create a workspace with a specific folder_path
+- createWorkspace:
+    name: "CWD Test"
+    folder_path: "C:/Windows/Temp"
+  store: ws
+
+- assertNotEmpty:
+    var: ws
+    field: workspace_id
+
+# Switch to the new workspace
+- switchWorkspace:
+    workspace_id: $ws.workspace_id
+
+- assertActiveWorkspace:
+    workspace_id: $ws.workspace_id
+
+# Create a terminal in the workspace (no explicit cwd — should inherit folder_path)
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: term
+
+- assertNotEmpty:
+    var: term
+    field: terminal_id
+
+# Wait for shell to start
+- waitForIdle:
+    terminal_id: $term.terminal_id
+    idle_ms: 3000
+
+# Check the terminal CWD — it should be the workspace folder_path
+- executeCommand:
+    terminal_id: $term.terminal_id
+    command: "(Get-Location).Path"
+    idle_ms: 2000
+
+# Bug #669: The CWD should be C:\Windows\Temp (the workspace folder_path),
+# not %USERPROFILE% or any other default directory.
+- assertTextContains:
+    terminal_id: $term.terminal_id
+    text: "Temp"
+
+# Cleanup
+- closeTerminal:
+    terminal_id: $term.terminal_id
+
+- deleteWorkspace:
+    workspace_id: $ws.workspace_id
