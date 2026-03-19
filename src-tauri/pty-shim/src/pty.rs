@@ -42,11 +42,27 @@ pub fn open_pty(
         "windows" => {
             let mut c = CommandBuilder::new("powershell.exe");
             c.arg("-NoLogo");
+            // Bug #669: Override any profile Set-Location so the workspace CWD sticks.
+            // -Command runs AFTER profiles, so it wins over profile cd/Set-Location.
+            if let Some(dir) = cwd {
+                c.args([
+                    "-NoExit",
+                    "-Command",
+                    &format!("Set-Location -LiteralPath '{}'", dir.replace('\'', "''")),
+                ]);
+            }
             c
         }
         "pwsh" => {
             let mut c = CommandBuilder::new("pwsh.exe");
             c.arg("-NoLogo");
+            if let Some(dir) = cwd {
+                c.args([
+                    "-NoExit",
+                    "-Command",
+                    &format!("Set-Location -LiteralPath '{}'", dir.replace('\'', "''")),
+                ]);
+            }
             c
         }
         "cmd" => CommandBuilder::new("cmd.exe"),
