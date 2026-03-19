@@ -633,6 +633,7 @@ mod tests {
             scrollback_memory_bytes: 0,
             paused: false,
             title: "demo".to_string(),
+            exit_code: None,
         }
     }
 
