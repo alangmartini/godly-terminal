@@ -14,17 +14,30 @@ pub mod diag {
     static LOG: Mutex<Option<std::fs::File>> = Mutex::new(None);
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
+    /// Maximum log file size before rotation (2MB).
+    const MAX_LOG_SIZE: u64 = 2 * 1024 * 1024;
+
     pub fn init() {
         START.get_or_init(std::time::Instant::now);
         let base = match std::env::var("APPDATA") {
             Ok(v) => std::path::PathBuf::from(v),
             Err(_) => return,
         };
-        let path = base.join("com.godly.terminal").join("iced-diag.log");
+        let dir = base.join("com.godly.terminal");
+        let path = dir.join("iced-diag.log");
+        let prev_path = dir.join("iced-diag.prev.log");
+
+        // Rotate if the log file exceeds 2MB
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > MAX_LOG_SIZE {
+                let _ = std::fs::copy(&path, &prev_path);
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+
         if let Ok(f) = std::fs::OpenOptions::new()
             .create(true)
-            .write(true)
-            .truncate(true)
+            .append(true)
             .open(&path)
         {
             *LOG.lock().unwrap() = Some(f);
