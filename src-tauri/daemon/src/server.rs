@@ -361,10 +361,6 @@ impl DaemonServer {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::Relaxed);
-    }
 }
 
 /// Get the raw handle from a File for use with PeekNamedPipe

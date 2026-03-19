@@ -27,61 +27,6 @@ pub fn remove_pid_file() {
     let _ = fs::remove_file(path);
 }
 
-/// Check if the daemon is already running by attempting to connect to its named pipe.
-/// This is more reliable than checking a PID file since the pipe only exists if
-/// the daemon is actively listening.
-///
-/// NOTE: This has a race window between daemon startup and pipe creation.
-/// For singleton enforcement, prefer `DaemonLock::try_acquire()` which uses
-/// a named mutex and is race-free.
-#[allow(dead_code)]
-pub fn is_daemon_running() -> bool {
-    #[cfg(windows)]
-    {
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
-        use winapi::um::errhandlingapi::GetLastError;
-        use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
-        use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
-        use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
-
-        const ERROR_PIPE_BUSY: u32 = 231;
-
-        let pipe_name_str = godly_protocol::pipe_name();
-        let pipe_name: Vec<u16> = OsStr::new(&pipe_name_str)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        unsafe {
-            let handle = CreateFileW(
-                pipe_name.as_ptr(),
-                GENERIC_READ | GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                std::ptr::null_mut(),
-                OPEN_EXISTING,
-                0,
-                std::ptr::null_mut(),
-            );
-
-            if handle == INVALID_HANDLE_VALUE {
-                // ERROR_PIPE_BUSY means the pipe exists but all instances are in use
-                // — the daemon IS running, just busy serving another client
-                let err = GetLastError();
-                err == ERROR_PIPE_BUSY
-            } else {
-                CloseHandle(handle);
-                true
-            }
-        }
-    }
-
-    #[cfg(not(windows))]
-    {
-        false
-    }
-}
-
 /// RAII guard that holds a Windows named mutex to enforce only one daemon
 /// instance per GODLY_INSTANCE. The mutex is released automatically when
 /// the process exits (normally or via crash), so no stale locks can occur.
@@ -142,10 +87,7 @@ impl DaemonLock {
 
     #[cfg(not(windows))]
     pub fn try_acquire() -> Result<Self, String> {
-        // On non-Windows, fall back to pipe check
-        if is_daemon_running() {
-            return Err("Another daemon instance is already running".to_string());
-        }
+        // Non-Windows stub — no singleton enforcement
         Ok(Self {})
     }
 }
