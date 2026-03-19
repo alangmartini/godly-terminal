@@ -22,6 +22,9 @@ pub fn key_to_pty_bytes(key: &Key, modifiers: Modifiers) -> Option<Vec<u8>> {
                     _ => return None,
                 };
                 Some(vec![ctrl_char])
+            } else if modifiers.shift() && s.len() == 1 && s.as_bytes()[0].is_ascii_lowercase() {
+                // Shift+letter: produce uppercase ASCII
+                Some(vec![s.as_bytes()[0].to_ascii_uppercase()])
             } else {
                 // Normal character — send as UTF-8
                 Some(s.as_bytes().to_vec())
@@ -256,5 +259,29 @@ mod tests {
     fn ctrl_f5() {
         let bytes = key_to_pty_bytes(&Key::Named(Named::F5), Modifiers::CTRL);
         assert_eq!(bytes, Some(b"\x1b[15;5~".to_vec()));
+    }
+
+    // --- Bug #668: Shift+letter should produce uppercase ---
+    // key_to_pty_bytes receives the base key from Iced; the caller (app.rs)
+    // now uses the `text` field instead for printable characters, but these
+    // tests document the expected contract if the function is called directly.
+
+    #[test]
+    fn shift_letter_a_produces_uppercase() {
+        // Bug #668: Shift+A must produce 'A' (0x41), not 'a' (0x61)
+        let bytes = key_to_pty_bytes(&Key::Character("a".into()), Modifiers::SHIFT);
+        assert_eq!(bytes, Some(b"A".to_vec()));
+    }
+
+    #[test]
+    fn shift_letter_z_produces_uppercase() {
+        let bytes = key_to_pty_bytes(&Key::Character("z".into()), Modifiers::SHIFT);
+        assert_eq!(bytes, Some(b"Z".to_vec()));
+    }
+
+    #[test]
+    fn shift_letter_m_produces_uppercase() {
+        let bytes = key_to_pty_bytes(&Key::Character("m".into()), Modifiers::SHIFT);
+        assert_eq!(bytes, Some(b"M".to_vec()));
     }
 }
