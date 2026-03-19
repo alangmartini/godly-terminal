@@ -1,0 +1,64 @@
+name: "Split pane operations"
+tags: [split, pane]
+---
+- resetApp
+- waitForReady
+
+# Get active workspace
+- getActiveWorkspace:
+  store: activeWs
+
+# Create two terminals for splitting
+- createTerminal:
+    workspace_id: $activeWs.workspace_id
+  store: term1
+
+- createTerminal:
+    workspace_id: $activeWs.workspace_id
+  store: term2
+
+# Create a horizontal split
+- createSplit:
+    workspace_id: $activeWs.workspace_id
+    left_terminal_id: $term1.terminal_id
+    right_terminal_id: $term2.terminal_id
+    direction: horizontal
+    ratio: 0.5
+
+# Verify split state
+- getSplitState:
+    workspace_id: $activeWs.workspace_id
+  store: splitState
+
+- assertNotEmpty:
+    var: splitState
+
+# Run commands in each pane
+- executeCommand:
+    terminal_id: $term1.terminal_id
+    command: "echo LEFT_PANE"
+    idle_ms: 2000
+
+- executeCommand:
+    terminal_id: $term2.terminal_id
+    command: "echo RIGHT_PANE"
+    idle_ms: 2000
+
+- assertTextContains:
+    terminal_id: $term1.terminal_id
+    text: "LEFT_PANE"
+
+- assertTextContains:
+    terminal_id: $term2.terminal_id
+    text: "RIGHT_PANE"
+
+# Clear the split
+- clearSplit:
+    workspace_id: $activeWs.workspace_id
+
+# Clean up
+- closeTerminal:
+    terminal_id: $term2.terminal_id
+
+- closeTerminal:
+    terminal_id: $term1.terminal_id
