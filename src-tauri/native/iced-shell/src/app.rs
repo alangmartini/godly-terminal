@@ -5366,55 +5366,108 @@ impl GodlyApp {
                 let mut assigned_terminal_ids = HashSet::new();
 
                 if let Some(merged) = merged_session_state {
+                    // Collect workspaces that lost all their terminals (e.g. after reinstall).
+                    // They'll be filled from the missing_live_terminal_ids pool below.
+                    let mut empty_workspaces: Vec<session_persistence::MergedWorkspaceState> =
+                        Vec::new();
+
                     for workspace in merged.workspaces {
-                        for terminal_id in workspace.layout.all_leaf_ids() {
-                            let terminal_id = terminal_id.to_string();
-                            if !assigned_terminal_ids.insert(terminal_id.clone()) {
-                                continue;
-                            }
-                            self.terminals.add_to_workspace(
-                                terminal_id.clone(),
-                                rows,
-                                cols,
-                                workspace.id.clone(),
-                            );
-                            if let Some(offset) = restored_scrollback_offsets.get(&terminal_id) {
-                                if let Some(term) = self.terminals.get_mut(&terminal_id) {
-                                    term.scrollback_offset = *offset;
+                        if let (Some(layout), Some(focused)) =
+                            (workspace.layout.clone(), workspace.focused_terminal.clone())
+                        {
+                            for terminal_id in layout.all_leaf_ids() {
+                                let terminal_id = terminal_id.to_string();
+                                if !assigned_terminal_ids.insert(terminal_id.clone()) {
+                                    continue;
                                 }
-                            }
-                        }
-
-                        self.workspaces.add_with_details(
-                            workspace.id.clone(),
-                            workspace.name,
-                            workspace.folder_path,
-                            workspace.worktree_mode,
-                            workspace.layout,
-                            workspace.focused_terminal,
-                        );
-                    }
-
-                    if !merged.missing_live_terminal_ids.is_empty() {
-                        if self.workspaces.count() == 0 {
-                            if let Some(first_id) = merged.missing_live_terminal_ids.first() {
                                 self.terminals.add_to_workspace(
-                                    first_id.clone(),
+                                    terminal_id.clone(),
                                     rows,
                                     cols,
-                                    "w-default".to_string(),
+                                    workspace.id.clone(),
                                 );
+                                if let Some(offset) =
+                                    restored_scrollback_offsets.get(&terminal_id)
+                                {
+                                    if let Some(term) = self.terminals.get_mut(&terminal_id) {
+                                        term.scrollback_offset = *offset;
+                                    }
+                                }
+                            }
+
+                            self.workspaces.add_with_details(
+                                workspace.id.clone(),
+                                workspace.name,
+                                workspace.folder_path,
+                                workspace.worktree_mode,
+                                layout,
+                                focused,
+                            );
+                        } else {
+                            // Bug #619: workspace has no live terminals — defer creation.
+                            empty_workspaces.push(workspace);
+                        }
+                    }
+
+                    // Assign missing live terminals: first fill empty workspaces (one each),
+                    // then overflow remaining into the active workspace.
+                    let mut missing_iter =
+                        merged.missing_live_terminal_ids.into_iter().peekable();
+
+                    // Fill empty workspaces with one terminal each.
+                    for workspace in empty_workspaces {
+                        if let Some(terminal_id) = missing_iter.next() {
+                            if assigned_terminal_ids.insert(terminal_id.clone()) {
+                                self.terminals.add_to_workspace(
+                                    terminal_id.clone(),
+                                    rows,
+                                    cols,
+                                    workspace.id.clone(),
+                                );
+                                if let Some(offset) =
+                                    restored_scrollback_offsets.get(&terminal_id)
+                                {
+                                    if let Some(term) = self.terminals.get_mut(&terminal_id) {
+                                        term.scrollback_offset = *offset;
+                                    }
+                                }
                                 self.workspaces.add_with_details(
-                                    "w-default".to_string(),
-                                    "Workspace 1".to_string(),
-                                    default_workspace_folder(),
-                                    false,
+                                    workspace.id.clone(),
+                                    workspace.name,
+                                    workspace.folder_path,
+                                    workspace.worktree_mode,
                                     LayoutNode::Leaf {
-                                        terminal_id: first_id.clone(),
+                                        terminal_id: terminal_id.clone(),
                                     },
-                                    first_id.clone(),
+                                    terminal_id,
                                 );
-                                assigned_terminal_ids.insert(first_id.clone());
+                            }
+                        }
+                        // No terminal available — workspace silently dropped.
+                    }
+
+                    // Handle remaining unassigned live terminals.
+                    if missing_iter.peek().is_some() {
+                        if self.workspaces.count() == 0 {
+                            if let Some(first_id) = missing_iter.next() {
+                                if assigned_terminal_ids.insert(first_id.clone()) {
+                                    self.terminals.add_to_workspace(
+                                        first_id.clone(),
+                                        rows,
+                                        cols,
+                                        "w-default".to_string(),
+                                    );
+                                    self.workspaces.add_with_details(
+                                        "w-default".to_string(),
+                                        "Workspace 1".to_string(),
+                                        default_workspace_folder(),
+                                        false,
+                                        LayoutNode::Leaf {
+                                            terminal_id: first_id.clone(),
+                                        },
+                                        first_id,
+                                    );
+                                }
                             }
                         }
 
@@ -5424,7 +5477,7 @@ impl GodlyApp {
                             .or_else(|| self.workspaces.active_id().map(str::to_string))
                             .unwrap_or_else(|| "w-default".to_string());
 
-                        for terminal_id in merged.missing_live_terminal_ids {
+                        for terminal_id in missing_iter {
                             if !assigned_terminal_ids.insert(terminal_id.clone()) {
                                 continue;
                             }
@@ -5439,7 +5492,9 @@ impl GodlyApp {
                                     term.scrollback_offset = *offset;
                                 }
                             }
-                            if let Some(workspace) = self.workspaces.get_mut(&target_workspace_id) {
+                            if let Some(workspace) =
+                                self.workspaces.get_mut(&target_workspace_id)
+                            {
                                 if let Some(anchor) = workspace
                                     .layout
                                     .all_leaf_ids()
