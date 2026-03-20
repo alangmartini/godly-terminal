@@ -6,8 +6,8 @@ use iced::widget::{
 use iced::{Border, Color, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::theme::{
-    ACCENT, ACCENT_HOVER, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, TEXT_ACTIVE, TEXT_PRIMARY,
-    TEXT_SECONDARY,
+    ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
+    TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::workspace_state::WorkspaceInfo;
 
@@ -129,7 +129,7 @@ impl<Message> canvas::Program<Message> for SidebarHeaderIcon {
 
 fn header_action_button_style(status: button::Status) -> button::Style {
     let bg = match status {
-        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
         _ => Color::TRANSPARENT,
     };
 
@@ -137,8 +137,8 @@ fn header_action_button_style(status: button::Status) -> button::Style {
         background: Some(iced::Background::Color(bg)),
         text_color: TEXT_ACTIVE(),
         border: Border {
-            color: BORDER(),
-            width: 1.0,
+            color: Color::TRANSPARENT,
+            width: 0.0,
             radius: 4.0.into(),
         },
         ..button::Style::default()
@@ -241,25 +241,13 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let has_workspace_notification =
             workspace_signals.has_workspace_notification(ws.id.as_str());
 
-        let row_text = if is_active {
-            ACCENT_HOVER()
-        } else {
-            TEXT_PRIMARY()
-        };
+        let row_text = TEXT_PRIMARY();
 
         let name_label = text(&ws.name).size(13).color(row_text);
 
         let terminal_count = ws.layout.leaf_count();
-        let badge_bg = if is_active {
-            Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.25)
-        } else {
-            BG_TERTIARY()
-        };
-        let badge_text = if is_active {
-            BG_SECONDARY()
-        } else {
-            TEXT_SECONDARY()
-        };
+        let badge_bg = GHOST_HOVER();
+        let badge_text = TEXT_SECONDARY();
 
         let badge = container(
             text(format!("{}", terminal_count))
@@ -341,10 +329,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             .width(Length::Fill)
             .style(move |_theme, status| {
                 let bg = if is_active {
-                    Color::from_rgba(ACCENT_HOVER().r, ACCENT_HOVER().g, ACCENT_HOVER().b, 0.08)
+                    GHOST_SELECTED()
                 } else {
                     match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                         _ => Color::TRANSPARENT,
                     }
                 };
@@ -384,7 +372,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
@@ -401,7 +389,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
@@ -425,7 +413,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 .width(Length::Fill)
                 .style(|_theme, status| {
                     let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                         _ => Color::TRANSPARENT,
                     };
                     button::Style {
@@ -443,7 +431,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     .width(Length::Fill)
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                            button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                             _ => Color::TRANSPARENT,
                         };
                         button::Style {
@@ -467,7 +455,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     .width(Length::Fill)
                     .style(|_theme, status| {
                         let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                            button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                             _ => Color::TRANSPARENT,
                         };
                         button::Style {
@@ -556,20 +544,13 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     )
     .padding(Padding::from([10, 10]))
     .style(|_theme| container::Style {
-        background: Some(iced::Background::Color(BG_SECONDARY())),
+        background: Some(iced::Background::Color(SURFACE_BG())),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
             radius: 0.0.into(),
         },
         ..container::Style::default()
-    });
-
-    let header_separator = rule::horizontal(1).style(|_theme| rule::Style {
-        color: BORDER(),
-        radius: 0.0.into(),
-        fill_mode: rule::FillMode::Full,
-        snap: true,
     });
 
     let scrollable_list = scrollable(
@@ -593,7 +574,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         .width(Length::Fill)
         .style(|_theme, status| {
             let bg = match status {
-                button::Status::Hovered => iced::Background::Color(BG_TERTIARY()),
+                button::Status::Hovered => iced::Background::Color(GHOST_HOVER()),
                 _ => iced::Background::Color(Color::TRANSPARENT),
             };
             button::Style {
@@ -625,12 +606,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .padding(Padding::from([4, 8]))
     .width(Length::Fill);
 
-    let sidebar_content = container(column![header, header_separator, scrollable_list, claude_md_footer])
+    let sidebar_content = container(column![header, scrollable_list, claude_md_footer])
         .width(Length::Fixed(sidebar_content_width))
         .height(Length::Fill)
         .clip(true)
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY())),
+            background: Some(iced::Background::Color(SURFACE_BG())),
             ..container::Style::default()
         });
 

@@ -1,7 +1,7 @@
 use iced::widget::{container, row, text, Space};
 use iced::{Border, Color, Element, Length, Padding};
 
-use crate::theme::{BG_SECONDARY, BORDER, TEXT_PRIMARY, TEXT_SECONDARY};
+use crate::theme::{STATUS_BAR_BG, TEXT_SECONDARY};
 
 /// Height of the status bar in logical pixels.
 pub const STATUS_BAR_HEIGHT: f32 = 20.0;
@@ -53,7 +53,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
 
     let shell_text = text(shell)
         .size(11)
-        .color(TEXT_PRIMARY())
+        .color(TEXT_SECONDARY())
         .font(iced::Font::MONOSPACE);
 
     let cwd_text = text(cwd)
@@ -78,10 +78,10 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
         .width(Length::Fill)
         .height(Length::Fixed(STATUS_BAR_HEIGHT))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY())),
+            background: Some(iced::Background::Color(STATUS_BAR_BG())),
             border: Border {
-                color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.08),
-                width: 0.5,
+                color: Color::TRANSPARENT,
+                width: 0.0,
                 radius: 0.0.into(),
             },
             ..container::Style::default()
