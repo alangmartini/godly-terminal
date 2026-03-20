@@ -35,6 +35,7 @@ pub enum AppAction {
     TogglePerfOverlay,
     Find,
     WhisperToggle,
+    QuickClaude,
 }
 
 /// Flat index order matching the categories in `shortcuts_tab.rs`.
@@ -45,7 +46,7 @@ pub enum AppAction {
 /// Clipboard:  13=Copy, 14=Paste, 15=SelectAll
 /// Scrollback: 16=ScrollPageUp, 17=ScrollPageDown, 18=ScrollToTop, 19=ScrollToBottom
 /// Zoom:       20=ZoomIn, 21=ZoomOut, 22=ZoomReset
-/// Workspaces: 23=NextWorkspace, 24=PrevWorkspace, 25=ToggleSidebar, 26=OpenSettings
+/// Workspaces: 23=NextWorkspace, 24=PrevWorkspace, 25=ToggleSidebar, 26=OpenSettings, 27=QuickClaude
 const FLAT_ACTION_ORDER: &[AppAction] = &[
     // Tabs
     AppAction::NewTab,
@@ -80,6 +81,7 @@ const FLAT_ACTION_ORDER: &[AppAction] = &[
     AppAction::PrevWorkspace,
     AppAction::ToggleSidebar,
     AppAction::OpenSettings,
+    AppAction::QuickClaude,
 ];
 
 /// Maps a flat category index to the corresponding `AppAction`.
@@ -299,6 +301,7 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
         "o" if shift => Some(AppAction::TogglePerfOverlay),
         "f" if !shift => Some(AppAction::Find),
         "m" if shift => Some(AppAction::WhisperToggle),
+        "q" if shift => Some(AppAction::QuickClaude),
         _ => None,
     }
 }
@@ -1182,5 +1185,33 @@ mod tests {
             check_app_shortcut(&named_key(Named::ArrowRight), alt_shift()),
             None
         );
+    }
+
+    // --- Quick Claude ---
+    #[test]
+    fn ctrl_shift_q_is_quick_claude() {
+        assert_eq!(
+            check_app_shortcut(&char_key("q"), ctrl_shift()),
+            Some(AppAction::QuickClaude)
+        );
+    }
+    #[test]
+    fn ctrl_shift_uppercase_q_is_quick_claude() {
+        assert_eq!(
+            check_app_shortcut(&char_key("Q"), ctrl_shift()),
+            Some(AppAction::QuickClaude)
+        );
+    }
+    #[test]
+    fn ctrl_q_alone_is_not_quick_claude() {
+        assert_eq!(check_app_shortcut(&char_key("q"), CTRL), None);
+    }
+    #[test]
+    fn q_alone_is_not_shortcut() {
+        assert_eq!(check_app_shortcut(&char_key("q"), NONE), None);
+    }
+    #[test]
+    fn flat_index_27_is_quick_claude() {
+        assert_eq!(flat_index_to_action(27), Some(AppAction::QuickClaude));
     }
 }
