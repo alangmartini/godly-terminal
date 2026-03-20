@@ -49,8 +49,9 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
                 info.cwd.to_string()
             },
             format!("{}\u{00D7}{}", info.cols, info.rows),
+            info.font,
         ),
-        None => (String::new(), String::new(), String::new()),
+        None => (String::new(), String::new(), String::new(), Font::default()),
     };
 
     let shell_text = text(shell)
