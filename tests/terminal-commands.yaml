@@ -1,0 +1,46 @@
+name: "Terminal creation, commands, and output"
+tags: [terminal, commands]
+---
+- resetApp
+- waitForReady
+
+# Get active workspace for creating terminals
+- getActiveWorkspace:
+  store: activeWs
+
+# Create a new terminal
+- createTerminal:
+    workspace_id: $activeWs.workspace_id
+  store: term
+
+- assertNotEmpty:
+    var: term
+    field: terminal_id
+
+# Run a simple echo command
+- executeCommand:
+    terminal_id: $term.terminal_id
+    command: "echo HELLO_GODLY_TEST"
+    idle_ms: 2000
+
+# Verify the output contains our string
+- assertTextContains:
+    terminal_id: $term.terminal_id
+    text: "HELLO_GODLY_TEST"
+
+# Wait for the terminal to be idle
+- waitForIdle:
+    terminal_id: $term.terminal_id
+    idle_ms: 1000
+
+# Read the grid
+- readGrid:
+    terminal_id: $term.terminal_id
+  store: grid
+
+- assertNotEmpty:
+    var: grid
+
+# Close the terminal
+- closeTerminal:
+    terminal_id: $term.terminal_id
