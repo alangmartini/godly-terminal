@@ -6027,8 +6027,6 @@ impl GodlyApp {
         }
 
         self.resize_all_terminals()
-
-        Task::none()
     }
 
     fn cycle_focus(&mut self) {
