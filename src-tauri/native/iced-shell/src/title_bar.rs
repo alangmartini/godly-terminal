@@ -1,16 +1,10 @@
 use iced::widget::{button, canvas, container, mouse_area, row, text};
 use iced::{Border, Color, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
 
-use crate::theme::TEXT_SECONDARY;
+use crate::theme::{DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
 
 /// Height of the custom title bar in logical pixels.
 pub const TITLE_BAR_HEIGHT: f32 = 34.0;
-
-const TITLE_BAR_BG_TOP: Color = Color::from_rgb(0.07, 0.07, 0.09);
-const TITLE_BAR_BG_BOTTOM: Color = Color::from_rgb(0.06, 0.06, 0.08);
-const CONTROL_HOVER_BG: Color = Color::from_rgb(0.18, 0.18, 0.22);
-const CLOSE_HOVER_BG: Color = Color::from_rgb(0.75, 0.15, 0.15);
-const CONTROL_TEXT_COLOR: Color = Color::from_rgb(0.70, 0.70, 0.75);
 
 /// Small terminal icon drawn via canvas.
 struct TerminalIcon {
@@ -77,7 +71,7 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
     on_close: M,
 ) -> Element<'a, M> {
     let icon = canvas(TerminalIcon {
-        color: CONTROL_TEXT_COLOR,
+        color: TEXT_SECONDARY(),
     })
     .width(Length::Fixed(16.0))
     .height(Length::Fixed(16.0));
@@ -99,9 +93,9 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
     )
     .on_press(on_drag);
 
-    let minimize_btn = window_control_button("\u{2013}", CONTROL_HOVER_BG, on_minimize); // –
-    let maximize_btn = window_control_button("\u{25A1}", CONTROL_HOVER_BG, on_maximize); // □
-    let close_btn = window_control_button("\u{00D7}", CLOSE_HOVER_BG, on_close); // ×
+    let minimize_btn = window_control_button("\u{2013}", GHOST_HOVER(), on_minimize); // –
+    let maximize_btn = window_control_button("\u{25A1}", GHOST_HOVER(), on_maximize); // □
+    let close_btn = window_control_button("\u{00D7}", DANGER(), on_close); // ×
 
     let controls = row![minimize_btn, maximize_btn, close_btn].spacing(0);
 
@@ -116,11 +110,7 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fixed(TITLE_BAR_HEIGHT))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Gradient(iced::Gradient::Linear(
-                iced::gradient::Linear::new(std::f32::consts::PI)
-                    .add_stop(0.0, TITLE_BAR_BG_TOP)
-                    .add_stop(1.0, TITLE_BAR_BG_BOTTOM),
-            ))),
+            background: Some(iced::Background::Color(TITLE_BAR_BG())),
             ..container::Style::default()
         })
         .into()
@@ -134,7 +124,7 @@ fn window_control_button<'a, M: Clone + 'a>(
     button(
         text(label)
             .size(14)
-            .color(CONTROL_TEXT_COLOR)
+            .color(TEXT_SECONDARY())
             .center(),
     )
     .on_press(on_press)
@@ -147,7 +137,7 @@ fn window_control_button<'a, M: Clone + 'a>(
         };
         button::Style {
             background: Some(iced::Background::Color(bg_color)),
-            text_color: CONTROL_TEXT_COLOR,
+            text_color: TEXT_SECONDARY(),
             border: Border::default(),
             ..button::Style::default()
         }
