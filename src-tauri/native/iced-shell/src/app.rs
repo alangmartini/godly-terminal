@@ -738,6 +738,14 @@ pub enum Message {
     QuickClaudeDialogSkillAutocompleteNavigate(i32),
     /// Dismiss skill autocomplete popup.
     QuickClaudeDialogSkillAutocompleteDismiss,
+    /// Model selected in Quick Claude dialog.
+    QuickClaudeDialogModelSelected(String),
+    /// Toggle model dropdown in Quick Claude dialog.
+    QuickClaudeDialogModelDropdownToggle,
+    /// Permission mode selected in Quick Claude dialog.
+    QuickClaudeDialogModeSelected(String),
+    /// Toggle mode dropdown in Quick Claude dialog.
+    QuickClaudeDialogModeDropdownToggle,
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
     /// AI tool command input changed.
@@ -2230,7 +2238,7 @@ impl GodlyApp {
                     QuickClaudeLayout::VSplit | QuickClaudeLayout::HSplit => 2,
                     QuickClaudeLayout::Grid2x2 => 4,
                 };
-                let steps = crate::quick_claude::default_launch_steps(num_agents, &preset.prompt_template);
+                let steps = crate::quick_claude::default_launch_steps(num_agents, &preset.prompt_template, "sonnet", "default");
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
                 let ws_name = format!("QC: {}", preset.name);
@@ -2365,6 +2373,28 @@ impl GodlyApp {
                     dlg.auto_suggest_branch = val;
                 }
             }
+            Message::QuickClaudeDialogModelSelected(model) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.selected_model = model;
+                    dlg.model_dropdown_open = false;
+                }
+            }
+            Message::QuickClaudeDialogModelDropdownToggle => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.model_dropdown_open = !dlg.model_dropdown_open;
+                }
+            }
+            Message::QuickClaudeDialogModeSelected(mode) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.selected_mode = mode;
+                    dlg.mode_dropdown_open = false;
+                }
+            }
+            Message::QuickClaudeDialogModeDropdownToggle => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.mode_dropdown_open = !dlg.mode_dropdown_open;
+                }
+            }
             Message::QuickClaudeDialogLaunch => {
                 if self.quick_claude_launch.is_some() {
                     return Task::none();
@@ -2374,8 +2404,10 @@ impl GodlyApp {
                 };
                 let prompt = dlg.prompt_text();
                 let prompt = prompt.trim();
+                let model = dlg.selected_model.clone();
+                let mode = dlg.selected_mode.clone();
                 let num_agents = 1;
-                let steps = crate::quick_claude::default_launch_steps(num_agents, prompt);
+                let steps = crate::quick_claude::default_launch_steps(num_agents, prompt, &model, &mode);
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
                 let ws_name = "Quick Claude".to_string();
@@ -3588,6 +3620,10 @@ impl GodlyApp {
                 Message::QuickClaudeDialogBranchChanged,
                 Message::QuickClaudeDialogMainBranchToggled,
                 Message::QuickClaudeDialogAutoSuggestToggled,
+                Message::QuickClaudeDialogModelSelected,
+                Message::QuickClaudeDialogModelDropdownToggle,
+                Message::QuickClaudeDialogModeSelected,
+                Message::QuickClaudeDialogModeDropdownToggle,
                 Message::QuickClaudeDialogLaunch,
                 Message::QuickClaudeDialogVoice,
                 Message::QuickClaudeDialogClose,
