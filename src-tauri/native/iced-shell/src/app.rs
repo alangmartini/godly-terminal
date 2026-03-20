@@ -1467,6 +1467,7 @@ impl GodlyApp {
                 key,
                 modifiers,
                 physical_key,
+                text,
                 ..
             }) => {
                 let mut capture = CaptureState {
@@ -1536,7 +1537,17 @@ impl GodlyApp {
                 self.selection.clear();
 
                 // Forward to PTY — send to focused terminal, not just active tab.
-                if let Some(bytes) = key_to_pty_bytes(&key, modifiers) {
+                // Use the platform-composed `text` for printable characters (handles
+                // Shift+key → uppercase/symbols correctly on all keyboard layouts).
+                // Fall back to key_to_pty_bytes for control chars and named keys.
+                let bytes = if !modifiers.control() {
+                    text.as_ref().map(|t| t.as_bytes().to_vec())
+                } else {
+                    None
+                }
+                .or_else(|| key_to_pty_bytes(&key, modifiers));
+
+                if let Some(bytes) = bytes {
                     if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client) {
                         let _ = commands::write_to_terminal(client, tid, &bytes);
                     }
