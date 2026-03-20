@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-03-20
+
+### Added
+- **Quick Claude Dialog** — press `Ctrl+Shift+Q` to open a modal dialog for rapidly launching Claude Code sessions with a prompt, workspace selection, and branch configuration (#682)
+
 ## [0.14.0] - 2026-03-20
 
 ### Added
