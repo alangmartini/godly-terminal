@@ -46,6 +46,7 @@ mod url_detector;
 mod terminal_context_menu;
 mod whisper_ui;
 mod quick_claude;
+mod quick_claude_dialog;
 mod session_persistence;
 mod keybinding_persistence;
 
