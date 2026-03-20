@@ -28,7 +28,17 @@ pub enum LaunchStep {
 }
 
 /// Build the default launch sequence for a preset with N agents.
-pub fn default_launch_steps(num_agents: usize, prompt: &str) -> Vec<LaunchStep> {
+pub fn default_launch_steps(num_agents: usize, prompt: &str, model: &str, mode: &str) -> Vec<LaunchStep> {
+    let mut cmd = "claude".to_string();
+    // Add model flag (always, since we default to sonnet)
+    cmd.push_str(&format!(" --model {}", model));
+    // Add mode flag
+    match mode {
+        "plan" => cmd.push_str(" --plan"),
+        "auto" => cmd.push_str(" --dangerously-skip-permissions"),
+        _ => {} // "default" — no flag
+    }
+
     let mut steps = Vec::new();
     for i in 0..num_agents {
         steps.push(LaunchStep::CreateTerminal { agent_index: i });
@@ -38,7 +48,7 @@ pub fn default_launch_steps(num_agents: usize, prompt: &str) -> Vec<LaunchStep> 
         });
         steps.push(LaunchStep::RunCommand {
             agent_index: i,
-            command: "claude".to_string(),
+            command: cmd.clone(),
         });
         steps.push(LaunchStep::WaitReady {
             agent_index: i,
@@ -267,7 +277,7 @@ mod tests {
 
     #[test]
     fn default_steps_single_no_prompt() {
-        let steps = default_launch_steps(1, "");
+        let steps = default_launch_steps(1, "", "sonnet", "default");
         // CreateTerminal, WaitIdle, RunCommand, WaitReady(trust), SendEnter, WaitReady(>)
         assert_eq!(steps.len(), 6);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0 }));
@@ -276,7 +286,7 @@ mod tests {
 
     #[test]
     fn default_steps_single_with_prompt() {
-        let steps = default_launch_steps(1, "build the app");
+        let steps = default_launch_steps(1, "build the app", "sonnet", "default");
         // 6 base steps + 1 SendPrompt
         assert_eq!(steps.len(), 7);
         assert!(matches!(steps[6], LaunchStep::SendPrompt { agent_index: 0, .. }));
@@ -284,9 +294,39 @@ mod tests {
 
     #[test]
     fn default_steps_grid_2x2() {
-        let steps = default_launch_steps(4, "test");
+        let steps = default_launch_steps(4, "test", "sonnet", "default");
         // Each agent: 7 steps (with prompt). 4 agents = 28
         assert_eq!(steps.len(), 28);
+    }
+
+    #[test]
+    fn default_steps_with_model_and_mode() {
+        let steps = default_launch_steps(1, "", "opus", "plan");
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            assert_eq!(command, "claude --model opus --plan");
+        } else {
+            panic!("Expected RunCommand at index 2");
+        }
+    }
+
+    #[test]
+    fn default_steps_auto_mode() {
+        let steps = default_launch_steps(1, "", "haiku", "auto");
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            assert_eq!(command, "claude --model haiku --dangerously-skip-permissions");
+        } else {
+            panic!("Expected RunCommand at index 2");
+        }
+    }
+
+    #[test]
+    fn default_steps_default_mode_no_extra_flag() {
+        let steps = default_launch_steps(1, "", "sonnet", "default");
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            assert_eq!(command, "claude --model sonnet");
+        } else {
+            panic!("Expected RunCommand at index 2");
+        }
     }
 
     #[test]
