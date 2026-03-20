@@ -59,9 +59,9 @@ For each test case:
    - **UNEXPECTED** — behavior not covered by docs/code (could be good or bad)
 
 **Important rules:**
-- Test via MCP tools only (this simulates how Claude Code and other AI tools interact with the terminal)
-- Clean up after each test (close terminals, remove worktrees) to avoid polluting the user's environment
-- If a test creates resources, track them and clean up in a final cleanup phase
+- Observe state via read-only MCP tools (this simulates how Claude Code and other AI tools inspect the terminal)
+- Ask the user to perform actions (create terminals, run commands, etc.) since MCP tools are read-only
+- Track any resources created during testing and ask the user to clean them up afterward
 - Record exact outputs — don't paraphrase. Copy the actual JSON responses.
 
 ### Phase 3b: Visual / UX Testing
@@ -76,7 +76,7 @@ When the feature has any UI or visual component (dialogs, tabs, terminal renderi
    - Is spacing consistent (padding, margins, gaps)?
    - Do interactive elements (buttons, inputs, dropdowns) look clickable/focusable?
    - Are loading/disabled/error states visually distinct?
-   - Does it look good at different terminal sizes? (use `resize_terminal` to test)
+   - Does it look good at different terminal sizes?
 
 3. **Evaluate the UX flow**:
    - Is the feature discoverable? Can a user find it without reading docs?
@@ -168,9 +168,8 @@ Label the issue with `bug` if core functionality is broken, `enhancement` if it 
 
 ### Phase 6: Cleanup
 
-1. **Close all test terminals** created during testing
-2. **Remove all test worktrees** created during testing
-3. **Verify** no resources were left behind by listing terminals/workspaces
+1. **Verify** no test resources were left behind by listing terminals/workspaces using `list_terminals` and `list_workspaces`
+2. If any test resources remain, ask the user to clean them up manually (MCP tools are read-only)
 
 ### Output
 
@@ -185,29 +184,26 @@ Passed:            <count>
 Failed:            <count>
 Degraded:          <count>
 Issues created:    #<number>
-Resources cleaned: <count> terminals, <count> worktrees
+Resources verified: <count> terminals, <count> workspaces checked
 ```
 
 ### Tips
 
 - When testing MCP tools, use `list_terminals` and `list_workspaces` to verify state changes
-- Use `execute_command` to run verification commands inside test terminals (e.g., `git branch` to check branch name)
-- Use `read_grid` to capture terminal screen state for visual verification of terminal-rendered UI
-- Use `resize_terminal` to test responsive behavior at different sizes
+- Use `read_terminal` and `read_grid` to capture terminal screen state for verification
+- Use `wait_for_text` and `wait_for_idle` to wait for expected terminal states
 - If a feature requires the Tauri app to be running (not just the daemon), note which tests are MCP-only vs require the full app
 - Search for existing issues before creating a new one: `gh issue list --search "<keywords>" --state all`
+- Note: MCP tools are **read-only**. You cannot create/close terminals, run commands, or modify state via MCP. Testing is observational — verify existing state rather than driving actions.
 
 ### Advanced Testing Tools
 
-When MCP-only testing is insufficient (e.g., you need to test drag-and-drop, keyboard shortcuts, visual layout, or mouse interactions), use the **hybrid testing framework**:
+When read-only MCP testing is insufficient (e.g., you need to test drag-and-drop, keyboard shortcuts, visual layout, or mouse interactions), use the **hybrid testing framework**:
 
-#### JS Bridge (godly-terminal MCP)
-- **`execute_js`** — Run JavaScript in the WebView to inspect DOM state, read the store, get element positions, check CSS classes, or dispatch synthetic events. Examples:
-  - `return window.__STORE__.getState().splitViews` — query split state
-  - `return document.querySelector('.split-divider')?.getBoundingClientRect()` — get element position for PyAutoGUI
-  - `return document.querySelector('.terminal-pane')?.className` — check CSS classes
+#### Read-Only MCP Tools (godly-terminal)
 - **`capture_screenshot`** — Capture a terminal canvas as a PNG file. Pass `terminal_id` for a specific terminal, or omit for the first visible canvas.
-- **`create_split` / `clear_split` / `get_split_state`** — Programmatic split view control via MCP.
+- **`get_split_state`** — Query the current split view configuration.
+- **`ui_query`** / **`ui_wait`** — Query UI state and wait for conditions.
 
 #### PyAutoGUI MCP (OS-level automation)
 When the `pyautogui-mcp` server is registered, you have real mouse/keyboard control:
@@ -217,9 +213,9 @@ When the `pyautogui-mcp` server is registered, you have real mouse/keyboard cont
 - **`focus_window` / `get_window_rect`** — Window management
 
 #### Hybrid Pattern (recommended for UI testing)
-1. Use `execute_js` to get element positions (reliable, CSS-selector-based)
+1. Use `ui_query` to query UI state
 2. Use `get_window_rect` to get the window offset
 3. Use PyAutoGUI `click`/`drag` at the computed screen coordinates
 4. Use `capture_screenshot` or PyAutoGUI `screenshot` to verify the result
-5. Use `execute_js` to verify state changes in the store
+5. Use `ui_query` to verify state changes after actions
 
