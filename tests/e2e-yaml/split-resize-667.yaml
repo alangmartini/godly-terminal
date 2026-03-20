@@ -1,0 +1,152 @@
+name: "Bug #667: Split must resize original terminal PTY (both directions)"
+tags: [split, resize, bug-667]
+---
+# Bug #667: When splitting a terminal, the original pane's PTY dimensions
+# are not updated to reflect the new smaller size. split_focused_pane() and
+# McpEvent::SplitTerminal both modify the layout tree but never call
+# resize_all_terminals() on the original terminal.
+
+- resetApp
+- waitForReady
+
+# ===================================================================
+# Part 1: Vertical split (top/bottom) — rows must decrease
+# ===================================================================
+
+# Get active workspace and terminal
+- getActiveWorkspace:
+  store: ws
+
+- getActiveTerminal:
+  store: term1
+
+# Wait for terminal to be idle and ready
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Capture the initial row count before splitting
+- executeCommand:
+    terminal_id: $term1.id
+    command: "ROWS_BEFORE=$(stty size | awk '{print $1}'); echo ROWS_BEFORE=$ROWS_BEFORE"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "ROWS_BEFORE="
+
+# Create a second terminal for the split
+- createTerminal:
+    workspace_id: $ws.id
+  store: term2
+
+- waitForIdle:
+    terminal_id: $term2.id
+    idle_ms: 2000
+
+# Split vertically (top/bottom) — term1 on top, term2 on bottom
+- splitTerminal:
+    workspace_id: $ws.id
+    target_terminal_id: $term1.id
+    new_terminal_id: $term2.id
+    direction: vertical
+
+# Wait for layout to settle and resize to propagate
+- sleep:
+    ms: 3000
+
+# Focus back on the original terminal
+- focusTerminal:
+    terminal_id: $term1.id
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Check the row count after the split — PTY should now report fewer rows
+- executeCommand:
+    terminal_id: $term1.id
+    command: "ROWS_AFTER=$(stty size | awk '{print $1}'); echo ROWS_AFTER=$ROWS_AFTER; if [ \"$ROWS_AFTER\" -lt \"$ROWS_BEFORE\" ]; then echo VSPLIT_RESIZE_OK; else echo VSPLIT_RESIZE_FAILED_before=${ROWS_BEFORE}_after=${ROWS_AFTER}; fi"
+    idle_ms: 3000
+
+# This assertion will FAIL if the bug is present: the PTY rows won't decrease
+# because resize_all_terminals() is never called after the split
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "VSPLIT_RESIZE_OK"
+
+# Cleanup vertical split
+- clearSplit:
+    workspace_id: $ws.id
+
+- closeTerminal:
+    terminal_id: $term2.id
+
+# ===================================================================
+# Part 2: Horizontal split (left/right) — columns must decrease
+# ===================================================================
+
+# Wait for unsplit to settle
+- sleep:
+    ms: 2000
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Capture the initial column count before splitting
+- executeCommand:
+    terminal_id: $term1.id
+    command: "COLS_BEFORE=$(stty size | awk '{print $2}'); echo COLS_BEFORE=$COLS_BEFORE"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "COLS_BEFORE="
+
+# Create a third terminal for horizontal split
+- createTerminal:
+    workspace_id: $ws.id
+  store: term3
+
+- waitForIdle:
+    terminal_id: $term3.id
+    idle_ms: 2000
+
+# Split horizontally (left/right) — term1 on left, term3 on right
+- splitTerminal:
+    workspace_id: $ws.id
+    target_terminal_id: $term1.id
+    new_terminal_id: $term3.id
+    direction: horizontal
+
+# Wait for layout to settle and resize to propagate
+- sleep:
+    ms: 3000
+
+# Focus back on the original terminal
+- focusTerminal:
+    terminal_id: $term1.id
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Check the column count after the split — PTY should now report fewer cols
+- executeCommand:
+    terminal_id: $term1.id
+    command: "COLS_AFTER=$(stty size | awk '{print $2}'); echo COLS_AFTER=$COLS_AFTER; if [ \"$COLS_AFTER\" -lt \"$COLS_BEFORE\" ]; then echo HSPLIT_RESIZE_OK; else echo HSPLIT_RESIZE_FAILED_before=${COLS_BEFORE}_after=${COLS_AFTER}; fi"
+    idle_ms: 3000
+
+# This assertion will FAIL if the bug is present: the PTY cols won't decrease
+# because resize_all_terminals() is never called after the split
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "HSPLIT_RESIZE_OK"
+
+# Cleanup
+- clearSplit:
+    workspace_id: $ws.id
+
+- closeTerminal:
+    terminal_id: $term3.id
