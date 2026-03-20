@@ -749,7 +749,6 @@ pub enum Message {
     QuickClaudeDialogLaunch,
     /// Voice input from Quick Claude dialog.
     QuickClaudeDialogVoice,
-<<<<<<< HEAD
     /// Skills loaded for Quick Claude dialog autocomplete.
     QuickClaudeDialogSkillsLoaded(Vec<crate::quick_claude_dialog::SkillEntry>),
     /// Skill selected from autocomplete popup.
@@ -758,14 +757,6 @@ pub enum Message {
     QuickClaudeDialogSkillAutocompleteNavigate(i32),
     /// Dismiss skill autocomplete popup.
     QuickClaudeDialogSkillAutocompleteDismiss,
-    /// Model selected in Quick Claude dialog.
-    QuickClaudeDialogModelSelected(String),
-    /// Toggle model dropdown in Quick Claude dialog.
-    QuickClaudeDialogModelDropdownToggle,
-    /// Permission mode selected in Quick Claude dialog.
-    QuickClaudeDialogModeSelected(String),
-    /// Toggle mode dropdown in Quick Claude dialog.
-=======
     /// Tab selected in Quick Claude dialog.
     QuickClaudeDialogTabSelected(crate::quick_claude_dialog::QuickClaudeTab),
     /// Session selected in Quick Claude dialog resume tab.
@@ -774,14 +765,13 @@ pub enum Message {
     QuickClaudeDialogSessionsLoaded(Vec<crate::quick_claude_dialog::ClaudeSession>),
     /// Resume a Claude session from Quick Claude dialog.
     QuickClaudeDialogResume,
-    /// Model selected in Quick Claude dialog (duplicated from PR1).
+    /// Model selected in Quick Claude dialog.
     QuickClaudeDialogModelSelected(String),
-    /// Toggle model dropdown in Quick Claude dialog (duplicated from PR1).
+    /// Toggle model dropdown in Quick Claude dialog.
     QuickClaudeDialogModelDropdownToggle,
-    /// Mode selected in Quick Claude dialog (duplicated from PR1).
+    /// Permission mode selected in Quick Claude dialog.
     QuickClaudeDialogModeSelected(String),
-    /// Toggle mode dropdown in Quick Claude dialog (duplicated from PR1).
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
+    /// Toggle mode dropdown in Quick Claude dialog.
     QuickClaudeDialogModeDropdownToggle,
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
@@ -1619,46 +1609,40 @@ impl GodlyApp {
                             }
                             return Task::none();
                         }
-<<<<<<< HEAD
-                        if self.quick_claude_dialog.is_some() {
+                        if let Some(ref dlg) = self.quick_claude_dialog {
                             // Skill autocomplete key routing
-                            if let Some(ref dlg) = self.quick_claude_dialog {
-                                if dlg.skill_autocomplete_open {
-                                    use iced::keyboard::key::Named;
-                                    match &key {
-                                        keyboard::Key::Named(Named::ArrowUp) => {
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillAutocompleteNavigate(
-                                                    -1,
-                                                ),
-                                            );
-                                        }
-                                        keyboard::Key::Named(Named::ArrowDown) => {
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillAutocompleteNavigate(
-                                                    1,
-                                                ),
-                                            );
-                                        }
-                                        keyboard::Key::Named(Named::Enter)
-                                        | keyboard::Key::Named(Named::Tab) => {
-                                            let selected = dlg.skill_autocomplete_selected;
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillSelected(selected),
-                                            );
-                                        }
-                                        keyboard::Key::Named(Named::Escape) => {
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillAutocompleteDismiss,
-                                            );
-                                        }
-                                        _ => {}
+                            if dlg.skill_autocomplete_open {
+                                use iced::keyboard::key::Named;
+                                match &key {
+                                    keyboard::Key::Named(Named::ArrowUp) => {
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(
+                                                -1,
+                                            ),
+                                        );
                                     }
+                                    keyboard::Key::Named(Named::ArrowDown) => {
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(
+                                                1,
+                                            ),
+                                        );
+                                    }
+                                    keyboard::Key::Named(Named::Enter)
+                                    | keyboard::Key::Named(Named::Tab) => {
+                                        let selected = dlg.skill_autocomplete_selected;
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillSelected(selected),
+                                        );
+                                    }
+                                    keyboard::Key::Named(Named::Escape) => {
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillAutocompleteDismiss,
+                                        );
+                                    }
+                                    _ => {}
                                 }
                             }
-=======
-                        if let Some(ref dlg) = self.quick_claude_dialog {
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
                             if is_escape_key(&key) {
                                 self.quick_claude_dialog = None;
                                 return Task::none();
@@ -2348,9 +2332,8 @@ impl GodlyApp {
                 self.quick_claude_dialog = Some(
                     crate::quick_claude_dialog::QuickClaudeDialogState::new(ws_id, ws_list),
                 );
-<<<<<<< HEAD
 
-                // Load skills asynchronously
+                // Load skills and sessions asynchronously
                 let ws_folder: Option<String> = self
                     .workspaces
                     .active()
@@ -2361,23 +2344,20 @@ impl GodlyApp {
                             Some(ws.folder_path.clone())
                         }
                     });
-                return iced::Task::perform(
+                let ws_folder2 = ws_folder.clone();
+                let skills_task = iced::Task::perform(
                     async move {
                         crate::quick_claude_dialog::discover_skills(ws_folder.as_deref())
                     },
                     Message::QuickClaudeDialogSkillsLoaded,
-=======
-                let ws_folder: Option<String> = self.workspaces.active()
-                    .and_then(|ws| {
-                        if ws.folder_path.is_empty() { None } else { Some(ws.folder_path.clone()) }
-                    });
-                return iced::Task::perform(
+                );
+                let sessions_task = iced::Task::perform(
                     async move {
-                        crate::quick_claude_dialog::discover_sessions(ws_folder.as_deref())
+                        crate::quick_claude_dialog::discover_sessions(ws_folder2.as_deref())
                     },
                     Message::QuickClaudeDialogSessionsLoaded,
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
                 );
+                return iced::Task::batch([skills_task, sessions_task]);
             }
             Message::QuickClaudeDialogClose => {
                 self.quick_claude_dialog = None;
@@ -2516,7 +2496,6 @@ impl GodlyApp {
                 // Voice integration — forward to whisper toggle if available
                 return self.update(Message::WhisperToggle);
             }
-<<<<<<< HEAD
             Message::QuickClaudeDialogSkillsLoaded(skills) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.skills = skills;
@@ -2555,7 +2534,8 @@ impl GodlyApp {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.skill_autocomplete_open = false;
                     dlg.skill_autocomplete_filter.clear();
-=======
+                }
+            }
             Message::QuickClaudeDialogTabSelected(tab) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.active_tab = tab;
@@ -2618,29 +2598,6 @@ impl GodlyApp {
 
                 self.quick_claude_launch = Some(launch_state);
                 return self.execute_next_launch_step();
-            }
-            Message::QuickClaudeDialogModelSelected(model) => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.selected_model = model;
-                    dlg.model_dropdown_open = false;
-                }
-            }
-            Message::QuickClaudeDialogModelDropdownToggle => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.model_dropdown_open = !dlg.model_dropdown_open;
-                }
-            }
-            Message::QuickClaudeDialogModeSelected(mode) => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.selected_mode = mode;
-                    dlg.mode_dropdown_open = false;
-                }
-            }
-            Message::QuickClaudeDialogModeDropdownToggle => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.mode_dropdown_open = !dlg.mode_dropdown_open;
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
-                }
             }
             Message::AiToolNameInputChanged(value) => {
                 self.ai_tool_name_input = value;
@@ -3818,19 +3775,12 @@ impl GodlyApp {
                 Message::QuickClaudeDialogLaunch,
                 Message::QuickClaudeDialogVoice,
                 Message::QuickClaudeDialogClose,
-<<<<<<< HEAD
                 Message::QuickClaudeDialogSkillSelected,
                 Message::QuickClaudeDialogSkillAutocompleteNavigate,
                 Message::QuickClaudeDialogSkillAutocompleteDismiss,
-=======
                 |tab| Message::QuickClaudeDialogTabSelected(tab),
                 Message::QuickClaudeDialogSessionSelected,
                 Message::QuickClaudeDialogResume,
-                |model| Message::QuickClaudeDialogModelSelected(model),
-                Message::QuickClaudeDialogModelDropdownToggle,
-                |mode| Message::QuickClaudeDialogModeSelected(mode),
-                Message::QuickClaudeDialogModeDropdownToggle,
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
             );
             stack![with_shell_picker, qc_overlay].into()
         } else {
