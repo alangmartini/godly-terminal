@@ -6004,7 +6004,7 @@ impl GodlyApp {
     // Resize
     // -----------------------------------------------------------------------
 
-    fn resize_all_terminals(&mut self) -> Task<Message> {
+    pub(crate) fn resize_all_terminals(&mut self) -> Task<Message> {
         let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
 
         for id in &ids {
@@ -6062,7 +6062,9 @@ impl GodlyApp {
             );
         }
 
-        self.create_terminal_task(decision.new_terminal_id)
+        let create_task = self.create_terminal_task(decision.new_terminal_id);
+        let resize_task = self.resize_all_terminals();
+        Task::batch([create_task, resize_task])
     }
 
     fn unsplit_focused_pane(&mut self) -> Task<Message> {
@@ -6090,7 +6092,7 @@ impl GodlyApp {
             let _ = commands::close_terminal(client, &decision.removed_terminal_id);
         }
 
-        Task::none()
+        self.resize_all_terminals()
     }
 
     fn cycle_focus(&mut self) {
