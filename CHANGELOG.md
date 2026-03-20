@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-03-20
+
+### Added
+- **Zed One Dark theme** — new default theme with 16 semantic UI tokens (ghost_hover, ghost_active, ghost_selected, surface_bg, tab_active_bg, tab_inactive_bg, title_bar_bg, status_bar_bg, border_variant, border_focused, etc.) with auto-derivation for existing themes (#676)
+- **YAML E2E test runner (godly-test)** — Maestro-like declarative YAML testing framework that drives Godly Terminal via MCP HTTP transport with 26+ built-in steps and 6 assertion types (#660)
+- **Terminal exit code capture** — real exit codes from shell processes are now captured and exposed through the MCP API and state dumps
+
+### Changed
+- **Zed-style component restyling** — tab bar, title bar, sidebar, status bar, context menu, settings dialog, and scrollbar now use semantic theme tokens instead of hardcoded colors. Title bar uses flat background, sidebar uses ghost hover/selected states, settings dialog uses ghost-style tabs (#676)
+- **MCP server is now read-only** — removed 56 state-changing tools to prevent interference between concurrent Claude Code agents; 33 read-only tools remain (#677)
+
+### Fixed
+- **Terminal freeze after minimizing window** — daemon now sends periodic keepalive to PTY shim, preventing the shim's 60-second idle timeout from disconnecting the pipe during window minimize (#652)
+- **Shift+key now produces correct characters** — Shift+letter combinations produce uppercase letters; Shift+symbol combinations produce the correct shifted symbols on all keyboard layouts (#668)
+- **Shift/Ctrl/Alt modifiers for special keys** — special keys now properly encode xterm-style CSI modifier parameters, restoring Shift+Arrow selection, Ctrl+Arrow word movement, and other modifier combinations (#656)
+- **Split pane content not resizing** — terminal PTY dimensions now update after split and unsplit operations (#667)
+- **Workspace CWD not applied to new terminals** — new terminals now inherit the active workspace's folder_path as their working directory; PowerShell sessions run Set-Location after profile to ensure workspace CWD sticks (#669)
+- **Workspace metadata lost after rebuild** — workspaces are now preserved during session merge even when terminal IDs don't match live sessions (#619)
+- **Tab title not reflecting OSC window title** — programs that set the window title via OSC 2 sequences now have their title shown in the tab bar (#672)
+- **Terminal content area clipped behind status bar** — terminal viewport now correctly subtracts the 20px status bar height
+- **Diagnostic log truncation** — logs now append instead of truncating on restart, preserving crash evidence with 2MB rotation
+- **Terminal creation working directory** — new terminals now open in the workspace's folder_path instead of defaulting to the app process's cwd (#655)
+
+### Tests
+- Added comprehensive test coverage for modifier sequences on arrow keys, Home/End, Delete/Insert, Page Up/Down, and function keys
+- Added regression tests for Shift+letter handling
+- Added split resize reproduction test (#673)
+
 ## [0.13.0] - 2026-03-15
 
 ### Added

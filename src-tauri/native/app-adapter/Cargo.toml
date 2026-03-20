@@ -1,6 +1,6 @@
 [package]
 name = "godly-app-adapter"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "BUSL-1.1"
 description = "Tauri-free daemon client adapter for the native frontend"
