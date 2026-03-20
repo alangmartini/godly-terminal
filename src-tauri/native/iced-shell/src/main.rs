@@ -1,5 +1,23 @@
 use iced::window;
 
+/// Geist Mono font family — bundled under SIL Open Font License.
+pub mod fonts {
+    use iced::Font;
+
+    pub const REGULAR: &[u8] = include_bytes!("../fonts/GeistMono-Regular.ttf");
+    pub const BOLD: &[u8] = include_bytes!("../fonts/GeistMono-Bold.ttf");
+    pub const ITALIC: &[u8] = include_bytes!("../fonts/GeistMono-Italic.ttf");
+    pub const BOLD_ITALIC: &[u8] = include_bytes!("../fonts/GeistMono-BoldItalic.ttf");
+
+    /// The Geist Mono font for normal-weight text.
+    pub const GEIST_MONO: Font = Font {
+        family: iced::font::Family::Name("Geist Mono"),
+        weight: iced::font::Weight::Normal,
+        stretch: iced::font::Stretch::Normal,
+        style: iced::font::Style::Normal,
+    };
+}
+
 mod app;
 mod claude_md_editor;
 mod mcp_handler;
@@ -61,6 +79,11 @@ fn main() -> iced::Result {
     iced::application(boot, GodlyApp::update, GodlyApp::view)
         .title(GodlyApp::title)
         .subscription(GodlyApp::subscription)
+        .font(fonts::REGULAR)
+        .font(fonts::BOLD)
+        .font(fonts::ITALIC)
+        .font(fonts::BOLD_ITALIC)
+        .default_font(fonts::GEIST_MONO)
         .window(window::Settings {
             size: iced::Size::new(1200.0, 800.0),
             min_size: Some(iced::Size::new(400.0, 300.0)),
