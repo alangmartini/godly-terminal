@@ -113,10 +113,27 @@ impl TerminalInfo {
             "\u{25C6}" // ◆
         } else if name.contains("codex") {
             "\u{25B6}" // ▶
+        } else if name.contains("pwsh") || name.contains("powershell") {
+            "\u{276F}" // ❯
+        } else if name.contains("cmd") {
+            "\u{25BA}" // ►
+        } else if name.contains("wsl") {
+            "\u{2318}" // ⌘
+        } else if name.contains("bash")
+            || name.contains("zsh")
+            || name.contains("fish")
+            || name == "sh"
+            || name.ends_with("/sh")
+        {
+            "\u{25B8}" // ▸
+        } else if name.contains("ssh") {
+            "\u{2192}" // →
         } else if name.contains("node") || name.contains("npm") || name.contains("pnpm") {
             "\u{25CB}" // ○
         } else if name.contains("python") {
             "\u{25CA}" // ◊
+        } else if name.contains("ruby") || name.contains("irb") {
+            "\u{25C8}" // ◈
         } else if name.contains("git") {
             "\u{2387}" // ⎇
         } else if name.contains("vim") || name.contains("nvim") {
@@ -508,19 +525,55 @@ mod tests {
         let info = col.add("t1".into(), 24, 80);
 
         info.process_name = "claude".into();
-        assert_eq!(info.tab_icon(), "\u{25C6}");
+        assert_eq!(info.tab_icon(), "\u{25C6}"); // ◆
 
         info.process_name = "codex".into();
-        assert_eq!(info.tab_icon(), "\u{25B6}");
-
-        info.process_name = "node".into();
-        assert_eq!(info.tab_icon(), "\u{25CB}");
-
-        info.process_name = "python3".into();
-        assert_eq!(info.tab_icon(), "\u{25CA}");
+        assert_eq!(info.tab_icon(), "\u{25B6}"); // ▶
 
         info.process_name = "pwsh".into();
-        assert_eq!(info.tab_icon(), "\u{25B8}");
+        assert_eq!(info.tab_icon(), "\u{276F}"); // ❯
+
+        info.process_name = "powershell".into();
+        assert_eq!(info.tab_icon(), "\u{276F}"); // ❯
+
+        info.process_name = "cmd.exe".into();
+        assert_eq!(info.tab_icon(), "\u{25BA}"); // ►
+
+        info.process_name = "wsl".into();
+        assert_eq!(info.tab_icon(), "\u{2318}"); // ⌘
+
+        info.process_name = "bash".into();
+        assert_eq!(info.tab_icon(), "\u{25B8}"); // ▸
+
+        info.process_name = "zsh".into();
+        assert_eq!(info.tab_icon(), "\u{25B8}"); // ▸
+
+        info.process_name = "fish".into();
+        assert_eq!(info.tab_icon(), "\u{25B8}"); // ▸
+
+        info.process_name = "ssh".into();
+        assert_eq!(info.tab_icon(), "\u{2192}"); // →
+
+        info.process_name = "node".into();
+        assert_eq!(info.tab_icon(), "\u{25CB}"); // ○
+
+        info.process_name = "python3".into();
+        assert_eq!(info.tab_icon(), "\u{25CA}"); // ◊
+
+        info.process_name = "ruby".into();
+        assert_eq!(info.tab_icon(), "\u{25C8}"); // ◈
+
+        info.process_name = "irb".into();
+        assert_eq!(info.tab_icon(), "\u{25C8}"); // ◈
+
+        info.process_name = "git".into();
+        assert_eq!(info.tab_icon(), "\u{2387}"); // ⎇
+
+        info.process_name = "vim".into();
+        assert_eq!(info.tab_icon(), "\u{25A0}"); // ■
+
+        info.process_name = "some-unknown".into();
+        assert_eq!(info.tab_icon(), "\u{25B8}"); // ▸ (default)
     }
 
     #[test]
