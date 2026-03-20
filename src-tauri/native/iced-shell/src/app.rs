@@ -1687,15 +1687,18 @@ impl GodlyApp {
                 self.selection.clear();
 
                 // Forward to PTY — send to focused terminal, not just active tab.
-                // Use the platform-composed `text` for printable characters (handles
-                // Shift+key → uppercase/symbols correctly on all keyboard layouts).
-                // Fall back to key_to_pty_bytes for control chars and named keys.
-                let bytes = if !modifiers.control() {
-                    text.as_ref().map(|t| t.as_bytes().to_vec())
-                } else {
-                    None
-                }
-                .or_else(|| key_to_pty_bytes(&key, modifiers));
+                // Use the platform-composed `text` for printable Character keys
+                // (handles Shift+key → uppercase/symbols on all keyboard layouts).
+                // Named keys (Tab, Enter, arrows, etc.) always go through
+                // key_to_pty_bytes which encodes modifiers correctly
+                // (e.g. Shift+Tab → ESC[Z, not bare \t).
+                let bytes =
+                    if !modifiers.control() && matches!(key, keyboard::Key::Character(_)) {
+                        text.as_ref().map(|t| t.as_bytes().to_vec())
+                    } else {
+                        None
+                    }
+                    .or_else(|| key_to_pty_bytes(&key, modifiers));
 
                 if let Some(bytes) = bytes {
                     if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client) {
