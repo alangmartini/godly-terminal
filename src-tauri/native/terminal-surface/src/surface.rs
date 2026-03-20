@@ -7,14 +7,6 @@ use godly_protocol::types::RichGridData;
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 
-/// Geist Mono font reference (loaded by the main application at startup).
-const GEIST_MONO: Font = Font {
-    family: iced::font::Family::Name("Geist Mono"),
-    weight: iced::font::Weight::Normal,
-    stretch: iced::font::Stretch::Normal,
-    style: iced::font::Style::Normal,
-};
-
 /// Grid position for selection rendering (local to avoid cross-crate dependency).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridPos {
@@ -78,6 +70,8 @@ pub struct TerminalCanvas<'a, Message = ()> {
     /// are dead. The canvas widget dispatches events through the widget tree
     /// (not subscriptions), so this path survives dormancy.
     pub on_redraw: Option<Message>,
+    /// Font to use for terminal text rendering.
+    pub font: Font,
 }
 
 impl<Message> Default for TerminalCanvas<'_, Message> {
@@ -89,6 +83,12 @@ impl<Message> Default for TerminalCanvas<'_, Message> {
             default_fg: DEFAULT_FG,
             default_bg: DEFAULT_BG,
             on_redraw: None,
+            font: Font {
+                family: iced::font::Family::Name("Geist Mono"),
+                weight: iced::font::Weight::Normal,
+                stretch: iced::font::Stretch::Normal,
+                style: iced::font::Style::Normal,
+            },
         }
     }
 }
@@ -103,6 +103,12 @@ impl<'a, Message> TerminalCanvas<'a, Message> {
             default_fg: DEFAULT_FG,
             default_bg: DEFAULT_BG,
             on_redraw: None,
+            font: Font {
+                family: iced::font::Family::Name("Geist Mono"),
+                weight: iced::font::Weight::Normal,
+                stretch: iced::font::Stretch::Normal,
+                style: iced::font::Style::Normal,
+            },
         }
     }
 }
@@ -151,7 +157,7 @@ impl<Message: Clone> canvas::Program<Message> for TerminalCanvas<'_, Message> {
         let cell_w = self.metrics.cell_width;
         let cell_h = self.metrics.cell_height;
         let font_size = self.metrics.font_size;
-        let monospace = GEIST_MONO;
+        let monospace = self.font;
 
         // Draw each cell
         for (row_idx, row) in grid.rows.iter().enumerate() {
