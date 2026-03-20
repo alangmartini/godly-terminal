@@ -730,6 +730,14 @@ pub enum Message {
     QuickClaudeDialogLaunch,
     /// Voice input from Quick Claude dialog.
     QuickClaudeDialogVoice,
+    /// Skills loaded for Quick Claude dialog autocomplete.
+    QuickClaudeDialogSkillsLoaded(Vec<crate::quick_claude_dialog::SkillEntry>),
+    /// Skill selected from autocomplete popup.
+    QuickClaudeDialogSkillSelected(usize),
+    /// Navigate autocomplete popup (delta: -1 up, +1 down).
+    QuickClaudeDialogSkillAutocompleteNavigate(i32),
+    /// Dismiss skill autocomplete popup.
+    QuickClaudeDialogSkillAutocompleteDismiss,
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
     /// AI tool command input changed.
@@ -1556,6 +1564,41 @@ impl GodlyApp {
                             return Task::none();
                         }
                         if self.quick_claude_dialog.is_some() {
+                            // Skill autocomplete key routing
+                            if let Some(ref dlg) = self.quick_claude_dialog {
+                                if dlg.skill_autocomplete_open {
+                                    use iced::keyboard::key::Named;
+                                    match &key {
+                                        keyboard::Key::Named(Named::ArrowUp) => {
+                                            return self.update(
+                                                Message::QuickClaudeDialogSkillAutocompleteNavigate(
+                                                    -1,
+                                                ),
+                                            );
+                                        }
+                                        keyboard::Key::Named(Named::ArrowDown) => {
+                                            return self.update(
+                                                Message::QuickClaudeDialogSkillAutocompleteNavigate(
+                                                    1,
+                                                ),
+                                            );
+                                        }
+                                        keyboard::Key::Named(Named::Enter)
+                                        | keyboard::Key::Named(Named::Tab) => {
+                                            let selected = dlg.skill_autocomplete_selected;
+                                            return self.update(
+                                                Message::QuickClaudeDialogSkillSelected(selected),
+                                            );
+                                        }
+                                        keyboard::Key::Named(Named::Escape) => {
+                                            return self.update(
+                                                Message::QuickClaudeDialogSkillAutocompleteDismiss,
+                                            );
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
                             if is_escape_key(&key) {
                                 self.quick_claude_dialog = None;
                                 return Task::none();
@@ -2237,6 +2280,24 @@ impl GodlyApp {
                 self.quick_claude_dialog = Some(
                     crate::quick_claude_dialog::QuickClaudeDialogState::new(ws_id, ws_list),
                 );
+
+                // Load skills asynchronously
+                let ws_folder: Option<String> = self
+                    .workspaces
+                    .active()
+                    .and_then(|ws| {
+                        if ws.folder_path.is_empty() {
+                            None
+                        } else {
+                            Some(ws.folder_path.clone())
+                        }
+                    });
+                return iced::Task::perform(
+                    async move {
+                        crate::quick_claude_dialog::discover_skills(ws_folder.as_deref())
+                    },
+                    Message::QuickClaudeDialogSkillsLoaded,
+                );
             }
             Message::QuickClaudeDialogClose => {
                 self.quick_claude_dialog = None;
@@ -2266,6 +2327,27 @@ impl GodlyApp {
             Message::QuickClaudeDialogPromptAction(action) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.prompt_content.perform(action);
+
+                    // Detect skill autocomplete trigger
+                    if dlg.selected_ai_tool == "Claude Code" {
+                        let text = dlg.prompt_content.text();
+                        // Find the last '/' in the text and check if it's a skill trigger
+                        if let Some(slash_pos) = text.rfind('/') {
+                            let after_slash = &text[slash_pos + 1..];
+                            // Only trigger if there's no space after the slash
+                            if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                                dlg.skill_autocomplete_open = true;
+                                dlg.skill_autocomplete_filter = after_slash.to_string();
+                                dlg.skill_autocomplete_selected = 0;
+                            } else {
+                                dlg.skill_autocomplete_open = false;
+                                dlg.skill_autocomplete_filter.clear();
+                            }
+                        } else {
+                            dlg.skill_autocomplete_open = false;
+                            dlg.skill_autocomplete_filter.clear();
+                        }
+                    }
                 }
             }
             Message::QuickClaudeDialogBranchChanged(val) => {
@@ -2329,6 +2411,46 @@ impl GodlyApp {
             Message::QuickClaudeDialogVoice => {
                 // Voice integration — forward to whisper toggle if available
                 return self.update(Message::WhisperToggle);
+            }
+            Message::QuickClaudeDialogSkillsLoaded(skills) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.skills = skills;
+                }
+            }
+            Message::QuickClaudeDialogSkillSelected(index) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    let filtered: Vec<&crate::quick_claude_dialog::SkillEntry> =
+                        dlg.filtered_skills();
+                    if let Some(skill) = filtered.get(index) {
+                        let skill_name = format!("/{}", skill.name);
+                        // Replace the /partial text in prompt with the selected skill name
+                        let current_text = dlg.prompt_content.text();
+                        if let Some(slash_pos) = current_text.rfind('/') {
+                            let new_text =
+                                format!("{}{} ", &current_text[..slash_pos], skill_name);
+                            dlg.prompt_content =
+                                iced::widget::text_editor::Content::with_text(&new_text);
+                        }
+                        dlg.skill_autocomplete_open = false;
+                        dlg.skill_autocomplete_filter.clear();
+                    }
+                }
+            }
+            Message::QuickClaudeDialogSkillAutocompleteNavigate(delta) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    let count = dlg.filtered_skills().len().min(8);
+                    if count > 0 {
+                        let current = dlg.skill_autocomplete_selected as i32;
+                        let next = (current + delta).rem_euclid(count as i32);
+                        dlg.skill_autocomplete_selected = next as usize;
+                    }
+                }
+            }
+            Message::QuickClaudeDialogSkillAutocompleteDismiss => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.skill_autocomplete_open = false;
+                    dlg.skill_autocomplete_filter.clear();
+                }
             }
             Message::AiToolNameInputChanged(value) => {
                 self.ai_tool_name_input = value;
@@ -3469,6 +3591,9 @@ impl GodlyApp {
                 Message::QuickClaudeDialogLaunch,
                 Message::QuickClaudeDialogVoice,
                 Message::QuickClaudeDialogClose,
+                Message::QuickClaudeDialogSkillSelected,
+                Message::QuickClaudeDialogSkillAutocompleteNavigate,
+                Message::QuickClaudeDialogSkillAutocompleteDismiss,
             );
             stack![with_shell_picker, qc_overlay].into()
         } else {
