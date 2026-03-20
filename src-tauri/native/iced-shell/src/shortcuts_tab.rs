@@ -147,6 +147,10 @@ const WORKSPACES: &[ShortcutEntry] = &[
         action: "Settings",
         keys: "Ctrl+,",
     },
+    ShortcutEntry {
+        action: "Quick Claude",
+        keys: "Ctrl+Shift+Q",
+    },
 ];
 
 const CATEGORIES: &[ShortcutCategory] = &[
