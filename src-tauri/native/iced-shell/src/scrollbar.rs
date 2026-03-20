@@ -72,7 +72,7 @@ impl canvas::Program<()> for ScrollbarCanvas {
         frame.fill(&track, Color::from_rgba(0.2, 0.2, 0.2, 0.0));
 
         // Thumb — slightly brighter default, rounded ends via path
-        let thumb_color = Color::from_rgba(0.5, 0.5, 0.5, 0.55);
+        let thumb_color = Color::from_rgba(0.5, 0.5, 0.5, 0.45);
         let w = TRACK_WIDTH - TRACK_MARGIN * 2.0;
         let h = self.metrics.thumb_height;
         let y = self.metrics.thumb_y;
