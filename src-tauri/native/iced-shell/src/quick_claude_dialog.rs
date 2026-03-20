@@ -38,6 +38,10 @@ pub struct QuickClaudeDialogState {
     pub skill_autocomplete_open: bool,
     pub skill_autocomplete_filter: String,
     pub skill_autocomplete_selected: usize,
+    pub selected_model: String,
+    pub model_dropdown_open: bool,
+    pub selected_mode: String,
+    pub mode_dropdown_open: bool,
 }
 
 impl QuickClaudeDialogState {
@@ -56,6 +60,10 @@ impl QuickClaudeDialogState {
             skill_autocomplete_open: false,
             skill_autocomplete_filter: String::new(),
             skill_autocomplete_selected: 0,
+            selected_model: "sonnet".to_string(),
+            model_dropdown_open: false,
+            selected_mode: "default".to_string(),
+            mode_dropdown_open: false,
         }
     }
 
@@ -87,6 +95,10 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     on_branch_changed: impl Fn(String) -> M + 'a,
     on_main_branch_toggled: impl Fn(bool) -> M + 'a,
     on_auto_suggest_toggled: impl Fn(bool) -> M + 'a,
+    on_model_selected: impl Fn(String) -> M + 'a,
+    on_model_dropdown_toggle: M,
+    on_mode_selected: impl Fn(String) -> M + 'a,
+    on_mode_dropdown_toggle: M,
     on_launch: M,
     on_voice: M,
     on_cancel: M,
@@ -266,6 +278,178 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 }),
         );
     }
+
+    // ── Model & Mode dropdowns (Claude Code only) ──────────────────────
+    let model_mode_section: Option<Element<'a, M>> = if state.selected_ai_tool == "Claude Code" {
+        let models = [("Opus", "opus"), ("Sonnet", "sonnet"), ("Haiku", "haiku")];
+        let modes = [("Default", "default"), ("Plan", "plan"), ("Auto", "auto")];
+
+        // Model dropdown
+        let model_display = models
+            .iter()
+            .find(|(_, v)| *v == state.selected_model.as_str())
+            .map(|(d, _)| *d)
+            .unwrap_or("Sonnet");
+
+        let model_toggle = on_model_dropdown_toggle.clone();
+        let model_button = button(
+            row![
+                text(model_display).size(13).color(text_primary),
+                Space::new().width(Length::Fill),
+                text(if state.model_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
+                    .size(10)
+                    .color(text_secondary),
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(model_toggle)
+        .padding(Padding::from([8, 12]))
+        .width(Length::Fill)
+        .style(move |_theme, _status| button::Style {
+            background: Some(Background::Color(bg_primary)),
+            text_color: text_primary,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..button::Style::default()
+        });
+
+        let mut model_col = column![
+            text("Model").size(11).color(text_secondary),
+            model_button,
+        ]
+        .spacing(4);
+
+        if state.model_dropdown_open {
+            let mut model_list = column![].spacing(2);
+            for (display, value) in models {
+                let is_selected = state.selected_model == value;
+                let val = value.to_string();
+                let item = button(
+                    text(display)
+                        .size(13)
+                        .color(if is_selected { text_active } else { text_primary }),
+                )
+                .on_press(on_model_selected(val))
+                .padding(Padding::from([5, 10]))
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(if is_selected {
+                        tint(accent, 0.12)
+                    } else {
+                        Color::TRANSPARENT
+                    })),
+                    text_color: text_primary,
+                    border: Border::default(),
+                    ..button::Style::default()
+                });
+                model_list = model_list.push(item);
+            }
+            model_col = model_col.push(
+                container(model_list)
+                    .width(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(bg_primary)),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+            );
+        }
+
+        // Mode dropdown
+        let mode_display = modes
+            .iter()
+            .find(|(_, v)| *v == state.selected_mode.as_str())
+            .map(|(d, _)| *d)
+            .unwrap_or("Default");
+
+        let mode_toggle = on_mode_dropdown_toggle.clone();
+        let mode_button = button(
+            row![
+                text(mode_display).size(13).color(text_primary),
+                Space::new().width(Length::Fill),
+                text(if state.mode_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
+                    .size(10)
+                    .color(text_secondary),
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(mode_toggle)
+        .padding(Padding::from([8, 12]))
+        .width(Length::Fill)
+        .style(move |_theme, _status| button::Style {
+            background: Some(Background::Color(bg_primary)),
+            text_color: text_primary,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..button::Style::default()
+        });
+
+        let mut mode_col = column![
+            text("Permission Mode").size(11).color(text_secondary),
+            mode_button,
+        ]
+        .spacing(4);
+
+        if state.mode_dropdown_open {
+            let mut mode_list = column![].spacing(2);
+            for (display, value) in modes {
+                let is_selected = state.selected_mode == value;
+                let val = value.to_string();
+                let item = button(
+                    text(display)
+                        .size(13)
+                        .color(if is_selected { text_active } else { text_primary }),
+                )
+                .on_press(on_mode_selected(val))
+                .padding(Padding::from([5, 10]))
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(if is_selected {
+                        tint(accent, 0.12)
+                    } else {
+                        Color::TRANSPARENT
+                    })),
+                    text_color: text_primary,
+                    border: Border::default(),
+                    ..button::Style::default()
+                });
+                mode_list = mode_list.push(item);
+            }
+            mode_col = mode_col.push(
+                container(mode_list)
+                    .width(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(bg_primary)),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+            );
+        }
+
+        let model_mode_row = row![
+            container(model_col).width(Length::FillPortion(1)),
+            container(mode_col).width(Length::FillPortion(1)),
+        ]
+        .spacing(12);
+
+        Some(model_mode_row.into())
+    } else {
+        None
+    };
 
     // ── Prompt textarea ──────────────────────────────────────────────────
     let editor = text_editor(&state.prompt_content)
@@ -454,22 +638,28 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     .spacing(8);
 
     // ── Compose dialog ───────────────────────────────────────────────────
-    let dialog_content = column![
+    let mut dialog_content = column![
         title,
         subtitle,
         step_indicator,
         workspace_section,
         ai_tool_section,
-        prompt_section,
-        branch_section,
-        checkbox_row,
-        footer,
     ]
     .spacing(12);
 
+    if let Some(mm_section) = model_mode_section {
+        dialog_content = dialog_content.push(mm_section);
+    }
+
+    dialog_content = dialog_content
+        .push(prompt_section)
+        .push(branch_section)
+        .push(checkbox_row)
+        .push(footer);
+
     let dialog = container(dialog_content)
         .padding(Padding::from([20, 24]))
-        .width(Length::Fixed(520.0))
+        .width(Length::Fixed(600.0))
         .style(move |_theme| container::Style {
             background: Some(Background::Color(bg_secondary)),
             border: Border {
@@ -624,6 +814,10 @@ mod tests {
         assert!(!state.skill_autocomplete_open);
         assert!(state.skill_autocomplete_filter.is_empty());
         assert_eq!(state.skill_autocomplete_selected, 0);
+        assert_eq!(state.selected_model, "sonnet");
+        assert!(!state.model_dropdown_open);
+        assert_eq!(state.selected_mode, "default");
+        assert!(!state.mode_dropdown_open);
     }
 
     #[test]
@@ -651,6 +845,10 @@ mod tests {
             BranchChanged(String),
             MainBranch(bool),
             AutoSuggest(bool),
+            ModelSelected(String),
+            ModelDropdown,
+            ModeSelected(String),
+            ModeDropdown,
             Launch,
             Voice,
             Cancel,
@@ -668,6 +866,10 @@ mod tests {
             Msg::BranchChanged,
             Msg::MainBranch,
             Msg::AutoSuggest,
+            Msg::ModelSelected,
+            Msg::ModelDropdown,
+            Msg::ModeSelected,
+            Msg::ModeDropdown,
             Msg::Launch,
             Msg::Voice,
             Msg::Cancel,
