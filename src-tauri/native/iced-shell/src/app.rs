@@ -433,6 +433,8 @@ pub struct GodlyApp {
     workspace_ai_modes: HashMap<String, AiToolMode>,
     // --- I1-I3: Quick Claude Launcher ---
     quick_claude_launch: Option<crate::quick_claude::LaunchState>,
+    // --- Quick Claude Dialog (modal) ---
+    quick_claude_dialog: Option<crate::quick_claude_dialog::QuickClaudeDialogState>,
     // --- G1/G2: Terminal Context Menu ---
     terminal_context_menu_pos: Option<(f32, f32)>,
     terminal_context_menu_terminal_id: Option<String>,
@@ -537,6 +539,7 @@ impl Default for GodlyApp {
             shell_picker: ShellPickerState::default(),
             workspace_ai_modes: HashMap::new(),
             quick_claude_launch: None,
+            quick_claude_dialog: None,
             terminal_context_menu_pos: None,
             terminal_context_menu_terminal_id: None,
             hovered_url: None,
@@ -702,6 +705,31 @@ pub enum Message {
     QuickClaudeLaunchStepComplete(Result<crate::quick_claude::StepResult, String>),
     /// Cancel a running Quick Claude launch.
     QuickClaudeLaunchCancel,
+    // --- Quick Claude Dialog (modal) ---
+    /// Open the Quick Claude dialog.
+    QuickClaudeDialogOpen,
+    /// Close the Quick Claude dialog.
+    QuickClaudeDialogClose,
+    /// Workspace selected in Quick Claude dialog.
+    QuickClaudeDialogWorkspaceSelected(String),
+    /// Toggle workspace dropdown in Quick Claude dialog.
+    QuickClaudeDialogWorkspaceDropdownToggle,
+    /// AI tool selected in Quick Claude dialog.
+    QuickClaudeDialogAiToolSelected(String),
+    /// Toggle AI tool dropdown in Quick Claude dialog.
+    QuickClaudeDialogAiToolDropdownToggle,
+    /// Prompt text editor action in Quick Claude dialog.
+    QuickClaudeDialogPromptAction(iced::widget::text_editor::Action),
+    /// Branch name changed in Quick Claude dialog.
+    QuickClaudeDialogBranchChanged(String),
+    /// Main branch mode toggled in Quick Claude dialog.
+    QuickClaudeDialogMainBranchToggled(bool),
+    /// Auto-suggest branch name toggled in Quick Claude dialog.
+    QuickClaudeDialogAutoSuggestToggled(bool),
+    /// Launch from Quick Claude dialog.
+    QuickClaudeDialogLaunch,
+    /// Voice input from Quick Claude dialog.
+    QuickClaudeDialogVoice,
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
     /// AI tool command input changed.
@@ -1482,6 +1510,7 @@ impl GodlyApp {
                     &mut capture,
                     self.mru_switcher.is_some(),
                     self.claude_md_editor.is_some(),
+                    self.quick_claude_dialog.is_some(),
                 );
 
                 // Write capture mutations back.
@@ -1524,6 +1553,19 @@ impl GodlyApp {
                             if is_escape_key(&key) {
                                 self.claude_md_editor = None;
                             }
+                            return Task::none();
+                        }
+                        if self.quick_claude_dialog.is_some() {
+                            if is_escape_key(&key) {
+                                self.quick_claude_dialog = None;
+                                return Task::none();
+                            }
+                            if modifiers.control()
+                                && matches!(key, keyboard::Key::Named(keyboard::key::Named::Enter))
+                            {
+                                return self.update(Message::QuickClaudeDialogLaunch);
+                            }
+                            // All other keys are forwarded to the dialog's text_editor
                             return Task::none();
                         }
                         return Task::none();
@@ -2183,6 +2225,110 @@ impl GodlyApp {
             }
             Message::QuickClaudeLaunchCancel => {
                 self.quick_claude_launch = None;
+            }
+            // --- Quick Claude Dialog (modal) ---
+            Message::QuickClaudeDialogOpen => {
+                let ws_id = self.workspaces.active().map(|ws| ws.id.clone());
+                let ws_list: Vec<(String, String)> = self
+                    .workspaces
+                    .iter()
+                    .map(|ws| (ws.id.clone(), ws.name.clone()))
+                    .collect();
+                self.quick_claude_dialog = Some(
+                    crate::quick_claude_dialog::QuickClaudeDialogState::new(ws_id, ws_list),
+                );
+            }
+            Message::QuickClaudeDialogClose => {
+                self.quick_claude_dialog = None;
+            }
+            Message::QuickClaudeDialogWorkspaceSelected(id) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.selected_workspace_id = Some(id);
+                    dlg.workspace_dropdown_open = false;
+                }
+            }
+            Message::QuickClaudeDialogWorkspaceDropdownToggle => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.workspace_dropdown_open = !dlg.workspace_dropdown_open;
+                }
+            }
+            Message::QuickClaudeDialogAiToolSelected(tool) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.selected_ai_tool = tool;
+                    dlg.ai_tool_dropdown_open = false;
+                }
+            }
+            Message::QuickClaudeDialogAiToolDropdownToggle => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.ai_tool_dropdown_open = !dlg.ai_tool_dropdown_open;
+                }
+            }
+            Message::QuickClaudeDialogPromptAction(action) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.prompt_content.perform(action);
+                }
+            }
+            Message::QuickClaudeDialogBranchChanged(val) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.branch_name = val;
+                }
+            }
+            Message::QuickClaudeDialogMainBranchToggled(val) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.main_branch_mode = val;
+                }
+            }
+            Message::QuickClaudeDialogAutoSuggestToggled(val) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.auto_suggest_branch = val;
+                }
+            }
+            Message::QuickClaudeDialogLaunch => {
+                if self.quick_claude_launch.is_some() {
+                    return Task::none();
+                }
+                let Some(dlg) = self.quick_claude_dialog.take() else {
+                    return Task::none();
+                };
+                let prompt = dlg.prompt_text();
+                let prompt = prompt.trim();
+                let num_agents = 1;
+                let steps = crate::quick_claude::default_launch_steps(num_agents, prompt);
+
+                let ws_id = uuid::Uuid::new_v4().to_string();
+                let ws_name = "Quick Claude".to_string();
+                let placeholder_id = uuid::Uuid::new_v4().to_string();
+                let rows = self.calculate_rows();
+                let cols = self.calculate_cols();
+                self.terminals.add_to_workspace(
+                    placeholder_id.clone(),
+                    rows,
+                    cols,
+                    ws_id.clone(),
+                );
+                self.workspaces.add(
+                    ws_id.clone(),
+                    ws_name.clone(),
+                    placeholder_id.clone(),
+                );
+                self.workspaces.set_active(&ws_id);
+                self.terminals.set_active(&placeholder_id);
+                self.next_workspace_num += 1;
+
+                let mut launch_state = crate::quick_claude::LaunchState::new(
+                    ws_name,
+                    steps,
+                    num_agents,
+                    ws_id,
+                );
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+
+                self.quick_claude_launch = Some(launch_state);
+                return self.execute_next_launch_step();
+            }
+            Message::QuickClaudeDialogVoice => {
+                // Voice integration — forward to whisper toggle if available
+                return self.update(Message::WhisperToggle);
             }
             Message::AiToolNameInputChanged(value) => {
                 self.ai_tool_name_input = value;
@@ -3308,6 +3454,27 @@ impl GodlyApp {
             with_copy_preview
         };
 
+        // --- Quick Claude Dialog overlay ---
+        let with_quick_claude: Element<'_, Message> = if let Some(ref dlg_state) = self.quick_claude_dialog {
+            let qc_overlay = crate::quick_claude_dialog::view_quick_claude_dialog(
+                dlg_state,
+                Message::QuickClaudeDialogWorkspaceSelected,
+                Message::QuickClaudeDialogWorkspaceDropdownToggle,
+                Message::QuickClaudeDialogAiToolSelected,
+                Message::QuickClaudeDialogAiToolDropdownToggle,
+                Message::QuickClaudeDialogPromptAction,
+                Message::QuickClaudeDialogBranchChanged,
+                Message::QuickClaudeDialogMainBranchToggled,
+                Message::QuickClaudeDialogAutoSuggestToggled,
+                Message::QuickClaudeDialogLaunch,
+                Message::QuickClaudeDialogVoice,
+                Message::QuickClaudeDialogClose,
+            );
+            stack![with_shell_picker, qc_overlay].into()
+        } else {
+            with_shell_picker
+        };
+
         // --- K1: CLAUDE.md Editor overlay ---
         let with_claude_md: Element<'_, Message> = if let Some(ref editor_state) = self.claude_md_editor {
             let editor_overlay = crate::claude_md_editor::view_claude_md_editor(
@@ -3316,9 +3483,9 @@ impl GodlyApp {
                 Message::ClaudeMdSave,
                 Message::ClaudeMdClose,
             );
-            stack![with_shell_picker, editor_overlay].into()
+            stack![with_quick_claude, editor_overlay].into()
         } else {
-            with_shell_picker
+            with_quick_claude
         };
 
         // --- G1/G2: Terminal Context Menu overlay ---
@@ -4858,6 +5025,9 @@ impl GodlyApp {
             }
             AppAction::WhisperToggle => {
                 return self.update(Message::WhisperToggle);
+            }
+            AppAction::QuickClaude => {
+                return self.update(Message::QuickClaudeDialogOpen);
             }
         }
     }
@@ -7004,6 +7174,7 @@ fn resolve_key_event(
     capture: &mut CaptureState,
     mru_switcher_open: bool,
     claude_md_editor_open: bool,
+    quick_claude_dialog_open: bool,
 ) -> KeyRoutingResult {
     // 1. Capture mode
     if let Some(cap_index) = capture.capturing_index {
@@ -7041,6 +7212,11 @@ fn resolve_key_event(
 
     // 3. CLAUDE.md editor intercepts Ctrl+S and Escape
     if claude_md_editor_open {
+        return KeyRoutingResult::Intercepted;
+    }
+
+    // 3b. Quick Claude dialog intercepts all keys
+    if quick_claude_dialog_open {
         return KeyRoutingResult::Intercepted;
     }
 
@@ -7788,6 +7964,7 @@ mod keyboard_routing_tests {
             &mut cap,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Override was recorded.
@@ -7803,6 +7980,7 @@ mod keyboard_routing_tests {
             &mut cap,
             false,
             false,
+            false,
         );
         // The custom binding should fire SplitRight.
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
@@ -7814,7 +7992,7 @@ mod keyboard_routing_tests {
 
         // Rebind SplitRight from Ctrl+\ to Ctrl+Shift+/.
         cap.capturing_index = Some(5);
-        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false);
+        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false);
 
         // Original Ctrl+\ should no longer trigger SplitRight.
         let result = resolve_key_event(
@@ -7822,6 +8000,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
         );
@@ -7840,6 +8019,7 @@ mod keyboard_routing_tests {
             &mut cap,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
@@ -7854,6 +8034,7 @@ mod keyboard_routing_tests {
             Modifiers::empty(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
         );
@@ -7875,6 +8056,7 @@ mod keyboard_routing_tests {
             &mut cap,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Still in capture mode — modifier-only press didn't exit.
@@ -7888,25 +8070,25 @@ mod keyboard_routing_tests {
 
         // Rebind SplitRight (5) to Ctrl+Shift+/
         cap.capturing_index = Some(5);
-        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false);
+        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false);
 
         // Rebind SplitDown (6) to Ctrl+Shift+.
         cap.capturing_index = Some(6);
-        resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false);
+        resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false);
 
         // Both custom bindings fire.
         assert_eq!(
-            resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false),
+            resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false),
             KeyRoutingResult::Action(AppAction::SplitRight)
         );
         assert_eq!(
-            resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false),
+            resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false),
             KeyRoutingResult::Action(AppAction::SplitDown)
         );
 
         // Both original defaults are disabled.
         assert_eq!(
-            resolve_key_event(&char_key("\\"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false),
+            resolve_key_event(&char_key("\\"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false, false),
             KeyRoutingResult::ForwardToPty
         );
         assert_eq!(
@@ -7916,14 +8098,15 @@ mod keyboard_routing_tests {
                 &PHYS_UNIDENT,
                 &mut cap,
                 false,
-                false
+                false,
+                false,
             ),
             KeyRoutingResult::ForwardToPty
         );
 
         // Unrelated defaults still work.
         assert_eq!(
-            resolve_key_event(&char_key("t"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false),
+            resolve_key_event(&char_key("t"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false, false),
             KeyRoutingResult::Action(AppAction::NewTab)
         );
     }
@@ -7943,6 +8126,7 @@ mod keyboard_routing_tests {
             &mut cap,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
@@ -7959,6 +8143,7 @@ mod keyboard_routing_tests {
             &mut cap,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Should normalize 0x1C to "\" in the stored chord.
@@ -7970,6 +8155,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
         );
@@ -7987,6 +8173,7 @@ mod keyboard_routing_tests {
             Modifiers::empty(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
         );
