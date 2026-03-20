@@ -4,6 +4,7 @@ pub mod claude_md_editor;
 pub mod notification_state;
 pub mod notifications;
 pub mod quick_claude;
+pub mod quick_claude_sessions;
 pub mod scrollback_restore;
 pub mod keybinding_persistence;
 pub mod session_persistence;
