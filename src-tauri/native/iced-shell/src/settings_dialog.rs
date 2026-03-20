@@ -2,8 +2,8 @@ use iced::widget::{button, center, column, container, row, scrollable, text, Spa
 use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
-    ACCENT, ACCENT_HOVER, BACKDROP, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, BORDER, TEXT_ACTIVE,
-    TEXT_PRIMARY, TEXT_SECONDARY,
+    BACKDROP, BORDER_FOCUSED, BORDER_VARIANT, BG_PRIMARY, BG_SECONDARY, GHOST_HOVER,
+    GHOST_SELECTED, RADIUS_LG, RADIUS_MD, RADIUS_SM, SURFACE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 
 /// A tab in the settings dialog.
@@ -12,10 +12,10 @@ pub struct SettingsTab {
     pub label: &'static str,
 }
 
-const DIALOG_RADIUS: f32 = 13.0;
-const DIALOG_OUTER_RADIUS: f32 = 14.0;
-const TAB_RADIUS: f32 = 7.0;
-const TAB_STRIP_RADIUS: f32 = 9.0;
+const DIALOG_RADIUS: f32 = RADIUS_LG;
+const DIALOG_OUTER_RADIUS: f32 = 9.0;
+const TAB_RADIUS: f32 = RADIUS_SM;
+const TAB_STRIP_RADIUS: f32 = RADIUS_MD;
 
 fn tint(color: Color, alpha: f32) -> Color {
     Color::from_rgba(color.r, color.g, color.b, alpha)
@@ -44,34 +44,46 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
             .on_press(on_tab_click(tab_id))
             .padding(Padding::from([7, 14]))
             .style(move |_theme, status| {
-                let (bg, border_color, text_color, shadow) = if is_active {
+                let (bg, border, text_color, shadow) = if is_active {
                     (
-                        tint(ACCENT(), 0.22),
-                        ACCENT_HOVER(),
-                        TEXT_ACTIVE(),
-                        Shadow {
-                            color: tint(ACCENT(), 0.30),
-                            offset: Vector::new(0.0, 1.0),
-                            blur_radius: 8.0,
+                        GHOST_SELECTED(),
+                        Border {
+                            color: BORDER_FOCUSED(),
+                            width: 2.0,
+                            radius: TAB_RADIUS.into(),
                         },
+                        TEXT_PRIMARY(),
+                        Shadow::default(),
                     )
                 } else {
                     match status {
                         button::Status::Hovered => (
-                            tint(BG_TERTIARY(), 0.95),
-                            tint(ACCENT(), 0.45),
+                            GHOST_HOVER(),
+                            Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: TAB_RADIUS.into(),
+                            },
                             TEXT_PRIMARY(),
                             Shadow::default(),
                         ),
                         button::Status::Pressed => (
-                            tint(ACCENT(), 0.16),
-                            tint(ACCENT(), 0.60),
-                            TEXT_ACTIVE(),
+                            GHOST_HOVER(),
+                            Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: TAB_RADIUS.into(),
+                            },
+                            TEXT_PRIMARY(),
                             Shadow::default(),
                         ),
                         _ => (
-                            tint(BG_PRIMARY(), 0.18),
-                            tint(BORDER(), 0.85),
+                            Color::TRANSPARENT,
+                            Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: TAB_RADIUS.into(),
+                            },
                             TEXT_SECONDARY(),
                             Shadow::default(),
                         ),
@@ -81,11 +93,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
                 button::Style {
                     background: Some(Background::Color(bg)),
                     text_color,
-                    border: Border {
-                        color: border_color,
-                        width: 1.0,
-                        radius: TAB_RADIUS.into(),
-                    },
+                    border,
                     shadow,
                     ..button::Style::default()
                 }
@@ -98,20 +106,19 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .on_press(on_close)
         .padding(Padding::from([4, 8]))
         .style(|_theme, status| {
-            let (bg, border_color, text_color) = match status {
-                button::Status::Hovered => {
-                    (tint(BG_TERTIARY(), 0.95), tint(BORDER(), 0.9), TEXT_ACTIVE())
+            let (bg, text_color) = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    (GHOST_HOVER(), TEXT_PRIMARY())
                 }
-                button::Status::Pressed => (tint(ACCENT(), 0.18), tint(ACCENT(), 0.6), TEXT_ACTIVE()),
-                _ => (tint(BG_PRIMARY(), 0.35), tint(BORDER(), 0.7), TEXT_PRIMARY()),
+                _ => (Color::TRANSPARENT, TEXT_SECONDARY()),
             };
 
             button::Style {
                 background: Some(Background::Color(bg)),
                 text_color,
                 border: Border {
-                    color: border_color,
-                    width: 1.0,
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
                     radius: TAB_RADIUS.into(),
                 },
                 ..button::Style::default()
@@ -120,7 +127,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
 
     let header = container(
         row![
-            text("Settings").size(20).color(TEXT_ACTIVE()),
+            text("Settings").size(20).color(TEXT_PRIMARY()),
             Space::new().width(Length::Fill),
             close_btn,
         ]
@@ -156,16 +163,11 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     .padding(Padding::from([8, 10]))
     .width(Length::Fill)
     .style(|_theme| container::Style {
-        background: Some(Background::Color(tint(BG_PRIMARY(), 0.72))),
+        background: Some(Background::Color(SURFACE_BG())),
         border: Border {
-            color: tint(BORDER(), 0.9),
-            width: 1.0,
+            color: Color::TRANSPARENT,
+            width: 0.0,
             radius: TAB_STRIP_RADIUS.into(),
-        },
-        shadow: Shadow {
-            color: tint(BACKDROP(), 0.28),
-            offset: Vector::new(0.0, 1.0),
-            blur_radius: 6.0,
         },
         ..container::Style::default()
     });
@@ -199,14 +201,14 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .style(|_theme| container::Style {
             background: Some(Background::Color(tint(BG_PRIMARY(), 0.84))),
             border: Border {
-                color: tint(ACCENT(), 0.26),
+                color: tint(BORDER_VARIANT(), 0.26),
                 width: 1.0,
                 radius: DIALOG_OUTER_RADIUS.into(),
             },
             shadow: Shadow {
                 color: tint(BACKDROP(), 0.65),
                 offset: Vector::new(0.0, 14.0),
-                blur_radius: 34.0,
+                blur_radius: 16.0,
             },
             ..container::Style::default()
         });
