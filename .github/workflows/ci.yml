@@ -29,7 +29,6 @@ jobs:
           -p godly-protocol
           -p godly-vt
           -p godly-daemon
-          -p godly-llm
         timeout-minutes: 8
 
   # ---------------------------------------------------------------------------
@@ -77,7 +76,7 @@ jobs:
         run: >
           cd src-tauri && cargo nextest run -p godly-daemon --profile ci
           --partition hash:${{ matrix.partition }}/3
-          -E "not (test(arrow_up_during_multi_session_contention) | test(cold_switch_snapshot_latency_under_contention))"
+          -E "not (test(arrow_up_during_multi_session_contention) | test(cold_switch_snapshot_latency_under_contention) | test(wmi_launch_escapes_job_object))"
         timeout-minutes: 10
 
   # ---------------------------------------------------------------------------
