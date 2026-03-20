@@ -40,6 +40,10 @@ pub fn spawn_shim(
         cmd.args(["--cwd", dir]);
     }
 
+    // Set GODLY_SESSION_ID so the shell (and tools like godly-notify) can
+    // identify which terminal tab they're running in.
+    cmd.env("GODLY_SESSION_ID", session_id);
+
     // Propagate GODLY_INSTANCE if set (for pipe name isolation in tests)
     if let Ok(instance) = std::env::var("GODLY_INSTANCE") {
         cmd.env("GODLY_INSTANCE", &instance);
