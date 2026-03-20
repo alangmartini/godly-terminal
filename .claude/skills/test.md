@@ -32,50 +32,46 @@ List the test cases before executing.
 
 ### Phase 2: Execute via MCP
 
-For each test case, use the godly-terminal MCP tools directly. Available tools include:
+For each test case, use the godly-terminal MCP tools to observe and verify state. Available tools are **read-only** — you can inspect state but cannot create, modify, or delete resources.
 
-**Terminal lifecycle:**
-- `create_terminal` / `close_terminal` — create and destroy sessions
-- `list_terminals` — verify terminal state
-- `rename_terminal` — rename a terminal
-- `focus_terminal` — switch focus
+**Terminal inspection:**
+- `get_current_terminal` / `get_active_terminal` — get current/active terminal info
+- `list_terminals` — list all terminals
+- `read_terminal` / `read_grid` — read terminal output / grid state
+- `export_terminal_info` — export detailed terminal info
 
-**Terminal I/O:**
-- `write_to_terminal` / `send_keys` — send input
-- `read_terminal` / `read_grid` — read output / grid state
-- `execute_command` — run a command and wait for output
-- `wait_for_text` / `wait_for_idle` — wait for expected state
+**Workspace inspection:**
+- `list_workspaces` / `get_active_workspace` / `get_workspace_details` — query workspace state
+- `get_workspace_modes` — check workspace modes
 
-**Workspace management:**
-- `list_workspaces` / `create_workspace` / `switch_workspace` / `delete_workspace`
-- `move_terminal_to_workspace`
-- `get_active_workspace` / `get_active_terminal`
-
-**Layout:**
-- `create_split` / `clear_split` / `get_split_state`
-- `split_terminal` / `unsplit_terminal`
-- `resize_terminal`
-- `get_layout_tree` / `swap_panes` / `zoom_pane`
+**Layout inspection:**
+- `get_split_state` / `get_layout_tree` — query split and layout state
+- `get_tab_order` — check tab ordering
 
 **Visual verification:**
 - `capture_screenshot` — screenshot a terminal canvas
 - `read_grid` — read the character grid for text verification
-**Advanced:**
-- `execute_js` — run JS in the WebView to inspect DOM/store state
-- `quick_claude` — spawn a Quick Claude session
+
+**State queries:**
+- `ui_query` / `ui_wait` — query UI state and wait for conditions
+- `wait_for_text` / `wait_for_idle` — wait for expected terminal state
+
+**App info:**
+- `get_app_info` / `get_active_theme` / `get_font_size` / `list_themes` — app configuration
+- `get_notification_status` / `get_notification_config` / `list_mute_patterns` — notification state
+- `list_available_shells` / `get_default_shell` — shell configuration
 
 For each test:
-1. **Setup** — create any required terminals, workspaces, splits
-2. **Action** — perform the feature action via MCP
-3. **Verify** — check the result (list state, read grid, screenshot)
+1. **Setup** — ask the user to set up the required state (create terminals, workspaces, splits) since MCP tools are read-only
+2. **Action** — ask the user to perform the feature action in the app
+3. **Verify** — check the result using read-only MCP tools (list state, read grid, screenshot)
 4. **Record** — note PASS/FAIL with the actual vs expected result
 
 ### Phase 3: Cleanup
 
 After all tests:
-1. Close all terminals created during testing
-2. Delete all workspaces created during testing
-3. Verify cleanup with `list_terminals` and `list_workspaces`
+1. Verify no unexpected resources remain using `list_terminals` and `list_workspaces`
+2. If test resources need cleanup, ask the user to close/delete them manually (MCP tools are read-only)
 
 ### Phase 4: Report
 
@@ -99,7 +95,7 @@ If any tests fail:
 
 ### Rules
 
-- **Always clean up** — never leave test terminals or workspaces behind
+- **Always verify cleanup** — check that no unexpected terminals or workspaces remain; ask the user to clean up if needed
 - **Record exact outputs** — don't paraphrase MCP responses, show the actual data
 - **Be fast** — this is a quick functional check, not a deep QA audit. Use `/manual-testing` for thorough investigation.
 - **Load MCP tools first** — use ToolSearch to load godly-terminal MCP tools before calling them
