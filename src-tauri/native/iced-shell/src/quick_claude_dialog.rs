@@ -21,6 +21,22 @@ pub struct SkillEntry {
     pub file_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum QuickClaudeTab {
+    NewPrompt,
+    ResumeSession,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaudeSession {
+    pub session_id: String,
+    pub first_message: String,
+    pub model: String,
+    pub timestamp: String,
+    pub branch: String,
+    pub file_path: String,
+}
+
 /// State for the Quick Claude dialog.
 #[derive(Debug)]
 pub struct QuickClaudeDialogState {
@@ -42,6 +58,9 @@ pub struct QuickClaudeDialogState {
     pub model_dropdown_open: bool,
     pub selected_mode: String,
     pub mode_dropdown_open: bool,
+    pub active_tab: QuickClaudeTab,
+    pub sessions: Vec<ClaudeSession>,
+    pub selected_session: Option<usize>,
 }
 
 impl QuickClaudeDialogState {
@@ -64,6 +83,9 @@ impl QuickClaudeDialogState {
             model_dropdown_open: false,
             selected_mode: "default".to_string(),
             mode_dropdown_open: false,
+            active_tab: QuickClaudeTab::NewPrompt,
+            sessions: Vec::new(),
+            selected_session: None,
         }
     }
 
@@ -105,6 +127,9 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     on_skill_selected: impl Fn(usize) -> M + 'a,
     _on_skill_autocomplete_navigate: impl Fn(i32) -> M + 'a,
     _on_skill_autocomplete_dismiss: M,
+    on_tab_selected: impl Fn(QuickClaudeTab) -> M + 'a,
+    on_session_selected: impl Fn(usize) -> M + 'a,
+    on_resume: M,
 ) -> Element<'a, M> {
     let accent = theme::ACCENT();
     let border_color = theme::BORDER();
@@ -114,15 +139,6 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     let text_primary = theme::TEXT_PRIMARY();
     let text_secondary = theme::TEXT_SECONDARY();
     let backdrop = theme::BACKDROP();
-
-    // ── Title ────────────────────────────────────────────────────────────
-    let title = text("Quick Claude").size(18).color(text_active);
-    let subtitle = text("Ctrl+Enter to launch \u{00B7} Escape to cancel")
-        .size(11)
-        .color(text_secondary);
-    let step_indicator = text("\u{2460} Workspace \u{2192} \u{2461} Prompt \u{2192} \u{2462} Launch")
-        .size(12)
-        .color(text_secondary);
 
     // ── Workspace dropdown ───────────────────────────────────────────────
     let current_ws_name = state
@@ -607,55 +623,174 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
 
     let checkbox_row = row![main_branch_btn, auto_suggest_btn].spacing(12);
 
-    // ── Footer buttons ───────────────────────────────────────────────────
-    let cancel_btn = button(text("Cancel").size(13))
-        .on_press(on_cancel)
-        .padding(Padding::from([6, 16]));
-
-    let voice_btn = button(text("Voice").size(13))
-        .on_press(on_voice)
-        .padding(Padding::from([6, 16]));
-
-    let launch_btn = button(text("Launch").size(13).color(text_active))
-        .on_press(on_launch)
-        .padding(Padding::from([6, 16]))
-        .style(move |_theme, _status| button::Style {
-            background: Some(Background::Color(accent)),
-            text_color: Color::WHITE,
-            border: Border {
-                radius: 6.0.into(),
-                ..Border::default()
-            },
-            ..button::Style::default()
-        });
-
-    let footer = row![
-        cancel_btn,
-        Space::new().width(Length::Fill),
-        voice_btn,
-        launch_btn,
-    ]
-    .spacing(8);
-
     // ── Compose dialog ───────────────────────────────────────────────────
-    let mut dialog_content = column![
-        title,
-        subtitle,
-        step_indicator,
-        workspace_section,
-        ai_tool_section,
-    ]
-    .spacing(12);
+    let dialog_content = match state.active_tab {
+        QuickClaudeTab::NewPrompt => {
+            let cancel_btn = button(text("Cancel").size(13))
+                .on_press(on_cancel)
+                .padding(Padding::from([6, 16]));
 
-    if let Some(mm_section) = model_mode_section {
-        dialog_content = dialog_content.push(mm_section);
-    }
+            let voice_btn = button(text("Voice").size(13))
+                .on_press(on_voice)
+                .padding(Padding::from([6, 16]));
 
-    dialog_content = dialog_content
-        .push(prompt_section)
-        .push(branch_section)
-        .push(checkbox_row)
-        .push(footer);
+            let launch_btn = button(text("Launch").size(13).color(text_active))
+                .on_press(on_launch)
+                .padding(Padding::from([6, 16]))
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(accent)),
+                    text_color: Color::WHITE,
+                    border: Border {
+                        radius: 6.0.into(),
+                        ..Border::default()
+                    },
+                    ..button::Style::default()
+                });
+
+            let footer = row![
+                cancel_btn,
+                Space::new().width(Length::Fill),
+                voice_btn,
+                launch_btn,
+            ]
+            .spacing(8);
+            let new_prompt_tab = {
+                let is_active = true;
+                button(text("New Prompt").size(12).color(if is_active { text_active } else { text_secondary }))
+                    .on_press(on_tab_selected(QuickClaudeTab::NewPrompt))
+                    .padding(Padding::from([6, 16]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(if is_active { tint(accent, 0.15) } else { Color::TRANSPARENT })),
+                        border: Border { radius: 4.0.into(), ..Border::default() },
+                        ..button::Style::default()
+                    })
+            };
+            let resume_tab_btn = {
+                let is_active = false;
+                let label = if state.sessions.is_empty() { "Resume".to_string() } else { format!("Resume ({})", state.sessions.len()) };
+                button(text(label).size(12).color(if is_active { text_active } else { text_secondary }))
+                    .on_press(on_tab_selected(QuickClaudeTab::ResumeSession))
+                    .padding(Padding::from([6, 16]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(if is_active { tint(accent, 0.15) } else { Color::TRANSPARENT })),
+                        border: Border { radius: 4.0.into(), ..Border::default() },
+                        ..button::Style::default()
+                    })
+            };
+            let tab_bar = row![new_prompt_tab, resume_tab_btn].spacing(4);
+
+            let mut content = column![
+                text("Quick Claude").size(18).color(text_active),
+                text("Ctrl+Enter to launch \u{00B7} Escape to cancel").size(11).color(text_secondary),
+                text("\u{2460} Workspace \u{2192} \u{2461} Prompt \u{2192} \u{2462} Launch").size(12).color(text_secondary),
+                tab_bar,
+                workspace_section,
+                ai_tool_section,
+            ].spacing(12);
+
+            if let Some(mm_section) = model_mode_section {
+                content = content.push(mm_section);
+            }
+            content
+                .push(prompt_section)
+                .push(branch_section)
+                .push(checkbox_row)
+                .push(footer)
+        }
+        QuickClaudeTab::ResumeSession => {
+            let new_prompt_tab2 = {
+                let is_active = false;
+                button(text("New Prompt").size(12).color(if is_active { text_active } else { text_secondary }))
+                    .on_press(on_tab_selected(QuickClaudeTab::NewPrompt))
+                    .padding(Padding::from([6, 16]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(if is_active { tint(accent, 0.15) } else { Color::TRANSPARENT })),
+                        border: Border { radius: 4.0.into(), ..Border::default() },
+                        ..button::Style::default()
+                    })
+            };
+            let resume_tab_btn2 = {
+                let is_active = true;
+                let label = if state.sessions.is_empty() { "Resume".to_string() } else { format!("Resume ({})", state.sessions.len()) };
+                button(text(label).size(12).color(if is_active { text_active } else { text_secondary }))
+                    .on_press(on_tab_selected(QuickClaudeTab::ResumeSession))
+                    .padding(Padding::from([6, 16]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(if is_active { tint(accent, 0.15) } else { Color::TRANSPARENT })),
+                        border: Border { radius: 4.0.into(), ..Border::default() },
+                        ..button::Style::default()
+                    })
+            };
+            let tab_bar2 = row![new_prompt_tab2, resume_tab_btn2].spacing(4);
+
+            let cancel_btn2 = button(text("Cancel").size(13))
+                .on_press(on_cancel)
+                .padding(Padding::from([6, 16]));
+            let mut session_list = column![].spacing(4);
+            if state.sessions.is_empty() {
+                session_list = session_list.push(
+                    container(text("No recent Claude sessions found").size(13).color(text_secondary))
+                        .padding(20).width(Length::Fill)
+                );
+            } else {
+                for (i, session) in state.sessions.iter().enumerate() {
+                    let is_selected = state.selected_session == Some(i);
+                    let msg_preview = if session.first_message.len() > 80 {
+                        format!("{}...", &session.first_message[..77])
+                    } else {
+                        session.first_message.clone()
+                    };
+                    let id_preview = format!("{}...{}", &session.session_id[..4.min(session.session_id.len())], &session.session_id[session.session_id.len().saturating_sub(4)..]);
+                    let timestamp_display = session.timestamp.clone();
+                    let model_display = format!("Model: {}", session.model);
+                    let session_item = button(
+                        column![
+                            row![
+                                text(msg_preview).size(12).color(if is_selected { text_active } else { text_primary }),
+                                Space::new().width(Length::Fill),
+                                text(timestamp_display).size(10).color(text_secondary),
+                            ].align_y(iced::Alignment::Center),
+                            row![
+                                text(model_display).size(10).color(text_secondary),
+                                Space::new().width(8),
+                                text(id_preview).size(10).color(text_secondary),
+                            ].spacing(8),
+                        ].spacing(2)
+                    )
+                    .on_press(on_session_selected(i))
+                    .padding(Padding::from([8, 12]))
+                    .width(Length::Fill)
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(if is_selected { tint(accent, 0.12) } else { Color::TRANSPARENT })),
+                        border: Border { color: if is_selected { accent } else { border_color }, width: 1.0, radius: 6.0.into() },
+                        ..button::Style::default()
+                    });
+                    session_list = session_list.push(session_item);
+                }
+            }
+            let resume_footer = if state.selected_session.is_some() {
+                let resume_btn = button(text("Resume").size(13).color(text_active))
+                    .on_press(on_resume)
+                    .padding(Padding::from([6, 16]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(accent)),
+                        text_color: Color::WHITE,
+                        border: Border { radius: 6.0.into(), ..Border::default() },
+                        ..button::Style::default()
+                    });
+                row![cancel_btn2, Space::new().width(Length::Fill), resume_btn].spacing(8)
+            } else {
+                row![cancel_btn2].spacing(8)
+            };
+            column![
+                text("Quick Claude").size(18).color(text_active),
+                text("Select a session to resume").size(11).color(text_secondary),
+                tab_bar2,
+                scrollable(session_list).height(Length::Fixed(300.0)),
+                resume_footer,
+            ].spacing(12)
+        }
+    };
 
     let dialog = container(dialog_content)
         .padding(Padding::from([20, 24]))
@@ -788,6 +923,130 @@ fn read_first_heading(path: &std::path::Path) -> Option<String> {
     None
 }
 
+pub fn discover_sessions(workspace_folder: Option<&str>) -> Vec<ClaudeSession> {
+    let home = match std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+    {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let project_key = match workspace_folder {
+        Some(folder) => folder.replace(['\\', ':', '/'], "-"),
+        None => return Vec::new(),
+    };
+    let sessions_dir = std::path::Path::new(&home)
+        .join(".claude")
+        .join("projects")
+        .join(&project_key);
+    if !sessions_dir.exists() {
+        return Vec::new();
+    }
+    let mut sessions: Vec<(ClaudeSession, std::time::SystemTime)> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map_or(true, |e| e != "jsonl") {
+            continue;
+        }
+        let session_id = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mtime = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let (first_message, model) = parse_session_jsonl(&path);
+        let timestamp = format_relative_time(mtime);
+        sessions.push((
+            ClaudeSession {
+                session_id,
+                first_message,
+                model,
+                timestamp,
+                branch: String::new(),
+                file_path: path.to_string_lossy().to_string(),
+            },
+            mtime,
+        ));
+    }
+    sessions.sort_by(|a, b| b.1.cmp(&a.1));
+    sessions.into_iter().take(20).map(|(s, _)| s).collect()
+}
+
+fn parse_session_jsonl(path: &std::path::Path) -> (String, String) {
+    use std::io::BufRead;
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return (String::new(), String::new()),
+    };
+    let reader = std::io::BufReader::new(file);
+    let mut first_user_message = String::new();
+    let mut model = String::new();
+    for line in reader.lines().take(50) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let value: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if first_user_message.is_empty() {
+            if value.get("type").and_then(|t| t.as_str()) == Some("human") {
+                if let Some(msg) = value.get("message").and_then(|m| m.get("content")) {
+                    if let Some(t) = msg.as_str() {
+                        first_user_message = t.to_string();
+                    } else if let Some(arr) = msg.as_array() {
+                        for item in arr {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
+                                    first_user_message = t.to_string();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if model.is_empty() {
+            if value.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+                if let Some(m) = value
+                    .get("message")
+                    .and_then(|m| m.get("model"))
+                    .and_then(|m| m.as_str())
+                {
+                    model = m.to_string();
+                }
+            }
+        }
+        if !first_user_message.is_empty() && !model.is_empty() {
+            break;
+        }
+    }
+    (first_user_message, model)
+}
+
+fn format_relative_time(time: std::time::SystemTime) -> String {
+    let elapsed = time.elapsed().unwrap_or_default();
+    let secs = elapsed.as_secs();
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else if secs < 604800 {
+        format!("{}d ago", secs / 86400)
+    } else {
+        format!("{}w ago", secs / 604800)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -818,6 +1077,9 @@ mod tests {
         assert!(!state.model_dropdown_open);
         assert_eq!(state.selected_mode, "default");
         assert!(!state.mode_dropdown_open);
+        assert_eq!(state.active_tab, QuickClaudeTab::NewPrompt);
+        assert!(state.sessions.is_empty());
+        assert!(state.selected_session.is_none());
     }
 
     #[test]
@@ -855,6 +1117,9 @@ mod tests {
             SkillSelected(usize),
             SkillNav(i32),
             SkillDismiss,
+            TabSelected(QuickClaudeTab),
+            SessionSelected(usize),
+            Resume,
         }
         let _el: Element<'_, Msg> = view_quick_claude_dialog(
             &state,
@@ -876,6 +1141,9 @@ mod tests {
             Msg::SkillSelected,
             Msg::SkillNav,
             Msg::SkillDismiss,
+            |tab| Msg::TabSelected(tab),
+            Msg::SessionSelected,
+            Msg::Resume,
         );
     }
 
