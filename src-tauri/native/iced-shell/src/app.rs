@@ -442,6 +442,8 @@ pub struct GodlyApp {
     // --- G4: Find in Terminal ---
     search: SearchState,
     // --- G6/G7: Scrollbar + Performance Overlay ---
+    /// Accumulated fractional mouse wheel delta to avoid truncation jitter.
+    wheel_accumulator: f32,
     perf_overlay_visible: bool,
     // --- K1: CLAUDE.md Editor ---
     claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
@@ -542,6 +544,7 @@ impl Default for GodlyApp {
             hovered_url: None,
             ctrl_held: false,
             search: SearchState::default(),
+            wheel_accumulator: 0.0,
             perf_overlay_visible: false,
             claude_md_editor: None,
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
@@ -1574,8 +1577,13 @@ impl GodlyApp {
 
             // --- Mouse wheel scrollback ---
             Message::MouseWheel { delta_y } => {
-                let lines = -(delta_y * 3.0) as isize;
-                return self.scroll_active(lines);
+                self.wheel_accumulator += delta_y * 3.0;
+                let lines = self.wheel_accumulator as isize; // truncates toward zero
+                if lines != 0 {
+                    self.wheel_accumulator -= lines as f32; // keep remainder
+                    return self.scroll_active(-lines);
+                }
+                return Task::none();
             }
 
             // --- Tab management ---
@@ -6469,10 +6477,20 @@ impl GodlyApp {
             ..container::Style::default()
         });
 
-        let inner = column![
-            accent_bar,
+        let visible_lines = term.rows as usize;
+        let total_lines = visible_lines + term.total_scrollback;
+        let track_height = term.rows as f32 * self.font_metrics.cell_height;
+
+        let scrollbar_el: Element<'_, Message> = crate::scrollbar::view_scrollbar(
+            total_lines, visible_lines, term.scrollback_offset, track_height,
+        ).map(|_: ()| Message::Heartbeat);
+
+        let terminal_row = row![
             canvas(tc).width(Length::Fill).height(Length::Fill),
+            scrollbar_el,
         ];
+
+        let inner = column![accent_bar, terminal_row];
 
         let pane = container(inner)
             .width(Length::Fill)

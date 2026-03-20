@@ -371,6 +371,8 @@ fn check_named_shortcut(named: &Named, ctrl: bool, shift: bool, alt: bool) -> Op
         Named::PageDown if shift && !ctrl => Some(AppAction::ScrollPageDown),
         Named::Home if ctrl && !shift => Some(AppAction::ScrollToTop),
         Named::End if ctrl && !shift => Some(AppAction::ScrollToBottom),
+        Named::Home if shift && !ctrl => Some(AppAction::ScrollToTop),
+        Named::End if shift && !ctrl => Some(AppAction::ScrollToBottom),
         _ => None,
     }
 }
@@ -629,8 +631,11 @@ mod tests {
         assert_eq!(check_app_shortcut(&named_key(Named::Home), NONE), None);
     }
     #[test]
-    fn shift_home_is_not_shortcut() {
-        assert_eq!(check_app_shortcut(&named_key(Named::Home), shift()), None);
+    fn shift_home_is_scroll_to_top() {
+        assert_eq!(
+            check_app_shortcut(&named_key(Named::Home), shift()),
+            Some(AppAction::ScrollToTop)
+        );
     }
     #[test]
     fn ctrl_shift_home_is_not_shortcut() {
@@ -651,8 +656,11 @@ mod tests {
         assert_eq!(check_app_shortcut(&named_key(Named::End), NONE), None);
     }
     #[test]
-    fn shift_end_is_not_shortcut() {
-        assert_eq!(check_app_shortcut(&named_key(Named::End), shift()), None);
+    fn shift_end_is_scroll_to_bottom() {
+        assert_eq!(
+            check_app_shortcut(&named_key(Named::End), shift()),
+            Some(AppAction::ScrollToBottom)
+        );
     }
     #[test]
     fn ctrl_shift_end_is_not_shortcut() {
