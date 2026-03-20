@@ -7,6 +7,20 @@ fn tint(color: Color, alpha: f32) -> Color {
     Color::from_rgba(color.r, color.g, color.b, alpha)
 }
 
+#[derive(Debug, Clone)]
+pub enum SkillScope {
+    Project,
+    User,
+}
+
+#[derive(Debug, Clone)]
+pub struct SkillEntry {
+    pub name: String,
+    pub description: String,
+    pub scope: SkillScope,
+    pub file_path: String,
+}
+
 /// State for the Quick Claude dialog.
 #[derive(Debug)]
 pub struct QuickClaudeDialogState {
@@ -20,6 +34,14 @@ pub struct QuickClaudeDialogState {
     pub auto_suggest_branch: bool,
     /// Snapshot of available workspaces (id, name) at dialog open time.
     pub workspaces: Vec<(String, String)>,
+    pub skills: Vec<SkillEntry>,
+    pub skill_autocomplete_open: bool,
+    pub skill_autocomplete_filter: String,
+    pub skill_autocomplete_selected: usize,
+    pub selected_model: String,
+    pub model_dropdown_open: bool,
+    pub selected_mode: String,
+    pub mode_dropdown_open: bool,
 }
 
 impl QuickClaudeDialogState {
@@ -34,11 +56,31 @@ impl QuickClaudeDialogState {
             main_branch_mode: false,
             auto_suggest_branch: true,
             workspaces,
+            skills: Vec::new(),
+            skill_autocomplete_open: false,
+            skill_autocomplete_filter: String::new(),
+            skill_autocomplete_selected: 0,
+            selected_model: "sonnet".to_string(),
+            model_dropdown_open: false,
+            selected_mode: "default".to_string(),
+            mode_dropdown_open: false,
         }
     }
 
     pub fn prompt_text(&self) -> String {
         self.prompt_content.text()
+    }
+
+    pub fn filtered_skills(&self) -> Vec<&SkillEntry> {
+        if self.skill_autocomplete_filter.is_empty() {
+            self.skills.iter().collect()
+        } else {
+            let filter = self.skill_autocomplete_filter.to_lowercase();
+            self.skills
+                .iter()
+                .filter(|s| s.name.to_lowercase().contains(&filter))
+                .collect()
+        }
     }
 }
 
@@ -53,9 +95,16 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     on_branch_changed: impl Fn(String) -> M + 'a,
     on_main_branch_toggled: impl Fn(bool) -> M + 'a,
     on_auto_suggest_toggled: impl Fn(bool) -> M + 'a,
+    on_model_selected: impl Fn(String) -> M + 'a,
+    on_model_dropdown_toggle: M,
+    on_mode_selected: impl Fn(String) -> M + 'a,
+    on_mode_dropdown_toggle: M,
     on_launch: M,
     on_voice: M,
     on_cancel: M,
+    on_skill_selected: impl Fn(usize) -> M + 'a,
+    _on_skill_autocomplete_navigate: impl Fn(i32) -> M + 'a,
+    _on_skill_autocomplete_dismiss: M,
 ) -> Element<'a, M> {
     let accent = theme::ACCENT();
     let border_color = theme::BORDER();
@@ -230,6 +279,178 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
         );
     }
 
+    // ── Model & Mode dropdowns (Claude Code only) ──────────────────────
+    let model_mode_section: Option<Element<'a, M>> = if state.selected_ai_tool == "Claude Code" {
+        let models = [("Opus", "opus"), ("Sonnet", "sonnet"), ("Haiku", "haiku")];
+        let modes = [("Default", "default"), ("Plan", "plan"), ("Auto", "auto")];
+
+        // Model dropdown
+        let model_display = models
+            .iter()
+            .find(|(_, v)| *v == state.selected_model.as_str())
+            .map(|(d, _)| *d)
+            .unwrap_or("Sonnet");
+
+        let model_toggle = on_model_dropdown_toggle.clone();
+        let model_button = button(
+            row![
+                text(model_display).size(13).color(text_primary),
+                Space::new().width(Length::Fill),
+                text(if state.model_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
+                    .size(10)
+                    .color(text_secondary),
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(model_toggle)
+        .padding(Padding::from([8, 12]))
+        .width(Length::Fill)
+        .style(move |_theme, _status| button::Style {
+            background: Some(Background::Color(bg_primary)),
+            text_color: text_primary,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..button::Style::default()
+        });
+
+        let mut model_col = column![
+            text("Model").size(11).color(text_secondary),
+            model_button,
+        ]
+        .spacing(4);
+
+        if state.model_dropdown_open {
+            let mut model_list = column![].spacing(2);
+            for (display, value) in models {
+                let is_selected = state.selected_model == value;
+                let val = value.to_string();
+                let item = button(
+                    text(display)
+                        .size(13)
+                        .color(if is_selected { text_active } else { text_primary }),
+                )
+                .on_press(on_model_selected(val))
+                .padding(Padding::from([5, 10]))
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(if is_selected {
+                        tint(accent, 0.12)
+                    } else {
+                        Color::TRANSPARENT
+                    })),
+                    text_color: text_primary,
+                    border: Border::default(),
+                    ..button::Style::default()
+                });
+                model_list = model_list.push(item);
+            }
+            model_col = model_col.push(
+                container(model_list)
+                    .width(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(bg_primary)),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+            );
+        }
+
+        // Mode dropdown
+        let mode_display = modes
+            .iter()
+            .find(|(_, v)| *v == state.selected_mode.as_str())
+            .map(|(d, _)| *d)
+            .unwrap_or("Default");
+
+        let mode_toggle = on_mode_dropdown_toggle.clone();
+        let mode_button = button(
+            row![
+                text(mode_display).size(13).color(text_primary),
+                Space::new().width(Length::Fill),
+                text(if state.mode_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
+                    .size(10)
+                    .color(text_secondary),
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(mode_toggle)
+        .padding(Padding::from([8, 12]))
+        .width(Length::Fill)
+        .style(move |_theme, _status| button::Style {
+            background: Some(Background::Color(bg_primary)),
+            text_color: text_primary,
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..button::Style::default()
+        });
+
+        let mut mode_col = column![
+            text("Permission Mode").size(11).color(text_secondary),
+            mode_button,
+        ]
+        .spacing(4);
+
+        if state.mode_dropdown_open {
+            let mut mode_list = column![].spacing(2);
+            for (display, value) in modes {
+                let is_selected = state.selected_mode == value;
+                let val = value.to_string();
+                let item = button(
+                    text(display)
+                        .size(13)
+                        .color(if is_selected { text_active } else { text_primary }),
+                )
+                .on_press(on_mode_selected(val))
+                .padding(Padding::from([5, 10]))
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(if is_selected {
+                        tint(accent, 0.12)
+                    } else {
+                        Color::TRANSPARENT
+                    })),
+                    text_color: text_primary,
+                    border: Border::default(),
+                    ..button::Style::default()
+                });
+                mode_list = mode_list.push(item);
+            }
+            mode_col = mode_col.push(
+                container(mode_list)
+                    .width(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(bg_primary)),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+            );
+        }
+
+        let model_mode_row = row![
+            container(model_col).width(Length::FillPortion(1)),
+            container(mode_col).width(Length::FillPortion(1)),
+        ]
+        .spacing(12);
+
+        Some(model_mode_row.into())
+    } else {
+        None
+    };
+
     // ── Prompt textarea ──────────────────────────────────────────────────
     let editor = text_editor(&state.prompt_content)
         .on_action(on_prompt_action)
@@ -248,11 +469,79 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
             ..container::Style::default()
         });
 
-    let prompt_section = column![
+    let mut prompt_section = column![
         text("Prompt").size(11).color(text_secondary),
         editor_container,
     ]
     .spacing(4);
+
+    // Skill autocomplete popup
+    if state.skill_autocomplete_open && state.selected_ai_tool == "Claude Code" {
+        let filtered = state.filtered_skills();
+        if !filtered.is_empty() {
+            let mut skill_list = column![].spacing(1);
+            for (i, skill) in filtered.iter().enumerate().take(8) {
+                let is_selected = i == state.skill_autocomplete_selected;
+                let idx = i;
+                let scope_label = match skill.scope {
+                    SkillScope::Project => "project",
+                    SkillScope::User => "user",
+                };
+                let skill_item = button(
+                    row![
+                        text(format!("/{}", skill.name)).size(12).color(if is_selected { text_active } else { text_primary }),
+                        Space::new().width(Length::Fill),
+                        text(scope_label).size(10).color(text_secondary),
+                    ]
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(on_skill_selected(idx))
+                .padding(Padding::from([4, 8]))
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(if is_selected {
+                        tint(accent, 0.15)
+                    } else {
+                        Color::TRANSPARENT
+                    })),
+                    text_color: text_primary,
+                    border: Border::default(),
+                    ..button::Style::default()
+                });
+                skill_list = skill_list.push(skill_item);
+            }
+
+            // Show description of selected skill
+            if let Some(skill) = filtered.get(state.skill_autocomplete_selected) {
+                if !skill.description.is_empty() {
+                    let desc_text = text(&skill.description).size(11).color(text_secondary);
+                    skill_list = skill_list.push(
+                        container(desc_text)
+                            .padding(Padding::from([4, 8]))
+                            .width(Length::Fill),
+                    );
+                }
+            }
+
+            let popup = container(skill_list)
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(Background::Color(bg_secondary)),
+                    border: Border {
+                        color: border_color,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    shadow: Shadow {
+                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                        offset: Vector::new(0.0, 2.0),
+                        blur_radius: 8.0,
+                    },
+                    ..container::Style::default()
+                });
+            prompt_section = prompt_section.push(popup);
+        }
+    }
 
     // ── Branch name input ────────────────────────────────────────────────
     let branch_input = text_input(
@@ -349,22 +638,28 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     .spacing(8);
 
     // ── Compose dialog ───────────────────────────────────────────────────
-    let dialog_content = column![
+    let mut dialog_content = column![
         title,
         subtitle,
         step_indicator,
         workspace_section,
         ai_tool_section,
-        prompt_section,
-        branch_section,
-        checkbox_row,
-        footer,
     ]
     .spacing(12);
 
+    if let Some(mm_section) = model_mode_section {
+        dialog_content = dialog_content.push(mm_section);
+    }
+
+    dialog_content = dialog_content
+        .push(prompt_section)
+        .push(branch_section)
+        .push(checkbox_row)
+        .push(footer);
+
     let dialog = container(dialog_content)
         .padding(Padding::from([20, 24]))
-        .width(Length::Fixed(520.0))
+        .width(Length::Fixed(600.0))
         .style(move |_theme| container::Style {
             background: Some(Background::Color(bg_secondary)),
             border: Border {
@@ -391,6 +686,108 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
         .into()
 }
 
+/// Discover Claude Code skills from project and user directories.
+pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
+    let mut skills = Vec::new();
+
+    // Project skills: {workspace}/.claude/skills/**/*.md
+    if let Some(folder) = workspace_folder {
+        let project_skills_dir = std::path::Path::new(folder).join(".claude").join("skills");
+        if project_skills_dir.exists() {
+            collect_skills_from_dir(&project_skills_dir, SkillScope::Project, &mut skills);
+        }
+    }
+
+    // User skills: ~/.claude/skills/**/*.md
+    if let Some(home) = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+    {
+        let user_skills_dir = std::path::Path::new(&home).join(".claude").join("skills");
+        if user_skills_dir.exists() {
+            collect_skills_from_dir(&user_skills_dir, SkillScope::User, &mut skills);
+        }
+    }
+
+    skills
+}
+
+fn collect_skills_from_dir(
+    dir: &std::path::Path,
+    scope: SkillScope,
+    skills: &mut Vec<SkillEntry>,
+) {
+    let Ok(entries) = walkdir_recursive(dir) else {
+        return;
+    };
+    for path in entries {
+        if path.extension().map_or(false, |e| e == "md") {
+            let name = if path.file_name().map_or(false, |f| f == "SKILL.md") {
+                // Use parent directory name for SKILL.md files
+                path.parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            } else {
+                // Use filename without extension
+                path.file_stem()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            };
+
+            if name.is_empty() {
+                continue;
+            }
+
+            let description = read_first_heading(&path).unwrap_or_default();
+
+            skills.push(SkillEntry {
+                name,
+                description,
+                scope: scope.clone(),
+                file_path: path.to_string_lossy().to_string(),
+            });
+        }
+    }
+}
+
+/// Recursively collect files from a directory.
+fn walkdir_recursive(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, std::io::Error> {
+    let mut results = Vec::new();
+    fn walk(
+        dir: &std::path::Path,
+        results: &mut Vec<std::path::PathBuf>,
+    ) -> Result<(), std::io::Error> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, results)?;
+            } else {
+                results.push(path);
+            }
+        }
+        Ok(())
+    }
+    walk(dir, &mut results)?;
+    Ok(results)
+}
+
+/// Read the first `# Heading` line from a markdown file.
+fn read_first_heading(path: &std::path::Path) -> Option<String> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    for line in reader.lines().take(20) {
+        let line = line.ok()?;
+        let trimmed = line.trim();
+        if let Some(heading) = trimmed.strip_prefix("# ") {
+            return Some(heading.to_string());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,6 +810,14 @@ mod tests {
         assert!(!state.main_branch_mode);
         assert!(state.auto_suggest_branch);
         assert_eq!(state.workspaces.len(), 2);
+        assert!(state.skills.is_empty());
+        assert!(!state.skill_autocomplete_open);
+        assert!(state.skill_autocomplete_filter.is_empty());
+        assert_eq!(state.skill_autocomplete_selected, 0);
+        assert_eq!(state.selected_model, "sonnet");
+        assert!(!state.model_dropdown_open);
+        assert_eq!(state.selected_mode, "default");
+        assert!(!state.mode_dropdown_open);
     }
 
     #[test]
@@ -440,9 +845,16 @@ mod tests {
             BranchChanged(String),
             MainBranch(bool),
             AutoSuggest(bool),
+            ModelSelected(String),
+            ModelDropdown,
+            ModeSelected(String),
+            ModeDropdown,
             Launch,
             Voice,
             Cancel,
+            SkillSelected(usize),
+            SkillNav(i32),
+            SkillDismiss,
         }
         let _el: Element<'_, Msg> = view_quick_claude_dialog(
             &state,
@@ -454,9 +866,72 @@ mod tests {
             Msg::BranchChanged,
             Msg::MainBranch,
             Msg::AutoSuggest,
+            Msg::ModelSelected,
+            Msg::ModelDropdown,
+            Msg::ModeSelected,
+            Msg::ModeDropdown,
             Msg::Launch,
             Msg::Voice,
             Msg::Cancel,
+            Msg::SkillSelected,
+            Msg::SkillNav,
+            Msg::SkillDismiss,
         );
+    }
+
+    #[test]
+    fn filtered_skills_empty_filter() {
+        let mut state = QuickClaudeDialogState::new(None, vec![]);
+        state.skills = vec![
+            SkillEntry {
+                name: "commit".to_string(),
+                description: "Create a commit".to_string(),
+                scope: SkillScope::User,
+                file_path: "/test/commit.md".to_string(),
+            },
+            SkillEntry {
+                name: "review-pr".to_string(),
+                description: "Review a PR".to_string(),
+                scope: SkillScope::Project,
+                file_path: "/test/review-pr.md".to_string(),
+            },
+        ];
+        assert_eq!(state.filtered_skills().len(), 2);
+    }
+
+    #[test]
+    fn filtered_skills_with_filter() {
+        let mut state = QuickClaudeDialogState::new(None, vec![]);
+        state.skills = vec![
+            SkillEntry {
+                name: "commit".to_string(),
+                description: "Create a commit".to_string(),
+                scope: SkillScope::User,
+                file_path: "/test/commit.md".to_string(),
+            },
+            SkillEntry {
+                name: "review-pr".to_string(),
+                description: "Review a PR".to_string(),
+                scope: SkillScope::Project,
+                file_path: "/test/review-pr.md".to_string(),
+            },
+        ];
+        state.skill_autocomplete_filter = "comm".to_string();
+        let filtered = state.filtered_skills();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "commit");
+    }
+
+    #[test]
+    fn discover_skills_no_project_dir() {
+        // Non-existent workspace folder should not add project skills
+        let skills = discover_skills(Some("/nonexistent/path/for/test"));
+        // Only user-level skills (if any) should be present — no project skills
+        for skill in &skills {
+            assert!(
+                !matches!(skill.scope, SkillScope::Project),
+                "should not find project skills for non-existent workspace"
+            );
+        }
     }
 }
