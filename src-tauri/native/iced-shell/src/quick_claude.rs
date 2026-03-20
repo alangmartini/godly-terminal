@@ -27,6 +27,26 @@ pub enum LaunchStep {
     Delay { ms: u64 },
 }
 
+/// Build launch steps for resuming an existing Claude session.
+pub fn resume_launch_steps(session_id: &str) -> Vec<LaunchStep> {
+    vec![
+        LaunchStep::CreateTerminal { agent_index: 0 },
+        LaunchStep::WaitIdle {
+            agent_index: 0,
+            idle_ms: 2000,
+        },
+        LaunchStep::RunCommand {
+            agent_index: 0,
+            command: format!("claude --resume --session-id {}", session_id),
+        },
+        LaunchStep::WaitReady {
+            agent_index: 0,
+            marker: ">".to_string(),
+            timeout_ms: 30000,
+        },
+    ]
+}
+
 /// Build the default launch sequence for a preset with N agents.
 pub fn default_launch_steps(num_agents: usize, prompt: &str, model: &str, mode: &str) -> Vec<LaunchStep> {
     let mut cmd = "claude".to_string();
@@ -274,6 +294,23 @@ fn simple_grid_hash(grid: &godly_protocol::types::RichGridData) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_steps_has_four_steps() {
+        let steps = resume_launch_steps("abc-123");
+        assert_eq!(steps.len(), 4);
+        assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0 }));
+        assert!(matches!(steps[1], LaunchStep::WaitIdle { agent_index: 0, .. }));
+        match &steps[2] {
+            LaunchStep::RunCommand { agent_index, command } => {
+                assert_eq!(*agent_index, 0);
+                assert!(command.contains("--resume"));
+                assert!(command.contains("abc-123"));
+            }
+            _ => panic!("Expected RunCommand"),
+        }
+        assert!(matches!(steps[3], LaunchStep::WaitReady { agent_index: 0, .. }));
+    }
 
     #[test]
     fn default_steps_single_no_prompt() {
