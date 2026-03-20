@@ -48,6 +48,7 @@ mod whisper_ui;
 mod quick_claude;
 mod quick_claude_dialog;
 mod session_persistence;
+mod font_enumerator;
 mod keybinding_persistence;
 
 use app::{GodlyApp, Message};
