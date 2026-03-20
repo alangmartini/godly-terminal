@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use iced::widget::{button, container, mouse_area, row, rule, text};
+use iced::widget::{button, column, container, mouse_area, row, rule, text, Space};
 use iced::{Border, Color, Element, Length, Padding};
 
 use crate::terminal_state::TerminalInfo;
 use crate::theme::{
-    BG_SECONDARY, BORDER_VARIANT, DANGER, GHOST_ACTIVE, GHOST_HOVER, TAB_ACTIVE_BG,
+    ACCENT, BG_SECONDARY, BORDER_VARIANT, DANGER, GHOST_ACTIVE, GHOST_HOVER, TAB_ACTIVE_BG,
     TAB_INACTIVE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 
@@ -19,6 +19,7 @@ const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 const TAB_BUTTON_HEIGHT: f32 = 26.0;
 const CLOSE_BUTTON_SIZE: f32 = 20.0;
 const SEPARATOR_HEIGHT: f32 = 14.0;
+const ACCENT_INDICATOR_HEIGHT: f32 = 2.0;
 
 /// Truncate a label to at most `max_chars` characters, appending "..." if truncated.
 fn truncate_label(s: &str, max_chars: usize) -> String {
@@ -171,9 +172,15 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         let truncated = truncate_label(&terminal.tab_label(), 30);
         let label = text(truncated).size(13).color(text_color);
         let process_badge = process_badge_label(&terminal.process_name).map(|badge| {
-            let badge_bg = GHOST_HOVER();
+            let badge_bg = if is_active {
+                let a = ACCENT();
+                Color::from_rgba(a.r, a.g, a.b, 0.20)
+            } else {
+                GHOST_HOVER()
+            };
+            let badge_text_color = if is_active { TEXT_PRIMARY() } else { TEXT_SECONDARY() };
 
-            container(text(badge).size(9).color(TEXT_SECONDARY()))
+            container(text(badge).size(9).color(badge_text_color))
                 .padding(Padding::from([1, 5]))
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(badge_bg)),
@@ -216,14 +223,28 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .push(container(label).padding(Padding::from([0, 1])))
             .push(close_btn);
 
+        let ghost_hover_bg = GHOST_HOVER();
         let tab_btn = button(tab_content)
             .padding(Padding::from([4, 10]))
             .height(Length::Fixed(TAB_BUTTON_HEIGHT))
-            .style(move |_theme, _status| button::Style {
-                background: Some(iced::Background::Color(bg)),
-                text_color: text_color,
-                border: Border::default(),
-                ..button::Style::default()
+            .style(move |_theme, status| {
+                let bg_color = if is_active {
+                    bg
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => ghost_hover_bg,
+                        _ => bg,
+                    }
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg_color)),
+                    text_color,
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
+                    ..button::Style::default()
+                }
             });
 
         let click_id = terminal.id.clone();
@@ -240,15 +261,32 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .on_press(on_drag_start(drag_start_id))
             .on_release(on_drag_end.clone());
 
+        // Active tab accent indicator (2px colored line at bottom edge).
+        let accent_color = if is_active { ACCENT() } else { Color::TRANSPARENT };
+        let indicator = container(Space::new().width(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fixed(ACCENT_INDICATOR_HEIGHT))
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(accent_color)),
+                ..container::Style::default()
+            });
+
+        let tab_column = column![
+            container(tab_with_drag).height(Length::Fill),
+            indicator,
+        ]
+        .height(Length::Fixed(TAB_BAR_HEIGHT))
+        .spacing(0);
+
         // Animate entry: clip max_width during the entry animation.
         if let Some(&progress) = entry_progress.get(&terminal.id) {
             let max_w = (TAB_ENTRY_MAX_WIDTH * progress).max(1.0);
-            let clip_container = container(tab_with_drag)
+            let clip_container = container(tab_column)
                 .max_width(max_w)
                 .clip(true);
             tabs = tabs.push(clip_container);
         } else {
-            tabs = tabs.push(tab_with_drag);
+            tabs = tabs.push(tab_column);
         }
 
         if separator_after_tab(index, terminals.len(), active_index) {
