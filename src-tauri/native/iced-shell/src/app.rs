@@ -7311,6 +7311,49 @@ fn collect_init_result_sync(
         return Ok(recovered);
     }
 
+    // No live sessions — check persisted state for workspace definitions to restore.
+    // This handles the rebuild/reinstall case: daemon has no sessions but the JSON
+    // file remembers which workspaces the user had open (names, folder paths, etc.).
+    if let Some(persisted) = session_persistence::load_from_default_path() {
+        if !persisted.workspaces.is_empty() {
+            log::info!(
+                "Restoring {} workspace(s) from persisted state (no live sessions)",
+                persisted.workspaces.len()
+            );
+            let mut new_session_ids = Vec::new();
+            for workspace in &persisted.workspaces {
+                let session_id = uuid::Uuid::new_v4().to_string();
+                let cwd = if workspace.folder_path.is_empty() {
+                    None
+                } else {
+                    Some(workspace.folder_path.as_str())
+                };
+                commands::create_terminal(
+                    client,
+                    &session_id,
+                    godly_protocol::ShellType::Windows,
+                    cwd,
+                    rows,
+                    cols,
+                )?;
+                new_session_ids.push(session_id);
+            }
+
+            // merge_with_live_sessions will produce empty layouts for each workspace
+            // (since persisted terminal IDs won't match new UUIDs), and the new session
+            // IDs will appear in missing_live_terminal_ids — apply_init_result fills
+            // the empty workspaces from that pool.
+            let merged =
+                session_persistence::merge_with_live_sessions(&persisted, &new_session_ids);
+
+            return Ok(InitResult::Recovered {
+                session_ids: new_session_ids,
+                restored_scrollback_offsets: HashMap::new(),
+                merged_session_state: Some(merged),
+            });
+        }
+    }
+
     let session_id = create_fresh_session(client, rows, cols)?;
     Ok(InitResult::Fresh { session_id })
 }
