@@ -141,36 +141,20 @@ After confirmation, proceed to spawning.
 
 ### Phase 4: Spawn Agents
 
-Get the current workspace from godly-terminal MCP, then spawn agents in parallel.
+Spawn agents in parallel using git worktrees and subagents (Task tool).
 
-#### 4a. Spawn terminals with worktrees
+#### 4a. Create worktrees for each work unit
 
-For each work unit that has no unmet dependencies:
+For each work unit that has no unmet dependencies, create a git worktree and launch a subagent:
 
-```
-# Use quick_claude for Claude Code agents
-mcp__godly-terminal__quick_claude(
-  workspace_id: <current>,
-  prompt: <work unit prompt>,
-  branch_name: "feat/<issue>-<unit-slug>"
-)
-
-# OR use codex MCP for Codex agents
-# First create a terminal with worktree, then run codex in it
-mcp__godly-terminal__create_terminal(
-  workspace_id: <current>,
-  worktree_name: "feat-<issue>-<unit-slug>"
-)
-# Then use mcp__codex-cli__codex with the worktree's working directory
+```bash
+# Create a worktree for the unit
+git worktree add .claude/worktrees/feat-<issue>-<unit-slug> -b feat/<issue>-<unit-slug>
 ```
 
-#### 4b. Rename terminals for visibility
+Then use the Task tool to spawn a subagent for each work unit with the worktree path as its working directory.
 
-```
-mcp__godly-terminal__rename_terminal(terminal_id, "Agent N: <unit-title>")
-```
-
-#### 4c. Create kanban sub-tasks
+#### 4b. Create kanban sub-tasks
 
 For each work unit, create a sub-task on the kanban board linking to the parent task.
 
@@ -178,27 +162,21 @@ For each work unit, create a sub-task on the kanban board linking to the parent 
 
 #### 5a. Monitor progress
 
-Periodically check each agent terminal:
-
-```
-mcp__godly-terminal__read_terminal(terminal_id, { mode: "tail", lines: 30, strip_ansi: true })
-```
-
-Look for:
-- Completion signals (agent went idle, committed changes)
+Use the Task tool to check subagent status. Look for:
+- Completion signals (subagent completed its task)
 - Error signals (test failures, compilation errors)
 - Agent asking questions (needs intervention)
 
 #### 5b. Handle dependencies
 
 When a dependency unit completes:
-1. Verify its work (read the terminal output for test results)
-2. Spawn the next dependent unit's agent
+1. Verify its work (check git log on the worktree branch)
+2. Spawn the next dependent unit's subagent
 
 #### 5c. Handle failures
 
 If an agent fails:
-- Read the full error output
+- Review the error output from the Task result
 - Decide: retry with adjusted prompt, fix manually, or ask the user
 - Do NOT let a failing agent block others indefinitely
 
@@ -319,5 +297,5 @@ Optionally offer to run `/manual-testing <feature>` after the build.
 | Best for | Complex multi-file, architecture decisions, test writing | Isolated mechanical tasks, clear spec |
 | Speed | Slower (deeper reasoning) | Faster (focused execution) |
 | Codebase awareness | Full project context via CLAUDE.md | Working directory context |
-| Spawning | `quick_claude` (godly-terminal MCP) | `mcp__codex-cli__codex` or terminal + CLI |
+| Spawning | Task tool (subagent in worktree) | `mcp__codex-cli__codex` or CLI in worktree |
 | Sandbox | No sandbox (full access) | Configurable sandbox (`workspace-write`) |
