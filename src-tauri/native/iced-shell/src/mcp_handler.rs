@@ -145,7 +145,7 @@ impl GodlyApp {
                         .split_leaf(&target_terminal_id, new_terminal_id.clone(), dir);
                     ws.focused_terminal = new_terminal_id;
                 }
-                iced::Task::none()
+                self.resize_all_terminals()
             }
 
             // J8: Unsplit — remove a terminal from its split.
@@ -161,7 +161,7 @@ impl GodlyApp {
                         }
                     }
                 }
-                iced::Task::none()
+                self.resize_all_terminals()
             }
 
             // J9: Swap two panes in a layout.
