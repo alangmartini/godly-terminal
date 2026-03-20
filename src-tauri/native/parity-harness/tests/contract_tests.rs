@@ -130,6 +130,7 @@ fn response_all_variants_serialize() {
                 scrollback_memory_bytes: 0,
                 paused: false,
                 title: String::new(),
+                exit_code: None,
             },
         },
         Response::SessionList { sessions: vec![] },
