@@ -79,6 +79,7 @@ use godly_protocol::McpResponse;
 
 use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCanvas};
 
+use crate::font_enumerator;
 use crate::notification_state::NotificationTracker;
 use crate::notifications;
 use crate::scrollback_restore;
@@ -453,6 +454,15 @@ pub struct GodlyApp {
     whisper_service: Option<Arc<parking_lot::Mutex<Option<godly_app_adapter::whisper::WhisperService>>>>,
     /// Pending reply channel for async screenshot capture.
     pub(crate) pending_screenshot_reply: Option<std::sync::mpsc::Sender<McpResponse>>,
+    // --- Font Family Selector ---
+    /// Currently selected font family name.
+    font_family: String,
+    /// Computed Iced Font from font_family (cached to avoid re-interning).
+    terminal_font: iced::Font,
+    /// Available monospace fonts from system (lazy-loaded on Appearance tab open).
+    available_fonts: Option<Vec<String>>,
+    /// Search/filter query for font list.
+    font_filter_query: String,
 }
 
 impl Default for GodlyApp {
@@ -551,6 +561,15 @@ impl Default for GodlyApp {
             whisper_state: None,
             whisper_service: None,
             pending_screenshot_reply: None,
+            font_family: "Geist Mono".to_string(),
+            terminal_font: iced::Font {
+                family: iced::font::Family::Name("Geist Mono"),
+                weight: iced::font::Weight::Normal,
+                stretch: iced::font::Stretch::Normal,
+                style: iced::font::Style::Normal,
+            },
+            available_fonts: None,
+            font_filter_query: String::new(),
         }
     }
 }
@@ -730,7 +749,6 @@ pub enum Message {
     QuickClaudeDialogLaunch,
     /// Voice input from Quick Claude dialog.
     QuickClaudeDialogVoice,
-<<<<<<< HEAD
     /// Skills loaded for Quick Claude dialog autocomplete.
     QuickClaudeDialogSkillsLoaded(Vec<crate::quick_claude_dialog::SkillEntry>),
     /// Skill selected from autocomplete popup.
@@ -739,14 +757,6 @@ pub enum Message {
     QuickClaudeDialogSkillAutocompleteNavigate(i32),
     /// Dismiss skill autocomplete popup.
     QuickClaudeDialogSkillAutocompleteDismiss,
-    /// Model selected in Quick Claude dialog.
-    QuickClaudeDialogModelSelected(String),
-    /// Toggle model dropdown in Quick Claude dialog.
-    QuickClaudeDialogModelDropdownToggle,
-    /// Permission mode selected in Quick Claude dialog.
-    QuickClaudeDialogModeSelected(String),
-    /// Toggle mode dropdown in Quick Claude dialog.
-=======
     /// Tab selected in Quick Claude dialog.
     QuickClaudeDialogTabSelected(crate::quick_claude_dialog::QuickClaudeTab),
     /// Session selected in Quick Claude dialog resume tab.
@@ -755,14 +765,13 @@ pub enum Message {
     QuickClaudeDialogSessionsLoaded(Vec<crate::quick_claude_dialog::ClaudeSession>),
     /// Resume a Claude session from Quick Claude dialog.
     QuickClaudeDialogResume,
-    /// Model selected in Quick Claude dialog (duplicated from PR1).
+    /// Model selected in Quick Claude dialog.
     QuickClaudeDialogModelSelected(String),
-    /// Toggle model dropdown in Quick Claude dialog (duplicated from PR1).
+    /// Toggle model dropdown in Quick Claude dialog.
     QuickClaudeDialogModelDropdownToggle,
-    /// Mode selected in Quick Claude dialog (duplicated from PR1).
+    /// Permission mode selected in Quick Claude dialog.
     QuickClaudeDialogModeSelected(String),
-    /// Toggle mode dropdown in Quick Claude dialog (duplicated from PR1).
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
+    /// Toggle mode dropdown in Quick Claude dialog.
     QuickClaudeDialogModeDropdownToggle,
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
@@ -839,6 +848,16 @@ pub enum Message {
     ToggleSettings,
     /// User clicked a settings tab.
     SettingsTabClicked(String),
+    /// Font family changed from settings.
+    FontFamilyChanged(String),
+    /// System fonts enumerated in background.
+    FontsEnumerated(Vec<String>),
+    /// Font filter search query changed.
+    FontFilterChanged(String),
+    /// Increment font size from settings stepper.
+    FontSizeIncrement,
+    /// Decrement font size from settings stepper.
+    FontSizeDecrement,
     /// User clicked a shortcut badge to enter capture mode.
     ShortcutBadgeClicked(usize),
     /// User cancelled shortcut capture (e.g. pressed Escape).
@@ -1270,6 +1289,7 @@ impl GodlyApp {
             settings_open: self.settings_open,
             settings_tab: self.settings_tab.clone(),
             font_size: self.font_metrics.font_size,
+            font_family: self.font_family.clone(),
             next_workspace_num: self.next_workspace_num,
             active_workspace_id: self.workspaces.active_id().map(str::to_string),
             active_terminal_id: self.terminals.active_id().map(str::to_string),
@@ -1589,46 +1609,40 @@ impl GodlyApp {
                             }
                             return Task::none();
                         }
-<<<<<<< HEAD
-                        if self.quick_claude_dialog.is_some() {
+                        if let Some(ref dlg) = self.quick_claude_dialog {
                             // Skill autocomplete key routing
-                            if let Some(ref dlg) = self.quick_claude_dialog {
-                                if dlg.skill_autocomplete_open {
-                                    use iced::keyboard::key::Named;
-                                    match &key {
-                                        keyboard::Key::Named(Named::ArrowUp) => {
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillAutocompleteNavigate(
-                                                    -1,
-                                                ),
-                                            );
-                                        }
-                                        keyboard::Key::Named(Named::ArrowDown) => {
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillAutocompleteNavigate(
-                                                    1,
-                                                ),
-                                            );
-                                        }
-                                        keyboard::Key::Named(Named::Enter)
-                                        | keyboard::Key::Named(Named::Tab) => {
-                                            let selected = dlg.skill_autocomplete_selected;
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillSelected(selected),
-                                            );
-                                        }
-                                        keyboard::Key::Named(Named::Escape) => {
-                                            return self.update(
-                                                Message::QuickClaudeDialogSkillAutocompleteDismiss,
-                                            );
-                                        }
-                                        _ => {}
+                            if dlg.skill_autocomplete_open {
+                                use iced::keyboard::key::Named;
+                                match &key {
+                                    keyboard::Key::Named(Named::ArrowUp) => {
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(
+                                                -1,
+                                            ),
+                                        );
                                     }
+                                    keyboard::Key::Named(Named::ArrowDown) => {
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(
+                                                1,
+                                            ),
+                                        );
+                                    }
+                                    keyboard::Key::Named(Named::Enter)
+                                    | keyboard::Key::Named(Named::Tab) => {
+                                        let selected = dlg.skill_autocomplete_selected;
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillSelected(selected),
+                                        );
+                                    }
+                                    keyboard::Key::Named(Named::Escape) => {
+                                        return self.update(
+                                            Message::QuickClaudeDialogSkillAutocompleteDismiss,
+                                        );
+                                    }
+                                    _ => {}
                                 }
                             }
-=======
-                        if let Some(ref dlg) = self.quick_claude_dialog {
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
                             if is_escape_key(&key) {
                                 self.quick_claude_dialog = None;
                                 return Task::none();
@@ -2323,9 +2337,8 @@ impl GodlyApp {
                 self.quick_claude_dialog = Some(
                     crate::quick_claude_dialog::QuickClaudeDialogState::new(ws_id, ws_list),
                 );
-<<<<<<< HEAD
 
-                // Load skills asynchronously
+                // Load skills and sessions asynchronously
                 let ws_folder: Option<String> = self
                     .workspaces
                     .active()
@@ -2336,23 +2349,20 @@ impl GodlyApp {
                             Some(ws.folder_path.clone())
                         }
                     });
-                return iced::Task::perform(
+                let ws_folder2 = ws_folder.clone();
+                let skills_task = iced::Task::perform(
                     async move {
                         crate::quick_claude_dialog::discover_skills(ws_folder.as_deref())
                     },
                     Message::QuickClaudeDialogSkillsLoaded,
-=======
-                let ws_folder: Option<String> = self.workspaces.active()
-                    .and_then(|ws| {
-                        if ws.folder_path.is_empty() { None } else { Some(ws.folder_path.clone()) }
-                    });
-                return iced::Task::perform(
+                );
+                let sessions_task = iced::Task::perform(
                     async move {
-                        crate::quick_claude_dialog::discover_sessions(ws_folder.as_deref())
+                        crate::quick_claude_dialog::discover_sessions(ws_folder2.as_deref())
                     },
                     Message::QuickClaudeDialogSessionsLoaded,
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
                 );
+                return iced::Task::batch([skills_task, sessions_task]);
             }
             Message::QuickClaudeDialogClose => {
                 self.quick_claude_dialog = None;
@@ -2491,7 +2501,6 @@ impl GodlyApp {
                 // Voice integration — forward to whisper toggle if available
                 return self.update(Message::WhisperToggle);
             }
-<<<<<<< HEAD
             Message::QuickClaudeDialogSkillsLoaded(skills) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.skills = skills;
@@ -2530,7 +2539,8 @@ impl GodlyApp {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.skill_autocomplete_open = false;
                     dlg.skill_autocomplete_filter.clear();
-=======
+                }
+            }
             Message::QuickClaudeDialogTabSelected(tab) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.active_tab = tab;
@@ -2593,29 +2603,6 @@ impl GodlyApp {
 
                 self.quick_claude_launch = Some(launch_state);
                 return self.execute_next_launch_step();
-            }
-            Message::QuickClaudeDialogModelSelected(model) => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.selected_model = model;
-                    dlg.model_dropdown_open = false;
-                }
-            }
-            Message::QuickClaudeDialogModelDropdownToggle => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.model_dropdown_open = !dlg.model_dropdown_open;
-                }
-            }
-            Message::QuickClaudeDialogModeSelected(mode) => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.selected_mode = mode;
-                    dlg.mode_dropdown_open = false;
-                }
-            }
-            Message::QuickClaudeDialogModeDropdownToggle => {
-                if let Some(ref mut dlg) = self.quick_claude_dialog {
-                    dlg.mode_dropdown_open = !dlg.mode_dropdown_open;
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
-                }
             }
             Message::AiToolNameInputChanged(value) => {
                 self.ai_tool_name_input = value;
@@ -3037,7 +3024,39 @@ impl GodlyApp {
                 self.settings_open = !self.settings_open;
             }
             Message::SettingsTabClicked(tab_id) => {
-                self.settings_tab = tab_id;
+                self.settings_tab = tab_id.clone();
+                if tab_id == "appearance" && self.available_fonts.is_none() {
+                    return iced::Task::perform(
+                        async { font_enumerator::enumerate_monospace_fonts() },
+                        Message::FontsEnumerated,
+                    );
+                }
+            }
+            Message::FontFamilyChanged(name) => {
+                self.font_family = name.clone();
+                let interned = font_enumerator::intern_font_name(&name);
+                self.terminal_font = iced::Font {
+                    family: iced::font::Family::Name(interned),
+                    weight: iced::font::Weight::Normal,
+                    stretch: iced::font::Stretch::Normal,
+                    style: iced::font::Style::Normal,
+                };
+                return self.resize_all_terminals();
+            }
+            Message::FontsEnumerated(fonts) => {
+                self.available_fonts = Some(fonts);
+            }
+            Message::FontFilterChanged(query) => {
+                self.font_filter_query = query;
+            }
+            Message::FontSizeIncrement => {
+                self.font_metrics = FontMetrics::from_font_size(self.font_metrics.font_size + 1.0);
+                return self.resize_all_terminals();
+            }
+            Message::FontSizeDecrement => {
+                let new_size = (self.font_metrics.font_size - 1.0).max(8.0);
+                self.font_metrics = FontMetrics::from_font_size(new_size);
+                return self.resize_all_terminals();
             }
             Message::ShortcutBadgeClicked(index) => {
                 self.shortcut_capturing_index = Some(index);
@@ -3551,6 +3570,7 @@ impl GodlyApp {
                 cwd: term.extract_cwd().unwrap_or(""),
                 cols: term.cols,
                 rows: term.rows,
+                font: self.terminal_font,
             });
         let status_bar_el: Element<'_, Message> = status_bar::view_status_bar(status_info);
 
@@ -3760,19 +3780,12 @@ impl GodlyApp {
                 Message::QuickClaudeDialogLaunch,
                 Message::QuickClaudeDialogVoice,
                 Message::QuickClaudeDialogClose,
-<<<<<<< HEAD
                 Message::QuickClaudeDialogSkillSelected,
                 Message::QuickClaudeDialogSkillAutocompleteNavigate,
                 Message::QuickClaudeDialogSkillAutocompleteDismiss,
-=======
                 |tab| Message::QuickClaudeDialogTabSelected(tab),
                 Message::QuickClaudeDialogSessionSelected,
                 Message::QuickClaudeDialogResume,
-                |model| Message::QuickClaudeDialogModelSelected(model),
-                Message::QuickClaudeDialogModelDropdownToggle,
-                |mode| Message::QuickClaudeDialogModeSelected(mode),
-                Message::QuickClaudeDialogModeDropdownToggle,
->>>>>>> bab36e65 (feat: add resume tab and model/mode dropdowns to Quick Claude dialog)
             );
             stack![with_shell_picker, qc_overlay].into()
         } else {
@@ -4059,8 +4072,126 @@ impl GodlyApp {
     /// Render the Appearance tab (theme selection grid with preview swatches).
     fn view_appearance_tab(&self) -> Element<'_, Message> {
         use crate::theme::{ThemeId, RADIUS_MD};
-        use iced::widget::{button, row, scrollable, text, Space};
+        use iced::widget::{button, row, scrollable, text, text_input, Space};
         use iced::Theme;
+
+        // -- Font section --
+        let font_header = column![
+            text("Font").size(16).color(TEXT_PRIMARY()),
+            text("Choose a monospace font for the terminal.")
+                .size(13)
+                .color(TEXT_SECONDARY()),
+        ]
+        .spacing(4);
+
+        // Font size stepper row
+        let font_size_val = self.font_metrics.font_size;
+        let minus_btn = button(text("\u{2212}").size(14).color(TEXT_PRIMARY()))
+            .on_press(Message::FontSizeDecrement)
+            .padding(Padding::from([4, 10]))
+            .style(move |_t: &Theme, _s| button::Style {
+                background: Some(iced::Background::Color(BG_TERTIARY())),
+                border: iced::Border {
+                    color: BORDER(),
+                    width: 1.0,
+                    radius: RADIUS_MD.into(),
+                },
+                text_color: TEXT_PRIMARY(),
+                ..Default::default()
+            });
+        let plus_btn = button(text("+").size(14).color(TEXT_PRIMARY()))
+            .on_press(Message::FontSizeIncrement)
+            .padding(Padding::from([4, 10]))
+            .style(move |_t: &Theme, _s| button::Style {
+                background: Some(iced::Background::Color(BG_TERTIARY())),
+                border: iced::Border {
+                    color: BORDER(),
+                    width: 1.0,
+                    radius: RADIUS_MD.into(),
+                },
+                text_color: TEXT_PRIMARY(),
+                ..Default::default()
+            });
+        let size_label = text(format!("{:.0}", font_size_val))
+            .size(14)
+            .color(TEXT_PRIMARY());
+        let font_size_row = row![
+            text("Size").size(13).color(TEXT_SECONDARY()),
+            Space::new().width(Length::Fill),
+            minus_btn,
+            container(size_label).padding(Padding::from([4, 8])),
+            plus_btn,
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+
+        // Font search input
+        let search_input = text_input("Search fonts...", &self.font_filter_query)
+            .on_input(Message::FontFilterChanged)
+            .size(13)
+            .padding(Padding::from([6, 10]));
+
+        // Font list
+        let mut font_list_col = column![].spacing(4);
+        if let Some(fonts) = &self.available_fonts {
+            let query_lower = self.font_filter_query.to_lowercase();
+            for font_name in fonts {
+                if !query_lower.is_empty() && !font_name.to_lowercase().contains(&query_lower) {
+                    continue;
+                }
+                let is_active = self.font_family == *font_name;
+                let name_clone = font_name.clone();
+                let interned = font_enumerator::intern_font_name(font_name);
+
+                let preview_font = iced::Font {
+                    family: iced::font::Family::Name(interned),
+                    weight: iced::font::Weight::Normal,
+                    stretch: iced::font::Stretch::Normal,
+                    style: iced::font::Style::Normal,
+                };
+
+                let label = text(font_name.as_str())
+                    .size(13)
+                    .font(preview_font)
+                    .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
+
+                let border_color = if is_active { ACCENT() } else { BORDER() };
+                let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+
+                let font_btn = button(
+                    container(label).padding(Padding::from([6, 10])),
+                )
+                .on_press(Message::FontFamilyChanged(name_clone))
+                .padding(0)
+                .width(Length::Fill)
+                .style(move |_t: &Theme, _s| button::Style {
+                    background: Some(iced::Background::Color(bg_color)),
+                    border: iced::Border {
+                        color: border_color,
+                        width: if is_active { 2.0 } else { 1.0 },
+                        radius: RADIUS_MD.into(),
+                    },
+                    text_color: TEXT_PRIMARY(),
+                    ..Default::default()
+                });
+
+                font_list_col = font_list_col.push(font_btn);
+            }
+        } else {
+            font_list_col = font_list_col.push(
+                text("Loading fonts...").size(13).color(TEXT_SECONDARY()),
+            );
+        }
+
+        let font_list_scrollable = scrollable(font_list_col)
+            .height(Length::Fixed(200.0));
+
+        // Separator between font and theme sections
+        let separator = container(Space::new().width(Length::Fill).height(1))
+            .style(move |_t: &Theme| container::Style {
+                background: Some(iced::Background::Color(BORDER())),
+                ..Default::default()
+            });
 
         let has_custom_active = self.active_custom_theme_id.is_some();
 
@@ -4124,6 +4255,13 @@ impl GodlyApp {
         }
 
         let mut col = column![
+            font_header,
+            font_size_row,
+            search_input,
+            font_list_scrollable,
+            Space::new().height(8),
+            separator,
+            Space::new().height(12),
             text("Theme").size(16).color(TEXT_PRIMARY()),
             text("Choose a color theme for the terminal and UI.")
                 .size(13)
@@ -5843,6 +5981,14 @@ impl GodlyApp {
                     self.settings_open = merged.settings_open;
                     self.settings_tab = merged.settings_tab.clone();
                     self.font_metrics = FontMetrics::from_font_size(merged.font_size);
+                    self.font_family = merged.font_family.clone();
+                    let interned = font_enumerator::intern_font_name(&merged.font_family);
+                    self.terminal_font = iced::Font {
+                        family: iced::font::Family::Name(interned),
+                        weight: iced::font::Weight::Normal,
+                        stretch: iced::font::Stretch::Normal,
+                        style: iced::font::Style::Normal,
+                    };
                     self.next_workspace_num = merged.next_workspace_num;
                 }
 
@@ -6926,6 +7072,7 @@ impl GodlyApp {
             default_fg: term_palette.foreground,
             default_bg: term_palette.background,
             on_redraw: Some(Message::Heartbeat),
+            font: self.terminal_font,
         };
 
         let accent_color = if is_focused {
@@ -7803,6 +7950,7 @@ mod helper_tests {
     };
     use super::{GridPos, LayoutNode, SplitDirection, TAB_BAR_HEIGHT};
     use crate::terminal_state::TerminalCollection;
+    use crate::status_bar;
     use crate::title_bar;
     use godly_terminal_surface::FontMetrics;
     use iced::keyboard::{key::Named, Key, Modifiers};
@@ -8191,8 +8339,9 @@ mod helper_tests {
     #[test]
     fn terminal_content_geometry_tracks_sidebar_and_split_ratios() {
         let top = title_bar::TITLE_BAR_HEIGHT + TAB_BAR_HEIGHT;
+        let bottom = status_bar::STATUS_BAR_HEIGHT;
         let content_rect = terminal_content_rect(1_200.0, 800.0, 220.0);
-        let expected_h = 800.0 - top;
+        let expected_h = 800.0 - top - bottom;
         assert_eq!(
             content_rect,
             PaneRect::new(220.0, top, 980.0, expected_h)
