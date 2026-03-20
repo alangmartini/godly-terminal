@@ -3,14 +3,6 @@ use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::theme::{STATUS_BAR_BG, TEXT_SECONDARY};
 
-/// Geist Mono font reference (loaded by the main application at startup).
-const GEIST_MONO: Font = Font {
-    family: iced::font::Family::Name("Geist Mono"),
-    weight: iced::font::Weight::Normal,
-    stretch: iced::font::Stretch::Normal,
-    style: iced::font::Style::Normal,
-};
-
 /// Height of the status bar in logical pixels.
 pub const STATUS_BAR_HEIGHT: f32 = 20.0;
 
@@ -20,6 +12,8 @@ pub struct StatusBarInfo<'a> {
     pub cwd: &'a str,
     pub cols: u16,
     pub rows: u16,
+    /// Font to use for status bar monospace text.
+    pub font: Font,
 }
 
 /// Derive a friendly shell type label from a process name.
@@ -46,7 +40,7 @@ pub fn shell_label(process_name: &str) -> &'static str {
 
 /// Renders the bottom status bar.
 pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> Element<'a, M> {
-    let (shell, cwd, dims) = match info {
+    let (shell, cwd, dims, status_font) = match info {
         Some(info) => (
             info.shell_label.to_string(),
             if info.cwd.is_empty() {
@@ -62,7 +56,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
     let shell_text = text(shell)
         .size(11)
         .color(TEXT_SECONDARY())
-        .font(GEIST_MONO);
+        .font(status_font);
 
     let cwd_text = text(cwd)
         .size(11)
@@ -71,7 +65,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
     let dims_text = text(dims)
         .size(11)
         .color(TEXT_SECONDARY())
-        .font(GEIST_MONO);
+        .font(status_font);
 
     let content = row![
         container(shell_text).padding(Padding::from([0, 8])),
@@ -125,6 +119,7 @@ mod tests {
             cwd: "C:\\Users\\test",
             cols: 80,
             rows: 24,
+            font: Font::default(),
         };
         let _el: Element<'_, Msg> = view_status_bar(Some(info));
     }

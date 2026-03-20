@@ -16,6 +16,8 @@ pub struct PersistedSessionState {
     pub settings_open: bool,
     pub settings_tab: String,
     pub font_size: f32,
+    #[serde(default = "default_font_family")]
+    pub font_family: String,
     pub next_workspace_num: u32,
     pub active_workspace_id: Option<String>,
     pub active_terminal_id: Option<String>,
@@ -59,6 +61,7 @@ pub struct MergedSessionState {
     pub settings_open: bool,
     pub settings_tab: String,
     pub font_size: f32,
+    pub font_family: String,
     pub next_workspace_num: u32,
     pub active_workspace_id: Option<String>,
     pub active_terminal_id: Option<String>,
@@ -332,6 +335,7 @@ pub fn merge_with_live_sessions(
         settings_open: persisted.settings_open,
         settings_tab: sanitize_settings_tab(&persisted.settings_tab),
         font_size: sanitize_font_size(persisted.font_size),
+        font_family: persisted.font_family.clone(),
         next_workspace_num: persisted.next_workspace_num.max(2),
         active_workspace_id,
         active_terminal_id,
@@ -346,6 +350,10 @@ fn sanitize_settings_tab(settings_tab: &str) -> String {
     } else {
         settings_tab.to_string()
     }
+}
+
+fn default_font_family() -> String {
+    "Geist Mono".to_string()
 }
 
 fn sanitize_font_size(font_size: f32) -> f32 {
@@ -368,6 +376,7 @@ mod tests {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
             next_workspace_num: 4,
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-2".to_string()),
@@ -404,6 +413,7 @@ mod tests {
             settings_open: true,
             settings_tab: "shortcuts".to_string(),
             font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
             next_workspace_num: 8,
             active_workspace_id: Some("w-2".to_string()),
             active_terminal_id: Some("t-3".to_string()),
@@ -541,6 +551,7 @@ mod tests {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
             next_workspace_num: 2,
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
@@ -625,6 +636,7 @@ mod tests {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
             next_workspace_num: 4,
             active_workspace_id: Some("w-dev".to_string()),
             active_terminal_id: Some("t-old-3".to_string()),
@@ -727,6 +739,7 @@ mod tests {
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
             font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
             next_workspace_num: 3,
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-old-1".to_string()),

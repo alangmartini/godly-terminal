@@ -7499,6 +7499,7 @@ mod helper_tests {
     };
     use super::{GridPos, LayoutNode, SplitDirection, TAB_BAR_HEIGHT};
     use crate::terminal_state::TerminalCollection;
+    use crate::status_bar;
     use crate::title_bar;
     use godly_terminal_surface::FontMetrics;
     use iced::keyboard::{key::Named, Key, Modifiers};
@@ -7887,8 +7888,9 @@ mod helper_tests {
     #[test]
     fn terminal_content_geometry_tracks_sidebar_and_split_ratios() {
         let top = title_bar::TITLE_BAR_HEIGHT + TAB_BAR_HEIGHT;
+        let bottom = status_bar::STATUS_BAR_HEIGHT;
         let content_rect = terminal_content_rect(1_200.0, 800.0, 220.0);
-        let expected_h = 800.0 - top;
+        let expected_h = 800.0 - top - bottom;
         assert_eq!(
             content_rect,
             PaneRect::new(220.0, top, 980.0, expected_h)
