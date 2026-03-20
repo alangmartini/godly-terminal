@@ -104,21 +104,25 @@ const BUILD: u32 = 17;  // Was 16
 
 ### Step 6: Test (all 33 cases + your new tool)
 
-## Existing Tools (30+)
+## Existing Tools
 
-**Terminal CRUD:** `create_terminal`, `close_terminal`, `rename_terminal`, `list_terminals`, `get_current_terminal`
+Note: The MCP server now exposes **read-only tools only**. Mutating tools (create/close/rename terminals, write to terminals, create/switch/delete workspaces, modify splits, etc.) have been removed.
 
-**Terminal I/O:** `write_to_terminal`, `read_terminal`, `read_grid`, `wait_for_text`, `wait_for_idle`, `send_keys`, `erase_content`, `execute_command`, `resize_terminal`
+**Terminal inspection:** `get_current_terminal`, `get_active_terminal`, `list_terminals`, `read_terminal`, `read_grid`, `export_terminal_info`
 
-**Workspace:** `create_workspace`, `switch_workspace`, `list_workspaces`, `move_terminal_to_workspace`, `delete_workspace`, `get_active_workspace`
+**Workspace inspection:** `list_workspaces`, `get_active_workspace`, `get_workspace_details`, `get_workspace_modes`
 
-**Worktrees:** `create_terminal` with `worktree: true/worktree_name`
+**Layout inspection:** `get_split_state`, `get_layout_tree`, `get_tab_order`
 
-**Notifications:** `notify`, `set_notification_enabled`, `get_notification_status`
+**Notifications (read-only):** `get_notification_status`, `get_notification_config`, `list_mute_patterns`
 
-**LLM:** `quick_claude` (AI branch naming)
+**Shell/Theme/App info:** `list_themes`, `get_active_theme`, `get_font_size`, `get_scroll_position`, `get_selected_text`, `list_available_shells`, `get_default_shell`, `get_app_info`
 
-**Misc:** `get_active_terminal`, `ping`
+**Waiting/Observation:** `wait_for_text`, `wait_for_idle`, `wait_for_app_ready`
+
+**Diagnostics:** `capture_screenshot`, `export_state_dump`, `collect_artifact_bundle`, `test_harness_status`
+
+**UI queries:** `ui_query`, `ui_wait`
 
 ## Backend Fallback Chain
 
@@ -152,22 +156,25 @@ const BUILD: u32 = 17;  // Was 16
 | `docs/mcp-testing.md` | 33-case test procedure |
 | `scripts/start-with-http.sh` | Wrapper: --ensure + exec stdio |
 
-## MCP Test Procedure (5 Phases, 33 Cases)
+## MCP Test Procedure
 
-**Phase 1 — Read-only:** `get_current_terminal`, `list_terminals`, `list_workspaces`, `get_notification_status`
+Since all tools are now read-only, the test procedure verifies observation and query tools:
 
-**Phase 2 — Notifications:** `notify`, `set_notification_enabled`, `get_notification_status` per-terminal/workspace
+**Phase 1 — Terminal queries:** `get_current_terminal`, `get_active_terminal`, `list_terminals`, `read_terminal`, `read_grid`, `export_terminal_info`
 
-**Phase 3 — Terminal CRUD:** `create_terminal` (basic, cwd, command, worktree), `write_to_terminal` + `read_terminal`, `rename_terminal`, `close_terminal`
+**Phase 2 — Workspace queries:** `list_workspaces`, `get_active_workspace`, `get_workspace_details`, `get_workspace_modes`
 
-**Phase 4 — Workspace ops:** `create_workspace`, `switch_workspace`, `move_terminal_to_workspace`
+**Phase 3 — Layout queries:** `get_split_state`, `get_layout_tree`, `get_tab_order`
 
-**Phase 5 — Error handling:** Invalid IDs (known bugs: some return `{success: true}` silently)
+**Phase 4 — App info:** `get_app_info`, `get_active_theme`, `list_themes`, `get_font_size`, `list_available_shells`, `get_default_shell`
+
+**Phase 5 — Diagnostics:** `capture_screenshot`, `export_state_dump`, `wait_for_text`, `wait_for_idle`, `wait_for_app_ready`
+
+**Phase 6 — Error handling:** Invalid IDs, missing terminals, edge cases
 
 ## Known Gaps
-- Some tools return `{success: true}` for invalid IDs (close, switch_workspace, rename, focus, move)
-- No visual confirmation for `focus_terminal` via MCP
 - MCP crate has no automated test suite in CI — testing is manual per `docs/mcp-testing.md`
+- All mutating tools have been removed — MCP server is read-only
 
 ## Logging
 
