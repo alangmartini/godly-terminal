@@ -10,16 +10,16 @@ use crate::theme::{
 };
 
 /// Height of the tab bar in logical pixels.
-pub const TAB_BAR_HEIGHT: f32 = 32.0;
+pub const TAB_BAR_HEIGHT: f32 = 36.0;
 /// Duration of tab entry animation in milliseconds.
 pub const TAB_ENTRY_DURATION_MS: u64 = 200;
 /// Estimated max width for a tab during entry animation.
 const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 
-const TAB_BUTTON_HEIGHT: f32 = 26.0;
-const CLOSE_BUTTON_SIZE: f32 = 20.0;
-const SEPARATOR_HEIGHT: f32 = 14.0;
-const ACCENT_INDICATOR_HEIGHT: f32 = 2.0;
+const TAB_BUTTON_HEIGHT: f32 = 30.0;
+const CLOSE_BUTTON_SIZE: f32 = 18.0;
+const SEPARATOR_HEIGHT: f32 = 16.0;
+const ACCENT_INDICATOR_HEIGHT: f32 = 3.0;
 
 /// Truncate a label to at most `max_chars` characters, appending "..." if truncated.
 fn truncate_label(s: &str, max_chars: usize) -> String {
@@ -32,6 +32,7 @@ fn truncate_label(s: &str, max_chars: usize) -> String {
     }
 }
 
+#[cfg(test)]
 fn contains_ascii_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
@@ -43,6 +44,7 @@ fn contains_ascii_insensitive(haystack: &str, needle: &str) -> bool {
         .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
+#[cfg(test)]
 fn process_badge_label(process_name: &str) -> Option<&'static str> {
     let trimmed = process_name.trim();
     if trimmed.is_empty() {
@@ -96,6 +98,14 @@ fn process_badge_label(process_name: &str) -> Option<&'static str> {
     };
 
     Some(label)
+}
+
+/// Returns a small icon glyph for the process, delegating to `TerminalInfo::tab_icon()`.
+fn process_icon_glyph(terminal: &TerminalInfo) -> Option<&'static str> {
+    if terminal.process_name.trim().is_empty() {
+        return None;
+    }
+    Some(terminal.tab_icon())
 }
 
 /// Compute entry progress (0.0..=1.0) for each animating tab.
@@ -171,68 +181,72 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
         let label = text(truncated).size(13).color(text_color);
-        let process_badge = process_badge_label(&terminal.process_name).map(|badge| {
-            let badge_bg = if is_active {
-                let a = ACCENT();
-                Color::from_rgba(a.r, a.g, a.b, 0.20)
-            } else {
-                GHOST_HOVER()
-            };
-            let badge_text_color = if is_active { TEXT_PRIMARY() } else { TEXT_SECONDARY() };
-
-            container(text(badge).size(9).color(badge_text_color))
-                .padding(Padding::from([1, 5]))
-                .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(badge_bg)),
-                    border: Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
-                        radius: 999.0.into(),
-                    },
-                    ..container::Style::default()
-                })
+        let icon_glyph = process_icon_glyph(terminal).map(|glyph| {
+            let icon_color = if is_active { ACCENT() } else { TEXT_SECONDARY() };
+            text(glyph).size(14).color(icon_color)
         });
 
         let close_id = terminal.id.clone();
-        let close_btn = button(text("\u{00D7}").size(13).color(text_color))
+        let close_btn = button(text("\u{00D7}").size(12).color(text_color))
             .on_press(on_close(close_id))
             .padding(0)
             .width(Length::Fixed(CLOSE_BUTTON_SIZE))
             .height(Length::Fixed(CLOSE_BUTTON_SIZE))
             .style(move |_theme, status| {
-                let bg_color = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
+                let (bg_color, btn_text_color) = match status {
+                    button::Status::Hovered => {
                         let d = DANGER();
-                        Color::from_rgba(d.r, d.g, d.b, 0.30)
+                        (Color::from_rgba(d.r, d.g, d.b, 0.15), d)
                     }
-                    _ => Color::TRANSPARENT,
+                    button::Status::Pressed => {
+                        let d = DANGER();
+                        (Color::from_rgba(d.r, d.g, d.b, 0.25), d)
+                    }
+                    _ => (Color::TRANSPARENT, text_color),
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg_color)),
-                    text_color: text_color,
-                    border: Border::default(),
+                    text_color: btn_text_color,
+                    border: Border {
+                        radius: 999.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
 
-        let mut tab_content = row![].spacing(8).align_y(iced::Alignment::Center);
-        if let Some(process_badge) = process_badge {
-            tab_content = tab_content.push(process_badge);
+        let mut tab_content = row![].spacing(6).align_y(iced::Alignment::Center);
+        if let Some(icon) = icon_glyph {
+            tab_content = tab_content.push(icon);
         }
         let tab_content = tab_content
             .push(container(label).padding(Padding::from([0, 1])))
             .push(close_btn);
 
         let ghost_hover_bg = GHOST_HOVER();
+        let ghost_active_bg = GHOST_ACTIVE();
+        // Active tab: blend TAB_ACTIVE_BG with a subtle accent tint.
+        let active_bg = if is_active {
+            let base = bg;
+            let accent = ACCENT();
+            Color::from_rgb(
+                base.r * 0.85 + accent.r * 0.15,
+                base.g * 0.85 + accent.g * 0.15,
+                base.b * 0.85 + accent.b * 0.15,
+            )
+        } else {
+            bg
+        };
         let tab_btn = button(tab_content)
-            .padding(Padding::from([4, 10]))
+            .padding(Padding::from([4, 12]))
             .height(Length::Fixed(TAB_BUTTON_HEIGHT))
             .style(move |_theme, status| {
                 let bg_color = if is_active {
-                    bg
+                    active_bg
                 } else {
                     match status {
-                        button::Status::Hovered | button::Status::Pressed => ghost_hover_bg,
+                        button::Status::Hovered => ghost_hover_bg,
+                        button::Status::Pressed => ghost_active_bg,
                         _ => bg,
                     }
                 };
@@ -240,7 +254,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                     background: Some(iced::Background::Color(bg_color)),
                     text_color,
                     border: Border {
-                        radius: 4.0.into(),
+                        radius: 6.0.into(),
                         ..Border::default()
                     },
                     ..button::Style::default()
@@ -297,7 +311,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                 snap: true,
             }))
             .height(Length::Fixed(SEPARATOR_HEIGHT))
-            .padding(Padding::from([9, 4]));
+            .padding(Padding::from([10, 4]));
             tabs = tabs.push(separator);
         }
     }
@@ -310,11 +324,11 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         .height(Length::Fixed(TAB_BAR_HEIGHT));
 
     // "+" button to add new terminals (ghost style).
-    let new_btn = button(text("+").size(14).color(TEXT_SECONDARY()))
+    let new_btn = button(text("+").size(15).color(TEXT_SECONDARY()))
         .on_press(on_new)
-        .padding(Padding::from([2, 10]))
+        .padding(Padding::from([3, 10]))
         .width(Length::Fixed(28.0))
-        .height(Length::Fixed(24.0))
+        .height(Length::Fixed(26.0))
         .style(|_theme, status| {
             let bg_color = match status {
                 button::Status::Hovered => GHOST_HOVER(),
@@ -356,8 +370,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        contains_ascii_insensitive, process_badge_label, separator_after_tab, truncate_label,
-        view_tab_bar,
+        contains_ascii_insensitive, process_badge_label, process_icon_glyph, separator_after_tab,
+        truncate_label, view_tab_bar,
     };
     use crate::terminal_state::TerminalInfo;
 
@@ -557,5 +571,38 @@ mod tests {
         // No entries returned when finished
         let progress = tab_entry_progress(&entering, 1000 + TAB_ENTRY_DURATION_MS);
         assert!(progress.is_empty());
+    }
+
+    #[test]
+    fn process_icon_glyph_delegates_to_tab_icon() {
+        let mut term = sample_terminal("t-1");
+
+        term.process_name = "pwsh".into();
+        assert_eq!(process_icon_glyph(&term), Some("\u{276F}")); // ❯
+
+        term.process_name = "cmd.exe".into();
+        assert_eq!(process_icon_glyph(&term), Some("\u{25BA}")); // ►
+
+        term.process_name = "bash".into();
+        assert_eq!(process_icon_glyph(&term), Some("\u{25B8}")); // ▸
+
+        term.process_name = "ssh".into();
+        assert_eq!(process_icon_glyph(&term), Some("\u{2192}")); // →
+
+        term.process_name = "ruby".into();
+        assert_eq!(process_icon_glyph(&term), Some("\u{25C8}")); // ◈
+
+        term.process_name = "claude".into();
+        assert_eq!(process_icon_glyph(&term), Some("\u{25C6}")); // ◆
+    }
+
+    #[test]
+    fn process_icon_glyph_returns_none_for_empty() {
+        let mut term = sample_terminal("t-1");
+        term.process_name = String::new();
+        assert_eq!(process_icon_glyph(&term), None);
+
+        term.process_name = "   ".into();
+        assert_eq!(process_icon_glyph(&term), None);
     }
 }
