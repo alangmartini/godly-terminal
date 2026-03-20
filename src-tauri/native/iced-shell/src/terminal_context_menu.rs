@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, mouse_area, text};
 use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
-    BG_SECONDARY, BG_TERTIARY, BORDER, BACKDROP, RADIUS_MD, SHADOW_COLOR, TEXT_PRIMARY,
+    BORDER_VARIANT, GHOST_HOVER, SURFACE_BG, BACKDROP, RADIUS_MD, SHADOW_COLOR, TEXT_PRIMARY,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +59,7 @@ pub fn view_terminal_context_menu<'a, M: Clone + 'a>(
             .width(Length::Fill)
             .style(|_theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
+                    button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
                     _ => Color::TRANSPARENT,
                 };
                 button::Style {
@@ -80,7 +80,7 @@ pub fn view_terminal_context_menu<'a, M: Clone + 'a>(
                 container(iced::widget::Space::new().width(Length::Fill).height(1.0))
                     .width(Length::Fill)
                     .style(|_theme| container::Style {
-                        background: Some(Background::Color(BORDER())),
+                        background: Some(Background::Color(BORDER_VARIANT())),
                         ..container::Style::default()
                     })
                     .into(),
@@ -93,16 +93,16 @@ pub fn view_terminal_context_menu<'a, M: Clone + 'a>(
         .padding(Padding::from([8, 6]))
         .width(Length::Fixed(200.0))
         .style(|_theme| container::Style {
-            background: Some(Background::Color(BG_SECONDARY())),
+            background: Some(Background::Color(SURFACE_BG())),
             border: Border {
-                color: BORDER(),
+                color: BORDER_VARIANT(),
                 width: 1.0,
                 radius: RADIUS_MD.into(),
             },
             shadow: Shadow {
                 color: SHADOW_COLOR,
-                offset: Vector::new(0.0, 4.0),
-                blur_radius: 12.0,
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 8.0,
             },
             ..container::Style::default()
         });

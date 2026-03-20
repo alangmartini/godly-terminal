@@ -4,7 +4,10 @@ use iced::widget::{button, container, mouse_area, row, rule, text};
 use iced::{Border, Color, Element, Length, Padding};
 
 use crate::terminal_state::TerminalInfo;
-use crate::theme::{BG_SECONDARY, PANE_BG};
+use crate::theme::{
+    BG_SECONDARY, BORDER_VARIANT, DANGER, GHOST_ACTIVE, GHOST_HOVER, TAB_ACTIVE_BG,
+    TAB_INACTIVE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
+};
 
 /// Height of the tab bar in logical pixels.
 pub const TAB_BAR_HEIGHT: f32 = 32.0;
@@ -13,20 +16,9 @@ pub const TAB_ENTRY_DURATION_MS: u64 = 200;
 /// Estimated max width for a tab during entry animation.
 const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 
-// Colors
-const TAB_TEXT_COLOR: Color = Color::from_rgb(0.85, 0.85, 0.85);
-const TAB_SEPARATOR_COLOR: Color = Color::from_rgba(0.55, 0.55, 0.62, 0.30);
-const PROCESS_BADGE_BG: Color = Color::from_rgb(0.13, 0.13, 0.17);
-const PROCESS_BADGE_ACTIVE_BG: Color = Color::from_rgb(0.20, 0.18, 0.13);
-const PROCESS_BADGE_TEXT: Color = Color::from_rgb(0.72, 0.72, 0.78);
-const CLOSE_HOVER_BG: Color = Color::from_rgb(0.35, 0.15, 0.15);
 const TAB_BUTTON_HEIGHT: f32 = 26.0;
 const CLOSE_BUTTON_SIZE: f32 = 20.0;
 const SEPARATOR_HEIGHT: f32 = 14.0;
-const NEW_TAB_HOVER_BG: Color = Color::from_rgb(0.16, 0.16, 0.20);
-const NEW_TAB_PRESSED_BG: Color = Color::from_rgb(0.19, 0.19, 0.24);
-const NEW_TAB_BORDER_COLOR: Color = Color::from_rgba(0.60, 0.60, 0.72, 0.45);
-const NEW_TAB_TEXT_COLOR: Color = Color::from_rgb(0.92, 0.92, 0.96);
 
 /// Truncate a label to at most `max_chars` characters, appending "..." if truncated.
 fn truncate_label(s: &str, max_chars: usize) -> String {
@@ -166,21 +158,22 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     for (index, &terminal) in terminals.iter().enumerate() {
         let is_active = active_id == Some(terminal.id.as_str());
         let bg = if is_active {
-            PANE_BG()
+            TAB_ACTIVE_BG()
         } else {
-            BG_SECONDARY()
+            TAB_INACTIVE_BG()
+        };
+        let text_color = if is_active {
+            TEXT_PRIMARY()
+        } else {
+            TEXT_SECONDARY()
         };
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
-        let label = text(truncated).size(13).color(TAB_TEXT_COLOR);
+        let label = text(truncated).size(13).color(text_color);
         let process_badge = process_badge_label(&terminal.process_name).map(|badge| {
-            let badge_bg = if is_active {
-                PROCESS_BADGE_ACTIVE_BG
-            } else {
-                PROCESS_BADGE_BG
-            };
+            let badge_bg = GHOST_HOVER();
 
-            container(text(badge).size(9).color(PROCESS_BADGE_TEXT))
+            container(text(badge).size(9).color(TEXT_SECONDARY()))
                 .padding(Padding::from([1, 5]))
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(badge_bg)),
@@ -194,19 +187,22 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         });
 
         let close_id = terminal.id.clone();
-        let close_btn = button(text("\u{00D7}").size(13).color(TAB_TEXT_COLOR))
+        let close_btn = button(text("\u{00D7}").size(13).color(text_color))
             .on_press(on_close(close_id))
             .padding(0)
             .width(Length::Fixed(CLOSE_BUTTON_SIZE))
             .height(Length::Fixed(CLOSE_BUTTON_SIZE))
             .style(move |_theme, status| {
                 let bg_color = match status {
-                    button::Status::Hovered | button::Status::Pressed => CLOSE_HOVER_BG,
+                    button::Status::Hovered | button::Status::Pressed => {
+                        let d = DANGER();
+                        Color::from_rgba(d.r, d.g, d.b, 0.30)
+                    }
                     _ => Color::TRANSPARENT,
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg_color)),
-                    text_color: TAB_TEXT_COLOR,
+                    text_color: text_color,
                     border: Border::default(),
                     ..button::Style::default()
                 }
@@ -225,7 +221,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .height(Length::Fixed(TAB_BUTTON_HEIGHT))
             .style(move |_theme, _status| button::Style {
                 background: Some(iced::Background::Color(bg)),
-                text_color: TAB_TEXT_COLOR,
+                text_color: text_color,
                 border: Border::default(),
                 ..button::Style::default()
             });
@@ -257,7 +253,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 
         if separator_after_tab(index, terminals.len(), active_index) {
             let separator = container(rule::vertical(1).style(|_theme| rule::Style {
-                color: TAB_SEPARATOR_COLOR,
+                color: BORDER_VARIANT(),
                 radius: 0.0.into(),
                 fill_mode: rule::FillMode::Full,
                 snap: true,
@@ -275,24 +271,24 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT));
 
-    // "+" button to add new terminals.
-    let new_btn = button(text("+").size(14).color(NEW_TAB_TEXT_COLOR))
+    // "+" button to add new terminals (ghost style).
+    let new_btn = button(text("+").size(14).color(TEXT_SECONDARY()))
         .on_press(on_new)
         .padding(Padding::from([2, 10]))
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(24.0))
         .style(|_theme, status| {
-            let (bg_color, border_color, border_width) = match status {
-                button::Status::Hovered => (NEW_TAB_HOVER_BG, NEW_TAB_BORDER_COLOR, 1.0),
-                button::Status::Pressed => (NEW_TAB_PRESSED_BG, NEW_TAB_BORDER_COLOR, 1.0),
-                _ => (Color::TRANSPARENT, Color::TRANSPARENT, 0.0),
+            let bg_color = match status {
+                button::Status::Hovered => GHOST_HOVER(),
+                button::Status::Pressed => GHOST_ACTIVE(),
+                _ => Color::TRANSPARENT,
             };
             button::Style {
                 background: Some(iced::Background::Color(bg_color)),
-                text_color: NEW_TAB_TEXT_COLOR,
+                text_color: TEXT_SECONDARY(),
                 border: Border {
-                    color: border_color,
-                    width: border_width,
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
                     radius: 8.0.into(),
                 },
                 ..button::Style::default()
