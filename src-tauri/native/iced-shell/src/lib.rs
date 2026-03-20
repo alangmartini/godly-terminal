@@ -29,6 +29,7 @@ pub mod url_detector;
 pub mod terminal_context_menu;
 pub mod whisper_ui;
 pub mod quick_claude_dialog;
+pub mod font_enumerator;
 
 #[cfg(test)]
 pub mod testing;
