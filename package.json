@@ -1,6 +1,6 @@
 {
   "name": "godly-terminal",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "license": "BUSL-1.1",
   "scripts": {
@@ -22,14 +22,11 @@
     "test:rust": "cd src-tauri && cargo nextest run --workspace",
     "test:rust:fast": "cd src-tauri && cargo nextest run --workspace --profile fast",
     "test:smart": "bash scripts/test-smart.sh",
-    "test:yaml": "node godly-test/godly-test.mjs run tests/e2e-yaml",
-    "test:yaml:validate": "node godly-test/godly-test.mjs validate tests/e2e-yaml",
-    "test:yaml:list": "node godly-test/godly-test.mjs list tests/e2e-yaml",
-    "version:bump": "node scripts/bump-version.mjs",
-    "phone": "pwsh scripts/setup-phone.ps1",
     "test:yaml": "node godly-test/godly-test.mjs run tests/e2e-yaml/",
     "test:yaml:validate": "node godly-test/godly-test.mjs validate tests/e2e-yaml/",
-    "test:yaml:list": "node godly-test/godly-test.mjs list tests/e2e-yaml/"
+    "test:yaml:list": "node godly-test/godly-test.mjs list tests/e2e-yaml/",
+    "version:bump": "node scripts/bump-version.mjs",
+    "phone": "pwsh scripts/setup-phone.ps1"
   },
   "devDependencies": {
     "qrcode-terminal": "^0.12.0"
