@@ -72,8 +72,10 @@ pub struct MergedWorkspaceState {
     pub name: String,
     pub folder_path: String,
     pub worktree_mode: bool,
-    pub focused_terminal: String,
-    pub layout: LayoutNode,
+    /// `None` when no persisted terminal IDs matched live sessions (e.g. after reinstall).
+    pub focused_terminal: Option<String>,
+    /// `None` when no persisted terminal IDs matched live sessions (e.g. after reinstall).
+    pub layout: Option<LayoutNode>,
 }
 
 impl PersistedLayoutNode {
@@ -256,24 +258,32 @@ pub fn merge_with_live_sessions(
             continue;
         }
 
-        let Some(layout) = workspace.layout.to_layout_filtered(&live_terminal_ids) else {
-            continue;
-        };
+        let layout = workspace.layout.to_layout_filtered(&live_terminal_ids);
 
-        let leaf_ids: Vec<String> = layout
-            .all_leaf_ids()
-            .into_iter()
-            .map(|id| id.to_string())
-            .collect();
-        if leaf_ids.is_empty() {
-            continue;
-        }
-        used_terminal_ids.extend(leaf_ids.iter().cloned());
-
-        let focused_terminal = if leaf_ids.iter().any(|id| id == &workspace.focused_terminal) {
-            workspace.focused_terminal.clone()
-        } else {
-            leaf_ids[0].clone()
+        let (layout, focused_terminal) = match layout {
+            Some(layout) => {
+                let leaf_ids: Vec<String> = layout
+                    .all_leaf_ids()
+                    .into_iter()
+                    .map(|id| id.to_string())
+                    .collect();
+                if leaf_ids.is_empty() {
+                    // Layout filtered down to nothing — preserve workspace metadata only.
+                    (None, None)
+                } else {
+                    used_terminal_ids.extend(leaf_ids.iter().cloned());
+                    let focused = if leaf_ids.iter().any(|id| id == &workspace.focused_terminal) {
+                        workspace.focused_terminal.clone()
+                    } else {
+                        leaf_ids[0].clone()
+                    };
+                    (Some(layout), Some(focused))
+                }
+            }
+            None => {
+                // Bug #619: preserve workspace metadata even when no terminal IDs match.
+                (None, None)
+            }
         };
 
         workspaces.push(MergedWorkspaceState {
@@ -307,7 +317,7 @@ pub fn merge_with_live_sessions(
                 workspaces
                     .iter()
                     .find(|workspace| workspace.id == *workspace_id)
-                    .map(|workspace| workspace.focused_terminal.clone())
+                    .and_then(|workspace| workspace.focused_terminal.clone())
             })
         });
 
@@ -431,18 +441,30 @@ mod tests {
         let live_sessions = vec!["t-1".to_string(), "t-4".to_string()];
         let merged = merge_with_live_sessions(&persisted, &live_sessions);
 
-        assert_eq!(merged.workspaces.len(), 1);
-        let workspace = &merged.workspaces[0];
-        assert_eq!(workspace.id, "w-1");
-        assert_eq!(workspace.focused_terminal, "t-1");
+        // w-1 has live terminal t-1; w-2 lost t-3 but metadata is preserved.
+        assert_eq!(merged.workspaces.len(), 2);
+
+        let w1 = &merged.workspaces[0];
+        assert_eq!(w1.id, "w-1");
+        assert_eq!(w1.focused_terminal.as_deref(), Some("t-1"));
         assert_eq!(
-            workspace.layout,
-            LayoutNode::Leaf {
+            w1.layout,
+            Some(LayoutNode::Leaf {
                 terminal_id: "t-1".to_string()
-            }
+            })
         );
-        assert_eq!(merged.active_workspace_id.as_deref(), Some("w-1"));
-        assert_eq!(merged.active_terminal_id.as_deref(), Some("t-1"));
+
+        let w2 = &merged.workspaces[1];
+        assert_eq!(w2.id, "w-2");
+        assert_eq!(w2.name, "Two");
+        assert!(w2.layout.is_none(), "w-2 has no live terminals");
+        assert!(w2.focused_terminal.is_none());
+
+        // w-2 was the user's active workspace and is now preserved (with no terminals).
+        assert_eq!(merged.active_workspace_id.as_deref(), Some("w-2"));
+        // Active terminal falls back to w-2's focused_terminal, which is None.
+        // Next fallback: no live terminal in active workspace → None.
+        assert_eq!(merged.active_terminal_id.as_deref(), None);
         assert_eq!(merged.missing_live_terminal_ids, vec!["t-4".to_string()]);
     }
 
@@ -552,7 +574,8 @@ mod tests {
         let merged = merge_with_live_sessions(&persisted, &live);
 
         let ws = &merged.workspaces[0];
-        match &ws.layout {
+        let layout = ws.layout.as_ref().expect("all terminals are live, layout should be Some");
+        match layout {
             LayoutNode::Split {
                 direction,
                 first,
@@ -584,5 +607,183 @@ mod tests {
         assert!(loaded.is_none());
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn merge_preserves_workspace_metadata_when_no_live_sessions_match() {
+        // Bug #619: after rebuild+reinstall, daemon has no surviving sessions.
+        // merge_with_live_sessions is called with empty live_session_ids,
+        // which causes ALL workspace metadata (names, folder paths) to be
+        // dropped. The app then falls back to a single "Workspace 1".
+        //
+        // Expected: workspace metadata (id, name, folder_path, worktree_mode)
+        // should survive even when all terminals are gone, so the app can
+        // recreate terminals in the correct workspace structure.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 14.0,
+            next_workspace_num: 4,
+            active_workspace_id: Some("w-dev".to_string()),
+            active_terminal_id: Some("t-old-3".to_string()),
+            workspaces: vec![
+                PersistedWorkspaceState {
+                    id: "w-default".to_string(),
+                    name: "Workspace 1".to_string(),
+                    folder_path: "C:\\Users\\dev\\project-a".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-old-1".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-old-1".to_string(),
+                    },
+                },
+                PersistedWorkspaceState {
+                    id: "w-dev".to_string(),
+                    name: "Development".to_string(),
+                    folder_path: "C:\\Users\\dev\\project-b".to_string(),
+                    worktree_mode: true,
+                    focused_terminal: "t-old-3".to_string(),
+                    layout: PersistedLayoutNode::Split {
+                        direction: PersistedSplitDirection::Vertical,
+                        ratio: 0.5,
+                        first: Box::new(PersistedLayoutNode::Leaf {
+                            terminal_id: "t-old-2".to_string(),
+                        }),
+                        second: Box::new(PersistedLayoutNode::Leaf {
+                            terminal_id: "t-old-3".to_string(),
+                        }),
+                    },
+                },
+                PersistedWorkspaceState {
+                    id: "w-test".to_string(),
+                    name: "Testing".to_string(),
+                    folder_path: "C:\\Users\\dev\\project-c".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-old-4".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-old-4".to_string(),
+                    },
+                },
+            ],
+        };
+
+        // Reinstall scenario: daemon restarted, zero live sessions match old IDs
+        let no_live_sessions: Vec<String> = vec![];
+        let merged = merge_with_live_sessions(&persisted, &no_live_sessions);
+
+        // Workspace metadata must survive even when all terminals are dead.
+        // The app should be able to recreate terminals in the correct structure.
+        assert_eq!(
+            merged.workspaces.len(),
+            3,
+            "all 3 workspace definitions must be preserved after reinstall; \
+             got {} (workspace metadata was dropped because no terminal IDs matched)",
+            merged.workspaces.len()
+        );
+
+        let names: Vec<&str> = merged.workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Workspace 1", "Development", "Testing"],
+            "workspace names must survive reinstall"
+        );
+
+        let folder_paths: Vec<&str> = merged
+            .workspaces
+            .iter()
+            .map(|w| w.folder_path.as_str())
+            .collect();
+        assert_eq!(
+            folder_paths,
+            vec![
+                "C:\\Users\\dev\\project-a",
+                "C:\\Users\\dev\\project-b",
+                "C:\\Users\\dev\\project-c"
+            ],
+            "workspace folder paths must survive reinstall"
+        );
+
+        assert_eq!(
+            merged.workspaces[1].worktree_mode, true,
+            "worktree_mode must survive reinstall"
+        );
+
+        // All workspaces should have None layout (no live terminals to match).
+        for ws in &merged.workspaces {
+            assert!(ws.layout.is_none(), "workspace '{}' should have no layout", ws.name);
+            assert!(ws.focused_terminal.is_none(), "workspace '{}' should have no focused terminal", ws.name);
+        }
+    }
+
+    #[test]
+    fn merge_preserves_workspace_metadata_when_live_sessions_are_all_new() {
+        // Bug #619 variant: daemon has sessions but none match saved terminal IDs.
+        // This happens when daemon was restarted and auto-spawned new sessions.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: false,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 13.0,
+            next_workspace_num: 3,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-old-1".to_string()),
+            workspaces: vec![
+                PersistedWorkspaceState {
+                    id: "w-1".to_string(),
+                    name: "Main".to_string(),
+                    folder_path: "C:\\dev".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-old-1".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-old-1".to_string(),
+                    },
+                },
+                PersistedWorkspaceState {
+                    id: "w-2".to_string(),
+                    name: "Backend".to_string(),
+                    folder_path: "C:\\dev\\backend".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-old-2".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-old-2".to_string(),
+                    },
+                },
+            ],
+        };
+
+        // Daemon restarted and spawned new sessions with different UUIDs
+        let new_live_sessions = vec![
+            "new-uuid-aaa".to_string(),
+            "new-uuid-bbb".to_string(),
+        ];
+        let merged = merge_with_live_sessions(&persisted, &new_live_sessions);
+
+        // Workspace metadata must survive even though no old terminal IDs match
+        assert_eq!(
+            merged.workspaces.len(),
+            2,
+            "workspace metadata must be preserved when live sessions don't match old IDs; \
+             got {} workspaces",
+            merged.workspaces.len()
+        );
+
+        assert_eq!(merged.workspaces[0].name, "Main");
+        assert_eq!(merged.workspaces[1].name, "Backend");
+
+        // Workspaces should have None layout (old terminal IDs don't match new ones).
+        for ws in &merged.workspaces {
+            assert!(ws.layout.is_none(), "workspace '{}' should have no layout", ws.name);
+            assert!(ws.focused_terminal.is_none());
+        }
+
+        // New sessions that don't belong to any workspace should appear in missing list
+        assert_eq!(
+            merged.missing_live_terminal_ids.len(),
+            2,
+            "unmatched new sessions should be in missing_live_terminal_ids"
+        );
     }
 }
