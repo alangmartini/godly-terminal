@@ -377,7 +377,6 @@ mod tests {
         truncate_label, view_tab_bar,
     };
     use crate::terminal_state::TerminalInfo;
-    use iced::Font;
 
     #[derive(Clone)]
     enum TestMessage {
