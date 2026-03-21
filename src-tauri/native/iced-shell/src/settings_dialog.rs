@@ -218,7 +218,7 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_theme| container::Style {
-            background: Some(Background::Color(tint(BACKDROP(), 0.84))),
+            background: Some(Background::Color(tint(BACKDROP(), 0.35))),
             ..container::Style::default()
         })
         .into()
