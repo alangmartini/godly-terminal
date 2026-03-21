@@ -62,7 +62,16 @@ use iced::keyboard;
 use iced::widget::{
     button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
 };
-use iced::{event, window, Color, Element, Length, Padding, Point, Shadow, Subscription, Task, Vector};
+use iced::{event, window, Color, Element, Font, Length, Padding, Point, Shadow, Subscription, Task, Vector};
+
+/// Proportional UI font for chrome elements (title bar, tab bar, status bar).
+/// Uses the system's default sans-serif (Segoe UI on Windows, SF Pro on macOS).
+const UI_FONT: Font = Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
 
 use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
@@ -3518,6 +3527,7 @@ impl GodlyApp {
         let title = self.title();
         let title_bar_row = title_bar::view_title_bar(
             title,
+            UI_FONT,
             Message::TitleBarDragStart,
             Message::TitleBarMinimize,
             Message::TitleBarToggleMaximize,
@@ -3533,6 +3543,7 @@ impl GodlyApp {
             &ordered,
             active_id,
             &entry_progress,
+            UI_FONT,
             |id| Message::TabClicked(id),
             |id| Message::CloseTabRequested(id),
             |id| Message::TabDragStart(id),
@@ -3579,7 +3590,7 @@ impl GodlyApp {
                 cwd: term.extract_cwd().unwrap_or(""),
                 cols: term.cols,
                 rows: term.rows,
-                font: self.terminal_font,
+                font: UI_FONT,
             });
         let status_bar_el: Element<'_, Message> = status_bar::view_status_bar(status_info);
 
