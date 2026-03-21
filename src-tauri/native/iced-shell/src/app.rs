@@ -4183,11 +4183,23 @@ impl GodlyApp {
                     .font(preview_font)
                     .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
 
+                let font_label_row: Element<'_, Message> = if is_active {
+                    row![
+                        text("\u{2713}").size(13).color(ACCENT()),
+                        label,
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+                } else {
+                    label.into()
+                };
+
                 let border_color = if is_active { ACCENT() } else { BORDER() };
                 let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
 
                 let font_btn = button(
-                    container(label).padding(Padding::from([6, 10])),
+                    container(font_label_row).padding(Padding::from([6, 10])),
                 )
                 .on_press(Message::FontFamilyChanged(name_clone))
                 .padding(0)
