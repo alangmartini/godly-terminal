@@ -8,7 +8,10 @@ use godly_app_adapter::daemon_client::NativeDaemonClient;
 #[derive(Debug, Clone)]
 pub enum LaunchStep {
     /// Create a terminal session via daemon.
-    CreateTerminal { agent_index: usize },
+    CreateTerminal {
+        agent_index: usize,
+        cwd: Option<String>,
+    },
     /// Wait until terminal output stabilizes for the given duration.
     WaitIdle { agent_index: usize, idle_ms: u64 },
     /// Write a command + carriage return to the terminal.
@@ -17,6 +20,15 @@ pub enum LaunchStep {
     WaitReady {
         agent_index: usize,
         marker: String,
+        timeout_ms: u64,
+    },
+    /// Adaptive wait: handles trust prompt if it appears, then waits for
+    /// Claude's input prompt. Replaces the old WaitReady("trust") + SendEnter
+    /// + WaitReady(">") sequence which broke when the trust prompt was absent.
+    WaitForClaudeReady {
+        agent_index: usize,
+        /// Skip trust prompt detection (true when --dangerously-skip-permissions).
+        skip_trust: bool,
         timeout_ms: u64,
     },
     /// Send Enter key (carriage return).
@@ -28,9 +40,12 @@ pub enum LaunchStep {
 }
 
 /// Build launch steps for resuming an existing Claude session.
-pub fn resume_launch_steps(session_id: &str) -> Vec<LaunchStep> {
+pub fn resume_launch_steps(session_id: &str, cwd: Option<&str>) -> Vec<LaunchStep> {
     vec![
-        LaunchStep::CreateTerminal { agent_index: 0 },
+        LaunchStep::CreateTerminal {
+            agent_index: 0,
+            cwd: cwd.map(|s| s.to_string()),
+        },
         LaunchStep::WaitIdle {
             agent_index: 0,
             idle_ms: 2000,
@@ -48,11 +63,18 @@ pub fn resume_launch_steps(session_id: &str) -> Vec<LaunchStep> {
 }
 
 /// Build the default launch sequence for a preset with N agents.
-pub fn default_launch_steps(num_agents: usize, prompt: &str, model: &str, mode: &str) -> Vec<LaunchStep> {
+pub fn default_launch_steps(
+    num_agents: usize,
+    prompt: &str,
+    model: &str,
+    mode: &str,
+    cwd: Option<&str>,
+) -> Vec<LaunchStep> {
     let mut cmd = "claude".to_string();
     // Add model flag (always, since we default to sonnet)
     cmd.push_str(&format!(" --model {}", model));
     // Add mode flag
+    let skip_trust = mode == "auto";
     match mode {
         "plan" => cmd.push_str(" --plan"),
         "auto" => cmd.push_str(" --dangerously-skip-permissions"),
@@ -61,7 +83,10 @@ pub fn default_launch_steps(num_agents: usize, prompt: &str, model: &str, mode: 
 
     let mut steps = Vec::new();
     for i in 0..num_agents {
-        steps.push(LaunchStep::CreateTerminal { agent_index: i });
+        steps.push(LaunchStep::CreateTerminal {
+            agent_index: i,
+            cwd: cwd.map(|s| s.to_string()),
+        });
         steps.push(LaunchStep::WaitIdle {
             agent_index: i,
             idle_ms: 2000,
@@ -70,16 +95,13 @@ pub fn default_launch_steps(num_agents: usize, prompt: &str, model: &str, mode: 
             agent_index: i,
             command: cmd.clone(),
         });
-        steps.push(LaunchStep::WaitReady {
+        // Adaptive wait: handles trust prompt if present, then waits for
+        // Claude's input prompt. Replaces the old rigid 3-step sequence that
+        // broke when the trust prompt was absent (auto mode, already-trusted dir).
+        steps.push(LaunchStep::WaitForClaudeReady {
             agent_index: i,
-            marker: "trust".to_string(),
+            skip_trust,
             timeout_ms: 30000,
-        });
-        steps.push(LaunchStep::SendEnter { agent_index: i });
-        steps.push(LaunchStep::WaitReady {
-            agent_index: i,
-            marker: ">".to_string(),
-            timeout_ms: 15000,
         });
         if !prompt.is_empty() {
             steps.push(LaunchStep::SendPrompt {
@@ -130,13 +152,13 @@ pub fn execute_step(
     cols: u16,
 ) -> Result<StepResult, String> {
     match step {
-        LaunchStep::CreateTerminal { .. } => {
+        LaunchStep::CreateTerminal { cwd, .. } => {
             let session_id = uuid::Uuid::new_v4().to_string();
             commands::create_terminal(
                 &client,
                 &session_id,
                 godly_protocol::ShellType::Windows,
-                None,
+                cwd.as_deref(),
                 rows,
                 cols,
             )?;
@@ -163,6 +185,15 @@ pub fn execute_step(
         } => {
             let session_id = resolve_session_id(&agent_terminal_ids, agent_index)?;
             wait_for_marker(&client, &session_id, &marker, timeout_ms)?;
+            Ok(StepResult::Ok)
+        }
+        LaunchStep::WaitForClaudeReady {
+            agent_index,
+            skip_trust,
+            timeout_ms,
+        } => {
+            let session_id = resolve_session_id(&agent_terminal_ids, agent_index)?;
+            wait_for_claude_ready(&client, &session_id, skip_trust, timeout_ms)?;
             Ok(StepResult::Ok)
         }
         LaunchStep::SendEnter { agent_index } => {
@@ -267,6 +298,58 @@ fn wait_for_marker(
     }
 }
 
+/// Adaptive wait for Claude Code to be ready for input.
+///
+/// Handles two scenarios:
+/// 1. Trust prompt appears ("Do you trust...") — sends Enter to accept, then
+///    waits for Claude's input prompt.
+/// 2. No trust prompt (auto mode or already-trusted dir) — waits directly
+///    for Claude's input prompt.
+///
+/// Uses ">" on its own line as the ready marker (Claude Code's input prompt).
+fn wait_for_claude_ready(
+    client: &NativeDaemonClient,
+    session_id: &str,
+    skip_trust: bool,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    let timeout = Duration::from_millis(timeout_ms);
+    let poll_interval = Duration::from_millis(300);
+    let start = std::time::Instant::now();
+    let mut trust_handled = false;
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(format!(
+                "Timed out waiting for Claude to be ready after {}ms",
+                timeout_ms
+            ));
+        }
+
+        let grid = commands::get_grid_snapshot(client, session_id)?;
+        let text = grid_to_text(&grid);
+
+        // Handle trust prompt if present and not skipped
+        if !skip_trust && !trust_handled && text.contains("trust") {
+            commands::write_to_terminal(client, session_id, b"\r")?;
+            trust_handled = true;
+            std::thread::sleep(poll_interval);
+            continue;
+        }
+
+        // Check for Claude's input prompt: ">" on its own line (trimmed)
+        let has_prompt = text.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed == ">" || trimmed.ends_with(">")
+        });
+        if has_prompt && (skip_trust || trust_handled || !text.contains("trust")) {
+            return Ok(());
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
 /// Extract all text content from a RichGridData snapshot.
 fn grid_to_text(grid: &godly_protocol::types::RichGridData) -> String {
     let mut text = String::new();
@@ -297,9 +380,9 @@ mod tests {
 
     #[test]
     fn resume_steps_has_four_steps() {
-        let steps = resume_launch_steps("abc-123");
+        let steps = resume_launch_steps("abc-123", Some("/test/dir"));
         assert_eq!(steps.len(), 4);
-        assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0 }));
+        assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
         assert!(matches!(steps[1], LaunchStep::WaitIdle { agent_index: 0, .. }));
         match &steps[2] {
             LaunchStep::RunCommand { agent_index, command } => {
@@ -313,32 +396,43 @@ mod tests {
     }
 
     #[test]
+    fn resume_steps_propagates_cwd() {
+        let steps = resume_launch_steps("abc-123", Some("/my/project"));
+        if let LaunchStep::CreateTerminal { cwd, .. } = &steps[0] {
+            assert_eq!(cwd.as_deref(), Some("/my/project"));
+        } else {
+            panic!("Expected CreateTerminal");
+        }
+    }
+
+    #[test]
     fn default_steps_single_no_prompt() {
-        let steps = default_launch_steps(1, "", "sonnet", "default");
-        // CreateTerminal, WaitIdle, RunCommand, WaitReady(trust), SendEnter, WaitReady(>)
-        assert_eq!(steps.len(), 6);
-        assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0 }));
+        let steps = default_launch_steps(1, "", "sonnet", "default", None);
+        // CreateTerminal, WaitIdle, RunCommand, WaitForClaudeReady
+        assert_eq!(steps.len(), 4);
+        assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
         assert!(matches!(steps[2], LaunchStep::RunCommand { agent_index: 0, .. }));
+        assert!(matches!(steps[3], LaunchStep::WaitForClaudeReady { agent_index: 0, skip_trust: false, .. }));
     }
 
     #[test]
     fn default_steps_single_with_prompt() {
-        let steps = default_launch_steps(1, "build the app", "sonnet", "default");
-        // 6 base steps + 1 SendPrompt
-        assert_eq!(steps.len(), 7);
-        assert!(matches!(steps[6], LaunchStep::SendPrompt { agent_index: 0, .. }));
+        let steps = default_launch_steps(1, "build the app", "sonnet", "default", None);
+        // 4 base steps + 1 SendPrompt
+        assert_eq!(steps.len(), 5);
+        assert!(matches!(steps[4], LaunchStep::SendPrompt { agent_index: 0, .. }));
     }
 
     #[test]
     fn default_steps_grid_2x2() {
-        let steps = default_launch_steps(4, "test", "sonnet", "default");
-        // Each agent: 7 steps (with prompt). 4 agents = 28
-        assert_eq!(steps.len(), 28);
+        let steps = default_launch_steps(4, "test", "sonnet", "default", None);
+        // Each agent: 5 steps (with prompt). 4 agents = 20
+        assert_eq!(steps.len(), 20);
     }
 
     #[test]
     fn default_steps_with_model_and_mode() {
-        let steps = default_launch_steps(1, "", "opus", "plan");
+        let steps = default_launch_steps(1, "", "opus", "plan", None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model opus --plan");
         } else {
@@ -348,21 +442,35 @@ mod tests {
 
     #[test]
     fn default_steps_auto_mode() {
-        let steps = default_launch_steps(1, "", "haiku", "auto");
+        let steps = default_launch_steps(1, "", "haiku", "auto", None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model haiku --dangerously-skip-permissions");
         } else {
             panic!("Expected RunCommand at index 2");
         }
+        // Auto mode should skip trust prompt
+        assert!(matches!(steps[3], LaunchStep::WaitForClaudeReady { skip_trust: true, .. }));
     }
 
     #[test]
     fn default_steps_default_mode_no_extra_flag() {
-        let steps = default_launch_steps(1, "", "sonnet", "default");
+        let steps = default_launch_steps(1, "", "sonnet", "default", None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model sonnet");
         } else {
             panic!("Expected RunCommand at index 2");
+        }
+        // Default mode should NOT skip trust prompt
+        assert!(matches!(steps[3], LaunchStep::WaitForClaudeReady { skip_trust: false, .. }));
+    }
+
+    #[test]
+    fn default_steps_propagates_cwd() {
+        let steps = default_launch_steps(1, "", "sonnet", "default", Some("/my/project"));
+        if let LaunchStep::CreateTerminal { cwd, .. } = &steps[0] {
+            assert_eq!(cwd.as_deref(), Some("/my/project"));
+        } else {
+            panic!("Expected CreateTerminal");
         }
     }
 

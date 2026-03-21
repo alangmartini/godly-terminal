@@ -2305,7 +2305,14 @@ impl GodlyApp {
                     QuickClaudeLayout::VSplit | QuickClaudeLayout::HSplit => 2,
                     QuickClaudeLayout::Grid2x2 => 4,
                 };
-                let steps = crate::quick_claude::default_launch_steps(num_agents, &preset.prompt_template, "sonnet", "default");
+
+                // Use active workspace's folder as CWD for presets
+                let cwd = self.workspaces.active()
+                    .map(|ws| ws.folder_path.clone())
+                    .filter(|p| !p.is_empty());
+                let steps = crate::quick_claude::default_launch_steps(
+                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(),
+                );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
                 let ws_name = format!("QC: {}", preset.name);
@@ -2494,27 +2501,69 @@ impl GodlyApp {
                 let model = dlg.selected_model.clone();
                 let mode = dlg.selected_mode.clone();
                 let num_agents = 1;
-                let steps = crate::quick_claude::default_launch_steps(num_agents, prompt, &model, &mode);
 
-                let ws_id = uuid::Uuid::new_v4().to_string();
-                let ws_name = "Quick Claude".to_string();
+                // Resolve workspace: use selected workspace if it exists,
+                // otherwise create a new one.
+                let selected_ws = dlg
+                    .selected_workspace_id
+                    .as_ref()
+                    .and_then(|id| self.workspaces.get(id))
+                    .map(|ws| (ws.id.clone(), ws.name.clone(), ws.folder_path.clone()));
+
                 let placeholder_id = uuid::Uuid::new_v4().to_string();
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
-                self.terminals.add_to_workspace(
-                    placeholder_id.clone(),
-                    rows,
-                    cols,
-                    ws_id.clone(),
+
+                let (ws_id, ws_name, cwd) = if let Some((id, name, folder)) = selected_ws {
+                    // Add terminal to the EXISTING workspace as a new tab
+                    self.terminals.add_to_workspace(
+                        placeholder_id.clone(),
+                        rows,
+                        cols,
+                        id.clone(),
+                    );
+                    // Split the focused terminal's leaf to show the new pane
+                    if let Some(ws) = self.workspaces.get_mut(&id) {
+                        let focused = ws.focused_terminal.clone();
+                        ws.layout.split_leaf(
+                            &focused,
+                            placeholder_id.clone(),
+                            SplitDirection::Horizontal,
+                        );
+                    }
+                    self.workspaces.set_active(&id);
+                    self.terminals.set_active(&placeholder_id);
+                    let cwd = if folder.is_empty() { None } else { Some(folder) };
+                    (id, name, cwd)
+                } else {
+                    // No workspace selected — create a new one
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let snippet: String = prompt.chars().take(30).collect();
+                    let name = if snippet.is_empty() {
+                        "Quick Claude".to_string()
+                    } else {
+                        format!("QC: {}", snippet.trim())
+                    };
+                    self.terminals.add_to_workspace(
+                        placeholder_id.clone(),
+                        rows,
+                        cols,
+                        id.clone(),
+                    );
+                    self.workspaces.add(
+                        id.clone(),
+                        name.clone(),
+                        placeholder_id.clone(),
+                    );
+                    self.workspaces.set_active(&id);
+                    self.terminals.set_active(&placeholder_id);
+                    self.next_workspace_num += 1;
+                    (id, name, None)
+                };
+
+                let steps = crate::quick_claude::default_launch_steps(
+                    num_agents, prompt, &model, &mode, cwd.as_deref(),
                 );
-                self.workspaces.add(
-                    ws_id.clone(),
-                    ws_name.clone(),
-                    placeholder_id.clone(),
-                );
-                self.workspaces.set_active(&ws_id);
-                self.terminals.set_active(&placeholder_id);
-                self.next_workspace_num += 1;
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
                     ws_name,
@@ -2609,8 +2658,18 @@ impl GodlyApp {
                     return Task::none();
                 };
 
+                // Use selected workspace's folder as CWD for resume
+                let cwd = dlg
+                    .selected_workspace_id
+                    .as_ref()
+                    .and_then(|id| self.workspaces.get(id))
+                    .map(|ws| ws.folder_path.clone())
+                    .filter(|p| !p.is_empty());
+
                 let session_id = session.session_id.clone();
-                let steps = crate::quick_claude::resume_launch_steps(&session_id);
+                let steps = crate::quick_claude::resume_launch_steps(
+                    &session_id, cwd.as_deref(),
+                );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
                 let ws_name = "Quick Claude (Resume)".to_string();
@@ -7121,7 +7180,7 @@ impl GodlyApp {
                     let launch = self.quick_claude_launch.as_ref().unwrap();
                     let si = launch.current_step;
                     let ai = launch.steps.get(si).and_then(|step| {
-                        if let crate::quick_claude::LaunchStep::CreateTerminal { agent_index } = step {
+                        if let crate::quick_claude::LaunchStep::CreateTerminal { agent_index, .. } = step {
                             Some(*agent_index)
                         } else {
                             None
@@ -7176,6 +7235,10 @@ impl GodlyApp {
             }
             Err(e) => {
                 log::error!("Quick Claude launch step failed: {}", e);
+                self.enqueue_toast(
+                    "Quick Claude Failed".to_string(),
+                    e,
+                );
                 self.quick_claude_launch = None;
                 Task::none()
             }
