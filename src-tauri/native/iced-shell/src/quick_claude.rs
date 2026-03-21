@@ -33,8 +33,14 @@ pub enum LaunchStep {
     },
     /// Send Enter key (carriage return).
     SendEnter { agent_index: usize },
-    /// Send the preset prompt text + carriage return.
+    /// Send the prompt text to the terminal (without carriage return).
     SendPrompt { agent_index: usize, prompt: String },
+    /// Wait for echoed text in terminal grid, confirming TUI is reading stdin.
+    WaitForEcho {
+        agent_index: usize,
+        text_prefix: String,
+        timeout_ms: u64,
+    },
     /// Sleep for N milliseconds.
     Delay { ms: u64 },
 }
@@ -104,9 +110,21 @@ pub fn default_launch_steps(
             timeout_ms: 30000,
         });
         if !prompt.is_empty() {
+            // 3-step prompt delivery to avoid ink paste detection:
+            // 1. Write prompt text (no CR)
             steps.push(LaunchStep::SendPrompt {
                 agent_index: i,
                 prompt: prompt.to_string(),
+            });
+            // 2. Wait for echo in grid (confirms TUI read the text)
+            steps.push(LaunchStep::WaitForEcho {
+                agent_index: i,
+                text_prefix: prompt.to_string(),
+                timeout_ms: 30000,
+            });
+            // 3. Send Enter separately (clean submit)
+            steps.push(LaunchStep::SendEnter {
+                agent_index: i,
             });
         }
     }
@@ -206,8 +224,18 @@ pub fn execute_step(
             prompt,
         } => {
             let session_id = resolve_session_id(&agent_terminal_ids, agent_index)?;
-            let data = format!("{}\r", prompt);
-            commands::write_to_terminal(&client, &session_id, data.as_bytes())?;
+            // Write prompt text WITHOUT carriage return to avoid ink paste detection.
+            // A separate SendEnter step follows after WaitForEcho confirms the TUI read the text.
+            commands::write_to_terminal(&client, &session_id, prompt.as_bytes())?;
+            Ok(StepResult::Ok)
+        }
+        LaunchStep::WaitForEcho {
+            agent_index,
+            text_prefix,
+            timeout_ms,
+        } => {
+            let session_id = resolve_session_id(&agent_terminal_ids, agent_index)?;
+            wait_for_echo(&client, &session_id, &text_prefix, timeout_ms)?;
             Ok(StepResult::Ok)
         }
         LaunchStep::Delay { ms } => {
@@ -298,6 +326,41 @@ fn wait_for_marker(
     }
 }
 
+/// Wait for echoed text to appear in the grid, confirming the TUI is reading stdin.
+/// Timeout is non-fatal: we log a warning and proceed (the Enter key will be sent anyway).
+fn wait_for_echo(
+    client: &NativeDaemonClient,
+    session_id: &str,
+    text_prefix: &str,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    let timeout = Duration::from_millis(timeout_ms);
+    let poll_interval = Duration::from_millis(250);
+    let start = std::time::Instant::now();
+    // Use first 40 chars as search prefix (grid may wrap long text)
+    let search_text: String = text_prefix.chars().take(40).collect();
+
+    loop {
+        if start.elapsed() > timeout {
+            log::warn!(
+                "Echo detection timed out after {}ms, sending Enter anyway",
+                timeout_ms
+            );
+            return Ok(());
+        }
+
+        let grid = commands::get_grid_snapshot(client, session_id)?;
+        let text = grid_to_text(&grid);
+        if text.contains(&search_text) {
+            // Small buffer to ensure TUI read loop is stable
+            std::thread::sleep(Duration::from_millis(100));
+            return Ok(());
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
 /// Adaptive wait for Claude Code to be ready for input.
 ///
 /// Handles two scenarios:
@@ -330,19 +393,25 @@ fn wait_for_claude_ready(
         let text = grid_to_text(&grid);
 
         // Handle trust prompt if present and not skipped
-        if !skip_trust && !trust_handled && text.contains("trust") {
+        if !skip_trust && !trust_handled && text.contains("Do you trust") {
             commands::write_to_terminal(client, session_id, b"\r")?;
             trust_handled = true;
             std::thread::sleep(poll_interval);
             continue;
         }
 
-        // Check for Claude's input prompt: ">" on its own line (trimmed)
-        let has_prompt = text.lines().any(|line| {
-            let trimmed = line.trim();
-            trimmed == ">" || trimmed.ends_with(">")
-        });
-        if has_prompt && (skip_trust || trust_handled || !text.contains("trust")) {
+        // Check for Claude's input prompt: ">" as the last non-empty line.
+        // Only matches Claude's actual input prompt, not arbitrary lines ending with ">".
+        let has_prompt = text
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| {
+                let trimmed = line.trim();
+                trimmed == ">" || trimmed == "> "
+            })
+            .unwrap_or(false);
+        if has_prompt && (skip_trust || trust_handled || !text.contains("Do you trust")) {
             return Ok(());
         }
 
@@ -418,16 +487,18 @@ mod tests {
     #[test]
     fn default_steps_single_with_prompt() {
         let steps = default_launch_steps(1, "build the app", "sonnet", "default", None);
-        // 4 base steps + 1 SendPrompt
-        assert_eq!(steps.len(), 5);
+        // 4 base steps + 3 prompt steps (SendPrompt + WaitForEcho + SendEnter)
+        assert_eq!(steps.len(), 7);
         assert!(matches!(steps[4], LaunchStep::SendPrompt { agent_index: 0, .. }));
+        assert!(matches!(steps[5], LaunchStep::WaitForEcho { agent_index: 0, .. }));
+        assert!(matches!(steps[6], LaunchStep::SendEnter { agent_index: 0 }));
     }
 
     #[test]
     fn default_steps_grid_2x2() {
         let steps = default_launch_steps(4, "test", "sonnet", "default", None);
-        // Each agent: 5 steps (with prompt). 4 agents = 20
-        assert_eq!(steps.len(), 20);
+        // Each agent: 7 steps (with prompt). 4 agents = 28
+        assert_eq!(steps.len(), 28);
     }
 
     #[test]
