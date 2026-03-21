@@ -37,6 +37,26 @@ pub struct SkillEntry {
     pub file_path: String,
 }
 
+/// Persistent preferences that survive dialog close/reopen.
+#[derive(Debug, Clone)]
+pub struct QuickClaudePreferences {
+    pub selected_model: String,
+    pub selected_mode: String,
+    pub selected_ai_tool: String,
+    pub selected_workspace_id: Option<String>,
+}
+
+impl Default for QuickClaudePreferences {
+    fn default() -> Self {
+        Self {
+            selected_model: "sonnet".to_string(),
+            selected_mode: "auto".to_string(),
+            selected_ai_tool: "Claude Code".to_string(),
+            selected_workspace_id: None,
+        }
+    }
+}
+
 /// State for the Quick Claude dialog.
 #[derive(Debug)]
 pub struct QuickClaudeDialogState {
@@ -61,14 +81,27 @@ pub struct QuickClaudeDialogState {
     pub model_dropdown_open: bool,
     pub selected_mode: String,
     pub mode_dropdown_open: bool,
+    /// Dynamically discovered model options: (display_name, value).
+    pub available_models: Vec<(String, String)>,
 }
 
 impl QuickClaudeDialogState {
-    pub fn new(workspace_id: Option<String>, workspaces: Vec<(String, String)>) -> Self {
+    pub fn new(
+        workspace_id: Option<String>,
+        workspaces: Vec<(String, String)>,
+        prefs: &QuickClaudePreferences,
+    ) -> Self {
+        // Use workspace from prefs if it exists in the workspace list, otherwise use current active
+        let ws_id = prefs
+            .selected_workspace_id
+            .as_ref()
+            .filter(|id| workspaces.iter().any(|(ws_id, _)| ws_id == *id))
+            .cloned()
+            .or(workspace_id);
         Self {
-            selected_workspace_id: workspace_id,
+            selected_workspace_id: ws_id,
             workspace_dropdown_open: false,
-            selected_ai_tool: "Claude Code".to_string(),
+            selected_ai_tool: prefs.selected_ai_tool.clone(),
             ai_tool_dropdown_open: false,
             prompt_content: text_editor::Content::new(),
             branch_name: String::new(),
@@ -82,10 +115,21 @@ impl QuickClaudeDialogState {
             skill_autocomplete_open: false,
             skill_autocomplete_filter: String::new(),
             skill_autocomplete_selected: 0,
-            selected_model: "sonnet".to_string(),
+            selected_model: prefs.selected_model.clone(),
             model_dropdown_open: false,
-            selected_mode: "default".to_string(),
+            selected_mode: prefs.selected_mode.clone(),
             mode_dropdown_open: false,
+            available_models: default_model_list(),
+        }
+    }
+
+    /// Save current selections back to preferences.
+    pub fn to_preferences(&self) -> QuickClaudePreferences {
+        QuickClaudePreferences {
+            selected_model: self.selected_model.clone(),
+            selected_mode: self.selected_mode.clone(),
+            selected_ai_tool: self.selected_ai_tool.clone(),
+            selected_workspace_id: self.selected_workspace_id.clone(),
         }
     }
 
@@ -374,14 +418,14 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
 
             // ── Model & Mode dropdowns (Claude Code only) ───────────────
             let model_mode_section: Option<Element<'a, M>> = if state.selected_ai_tool == "Claude Code" {
-                let models = [("Opus", "opus"), ("Sonnet", "sonnet"), ("Haiku", "haiku")];
                 let modes = [("Default", "default"), ("Plan", "plan"), ("Auto", "auto")];
 
-                let model_display = models
+                let model_display = state
+                    .available_models
                     .iter()
-                    .find(|(_, v)| *v == state.selected_model.as_str())
-                    .map(|(d, _)| *d)
-                    .unwrap_or("Sonnet");
+                    .find(|(_, v)| v == &state.selected_model)
+                    .map(|(d, _)| d.as_str())
+                    .unwrap_or(&state.selected_model);
 
                 let model_toggle = on_model_dropdown_toggle.clone();
                 let model_button = button(
@@ -416,11 +460,12 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
 
                 if state.model_dropdown_open {
                     let mut model_list = column![].spacing(2);
-                    for (display, value) in models {
-                        let is_selected = state.selected_model == value;
-                        let val = value.to_string();
+                    for (display, value) in &state.available_models {
+                        let is_selected = state.selected_model == *value;
+                        let val = value.clone();
+                        let display_ref = display.as_str();
                         let item = button(
-                            text(display)
+                            text(display_ref)
                                 .size(13)
                                 .color(if is_selected { text_active } else { text_primary }),
                         )
@@ -1109,6 +1154,84 @@ fn format_relative_time(time: std::time::SystemTime) -> String {
     }
 }
 
+/// Default hardcoded model list used as fallback.
+pub fn default_model_list() -> Vec<(String, String)> {
+    vec![
+        ("Opus".to_string(), "opus".to_string()),
+        ("Sonnet".to_string(), "sonnet".to_string()),
+        ("Haiku".to_string(), "haiku".to_string()),
+    ]
+}
+
+/// Discover available models by running `claude --help` and parsing the --model description.
+/// Returns (display_name, value) pairs. Falls back to default list on failure.
+pub fn discover_models() -> Vec<(String, String)> {
+    let output = match std::process::Command::new("claude")
+        .args(["--help"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return default_model_list(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_models_from_help(&stdout)
+}
+
+/// Parse model aliases from claude --help output.
+/// Looks for the --model line and extracts quoted aliases like 'sonnet', 'opus'.
+fn parse_models_from_help(help_text: &str) -> Vec<(String, String)> {
+    // Find the --model line and extract aliases from the description
+    // Format: --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6').
+    let mut aliases: Vec<String> = Vec::new();
+
+    for line in help_text.lines() {
+        if line.contains("--model") && line.contains("alias") {
+            // Extract single-quoted strings as aliases
+            let mut rest = line;
+            while let Some(start) = rest.find('\'') {
+                rest = &rest[start + 1..];
+                if let Some(end) = rest.find('\'') {
+                    let alias = &rest[..end];
+                    // Filter: only short single-word aliases (not full model names or stray text)
+                    if !alias.is_empty()
+                        && !alias.contains('-')
+                        && !alias.contains(' ')
+                        && alias.chars().all(|c| c.is_alphanumeric())
+                    {
+                        aliases.push(alias.to_string());
+                    }
+                    rest = &rest[end + 1..];
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Also look for the --permission-mode line to find modes
+    // But for now just handle models
+
+    if aliases.is_empty() {
+        return default_model_list();
+    }
+
+    // Build display names: capitalize first letter
+    aliases
+        .into_iter()
+        .map(|alias| {
+            let display = {
+                let mut chars = alias.chars();
+                match chars.next() {
+                    Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                    None => alias.clone(),
+                }
+            };
+            (display, alias)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1122,7 +1245,7 @@ mod tests {
 
     #[test]
     fn state_new_defaults() {
-        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces());
+        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &QuickClaudePreferences::default());
         assert_eq!(state.selected_workspace_id, Some("ws-1".into()));
         assert_eq!(state.selected_ai_tool, "Claude Code");
         assert!(!state.workspace_dropdown_open);
@@ -1140,25 +1263,26 @@ mod tests {
         assert_eq!(state.skill_autocomplete_selected, 0);
         assert_eq!(state.selected_model, "sonnet");
         assert!(!state.model_dropdown_open);
-        assert_eq!(state.selected_mode, "default");
+        assert_eq!(state.selected_mode, "auto");
         assert!(!state.mode_dropdown_open);
+        assert!(!state.available_models.is_empty());
     }
 
     #[test]
     fn state_new_no_workspace() {
-        let state = QuickClaudeDialogState::new(None, vec![]);
+        let state = QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         assert!(state.selected_workspace_id.is_none());
     }
 
     #[test]
     fn prompt_text_empty() {
-        let state = QuickClaudeDialogState::new(None, vec![]);
+        let state = QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         assert!(state.prompt_text().trim().is_empty());
     }
 
     #[test]
     fn view_does_not_panic() {
-        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces());
+        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &QuickClaudePreferences::default());
         #[derive(Debug, Clone)]
         enum Msg {
             WsSelected(String),
@@ -1211,7 +1335,7 @@ mod tests {
 
     #[test]
     fn view_resume_tab_does_not_panic() {
-        let mut state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces());
+        let mut state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &QuickClaudePreferences::default());
         state.active_tab = QuickClaudeTab::ResumeSession;
         state.sessions = vec![
             ClaudeSession {
@@ -1275,7 +1399,7 @@ mod tests {
 
     #[test]
     fn filtered_skills_empty_filter() {
-        let mut state = QuickClaudeDialogState::new(None, vec![]);
+        let mut state = QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.skills = vec![
             SkillEntry {
                 name: "commit".to_string(),
@@ -1295,7 +1419,7 @@ mod tests {
 
     #[test]
     fn filtered_skills_with_filter() {
-        let mut state = QuickClaudeDialogState::new(None, vec![]);
+        let mut state = QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.skills = vec![
             SkillEntry {
                 name: "commit".to_string(),
@@ -1372,5 +1496,98 @@ mod tests {
         let time = std::time::SystemTime::now() - std::time::Duration::from_secs(1209600);
         let result = format_relative_time(time);
         assert_eq!(result, "2w ago");
+    }
+
+    #[test]
+    fn preferences_default_mode_is_auto() {
+        let prefs = QuickClaudePreferences::default();
+        assert_eq!(prefs.selected_mode, "auto");
+        assert_eq!(prefs.selected_model, "sonnet");
+        assert_eq!(prefs.selected_ai_tool, "Claude Code");
+        assert!(prefs.selected_workspace_id.is_none());
+    }
+
+    #[test]
+    fn state_inherits_preferences() {
+        let prefs = QuickClaudePreferences {
+            selected_model: "opus".to_string(),
+            selected_mode: "plan".to_string(),
+            selected_ai_tool: "Codex".to_string(),
+            selected_workspace_id: Some("ws-2".to_string()),
+        };
+        let state = QuickClaudeDialogState::new(
+            Some("ws-1".into()),
+            sample_workspaces(),
+            &prefs,
+        );
+        assert_eq!(state.selected_model, "opus");
+        assert_eq!(state.selected_mode, "plan");
+        assert_eq!(state.selected_ai_tool, "Codex");
+        // ws-2 exists in workspaces, so prefs workspace is used
+        assert_eq!(state.selected_workspace_id, Some("ws-2".to_string()));
+    }
+
+    #[test]
+    fn state_prefs_workspace_falls_back_when_not_in_list() {
+        let prefs = QuickClaudePreferences {
+            selected_model: "sonnet".to_string(),
+            selected_mode: "auto".to_string(),
+            selected_ai_tool: "Claude Code".to_string(),
+            selected_workspace_id: Some("ws-gone".to_string()),
+        };
+        let state = QuickClaudeDialogState::new(
+            Some("ws-1".into()),
+            sample_workspaces(),
+            &prefs,
+        );
+        // ws-gone not in workspaces, falls back to active workspace
+        assert_eq!(state.selected_workspace_id, Some("ws-1".to_string()));
+    }
+
+    #[test]
+    fn to_preferences_roundtrip() {
+        let prefs = QuickClaudePreferences {
+            selected_model: "opus".to_string(),
+            selected_mode: "plan".to_string(),
+            selected_ai_tool: "Codex".to_string(),
+            selected_workspace_id: Some("ws-1".to_string()),
+        };
+        let state = QuickClaudeDialogState::new(
+            Some("ws-1".into()),
+            sample_workspaces(),
+            &prefs,
+        );
+        let roundtripped = state.to_preferences();
+        assert_eq!(roundtripped.selected_model, "opus");
+        assert_eq!(roundtripped.selected_mode, "plan");
+        assert_eq!(roundtripped.selected_ai_tool, "Codex");
+        assert_eq!(roundtripped.selected_workspace_id, Some("ws-1".to_string()));
+    }
+
+    #[test]
+    fn parse_models_from_help_extracts_aliases() {
+        let help = r#"  --model <model>  Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus') or a model's full name (e.g. 'claude-sonnet-4-6')."#;
+        let models = parse_models_from_help(help);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0], ("Sonnet".to_string(), "sonnet".to_string()));
+        assert_eq!(models[1], ("Opus".to_string(), "opus".to_string()));
+    }
+
+    #[test]
+    fn parse_models_from_help_no_model_line_returns_defaults() {
+        let help = "some other help text\n--verbose  Enable verbose";
+        let models = parse_models_from_help(help);
+        // Falls back to default list
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0].1, "opus");
+    }
+
+    #[test]
+    fn default_model_list_has_three() {
+        let models = default_model_list();
+        assert_eq!(models.len(), 3);
+        assert!(models.iter().any(|(_, v)| v == "opus"));
+        assert!(models.iter().any(|(_, v)| v == "sonnet"));
+        assert!(models.iter().any(|(_, v)| v == "haiku"));
     }
 }
