@@ -1898,6 +1898,7 @@ dependencies = [
  "godly-protocol",
  "iced",
  "log",
+ "swash",
 ]
 
 [[package]]
