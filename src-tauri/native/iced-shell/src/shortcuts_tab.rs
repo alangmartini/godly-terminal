@@ -107,11 +107,11 @@ const SCROLLBACK: &[ShortcutEntry] = &[
     },
     ShortcutEntry {
         action: "Scroll Top",
-        keys: "Ctrl+Home",
+        keys: "Ctrl+Home / Shift+Home",
     },
     ShortcutEntry {
         action: "Scroll Bottom",
-        keys: "Ctrl+End",
+        keys: "Ctrl+End / Shift+End",
     },
 ];
 
