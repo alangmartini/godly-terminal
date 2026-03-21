@@ -3543,6 +3543,7 @@ impl GodlyApp {
         let title = self.title();
         let title_bar_row = title_bar::view_title_bar(
             title,
+            self.terminal_font,
             Message::TitleBarDragStart,
             Message::TitleBarMinimize,
             Message::TitleBarToggleMaximize,
@@ -3558,6 +3559,7 @@ impl GodlyApp {
             &ordered,
             active_id,
             &entry_progress,
+            self.terminal_font,
             |id| Message::TabClicked(id),
             |id| Message::CloseTabRequested(id),
             |id| Message::TabDragStart(id),
@@ -3639,6 +3641,7 @@ impl GodlyApp {
                     },
                 ),
                 sidebar_width,
+                self.terminal_font,
                 Message::SidebarAction,
                 Message::SidebarResizeStart,
                 Message::SidebarResizeEnd,

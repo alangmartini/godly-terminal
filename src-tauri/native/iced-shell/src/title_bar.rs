@@ -1,5 +1,5 @@
 use iced::widget::{button, canvas, container, mouse_area, row, text};
-use iced::{Border, Color, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
+use iced::{Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::theme::{DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
 
@@ -65,6 +65,7 @@ impl<Message> canvas::Program<Message> for TerminalIcon {
 /// Renders the custom window title bar with drag area and control buttons.
 pub fn view_title_bar<'a, M: Clone + 'a>(
     title: String,
+    font: Font,
     on_drag: M,
     on_minimize: M,
     on_maximize: M,
@@ -78,7 +79,8 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
 
     let title_text = text(title)
         .size(12.5)
-        .color(TEXT_SECONDARY());
+        .color(TEXT_SECONDARY())
+        .font(font);
 
     let title_content = row![
         container(icon).padding(Padding { top: 0.0, right: 6.0, bottom: 0.0, left: 8.0 }),
@@ -161,6 +163,7 @@ mod tests {
     fn title_bar_renders_without_panic() {
         let _ = view_title_bar(
             "pwsh — Godly Terminal".to_string(),
+            Font::default(),
             Msg::Drag,
             Msg::Min,
             Msg::Max,
