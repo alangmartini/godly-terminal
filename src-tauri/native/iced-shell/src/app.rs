@@ -621,7 +621,7 @@ impl Default for GodlyApp {
                 r
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
-            use_pixel_renderer: true,
+            use_pixel_renderer: false,
         }
     }
 }
