@@ -384,6 +384,51 @@ impl GodlyApp {
                 iced::Task::none(),
             ),
 
+            McpRequest::ToggleWorktreeMode { workspace_id } => {
+                if let Some(ws) = self.workspaces.get(&workspace_id) {
+                    let new_mode = !ws.worktree_mode;
+                    let _ = self.workspaces.set_worktree_mode(&workspace_id, new_mode);
+                    let claude_code_mode = false; // TODO: read actual value
+                    (
+                        McpResponse::WorkspaceModes {
+                            worktree_mode: new_mode,
+                            claude_code_mode,
+                        },
+                        iced::Task::none(),
+                    )
+                } else {
+                    (
+                        McpResponse::Error {
+                            message: format!("Workspace {} not found", workspace_id),
+                        },
+                        iced::Task::none(),
+                    )
+                }
+            }
+
+            McpRequest::RemoveWorktree { worktree_path } => {
+                // Find repo root from any active workspace.
+                let repo_root = self.workspaces.active().map(|ws| ws.folder_path.clone());
+                if let Some(root) = repo_root {
+                    match crate::git_worktree::remove_worktree(&root, &worktree_path) {
+                        Ok(()) => (McpResponse::Ok, iced::Task::none()),
+                        Err(e) => (
+                            McpResponse::Error {
+                                message: format!("Failed to remove worktree: {e}"),
+                            },
+                            iced::Task::none(),
+                        ),
+                    }
+                } else {
+                    (
+                        McpResponse::Error {
+                            message: "No active workspace to determine repo root".to_string(),
+                        },
+                        iced::Task::none(),
+                    )
+                }
+            }
+
             other => (
                 McpResponse::Error {
                     message: format!("Unsupported native MCP request: {:?}", other),

@@ -186,6 +186,153 @@ pub fn view_copy_preview<'a, M: Clone + 'a>(
     )
 }
 
+/// Render a worktree close confirmation dialog with three buttons:
+/// Remove Worktree (danger), Keep Worktree, Cancel.
+pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
+    worktree_path: &'a str,
+    on_remove: M,
+    on_keep: M,
+    on_cancel: M,
+) -> Element<'a, M> {
+    let body_text = column![
+        text("This terminal uses a git worktree at:")
+            .size(13)
+            .color(TEXT_PRIMARY()),
+        Space::new().height(6.0),
+        container(
+            text(worktree_path).size(12).color(TEXT_SECONDARY())
+        )
+        .padding(Padding::from([6, 10]))
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(BG_TERTIARY())),
+            border: Border {
+                color: BORDER(),
+                width: 1.0,
+                radius: RADIUS_SM.into(),
+            },
+            ..container::Style::default()
+        }),
+        Space::new().height(10.0),
+        text("Remove the worktree from disk, or keep it for later?")
+            .size(13)
+            .color(TEXT_PRIMARY()),
+    ];
+
+    let title_text = text("Close Worktree Terminal?").size(16).color(TEXT_ACTIVE());
+
+    let cancel_btn = button(text("Cancel").size(13).color(TEXT_PRIMARY()))
+        .on_press(on_cancel)
+        .padding(Padding::from([7, 18]))
+        .style(move |_theme, status| {
+            let bg = match status {
+                button::Status::Hovered => BG_TERTIARY(),
+                _ => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: TEXT_PRIMARY(),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: RADIUS_MD.into(),
+                },
+                ..button::Style::default()
+            }
+        });
+
+    let keep_btn = button(text("Keep Worktree").size(13).color(TEXT_PRIMARY()))
+        .on_press(on_keep)
+        .padding(Padding::from([7, 18]))
+        .style(move |_theme, status| {
+            let bg = match status {
+                button::Status::Hovered => BG_TERTIARY(),
+                _ => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: TEXT_PRIMARY(),
+                border: Border {
+                    color: BORDER(),
+                    width: 1.0,
+                    radius: RADIUS_MD.into(),
+                },
+                ..button::Style::default()
+            }
+        });
+
+    let danger_color = DANGER();
+    let remove_btn = button(text("Remove Worktree").size(13).color(Color::WHITE))
+        .on_press(on_remove)
+        .padding(Padding::from([7, 18]))
+        .style(move |_theme, status| {
+            let bg = match status {
+                button::Status::Hovered => Color::from_rgba(
+                    (danger_color.r * 1.1).min(1.0),
+                    (danger_color.g * 1.1).min(1.0),
+                    (danger_color.b * 1.1).min(1.0),
+                    1.0,
+                ),
+                _ => danger_color,
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: Color::WHITE,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: RADIUS_MD.into(),
+                },
+                ..button::Style::default()
+            }
+        });
+
+    let footer = row![
+        Space::new().width(Length::Fill),
+        cancel_btn,
+        keep_btn,
+        remove_btn,
+    ]
+    .spacing(8);
+
+    let dialog_content = column![
+        title_text,
+        Space::new().height(12.0),
+        body_text,
+        Space::new().height(16.0),
+        footer,
+    ];
+
+    let border_color = Color::from_rgba(DANGER().r, DANGER().g, DANGER().b, 0.25);
+
+    let dialog = container(dialog_content)
+        .padding(Padding::from([20, 24]))
+        .width(Length::Fixed(480.0))
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(BG_SECONDARY())),
+            border: Border {
+                color: border_color,
+                width: 0.5,
+                radius: RADIUS_LG.into(),
+            },
+            shadow: Shadow {
+                color: SHADOW_DANGER(),
+                offset: Vector::new(0.0, 8.0),
+                blur_radius: 24.0,
+            },
+            ..container::Style::default()
+        });
+
+    container(iced::widget::center(dialog))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(BACKDROP())),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 /// Threshold in characters above which a copy preview is shown.
 pub const COPY_PREVIEW_THRESHOLD: usize = 500;
 
