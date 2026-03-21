@@ -404,6 +404,7 @@ mod tests {
             workspace_id: None,
             custom_name: None,
             worktree_path: None,
+            cached_image_handle: None,
         }
     }
 

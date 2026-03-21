@@ -26,6 +26,8 @@ pub struct TerminalInfo {
     pub custom_name: Option<String>,
     /// Path to a git worktree created for this terminal (None = normal terminal).
     pub worktree_path: Option<String>,
+    /// Cached image handle for the pixel-rendered terminal (None = needs render).
+    pub cached_image_handle: Option<iced::widget::image::Handle>,
 }
 
 impl TerminalInfo {
@@ -363,6 +365,7 @@ impl TerminalCollection {
                 workspace_id,
                 custom_name: None,
                 worktree_path: None,
+                cached_image_handle: None,
             },
         );
         if self.tabs.active_id() == Some(id.as_str()) {
