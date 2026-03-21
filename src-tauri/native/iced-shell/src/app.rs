@@ -2997,6 +2997,7 @@ impl GodlyApp {
                 }
             }
             Message::FontFamilyChanged(name) => {
+                log::info!("[FONT] family changed: {} -> {}", self.font_family, name);
                 self.font_family = name.clone();
                 let interned = font_enumerator::intern_font_name(&name);
                 self.terminal_font = iced::Font {
@@ -3014,11 +3015,13 @@ impl GodlyApp {
                 self.font_filter_query = query;
             }
             Message::FontSizeIncrement => {
+                log::info!("[FONT] size increment: {} -> {}", self.font_metrics.font_size, self.font_metrics.font_size + 1.0);
                 self.font_metrics = FontMetrics::from_font_size(self.font_metrics.font_size + 1.0);
                 return self.resize_all_terminals();
             }
             Message::FontSizeDecrement => {
                 let new_size = (self.font_metrics.font_size - 1.0).max(8.0);
+                log::info!("[FONT] size decrement: {} -> {}", self.font_metrics.font_size, new_size);
                 self.font_metrics = FontMetrics::from_font_size(new_size);
                 return self.resize_all_terminals();
             }
@@ -4226,6 +4229,10 @@ impl GodlyApp {
         let font_list_scrollable = scrollable(font_list_col)
             .height(Length::Fixed(200.0));
 
+        // Font preview area — shows sample text in the selected font & size
+        let preview_font = self.terminal_font;
+        let preview_size = self.font_metrics.font_size;
+
         // Separator between font and theme sections
         let separator = container(Space::new().width(Length::Fill).height(1))
             .style(move |_t: &Theme| container::Style {
@@ -4299,6 +4306,29 @@ impl GodlyApp {
             font_size_row,
             search_input,
             font_list_scrollable,
+            Space::new().height(4),
+            text("Preview").size(13).color(TEXT_SECONDARY()),
+            container(
+                column![
+                    text("$ echo \"Hello, World!\"").font(preview_font).size(preview_size).color(TEXT_PRIMARY()),
+                    text("Hello, World!").font(preview_font).size(preview_size).color(ACCENT()),
+                    text("$ git status").font(preview_font).size(preview_size).color(TEXT_PRIMARY()),
+                    text("On branch main").font(preview_font).size(preview_size).color(TEXT_SECONDARY()),
+                    text("ABCDEFGHIJKLM 0123456789 {}[]()").font(preview_font).size(preview_size).color(TEXT_PRIMARY()),
+                ]
+                .spacing(2)
+            )
+            .width(Length::Fill)
+            .padding(Padding::from([12, 16]))
+            .style(move |_t: &Theme| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.85))),
+                border: iced::Border {
+                    color: BORDER(),
+                    width: 1.0,
+                    radius: RADIUS_MD.into(),
+                },
+                ..Default::default()
+            }),
             Space::new().height(8),
             separator,
             Space::new().height(12),
