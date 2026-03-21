@@ -107,6 +107,23 @@ use crate::terminal_context_menu::{self, TermCtxAction};
 use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
 use crate::whisper_ui;
 
+/// Default font family name for the bundled Geist Mono font.
+const DEFAULT_FONT_FAMILY: &str = "Geist Mono";
+
+/// Bundled Geist Mono Regular font bytes for measured metrics.
+/// Same file as the `fonts::REGULAR` constant in `main.rs`.
+const GEIST_MONO_REGULAR: &[u8] = include_bytes!("../fonts/GeistMono-Regular.ttf");
+
+/// Create font metrics using the bundled Geist Mono font file for accurate
+/// measurements. Falls back to heuristic ratios for non-default font families.
+fn measured_font_metrics(font_size: f32, font_family: &str) -> FontMetrics {
+    if font_family == DEFAULT_FONT_FAMILY {
+        FontMetrics::from_font_bytes(font_size, GEIST_MONO_REGULAR)
+    } else {
+        FontMetrics::from_font_size(font_size)
+    }
+}
+
 #[path = "mru_switcher.rs"]
 mod mru_switcher;
 
@@ -480,7 +497,7 @@ impl Default for GodlyApp {
             window_height: 800.0,
             window_id: None,
             window_focused: true,
-            font_metrics: FontMetrics::default(),
+            font_metrics: measured_font_metrics(14.0, DEFAULT_FONT_FAMILY),
             selection: SelectionState::default(),
             sidebar_visible: true,
             sidebar_width: SIDEBAR_WIDTH,
@@ -564,7 +581,7 @@ impl Default for GodlyApp {
             whisper_state: None,
             whisper_service: None,
             pending_screenshot_reply: None,
-            font_family: "Geist Mono".to_string(),
+            font_family: DEFAULT_FONT_FAMILY.to_string(),
             terminal_font: iced::Font {
                 family: iced::font::Family::Name("Geist Mono"),
                 weight: iced::font::Weight::Normal,
@@ -3016,13 +3033,13 @@ impl GodlyApp {
             }
             Message::FontSizeIncrement => {
                 log::info!("[FONT] size increment: {} -> {}", self.font_metrics.font_size, self.font_metrics.font_size + 1.0);
-                self.font_metrics = FontMetrics::from_font_size(self.font_metrics.font_size + 1.0);
+                self.font_metrics = measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
                 return self.resize_all_terminals();
             }
             Message::FontSizeDecrement => {
                 let new_size = (self.font_metrics.font_size - 1.0).max(8.0);
                 log::info!("[FONT] size decrement: {} -> {}", self.font_metrics.font_size, new_size);
-                self.font_metrics = FontMetrics::from_font_size(new_size);
+                self.font_metrics = measured_font_metrics(new_size, &self.font_family);
                 return self.resize_all_terminals();
             }
             Message::ShortcutBadgeClicked(index) => {
@@ -5434,16 +5451,16 @@ impl GodlyApp {
                 self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward)
             }
             AppAction::ZoomIn => {
-                self.font_metrics = FontMetrics::from_font_size(self.font_metrics.font_size + 1.0);
+                self.font_metrics = measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
                 self.resize_all_terminals()
             }
             AppAction::ZoomOut => {
                 let new_size = (self.font_metrics.font_size - 1.0).max(8.0);
-                self.font_metrics = FontMetrics::from_font_size(new_size);
+                self.font_metrics = measured_font_metrics(new_size, &self.font_family);
                 self.resize_all_terminals()
             }
             AppAction::ZoomReset => {
-                self.font_metrics = FontMetrics::default();
+                self.font_metrics = measured_font_metrics(14.0, &self.font_family);
                 self.resize_all_terminals()
             }
             AppAction::ScrollPageUp => {
@@ -6050,7 +6067,7 @@ impl GodlyApp {
                     self.sidebar_visible = merged.sidebar_visible;
                     self.settings_open = merged.settings_open;
                     self.settings_tab = merged.settings_tab.clone();
-                    self.font_metrics = FontMetrics::from_font_size(merged.font_size);
+                    self.font_metrics = measured_font_metrics(merged.font_size, &merged.font_family);
                     self.font_family = merged.font_family.clone();
                     let interned = font_enumerator::intern_font_name(&merged.font_family);
                     self.terminal_font = iced::Font {
