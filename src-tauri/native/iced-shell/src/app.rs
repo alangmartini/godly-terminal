@@ -1678,11 +1678,16 @@ impl GodlyApp {
                 // (e.g. Shift+Tab → ESC[Z, not bare \t).
                 let bytes =
                     if !modifiers.control() && matches!(key, keyboard::Key::Character(_)) {
+                        // Use platform-composed text for printable characters.
+                        // If `text` is None this is a dead-key press — return None
+                        // so no bytes are sent until the composition resolves.
+                        // Falling through to key_to_pty_bytes here would send
+                        // the raw character prematurely, causing duplicates
+                        // when the dead key is later cancelled or composed.
                         text.as_ref().map(|t| t.as_bytes().to_vec())
                     } else {
-                        None
-                    }
-                    .or_else(|| key_to_pty_bytes(&key, modifiers));
+                        key_to_pty_bytes(&key, modifiers)
+                    };
 
                 if let Some(bytes) = bytes {
                     if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client) {
