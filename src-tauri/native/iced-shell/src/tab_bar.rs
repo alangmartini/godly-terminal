@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use iced::widget::{button, column, container, mouse_area, row, rule, text, Space};
-use iced::{Border, Color, Element, Length, Padding};
+use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::terminal_state::TerminalInfo;
 use crate::theme::{
@@ -155,6 +155,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     terminals: &[&'a TerminalInfo],
     active_id: Option<&str>,
     entry_progress: &HashMap<String, f32>,
+    font: Font,
     on_tab_click: impl Fn(String) -> M + 'a,
     on_close: impl Fn(String) -> M + 'a,
     on_drag_start: impl Fn(String) -> M + 'a,
@@ -180,7 +181,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         };
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
-        let label = text(truncated).size(13).color(text_color);
+        let label = text(truncated).size(13).color(text_color).font(font);
         let icon_glyph = process_icon_glyph(terminal).map(|glyph| {
             let icon_color = if is_active { ACCENT() } else { TEXT_SECONDARY() };
             text(glyph).size(14).color(icon_color)
@@ -374,6 +375,7 @@ mod tests {
         truncate_label, view_tab_bar,
     };
     use crate::terminal_state::TerminalInfo;
+    use iced::Font;
 
     #[derive(Clone)]
     enum TestMessage {
@@ -471,6 +473,7 @@ mod tests {
             &terminals,
             Some("t-1"),
             &no_anim,
+            Font::default(),
             |_| TestMessage::TabClicked,
             |_| TestMessage::TabClosed,
             |_| TestMessage::TabDragStart,
@@ -493,6 +496,7 @@ mod tests {
             &terminals,
             Some("t-0"),
             &no_anim,
+            Font::default(),
             |_| TestMessage::TabClicked,
             |_| TestMessage::TabClosed,
             |_| TestMessage::TabDragStart,
@@ -515,6 +519,7 @@ mod tests {
             &terminals,
             Some("t-1"),
             &no_anim,
+            Font::default(),
             |_| TestMessage::TabClicked,
             |_| TestMessage::TabClosed,
             |_| TestMessage::TabDragStart,

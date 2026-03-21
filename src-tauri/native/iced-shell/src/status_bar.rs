@@ -61,7 +61,8 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
 
     let cwd_text = text(cwd)
         .size(11)
-        .color(TEXT_SECONDARY());
+        .color(TEXT_SECONDARY())
+        .font(status_font);
 
     let dims_text = text(dims)
         .size(11)
