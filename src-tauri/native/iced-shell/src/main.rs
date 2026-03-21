@@ -82,6 +82,7 @@ fn main() -> iced::Result {
     iced::application(boot, GodlyApp::update, GodlyApp::view)
         .title(GodlyApp::title)
         .subscription(GodlyApp::subscription)
+        .antialiasing(true)
         .font(fonts::REGULAR)
         .font(fonts::BOLD)
         .font(fonts::ITALIC)
