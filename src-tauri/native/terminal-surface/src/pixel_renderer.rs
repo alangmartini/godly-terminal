@@ -13,6 +13,9 @@ use crate::surface::GridPos;
 /// display via `iced::widget::image::Handle::from_rgba()`. The renderer
 /// caches rasterized glyphs in a `GlyphCache` and composites them with
 /// per-cell foreground/background colors, selection highlight, and cursor.
+///
+/// Character positions use fractional cell metrics (matching the canvas
+/// renderer and grid dimension calculation) to avoid spacing mismatches.
 pub struct PixelRenderer {
     buffer: Vec<u8>,
     width: u32,
@@ -44,18 +47,18 @@ impl PixelRenderer {
     ) -> (&[u8], u32, u32) {
         let cols = grid.dimensions.cols as u32;
         let rows = grid.dimensions.rows as u32;
-        let cell_w = metrics.cell_width.ceil() as u32;
-        let cell_h = metrics.cell_height.ceil() as u32;
+        let cell_w = metrics.cell_width;
+        let cell_h = metrics.cell_height;
 
-        if cols == 0 || rows == 0 || cell_w == 0 || cell_h == 0 {
+        if cols == 0 || rows == 0 || cell_w <= 0.0 || cell_h <= 0.0 {
             self.buffer.clear();
             self.width = 0;
             self.height = 0;
             return (&self.buffer, 0, 0);
         }
 
-        let w = cols * cell_w;
-        let h = rows * cell_h;
+        let w = (cols as f32 * cell_w).ceil() as u32;
+        let h = (rows as f32 * cell_h).ceil() as u32;
         let total = (w * h * 4) as usize;
 
         if self.width != w || self.height != h {
@@ -67,17 +70,22 @@ impl PixelRenderer {
         let bg_r = (default_bg.r * 255.0) as u8;
         let bg_g = (default_bg.g * 255.0) as u8;
         let bg_b = (default_bg.b * 255.0) as u8;
-        fill_solid(&mut self.buffer, w, h, bg_r, bg_g, bg_b, 255);
+        fill_solid(&mut self.buffer, bg_r, bg_g, bg_b, 255);
 
         for (row_idx, row) in grid.rows.iter().enumerate() {
+            let cell_y = (row_idx as f32 * cell_h).round() as i32;
+            let next_row_y = ((row_idx + 1) as f32 * cell_h).round() as i32;
+            let row_h = (next_row_y - cell_y) as u32;
+
             for (col_idx, cell) in row.cells.iter().enumerate() {
                 if cell.wide_continuation {
                     continue;
                 }
 
-                let cell_x = col_idx as u32 * cell_w;
-                let cell_y = row_idx as u32 * cell_h;
-                let char_width: u32 = if cell.wide { 2 } else { 1 };
+                let char_cols: u32 = if cell.wide { 2 } else { 1 };
+                let cell_x = (col_idx as f32 * cell_w).round() as i32;
+                let next_col_x = ((col_idx as u32 + char_cols) as f32 * cell_w).round() as i32;
+                let col_w = (next_col_x - cell_x) as u32;
 
                 let (mut fg, bg) = if cell.inverse {
                     (
@@ -112,8 +120,8 @@ impl PixelRenderer {
                         h,
                         cell_x,
                         cell_y,
-                        cell_w * char_width,
-                        cell_h,
+                        col_w,
+                        row_h,
                         cbg_r,
                         cbg_g,
                         cbg_b,
@@ -153,9 +161,9 @@ impl PixelRenderer {
                     }
                     let glyph_ref = cache.get(&key).unwrap();
 
-                    let glyph_x = cell_x as i32 + glyph_ref.bearing_x;
+                    let glyph_x = cell_x + glyph_ref.bearing_x;
                     let glyph_y =
-                        cell_y as i32 + (metrics.baseline_offset as i32 - glyph_ref.bearing_y);
+                        cell_y + (metrics.baseline_offset as i32 - glyph_ref.bearing_y);
 
                     blit_alpha(
                         &mut self.buffer,
@@ -171,14 +179,14 @@ impl PixelRenderer {
                 }
 
                 if cell.underline {
-                    let uy = cell_y + cell_h - 2;
+                    let uy = next_row_y - 2;
                     fill_rect(
                         &mut self.buffer,
                         w,
                         h,
                         cell_x,
                         uy,
-                        cell_w * char_width,
+                        col_w,
                         1,
                         fg_r,
                         fg_g,
@@ -199,34 +207,32 @@ impl PixelRenderer {
                 if row >= grid.rows.len() {
                     break;
                 }
-                let y = row as u32 * cell_h;
+                let y = (row as f32 * cell_h).round() as i32;
+                let next_y = ((row + 1) as f32 * cell_h).round() as i32;
+                let rh = (next_y - y) as u32;
                 let col_start = if row == start.row { start.col } else { 0 };
                 let col_end = if row == end.row {
                     end.col
                 } else {
                     grid.rows[row].cells.len().saturating_sub(1)
                 };
-                let x = col_start as u32 * cell_w;
-                let width = ((col_end - col_start + 1) as u32) * cell_w;
+                let x = (col_start as f32 * cell_w).round() as i32;
+                let x_end = ((col_end + 1) as f32 * cell_w).round() as i32;
+                let rw = (x_end - x) as u32;
                 blend_rect(
-                    &mut self.buffer,
-                    w,
-                    h,
-                    x,
-                    y,
-                    width,
-                    cell_h,
-                    sel_r,
-                    sel_g,
-                    sel_b,
-                    sel_a,
+                    &mut self.buffer, w, h, x, y, rw, rh,
+                    sel_r, sel_g, sel_b, sel_a,
                 );
             }
         }
 
         if !grid.cursor_hidden {
-            let cursor_x = grid.cursor.col as u32 * cell_w;
-            let cursor_y = grid.cursor.row as u32 * cell_h;
+            let cursor_x = (grid.cursor.col as f32 * cell_w).round() as i32;
+            let cursor_y = (grid.cursor.row as f32 * cell_h).round() as i32;
+            let next_cx = ((grid.cursor.col as f32 + 1.0) * cell_w).round() as i32;
+            let next_cy = ((grid.cursor.row as f32 + 1.0) * cell_h).round() as i32;
+            let cw = (next_cx - cursor_x) as u32;
+            let ch = (next_cy - cursor_y) as u32;
             let cur_r: u8 = 255;
             let cur_g: u8 = 255;
             let cur_b: u8 = 255;
@@ -235,50 +241,26 @@ impl PixelRenderer {
             match grid.cursor.cursor_style {
                 CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
                     blend_rect(
-                        &mut self.buffer,
-                        w,
-                        h,
-                        cursor_x,
-                        cursor_y,
-                        cell_w,
-                        cell_h,
-                        cur_r,
-                        cur_g,
-                        cur_b,
-                        cur_a,
+                        &mut self.buffer, w, h,
+                        cursor_x, cursor_y, cw, ch,
+                        cur_r, cur_g, cur_b, cur_a,
                     );
                 }
                 CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
                     let underline_h = 2u32;
-                    let uy = cursor_y + cell_h.saturating_sub(underline_h);
+                    let uy = next_cy - underline_h as i32;
                     blend_rect(
-                        &mut self.buffer,
-                        w,
-                        h,
-                        cursor_x,
-                        uy,
-                        cell_w,
-                        underline_h,
-                        cur_r,
-                        cur_g,
-                        cur_b,
-                        cur_a,
+                        &mut self.buffer, w, h,
+                        cursor_x, uy, cw, underline_h,
+                        cur_r, cur_g, cur_b, cur_a,
                     );
                 }
                 CursorShape::BlinkBar | CursorShape::SteadyBar => {
                     let bar_w = 2u32;
                     blend_rect(
-                        &mut self.buffer,
-                        w,
-                        h,
-                        cursor_x,
-                        cursor_y,
-                        bar_w,
-                        cell_h,
-                        cur_r,
-                        cur_g,
-                        cur_b,
-                        cur_a,
+                        &mut self.buffer, w, h,
+                        cursor_x, cursor_y, bar_w, ch,
+                        cur_r, cur_g, cur_b, cur_a,
                     );
                 }
             }
@@ -289,20 +271,21 @@ impl PixelRenderer {
 }
 
 /// Fill the entire buffer with a solid color.
-fn fill_solid(buf: &mut [u8], _w: u32, _h: u32, r: u8, g: u8, b: u8, a: u8) {
+fn fill_solid(buf: &mut [u8], r: u8, g: u8, b: u8, a: u8) {
     let pixel = [r, g, b, a];
     for chunk in buf.chunks_exact_mut(4) {
         chunk.copy_from_slice(&pixel);
     }
 }
 
-/// Fill a rectangle with a solid color.
+/// Fill a rectangle with a solid color. Coordinates are i32 to support
+/// fractional cell positioning that may round to negative values at edges.
 fn fill_rect(
     buf: &mut [u8],
     buf_w: u32,
     buf_h: u32,
-    x: u32,
-    y: u32,
+    x: i32,
+    y: i32,
     w: u32,
     h: u32,
     r: u8,
@@ -310,10 +293,12 @@ fn fill_rect(
     b: u8,
     a: u8,
 ) {
-    let x_end = (x + w).min(buf_w);
-    let y_end = (y + h).min(buf_h);
-    for py in y..y_end {
-        for px in x..x_end {
+    let x0 = x.max(0) as u32;
+    let y0 = y.max(0) as u32;
+    let x_end = ((x as i64 + w as i64) as u32).min(buf_w);
+    let y_end = ((y as i64 + h as i64) as u32).min(buf_h);
+    for py in y0..y_end {
+        for px in x0..x_end {
             let idx = ((py * buf_w + px) * 4) as usize;
             if idx + 3 < buf.len() {
                 buf[idx] = r;
@@ -330,8 +315,8 @@ fn blend_rect(
     buf: &mut [u8],
     buf_w: u32,
     buf_h: u32,
-    x: u32,
-    y: u32,
+    x: i32,
+    y: i32,
     w: u32,
     h: u32,
     r: u8,
@@ -339,12 +324,14 @@ fn blend_rect(
     b: u8,
     a: u8,
 ) {
-    let x_end = (x + w).min(buf_w);
-    let y_end = (y + h).min(buf_h);
+    let x0 = x.max(0) as u32;
+    let y0 = y.max(0) as u32;
+    let x_end = ((x as i64 + w as i64) as u32).min(buf_w);
+    let y_end = ((y as i64 + h as i64) as u32).min(buf_h);
     let src_a = a as u16;
     let inv_a = 255 - src_a;
-    for py in y..y_end {
-        for px in x..x_end {
+    for py in y0..y_end {
+        for px in x0..x_end {
             let idx = ((py * buf_w + px) * 4) as usize;
             if idx + 3 < buf.len() {
                 buf[idx] = ((r as u16 * src_a + buf[idx] as u16 * inv_a) / 255) as u8;
@@ -502,10 +489,11 @@ mod tests {
             None,
         );
 
-        let cell_w = metrics.cell_width.ceil() as u32;
-        let cell_h = metrics.cell_height.ceil() as u32;
-        assert_eq!(w, cell_w);
-        assert_eq!(h, cell_h);
+        // Buffer size derived from fractional metrics: ceil(1 * cell_w) x ceil(1 * cell_h)
+        let expected_w = metrics.cell_width.ceil() as u32;
+        let expected_h = metrics.cell_height.ceil() as u32;
+        assert_eq!(w, expected_w);
+        assert_eq!(h, expected_h);
         assert_eq!(buf.len(), (w * h * 4) as usize);
     }
 
@@ -540,14 +528,12 @@ mod tests {
 
         fill_rect(&mut buf, w, h, 1, 1, 2, 2, 255, 0, 0, 255);
 
-        // Check pixel at (1,1) is red
         let idx = ((1 * w + 1) * 4) as usize;
         assert_eq!(buf[idx], 255);
         assert_eq!(buf[idx + 1], 0);
         assert_eq!(buf[idx + 2], 0);
         assert_eq!(buf[idx + 3], 255);
 
-        // Check pixel at (0,0) is still black
         assert_eq!(buf[0], 0);
         assert_eq!(buf[1], 0);
         assert_eq!(buf[2], 0);
@@ -560,8 +546,7 @@ mod tests {
         let h = 4u32;
         let mut buf = vec![0u8; (w * h * 4) as usize];
 
-        // Fill background white
-        fill_solid(&mut buf, w, h, 255, 255, 255, 255);
+        fill_solid(&mut buf, 255, 255, 255, 255);
 
         let glyph = CachedGlyph {
             alpha: vec![128; 4], // 2x2, 50% alpha
@@ -572,20 +557,14 @@ mod tests {
             advance: 8.0,
         };
 
-        // Blit red glyph at (1,1)
         blit_alpha(&mut buf, w, h, &glyph, 1, 1, 255, 0, 0);
 
-        // Pixel at (1,1): blend red (128/255 ~ 50%) over white
         let idx = ((1 * w + 1) * 4) as usize;
-        // Expected R: (255 * 128 + 255 * 127) / 255 = 255
-        // Expected G: (0 * 128 + 255 * 127) / 255 ≈ 127
-        // Expected B: (0 * 128 + 255 * 127) / 255 ≈ 127
         assert_eq!(buf[idx], 255); // R
         assert!((buf[idx + 1] as i32 - 127).abs() <= 1); // G
         assert!((buf[idx + 2] as i32 - 127).abs() <= 1); // B
         assert_eq!(buf[idx + 3], 255); // A
 
-        // Pixel at (0,0) should still be pure white
         assert_eq!(buf[0], 255);
         assert_eq!(buf[1], 255);
         assert_eq!(buf[2], 255);
@@ -611,7 +590,28 @@ mod tests {
             None,
         );
 
-        // 'A' and 'B' should both be cached
         assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn fractional_positioning_matches_grid_extent() {
+        // Verify buffer width = ceil(cols * cell_w), not cols * ceil(cell_w)
+        let grid = make_grid(2, 10, vec![
+            vec![make_cell(" "); 10],
+            vec![make_cell(" "); 10],
+        ]);
+        let metrics = FontMetrics::from_font_size(14.0); // cell_w=8.4
+        let mut cache = GlyphCache::new();
+        let mut rast = StubRasterizer;
+        let mut renderer = PixelRenderer::new();
+
+        let (_, w, _) = renderer.render(
+            &grid, &metrics, &mut cache, &mut rast,
+            Color::WHITE, Color::BLACK, None,
+        );
+
+        // ceil(10 * 8.4) = ceil(84.0) = 84, NOT 10 * ceil(8.4) = 10 * 9 = 90
+        let expected = (10.0_f32 * metrics.cell_width).ceil() as u32;
+        assert_eq!(w, expected);
     }
 }
