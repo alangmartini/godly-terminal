@@ -438,6 +438,7 @@ pub struct GodlyApp {
     quick_claude_launch: Option<crate::quick_claude::LaunchState>,
     // --- Quick Claude Dialog (modal) ---
     quick_claude_dialog: Option<crate::quick_claude_dialog::QuickClaudeDialogState>,
+    quick_claude_prefs: crate::quick_claude_dialog::QuickClaudePreferences,
     // --- G1/G2: Terminal Context Menu ---
     terminal_context_menu_pos: Option<(f32, f32)>,
     terminal_context_menu_terminal_id: Option<String>,
@@ -553,6 +554,7 @@ impl Default for GodlyApp {
             workspace_ai_modes: HashMap::new(),
             quick_claude_launch: None,
             quick_claude_dialog: None,
+            quick_claude_prefs: crate::quick_claude_dialog::QuickClaudePreferences::default(),
             terminal_context_menu_pos: None,
             terminal_context_menu_terminal_id: None,
             hovered_url: None,
@@ -776,6 +778,8 @@ pub enum Message {
     QuickClaudeDialogModeSelected(String),
     /// Toggle mode dropdown in Quick Claude dialog.
     QuickClaudeDialogModeDropdownToggle,
+    /// Models discovered from claude CLI.
+    QuickClaudeDialogModelsLoaded(Vec<(String, String)>),
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
     /// AI tool command input changed.
@@ -2299,10 +2303,14 @@ impl GodlyApp {
                     .map(|ws| (ws.id.clone(), ws.name.clone()))
                     .collect();
                 self.quick_claude_dialog = Some(
-                    crate::quick_claude_dialog::QuickClaudeDialogState::new(ws_id, ws_list),
+                    crate::quick_claude_dialog::QuickClaudeDialogState::new(
+                        ws_id,
+                        ws_list,
+                        &self.quick_claude_prefs,
+                    ),
                 );
 
-                // Load skills and sessions asynchronously
+                // Load skills, sessions, and models asynchronously
                 let ws_folder: Option<String> = self
                     .workspaces
                     .active()
@@ -2326,7 +2334,13 @@ impl GodlyApp {
                     },
                     Message::QuickClaudeDialogSessionsLoaded,
                 );
-                return iced::Task::batch([skills_task, sessions_task]);
+                let models_task = iced::Task::perform(
+                    async move {
+                        crate::quick_claude_dialog::discover_models()
+                    },
+                    Message::QuickClaudeDialogModelsLoaded,
+                );
+                return iced::Task::batch([skills_task, sessions_task, models_task]);
             }
             Message::QuickClaudeDialogClose => {
                 self.quick_claude_dialog = None;
@@ -2423,6 +2437,8 @@ impl GodlyApp {
                 let Some(dlg) = self.quick_claude_dialog.take() else {
                     return Task::none();
                 };
+                // Save preferences for next dialog open
+                self.quick_claude_prefs = dlg.to_preferences();
                 let prompt = dlg.prompt_text();
                 let prompt = prompt.trim();
                 let model = dlg.selected_model.clone();
@@ -2515,6 +2531,13 @@ impl GodlyApp {
                     dlg.selected_session = Some(index);
                 }
             }
+            Message::QuickClaudeDialogModelsLoaded(models) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    if !models.is_empty() {
+                        dlg.available_models = models;
+                    }
+                }
+            }
             Message::QuickClaudeDialogSessionsLoaded(sessions) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.sessions = sessions;
@@ -2527,6 +2550,8 @@ impl GodlyApp {
                 let Some(dlg) = self.quick_claude_dialog.take() else {
                     return Task::none();
                 };
+                // Save preferences for next dialog open
+                self.quick_claude_prefs = dlg.to_preferences();
                 let Some(selected_idx) = dlg.selected_session else {
                     return Task::none();
                 };
@@ -7098,9 +7123,7 @@ impl GodlyApp {
             }
             Err(e) => {
                 log::error!("Quick Claude launch step failed: {}", e);
-                if let Some(launch) = &mut self.quick_claude_launch {
-                    launch.error = Some(e);
-                }
+                self.quick_claude_launch = None;
                 Task::none()
             }
         }
