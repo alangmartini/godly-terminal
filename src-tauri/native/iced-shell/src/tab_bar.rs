@@ -403,6 +403,7 @@ mod tests {
             total_scrollback: 0,
             workspace_id: None,
             custom_name: None,
+            worktree_path: None,
         }
     }
 

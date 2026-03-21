@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,9 @@ pub struct PersistedSessionState {
     pub active_workspace_id: Option<String>,
     pub active_terminal_id: Option<String>,
     pub workspaces: Vec<PersistedWorkspaceState>,
+    /// Worktree paths associated with terminal sessions (terminal_id → worktree_path).
+    #[serde(default)]
+    pub terminal_worktree_paths: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -67,6 +70,8 @@ pub struct MergedSessionState {
     pub active_terminal_id: Option<String>,
     pub workspaces: Vec<MergedWorkspaceState>,
     pub missing_live_terminal_ids: Vec<String>,
+    /// Worktree paths for terminals that survived the merge.
+    pub terminal_worktree_paths: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -330,6 +335,14 @@ pub fn merge_with_live_sessions(
         .cloned()
         .collect();
 
+    // Filter worktree paths to only include live terminals.
+    let terminal_worktree_paths: HashMap<String, String> = persisted
+        .terminal_worktree_paths
+        .iter()
+        .filter(|(id, _)| live_terminal_ids.contains(id.as_str()))
+        .map(|(id, path)| (id.clone(), path.clone()))
+        .collect();
+
     MergedSessionState {
         sidebar_visible: persisted.sidebar_visible,
         settings_open: persisted.settings_open,
@@ -341,6 +354,7 @@ pub fn merge_with_live_sessions(
         active_terminal_id,
         workspaces,
         missing_live_terminal_ids,
+        terminal_worktree_paths,
     }
 }
 
@@ -380,6 +394,7 @@ mod tests {
             next_workspace_num: 4,
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-2".to_string()),
+            terminal_worktree_paths: HashMap::new(),
             workspaces: vec![PersistedWorkspaceState {
                 id: "w-1".to_string(),
                 name: "Workspace 1".to_string(),
@@ -417,6 +432,7 @@ mod tests {
             next_workspace_num: 8,
             active_workspace_id: Some("w-2".to_string()),
             active_terminal_id: Some("t-3".to_string()),
+            terminal_worktree_paths: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-1".to_string(),
@@ -555,6 +571,7 @@ mod tests {
             next_workspace_num: 2,
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
             workspaces: vec![PersistedWorkspaceState {
                 id: "w-1".to_string(),
                 name: "Main".to_string(),
@@ -640,6 +657,7 @@ mod tests {
             next_workspace_num: 4,
             active_workspace_id: Some("w-dev".to_string()),
             active_terminal_id: Some("t-old-3".to_string()),
+            terminal_worktree_paths: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-default".to_string(),
@@ -743,6 +761,7 @@ mod tests {
             next_workspace_num: 3,
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-old-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-1".to_string(),

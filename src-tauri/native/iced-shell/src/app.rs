@@ -421,6 +421,8 @@ pub struct GodlyApp {
     tab_drag_start_pos: Option<Point>,
     /// Ctrl+Tab MRU switcher popup state while modifier is held.
     mru_switcher: Option<MruSwitcherState>,
+    // --- Worktree Mode ---
+    worktree_close_pending: Option<String>,
     // --- K2/K3: Quit Confirmation + Copy Preview ---
     quit_confirm_pending: bool,
     copy_preview_text: Option<String>,
@@ -541,6 +543,7 @@ impl Default for GodlyApp {
             dragging_tab_id: None,
             tab_drag_start_pos: None,
             mru_switcher: None,
+            worktree_close_pending: None,
             quit_confirm_pending: false,
             copy_preview_text: None,
             active_theme: crate::theme::ThemeId::Dusk,
@@ -878,6 +881,23 @@ pub enum Message {
     CopyPreviewShow(String),
     CopyPreviewConfirmed,
     CopyPreviewDismissed,
+    // --- Worktree Mode ---
+    /// A worktree was successfully created for a new terminal.
+    WorktreeCreated {
+        session_id: String,
+        worktree_path: String,
+    },
+    /// User confirmed worktree cleanup on terminal close.
+    WorktreeCloseConfirmed { session_id: String },
+    /// User chose to keep worktree on terminal close.
+    WorktreeCloseKeep { session_id: String },
+    /// Background worktree removal completed.
+    WorktreeRemoved {
+        session_id: String,
+        result: Result<(), String>,
+    },
+    /// Dismiss the worktree close dialog without closing.
+    WorktreeCloseCancelled,
     // --- F1-F4: Theme System ---
     ThemeChanged(crate::theme::ThemeId),
     // --- F5: Custom Theme Import/Export ---
@@ -1273,6 +1293,7 @@ impl GodlyApp {
         self.dragging_tab_id = None;
         self.tab_drag_start_pos = None;
         self.mru_switcher = None;
+        self.worktree_close_pending = None;
         self.quit_confirm_pending = false;
         self.copy_preview_text = None;
         self.terminal_context_menu_pos = None;
@@ -1303,6 +1324,15 @@ impl GodlyApp {
                     worktree_mode: workspace.worktree_mode,
                     focused_terminal: workspace.focused_terminal.clone(),
                     layout: session_persistence::PersistedLayoutNode::from_layout(&workspace.layout),
+                })
+                .collect(),
+            terminal_worktree_paths: self
+                .terminals
+                .iter()
+                .filter_map(|t| {
+                    t.worktree_path
+                        .as_ref()
+                        .map(|path| (t.id.clone(), path.clone()))
                 })
                 .collect(),
         }
@@ -1836,76 +1866,10 @@ impl GodlyApp {
                 return self.close_terminal(&id);
             }
             Message::TerminalCreated(Ok(session_id)) => {
-                let ws_id = self.workspaces.active_id().map(str::to_string);
-                let in_layout = self
-                    .active_layout()
-                    .map(|layout| layout.find_leaf(&session_id))
-                    .unwrap_or(false);
-                let decision =
-                    tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
-                        session_id,
-                        active_workspace_id: ws_id.clone(),
-                        terminal_in_active_layout: in_layout,
-                    });
-                if let Some(workspace_mutation) = decision.workspace_mutation {
-                    if let Some(ws) = self.workspaces.active_mut() {
-                        match workspace_mutation {
-                            tab_reducer::WorkspaceTerminalMutation::FocusTerminal => {
-                                ws.focused_terminal = decision.session_id.clone();
-                            }
-                            tab_reducer::WorkspaceTerminalMutation::ResetLayoutToSingleTerminal => {
-                                ws.layout = LayoutNode::Leaf {
-                                    terminal_id: decision.session_id.clone(),
-                                };
-                                ws.focused_terminal = decision.session_id.clone();
-                            }
-                        }
-                    }
-                }
-                let (rows, cols) = self.terminal_grid_size(Some(decision.session_id.as_str()));
-                if let Some(ws_id) = &decision.assign_workspace_id {
-                    self.terminals.add_to_workspace(
-                        decision.session_id.clone(),
-                        rows,
-                        cols,
-                        ws_id.clone(),
-                    );
-                } else {
-                    self.terminals.add(decision.session_id.clone(), rows, cols);
-                }
-
-                if decision.set_terminal_active {
-                    self.terminals.set_active(&decision.session_id);
-                }
-                // Start tab entry animation.
-                self.entering_tabs
-                    .insert(decision.session_id.clone(), Self::now_ms());
-
-                // Auto-launch AI tool if workspace has a mode set.
-                if let Some(ws_id) = &ws_id {
-                    if let Some(client) = &self.client {
-                        let cmd = match self.workspace_ai_modes.get(ws_id) {
-                            Some(AiToolMode::Claude) => Some("claude\r"),
-                            Some(AiToolMode::Codex) => Some("codex\r"),
-                            Some(AiToolMode::Both) => Some("claude\r"),
-                            Some(AiToolMode::None) | None => None,
-                        };
-                        if let Some(cmd) = cmd {
-                            if let Err(e) = commands::write_to_terminal(
-                                client,
-                                &decision.session_id,
-                                cmd.as_bytes(),
-                            ) {
-                                log::warn!("Failed to auto-launch AI tool: {e}");
-                            }
-                        }
-                    }
-                }
-
-                return self.fetch_grid(&decision.fetch_grid_terminal_id);
+                return self.handle_terminal_created(Ok(session_id));
             }
             Message::TerminalCreated(Err(e)) => {
-                log::error!("Failed to create terminal: {}", e);
+                return self.handle_terminal_created(Err(e));
             }
 
             Message::WindowOpened(window_id) => {
@@ -3092,6 +3056,48 @@ impl GodlyApp {
             Message::CopyPreviewDismissed => {
                 self.copy_preview_text = None;
             }
+            // --- Worktree Mode ---
+            Message::WorktreeCreated { session_id, worktree_path } => {
+                self.terminals.set_worktree_path(&session_id, worktree_path);
+                return self.handle_terminal_created(Ok(session_id));
+            }
+            Message::WorktreeCloseConfirmed { session_id } => {
+                self.worktree_close_pending = None;
+                let worktree_path = self.terminals.get(&session_id)
+                    .and_then(|t| t.worktree_path.clone());
+                let repo_root = self.workspaces.active()
+                    .map(|ws| ws.folder_path.clone());
+                let close_task = self.close_terminal_immediate(&session_id);
+                if let (Some(wt_path), Some(root)) = (worktree_path, repo_root) {
+                    let sid = session_id.clone();
+                    let remove_task = Task::perform(
+                        async move {
+                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                            std::thread::spawn(move || {
+                                let result = crate::git_worktree::remove_worktree(&root, &wt_path);
+                                let _ = tx.send(result);
+                            });
+                            rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                        },
+                        move |result| Message::WorktreeRemoved { session_id: sid, result },
+                    );
+                    return Task::batch([close_task, remove_task]);
+                }
+                return close_task;
+            }
+            Message::WorktreeCloseKeep { session_id } => {
+                self.worktree_close_pending = None;
+                return self.close_terminal_immediate(&session_id);
+            }
+            Message::WorktreeRemoved { session_id, result } => {
+                match result {
+                    Ok(()) => log::info!("Worktree cleaned up for session {session_id}"),
+                    Err(ref e) => log::warn!("Failed to remove worktree for {session_id}: {e}"),
+                }
+            }
+            Message::WorktreeCloseCancelled => {
+                self.worktree_close_pending = None;
+            }
             Message::ThemeChanged(id) => {
                 self.active_theme = id;
                 self.active_custom_theme_id = None;
@@ -3730,9 +3736,31 @@ impl GodlyApp {
             with_tab_rename
         };
 
-        let with_copy_preview: Element<'_, Message> = if let Some(ref preview_text) = self.copy_preview_text {
+        let with_worktree_close: Element<'_, Message> = if let Some(ref pending_id) = self.worktree_close_pending {
+            let worktree_path = self
+                .terminals
+                .get(pending_id)
+                .and_then(|t| t.worktree_path.as_deref())
+                .unwrap_or("unknown");
+            let pid1 = pending_id.clone();
+            let pid2 = pending_id.clone();
             stack![
                 with_quit,
+                crate::confirm_dialog::view_worktree_close_confirm(
+                    worktree_path,
+                    Message::WorktreeCloseConfirmed { session_id: pid1 },
+                    Message::WorktreeCloseKeep { session_id: pid2 },
+                    Message::WorktreeCloseCancelled,
+                )
+            ]
+            .into()
+        } else {
+            with_quit
+        };
+
+        let with_copy_preview: Element<'_, Message> = if let Some(ref preview_text) = self.copy_preview_text {
+            stack![
+                with_worktree_close,
                 crate::confirm_dialog::view_copy_preview(
                     preview_text,
                     preview_text.len(),
@@ -3742,7 +3770,7 @@ impl GodlyApp {
             ]
             .into()
         } else {
-            with_quit
+            with_worktree_close
         };
 
         // Shell picker overlay (H1-H6)
@@ -5997,6 +6025,9 @@ impl GodlyApp {
                 let mut assigned_terminal_ids = HashSet::new();
 
                 if let Some(merged) = merged_session_state {
+                    // Restore worktree paths for surviving terminals.
+                    let worktree_paths = merged.terminal_worktree_paths.clone();
+
                     // Collect workspaces that lost all their terminals (e.g. after reinstall).
                     // They'll be filled from the missing_live_terminal_ids pool below.
                     let mut empty_workspaces: Vec<session_persistence::MergedWorkspaceState> =
@@ -6163,6 +6194,11 @@ impl GodlyApp {
                         self.last_test_terminal_id = Some(active_terminal_id);
                     } else if let Some(active_workspace) = self.workspaces.active() {
                         self.terminals.set_active(&active_workspace.focused_terminal);
+                    }
+
+                    // Apply persisted worktree paths to restored terminals.
+                    for (terminal_id, path) in worktree_paths {
+                        self.terminals.set_worktree_path(&terminal_id, path);
                     }
                 }
 
@@ -6361,18 +6397,23 @@ impl GodlyApp {
     }
 
     fn create_new_terminal(&self) -> Task<Message> {
-        let cwd = self
-            .workspaces
-            .active()
-            .map(|ws| ws.folder_path.clone());
-        self.create_terminal_task_with_cwd(uuid::Uuid::new_v4().to_string(), cwd)
+        let session_id = uuid::Uuid::new_v4().to_string();
+        if let Some(ws) = self.workspaces.active() {
+            if ws.worktree_mode {
+                return self.create_terminal_task_with_worktree(session_id, ws.folder_path.clone());
+            }
+        }
+        let cwd = self.workspaces.active().map(|ws| ws.folder_path.clone());
+        self.create_terminal_task_with_cwd(session_id, cwd)
     }
 
     fn create_terminal_task(&self, session_id: String) -> Task<Message> {
-        let cwd = self
-            .workspaces
-            .active()
-            .map(|ws| ws.folder_path.clone());
+        if let Some(ws) = self.workspaces.active() {
+            if ws.worktree_mode {
+                return self.create_terminal_task_with_worktree(session_id, ws.folder_path.clone());
+            }
+        }
+        let cwd = self.workspaces.active().map(|ws| ws.folder_path.clone());
         self.create_terminal_task_with_cwd(session_id, cwd)
     }
 
@@ -6409,6 +6450,84 @@ impl GodlyApp {
                     .unwrap_or_else(|_| Err("Background thread panicked".into()))
             },
             Message::TerminalCreated,
+        )
+    }
+
+    fn create_terminal_task_with_worktree(
+        &self,
+        session_id: String,
+        repo_folder: String,
+    ) -> Task<Message> {
+        let Some(client) = &self.client else {
+            return Task::done(Message::TerminalCreated(Err(
+                "No daemon connection".to_string(),
+            )));
+        };
+        let client = Arc::clone(client);
+        let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
+
+        Task::perform(
+            async move {
+                let (tx, rx) =
+                    futures_channel::oneshot::channel::<Result<(String, Option<String>), String>>();
+                std::thread::spawn(move || {
+                    // Check if it's a git repo.
+                    if !crate::git_worktree::is_git_repo(&repo_folder) {
+                        log::warn!("Worktree mode enabled but not a git repo: {repo_folder}");
+                        let result = commands::create_terminal(
+                            &client,
+                            &session_id,
+                            godly_protocol::ShellType::Windows,
+                            Some(&repo_folder),
+                            rows,
+                            cols,
+                        )
+                        .map(|_| (session_id, None::<String>));
+                        let _ = tx.send(result);
+                        return;
+                    }
+
+                    // Create worktree in detached HEAD.
+                    let dir_name = crate::git_worktree::generate_worktree_dir_name();
+                    match crate::git_worktree::create_worktree(&repo_folder, &dir_name) {
+                        Ok(worktree_path) => {
+                            let result = commands::create_terminal(
+                                &client,
+                                &session_id,
+                                godly_protocol::ShellType::Windows,
+                                Some(&worktree_path),
+                                rows,
+                                cols,
+                            )
+                            .map(|_| (session_id, Some(worktree_path)));
+                            let _ = tx.send(result);
+                        }
+                        Err(e) => {
+                            log::warn!("Worktree creation failed, falling back: {e}");
+                            let result = commands::create_terminal(
+                                &client,
+                                &session_id,
+                                godly_protocol::ShellType::Windows,
+                                Some(&repo_folder),
+                                rows,
+                                cols,
+                            )
+                            .map(|_| (session_id, None::<String>));
+                            let _ = tx.send(result);
+                        }
+                    }
+                });
+                rx.await
+                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
+            },
+            |result| match result {
+                Ok((session_id, Some(worktree_path))) => Message::WorktreeCreated {
+                    session_id,
+                    worktree_path,
+                },
+                Ok((session_id, None)) => Message::TerminalCreated(Ok(session_id)),
+                Err(e) => Message::TerminalCreated(Err(e)),
+            },
         )
     }
 
@@ -6559,6 +6678,17 @@ impl GodlyApp {
     }
 
     pub(crate) fn close_terminal(&mut self, session_id: &str) -> Task<Message> {
+        // If this terminal has a worktree, show confirmation dialog.
+        if let Some(term) = self.terminals.get(session_id) {
+            if term.worktree_path.is_some() {
+                self.worktree_close_pending = Some(session_id.to_string());
+                return Task::none();
+            }
+        }
+        self.close_terminal_immediate(session_id)
+    }
+
+    fn close_terminal_immediate(&mut self, session_id: &str) -> Task<Message> {
         if self.dragging_tab_id.as_deref() == Some(session_id) {
             self.dragging_tab_id = None;
             self.tab_drag_start_pos = None;
@@ -6618,6 +6748,84 @@ impl GodlyApp {
         }
 
         Task::none()
+    }
+
+    fn handle_terminal_created(&mut self, result: Result<String, String>) -> Task<Message> {
+        match result {
+            Ok(session_id) => {
+                let ws_id = self.workspaces.active_id().map(str::to_string);
+                let in_layout = self
+                    .active_layout()
+                    .map(|layout| layout.find_leaf(&session_id))
+                    .unwrap_or(false);
+                let decision =
+                    tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
+                        session_id,
+                        active_workspace_id: ws_id.clone(),
+                        terminal_in_active_layout: in_layout,
+                    });
+                if let Some(workspace_mutation) = decision.workspace_mutation {
+                    if let Some(ws) = self.workspaces.active_mut() {
+                        match workspace_mutation {
+                            tab_reducer::WorkspaceTerminalMutation::FocusTerminal => {
+                                ws.focused_terminal = decision.session_id.clone();
+                            }
+                            tab_reducer::WorkspaceTerminalMutation::ResetLayoutToSingleTerminal => {
+                                ws.layout = LayoutNode::Leaf {
+                                    terminal_id: decision.session_id.clone(),
+                                };
+                                ws.focused_terminal = decision.session_id.clone();
+                            }
+                        }
+                    }
+                }
+                let (rows, cols) = self.terminal_grid_size(Some(decision.session_id.as_str()));
+                if let Some(ws_id) = &decision.assign_workspace_id {
+                    self.terminals.add_to_workspace(
+                        decision.session_id.clone(),
+                        rows,
+                        cols,
+                        ws_id.clone(),
+                    );
+                } else {
+                    self.terminals.add(decision.session_id.clone(), rows, cols);
+                }
+
+                if decision.set_terminal_active {
+                    self.terminals.set_active(&decision.session_id);
+                }
+                // Start tab entry animation.
+                self.entering_tabs
+                    .insert(decision.session_id.clone(), Self::now_ms());
+
+                // Auto-launch AI tool if workspace has a mode set.
+                if let Some(ws_id) = &ws_id {
+                    if let Some(client) = &self.client {
+                        let cmd = match self.workspace_ai_modes.get(ws_id) {
+                            Some(AiToolMode::Claude) => Some("claude\r"),
+                            Some(AiToolMode::Codex) => Some("codex\r"),
+                            Some(AiToolMode::Both) => Some("claude\r"),
+                            Some(AiToolMode::None) | None => None,
+                        };
+                        if let Some(cmd) = cmd {
+                            if let Err(e) = commands::write_to_terminal(
+                                client,
+                                &decision.session_id,
+                                cmd.as_bytes(),
+                            ) {
+                                log::warn!("Failed to auto-launch AI tool: {e}");
+                            }
+                        }
+                    }
+                }
+
+                self.fetch_grid(&decision.fetch_grid_terminal_id)
+            }
+            Err(e) => {
+                log::error!("Failed to create terminal: {}", e);
+                Task::none()
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
