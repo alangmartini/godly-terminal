@@ -39,6 +39,51 @@ impl FontMetrics {
             baseline_offset,
         }
     }
+
+    /// Create font metrics by measuring the actual font file via swash.
+    ///
+    /// Reads ascent, descent, and leading from the font's OS/2 and hhea tables,
+    /// and measures the advance width of the '0' glyph for the cell width.
+    /// Falls back to [`from_font_size`](Self::from_font_size) if the font
+    /// data cannot be parsed.
+    pub fn from_font_bytes(font_size: f32, font_data: &[u8]) -> Self {
+        let font = match swash::FontRef::from_index(font_data, 0) {
+            Some(f) => f,
+            None => return Self::from_font_size(font_size),
+        };
+
+        let metrics = font.metrics(&[]);
+        let upem = metrics.units_per_em as f32;
+        if upem == 0.0 {
+            return Self::from_font_size(font_size);
+        }
+
+        let scale = font_size / upem;
+        let ascent = metrics.ascent * scale;
+        let descent = metrics.descent.abs() * scale;
+        let leading = metrics.leading * scale;
+
+        let cell_height = ascent + descent + leading;
+        let baseline_offset = ascent;
+
+        // Measure advance width of '0' for cell width
+        let charmap = font.charmap();
+        let glyph_id = charmap.map('0');
+        let glyph_metrics = font.glyph_metrics(&[]).scale(font_size);
+        let cell_width = glyph_metrics.advance_width(glyph_id);
+
+        // Sanity check: if measurements look unreasonable, fall back
+        if cell_width <= 0.0 || cell_height <= 0.0 || baseline_offset <= 0.0 {
+            return Self::from_font_size(font_size);
+        }
+
+        Self {
+            cell_width,
+            cell_height,
+            font_size,
+            baseline_offset,
+        }
+    }
 }
 
 impl Default for FontMetrics {
@@ -112,5 +157,57 @@ mod tests {
                 size
             );
         }
+    }
+
+    /// Geist Mono Regular font bytes for testing measured metrics.
+    const GEIST_MONO: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
+
+    #[test]
+    fn from_font_bytes_cell_width_positive_and_less_than_font_size() {
+        for size in [12.0, 14.0, 16.0, 20.0] {
+            let m = FontMetrics::from_font_bytes(size, GEIST_MONO);
+            assert!(
+                m.cell_width > 0.0 && m.cell_width < size,
+                "cell_width ({}) should be > 0 and < font_size ({}) for monospace",
+                m.cell_width,
+                size,
+            );
+        }
+    }
+
+    #[test]
+    fn from_font_bytes_cell_height_greater_than_width() {
+        let m = FontMetrics::from_font_bytes(14.0, GEIST_MONO);
+        assert!(
+            m.cell_height > m.cell_width,
+            "cell_height ({}) should be > cell_width ({}) for monospace",
+            m.cell_height,
+            m.cell_width,
+        );
+    }
+
+    #[test]
+    fn from_font_bytes_baseline_within_cell() {
+        let m = FontMetrics::from_font_bytes(14.0, GEIST_MONO);
+        assert!(
+            m.baseline_offset > 0.0 && m.baseline_offset < m.cell_height,
+            "baseline_offset ({}) should be within (0, {})",
+            m.baseline_offset,
+            m.cell_height,
+        );
+    }
+
+    #[test]
+    fn from_font_bytes_invalid_data_falls_back() {
+        let m = FontMetrics::from_font_bytes(14.0, b"not a font");
+        let fallback = FontMetrics::from_font_size(14.0);
+        assert_eq!(m, fallback, "invalid font data should fall back to heuristic");
+    }
+
+    #[test]
+    fn from_font_bytes_empty_data_falls_back() {
+        let m = FontMetrics::from_font_bytes(14.0, &[]);
+        let fallback = FontMetrics::from_font_size(14.0);
+        assert_eq!(m, fallback, "empty font data should fall back to heuristic");
     }
 }
