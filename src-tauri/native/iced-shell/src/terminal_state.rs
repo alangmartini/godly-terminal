@@ -24,6 +24,8 @@ pub struct TerminalInfo {
     pub workspace_id: Option<String>,
     /// User-assigned custom name (overrides title/process_name in tab label).
     pub custom_name: Option<String>,
+    /// Path to a git worktree created for this terminal (None = normal terminal).
+    pub worktree_path: Option<String>,
 }
 
 impl TerminalInfo {
@@ -360,6 +362,7 @@ impl TerminalCollection {
                 total_scrollback: 0,
                 workspace_id,
                 custom_name: None,
+                worktree_path: None,
             },
         );
         if self.tabs.active_id() == Some(id.as_str()) {
@@ -377,6 +380,13 @@ impl TerminalCollection {
     pub fn rename(&mut self, id: &str, name: Option<String>) {
         if let Some(term) = self.get_mut(id) {
             term.custom_name = name;
+        }
+    }
+
+    /// Set the worktree path for a terminal.
+    pub fn set_worktree_path(&mut self, id: &str, path: String) {
+        if let Some(term) = self.get_mut(id) {
+            term.worktree_path = Some(path);
         }
     }
 

@@ -30,6 +30,7 @@ pub mod terminal_context_menu;
 pub mod whisper_ui;
 pub mod quick_claude_dialog;
 pub mod font_enumerator;
+pub mod git_worktree;
 
 #[cfg(test)]
 pub mod testing;

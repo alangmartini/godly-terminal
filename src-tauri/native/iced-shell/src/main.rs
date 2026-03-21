@@ -49,6 +49,7 @@ mod quick_claude;
 mod quick_claude_dialog;
 mod session_persistence;
 mod font_enumerator;
+mod git_worktree;
 mod keybinding_persistence;
 
 use app::{GodlyApp, Message};
