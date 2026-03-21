@@ -3,7 +3,7 @@ use std::f32::consts::TAU;
 use iced::widget::{
     button, canvas, column, container, mouse_area, row, rule, scrollable, text, Space,
 };
-use iced::{Border, Color, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
+use iced::{Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::theme::{
     ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
@@ -226,6 +226,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     active_id: Option<&str>,
     workspace_signals: S,
     sidebar_width: f32,
+    font: Font,
     on_action: impl Fn(SidebarAction) -> M + 'a,
     on_resize_start: M,
     on_resize_end: M,
@@ -243,7 +244,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
         let row_text = TEXT_PRIMARY();
 
-        let name_label = text(&ws.name).size(13).color(row_text);
+        let name_label = text(&ws.name).size(13).color(row_text).font(font);
 
         let terminal_count = ws.layout.leaf_count();
         let badge_bg = GHOST_HOVER();
@@ -670,6 +671,7 @@ mod tests {
             None,
             None,
             SIDEBAR_WIDTH,
+            Font::default(),
             |_action| TestMsg::Action,
             TestMsg::ResizeStart,
             TestMsg::ResizeEnd,
@@ -684,6 +686,7 @@ mod tests {
             Some("w1"),
             None,
             SIDEBAR_WIDTH,
+            Font::default(),
             |_action| TestMsg::Action,
             TestMsg::ResizeStart,
             TestMsg::ResizeEnd,
@@ -702,6 +705,7 @@ mod tests {
             Some("w2"),
             Some("w2"),
             SIDEBAR_WIDTH,
+            Font::default(),
             |_action| TestMsg::Action,
             TestMsg::ResizeStart,
             TestMsg::ResizeEnd,
@@ -723,6 +727,7 @@ mod tests {
             Some("w1"),
             (Some("w2"), has_notification as fn(&str) -> bool),
             SIDEBAR_WIDTH,
+            Font::default(),
             |_action| TestMsg::Action,
             TestMsg::ResizeStart,
             TestMsg::ResizeEnd,
@@ -752,6 +757,7 @@ mod tests {
             Some("w1"),
             None,
             72.0,
+            Font::default(),
             |_action| TestMsg::Action,
             TestMsg::ResizeStart,
             TestMsg::ResizeEnd,
