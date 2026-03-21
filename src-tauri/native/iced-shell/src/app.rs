@@ -7457,7 +7457,8 @@ impl GodlyApp {
                 let img = iced::widget::image::Image::new(handle.clone())
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .content_fit(iced::ContentFit::Fill);
+                    .content_fit(iced::ContentFit::None)
+                    .filter_method(iced::widget::image::FilterMethod::Nearest);
                 column![accent_bar, img]
             } else {
                 // No cached handle yet — fall back to canvas
