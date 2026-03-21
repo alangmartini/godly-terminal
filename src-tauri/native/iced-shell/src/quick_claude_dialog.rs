@@ -44,6 +44,8 @@ pub struct QuickClaudePreferences {
     pub selected_mode: String,
     pub selected_ai_tool: String,
     pub selected_workspace_id: Option<String>,
+    pub auto_suggest_branch: bool,
+    pub main_branch_mode: bool,
 }
 
 impl Default for QuickClaudePreferences {
@@ -53,6 +55,8 @@ impl Default for QuickClaudePreferences {
             selected_mode: "auto".to_string(),
             selected_ai_tool: "Claude Code".to_string(),
             selected_workspace_id: None,
+            auto_suggest_branch: true,
+            main_branch_mode: false,
         }
     }
 }
@@ -105,8 +109,8 @@ impl QuickClaudeDialogState {
             ai_tool_dropdown_open: false,
             prompt_content: text_editor::Content::new(),
             branch_name: String::new(),
-            main_branch_mode: false,
-            auto_suggest_branch: true,
+            main_branch_mode: prefs.main_branch_mode,
+            auto_suggest_branch: prefs.auto_suggest_branch,
             workspaces,
             active_tab: QuickClaudeTab::NewPrompt,
             sessions: Vec::new(),
@@ -130,6 +134,8 @@ impl QuickClaudeDialogState {
             selected_mode: self.selected_mode.clone(),
             selected_ai_tool: self.selected_ai_tool.clone(),
             selected_workspace_id: self.selected_workspace_id.clone(),
+            auto_suggest_branch: self.auto_suggest_branch,
+            main_branch_mode: self.main_branch_mode,
         }
     }
 
@@ -1514,6 +1520,8 @@ mod tests {
             selected_mode: "plan".to_string(),
             selected_ai_tool: "Codex".to_string(),
             selected_workspace_id: Some("ws-2".to_string()),
+            auto_suggest_branch: false,
+            main_branch_mode: true,
         };
         let state = QuickClaudeDialogState::new(
             Some("ws-1".into()),
@@ -1525,6 +1533,8 @@ mod tests {
         assert_eq!(state.selected_ai_tool, "Codex");
         // ws-2 exists in workspaces, so prefs workspace is used
         assert_eq!(state.selected_workspace_id, Some("ws-2".to_string()));
+        assert!(!state.auto_suggest_branch);
+        assert!(state.main_branch_mode);
     }
 
     #[test]
@@ -1534,6 +1544,8 @@ mod tests {
             selected_mode: "auto".to_string(),
             selected_ai_tool: "Claude Code".to_string(),
             selected_workspace_id: Some("ws-gone".to_string()),
+            auto_suggest_branch: true,
+            main_branch_mode: false,
         };
         let state = QuickClaudeDialogState::new(
             Some("ws-1".into()),
@@ -1551,6 +1563,8 @@ mod tests {
             selected_mode: "plan".to_string(),
             selected_ai_tool: "Codex".to_string(),
             selected_workspace_id: Some("ws-1".to_string()),
+            auto_suggest_branch: false,
+            main_branch_mode: true,
         };
         let state = QuickClaudeDialogState::new(
             Some("ws-1".into()),
@@ -1562,6 +1576,8 @@ mod tests {
         assert_eq!(roundtripped.selected_mode, "plan");
         assert_eq!(roundtripped.selected_ai_tool, "Codex");
         assert_eq!(roundtripped.selected_workspace_id, Some("ws-1".to_string()));
+        assert!(!roundtripped.auto_suggest_branch);
+        assert!(roundtripped.main_branch_mode);
     }
 
     #[test]

@@ -2330,8 +2330,7 @@ impl GodlyApp {
                     ws_name,
                     placeholder_id.clone(),
                 );
-                self.workspaces.set_active(&ws_id);
-                self.terminals.set_active(&placeholder_id);
+                // Background launch: do NOT switch focus
                 self.next_workspace_num += 1;
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
@@ -2343,6 +2342,7 @@ impl GodlyApp {
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
                 self.quick_claude_launch = Some(launch_state);
+                self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
                 return self.execute_next_launch_step();
             }
             Message::QuickClaudeLaunchStepComplete(result) => {
@@ -2531,8 +2531,7 @@ impl GodlyApp {
                             SplitDirection::Horizontal,
                         );
                     }
-                    self.workspaces.set_active(&id);
-                    self.terminals.set_active(&placeholder_id);
+                    // Background launch: do NOT switch focus
                     let cwd = if folder.is_empty() { None } else { Some(folder) };
                     (id, name, cwd)
                 } else {
@@ -2555,8 +2554,7 @@ impl GodlyApp {
                         name.clone(),
                         placeholder_id.clone(),
                     );
-                    self.workspaces.set_active(&id);
-                    self.terminals.set_active(&placeholder_id);
+                    // Background launch: do NOT switch focus
                     self.next_workspace_num += 1;
                     (id, name, None)
                 };
@@ -2574,6 +2572,7 @@ impl GodlyApp {
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
                 self.quick_claude_launch = Some(launch_state);
+                self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
                 return self.execute_next_launch_step();
             }
             Message::QuickClaudeDialogVoice => {
@@ -2687,8 +2686,7 @@ impl GodlyApp {
                     ws_name.clone(),
                     placeholder_id.clone(),
                 );
-                self.workspaces.set_active(&ws_id);
-                self.terminals.set_active(&placeholder_id);
+                // Background launch: do NOT switch focus
                 self.next_workspace_num += 1;
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
@@ -2700,6 +2698,7 @@ impl GodlyApp {
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
                 self.quick_claude_launch = Some(launch_state);
+                self.enqueue_toast("Quick Claude".into(), "Resuming in background...".into());
                 return self.execute_next_launch_step();
             }
             Message::AiToolNameInputChanged(value) => {
@@ -5921,6 +5920,14 @@ impl GodlyApp {
     }
 
     pub(crate) fn delete_workspace(&mut self, workspace_id: &str) -> Task<Message> {
+        // Cancel any in-flight Quick Claude launch targeting this workspace
+        if let Some(ref launch) = self.quick_claude_launch {
+            if launch.workspace_id == workspace_id {
+                log::warn!("Cancelling Quick Claude launch: target workspace is being deleted");
+                self.quick_claude_launch = None;
+            }
+        }
+
         let terminal_ids: Vec<String> = self
             .terminals
             .terminals_for_workspace(workspace_id)
@@ -7222,7 +7229,7 @@ impl GodlyApp {
                             cols,
                             ws_id,
                         );
-                        self.terminals.set_active(session_id);
+                        // Background launch: do NOT switch focus
                         self.entering_tabs
                             .insert(session_id.clone(), Self::now_ms());
                     }
@@ -7333,7 +7340,14 @@ impl GodlyApp {
             }
         }
 
+        let launch_name = self.quick_claude_launch.as_ref()
+            .map(|l| l.preset_name.clone())
+            .unwrap_or_default();
         self.quick_claude_launch = None;
+        self.enqueue_toast(
+            "Quick Claude Ready".into(),
+            format!("{} is ready", launch_name),
+        );
         self.resize_all_terminals()
     }
 
