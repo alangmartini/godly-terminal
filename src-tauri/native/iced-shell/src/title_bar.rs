@@ -79,8 +79,8 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
 
     let title_text = text(title)
         .size(12.5)
-        .color(TEXT_SECONDARY())
-        .font(font);
+        .font(font)
+        .color(TEXT_SECONDARY());
 
     let title_content = row![
         container(icon).padding(Padding { top: 0.0, right: 6.0, bottom: 0.0, left: 8.0 }),

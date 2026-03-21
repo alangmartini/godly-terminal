@@ -181,7 +181,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         };
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
-        let label = text(truncated).size(13).color(text_color).font(font);
+        let label = text(truncated).size(13).font(font).color(text_color);
         let icon_glyph = process_icon_glyph(terminal).map(|glyph| {
             let icon_color = if is_active { ACCENT() } else { TEXT_SECONDARY() };
             text(glyph).size(14).color(icon_color)
@@ -369,6 +369,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+
+    use iced::Font;
 
     use super::{
         contains_ascii_insensitive, process_badge_label, process_icon_glyph, separator_after_tab,
