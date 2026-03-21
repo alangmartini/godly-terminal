@@ -492,6 +492,15 @@ pub struct GodlyApp {
     available_fonts: Option<Vec<String>>,
     /// Search/filter query for font list.
     font_filter_query: String,
+    // --- Pixel Renderer (glyph atlas pipeline) ---
+    /// Glyph cache for the pixel rendering pipeline.
+    glyph_cache: godly_terminal_surface::glyph_cache::GlyphCache,
+    /// Primary font rasterizer (swash-based).
+    glyph_rasterizer: godly_terminal_surface::swash_rasterizer::SwashRasterizer,
+    /// Reusable pixel renderer (keeps buffer between frames to avoid reallocation).
+    pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer,
+    /// Whether to use the new image-based renderer instead of the canvas.
+    use_pixel_renderer: bool,
 }
 
 impl Default for GodlyApp {
@@ -601,6 +610,18 @@ impl Default for GodlyApp {
             },
             available_fonts: None,
             font_filter_query: String::new(),
+            glyph_cache: godly_terminal_surface::glyph_cache::GlyphCache::new(),
+            glyph_rasterizer: {
+                use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer as _;
+                let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
+                r.load_font(
+                    include_bytes!("../fonts/GeistMono-Regular.ttf"),
+                    0,
+                );
+                r
+            },
+            pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
+            use_pixel_renderer: true,
         }
     }
 }
@@ -1528,6 +1549,9 @@ impl GodlyApp {
                 }
                 if should_persist_clamp {
                     self.persist_scrollback_offsets();
+                }
+                if self.use_pixel_renderer {
+                    self.render_terminal_image(&session_id);
                 }
             }
             Message::GridFetchFailed { session_id, error } => {
@@ -7337,6 +7361,41 @@ impl GodlyApp {
     }
 
     // -----------------------------------------------------------------------
+    // Pixel renderer helpers
+    // -----------------------------------------------------------------------
+
+    /// Pre-render a terminal's grid into an RGBA pixel buffer and cache the
+    /// resulting `Handle` on the `TerminalInfo`. Called from `update()` after
+    /// grid data changes (GridFetched, selection changes, etc.).
+    fn render_terminal_image(&mut self, session_id: &str) {
+        let grid_clone = match self.terminals.get(session_id).and_then(|t| t.grid.clone()) {
+            Some(g) => g,
+            None => return,
+        };
+        let metrics = self.font_metrics;
+        let palette = crate::theme::active_terminal_palette();
+        let default_fg = palette.foreground;
+        let default_bg = palette.background;
+
+        let (pixels, w, h) = self.pixel_renderer.render(
+            &grid_clone,
+            &metrics,
+            &mut self.glyph_cache,
+            &mut self.glyph_rasterizer,
+            default_fg,
+            default_bg,
+            None, // selection handled separately in view for now
+        );
+
+        if w > 0 && h > 0 {
+            let handle = iced::widget::image::Handle::from_rgba(w, h, pixels.to_vec());
+            if let Some(term) = self.terminals.get_mut(session_id) {
+                term.cached_image_handle = Some(handle);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Rendering helpers
     // -----------------------------------------------------------------------
 
@@ -7392,10 +7451,27 @@ impl GodlyApp {
             ..container::Style::default()
         });
 
-        let inner = column![
-            accent_bar,
-            canvas(tc).width(Length::Fill).height(Length::Fill),
-        ];
+        // Choose between pixel-rendered Image and canvas-based rendering.
+        let inner = if self.use_pixel_renderer {
+            if let Some(handle) = &term.cached_image_handle {
+                let img = iced::widget::image::Image::new(handle.clone())
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .content_fit(iced::ContentFit::Fill);
+                column![accent_bar, img]
+            } else {
+                // No cached handle yet — fall back to canvas
+                column![
+                    accent_bar,
+                    canvas(tc).width(Length::Fill).height(Length::Fill),
+                ]
+            }
+        } else {
+            column![
+                accent_bar,
+                canvas(tc).width(Length::Fill).height(Length::Fill),
+            ]
+        };
 
         let pane = container(inner)
             .width(Length::Fill)

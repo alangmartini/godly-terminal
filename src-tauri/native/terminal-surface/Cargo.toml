@@ -10,6 +10,7 @@ iced.workspace = true
 godly-protocol = { path = "../../protocol" }
 log = "0.4"
 swash = "0.2"
+fontdb = "0.23"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
