@@ -12,6 +12,13 @@ log = "0.4"
 swash = "0.2"
 fontdb = "0.23"
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "throughput_stress"
+harness = false
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Graphics_DirectWrite",
