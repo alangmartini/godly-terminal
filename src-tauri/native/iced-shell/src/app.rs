@@ -3006,7 +3006,15 @@ impl GodlyApp {
                                         let (tx, rx) = futures_channel::oneshot::channel();
                                         std::thread::spawn(move || {
                                             std::thread::sleep(std::time::Duration::from_millis(1500));
-                                            let addr = format!("{}:{}", h, p);
+                                            // 0.0.0.0 is valid for binding (all interfaces) but
+                                            // not for connecting on Windows (WSAEADDRNOTAVAIL).
+                                            // Use loopback for the health check instead.
+                                            let connect_host = if h == "0.0.0.0" || h == "::" {
+                                                "127.0.0.1"
+                                            } else {
+                                                &h
+                                            };
+                                            let addr = format!("{}:{}", connect_host, p);
                                             let result = match addr.parse::<std::net::SocketAddr>() {
                                                 Ok(sock) => std::net::TcpStream::connect_timeout(
                                                     &sock,
@@ -8673,7 +8681,12 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
                         let (tx, rx) = futures_channel::oneshot::channel();
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_millis(1500));
-                            let addr = format!("{}:{}", h, p);
+                            let connect_host = if h == "0.0.0.0" || h == "::" {
+                                "127.0.0.1"
+                            } else {
+                                &h
+                            };
+                            let addr = format!("{}:{}", connect_host, p);
                             let result = match addr.parse::<std::net::SocketAddr>() {
                                 Ok(sock) => std::net::TcpStream::connect_timeout(
                                     &sock,
