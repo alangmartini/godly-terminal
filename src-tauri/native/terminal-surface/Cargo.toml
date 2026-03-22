@@ -19,6 +19,10 @@ criterion = "0.5"
 name = "render_benchmark"
 harness = false
 
+[[bench]]
+name = "throughput_stress"
+harness = false
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Graphics_DirectWrite",
