@@ -97,16 +97,17 @@ pub fn default_launch_steps(
         "auto" => cmd.push_str(" --dangerously-skip-permissions"),
         _ => {} // "default" — no flag
     }
-    // Build effective prompt: append image references if any
+    // Build effective prompt: append image references if any.
+    // IMPORTANT: keep everything on ONE line — embedded newlines in the command
+    // string cause PowerShell on Windows to misparse the multi-line input via PTY.
     let effective_prompt = if image_paths.is_empty() {
         prompt.to_string()
     } else {
-        let mut parts = vec![prompt.to_string()];
-        parts.push("\n\n[Attached images - please read these files to view them:]".to_string());
-        for path in image_paths {
-            parts.push(format!("- {}", path));
-        }
-        parts.join("\n")
+        let paths = image_paths.join(", ");
+        format!(
+            "{} [Attached images - please read these files to view them: {}]",
+            prompt, paths
+        )
     };
     // Pass prompt as CLI positional argument
     if !effective_prompt.is_empty() {
