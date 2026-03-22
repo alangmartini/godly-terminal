@@ -196,6 +196,10 @@ struct ToastNotification {
     title: String,
     message: String,
     expires_at_ms: u64,
+    /// Terminal that triggered the notification (for click-to-focus).
+    source_terminal_id: Option<String>,
+    /// Workspace that owns the source terminal (for click-to-focus).
+    source_workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -869,6 +873,8 @@ pub enum Message {
     ToastTick,
     /// Dismiss a specific toast notification by ID.
     DismissToast(u64),
+    /// User clicked a toast — switch to its source workspace/terminal.
+    ToastClicked(u64),
     /// Heartbeat tick — keeps the event loop alive when window is unfocused/minimized
     /// so that the Focused event is reliably delivered on restore.
     Heartbeat,
@@ -1197,6 +1203,30 @@ impl GodlyApp {
             title,
             message,
             now_ms,
+            None,
+            None,
+        );
+    }
+
+    pub(crate) fn enqueue_toast_for_terminal(
+        &mut self,
+        title: String,
+        message: String,
+        terminal_id: &str,
+    ) {
+        let workspace_id = self
+            .terminals
+            .get(terminal_id)
+            .and_then(|t| t.workspace_id.clone());
+        let now_ms = Self::now_ms();
+        enqueue_toast_entry(
+            self.toasts.as_mut(),
+            &mut self.next_toast_id,
+            title,
+            message,
+            now_ms,
+            Some(terminal_id.to_string()),
+            workspace_id,
         );
     }
 
@@ -1213,7 +1243,7 @@ impl GodlyApp {
         } else {
             format!("Bell event from {}", terminal_id)
         };
-        self.enqueue_toast(title, message);
+        self.enqueue_toast_for_terminal(title, message, terminal_id);
     }
 
     pub(crate) fn play_notification_sound_if_allowed(&mut self, terminal_id: &str) {
@@ -3080,6 +3110,25 @@ impl GodlyApp {
             Message::DismissToast(id) => {
                 self.toasts.retain(|t| t.id != id);
             }
+            Message::ToastClicked(id) => {
+                if let Some(toast) = self.toasts.iter().find(|t| t.id == id) {
+                    if let Some(ws_id) = toast.source_workspace_id.clone() {
+                        let terminal_id = toast
+                            .source_terminal_id
+                            .clone()
+                            .or_else(|| {
+                                self.workspaces
+                                    .get(&ws_id)
+                                    .map(|ws| ws.focused_terminal.clone())
+                            });
+                        self.workspaces.set_active(&ws_id);
+                        if let Some(tid) = terminal_id {
+                            self.notifications.mark_read(&tid);
+                        }
+                    }
+                }
+                self.toasts.retain(|t| t.id != id);
+            }
             Message::Heartbeat => {
                 // Detect actual focus via Win32 API — Iced's Focused/Unfocused
                 // events are unreliable on Windows (missed on minimize, stolen
@@ -4654,6 +4703,7 @@ impl GodlyApp {
         let mut toasts_column = column![].spacing(8).width(Length::Fixed(320.0));
         for toast in &self.toasts {
             let toast_id = toast.id;
+            let has_source = toast.source_workspace_id.is_some();
             let close_btn = button(
                 text("\u{2715}").size(10).color(TEXT_SECONDARY()),
             )
@@ -4715,12 +4765,21 @@ impl GodlyApp {
                 },
                 ..container::Style::default()
             });
+            // Make the card clickable to focus the source workspace/terminal.
+            let card: Element<'_, Message> = if has_source {
+                mouse_area(card)
+                    .on_press(Message::ToastClicked(toast_id))
+                    .into()
+            } else {
+                card.into()
+            };
             toasts_column = toasts_column.push(card);
         }
 
         container(row![Space::new().width(Length::Fill), toasts_column])
             .width(Length::Fill)
-            .height(Length::Shrink)
+            .height(Length::Fill)
+            .align_y(iced::alignment::Vertical::Bottom)
             .padding(Padding::from([14, 14]))
             .into()
     }
@@ -8141,6 +8200,8 @@ fn enqueue_toast_entry(
     title: String,
     message: String,
     now_ms: u64,
+    source_terminal_id: Option<String>,
+    source_workspace_id: Option<String>,
 ) -> u64 {
     let toast_id = *next_toast_id;
     *next_toast_id = next_toast_id.saturating_add(1);
@@ -8150,6 +8211,8 @@ fn enqueue_toast_entry(
         title,
         message,
         expires_at_ms: now_ms.saturating_add(TOAST_TTL_MS),
+        source_terminal_id,
+        source_workspace_id,
     });
 
     if toasts.len() > MAX_ACTIVE_TOASTS {
@@ -8769,6 +8832,8 @@ mod helper_tests {
                 format!("title-{index}"),
                 format!("message-{index}"),
                 10_000,
+                None,
+                None,
             );
         }
 
@@ -8789,12 +8854,16 @@ mod helper_tests {
                 title: "A".to_string(),
                 message: "first".to_string(),
                 expires_at_ms: 1_000 + TOAST_TTL_MS,
+                source_terminal_id: None,
+                source_workspace_id: None,
             },
             ToastNotification {
                 id: 2,
                 title: "B".to_string(),
                 message: "second".to_string(),
                 expires_at_ms: 5_000 + TOAST_TTL_MS,
+                source_terminal_id: None,
+                source_workspace_id: None,
             },
         ];
 
