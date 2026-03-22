@@ -447,6 +447,7 @@ pub struct GodlyApp {
     search: SearchState,
     // --- G6/G7: Scrollbar + Performance Overlay ---
     perf_overlay_visible: bool,
+    perf_stats: crate::perf_stats::PerfStats,
     // --- K1: CLAUDE.md Editor ---
     claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
     // --- I4/I5: Voice/Whisper Integration ---
@@ -570,6 +571,7 @@ impl Default for GodlyApp {
             ctrl_held: false,
             search: SearchState::default(),
             perf_overlay_visible: false,
+            perf_stats: crate::perf_stats::PerfStats::new(),
             claude_md_editor: None,
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
             whisper_state: None,
@@ -3133,6 +3135,7 @@ impl GodlyApp {
                 self.toasts.retain(|t| t.id != id);
             }
             Message::Heartbeat => {
+                self.perf_stats.frame_tick();
                 // Detect actual focus via Win32 API — Iced's Focused/Unfocused
                 // events are unreliable on Windows (missed on minimize, stolen
                 // on restore). This runs from RedrawRequested + WM_TIMER.
@@ -4111,8 +4114,10 @@ impl GodlyApp {
         // --- G7: Performance overlay (top-right corner) ---
         let with_perf: Element<'_, Message> = if self.perf_overlay_visible {
             let perf: Element<'_, Message> = crate::perf_overlay::view_perf_overlay(
-                60.0, // placeholder FPS
-                16.6, // placeholder frame_ms
+                self.perf_stats.fps(),
+                self.perf_stats.frame_ms(),
+                self.perf_stats.render_ms(),
+                if self.use_pixel_renderer { "Pixel" } else { "Canvas" },
                 self.terminals.count(),
             );
             let positioned = container(perf)
@@ -7758,6 +7763,7 @@ impl GodlyApp {
         let default_fg = palette.foreground;
         let default_bg = palette.background;
 
+        let t0 = std::time::Instant::now();
         let (pixels, w, h) = self.pixel_renderer.render(
             &grid_clone,
             &metrics,
@@ -7774,6 +7780,8 @@ impl GodlyApp {
                 term.cached_image_handle = Some(handle);
             }
         }
+
+        self.perf_stats.record_render_duration_us(t0.elapsed().as_micros() as f64);
     }
 
     // -----------------------------------------------------------------------
