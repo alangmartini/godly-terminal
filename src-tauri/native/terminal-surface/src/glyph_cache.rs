@@ -1,5 +1,23 @@
 use std::collections::HashMap;
 
+/// Snapshot of cache hit/miss counters.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl CacheStats {
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
+    }
+}
+
 /// Lookup key for cached glyphs.
 ///
 /// Font size is quantized to quarter-pixel steps (size * 4 as u16) to avoid
@@ -43,6 +61,8 @@ pub struct CachedGlyph {
 pub struct GlyphCache {
     entries: HashMap<GlyphKey, CachedGlyph>,
     generation: u64,
+    hits: u64,
+    misses: u64,
 }
 
 impl GlyphCache {
@@ -50,11 +70,18 @@ impl GlyphCache {
         Self {
             entries: HashMap::new(),
             generation: 0,
+            hits: 0,
+            misses: 0,
         }
     }
 
-    /// Look up a cached glyph by key.
-    pub fn get(&self, key: &GlyphKey) -> Option<&CachedGlyph> {
+    /// Look up a cached glyph by key, tracking hits and misses.
+    pub fn get(&mut self, key: &GlyphKey) -> Option<&CachedGlyph> {
+        if self.entries.contains_key(key) {
+            self.hits += 1;
+        } else {
+            self.misses += 1;
+        }
         self.entries.get(key)
     }
 
@@ -63,10 +90,12 @@ impl GlyphCache {
         self.entries.insert(key, glyph);
     }
 
-    /// Clear all entries and increment the generation counter.
+    /// Clear all entries, increment the generation counter, and reset stats.
     pub fn invalidate(&mut self) {
         self.entries.clear();
         self.generation += 1;
+        self.hits = 0;
+        self.misses = 0;
     }
 
     /// Current cache generation (incremented on each invalidate).
@@ -82,6 +111,20 @@ impl GlyphCache {
     /// Whether the cache is empty.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Returns a snapshot of the current hit/miss counters.
+    pub fn stats(&self) -> CacheStats {
+        CacheStats {
+            hits: self.hits,
+            misses: self.misses,
+        }
+    }
+
+    /// Reset hit/miss counters to zero.
+    pub fn reset_stats(&mut self) {
+        self.hits = 0;
+        self.misses = 0;
     }
 }
 
@@ -114,7 +157,7 @@ mod tests {
 
     #[test]
     fn get_nonexistent_returns_none() {
-        let cache = GlyphCache::new();
+        let mut cache = GlyphCache::new();
         let key = GlyphKey::new('Z', 14.0, false, false);
         assert!(cache.get(&key).is_none());
     }
@@ -164,5 +207,84 @@ mod tests {
 
         assert_eq!(cache.get(&k1).unwrap().alpha[0], 50);
         assert_eq!(cache.get(&k2).unwrap().alpha[0], 200);
+    }
+
+    #[test]
+    fn hit_increments_on_found() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphKey::new('A', 14.0, false, false);
+        cache.insert(key, make_glyph(100));
+
+        let _ = cache.get(&key);
+        let s = cache.stats();
+        assert_eq!(s.hits, 1);
+        assert_eq!(s.misses, 0);
+    }
+
+    #[test]
+    fn miss_increments_on_not_found() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphKey::new('Z', 14.0, false, false);
+
+        let _ = cache.get(&key);
+        let s = cache.stats();
+        assert_eq!(s.hits, 0);
+        assert_eq!(s.misses, 1);
+    }
+
+    #[test]
+    fn mixed_hit_miss_tracking() {
+        let mut cache = GlyphCache::new();
+        let present = GlyphKey::new('A', 14.0, false, false);
+        let absent = GlyphKey::new('Z', 14.0, false, false);
+        cache.insert(present, make_glyph(100));
+
+        let _ = cache.get(&present);
+        let _ = cache.get(&absent);
+        let s = cache.stats();
+        assert_eq!(s.hits, 1);
+        assert_eq!(s.misses, 1);
+    }
+
+    #[test]
+    fn reset_stats_clears_counters() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphKey::new('A', 14.0, false, false);
+        cache.insert(key, make_glyph(100));
+
+        let _ = cache.get(&key);
+        let _ = cache.get(&GlyphKey::new('Z', 14.0, false, false));
+        cache.reset_stats();
+
+        let s = cache.stats();
+        assert_eq!(s.hits, 0);
+        assert_eq!(s.misses, 0);
+    }
+
+    #[test]
+    fn invalidate_resets_stats() {
+        let mut cache = GlyphCache::new();
+        let key = GlyphKey::new('A', 14.0, false, false);
+        cache.insert(key, make_glyph(100));
+
+        let _ = cache.get(&key);
+        let _ = cache.get(&GlyphKey::new('Z', 14.0, false, false));
+        cache.invalidate();
+
+        let s = cache.stats();
+        assert_eq!(s.hits, 0);
+        assert_eq!(s.misses, 0);
+    }
+
+    #[test]
+    fn hit_rate_calculation() {
+        let s = CacheStats::default();
+        assert_eq!(s.hit_rate(), 0.0);
+
+        let s = CacheStats { hits: 1, misses: 1 };
+        assert!((s.hit_rate() - 0.5).abs() < f64::EPSILON);
+
+        let s = CacheStats { hits: 10, misses: 0 };
+        assert!((s.hit_rate() - 1.0).abs() < f64::EPSILON);
     }
 }
