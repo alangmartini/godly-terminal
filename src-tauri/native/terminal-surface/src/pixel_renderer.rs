@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use godly_protocol::types::{CursorShape, RichGridData};
 use iced::Color;
 
@@ -5,6 +7,7 @@ use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 use crate::glyph_cache::{CachedGlyph, GlyphCache, GlyphKey};
 use crate::glyph_rasterizer::GlyphRasterizer;
+use crate::render_stats::RenderStats;
 use crate::surface::GridPos;
 
 /// CPU-side terminal grid compositor.
@@ -20,6 +23,7 @@ pub struct PixelRenderer {
     buffer: Vec<u8>,
     width: u32,
     height: u32,
+    last_stats: RenderStats,
 }
 
 impl PixelRenderer {
@@ -28,7 +32,12 @@ impl PixelRenderer {
             buffer: Vec::new(),
             width: 0,
             height: 0,
+            last_stats: RenderStats::default(),
         }
+    }
+
+    pub fn last_stats(&self) -> &RenderStats {
+        &self.last_stats
     }
 
     /// Render a terminal grid into an RGBA pixel buffer.
@@ -45,6 +54,8 @@ impl PixelRenderer {
         default_bg: Color,
         selection: Option<(GridPos, GridPos)>,
     ) -> (&[u8], u32, u32) {
+        let t_start = Instant::now();
+
         let cols = grid.dimensions.cols as u32;
         let rows = grid.dimensions.rows as u32;
         let cell_w = metrics.cell_width;
@@ -54,6 +65,7 @@ impl PixelRenderer {
             self.buffer.clear();
             self.width = 0;
             self.height = 0;
+            self.last_stats = RenderStats::default();
             return (&self.buffer, 0, 0);
         }
 
@@ -70,16 +82,25 @@ impl PixelRenderer {
         let bg_r = (default_bg.r * 255.0) as u8;
         let bg_g = (default_bg.g * 255.0) as u8;
         let bg_b = (default_bg.b * 255.0) as u8;
+        let t_bg = Instant::now();
         fill_solid(&mut self.buffer, bg_r, bg_g, bg_b, 255);
+        let bg_fill = t_bg.elapsed();
 
+        let t_glyph = Instant::now();
+        let mut cells_rendered: u32 = 0;
+        let mut rows_rendered: u32 = 0;
         for (row_idx, row) in grid.rows.iter().enumerate() {
             let cell_y = (row_idx as f32 * cell_h).round() as i32;
             let next_row_y = ((row_idx + 1) as f32 * cell_h).round() as i32;
             let row_h = (next_row_y - cell_y) as u32;
+            rows_rendered += 1;
 
             for (col_idx, cell) in row.cells.iter().enumerate() {
                 if cell.wide_continuation {
                     continue;
+                }
+                if !cell.content.is_empty() {
+                    cells_rendered += 1;
                 }
 
                 let char_cols: u32 = if cell.wide { 2 } else { 1 };
@@ -196,7 +217,9 @@ impl PixelRenderer {
                 }
             }
         }
+        let glyph_phase = t_glyph.elapsed();
 
+        let t_sel = Instant::now();
         if let Some((start, end)) = selection {
             let sel_r: u8 = 51;
             let sel_g: u8 = 102;
@@ -225,7 +248,9 @@ impl PixelRenderer {
                 );
             }
         }
+        let selection_phase = t_sel.elapsed();
 
+        let t_cur = Instant::now();
         if !grid.cursor_hidden {
             let cursor_x = (grid.cursor.col as f32 * cell_w).round() as i32;
             let cursor_y = (grid.cursor.row as f32 * cell_h).round() as i32;
@@ -265,6 +290,17 @@ impl PixelRenderer {
                 }
             }
         }
+        let cursor_phase = t_cur.elapsed();
+
+        self.last_stats = RenderStats {
+            bg_fill,
+            glyph_phase,
+            cursor_phase,
+            selection_phase,
+            total: t_start.elapsed(),
+            cells_rendered,
+            rows_rendered,
+        };
 
         (&self.buffer, w, h)
     }
@@ -613,5 +649,46 @@ mod tests {
         // ceil(10 * 8.4) = ceil(84.0) = 84, NOT 10 * ceil(8.4) = 10 * 9 = 90
         let expected = (10.0_f32 * metrics.cell_width).ceil() as u32;
         assert_eq!(w, expected);
+    }
+
+    #[test]
+    fn render_populates_last_stats() {
+        let grid = make_grid(2, 3, vec![
+            vec![make_cell("A"), make_cell("B"), make_cell("C")],
+            vec![make_cell("D"), make_cell(" "), make_cell("F")],
+        ]);
+        let metrics = FontMetrics::from_font_size(14.0);
+        let mut cache = GlyphCache::new();
+        let mut rast = StubRasterizer;
+        let mut renderer = PixelRenderer::new();
+
+        renderer.render(
+            &grid, &metrics, &mut cache, &mut rast,
+            Color::WHITE, Color::BLACK, None,
+        );
+
+        let stats = renderer.last_stats();
+        assert!(stats.rows_rendered > 0);
+        assert!(stats.cells_rendered > 0);
+        assert!(stats.total > std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn empty_grid_stats() {
+        let grid = make_grid(0, 0, vec![]);
+        let metrics = FontMetrics::from_font_size(14.0);
+        let mut cache = GlyphCache::new();
+        let mut rast = StubRasterizer;
+        let mut renderer = PixelRenderer::new();
+
+        renderer.render(
+            &grid, &metrics, &mut cache, &mut rast,
+            Color::WHITE, Color::BLACK, None,
+        );
+
+        let stats = renderer.last_stats();
+        assert_eq!(stats.rows_rendered, 0);
+        assert_eq!(stats.cells_rendered, 0);
+        assert_eq!(stats.total, std::time::Duration::ZERO);
     }
 }

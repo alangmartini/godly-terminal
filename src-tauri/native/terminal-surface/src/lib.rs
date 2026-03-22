@@ -6,6 +6,7 @@ pub mod glyph_cache;
 pub mod glyph_rasterizer;
 pub mod font_loader;
 pub mod pixel_renderer;
+pub mod render_stats;
 pub mod swash_rasterizer;
 mod surface;
 
