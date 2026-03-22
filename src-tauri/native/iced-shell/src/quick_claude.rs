@@ -85,7 +85,7 @@ pub fn default_launch_steps(
     cmd.push_str(&format!(" --model {}", model));
     // Add mode flag
     match mode {
-        "plan" => cmd.push_str(" --plan"),
+        "plan" => cmd.push_str(" --permission-mode plan"),
         "auto" => cmd.push_str(" --dangerously-skip-permissions"),
         _ => {} // "default" — no flag
     }
@@ -509,7 +509,7 @@ mod tests {
     fn default_steps_with_model_and_mode() {
         let steps = default_launch_steps(1, "", "opus", "plan", None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
-            assert_eq!(command, "claude --model opus --plan");
+            assert_eq!(command, "claude --model opus --permission-mode plan");
         } else {
             panic!("Expected RunCommand at index 2");
         }
