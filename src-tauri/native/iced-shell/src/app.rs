@@ -589,7 +589,7 @@ impl Default for GodlyApp {
             workspace_ai_modes: HashMap::new(),
             quick_claude_launch: None,
             quick_claude_dialog: None,
-            quick_claude_prefs: crate::quick_claude_dialog::QuickClaudePreferences::default(),
+            quick_claude_prefs: crate::quick_claude_dialog::load_preferences(),
             terminal_context_menu_pos: None,
             terminal_context_menu_terminal_id: None,
             hovered_url: None,
@@ -2523,8 +2523,9 @@ impl GodlyApp {
                 let Some(dlg) = self.quick_claude_dialog.take() else {
                     return Task::none();
                 };
-                // Save preferences for next dialog open
+                // Save preferences for next dialog open (and persist to disk)
                 self.quick_claude_prefs = dlg.to_preferences();
+                crate::quick_claude_dialog::save_preferences(&self.quick_claude_prefs);
                 let prompt = dlg.prompt_text();
                 let prompt = prompt.trim();
                 let model = dlg.selected_model.clone();
@@ -2698,8 +2699,9 @@ impl GodlyApp {
                 let Some(dlg) = self.quick_claude_dialog.take() else {
                     return Task::none();
                 };
-                // Save preferences for next dialog open
+                // Save preferences for next dialog open (and persist to disk)
                 self.quick_claude_prefs = dlg.to_preferences();
+                crate::quick_claude_dialog::save_preferences(&self.quick_claude_prefs);
                 let Some(selected_idx) = dlg.selected_session else {
                     return Task::none();
                 };
