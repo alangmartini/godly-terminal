@@ -1,5 +1,5 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input, text_editor, Space};
-use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
+use iced::widget::{button, column, container, row, scrollable, stack, text, text_input, text_editor, Space};
+use iced::{Background, Border, Color, ContentFit, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme;
 
@@ -35,6 +35,17 @@ pub struct SkillEntry {
     pub description: String,
     pub scope: SkillScope,
     pub file_path: String,
+}
+
+/// An image attachment in the Quick Claude dialog.
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    /// Absolute path to the image file on disk.
+    pub file_path: String,
+    /// Iced image handle for rendering the thumbnail.
+    pub thumbnail_handle: iced::widget::image::Handle,
+    /// Original filename (for display).
+    pub display_name: String,
 }
 
 /// Persistent preferences that survive dialog close/reopen.
@@ -87,6 +98,8 @@ pub struct QuickClaudeDialogState {
     pub mode_dropdown_open: bool,
     /// Dynamically discovered model options: (display_name, value).
     pub available_models: Vec<(String, String)>,
+    /// Images attached to the prompt (via paste or drag-and-drop).
+    pub attached_images: Vec<ImageAttachment>,
 }
 
 impl QuickClaudeDialogState {
@@ -124,6 +137,7 @@ impl QuickClaudeDialogState {
             selected_mode: prefs.selected_mode.clone(),
             mode_dropdown_open: false,
             available_models: default_model_list(),
+            attached_images: Vec::new(),
         }
     }
 
@@ -180,6 +194,7 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     on_tab_selected: impl Fn(QuickClaudeTab) -> M + 'a,
     on_session_selected: impl Fn(usize) -> M + 'a,
     on_resume: M,
+    on_image_removed: impl Fn(usize) -> M + 'a,
 ) -> Element<'a, M> {
     let accent = theme::ACCENT();
     let border_color = theme::BORDER();
@@ -682,6 +697,74 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                         });
                     prompt_section = prompt_section.push(popup);
                 }
+            }
+
+            // ── Image attachments ─────────────────────────────────────────
+            if !state.attached_images.is_empty() {
+                let mut image_row = row![].spacing(8).align_y(iced::Alignment::End);
+
+                for (i, attachment) in state.attached_images.iter().enumerate() {
+                    let thumb = iced::widget::image::Image::new(attachment.thumbnail_handle.clone())
+                        .width(Length::Fixed(48.0))
+                        .height(Length::Fixed(48.0))
+                        .content_fit(ContentFit::Cover);
+
+                    let remove_btn = button(
+                        text("\u{2715}").size(9).color(Color::WHITE),
+                    )
+                    .on_press(on_image_removed(i))
+                    .padding(Padding::from([1, 3]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.6))),
+                        text_color: Color::WHITE,
+                        border: Border {
+                            radius: 3.0.into(),
+                            ..Border::default()
+                        },
+                        ..button::Style::default()
+                    });
+
+                    let name_label = text(&attachment.display_name)
+                        .size(9)
+                        .color(text_secondary);
+
+                    let thumb_with_remove = column![
+                        container(
+                            stack![
+                                thumb,
+                                container(remove_btn)
+                                    .align_right(Length::Fill)
+                                    .padding(2),
+                            ]
+                        )
+                        .width(Length::Fixed(48.0))
+                        .height(Length::Fixed(48.0))
+                        .style(move |_theme| container::Style {
+                            border: Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..container::Style::default()
+                        }),
+                        container(name_label).width(Length::Fixed(48.0)),
+                    ]
+                    .spacing(2)
+                    .align_x(iced::Alignment::Center);
+
+                    image_row = image_row.push(thumb_with_remove);
+                }
+
+                let attachment_label = text(
+                    format!("{} image{} attached", state.attached_images.len(),
+                        if state.attached_images.len() == 1 { "" } else { "s" }),
+                )
+                .size(10)
+                .color(text_secondary);
+
+                prompt_section = prompt_section.push(
+                    column![attachment_label, image_row].spacing(4),
+                );
             }
 
             // ── Branch name input ────────────────────────────────────────
@@ -1322,6 +1405,7 @@ mod tests {
             TabSelected(QuickClaudeTab),
             SessionSelected(usize),
             Resume,
+            ImageRemoved(usize),
         }
         let _el: Element<'_, Msg> = view_quick_claude_dialog(
             &state,
@@ -1346,6 +1430,7 @@ mod tests {
             Msg::TabSelected,
             Msg::SessionSelected,
             Msg::Resume,
+            Msg::ImageRemoved,
         );
     }
 
@@ -1386,6 +1471,7 @@ mod tests {
             TabSelected(QuickClaudeTab),
             SessionSelected(usize),
             Resume,
+            ImageRemoved(usize),
         }
         let _el: Element<'_, Msg> = view_quick_claude_dialog(
             &state,
@@ -1410,6 +1496,7 @@ mod tests {
             Msg::TabSelected,
             Msg::SessionSelected,
             Msg::Resume,
+            Msg::ImageRemoved,
         );
     }
 
