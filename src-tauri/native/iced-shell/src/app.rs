@@ -1741,6 +1741,17 @@ impl GodlyApp {
                                 }
                                 return self.update(Message::QuickClaudeDialogLaunch);
                             }
+                            // Tab key → launch (skip normal tab-order cycling)
+                            if matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))
+                                && !modifiers.control()
+                            {
+                                if dlg.active_tab == crate::quick_claude_dialog::QuickClaudeTab::ResumeSession
+                                    && dlg.selected_session.is_some()
+                                {
+                                    return self.update(Message::QuickClaudeDialogResume);
+                                }
+                                return self.update(Message::QuickClaudeDialogLaunch);
+                            }
                             // All other keys are forwarded to the dialog's text_editor
                             return Task::none();
                         }
@@ -2398,7 +2409,10 @@ impl GodlyApp {
                     },
                     Message::QuickClaudeDialogModelsLoaded,
                 );
-                return iced::Task::batch([skills_task, sessions_task, models_task]);
+                let focus_task = iced::widget::operation::focus(
+                    crate::quick_claude_dialog::prompt_editor_id(),
+                );
+                return iced::Task::batch([skills_task, sessions_task, models_task, focus_task]);
             }
             Message::QuickClaudeDialogClose => {
                 self.quick_claude_dialog = None;
