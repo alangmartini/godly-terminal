@@ -123,7 +123,7 @@ impl GodlyApp {
                 } else {
                     terminal_id.clone()
                 };
-                self.enqueue_toast(title, msg);
+                self.enqueue_toast_for_terminal(title, msg, &terminal_id);
                 self.play_notification_sound_if_allowed(&terminal_id);
                 iced::Task::none()
             }
