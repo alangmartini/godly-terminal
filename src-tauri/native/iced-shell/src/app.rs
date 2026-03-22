@@ -105,9 +105,9 @@ use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
-    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, PANE_BG,
-    PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_MD, SHADOW_ACCENT, SHADOW_COLOR, TEXT_ACTIVE,
-    TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, GHOST_HOVER,
+    PANE_BG, PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_SM, SHADOW_ACCENT, SHADOW_COLOR,
+    TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::url_detector;
 use crate::workspace_state::WorkspaceCollection;
@@ -899,6 +899,8 @@ pub enum Message {
     RemoteClearEditor,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
+    /// Dismiss a specific toast notification by ID.
+    DismissToast(u64),
     /// Heartbeat tick — keeps the event loop alive when window is unfocused/minimized
     /// so that the Focused event is reliably delivered on restore.
     Heartbeat,
@@ -3083,6 +3085,9 @@ impl GodlyApp {
                 let now_ms = Self::now_ms();
                 let _ = prune_expired_toasts(self.toasts.as_mut(), now_ms);
             }
+            Message::DismissToast(id) => {
+                self.toasts.retain(|t| t.id != id);
+            }
             Message::Heartbeat => {
                 // Detect actual focus via Win32 API — Iced's Focused/Unfocused
                 // events are unreliable on Windows (missed on minimize, stolen
@@ -4656,23 +4661,56 @@ impl GodlyApp {
     fn view_toast_overlay(&self) -> Element<'_, Message> {
         let mut toasts_column = column![].spacing(8).width(Length::Fixed(320.0));
         for toast in &self.toasts {
-            let accent_border = container(Space::new().width(3.0).height(Length::Fill))
-                .style(|_theme| container::Style {
-                    background: Some(iced::Background::Color(ACCENT())),
-                    ..container::Style::default()
-                });
-            let card_content = column![
+            let toast_id = toast.id;
+            let close_btn = button(
+                text("\u{2715}").size(10).color(TEXT_SECONDARY()),
+            )
+            .on_press(Message::DismissToast(toast_id))
+            .padding(Padding::from([2, 5]))
+            .style(|_theme, status| button::Style {
+                background: if matches!(status, button::Status::Hovered) {
+                    Some(iced::Background::Color(GHOST_HOVER()))
+                } else {
+                    None
+                },
+                text_color: TEXT_SECONDARY(),
+                border: iced::Border {
+                    radius: RADIUS_SM.into(),
+                    ..iced::Border::default()
+                },
+                ..button::Style::default()
+            });
+            let header = row![
                 text(&toast.title).size(13).color(TEXT_ACTIVE()),
+                Space::new().width(Length::Fill),
+                close_btn,
+            ]
+            .align_y(iced::Alignment::Center);
+            let card_content = column![
+                header,
                 text(&toast.message).size(11).color(TEXT_SECONDARY()),
             ]
             .spacing(2);
+            // Outer container with ACCENT background creates the left accent border;
+            // inner container with BG_SECONDARY sits on top with left padding offset.
             let card = container(
-                row![accent_border, container(card_content).padding(Padding::from([10, 14]))]
-                    .spacing(0),
+                container(card_content)
+                    .padding(Padding::from([10, 14]))
+                    .width(Length::Fill)
+                    .style(|_theme| container::Style {
+                        background: Some(iced::Background::Color(BG_SECONDARY())),
+                        ..container::Style::default()
+                    }),
             )
             .width(Length::Fill)
+            .padding(Padding {
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: 3.0,
+            })
             .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(BG_SECONDARY())),
+                background: Some(iced::Background::Color(ACCENT())),
                 border: iced::Border {
                     color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.6),
                     width: 0.5,
@@ -4690,7 +4728,7 @@ impl GodlyApp {
 
         container(row![Space::new().width(Length::Fill), toasts_column])
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Shrink)
             .padding(Padding::from([14, 14]))
             .into()
     }
