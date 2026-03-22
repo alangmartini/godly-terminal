@@ -1,5 +1,12 @@
 use arboard::Clipboard;
 
+#[cfg(target_os = "windows")]
+use {
+    winapi::um::winuser::{OpenClipboard, GetClipboardData},
+    winapi::um::shellapi::DragQueryFileW,
+    winapi::um::winuser::CF_HDROP,
+};
+
 /// Copy text to the system clipboard.
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard =
@@ -43,8 +50,80 @@ pub fn check_clipboard_image() -> Result<Option<String>, String> {
             let path = save_clipboard_image_as_png(img.width, img.height, &img.bytes)?;
             Ok(Some(path))
         }
-        Err(_) => Ok(None),
+        Err(e) => {
+            log::debug!("No bitmap image found on clipboard: {}", e);
+            Ok(None)
+        }
     }
+}
+
+/// Check clipboard for image files (CF_HDROP format).
+/// Windows File Explorer puts file paths on the clipboard, not bitmap data.
+/// Returns a list of image file paths found.
+#[cfg(target_os = "windows")]
+pub fn check_clipboard_image_files() -> Result<Vec<String>, String> {
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err("Failed to open clipboard".to_string());
+        }
+
+        let handle = GetClipboardData(CF_HDROP as u32);
+        let _guard = ClipboardGuard;
+
+        if handle.is_null() {
+            log::debug!("No CF_HDROP data on clipboard");
+            return Ok(Vec::new());
+        }
+
+        let hdrop = handle as winapi::um::shellapi::HDROP;
+        let count = DragQueryFileW(hdrop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+
+        let mut paths = Vec::new();
+        for i in 0..count {
+            let len = DragQueryFileW(hdrop, i, std::ptr::null_mut(), 0) + 1;
+            let mut buf = vec![0u16; len as usize];
+            DragQueryFileW(hdrop, i, buf.as_mut_ptr(), len);
+
+            // Remove null terminator for conversion.
+            buf.pop();
+            let path = String::from_utf16(&buf)
+                .unwrap_or_else(|_| String::new());
+
+            // Check if it's an image file by extension.
+            if is_image_file(&path) {
+                paths.push(path);
+            }
+        }
+
+        if !paths.is_empty() {
+            log::info!("Found {} image file(s) on clipboard", paths.len());
+        } else {
+            log::debug!("No image files found in CF_HDROP clipboard data");
+        }
+
+        Ok(paths)
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct ClipboardGuard;
+
+#[cfg(target_os = "windows")]
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = winapi::um::winuser::CloseClipboard();
+        }
+    }
+}
+
+/// Check if a file path is an image file based on extension.
+fn is_image_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    matches!(
+        lower.split('.').last().unwrap_or(""),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "tiff" | "ico"
+    )
 }
 
 /// Encode raw RGBA pixels as PNG and write to a temp file.
