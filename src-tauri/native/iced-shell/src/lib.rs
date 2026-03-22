@@ -25,6 +25,7 @@ pub mod search;
 pub mod scrollbar;
 pub mod status_bar;
 pub mod perf_overlay;
+pub mod perf_stats;
 pub mod url_detector;
 pub mod terminal_context_menu;
 pub mod whisper_ui;
