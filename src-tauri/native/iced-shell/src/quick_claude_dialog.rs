@@ -1160,17 +1160,18 @@ fn format_relative_time(time: std::time::SystemTime) -> String {
     }
 }
 
-/// Default hardcoded model list used as fallback.
+/// Default model list — always includes the three core Claude Code aliases.
+/// Order matches Claude Code's default (Sonnet first as the default model).
 pub fn default_model_list() -> Vec<(String, String)> {
     vec![
-        ("Opus".to_string(), "opus".to_string()),
         ("Sonnet".to_string(), "sonnet".to_string()),
+        ("Opus".to_string(), "opus".to_string()),
         ("Haiku".to_string(), "haiku".to_string()),
     ]
 }
 
 /// Discover available models by running `claude --help` and parsing the --model description.
-/// Returns (display_name, value) pairs. Falls back to default list on failure.
+/// Merges discovered models with the default list so core aliases are always present.
 pub fn discover_models() -> Vec<(String, String)> {
     let output = match std::process::Command::new("claude")
         .args(["--help"])
@@ -1181,7 +1182,16 @@ pub fn discover_models() -> Vec<(String, String)> {
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_models_from_help(&stdout)
+    let discovered = parse_models_from_help(&stdout);
+
+    // Merge: start with defaults, add any newly discovered models
+    let mut models = default_model_list();
+    for (display, value) in discovered {
+        if !models.iter().any(|(_, v)| v == &value) {
+            models.push((display, value));
+        }
+    }
+    models
 }
 
 /// Parse model aliases from claude --help output.
@@ -1595,7 +1605,7 @@ mod tests {
         let models = parse_models_from_help(help);
         // Falls back to default list
         assert_eq!(models.len(), 3);
-        assert_eq!(models[0].1, "opus");
+        assert_eq!(models[0].1, "sonnet");
     }
 
     #[test]

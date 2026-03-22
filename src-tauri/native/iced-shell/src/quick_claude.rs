@@ -69,6 +69,10 @@ pub fn resume_launch_steps(session_id: &str, cwd: Option<&str>) -> Vec<LaunchSte
 }
 
 /// Build the default launch sequence for a preset with N agents.
+///
+/// The prompt is passed as a CLI positional argument to `claude`, avoiding
+/// the fragile interactive prompt detection that broke because Claude Code's
+/// TUI renders a hint bar below the `>` input prompt.
 pub fn default_launch_steps(
     num_agents: usize,
     prompt: &str,
@@ -80,11 +84,16 @@ pub fn default_launch_steps(
     // Add model flag (always, since we default to sonnet)
     cmd.push_str(&format!(" --model {}", model));
     // Add mode flag
-    let skip_trust = mode == "auto";
     match mode {
         "plan" => cmd.push_str(" --plan"),
         "auto" => cmd.push_str(" --dangerously-skip-permissions"),
         _ => {} // "default" — no flag
+    }
+    // Pass prompt as CLI positional argument
+    if !prompt.is_empty() {
+        // Shell-escape: wrap in single quotes, escape embedded single quotes
+        let escaped = prompt.replace('\'', "'\\''");
+        cmd.push_str(&format!(" '{}'", escaped));
     }
 
     let mut steps = Vec::new();
@@ -101,32 +110,6 @@ pub fn default_launch_steps(
             agent_index: i,
             command: cmd.clone(),
         });
-        // Adaptive wait: handles trust prompt if present, then waits for
-        // Claude's input prompt. Replaces the old rigid 3-step sequence that
-        // broke when the trust prompt was absent (auto mode, already-trusted dir).
-        steps.push(LaunchStep::WaitForClaudeReady {
-            agent_index: i,
-            skip_trust,
-            timeout_ms: 30000,
-        });
-        if !prompt.is_empty() {
-            // 3-step prompt delivery to avoid ink paste detection:
-            // 1. Write prompt text (no CR)
-            steps.push(LaunchStep::SendPrompt {
-                agent_index: i,
-                prompt: prompt.to_string(),
-            });
-            // 2. Wait for echo in grid (confirms TUI read the text)
-            steps.push(LaunchStep::WaitForEcho {
-                agent_index: i,
-                text_prefix: prompt.to_string(),
-                timeout_ms: 30000,
-            });
-            // 3. Send Enter separately (clean submit)
-            steps.push(LaunchStep::SendEnter {
-                agent_index: i,
-            });
-        }
     }
     steps
 }
@@ -139,18 +122,26 @@ pub struct LaunchState {
     pub current_step: usize,
     pub agent_terminal_ids: Vec<Option<String>>,
     pub workspace_id: String,
+    pub is_new_workspace: bool,
     pub completed: bool,
     pub error: Option<String>,
 }
 
 impl LaunchState {
-    pub fn new(preset_name: String, steps: Vec<LaunchStep>, num_agents: usize, workspace_id: String) -> Self {
+    pub fn new(
+        preset_name: String,
+        steps: Vec<LaunchStep>,
+        num_agents: usize,
+        workspace_id: String,
+        is_new_workspace: bool,
+    ) -> Self {
         Self {
             preset_name,
             steps,
             current_step: 0,
             agent_terminal_ids: vec![None; num_agents],
             workspace_id,
+            is_new_workspace,
             completed: false,
             error: None,
         }
@@ -477,28 +468,41 @@ mod tests {
     #[test]
     fn default_steps_single_no_prompt() {
         let steps = default_launch_steps(1, "", "sonnet", "default", None);
-        // CreateTerminal, WaitIdle, RunCommand, WaitForClaudeReady
-        assert_eq!(steps.len(), 4);
+        // CreateTerminal, WaitIdle, RunCommand
+        assert_eq!(steps.len(), 3);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
+        assert!(matches!(steps[1], LaunchStep::WaitIdle { agent_index: 0, .. }));
         assert!(matches!(steps[2], LaunchStep::RunCommand { agent_index: 0, .. }));
-        assert!(matches!(steps[3], LaunchStep::WaitForClaudeReady { agent_index: 0, skip_trust: false, .. }));
     }
 
     #[test]
     fn default_steps_single_with_prompt() {
         let steps = default_launch_steps(1, "build the app", "sonnet", "default", None);
-        // 4 base steps + 3 prompt steps (SendPrompt + WaitForEcho + SendEnter)
-        assert_eq!(steps.len(), 7);
-        assert!(matches!(steps[4], LaunchStep::SendPrompt { agent_index: 0, .. }));
-        assert!(matches!(steps[5], LaunchStep::WaitForEcho { agent_index: 0, .. }));
-        assert!(matches!(steps[6], LaunchStep::SendEnter { agent_index: 0 }));
+        // Prompt is now a CLI arg — same 3 steps, prompt embedded in command
+        assert_eq!(steps.len(), 3);
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            assert!(command.contains("'build the app'"));
+        } else {
+            panic!("Expected RunCommand");
+        }
+    }
+
+    #[test]
+    fn default_steps_prompt_with_single_quotes() {
+        let steps = default_launch_steps(1, "fix it's broken", "sonnet", "auto", None);
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            // Single quotes in prompt should be escaped
+            assert!(command.contains("'fix it'\\''s broken'"));
+        } else {
+            panic!("Expected RunCommand");
+        }
     }
 
     #[test]
     fn default_steps_grid_2x2() {
         let steps = default_launch_steps(4, "test", "sonnet", "default", None);
-        // Each agent: 7 steps (with prompt). 4 agents = 28
-        assert_eq!(steps.len(), 28);
+        // Each agent: 3 steps. 4 agents = 12
+        assert_eq!(steps.len(), 12);
     }
 
     #[test]
@@ -519,8 +523,6 @@ mod tests {
         } else {
             panic!("Expected RunCommand at index 2");
         }
-        // Auto mode should skip trust prompt
-        assert!(matches!(steps[3], LaunchStep::WaitForClaudeReady { skip_trust: true, .. }));
     }
 
     #[test]
@@ -531,8 +533,6 @@ mod tests {
         } else {
             panic!("Expected RunCommand at index 2");
         }
-        // Default mode should NOT skip trust prompt
-        assert!(matches!(steps[3], LaunchStep::WaitForClaudeReady { skip_trust: false, .. }));
     }
 
     #[test]
