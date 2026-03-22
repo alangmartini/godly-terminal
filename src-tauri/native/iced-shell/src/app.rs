@@ -827,8 +827,8 @@ pub enum Message {
     QuickClaudeDialogModeDropdownToggle,
     /// Models discovered from claude CLI.
     QuickClaudeDialogModelsLoaded(Vec<(String, String)>),
-    /// Image pasted from clipboard into Quick Claude dialog.
-    QuickClaudeDialogImagePasted(Result<crate::quick_claude_dialog::ImageAttachment, String>),
+    /// Image(s) pasted from clipboard into Quick Claude dialog.
+    QuickClaudeDialogImagePasted(Result<Vec<crate::quick_claude_dialog::ImageAttachment>, String>),
     /// Remove an attached image from Quick Claude dialog by index.
     QuickClaudeDialogImageRemoved(usize),
     /// AI tool display name input changed.
@@ -2674,12 +2674,15 @@ impl GodlyApp {
             }
             Message::QuickClaudeDialogImagePasted(result) => {
                 match result {
-                    Ok(attachment) => {
+                    Ok(attachments) => {
                         if let Some(ref mut dlg) = self.quick_claude_dialog {
-                            if dlg.attached_images.len() < 10 {
-                                dlg.attached_images.push(attachment);
-                            } else {
-                                log::warn!("Quick Claude: max 10 image attachments reached");
+                            for attachment in attachments {
+                                if dlg.attached_images.len() < 10 {
+                                    dlg.attached_images.push(attachment);
+                                } else {
+                                    log::warn!("Quick Claude: max 10 image attachments reached");
+                                    break;
+                                }
                             }
                         }
                     }
@@ -7550,30 +7553,48 @@ impl GodlyApp {
             async move {
                 let (tx, rx) = futures_channel::oneshot::channel();
                 std::thread::spawn(move || {
-                    let result = clipboard::check_clipboard_image();
+                    // Try bitmap image first (arboard get_image).
+                    let result = if let Ok(Some(path)) = clipboard::check_clipboard_image() {
+                        Ok(vec![path])
+                    } else {
+                        // Fallback: check for image files via CF_HDROP (File Explorer drag-drop).
+                        #[cfg(target_os = "windows")]
+                        {
+                            match clipboard::check_clipboard_image_files() {
+                                Ok(paths) if !paths.is_empty() => Ok(paths),
+                                _ => Err("No image or image file found on clipboard".into()),
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            Err("No image found on clipboard".into())
+                        }
+                    };
                     let _ = tx.send(result);
                 });
                 rx.await
                     .unwrap_or_else(|_| Err("Clipboard background thread panicked".into()))
             },
             |result| match result {
-                Ok(Some(path)) => {
-                    let display_name = std::path::Path::new(&path)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "clipboard-image.png".to_string());
-                    let handle = iced::widget::image::Handle::from_path(&path);
-                    Message::QuickClaudeDialogImagePasted(Ok(
-                        crate::quick_claude_dialog::ImageAttachment {
+                Ok(paths) => {
+                    let mut attachments = Vec::new();
+                    for path in paths {
+                        let display_name = std::path::Path::new(&path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "image".to_string());
+                        let handle = iced::widget::image::Handle::from_path(&path);
+                        attachments.push(crate::quick_claude_dialog::ImageAttachment {
                             file_path: path,
                             thumbnail_handle: handle,
                             display_name,
-                        },
-                    ))
-                }
-                Ok(None) => {
-                    // No image on clipboard — text paste already handled by text_editor
-                    Message::ClipboardPasteFailed("Clipboard empty".into())
+                        });
+                    }
+                    if attachments.is_empty() {
+                        Message::ClipboardPasteFailed("No images found on clipboard".into())
+                    } else {
+                        Message::QuickClaudeDialogImagePasted(Ok(attachments))
+                    }
                 }
                 Err(e) => Message::QuickClaudeDialogImagePasted(Err(e)),
             },
