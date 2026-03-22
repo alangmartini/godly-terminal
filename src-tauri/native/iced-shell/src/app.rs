@@ -2336,7 +2336,7 @@ impl GodlyApp {
                     .map(|ws| ws.folder_path.clone())
                     .filter(|p| !p.is_empty());
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[],
+                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], false,
                 );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
@@ -2586,8 +2586,9 @@ impl GodlyApp {
                     (id, name, None, true)
                 };
 
+                let use_worktree = !dlg.main_branch_mode;
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths,
+                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, use_worktree,
                 );
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
@@ -7256,6 +7257,24 @@ impl GodlyApp {
                     (ai, ph, wid)
                 };
 
+                // Handle WorktreeCreated: override the CWD of the next
+                // CreateTerminal step for this agent.
+                if let crate::quick_claude::StepResult::WorktreeCreated { ref worktree_path } = step_result {
+                    if let Some(launch) = &mut self.quick_claude_launch {
+                        let si = launch.current_step;
+                        let agent_idx = launch.steps.get(si).and_then(|step| {
+                            if let crate::quick_claude::LaunchStep::CreateWorktree { agent_index, .. } = step {
+                                Some(*agent_index)
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(_ai) = agent_idx {
+                            launch.pending_worktree_path = Some(worktree_path.clone());
+                        }
+                    }
+                }
+
                 if let crate::quick_claude::StepResult::TerminalCreated(ref session_id) = step_result {
                     if let Some(agent_index) = agent_index_opt {
                         if agent_index == 0 {
@@ -7289,6 +7308,13 @@ impl GodlyApp {
                         // Background launch: do NOT switch focus
                         self.entering_tabs
                             .insert(session_id.clone(), Self::now_ms());
+
+                        // Apply pending worktree path so terminal cleanup works on close
+                        if let Some(launch) = &mut self.quick_claude_launch {
+                            if let Some(wt_path) = launch.pending_worktree_path.take() {
+                                self.terminals.set_worktree_path(session_id, wt_path);
+                            }
+                        }
                     }
                 }
 
