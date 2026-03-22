@@ -92,7 +92,8 @@ pub fn default_launch_steps(
     // Pass prompt as CLI positional argument
     if !prompt.is_empty() {
         // Shell-escape: wrap in single quotes, escape embedded single quotes
-        let escaped = prompt.replace('\'', "'\\''");
+        // PowerShell escapes single quotes by doubling them: 'isn''t' -> isn't
+        let escaped = prompt.replace('\'', "''");
         cmd.push_str(&format!(" '{}'", escaped));
     }
 
@@ -491,8 +492,22 @@ mod tests {
     fn default_steps_prompt_with_single_quotes() {
         let steps = default_launch_steps(1, "fix it's broken", "sonnet", "auto", None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
-            // Single quotes in prompt should be escaped
-            assert!(command.contains("'fix it'\\''s broken'"));
+            // PowerShell escapes single quotes by doubling them
+            assert!(command.contains("'fix it''s broken'"), "got: {command}");
+        } else {
+            panic!("Expected RunCommand");
+        }
+    }
+
+    #[test]
+    fn default_steps_prompt_with_double_quotes() {
+        let steps = default_launch_steps(1, "what is \"the issue\"", "sonnet", "auto", None);
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            // Double quotes inside single-quoted strings are literal (no escaping needed)
+            assert!(
+                command.contains("'what is \"the issue\"'"),
+                "got: {command}"
+            );
         } else {
             panic!("Expected RunCommand");
         }
