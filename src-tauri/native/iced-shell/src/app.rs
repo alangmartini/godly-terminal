@@ -827,6 +827,10 @@ pub enum Message {
     QuickClaudeDialogModeDropdownToggle,
     /// Models discovered from claude CLI.
     QuickClaudeDialogModelsLoaded(Vec<(String, String)>),
+    /// Image pasted from clipboard into Quick Claude dialog.
+    QuickClaudeDialogImagePasted(Result<crate::quick_claude_dialog::ImageAttachment, String>),
+    /// Remove an attached image from Quick Claude dialog by index.
+    QuickClaudeDialogImageRemoved(usize),
     /// AI tool display name input changed.
     AiToolNameInputChanged(String),
     /// AI tool command input changed.
@@ -1591,6 +1595,10 @@ impl GodlyApp {
                 }
             }
             Message::FileDropped(path) => {
+                // If Quick Claude dialog is open, attach as image instead
+                if self.quick_claude_dialog.is_some() {
+                    return self.add_dropped_file_to_quick_claude(path);
+                }
                 let target_terminal = self.target_terminal_id().map(str::to_string);
                 if let (Some(terminal_id), Some(client)) = (target_terminal, &self.client) {
                     let payload = format!("{} ", quote_dropped_path(&path));
@@ -1730,6 +1738,12 @@ impl GodlyApp {
                             if is_escape_key(&key) {
                                 self.quick_claude_dialog = None;
                                 return Task::none();
+                            }
+                            // Ctrl+V: check clipboard for image attachment
+                            if modifiers.control()
+                                && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "v")
+                            {
+                                return self.check_clipboard_for_quick_claude_image();
                             }
                             if modifiers.control()
                                 && matches!(key, keyboard::Key::Named(keyboard::key::Named::Enter))
@@ -2311,7 +2325,7 @@ impl GodlyApp {
                     .map(|ws| ws.folder_path.clone())
                     .filter(|p| !p.is_empty());
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(),
+                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[],
                 );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
@@ -2501,6 +2515,11 @@ impl GodlyApp {
                 let prompt = prompt.trim();
                 let model = dlg.selected_model.clone();
                 let mode = dlg.selected_mode.clone();
+                let image_paths: Vec<String> = dlg
+                    .attached_images
+                    .iter()
+                    .map(|a| a.file_path.clone())
+                    .collect();
                 let num_agents = 1;
 
                 // Resolve workspace: use selected workspace if it exists,
@@ -2553,7 +2572,7 @@ impl GodlyApp {
                 };
 
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, prompt, &model, &mode, cwd.as_deref(),
+                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths,
                 );
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
@@ -2633,6 +2652,29 @@ impl GodlyApp {
             Message::QuickClaudeDialogSessionsLoaded(sessions) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.sessions = sessions;
+                }
+            }
+            Message::QuickClaudeDialogImagePasted(result) => {
+                match result {
+                    Ok(attachment) => {
+                        if let Some(ref mut dlg) = self.quick_claude_dialog {
+                            if dlg.attached_images.len() < 10 {
+                                dlg.attached_images.push(attachment);
+                            } else {
+                                log::warn!("Quick Claude: max 10 image attachments reached");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Quick Claude image paste failed: {}", e);
+                    }
+                }
+            }
+            Message::QuickClaudeDialogImageRemoved(index) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    if index < dlg.attached_images.len() {
+                        dlg.attached_images.remove(index);
+                    }
                 }
             }
             Message::QuickClaudeDialogResume => {
@@ -3948,6 +3990,7 @@ impl GodlyApp {
                 |tab| Message::QuickClaudeDialogTabSelected(tab),
                 Message::QuickClaudeDialogSessionSelected,
                 Message::QuickClaudeDialogResume,
+                Message::QuickClaudeDialogImageRemoved,
             );
             stack![with_shell_picker, qc_overlay].into()
         } else {
@@ -7412,6 +7455,89 @@ impl GodlyApp {
                 Err(e) => Message::ClipboardPasteFailed(e),
             },
         )
+    }
+
+    /// Check clipboard for an image and attach it to the Quick Claude dialog.
+    /// If no image is found, does nothing (text paste is handled by the text_editor).
+    fn check_clipboard_for_quick_claude_image(&self) -> Task<Message> {
+        Task::perform(
+            async move {
+                let (tx, rx) = futures_channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let result = clipboard::check_clipboard_image();
+                    let _ = tx.send(result);
+                });
+                rx.await
+                    .unwrap_or_else(|_| Err("Clipboard background thread panicked".into()))
+            },
+            |result| match result {
+                Ok(Some(path)) => {
+                    let display_name = std::path::Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "clipboard-image.png".to_string());
+                    let handle = iced::widget::image::Handle::from_path(&path);
+                    Message::QuickClaudeDialogImagePasted(Ok(
+                        crate::quick_claude_dialog::ImageAttachment {
+                            file_path: path,
+                            thumbnail_handle: handle,
+                            display_name,
+                        },
+                    ))
+                }
+                Ok(None) => {
+                    // No image on clipboard — text paste already handled by text_editor
+                    Message::ClipboardPasteFailed("Clipboard empty".into())
+                }
+                Err(e) => Message::QuickClaudeDialogImagePasted(Err(e)),
+            },
+        )
+    }
+
+    /// Add a dropped file as an image attachment to the Quick Claude dialog.
+    fn add_dropped_file_to_quick_claude(&mut self, path: std::path::PathBuf) -> Task<Message> {
+        let Some(ref mut dlg) = self.quick_claude_dialog else {
+            return Task::none();
+        };
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let image_exts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+        if !image_exts.contains(&ext.as_str()) {
+            log::warn!("Quick Claude: dropped non-image file ignored: {}", path.display());
+            return Task::none();
+        }
+
+        if dlg.attached_images.len() >= 10 {
+            log::warn!("Quick Claude: max 10 image attachments reached");
+            return Task::none();
+        }
+
+        let display_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "image".to_string());
+
+        let file_path = path.to_string_lossy().to_string();
+        // Strip Windows UNC prefix
+        let clean_path = file_path
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&file_path)
+            .to_string();
+
+        let handle = iced::widget::image::Handle::from_path(&path);
+
+        dlg.attached_images.push(crate::quick_claude_dialog::ImageAttachment {
+            file_path: clean_path,
+            thumbnail_handle: handle,
+            display_name,
+        });
+
+        Task::none()
     }
 
     // -----------------------------------------------------------------------
