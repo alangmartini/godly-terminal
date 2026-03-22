@@ -42,12 +42,27 @@ pub fn generate_worktree_dir_name() -> String {
     format!("godly-wt-{}", &id[..8])
 }
 
+/// Resolve the base directory for worktrees.
+///
+/// Uses `%APPDATA%/com.godly.terminal/worktrees/` so that worktrees live
+/// outside the source repository, avoiding the git-inside-git problem that
+/// causes Claude agents to navigate back to the parent repo.
+fn worktrees_base_dir() -> Result<std::path::PathBuf, String> {
+    let appdata = std::env::var("APPDATA")
+        .map_err(|_| "APPDATA environment variable not set".to_string())?;
+    Ok(Path::new(&appdata)
+        .join("com.godly.terminal")
+        .join("worktrees"))
+}
+
 /// Create a git worktree in detached HEAD mode.
 ///
-/// Creates the worktree at `<repo_root>/.godly-worktrees/<dir_name>/`.
+/// Creates the worktree at `%APPDATA%/com.godly.terminal/worktrees/<dir_name>/`.
+/// This places worktrees outside the source repo to avoid the git-inside-git
+/// problem that causes Claude agents to navigate back to the parent repo.
 /// Returns the absolute path to the created worktree directory.
 pub fn create_worktree(repo_root: &str, dir_name: &str) -> Result<String, String> {
-    let worktrees_dir = Path::new(repo_root).join(".godly-worktrees");
+    let worktrees_dir = worktrees_base_dir()?;
     let worktree_path = worktrees_dir.join(dir_name);
     let worktree_path_str = worktree_path
         .to_str()
@@ -57,11 +72,8 @@ pub fn create_worktree(repo_root: &str, dir_name: &str) -> Result<String, String
     // Ensure parent directory exists.
     if !worktrees_dir.exists() {
         std::fs::create_dir_all(&worktrees_dir)
-            .map_err(|e| format!("Failed to create .godly-worktrees directory: {e}"))?;
+            .map_err(|e| format!("Failed to create worktrees directory: {e}"))?;
     }
-
-    // Auto-add .godly-worktrees/ to .gitignore if not already present.
-    ensure_gitignore(repo_root);
 
     let output = Command::new("git")
         .args([
@@ -112,26 +124,6 @@ pub fn remove_worktree(repo_root: &str, worktree_path: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// Ensure `.godly-worktrees/` is in the repo's `.gitignore`.
-fn ensure_gitignore(repo_root: &str) {
-    let gitignore_path = Path::new(repo_root).join(".gitignore");
-    let entry = ".godly-worktrees/";
-
-    if gitignore_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&gitignore_path) {
-            if content.lines().any(|line| line.trim() == entry) {
-                return; // Already present.
-            }
-            // Append to existing .gitignore.
-            let separator = if content.ends_with('\n') { "" } else { "\n" };
-            let new_content = format!("{content}{separator}{entry}\n");
-            let _ = std::fs::write(&gitignore_path, new_content);
-        }
-    } else {
-        // Create new .gitignore with just our entry.
-        let _ = std::fs::write(&gitignore_path, format!("{entry}\n"));
-    }
-}
 
 #[cfg(test)]
 mod tests {
