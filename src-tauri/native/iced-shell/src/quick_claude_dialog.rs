@@ -3,6 +3,11 @@ use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme;
 
+/// Widget ID for the prompt text editor — used to focus it on dialog open.
+pub fn prompt_editor_id() -> iced::widget::Id {
+    iced::widget::Id::new("quick-claude-prompt-editor")
+}
+
 fn tint(color: Color, alpha: f32) -> Color {
     Color::from_rgba(color.r, color.g, color.b, alpha)
 }
@@ -192,7 +197,7 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
 
     // ── Title ────────────────────────────────────────────────────────────
     let title = text("Quick Claude").size(18).color(text_active);
-    let subtitle = text("Ctrl+Enter to launch \u{00B7} Escape to cancel")
+    let subtitle = text("Tab or Ctrl+Enter to launch \u{00B7} Escape to cancel")
         .size(11)
         .color(text_secondary);
     let step_indicator = text("\u{2460} Workspace \u{2192} \u{2461} Prompt \u{2192} \u{2462} Launch")
@@ -595,6 +600,7 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
 
             // ── Prompt textarea ──────────────────────────────────────────
             let editor = text_editor(&state.prompt_content)
+                .id(prompt_editor_id())
                 .on_action(on_prompt_action)
                 .padding(12)
                 .height(Length::Fixed(140.0));
