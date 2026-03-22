@@ -2338,6 +2338,7 @@ impl GodlyApp {
                     steps,
                     num_agents,
                     ws_id,
+                    true, // new workspace
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
@@ -2514,26 +2515,18 @@ impl GodlyApp {
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
 
-                let (ws_id, ws_name, cwd) = if let Some((id, name, folder)) = selected_ws {
-                    // Add terminal to the EXISTING workspace as a new tab
+                let (ws_id, ws_name, cwd, is_new_ws) = if let Some((id, name, folder)) = selected_ws {
+                    // Add terminal to the EXISTING workspace — it appears in
+                    // the tab bar without modifying the current layout or focus.
                     self.terminals.add_to_workspace(
                         placeholder_id.clone(),
                         rows,
                         cols,
                         id.clone(),
                     );
-                    // Split the focused terminal's leaf to show the new pane
-                    if let Some(ws) = self.workspaces.get_mut(&id) {
-                        let focused = ws.focused_terminal.clone();
-                        ws.layout.split_leaf(
-                            &focused,
-                            placeholder_id.clone(),
-                            SplitDirection::Horizontal,
-                        );
-                    }
-                    // Background launch: do NOT switch focus
+                    // Background launch: do NOT split, do NOT switch focus
                     let cwd = if folder.is_empty() { None } else { Some(folder) };
-                    (id, name, cwd)
+                    (id, name, cwd, false)
                 } else {
                     // No workspace selected — create a new one
                     let id = uuid::Uuid::new_v4().to_string();
@@ -2556,7 +2549,7 @@ impl GodlyApp {
                     );
                     // Background launch: do NOT switch focus
                     self.next_workspace_num += 1;
-                    (id, name, None)
+                    (id, name, None, true)
                 };
 
                 let steps = crate::quick_claude::default_launch_steps(
@@ -2568,6 +2561,7 @@ impl GodlyApp {
                     steps,
                     num_agents,
                     ws_id,
+                    is_new_ws,
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
@@ -2694,6 +2688,7 @@ impl GodlyApp {
                     steps,
                     1,
                     ws_id,
+                    true, // new workspace
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
@@ -7207,12 +7202,15 @@ impl GodlyApp {
                         if agent_index == 0 {
                             if let Some(placeholder) = placeholder_opt {
                                 if let Some(ws) = self.workspaces.get_mut(&ws_id) {
+                                    // Replace placeholder in layout (only meaningful
+                                    // for new workspaces where placeholder is the
+                                    // initial leaf; for existing workspaces the
+                                    // placeholder is not in the layout tree).
                                     replace_leaf_in_layout(
                                         &mut ws.layout,
                                         &placeholder,
                                         session_id.clone(),
                                     );
-                                    ws.focused_terminal = session_id.clone();
                                 }
                                 self.terminals.remove(&placeholder);
                             }
@@ -7272,70 +7270,76 @@ impl GodlyApp {
 
         let num_agents = terminal_ids.len();
         let ws_id = launch.workspace_id.clone();
+        let is_new_workspace = launch.is_new_workspace;
 
-        let two_agent_direction = {
-            let preset_name = launch.preset_name.clone();
-            let matching_preset = self
-                .quick_claude_presets
-                .iter()
-                .find(|p| p.name == preset_name);
-            match matching_preset.map(|p| p.layout) {
-                Some(QuickClaudeLayout::HSplit) => SplitDirection::Vertical,
-                _ => SplitDirection::Horizontal,
-            }
-        };
+        // Only set up the workspace layout for NEW workspaces.
+        // For existing workspaces the terminal is already in the tab bar;
+        // modifying the layout would destroy the user's current view.
+        if is_new_workspace {
+            let two_agent_direction = {
+                let preset_name = launch.preset_name.clone();
+                let matching_preset = self
+                    .quick_claude_presets
+                    .iter()
+                    .find(|p| p.name == preset_name);
+                match matching_preset.map(|p| p.layout) {
+                    Some(QuickClaudeLayout::HSplit) => SplitDirection::Vertical,
+                    _ => SplitDirection::Horizontal,
+                }
+            };
 
-        if let Some(ws) = self.workspaces.get_mut(&ws_id) {
-            match num_agents {
-                1 => {
-                    ws.layout = LayoutNode::Leaf {
-                        terminal_id: terminal_ids[0].clone(),
-                    };
-                    ws.focused_terminal = terminal_ids[0].clone();
-                }
-                2 => {
-                    ws.layout = LayoutNode::Leaf {
-                        terminal_id: terminal_ids[0].clone(),
-                    };
-                    ws.layout.split_leaf(
-                        &terminal_ids[0],
-                        terminal_ids[1].clone(),
-                        two_agent_direction,
-                    );
-                    ws.focused_terminal = terminal_ids[0].clone();
-                }
-                4 => {
-                    ws.layout = LayoutNode::Split {
-                        direction: SplitDirection::Horizontal,
-                        ratio: 0.5,
-                        first: Box::new(LayoutNode::Split {
-                            direction: SplitDirection::Vertical,
+            if let Some(ws) = self.workspaces.get_mut(&ws_id) {
+                match num_agents {
+                    1 => {
+                        ws.layout = LayoutNode::Leaf {
+                            terminal_id: terminal_ids[0].clone(),
+                        };
+                        ws.focused_terminal = terminal_ids[0].clone();
+                    }
+                    2 => {
+                        ws.layout = LayoutNode::Leaf {
+                            terminal_id: terminal_ids[0].clone(),
+                        };
+                        ws.layout.split_leaf(
+                            &terminal_ids[0],
+                            terminal_ids[1].clone(),
+                            two_agent_direction,
+                        );
+                        ws.focused_terminal = terminal_ids[0].clone();
+                    }
+                    4 => {
+                        ws.layout = LayoutNode::Split {
+                            direction: SplitDirection::Horizontal,
                             ratio: 0.5,
-                            first: Box::new(LayoutNode::Leaf {
-                                terminal_id: terminal_ids[0].clone(),
+                            first: Box::new(LayoutNode::Split {
+                                direction: SplitDirection::Vertical,
+                                ratio: 0.5,
+                                first: Box::new(LayoutNode::Leaf {
+                                    terminal_id: terminal_ids[0].clone(),
+                                }),
+                                second: Box::new(LayoutNode::Leaf {
+                                    terminal_id: terminal_ids[2].clone(),
+                                }),
                             }),
-                            second: Box::new(LayoutNode::Leaf {
-                                terminal_id: terminal_ids[2].clone(),
+                            second: Box::new(LayoutNode::Split {
+                                direction: SplitDirection::Vertical,
+                                ratio: 0.5,
+                                first: Box::new(LayoutNode::Leaf {
+                                    terminal_id: terminal_ids[1].clone(),
+                                }),
+                                second: Box::new(LayoutNode::Leaf {
+                                    terminal_id: terminal_ids[3].clone(),
+                                }),
                             }),
-                        }),
-                        second: Box::new(LayoutNode::Split {
-                            direction: SplitDirection::Vertical,
-                            ratio: 0.5,
-                            first: Box::new(LayoutNode::Leaf {
-                                terminal_id: terminal_ids[1].clone(),
-                            }),
-                            second: Box::new(LayoutNode::Leaf {
-                                terminal_id: terminal_ids[3].clone(),
-                            }),
-                        }),
-                    };
-                    ws.focused_terminal = terminal_ids[0].clone();
-                }
-                _ => {
-                    ws.layout = LayoutNode::Leaf {
-                        terminal_id: terminal_ids[0].clone(),
-                    };
-                    ws.focused_terminal = terminal_ids[0].clone();
+                        };
+                        ws.focused_terminal = terminal_ids[0].clone();
+                    }
+                    _ => {
+                        ws.layout = LayoutNode::Leaf {
+                            terminal_id: terminal_ids[0].clone(),
+                        };
+                        ws.focused_terminal = terminal_ids[0].clone();
+                    }
                 }
             }
         }
