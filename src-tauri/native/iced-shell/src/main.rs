@@ -51,6 +51,7 @@ mod session_persistence;
 mod font_enumerator;
 mod git_worktree;
 mod keybinding_persistence;
+mod phone_remote;
 
 use app::{GodlyApp, Message};
 
