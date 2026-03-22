@@ -31,6 +31,7 @@ pub mod whisper_ui;
 pub mod quick_claude_dialog;
 pub mod font_enumerator;
 pub mod git_worktree;
+pub mod phone_remote;
 
 #[cfg(test)]
 pub mod testing;

@@ -188,35 +188,7 @@ struct FlowEntry {
     enabled: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RemoteAuthMode {
-    Password,
-    SshKey,
-}
-
-impl RemoteAuthMode {
-    fn all() -> [Self; 2] {
-        [Self::Password, Self::SshKey]
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Password => "Password",
-            Self::SshKey => "SSH Key",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RemoteConnectionEntry {
-    name: String,
-    host: String,
-    port: u16,
-    username: String,
-    auth_mode: RemoteAuthMode,
-    auth_value: Option<String>,
-    enabled: bool,
-}
+use crate::phone_remote::{PhoneRemotePreferences, PhoneRemoteStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToastNotification {
@@ -418,22 +390,18 @@ pub struct GodlyApp {
     flows: Vec<FlowEntry>,
     /// Selected flow index when editing an existing flow.
     flow_edit_index: Option<usize>,
-    /// Remote profile editor input: profile name.
-    remote_name_input: String,
-    /// Remote profile editor input: SSH host/IP.
-    remote_host_input: String,
-    /// Remote profile editor input: SSH port.
-    remote_port_input: String,
-    /// Remote profile editor input: SSH username.
-    remote_username_input: String,
-    /// Remote profile editor selected auth mode.
-    remote_auth_mode: RemoteAuthMode,
-    /// Remote profile editor input: password or key path.
-    remote_auth_value_input: String,
-    /// Stored remote connection profiles for settings/runtime usage.
-    remote_connections: Vec<RemoteConnectionEntry>,
-    /// Selected remote profile index when editing.
-    remote_edit_index: Option<usize>,
+    /// Phone remote server preferences (persisted).
+    phone_remote_prefs: PhoneRemotePreferences,
+    /// Phone remote server runtime status.
+    phone_remote_status: PhoneRemoteStatus,
+    /// Phone remote child process handle (not Debug/Clone — managed separately).
+    phone_remote_process: Option<std::process::Child>,
+    /// Phone remote settings form: host binding input.
+    phone_remote_host_input: String,
+    /// Phone remote settings form: port input.
+    phone_remote_port_input: String,
+    /// Phone remote settings form: API key input.
+    phone_remote_api_key_input: String,
     /// Active toast notifications rendered as overlay cards.
     toasts: Vec<ToastNotification>,
     /// Monotonic id source for toast notifications.
@@ -505,6 +473,10 @@ pub struct GodlyApp {
 
 impl Default for GodlyApp {
     fn default() -> Self {
+        let phone_prefs = crate::phone_remote::load_preferences();
+        let phone_host_input = phone_prefs.host.clone();
+        let phone_port_input = phone_prefs.port.to_string();
+        let phone_key_input = phone_prefs.api_key.clone();
         Self {
             client: None,
             terminals: TerminalCollection::new(),
@@ -566,14 +538,12 @@ impl Default for GodlyApp {
             flow_steps_input: String::new(),
             flows: Vec::new(),
             flow_edit_index: None,
-            remote_name_input: String::new(),
-            remote_host_input: String::new(),
-            remote_port_input: "22".to_string(),
-            remote_username_input: String::new(),
-            remote_auth_mode: RemoteAuthMode::Password,
-            remote_auth_value_input: String::new(),
-            remote_connections: Vec::new(),
-            remote_edit_index: None,
+            phone_remote_prefs: phone_prefs,
+            phone_remote_status: PhoneRemoteStatus::Stopped,
+            phone_remote_process: None,
+            phone_remote_host_input: phone_host_input,
+            phone_remote_port_input: phone_port_input,
+            phone_remote_api_key_input: phone_key_input,
             toasts: Vec::new(),
             next_toast_id: 1,
             dragging_tab_id: None,
@@ -875,28 +845,26 @@ pub enum Message {
     FlowToggleEnabled(usize),
     /// Clear flow editor state.
     FlowClearEditor,
-    /// Remote profile name input changed.
-    RemoteNameInputChanged(String),
-    /// Remote host input changed.
-    RemoteHostInputChanged(String),
-    /// Remote port input changed.
-    RemotePortInputChanged(String),
-    /// Remote username input changed.
-    RemoteUsernameInputChanged(String),
-    /// Remote auth mode selected.
-    RemoteAuthModeSelected(RemoteAuthMode),
-    /// Remote auth value input changed.
-    RemoteAuthValueInputChanged(String),
-    /// Save current remote profile values.
-    RemoteSave,
-    /// Load an existing remote profile into editor.
-    RemoteEdit(usize),
-    /// Remove an existing remote profile.
-    RemoteDelete(usize),
-    /// Toggle enabled state for a remote profile.
-    RemoteToggleEnabled(usize),
-    /// Clear remote editor state.
-    RemoteClearEditor,
+    /// Toggle phone remote server on/off.
+    PhoneRemoteToggle,
+    /// Phone remote host input changed.
+    PhoneRemoteHostInputChanged(String),
+    /// Phone remote port input changed.
+    PhoneRemotePortInputChanged(String),
+    /// Phone remote API key input changed.
+    PhoneRemoteApiKeyInputChanged(String),
+    /// Toggle auto-start preference.
+    PhoneRemoteAutoStartToggle,
+    /// Save phone remote settings to disk and apply.
+    PhoneRemoteSaveSettings,
+    /// Result of health check after spawning the server.
+    PhoneRemoteStartResult(Result<(), String>),
+    /// Generate a new random API key.
+    PhoneRemoteRegenerateKey,
+    /// Copy the phone URL to clipboard.
+    PhoneRemoteCopyUrl,
+    /// Copy the API key to clipboard.
+    PhoneRemoteCopyApiKey,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
     /// Dismiss a specific toast notification by ID.
@@ -1400,10 +1368,14 @@ impl GodlyApp {
         session_persistence::save_to_default_path(&self.build_persisted_session_state())
     }
 
-    fn persist_before_close(&self) {
+    fn persist_before_close(&mut self) {
         if let Err(error) = self.save_layout_for_testing() {
             log::warn!("Failed to persist native session state: {}", error);
         }
+        if let Some(ref mut child) = self.phone_remote_process {
+            crate::phone_remote::stop_remote_server(child);
+        }
+        self.phone_remote_process = None;
     }
 
     pub fn title(&self) -> String {
@@ -2969,117 +2941,137 @@ impl GodlyApp {
                 self.flow_trigger_input.clear();
                 self.flow_steps_input.clear();
             }
-            Message::RemoteNameInputChanged(value) => {
-                self.remote_name_input = value;
-            }
-            Message::RemoteHostInputChanged(value) => {
-                self.remote_host_input = value;
-            }
-            Message::RemotePortInputChanged(value) => {
-                self.remote_port_input = value;
-            }
-            Message::RemoteUsernameInputChanged(value) => {
-                self.remote_username_input = value;
-            }
-            Message::RemoteAuthModeSelected(mode) => {
-                self.remote_auth_mode = mode;
-            }
-            Message::RemoteAuthValueInputChanged(value) => {
-                self.remote_auth_value_input = value;
-            }
-            Message::RemoteSave => {
-                let Some(name) = normalize_remote_field(&self.remote_name_input) else {
-                    return Task::none();
-                };
-                let Some(host) = normalize_remote_field(&self.remote_host_input) else {
-                    return Task::none();
-                };
-                let Some(port) = normalize_remote_port(&self.remote_port_input) else {
-                    return Task::none();
-                };
-                let Some(username) = normalize_remote_field(&self.remote_username_input) else {
-                    return Task::none();
-                };
-                let auth_value = normalize_remote_field(&self.remote_auth_value_input);
-                let enabled = self
-                    .remote_edit_index
-                    .and_then(|index| {
-                        self.remote_connections
-                            .get(index)
-                            .map(|profile| profile.enabled)
-                    })
-                    .unwrap_or(true);
+            Message::PhoneRemoteToggle => {
+                match self.phone_remote_status {
+                    PhoneRemoteStatus::Stopped | PhoneRemoteStatus::Failed(_) => {
+                        // Apply current form inputs to prefs before starting
+                        if let Ok(port) = self.phone_remote_port_input.trim().parse::<u16>() {
+                            if port > 0 {
+                                self.phone_remote_prefs.port = port;
+                            }
+                        }
+                        let host = self.phone_remote_host_input.trim().to_string();
+                        if !host.is_empty() {
+                            self.phone_remote_prefs.host = host;
+                        }
+                        let key = self.phone_remote_api_key_input.trim().to_string();
+                        if !key.is_empty() {
+                            self.phone_remote_prefs.api_key = key;
+                        }
+                        crate::phone_remote::save_preferences(&self.phone_remote_prefs);
 
-                let next_profile = RemoteConnectionEntry {
-                    name,
-                    host,
-                    port,
-                    username,
-                    auth_mode: self.remote_auth_mode,
-                    auth_value,
-                    enabled,
-                };
-
-                if let Some(edit_index) = self.remote_edit_index {
-                    if edit_index < self.remote_connections.len() {
-                        self.remote_connections[edit_index] = next_profile;
-                    } else {
-                        self.remote_connections.push(next_profile);
+                        match crate::phone_remote::spawn_remote_server(&self.phone_remote_prefs) {
+                            Ok(child) => {
+                                self.phone_remote_process = Some(child);
+                                self.phone_remote_status = PhoneRemoteStatus::Starting;
+                                let h = self.phone_remote_prefs.host.clone();
+                                let p = self.phone_remote_prefs.port;
+                                return Task::perform(
+                                    async move {
+                                        let (tx, rx) = futures_channel::oneshot::channel();
+                                        std::thread::spawn(move || {
+                                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                                            let addr = format!("{}:{}", h, p);
+                                            let result = match addr.parse::<std::net::SocketAddr>() {
+                                                Ok(sock) => std::net::TcpStream::connect_timeout(
+                                                    &sock,
+                                                    std::time::Duration::from_secs(3),
+                                                )
+                                                .map(|_| ())
+                                                .map_err(|e| e.to_string()),
+                                                Err(e) => Err(e.to_string()),
+                                            };
+                                            let _ = tx.send(result);
+                                        });
+                                        rx.await.unwrap_or(Err("Health check panicked".into()))
+                                    },
+                                    Message::PhoneRemoteStartResult,
+                                );
+                            }
+                            Err(e) => {
+                                self.phone_remote_status = PhoneRemoteStatus::Failed(e);
+                            }
+                        }
                     }
-                } else {
-                    self.remote_connections.push(next_profile);
-                }
-
-                self.remote_name_input.clear();
-                self.remote_host_input.clear();
-                self.remote_port_input = "22".to_string();
-                self.remote_username_input.clear();
-                self.remote_auth_mode = RemoteAuthMode::Password;
-                self.remote_auth_value_input.clear();
-                self.remote_edit_index = None;
-            }
-            Message::RemoteEdit(index) => {
-                if let Some(profile) = self.remote_connections.get(index) {
-                    self.remote_name_input = profile.name.clone();
-                    self.remote_host_input = profile.host.clone();
-                    self.remote_port_input = profile.port.to_string();
-                    self.remote_username_input = profile.username.clone();
-                    self.remote_auth_mode = profile.auth_mode;
-                    self.remote_auth_value_input = profile.auth_value.clone().unwrap_or_default();
-                    self.remote_edit_index = Some(index);
-                }
-            }
-            Message::RemoteDelete(index) => {
-                if index < self.remote_connections.len() {
-                    self.remote_connections.remove(index);
-                    match self.remote_edit_index {
-                        Some(edit_index) if edit_index == index => {
-                            self.remote_edit_index = None;
-                            self.remote_name_input.clear();
-                            self.remote_host_input.clear();
-                            self.remote_port_input = "22".to_string();
-                            self.remote_username_input.clear();
-                            self.remote_auth_mode = RemoteAuthMode::Password;
-                            self.remote_auth_value_input.clear();
+                    PhoneRemoteStatus::Running | PhoneRemoteStatus::Starting => {
+                        if let Some(ref mut child) = self.phone_remote_process {
+                            crate::phone_remote::stop_remote_server(child);
                         }
-                        Some(edit_index) if edit_index > index => {
-                            self.remote_edit_index = Some(edit_index - 1);
-                        }
-                        _ => {}
+                        self.phone_remote_process = None;
+                        self.phone_remote_status = PhoneRemoteStatus::Stopped;
                     }
                 }
             }
-            Message::RemoteToggleEnabled(index) => {
-                let _ = toggle_remote_enabled(self.remote_connections.as_mut_slice(), index);
+            Message::PhoneRemoteHostInputChanged(value) => {
+                self.phone_remote_host_input = value;
             }
-            Message::RemoteClearEditor => {
-                self.remote_edit_index = None;
-                self.remote_name_input.clear();
-                self.remote_host_input.clear();
-                self.remote_port_input = "22".to_string();
-                self.remote_username_input.clear();
-                self.remote_auth_mode = RemoteAuthMode::Password;
-                self.remote_auth_value_input.clear();
+            Message::PhoneRemotePortInputChanged(value) => {
+                self.phone_remote_port_input = value;
+            }
+            Message::PhoneRemoteApiKeyInputChanged(value) => {
+                self.phone_remote_api_key_input = value;
+            }
+            Message::PhoneRemoteAutoStartToggle => {
+                self.phone_remote_prefs.auto_start = !self.phone_remote_prefs.auto_start;
+                crate::phone_remote::save_preferences(&self.phone_remote_prefs);
+            }
+            Message::PhoneRemoteSaveSettings => {
+                let port = self
+                    .phone_remote_port_input
+                    .trim()
+                    .parse::<u16>()
+                    .unwrap_or(self.phone_remote_prefs.port);
+                let host = self.phone_remote_host_input.trim().to_string();
+                let key = self.phone_remote_api_key_input.trim().to_string();
+
+                if port > 0 {
+                    self.phone_remote_prefs.port = port;
+                }
+                if !host.is_empty() {
+                    self.phone_remote_prefs.host = host;
+                }
+                if !key.is_empty() {
+                    self.phone_remote_prefs.api_key = key;
+                }
+                crate::phone_remote::save_preferences(&self.phone_remote_prefs);
+
+                // If server is running, restart with new settings
+                if self.phone_remote_status == PhoneRemoteStatus::Running
+                    || self.phone_remote_status == PhoneRemoteStatus::Starting
+                {
+                    if let Some(ref mut child) = self.phone_remote_process {
+                        crate::phone_remote::stop_remote_server(child);
+                    }
+                    self.phone_remote_process = None;
+                    self.phone_remote_status = PhoneRemoteStatus::Stopped;
+                    return self.update(Message::PhoneRemoteToggle);
+                }
+            }
+            Message::PhoneRemoteStartResult(result) => match result {
+                Ok(()) => {
+                    self.phone_remote_status = PhoneRemoteStatus::Running;
+                }
+                Err(msg) => {
+                    if let Some(ref mut child) = self.phone_remote_process {
+                        crate::phone_remote::stop_remote_server(child);
+                    }
+                    self.phone_remote_process = None;
+                    self.phone_remote_status = PhoneRemoteStatus::Failed(msg);
+                }
+            },
+            Message::PhoneRemoteRegenerateKey => {
+                let new_key = crate::phone_remote::generate_api_key();
+                self.phone_remote_api_key_input = new_key;
+            }
+            Message::PhoneRemoteCopyUrl => {
+                let url = format!(
+                    "http://{}:{}/phone",
+                    self.phone_remote_prefs.host, self.phone_remote_prefs.port
+                );
+                return iced::clipboard::write(url);
+            }
+            Message::PhoneRemoteCopyApiKey => {
+                return iced::clipboard::write(self.phone_remote_prefs.api_key.clone());
             }
             Message::ToastTick => {
                 let now_ms = Self::now_ms();
@@ -5293,156 +5285,172 @@ impl GodlyApp {
     }
 
     fn view_remote_tab(&self) -> Element<'_, Message> {
-        let save_label = if self.remote_edit_index.is_some() {
-            "Update Profile"
+        // --- Status indicator ---
+        let (status_text, status_color) = match &self.phone_remote_status {
+            PhoneRemoteStatus::Stopped => ("Stopped", TEXT_SECONDARY()),
+            PhoneRemoteStatus::Starting => ("Starting...", iced::Color::from_rgb(0.9, 0.8, 0.2)),
+            PhoneRemoteStatus::Running => ("Running", iced::Color::from_rgb(0.3, 0.85, 0.4)),
+            PhoneRemoteStatus::Failed(msg) => {
+                // We can't return a reference to a temporary, so we handle below
+                let _ = msg;
+                ("Failed", iced::Color::from_rgb(0.9, 0.3, 0.3))
+            }
+        };
+
+        let status_row = {
+            let mut r = row![
+                text("Status: ").size(12).color(TEXT_SECONDARY()),
+                text(status_text).size(12).color(status_color),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+            if let PhoneRemoteStatus::Failed(msg) = &self.phone_remote_status {
+                r = r.push(text(format!(" - {msg}")).size(11).color(TEXT_SECONDARY()));
+            }
+            r
+        };
+
+        // --- Toggle button ---
+        let is_active = matches!(
+            self.phone_remote_status,
+            PhoneRemoteStatus::Running | PhoneRemoteStatus::Starting
+        );
+        let toggle_label = if is_active { "Deactivate" } else { "Activate" };
+        let toggle_bg = if is_active {
+            iced::Color::from_rgb(0.7, 0.2, 0.2)
         } else {
-            "Add Profile"
+            iced::Color::from_rgb(0.2, 0.6, 0.3)
         };
-
-        let auth_placeholder = match self.remote_auth_mode {
-            RemoteAuthMode::Password => "Password (optional)",
-            RemoteAuthMode::SshKey => "SSH key path (optional)",
-        };
-
-        let mut auth_mode_row = row![].spacing(8).align_y(iced::Alignment::Center);
-        for mode in RemoteAuthMode::all() {
-            let is_active = self.remote_auth_mode == mode;
-            let bg = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
-            let fg = if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() };
-            let mode_button = button(text(mode.label()).size(12).color(fg))
-                .on_press(Message::RemoteAuthModeSelected(mode))
-                .padding(Padding::from([4, 9]))
-                .style(move |_theme, status| {
-                    let hover_bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => BG_TERTIARY(),
-                        _ => bg,
-                    };
-                    button::Style {
-                        background: Some(iced::Background::Color(hover_bg)),
-                        text_color: fg,
-                        border: iced::Border {
-                            color: BORDER(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..button::Style::default()
+        let toggle_button = button(text(toggle_label).size(12).color(TEXT_PRIMARY()))
+            .on_press(Message::PhoneRemoteToggle)
+            .padding(Padding::from([6, 14]))
+            .style(move |_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => {
+                        iced::Color {
+                            a: 0.9,
+                            ..toggle_bg
+                        }
                     }
-                });
-            auth_mode_row = auth_mode_row.push(mode_button);
-        }
-
-        let mut remote_list = column![].spacing(8).width(Length::Fill);
-        if self.remote_connections.is_empty() {
-            remote_list = remote_list.push(
-                text("No remote profiles configured.")
-                    .size(11)
-                    .color(TEXT_SECONDARY()),
-            );
-        } else {
-            for (index, profile) in self.remote_connections.iter().enumerate() {
-                let is_editing = self.remote_edit_index == Some(index);
-                let card_bg = if is_editing {
-                    BG_TERTIARY()
-                } else {
-                    BG_SECONDARY()
+                    _ => toggle_bg,
                 };
-                let status_label = if profile.enabled {
-                    "Enabled"
-                } else {
-                    "Disabled"
-                };
-                let toggle_label = if profile.enabled { "Disable" } else { "Enable" };
-                let auth_display = match (profile.auth_mode, profile.auth_value.as_deref()) {
-                    (RemoteAuthMode::Password, Some(_)) => "Password: ******".to_string(),
-                    (RemoteAuthMode::Password, None) => "Password: -".to_string(),
-                    (RemoteAuthMode::SshKey, Some(value)) => format!("SSH Key: {}", value),
-                    (RemoteAuthMode::SshKey, None) => "SSH Key: -".to_string(),
-                };
-                let card = container(column![
-                    row![
-                        text(&profile.name).size(13).color(TEXT_ACTIVE()),
-                        Space::new().width(Length::Fill),
-                        text(status_label).size(11).color(TEXT_SECONDARY()),
-                        button(text(toggle_label).size(11).color(TEXT_PRIMARY()))
-                            .on_press(Message::RemoteToggleEnabled(index))
-                            .padding(Padding::from([2, 7])),
-                        button(text("Edit").size(11).color(TEXT_PRIMARY()))
-                            .on_press(Message::RemoteEdit(index))
-                            .padding(Padding::from([2, 7])),
-                        button(text("Delete").size(11).color(TEXT_PRIMARY()))
-                            .on_press(Message::RemoteDelete(index))
-                            .padding(Padding::from([2, 7])),
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-                    text(format!(
-                        "Connection: {}@{}:{}",
-                        profile.username, profile.host, profile.port
-                    ))
-                    .size(11)
-                    .color(TEXT_PRIMARY()),
-                    text(auth_display).size(11).color(TEXT_SECONDARY()),
-                ])
-                .padding(Padding::from([8, 10]))
-                .width(Length::Fill)
-                .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(card_bg)),
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: TEXT_PRIMARY(),
                     border: iced::Border {
                         color: BORDER(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
-                    ..container::Style::default()
-                });
-                remote_list = remote_list.push(card);
-            }
+                    ..button::Style::default()
+                }
+            });
+
+        // --- Settings form ---
+        let api_key_row = row![
+            text_input("API Key", &self.phone_remote_api_key_input)
+                .on_input(Message::PhoneRemoteApiKeyInputChanged)
+                .padding(Padding::from([4, 8]))
+                .size(12),
+            button(text("Regenerate").size(11).color(TEXT_PRIMARY()))
+                .on_press(Message::PhoneRemoteRegenerateKey)
+                .padding(Padding::from([4, 8])),
+            button(text("Copy").size(11).color(TEXT_PRIMARY()))
+                .on_press(Message::PhoneRemoteCopyApiKey)
+                .padding(Padding::from([4, 8])),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+
+        // Auto-start checkbox
+        let auto_start_label = if self.phone_remote_prefs.auto_start {
+            "[x] Start automatically with app"
+        } else {
+            "[ ] Start automatically with app"
+        };
+        let auto_start_btn = button(text(auto_start_label).size(12).color(TEXT_PRIMARY()))
+            .on_press(Message::PhoneRemoteAutoStartToggle)
+            .padding(Padding::from([4, 8]))
+            .style(|_theme, _status| button::Style {
+                background: None,
+                text_color: TEXT_PRIMARY(),
+                border: iced::Border::default(),
+                ..button::Style::default()
+            });
+
+        // --- Connection info (only when running) ---
+        let mut content = column![
+            text("Phone Remote").size(14).color(TEXT_ACTIVE()),
+            text("Control your terminal sessions from your phone's browser.")
+                .size(12)
+                .color(TEXT_PRIMARY()),
+            status_row,
+            toggle_button,
+            text("Server Settings").size(12).color(TEXT_SECONDARY()),
+            text_input("Host binding (e.g. 0.0.0.0)", &self.phone_remote_host_input)
+                .on_input(Message::PhoneRemoteHostInputChanged)
+                .padding(Padding::from([4, 8]))
+                .size(12),
+            text_input("Port (e.g. 3377)", &self.phone_remote_port_input)
+                .on_input(Message::PhoneRemotePortInputChanged)
+                .padding(Padding::from([4, 8]))
+                .size(12),
+            text("API Key").size(12).color(TEXT_SECONDARY()),
+            api_key_row,
+            auto_start_btn,
+            button(text("Save Settings").size(12).color(TEXT_PRIMARY()))
+                .on_press(Message::PhoneRemoteSaveSettings)
+                .padding(Padding::from([6, 14])),
+        ]
+        .spacing(10)
+        .width(Length::Fill);
+
+        if self.phone_remote_status == PhoneRemoteStatus::Running {
+            let url = format!(
+                "http://{}:{}/phone",
+                self.phone_remote_prefs.host, self.phone_remote_prefs.port
+            );
+            content = content
+                .push(text("Connection Info").size(12).color(TEXT_SECONDARY()))
+                .push(
+                    container(
+                        column![
+                            row![
+                                text("Phone URL: ").size(12).color(TEXT_SECONDARY()),
+                                text(url.clone()).size(12).color(TEXT_ACTIVE()),
+                                button(text("Copy URL").size(11).color(TEXT_PRIMARY()))
+                                    .on_press(Message::PhoneRemoteCopyUrl)
+                                    .padding(Padding::from([2, 8])),
+                            ]
+                            .spacing(6)
+                            .align_y(iced::Alignment::Center),
+                            row![
+                                text("API Key: ").size(12).color(TEXT_SECONDARY()),
+                                text("*".repeat(8)).size(12).color(TEXT_PRIMARY()),
+                                button(text("Copy Key").size(11).color(TEXT_PRIMARY()))
+                                    .on_press(Message::PhoneRemoteCopyApiKey)
+                                    .padding(Padding::from([2, 8])),
+                            ]
+                            .spacing(6)
+                            .align_y(iced::Alignment::Center),
+                        ]
+                        .spacing(6),
+                    )
+                    .padding(Padding::from([8, 10]))
+                    .width(Length::Fill)
+                    .style(|_theme| container::Style {
+                        background: Some(iced::Background::Color(BG_SECONDARY())),
+                        border: iced::Border {
+                            color: BORDER(),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+                );
         }
 
-        container(
-            column![
-                text("Remote (SSH)").size(14).color(TEXT_ACTIVE()),
-                text("Configure SSH connection profiles for remote terminal sessions.")
-                    .size(12)
-                    .color(TEXT_PRIMARY()),
-                text_input("Profile name", &self.remote_name_input)
-                    .on_input(Message::RemoteNameInputChanged)
-                    .padding(Padding::from([4, 8]))
-                    .size(12),
-                text_input("Host or IP", &self.remote_host_input)
-                    .on_input(Message::RemoteHostInputChanged)
-                    .padding(Padding::from([4, 8]))
-                    .size(12),
-                text_input("Port", &self.remote_port_input)
-                    .on_input(Message::RemotePortInputChanged)
-                    .padding(Padding::from([4, 8]))
-                    .size(12),
-                text_input("Username", &self.remote_username_input)
-                    .on_input(Message::RemoteUsernameInputChanged)
-                    .padding(Padding::from([4, 8]))
-                    .size(12),
-                text("Auth Mode").size(12).color(TEXT_SECONDARY()),
-                auth_mode_row,
-                text_input(auth_placeholder, &self.remote_auth_value_input)
-                    .on_input(Message::RemoteAuthValueInputChanged)
-                    .padding(Padding::from([4, 8]))
-                    .size(12),
-                row![
-                    button(text(save_label).size(12).color(TEXT_PRIMARY()))
-                        .on_press(Message::RemoteSave)
-                        .padding(Padding::from([4, 9])),
-                    button(text("Clear").size(12).color(TEXT_PRIMARY()))
-                        .on_press(Message::RemoteClearEditor)
-                        .padding(Padding::from([4, 9])),
-                ]
-                .spacing(8),
-                text("Connection Profiles").size(12).color(TEXT_SECONDARY()),
-                remote_list,
-            ]
-            .spacing(10)
-            .width(Length::Fill),
-        )
-        .width(Length::Fill)
-        .into()
+        container(content).width(Length::Fill).into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -8174,31 +8182,6 @@ fn toggle_flow_enabled(flows: &mut [FlowEntry], index: usize) -> bool {
     true
 }
 
-fn normalize_remote_field(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn normalize_remote_port(value: &str) -> Option<u16> {
-    let parsed = value.trim().parse::<u16>().ok()?;
-    if parsed == 0 {
-        None
-    } else {
-        Some(parsed)
-    }
-}
-
-fn toggle_remote_enabled(profiles: &mut [RemoteConnectionEntry], index: usize) -> bool {
-    let Some(entry) = profiles.get_mut(index) else {
-        return false;
-    };
-    entry.enabled = !entry.enabled;
-    true
-}
 
 fn wildcard_matches(pattern: &str, candidate: &str) -> bool {
     if pattern == "*" {
@@ -8585,10 +8568,50 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
         godly_app_adapter::mcp_pipe::start_mcp_server(mcp_tx);
     }
 
+    // Auto-start phone remote server if configured.
+    let phone_remote_task = if app.phone_remote_prefs.auto_start {
+        match crate::phone_remote::spawn_remote_server(&app.phone_remote_prefs) {
+            Ok(child) => {
+                app.phone_remote_process = Some(child);
+                app.phone_remote_status = PhoneRemoteStatus::Starting;
+                let h = app.phone_remote_prefs.host.clone();
+                let p = app.phone_remote_prefs.port;
+                Some(Task::perform(
+                    async move {
+                        let (tx, rx) = futures_channel::oneshot::channel();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            let addr = format!("{}:{}", h, p);
+                            let result = match addr.parse::<std::net::SocketAddr>() {
+                                Ok(sock) => std::net::TcpStream::connect_timeout(
+                                    &sock,
+                                    std::time::Duration::from_secs(3),
+                                )
+                                .map(|_| ())
+                                .map_err(|e| e.to_string()),
+                                Err(e) => Err(e.to_string()),
+                            };
+                            let _ = tx.send(result);
+                        });
+                        rx.await.unwrap_or(Err("Health check panicked".into()))
+                    },
+                    Message::PhoneRemoteStartResult,
+                ))
+            }
+            Err(e) => {
+                log::warn!("Failed to auto-start phone remote: {e}");
+                app.phone_remote_status = PhoneRemoteStatus::Failed(e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let rows = app.calculate_rows();
     let cols = app.calculate_cols();
 
-    Task::perform(
+    let init_task = Task::perform(
         async move {
             let (tx, rx) = futures_channel::oneshot::channel();
             std::thread::spawn(move || {
@@ -8599,7 +8622,12 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
                 .unwrap_or_else(|_| Err("Background thread panicked".into()))
         },
         Message::Initialized,
-    )
+    );
+
+    match phone_remote_task {
+        Some(pr_task) => Task::batch([init_task, pr_task]),
+        None => init_task,
+    }
 }
 
 #[cfg(test)]
@@ -8610,14 +8638,14 @@ mod helper_tests {
         inset_terminal_pane_rect, mru_cycle_direction_from_shortcut_key,
         next_mru_switcher_selection, next_tab_id_from_mru, normalize_ai_tool_field,
         normalize_flow_field, normalize_mute_pattern, normalize_plugin_field,
-        normalize_quick_claude_text, normalize_remote_field, normalize_remote_port,
+        normalize_quick_claude_text,
         pane_rect_for_terminal, parse_flow_steps, pointer_to_grid, prune_expired_toasts,
         quote_dropped_path, resolve_terminal_empty_state, resolved_sidebar_width,
         should_commit_mru_switcher_on_key_release, should_commit_mru_switcher_on_modifiers_changed,
         sidebar_animation_finished, terminal_content_rect, toggle_flow_enabled,
-        toggle_plugin_enabled, toggle_remote_enabled, wildcard_matches,
-        workspace_matches_mute_patterns, FlowEntry, PaneRect, PluginEntry, RemoteAuthMode,
-        RemoteConnectionEntry, TerminalEmptyState, ToastNotification, MAX_ACTIVE_TOASTS,
+        toggle_plugin_enabled, wildcard_matches,
+        workspace_matches_mute_patterns, FlowEntry, PaneRect, PluginEntry,
+        TerminalEmptyState, ToastNotification, MAX_ACTIVE_TOASTS,
         SIDEBAR_ANIMATION_DURATION_MS, TOAST_TTL_MS,
     };
     use super::{GridPos, LayoutNode, SplitDirection, TAB_BAR_HEIGHT};
@@ -8729,35 +8757,6 @@ mod helper_tests {
         assert!(!toggle_flow_enabled(flows.as_mut_slice(), 10));
     }
 
-    #[test]
-    fn normalize_remote_fields_and_port_validation_work() {
-        assert_eq!(
-            normalize_remote_field("  prod-cluster  "),
-            Some("prod-cluster".to_string())
-        );
-        assert_eq!(normalize_remote_field("  "), None);
-        assert_eq!(normalize_remote_port("22"), Some(22));
-        assert_eq!(normalize_remote_port(" 65535 "), Some(65535));
-        assert_eq!(normalize_remote_port("0"), None);
-        assert_eq!(normalize_remote_port("70000"), None);
-        assert_eq!(normalize_remote_port("abc"), None);
-    }
-
-    #[test]
-    fn toggle_remote_enabled_flips_state_and_handles_missing_index() {
-        let mut profiles = vec![RemoteConnectionEntry {
-            name: "Prod SSH".to_string(),
-            host: "10.0.0.20".to_string(),
-            port: 22,
-            username: "deploy".to_string(),
-            auth_mode: RemoteAuthMode::Password,
-            auth_value: Some("secret".to_string()),
-            enabled: true,
-        }];
-        assert!(toggle_remote_enabled(profiles.as_mut_slice(), 0));
-        assert!(!profiles[0].enabled);
-        assert!(!toggle_remote_enabled(profiles.as_mut_slice(), 10));
-    }
 
     #[test]
     fn enqueue_toast_entry_assigns_ids_and_limits_queue() {

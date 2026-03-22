@@ -41,3 +41,4 @@ commands.txt
 # Local settings (agent memory and local permissions are private)
 .claude/agent-memory/
 .claude/settings.local.json
+.godly-worktrees/
