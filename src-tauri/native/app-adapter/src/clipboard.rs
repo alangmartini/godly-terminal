@@ -33,6 +33,20 @@ pub fn paste_from_clipboard() -> Result<String, String> {
     }
 }
 
+/// Check clipboard for an image. Returns the saved PNG path if found.
+/// Does not consume text clipboard content — only looks for image data.
+pub fn check_clipboard_image() -> Result<Option<String>, String> {
+    let mut clipboard =
+        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+    match clipboard.get_image() {
+        Ok(img) => {
+            let path = save_clipboard_image_as_png(img.width, img.height, &img.bytes)?;
+            Ok(Some(path))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
 /// Encode raw RGBA pixels as PNG and write to a temp file.
 /// Returns the absolute path to the saved file.
 fn save_clipboard_image_as_png(

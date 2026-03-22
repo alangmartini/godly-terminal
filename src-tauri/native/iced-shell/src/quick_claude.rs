@@ -79,6 +79,7 @@ pub fn default_launch_steps(
     model: &str,
     mode: &str,
     cwd: Option<&str>,
+    image_paths: &[String],
 ) -> Vec<LaunchStep> {
     let mut cmd = "claude".to_string();
     // Add model flag (always, since we default to sonnet)
@@ -89,11 +90,22 @@ pub fn default_launch_steps(
         "auto" => cmd.push_str(" --dangerously-skip-permissions"),
         _ => {} // "default" — no flag
     }
+    // Build effective prompt: append image references if any
+    let effective_prompt = if image_paths.is_empty() {
+        prompt.to_string()
+    } else {
+        let mut parts = vec![prompt.to_string()];
+        parts.push("\n\n[Attached images - please read these files to view them:]".to_string());
+        for path in image_paths {
+            parts.push(format!("- {}", path));
+        }
+        parts.join("\n")
+    };
     // Pass prompt as CLI positional argument
-    if !prompt.is_empty() {
+    if !effective_prompt.is_empty() {
         // Shell-escape: wrap in single quotes, escape embedded single quotes
         // PowerShell escapes single quotes by doubling them: 'isn''t' -> isn't
-        let escaped = prompt.replace('\'', "''");
+        let escaped = effective_prompt.replace('\'', "''");
         cmd.push_str(&format!(" '{}'", escaped));
     }
 
@@ -468,7 +480,7 @@ mod tests {
 
     #[test]
     fn default_steps_single_no_prompt() {
-        let steps = default_launch_steps(1, "", "sonnet", "default", None);
+        let steps = default_launch_steps(1, "", "sonnet", "default", None, &[]);
         // CreateTerminal, WaitIdle, RunCommand
         assert_eq!(steps.len(), 3);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
@@ -478,7 +490,7 @@ mod tests {
 
     #[test]
     fn default_steps_single_with_prompt() {
-        let steps = default_launch_steps(1, "build the app", "sonnet", "default", None);
+        let steps = default_launch_steps(1, "build the app", "sonnet", "default", None, &[]);
         // Prompt is now a CLI arg — same 3 steps, prompt embedded in command
         assert_eq!(steps.len(), 3);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
@@ -490,7 +502,7 @@ mod tests {
 
     #[test]
     fn default_steps_prompt_with_single_quotes() {
-        let steps = default_launch_steps(1, "fix it's broken", "sonnet", "auto", None);
+        let steps = default_launch_steps(1, "fix it's broken", "sonnet", "auto", None, &[]);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             // PowerShell escapes single quotes by doubling them
             assert!(command.contains("'fix it''s broken'"), "got: {command}");
@@ -501,7 +513,7 @@ mod tests {
 
     #[test]
     fn default_steps_prompt_with_double_quotes() {
-        let steps = default_launch_steps(1, "what is \"the issue\"", "sonnet", "auto", None);
+        let steps = default_launch_steps(1, "what is \"the issue\"", "sonnet", "auto", None, &[]);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             // Double quotes inside single-quoted strings are literal (no escaping needed)
             assert!(
@@ -515,14 +527,14 @@ mod tests {
 
     #[test]
     fn default_steps_grid_2x2() {
-        let steps = default_launch_steps(4, "test", "sonnet", "default", None);
+        let steps = default_launch_steps(4, "test", "sonnet", "default", None, &[]);
         // Each agent: 3 steps. 4 agents = 12
         assert_eq!(steps.len(), 12);
     }
 
     #[test]
     fn default_steps_with_model_and_mode() {
-        let steps = default_launch_steps(1, "", "opus", "plan", None);
+        let steps = default_launch_steps(1, "", "opus", "plan", None, &[]);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model opus --permission-mode plan");
         } else {
@@ -532,7 +544,7 @@ mod tests {
 
     #[test]
     fn default_steps_auto_mode() {
-        let steps = default_launch_steps(1, "", "haiku", "auto", None);
+        let steps = default_launch_steps(1, "", "haiku", "auto", None, &[]);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model haiku --dangerously-skip-permissions");
         } else {
@@ -542,7 +554,7 @@ mod tests {
 
     #[test]
     fn default_steps_default_mode_no_extra_flag() {
-        let steps = default_launch_steps(1, "", "sonnet", "default", None);
+        let steps = default_launch_steps(1, "", "sonnet", "default", None, &[]);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model sonnet");
         } else {
@@ -552,11 +564,39 @@ mod tests {
 
     #[test]
     fn default_steps_propagates_cwd() {
-        let steps = default_launch_steps(1, "", "sonnet", "default", Some("/my/project"));
+        let steps = default_launch_steps(1, "", "sonnet", "default", Some("/my/project"), &[]);
         if let LaunchStep::CreateTerminal { cwd, .. } = &steps[0] {
             assert_eq!(cwd.as_deref(), Some("/my/project"));
         } else {
             panic!("Expected CreateTerminal");
+        }
+    }
+
+    #[test]
+    fn default_steps_with_image_paths() {
+        let images = vec![
+            "C:/tmp/godly-clipboard/clipboard-123.png".to_string(),
+            "C:/Users/test/screenshot.jpg".to_string(),
+        ];
+        let steps = default_launch_steps(1, "fix this bug", "sonnet", "auto", None, &images);
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            assert!(command.contains("fix this bug"));
+            assert!(command.contains("[Attached images"));
+            assert!(command.contains("clipboard-123.png"));
+            assert!(command.contains("screenshot.jpg"));
+        } else {
+            panic!("Expected RunCommand");
+        }
+    }
+
+    #[test]
+    fn default_steps_empty_images_unchanged() {
+        let with_images = default_launch_steps(1, "hello", "sonnet", "default", None, &[]);
+        if let LaunchStep::RunCommand { command, .. } = &with_images[2] {
+            assert!(!command.contains("[Attached images"));
+            assert!(command.contains("'hello'"));
+        } else {
+            panic!("Expected RunCommand");
         }
     }
 
