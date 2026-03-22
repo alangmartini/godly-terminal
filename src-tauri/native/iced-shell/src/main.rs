@@ -42,6 +42,7 @@ mod search;
 mod scrollbar;
 mod status_bar;
 mod perf_overlay;
+mod perf_stats;
 mod url_detector;
 mod terminal_context_menu;
 mod whisper_ui;
