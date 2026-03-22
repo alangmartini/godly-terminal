@@ -1910,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "godly-app-adapter"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "futures-channel",
@@ -1928,7 +1928,7 @@ dependencies = [
 
 [[package]]
 name = "godly-daemon"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "dhat",
  "godly-protocol",
@@ -1953,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "godly-iced-shell"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "env_logger",
  "fontdb",
@@ -1982,7 +1982,7 @@ version = "0.1.0"
 
 [[package]]
 name = "godly-mcp"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "godly-notify"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "godly-protocol",
  "winapi",
@@ -2022,7 +2022,7 @@ version = "0.1.0"
 
 [[package]]
 name = "godly-protocol"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "serde",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "godly-vt"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "base64",
  "criterion",
