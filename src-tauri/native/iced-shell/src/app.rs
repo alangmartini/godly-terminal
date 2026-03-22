@@ -7242,7 +7242,13 @@ impl GodlyApp {
             return self.finalize_launch();
         }
 
-        let step = launch.steps[step_index].clone();
+        let mut step = launch.steps[step_index].clone();
+        // If a worktree was just created, override the CWD of the next CreateTerminal step
+        if let crate::quick_claude::LaunchStep::CreateTerminal { ref mut cwd, .. } = step {
+            if let Some(wt_path) = &launch.pending_worktree_path {
+                *cwd = Some(wt_path.clone());
+            }
+        }
         let agent_ids = launch.agent_terminal_ids.clone();
 
         let Some(client) = &self.client else {
