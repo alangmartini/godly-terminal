@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use iced::widget::{button, column, container, row, scrollable, stack, text, text_input, text_editor, Space};
 use iced::{Background, Border, Color, ContentFit, Element, Length, Padding, Shadow, Vector};
+use serde::{Deserialize, Serialize};
 
 use crate::theme;
 
@@ -54,7 +57,8 @@ pub struct ImageAttachment {
 }
 
 /// Persistent preferences that survive dialog close/reopen.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct QuickClaudePreferences {
     pub selected_model: String,
     pub selected_mode: String,
@@ -74,6 +78,46 @@ impl Default for QuickClaudePreferences {
             auto_suggest_branch: true,
             main_branch_mode: false,
         }
+    }
+}
+
+const PREFS_FILE_NAME: &str = "quick-claude-prefs.json";
+
+fn prefs_path() -> PathBuf {
+    let base = std::env::var("APPDATA")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let directory_name = format!("com.godly.terminal{}", godly_protocol::instance_suffix());
+    base.join(directory_name)
+        .join("native")
+        .join(PREFS_FILE_NAME)
+}
+
+/// Load Quick Claude preferences from disk, returning defaults if the file
+/// is missing or cannot be parsed.
+pub fn load_preferences() -> QuickClaudePreferences {
+    let path = prefs_path();
+    match std::fs::read_to_string(&path) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => QuickClaudePreferences::default(),
+    }
+}
+
+/// Save Quick Claude preferences to disk.
+pub fn save_preferences(prefs: &QuickClaudePreferences) {
+    let path = prefs_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(prefs) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::warn!("Failed to save Quick Claude prefs: {e}");
+            }
+        }
+        Err(e) => log::warn!("Failed to serialize Quick Claude prefs: {e}"),
     }
 }
 
@@ -1708,5 +1752,66 @@ mod tests {
         assert!(models.iter().any(|(_, v)| v == "opus"));
         assert!(models.iter().any(|(_, v)| v == "sonnet"));
         assert!(models.iter().any(|(_, v)| v == "haiku"));
+    }
+
+    #[test]
+    fn prefs_serialization_round_trip() {
+        let prefs = QuickClaudePreferences {
+            selected_model: "opus".to_string(),
+            selected_mode: "plan".to_string(),
+            selected_ai_tool: "Codex".to_string(),
+            selected_workspace_id: Some("ws-42".to_string()),
+            auto_suggest_branch: false,
+            main_branch_mode: true,
+        };
+        let json = serde_json::to_string(&prefs).unwrap();
+        let loaded: QuickClaudePreferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.selected_model, "opus");
+        assert_eq!(loaded.selected_mode, "plan");
+        assert_eq!(loaded.selected_ai_tool, "Codex");
+        assert_eq!(loaded.selected_workspace_id, Some("ws-42".to_string()));
+        assert!(!loaded.auto_suggest_branch);
+        assert!(loaded.main_branch_mode);
+    }
+
+    #[test]
+    fn prefs_deserialize_missing_fields_uses_defaults() {
+        // Simulate a JSON from an older version with fewer fields
+        let json = r#"{"selected_model":"haiku","selected_mode":"auto"}"#;
+        let loaded: QuickClaudePreferences = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.selected_model, "haiku");
+        assert_eq!(loaded.selected_mode, "auto");
+        // Fields missing from JSON should get their Default values
+        assert_eq!(loaded.selected_ai_tool, "Claude Code");
+        assert!(loaded.selected_workspace_id.is_none());
+        assert!(loaded.auto_suggest_branch);
+        assert!(!loaded.main_branch_mode);
+    }
+
+    #[test]
+    fn prefs_save_and_load_via_tempfile() {
+        let dir = std::env::temp_dir().join(format!("godly-prefs-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("quick-claude-prefs.json");
+
+        let prefs = QuickClaudePreferences {
+            selected_model: "opus".to_string(),
+            selected_mode: "plan".to_string(),
+            ..QuickClaudePreferences::default()
+        };
+
+        // Write
+        let json = serde_json::to_string_pretty(&prefs).unwrap();
+        std::fs::write(&path, &json).unwrap();
+
+        // Read back
+        let loaded_json = std::fs::read_to_string(&path).unwrap();
+        let loaded: QuickClaudePreferences = serde_json::from_str(&loaded_json).unwrap();
+        assert_eq!(loaded.selected_model, "opus");
+        assert_eq!(loaded.selected_mode, "plan");
+        assert_eq!(loaded.selected_ai_tool, "Claude Code");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

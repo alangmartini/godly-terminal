@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-03-22
+
+### Added
+- **Clipboard image support** — when pasting from clipboard using Ctrl+Shift+V, if no text is present, Godly Terminal now detects images (e.g., from ShareX), saves them as temp PNG files, and pastes the file path instead
+- **Claude Code CLI flags** — Quick Claude dialog now has Model (Opus/Sonnet/Haiku) and Permission Mode (Default/Plan/Auto) dropdowns
+- **Resume Claude sessions** — Quick Claude dialog now has a "Resume" tab showing recent Claude Code conversations, with one-click resume via `claude --resume`
+- **Quick Claude session tracking** — launched sessions are now persisted to disk for future resume and cleanup
+- **Inline skill autocomplete** — type `/` in the Quick Claude prompt to see and select from available Claude Code skills
+- **Font family selector in Settings/Appearance** — choose any installed monospace font for terminal rendering with live preview, search filtering, and session persistence
+- **Worktree Mode for workspaces** — when enabled via sidebar context menu, new terminals automatically create isolated git worktrees
+- **In-dialog font preview** — Appearance tab now shows a live preview section with sample terminal text (#695)
+- **DirectWrite glyph rasterizer** — Windows-native text rasterization module using DirectWrite COM APIs for ClearType-quality glyph rendering
+- **Quick Claude preferences persistence** — Dialog now remembers selected model, mode, AI tool, and workspace across sessions
+- **Dynamic model discovery** — Models are automatically discovered from `claude --help` output on dialog open
+- **Glyph atlas rendering pipeline** — New CPU-side glyph rasterization with swash, glyph cache, and pixel buffer compositor
+- **Image widget integration** — Terminal panes now use pre-rendered pixel buffers via Iced's image widget
+- **Font fallback** — System font fallback chain for characters not in the primary terminal font
+- **Quick Claude auto-focus** — prompt editor now receives focus automatically when dialog opens (#710)
+- **Tab-to-launch hotkey** — pressing Tab in Quick Claude dialog now triggers launch (#710)
+- **Quick Claude image attachments** — paste images from clipboard (Ctrl+V) or drag-and-drop image files onto the Quick Claude dialog with thumbnail previews (#714)
+
+### Fixed
+- **Notification hooks now work** — daemon now injects `GODLY_SESSION_ID` into PTY shell environment
+- **Restore workspaces after rebuild/reinstall** — shell now loads and restores persisted workspaces instead of defaulting to a single "Workspace 1"
+- **Shift+Tab escape sequence** — Shift+Tab now correctly sends `ESC[Z` to the PTY (#678)
+- **Resume tab merge conflicts** — resolved 5 merge conflicts between skill autocomplete and resume tab
+- **Dead key duplicate character bug** — pressing dead key then backspace now correctly deletes one character
+- **Shift+Home/End scroll keybindings** — Shift+Home scrolls to top and Shift+End scrolls to bottom (#678)
+- **Measured font metrics** — Terminal cell dimensions now use real font measurements via swash
+- **Terminal trembling on keystroke** — Changed image widget to `ContentFit::None` with nearest-neighbor filtering
+- **Pixel renderer fractional positioning** — Fixed character misalignment by using fractional cell positions
+- **Quick Claude workspace selection ignored** — User-selected workspace was ignored; now properly adds terminal to selected workspace
+- **Quick Claude prompt never delivered** — Fixed missing CWD configuration and broken trust prompt detection
+- **Terminal working directory wrong** — Quick Claude now inherits CWD from selected workspace
+- **Quick Claude plan mode flag** — changed invalid `--plan` flag to correct `--permission-mode plan` (#713)
+- **Quick Claude quote escaping** — single quotes now correctly escaped for PowerShell using doubled quotes (#712)
+
+### Changed
+- **Tab bar visual polish** — active tab accent indicator, hover feedback, rounded corners, increased height
+- **Tab icons** — replaced 2-letter pill badges with Unicode glyphs
+- **Close button styling** — circular shape with subtle danger hover effect
+- **Font setting now applies to UI chrome** — sidebar, tab bar, title bar, and status bar now respect font configuration (#698)
+- **Proportional font for UI chrome** — UI elements now use system sans-serif font for improved readability
+- **Default Quick Claude mode is now "auto"** — Changed from "default" mode for improved UX
+
 ## [0.15.0] - 2026-03-20
 
 ### Added
