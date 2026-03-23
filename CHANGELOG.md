@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-03-22
+
+### Added
+- **Phone remote server integration** — Settings > Remote tab now allows activating/deactivating the `godly-remote` phone control server directly from Godly Terminal without manual scripts. Includes server status indicator, auto-start preference, API key management, and connection info card.
+- **GlyphCache hit/miss tracking** — Added `CacheStats` struct and `stats()`/`reset_stats()` methods to `GlyphCache` for monitoring cache effectiveness (#723)
+- **Render statistics** — Added `RenderStats` struct and per-phase timing instrumentation to `PixelRenderer` for profiling render performance (#724)
+- **Live performance overlay** — Replaced hardcoded FPS/frame time placeholders with real rolling-average measurements, added render duration and renderer type display (#725)
+- **PixelRenderer criterion benchmarks** — Added micro-benchmarks for grid rendering at various sizes, cache states, and content densities (#726)
+- **Throughput stress benchmarks** — Added criterion benchmarks for sustained rendering throughput, varying grid sequences, buffer reuse efficiency, and content density scaling (#728)
+
+### Changed
+- **Sidebar visual redesign** — Active workspace now has 3px accent-colored left bar, accent-tinted background, and bold font weight for clear visual hierarchy. Header redesigned with uppercase "WORKSPACES" in terminal font and separator line. All magic numbers replaced with design tokens (#722)
+
+### Fixed
+- **Toast notifications positioning and click handling** — notifications now appear in bottom-right corner instead of top-center. Clicking a terminal-sourced notification now focuses the source workspace and terminal, marks it as read, and dismisses the toast.
+- **Quick Claude image command parsing** — fixed PowerShell misinterpreting multi-line command strings with embedded newlines on Windows PTY; image references now kept on a single line in the prompt text (#718)
+- **Quick Claude image paste from File Explorer** — Added fallback to read CF_HDROP clipboard format when bitmap image data is not available
+- **Quick Claude worktree CWD** — terminal launched from Quick Claude now correctly starts in the created worktree directory (#717)
+- **Toast notification height** — notifications no longer stretch to fill window height; now shrink-wrap to content (#715)
+- **Toast close button** — each notification card displays a dismiss button in top-right corner (#715)
+- **Quick Claude worktree navigation** — Moved worktrees to `%APPDATA%` to avoid git-inside-git nesting (#727)
+
 ## [0.15.1] - 2026-03-22
 
 ### Added
