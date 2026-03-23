@@ -1797,9 +1797,6 @@ impl GodlyApp {
                     }
                 }
 
-                // Any keypress clears selection.
-                self.selection.clear();
-
                 // Forward to PTY — send to focused terminal, not just active tab.
                 // Use the platform-composed `text` for printable Character keys
                 // (handles Shift+key → uppercase/symbols on all keyboard layouts).
@@ -1820,6 +1817,12 @@ impl GodlyApp {
                     };
 
                 if let Some(bytes) = bytes {
+                    // Clear selection when an actual key produces PTY output.
+                    // Modifier-only keys (Ctrl, Shift, Alt, Super) produce no
+                    // bytes, so they must NOT clear the selection — otherwise
+                    // pressing Ctrl before Ctrl+Shift+C wipes the selection
+                    // before the copy shortcut fires.
+                    self.selection.clear();
                     if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client) {
                         let _ = commands::write_to_terminal(client, tid, &bytes);
                     }
