@@ -2357,7 +2357,7 @@ impl GodlyApp {
                     .map(|ws| ws.folder_path.clone())
                     .filter(|p| !p.is_empty());
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], false,
+                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], false, None,
                 );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
@@ -2425,16 +2425,18 @@ impl GodlyApp {
                             Some(ws.folder_path.clone())
                         }
                     });
-                let ws_folder2 = ws_folder.clone();
                 let skills_task = iced::Task::perform(
                     async move {
                         crate::quick_claude_dialog::discover_skills(ws_folder.as_deref())
                     },
                     Message::QuickClaudeDialogSkillsLoaded,
                 );
+                // Clean up stale session records before loading
+                let live_ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                let _ = crate::quick_claude_sessions::cleanup_stale_sessions(&live_ids);
                 let sessions_task = iced::Task::perform(
                     async move {
-                        crate::quick_claude_dialog::discover_sessions(ws_folder2.as_deref())
+                        crate::quick_claude_dialog::discover_sessions()
                     },
                     Message::QuickClaudeDialogSessionsLoaded,
                 );
@@ -2628,18 +2630,38 @@ impl GodlyApp {
                 };
 
                 let use_worktree = !dlg.main_branch_mode;
+                let claude_session_id = uuid::Uuid::new_v4().to_string();
                 let steps = crate::quick_claude::default_launch_steps(
                     num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, use_worktree,
+                    Some(&claude_session_id),
                 );
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
                     ws_name,
                     steps,
                     num_agents,
-                    ws_id,
+                    ws_id.clone(),
                     is_new_ws,
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+
+                // Record session for resume tracking
+                let record_id = uuid::Uuid::new_v4().to_string();
+                let session_record = crate::quick_claude_sessions::QuickClaudeSessionRecord {
+                    id: record_id.clone(),
+                    prompt: prompt.to_string(),
+                    terminal_id: String::new(),
+                    workspace_id: ws_id,
+                    branch: String::new(),
+                    model: model.clone(),
+                    mode: mode.clone(),
+                    status: crate::quick_claude_sessions::SessionStatus::Running,
+                    launched_at: crate::quick_claude_sessions::now_iso8601(),
+                    claude_session_id: Some(claude_session_id),
+                    cwd: cwd.clone(),
+                };
+                let _ = crate::quick_claude_sessions::add_session(session_record);
+                launch_state.session_record_id = Some(record_id);
 
                 self.quick_claude_launch = Some(launch_state);
                 self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
@@ -2765,44 +2787,57 @@ impl GodlyApp {
                     return Task::none();
                 };
 
-                // Use selected workspace's folder as CWD for resume
-                let cwd = dlg
-                    .selected_workspace_id
-                    .as_ref()
-                    .and_then(|id| self.workspaces.get(id))
-                    .map(|ws| ws.folder_path.clone())
-                    .filter(|p| !p.is_empty());
+                // Use session's stored CWD if it still exists on disk,
+                // falling back to selected workspace folder.
+                let cwd = session.cwd.clone()
+                    .filter(|p| std::path::Path::new(p).exists())
+                    .or_else(|| {
+                        dlg.selected_workspace_id
+                            .as_ref()
+                            .and_then(|id| self.workspaces.get(id))
+                            .map(|ws| ws.folder_path.clone())
+                            .filter(|p| !p.is_empty())
+                    });
 
                 let session_id = session.session_id.clone();
                 let steps = crate::quick_claude::resume_launch_steps(
                     &session_id, cwd.as_deref(),
                 );
 
-                let ws_id = uuid::Uuid::new_v4().to_string();
-                let ws_name = "Quick Claude (Resume)".to_string();
                 let placeholder_id = uuid::Uuid::new_v4().to_string();
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
+
+                // Reuse the original workspace if it still exists
+                let (ws_id, ws_name, is_new_ws) = if self.workspaces.get(&session.workspace_id).is_some() {
+                    let name = self.workspaces.get(&session.workspace_id).unwrap().name.clone();
+                    (session.workspace_id.clone(), name, false)
+                } else {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let snippet: String = session.first_message.chars().take(30).collect();
+                    let name = if snippet.is_empty() {
+                        "Quick Claude (Resume)".to_string()
+                    } else {
+                        format!("QC: {}", snippet.trim())
+                    };
+                    self.workspaces.add(id.clone(), name.clone(), placeholder_id.clone());
+                    self.next_workspace_num += 1;
+                    (id, name, true)
+                };
+
                 self.terminals.add_to_workspace(
                     placeholder_id.clone(),
                     rows,
                     cols,
                     ws_id.clone(),
                 );
-                self.workspaces.add(
-                    ws_id.clone(),
-                    ws_name.clone(),
-                    placeholder_id.clone(),
-                );
-                // Background launch: do NOT switch focus
-                self.next_workspace_num += 1;
 
                 let mut launch_state = crate::quick_claude::LaunchState::new(
                     ws_name,
                     steps,
                     1,
                     ws_id,
-                    true, // new workspace
+                    is_new_ws,
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
@@ -7463,6 +7498,16 @@ impl GodlyApp {
                         });
                         if let Some(_ai) = agent_idx {
                             launch.pending_worktree_path = Some(worktree_path.clone());
+                            // Update session record CWD to worktree path
+                            if let Some(ref record_id) = launch.session_record_id {
+                                let rid = record_id.clone();
+                                let wt = worktree_path.clone();
+                                let mut sessions = crate::quick_claude_sessions::load_sessions();
+                                if let Some(rec) = sessions.iter_mut().find(|s| s.id == rid) {
+                                    rec.cwd = Some(wt);
+                                }
+                                let _ = crate::quick_claude_sessions::save_sessions(&sessions);
+                            }
                         }
                     }
                 }
@@ -7488,6 +7533,16 @@ impl GodlyApp {
 
                         if let Some(launch) = &mut self.quick_claude_launch {
                             launch.agent_terminal_ids[agent_index] = Some(session_id.clone());
+                            // Update session record terminal_id
+                            if let Some(ref record_id) = launch.session_record_id {
+                                let rid = record_id.clone();
+                                let tid = session_id.clone();
+                                let mut sessions = crate::quick_claude_sessions::load_sessions();
+                                if let Some(rec) = sessions.iter_mut().find(|s| s.id == rid) {
+                                    rec.terminal_id = tid;
+                                }
+                                let _ = crate::quick_claude_sessions::save_sessions(&sessions);
+                            }
                         }
 
                         let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));

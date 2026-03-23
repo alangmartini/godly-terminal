@@ -22,6 +22,8 @@ pub struct QuickClaudeSessionRecord {
     pub status: SessionStatus,
     pub launched_at: String,     // ISO 8601 format
     pub claude_session_id: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 pub fn sessions_path() -> PathBuf {
@@ -143,6 +145,7 @@ mod tests {
             status,
             launched_at: "2026-03-20T12:00:00Z".to_string(),
             claude_session_id: None,
+            cwd: None,
         }
     }
 
@@ -277,6 +280,22 @@ mod tests {
         assert_eq!(&timestamp[10..11], "T", "char 10 should be T: {}", timestamp);
         assert_eq!(&timestamp[13..14], ":", "char 13 should be colon: {}", timestamp);
         assert_eq!(&timestamp[16..17], ":", "char 16 should be colon: {}", timestamp);
+    }
+
+    #[test]
+    fn test_session_record_cwd_roundtrip() {
+        let mut record = make_record("s-cwd", "t-cwd", SessionStatus::Running);
+        record.cwd = Some("/worktree/path".to_string());
+        let json = serde_json::to_string(&record).expect("serialize");
+        let decoded: QuickClaudeSessionRecord = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.cwd, Some("/worktree/path".to_string()));
+    }
+
+    #[test]
+    fn test_old_records_without_cwd_deserialize() {
+        let json = r#"{"id":"s-1","prompt":"test","terminal_id":"t-1","workspace_id":"ws-1","branch":"main","model":"opus","mode":"code","status":"Running","launched_at":"2026-03-20T12:00:00Z","claude_session_id":null}"#;
+        let decoded: QuickClaudeSessionRecord = serde_json::from_str(json).expect("old records should deserialize");
+        assert_eq!(decoded.cwd, None);
     }
 
     #[test]
