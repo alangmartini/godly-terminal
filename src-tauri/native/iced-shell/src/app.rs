@@ -2460,6 +2460,18 @@ impl GodlyApp {
                 }
             }
             Message::QuickClaudeDialogPromptAction(action) => {
+                // Detect paste action BEFORE consuming action via perform().
+                // keyboard::listen() only sees Status::Ignored events, but the
+                // text_editor widget captures Ctrl+V (Status::Captured) for its
+                // own text paste, so the keyboard-based image check never fires.
+                // Instead, detect the Paste action here and also check for images.
+                let is_paste = matches!(
+                    &action,
+                    iced::widget::text_editor::Action::Edit(
+                        iced::widget::text_editor::Edit::Paste(_)
+                    )
+                );
+
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.prompt_content.perform(action);
 
@@ -2483,6 +2495,10 @@ impl GodlyApp {
                             dlg.skill_autocomplete_filter.clear();
                         }
                     }
+                }
+
+                if is_paste {
+                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogBranchChanged(val) => {
