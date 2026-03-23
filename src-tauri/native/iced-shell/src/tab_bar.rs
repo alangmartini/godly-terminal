@@ -188,6 +188,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         });
 
         let close_id = terminal.id.clone();
+        // Inactive tabs: close button hidden until directly hovered.
+        // Active tab: close button always visible.
         let close_btn = button(text("\u{00D7}").size(12).color(text_color))
             .on_press(on_close(close_id))
             .padding(0)
@@ -203,7 +205,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                         let d = DANGER();
                         (Color::from_rgba(d.r, d.g, d.b, 0.25), d)
                     }
-                    _ => (Color::TRANSPARENT, text_color),
+                    _ if is_active => (Color::TRANSPARENT, text_color),
+                    _ => (Color::TRANSPARENT, Color::TRANSPARENT),
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg_color)),
