@@ -114,6 +114,41 @@ pub fn log(msg: &str) {
     }
 }
 
+/// Install a panic hook that writes crash info + backtrace to the log.
+/// Without this, iced-shell panics vanish (no console attached to GUI process).
+pub fn install_panic_hook() {
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown payload".to_string()
+        };
+
+        let bt = std::backtrace::Backtrace::force_capture();
+
+        let msg = format!(
+            "PANIC at {}\nPayload: {}\nBacktrace:\n{}",
+            location, payload, bt
+        );
+
+        log(&msg);
+
+        // Also write to stderr in case a console is attached
+        eprintln!("[iced-shell] {}", msg);
+
+        // Chain to previous hook
+        prev_hook(info);
+    }));
+}
+
 fn rotate(state: &mut LogState) {
     let _ = fs::copy(&state.path, &state.prev_path);
     let _ = fs::remove_file(&state.path);
