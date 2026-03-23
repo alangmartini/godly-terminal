@@ -15,6 +15,7 @@ pub struct PhoneRemotePreferences {
     pub port: u16,
     pub api_key: String,
     pub auto_start: bool,
+    pub password: String,
 }
 
 impl Default for PhoneRemotePreferences {
@@ -24,6 +25,7 @@ impl Default for PhoneRemotePreferences {
             port: 3377,
             api_key: generate_api_key(),
             auto_start: false,
+            password: String::new(),
         }
     }
 }
@@ -119,6 +121,9 @@ pub fn spawn_remote_server(prefs: &PhoneRemotePreferences) -> Result<Child, Stri
     cmd.env("GODLY_REMOTE_HOST", &prefs.host)
         .env("GODLY_REMOTE_PORT", prefs.port.to_string())
         .env("GODLY_REMOTE_API_KEY", &prefs.api_key);
+    if !prefs.password.is_empty() {
+        cmd.env("GODLY_REMOTE_PASSWORD", &prefs.password);
+    }
 
     #[cfg(windows)]
     {
@@ -137,6 +142,32 @@ pub fn stop_remote_server(child: &mut Child) {
 }
 
 // ---------------------------------------------------------------------------
+// LAN IP detection
+// ---------------------------------------------------------------------------
+
+/// Detect the local LAN IP address by connecting a UDP socket to a public
+/// address (no data is actually sent). Returns `None` if detection fails.
+pub fn detect_lan_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
+
+/// Return a display-friendly host for the phone remote URL.
+///
+/// When the server binds to all interfaces (`0.0.0.0` or `::`), we detect
+/// the LAN IP so the URL is directly usable from another device. Falls back
+/// to `"localhost"` when detection fails.
+pub fn display_host(host: &str) -> String {
+    if host == "0.0.0.0" || host == "::" {
+        detect_lan_ip().unwrap_or_else(|| "localhost".to_string())
+    } else {
+        host.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -151,6 +182,7 @@ mod tests {
         assert_eq!(prefs.port, 3377);
         assert_eq!(prefs.api_key.len(), 32);
         assert!(!prefs.auto_start);
+        assert!(prefs.password.is_empty());
     }
 
     #[test]
@@ -170,6 +202,7 @@ mod tests {
             port: 4000,
             api_key: "abc123".to_string(),
             auto_start: true,
+            password: "s3cret".to_string(),
         };
         let json = serde_json::to_string(&prefs).unwrap();
         let loaded: PhoneRemotePreferences = serde_json::from_str(&json).unwrap();
@@ -177,6 +210,7 @@ mod tests {
         assert_eq!(loaded.port, 4000);
         assert_eq!(loaded.api_key, "abc123");
         assert!(loaded.auto_start);
+        assert_eq!(loaded.password, "s3cret");
     }
 
     #[test]
@@ -188,5 +222,28 @@ mod tests {
         assert!(!loaded.auto_start);
         // api_key gets a fresh default (non-empty)
         assert!(!loaded.api_key.is_empty());
+        // password defaults to empty string when missing
+        assert!(loaded.password.is_empty());
+    }
+
+    #[test]
+    fn password_field_roundtrips_through_serde() {
+        let prefs = PhoneRemotePreferences {
+            password: "hunter2".to_string(),
+            ..PhoneRemotePreferences::default()
+        };
+        let json = serde_json::to_string(&prefs).unwrap();
+        let loaded: PhoneRemotePreferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.password, "hunter2");
+    }
+
+    #[test]
+    fn detect_lan_ip_returns_non_loopback() {
+        // This test may be skipped in environments without network access.
+        if let Some(ip) = detect_lan_ip() {
+            assert!(!ip.is_empty());
+            // Should not be the unspecified address
+            assert_ne!(ip, "0.0.0.0");
+        }
     }
 }
