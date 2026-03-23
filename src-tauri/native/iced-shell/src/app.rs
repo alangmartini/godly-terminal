@@ -406,6 +406,8 @@ pub struct GodlyApp {
     phone_remote_port_input: String,
     /// Phone remote settings form: API key input.
     phone_remote_api_key_input: String,
+    /// Phone remote settings form: password input.
+    phone_remote_password_input: String,
     /// Active toast notifications rendered as overlay cards.
     toasts: Vec<ToastNotification>,
     /// Monotonic id source for toast notifications.
@@ -482,6 +484,7 @@ impl Default for GodlyApp {
         let phone_host_input = phone_prefs.host.clone();
         let phone_port_input = phone_prefs.port.to_string();
         let phone_key_input = phone_prefs.api_key.clone();
+        let phone_password_input = phone_prefs.password.clone();
         Self {
             client: None,
             terminals: TerminalCollection::new(),
@@ -549,6 +552,7 @@ impl Default for GodlyApp {
             phone_remote_host_input: phone_host_input,
             phone_remote_port_input: phone_port_input,
             phone_remote_api_key_input: phone_key_input,
+            phone_remote_password_input: phone_password_input,
             toasts: Vec::new(),
             next_toast_id: 1,
             dragging_tab_id: None,
@@ -859,6 +863,8 @@ pub enum Message {
     PhoneRemotePortInputChanged(String),
     /// Phone remote API key input changed.
     PhoneRemoteApiKeyInputChanged(String),
+    /// Phone remote password input changed.
+    PhoneRemotePasswordInputChanged(String),
     /// Toggle auto-start preference.
     PhoneRemoteAutoStartToggle,
     /// Save phone remote settings to disk and apply.
@@ -3024,6 +3030,8 @@ impl GodlyApp {
                         if !key.is_empty() {
                             self.phone_remote_prefs.api_key = key;
                         }
+                        self.phone_remote_prefs.password =
+                            self.phone_remote_password_input.trim().to_string();
                         crate::phone_remote::save_preferences(&self.phone_remote_prefs);
 
                         match crate::phone_remote::spawn_remote_server(&self.phone_remote_prefs) {
@@ -3085,6 +3093,9 @@ impl GodlyApp {
             Message::PhoneRemoteApiKeyInputChanged(value) => {
                 self.phone_remote_api_key_input = value;
             }
+            Message::PhoneRemotePasswordInputChanged(value) => {
+                self.phone_remote_password_input = value;
+            }
             Message::PhoneRemoteAutoStartToggle => {
                 self.phone_remote_prefs.auto_start = !self.phone_remote_prefs.auto_start;
                 crate::phone_remote::save_preferences(&self.phone_remote_prefs);
@@ -3107,6 +3118,8 @@ impl GodlyApp {
                 if !key.is_empty() {
                     self.phone_remote_prefs.api_key = key;
                 }
+                self.phone_remote_prefs.password =
+                    self.phone_remote_password_input.trim().to_string();
                 crate::phone_remote::save_preferences(&self.phone_remote_prefs);
 
                 // If server is running, restart with new settings
@@ -3138,9 +3151,10 @@ impl GodlyApp {
                 self.phone_remote_api_key_input = new_key;
             }
             Message::PhoneRemoteCopyUrl => {
+                let host = crate::phone_remote::display_host(&self.phone_remote_prefs.host);
                 let url = format!(
-                    "http://{}:{}/phone",
-                    self.phone_remote_prefs.host, self.phone_remote_prefs.port
+                    "http://{}:{}/phone#key={}",
+                    host, self.phone_remote_prefs.port, self.phone_remote_prefs.api_key
                 );
                 return iced::clipboard::write(url);
             }
@@ -5501,6 +5515,12 @@ impl GodlyApp {
                 .on_input(Message::PhoneRemotePortInputChanged)
                 .padding(Padding::from([4, 8]))
                 .size(12),
+            text("Password (for browser login)").size(12).color(TEXT_SECONDARY()),
+            text_input("Optional password for phone browser login", &self.phone_remote_password_input)
+                .on_input(Message::PhoneRemotePasswordInputChanged)
+                .padding(Padding::from([4, 8]))
+                .size(12)
+                .secure(true),
             text("API Key").size(12).color(TEXT_SECONDARY()),
             api_key_row,
             auto_start_btn,
@@ -5512,10 +5532,8 @@ impl GodlyApp {
         .width(Length::Fill);
 
         if self.phone_remote_status == PhoneRemoteStatus::Running {
-            let url = format!(
-                "http://{}:{}/phone",
-                self.phone_remote_prefs.host, self.phone_remote_prefs.port
-            );
+            let host = crate::phone_remote::display_host(&self.phone_remote_prefs.host);
+            let url = format!("http://{}:{}/phone", host, self.phone_remote_prefs.port);
             content = content
                 .push(text("Connection Info").size(12).color(TEXT_SECONDARY()))
                 .push(
