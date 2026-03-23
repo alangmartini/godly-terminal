@@ -70,6 +70,8 @@ pub struct QuickClaudePreferences {
     pub selected_workspace_id: Option<String>,
     pub auto_suggest_branch: bool,
     pub main_branch_mode: bool,
+    #[serde(default)]
+    pub batch_clone_mode: bool,
 }
 
 impl Default for QuickClaudePreferences {
@@ -81,6 +83,7 @@ impl Default for QuickClaudePreferences {
             selected_workspace_id: None,
             auto_suggest_branch: true,
             main_branch_mode: false,
+            batch_clone_mode: false,
         }
     }
 }
@@ -136,6 +139,7 @@ pub struct QuickClaudeDialogState {
     pub branch_name: String,
     pub main_branch_mode: bool,
     pub auto_suggest_branch: bool,
+    pub batch_clone_mode: bool,
     /// Snapshot of available workspaces (id, name) at dialog open time.
     pub workspaces: Vec<(String, String)>,
     pub active_tab: QuickClaudeTab,
@@ -177,6 +181,7 @@ impl QuickClaudeDialogState {
             branch_name: String::new(),
             main_branch_mode: prefs.main_branch_mode,
             auto_suggest_branch: prefs.auto_suggest_branch,
+            batch_clone_mode: prefs.batch_clone_mode,
             workspaces,
             active_tab: QuickClaudeTab::NewPrompt,
             sessions: Vec::new(),
@@ -203,6 +208,7 @@ impl QuickClaudeDialogState {
             selected_workspace_id: self.selected_workspace_id.clone(),
             auto_suggest_branch: self.auto_suggest_branch,
             main_branch_mode: self.main_branch_mode,
+            batch_clone_mode: self.batch_clone_mode,
         }
     }
 
@@ -234,6 +240,7 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     on_branch_changed: impl Fn(String) -> M + 'a,
     on_main_branch_toggled: impl Fn(bool) -> M + 'a,
     on_auto_suggest_toggled: impl Fn(bool) -> M + 'a,
+    on_batch_clone_toggled: impl Fn(bool) -> M + 'a,
     on_model_selected: impl Fn(String) -> M + 'a,
     on_model_dropdown_toggle: M,
     on_mode_selected: impl Fn(String) -> M + 'a,
@@ -844,12 +851,12 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     text(main_branch_indicator).size(14).color(accent),
                     text("Open in main branch (no worktree)")
                         .size(12)
-                        .color(text_primary)
+                        .color(if state.batch_clone_mode { text_secondary } else { text_primary })
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(on_main_branch_toggled(!state.main_branch_mode))
+            .on_press_maybe(if state.batch_clone_mode { None } else { Some(on_main_branch_toggled(!state.main_branch_mode)) })
             .padding(Padding::from([4, 8]))
             .style(move |_theme, _status| button::Style {
                 background: None,
@@ -863,12 +870,12 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     text(auto_suggest_indicator).size(14).color(accent),
                     text("Auto-suggest branch name")
                         .size(12)
-                        .color(text_primary)
+                        .color(if state.batch_clone_mode { text_secondary } else { text_primary })
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press(on_auto_suggest_toggled(!state.auto_suggest_branch))
+            .on_press_maybe(if state.batch_clone_mode { None } else { Some(on_auto_suggest_toggled(!state.auto_suggest_branch)) })
             .padding(Padding::from([4, 8]))
             .style(move |_theme, _status| button::Style {
                 background: None,
@@ -876,7 +883,26 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 ..button::Style::default()
             });
 
-            let checkbox_row = row![main_branch_btn, auto_suggest_btn].spacing(12);
+            let batch_clone_indicator = if state.batch_clone_mode { "\u{2611}" } else { "\u{2610}" };
+            let batch_clone_btn = button(
+                row![
+                    text(batch_clone_indicator).size(14).color(accent),
+                    text("Full clone (batch-friendly)")
+                        .size(12)
+                        .color(if state.main_branch_mode { text_secondary } else { text_primary })
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .on_press_maybe(if state.main_branch_mode { None } else { Some(on_batch_clone_toggled(!state.batch_clone_mode)) })
+            .padding(Padding::from([4, 8]))
+            .style(move |_theme, _status| button::Style {
+                background: None,
+                border: Border::default(),
+                ..button::Style::default()
+            });
+
+            let checkbox_row = row![main_branch_btn, auto_suggest_btn, batch_clone_btn].spacing(12);
 
             let launch_btn = button(text("Launch").size(13).color(text_active))
                 .on_press(on_launch)
@@ -1422,6 +1448,7 @@ mod tests {
         assert!(state.branch_name.is_empty());
         assert!(!state.main_branch_mode);
         assert!(state.auto_suggest_branch);
+        assert!(!state.batch_clone_mode);
         assert_eq!(state.workspaces.len(), 2);
         assert_eq!(state.active_tab, QuickClaudeTab::NewPrompt);
         assert!(state.sessions.is_empty());
@@ -1462,6 +1489,7 @@ mod tests {
             BranchChanged(String),
             MainBranch(bool),
             AutoSuggest(bool),
+            BatchClone(bool),
             ModelSelected(String),
             ModelDropdown,
             ModeSelected(String),
@@ -1487,6 +1515,7 @@ mod tests {
             Msg::BranchChanged,
             Msg::MainBranch,
             Msg::AutoSuggest,
+            Msg::BatchClone,
             Msg::ModelSelected,
             Msg::ModelDropdown,
             Msg::ModeSelected,
@@ -1530,6 +1559,7 @@ mod tests {
             BranchChanged(String),
             MainBranch(bool),
             AutoSuggest(bool),
+            BatchClone(bool),
             ModelSelected(String),
             ModelDropdown,
             ModeSelected(String),
@@ -1555,6 +1585,7 @@ mod tests {
             Msg::BranchChanged,
             Msg::MainBranch,
             Msg::AutoSuggest,
+            Msg::BatchClone,
             Msg::ModelSelected,
             Msg::ModelDropdown,
             Msg::ModeSelected,
@@ -1682,6 +1713,7 @@ mod tests {
             selected_workspace_id: Some("ws-2".to_string()),
             auto_suggest_branch: false,
             main_branch_mode: true,
+            batch_clone_mode: false,
         };
         let state = QuickClaudeDialogState::new(
             Some("ws-1".into()),
@@ -1706,6 +1738,7 @@ mod tests {
             selected_workspace_id: Some("ws-gone".to_string()),
             auto_suggest_branch: true,
             main_branch_mode: false,
+            batch_clone_mode: false,
         };
         let state = QuickClaudeDialogState::new(
             Some("ws-1".into()),
@@ -1725,6 +1758,7 @@ mod tests {
             selected_workspace_id: Some("ws-1".to_string()),
             auto_suggest_branch: false,
             main_branch_mode: true,
+            batch_clone_mode: false,
         };
         let state = QuickClaudeDialogState::new(
             Some("ws-1".into()),
@@ -1776,6 +1810,7 @@ mod tests {
             selected_workspace_id: Some("ws-42".to_string()),
             auto_suggest_branch: false,
             main_branch_mode: true,
+            batch_clone_mode: false,
         };
         let json = serde_json::to_string(&prefs).unwrap();
         let loaded: QuickClaudePreferences = serde_json::from_str(&json).unwrap();
@@ -1799,6 +1834,7 @@ mod tests {
         assert!(loaded.selected_workspace_id.is_none());
         assert!(loaded.auto_suggest_branch);
         assert!(!loaded.main_branch_mode);
+        assert!(!loaded.batch_clone_mode);
     }
 
     #[test]
@@ -1826,5 +1862,29 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_preferences_batch_clone_default() {
+        let prefs = QuickClaudePreferences::default();
+        assert!(!prefs.batch_clone_mode);
+    }
+
+    #[test]
+    fn test_preferences_batch_clone_roundtrip() {
+        let prefs = QuickClaudePreferences {
+            batch_clone_mode: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&prefs).unwrap();
+        let decoded: QuickClaudePreferences = serde_json::from_str(&json).unwrap();
+        assert!(decoded.batch_clone_mode);
+    }
+
+    #[test]
+    fn test_old_prefs_without_batch_clone_deserialize() {
+        let json = r#"{"selected_model":"sonnet","selected_mode":"auto","selected_ai_tool":"Claude Code","selected_workspace_id":null,"auto_suggest_branch":true,"main_branch_mode":false}"#;
+        let decoded: QuickClaudePreferences = serde_json::from_str(json).unwrap();
+        assert!(!decoded.batch_clone_mode);
     }
 }

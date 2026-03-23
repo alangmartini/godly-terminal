@@ -777,6 +777,8 @@ pub enum Message {
     QuickClaudeDialogMainBranchToggled(bool),
     /// Auto-suggest branch name toggled in Quick Claude dialog.
     QuickClaudeDialogAutoSuggestToggled(bool),
+    /// Batch clone mode toggled in Quick Claude dialog.
+    QuickClaudeDialogBatchCloneToggled(bool),
     /// Launch from Quick Claude dialog.
     QuickClaudeDialogLaunch,
     /// Voice input from Quick Claude dialog.
@@ -2539,11 +2541,23 @@ impl GodlyApp {
             Message::QuickClaudeDialogMainBranchToggled(val) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.main_branch_mode = val;
+                    if val {
+                        dlg.batch_clone_mode = false;
+                    }
                 }
             }
             Message::QuickClaudeDialogAutoSuggestToggled(val) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.auto_suggest_branch = val;
+                }
+            }
+            Message::QuickClaudeDialogBatchCloneToggled(val) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.batch_clone_mode = val;
+                    if val {
+                        dlg.main_branch_mode = false;
+                        dlg.auto_suggest_branch = false;
+                    }
                 }
             }
             Message::QuickClaudeDialogModelSelected(model) => {
@@ -4157,6 +4171,7 @@ impl GodlyApp {
                 Message::QuickClaudeDialogBranchChanged,
                 Message::QuickClaudeDialogMainBranchToggled,
                 Message::QuickClaudeDialogAutoSuggestToggled,
+                Message::QuickClaudeDialogBatchCloneToggled,
                 Message::QuickClaudeDialogModelSelected,
                 Message::QuickClaudeDialogModelDropdownToggle,
                 Message::QuickClaudeDialogModeSelected,
