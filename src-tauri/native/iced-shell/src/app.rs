@@ -2475,13 +2475,17 @@ impl GodlyApp {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.prompt_content.perform(action);
 
-                    // Detect skill autocomplete trigger
+                    // Detect skill autocomplete trigger based on cursor position
                     if dlg.selected_ai_tool == "Claude Code" {
                         let text = dlg.prompt_content.text();
-                        // Find the last '/' in the text and check if it's a skill trigger
-                        if let Some(slash_pos) = text.rfind('/') {
-                            let after_slash = &text[slash_pos + 1..];
-                            // Only trigger if there's no space after the slash
+                        let cursor = dlg.prompt_content.cursor();
+                        // Compute byte offset of cursor in the full text
+                        let cursor_byte_offset = text_editor_cursor_byte_offset(&text, &cursor.position);
+                        let before_cursor = &text[..cursor_byte_offset];
+                        // Find the last '/' before the cursor
+                        if let Some(slash_pos) = before_cursor.rfind('/') {
+                            let after_slash = &before_cursor[slash_pos + 1..];
+                            // Only trigger if there's no space/newline between slash and cursor
                             if !after_slash.contains(' ') && !after_slash.contains('\n') {
                                 dlg.skill_autocomplete_open = true;
                                 dlg.skill_autocomplete_filter = after_slash.to_string();
@@ -2643,11 +2647,22 @@ impl GodlyApp {
                         let skill_name = format!("/{}", skill.name);
                         // Replace the /partial text in prompt with the selected skill name
                         let current_text = dlg.prompt_content.text();
-                        if let Some(slash_pos) = current_text.rfind('/') {
+                        let cursor = dlg.prompt_content.cursor();
+                        let cursor_byte_offset = text_editor_cursor_byte_offset(&current_text, &cursor.position);
+                        let before_cursor = &current_text[..cursor_byte_offset];
+                        let after_cursor = &current_text[cursor_byte_offset..];
+                        if let Some(slash_pos) = before_cursor.rfind('/') {
                             let new_text =
-                                format!("{}{} ", &current_text[..slash_pos], skill_name);
+                                format!("{}{} {}", &current_text[..slash_pos], skill_name, after_cursor);
+                            let new_cursor_offset = slash_pos + skill_name.len() + 1; // after the space
                             dlg.prompt_content =
                                 iced::widget::text_editor::Content::with_text(&new_text);
+                            // Move cursor to right after the inserted skill name + space
+                            let new_cursor_pos = byte_offset_to_editor_position(&new_text, new_cursor_offset);
+                            dlg.prompt_content.move_to(iced::widget::text_editor::Cursor {
+                                position: new_cursor_pos,
+                                selection: None,
+                            });
                         }
                         dlg.skill_autocomplete_open = false;
                         dlg.skill_autocomplete_filter.clear();
@@ -8203,6 +8218,46 @@ fn replace_leaf_in_layout(layout: &mut LayoutNode, old_id: &str, new_id: String)
         }
         _ => {}
     }
+}
+
+/// Convert an iced text_editor cursor Position (line, column) to a byte offset in the full text.
+fn text_editor_cursor_byte_offset(
+    text: &str,
+    pos: &iced::widget::text_editor::Position,
+) -> usize {
+    let mut offset = 0;
+    for (i, line) in text.split_inclusive('\n').enumerate() {
+        if i == pos.line {
+            // Column is a character offset within this line
+            return offset + line.chars().take(pos.column).map(|c| c.len_utf8()).sum::<usize>();
+        }
+        offset += line.len();
+    }
+    // If cursor is past the last newline-terminated line, we're on the final line
+    // (which has no trailing '\n' and wasn't yielded by split_inclusive with a newline).
+    // `offset` now points to the start of that final segment.
+    let remaining = &text[offset..];
+    offset + remaining.chars().take(pos.column).map(|c| c.len_utf8()).sum::<usize>()
+}
+
+/// Convert a byte offset back to an iced text_editor Position (line, column).
+fn byte_offset_to_editor_position(
+    text: &str,
+    byte_offset: usize,
+) -> iced::widget::text_editor::Position {
+    let mut line = 0;
+    let mut line_start = 0;
+    for (i, ch) in text.char_indices() {
+        if i >= byte_offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+    let column = text[line_start..byte_offset.min(text.len())].chars().count();
+    iced::widget::text_editor::Position { line, column }
 }
 
 fn normalize_quick_claude_text(value: &str) -> Option<String> {
