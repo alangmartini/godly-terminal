@@ -1058,6 +1058,16 @@ impl GodlyApp {
             .collect()
     }
 
+    /// Mark all terminals in the active workspace as read.
+    fn mark_active_workspace_read(&mut self) {
+        if let Some(ws) = self.workspaces.active() {
+            let ids: Vec<String> = ws.layout.all_leaf_ids().iter().map(|s| s.to_string()).collect();
+            for terminal_id in ids {
+                self.notifications.mark_read(&terminal_id);
+            }
+        }
+    }
+
     fn workspace_muted_for_terminal(&self, terminal_id: &str) -> bool {
         let Some(terminal) = self.terminals.get(terminal_id) else {
             return false;
@@ -1490,9 +1500,15 @@ impl GodlyApp {
                     }
                     term.dirty = true;
                 }
-                // Track notifications for non-focused terminals.
-                let is_focused = self.active_focused() == Some(session_id.as_str());
-                if !is_focused {
+                // Track notifications for terminals outside the active workspace.
+                // All terminals visible in the active workspace are considered "seen"
+                // — not just the single focused pane — so they don't accumulate
+                // false unread counts that would show a badge when switching away.
+                let in_active_workspace = self
+                    .workspaces
+                    .active()
+                    .map_or(false, |ws| ws.layout.find_leaf(&session_id));
+                if !in_active_workspace {
                     self.notifications.record_output(&session_id);
                 }
                 return self.fetch_grid(&session_id);
@@ -2184,9 +2200,7 @@ impl GodlyApp {
                 if decision.clear_context_menu {
                     self.workspace_context_menu_id = None;
                 }
-                if let Some(terminal_id) = decision.mark_terminal_read_id {
-                    self.notifications.mark_read(&terminal_id);
-                }
+                self.mark_active_workspace_read();
                 self.tab_context_menu_id = None;
             }
             Message::NewWorkspaceRequested => {
@@ -5898,26 +5912,12 @@ impl GodlyApp {
             }
             AppAction::NextWorkspace => {
                 self.workspaces.next();
-                let read_target = workspace_reducer::reduce_workspace_switch_read_target(
-                    self.workspaces
-                        .active()
-                        .map(|workspace| workspace.focused_terminal.clone()),
-                );
-                if let Some(terminal_id) = read_target {
-                    self.notifications.mark_read(&terminal_id);
-                }
+                self.mark_active_workspace_read();
                 Task::none()
             }
             AppAction::PrevWorkspace => {
                 self.workspaces.previous();
-                let read_target = workspace_reducer::reduce_workspace_switch_read_target(
-                    self.workspaces
-                        .active()
-                        .map(|workspace| workspace.focused_terminal.clone()),
-                );
-                if let Some(terminal_id) = read_target {
-                    self.notifications.mark_read(&terminal_id);
-                }
+                self.mark_active_workspace_read();
                 Task::none()
             }
             AppAction::ToggleSidebar => self.toggle_sidebar_visibility(),
@@ -6030,9 +6030,8 @@ impl GodlyApp {
                 if decision.clear_context_menu {
                     self.workspace_context_menu_id = None;
                 }
-                if let Some(terminal_id) = decision.mark_terminal_read_id {
-                    self.notifications.mark_read(&terminal_id);
-                }
+                // Mark all terminals in the destination workspace as read.
+                self.mark_active_workspace_read();
                 self.tab_context_menu_id = None;
                 Task::none()
             }
@@ -6247,9 +6246,7 @@ impl GodlyApp {
                 .active()
                 .map(|workspace| workspace.focused_terminal.clone()),
         );
-        if let Some(terminal_id) = decision.mark_terminal_read_id {
-            self.notifications.mark_read(&terminal_id);
-        }
+        self.mark_active_workspace_read();
         if let Some(terminal_id) = decision.fetch_grid_terminal_id {
             return self.fetch_grid(&terminal_id);
         }
