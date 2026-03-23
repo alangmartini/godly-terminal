@@ -60,6 +60,7 @@ use app::{GodlyApp, Message};
 fn main() -> iced::Result {
     crash_handler::init();
     crash_handler::install_panic_hook();
+    crash_handler::install_exception_handler();
 
     env_logger::init();
     log::info!(
