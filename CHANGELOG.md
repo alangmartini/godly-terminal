@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-03-23
+
+### Added
+- **Phone remote password preference** — Add password field to phone remote settings UI for browser-based login (#733)
+- **Browser password authentication** — Added `POST /api/authenticate` endpoint to exchange a password for the API key, `GET /` redirect to `/phone`, and made `GET /api/device-status` publicly accessible without auth (#736)
+- **Password-based browser authentication for phone remote** — Users can navigate to the remote URL in a browser and authenticate with a password, without needing to copy-paste API keys (#735)
+
+### Fixed
+- **Copy URL shows LAN IP** — Copy URL now detects LAN IP instead of showing unbrowsable `0.0.0.0`, and includes `#key=` fragment for auto-authentication (#733)
+- **Skill autocomplete in Quick Claude** — Typing `/` now triggers skill autosuggestion at any cursor position, not just at the end of the line (#734)
+- **Phone Remote health check on Windows** — Fixed WSAEADDRNOTAVAIL error when health check tried to connect to `0.0.0.0:3377`; now maps to loopback `127.0.0.1` (#730)
+- **Quick Claude image paste via Ctrl+V** — The text_editor widget now correctly triggers clipboard image detection when pasting (#729)
+- **Quick Claude plugin skills in autocomplete** — `/` autocomplete now discovers and displays all installed Claude Code plugins (#731)
+- **Background tabs restored as splits** — Fixed bug where background tabs were restored as horizontal splits instead of background tabs after restarting (#737)
+
 ## [0.16.0] - 2026-03-22
 
 ### Added
