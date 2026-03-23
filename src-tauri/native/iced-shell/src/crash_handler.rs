@@ -149,6 +149,71 @@ pub fn install_panic_hook() {
     }));
 }
 
+/// Install a Windows structured exception handler for silent crashes.
+/// Catches access violations, stack overflows, heap corruption that bypass
+/// Rust's panic machinery entirely.
+///
+/// Note: does not chain to a previous filter. Iced/wgpu/winit do not install
+/// their own SEH handlers, so there is nothing to chain to. This matches the
+/// daemon's proven approach in debug_log.rs.
+#[cfg(windows)]
+pub fn install_exception_handler() {
+    use winapi::um::errhandlingapi::SetUnhandledExceptionFilter;
+    use winapi::um::winnt::EXCEPTION_POINTERS;
+
+    unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
+        if info.is_null() {
+            return 1; // EXCEPTION_EXECUTE_HANDLER
+        }
+
+        let record = (*info).ExceptionRecord;
+        if record.is_null() {
+            return 1;
+        }
+
+        let code = (*record).ExceptionCode;
+        let address = (*record).ExceptionAddress as usize;
+
+        let code_name = match code {
+            0xC0000005 => "ACCESS_VIOLATION",
+            0xC00000FD => "STACK_OVERFLOW",
+            0xC0000374 => "HEAP_CORRUPTION",
+            0xC0000409 => "STACK_BUFFER_OVERRUN",
+            _ => "UNKNOWN",
+        };
+
+        // Use try_lock to avoid deadlock if exception occurs during logging
+        if let Some(mutex) = LOG_FILE.get() {
+            if let Ok(mut state) = mutex.try_lock() {
+                let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default();
+                let _ = writeln!(
+                    state.file,
+                    "[{}.{:03}] FATAL EXCEPTION: code=0x{:08X} ({}) address=0x{:X}",
+                    ts.as_secs(),
+                    ts.subsec_millis(),
+                    code,
+                    code_name,
+                    address
+                );
+                let _ = state.file.flush();
+            }
+        }
+
+        1 // EXCEPTION_EXECUTE_HANDLER
+    }
+
+    unsafe {
+        SetUnhandledExceptionFilter(Some(handler));
+    }
+}
+
+#[cfg(not(windows))]
+pub fn install_exception_handler() {
+    // No-op on non-Windows
+}
+
 fn rotate(state: &mut LogState) {
     let _ = fs::copy(&state.path, &state.prev_path);
     let _ = fs::remove_file(&state.path);
