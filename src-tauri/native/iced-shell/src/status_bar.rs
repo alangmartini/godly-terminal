@@ -1,10 +1,11 @@
-use iced::widget::{container, row, text, Space};
+use iced::widget::{column, container, row, rule, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
 
-use crate::theme::{STATUS_BAR_BG, TEXT_SECONDARY};
+use crate::theme::{BORDER, GHOST_HOVER, STATUS_BAR_BG, TEXT_SECONDARY};
 
 /// Height of the status bar in logical pixels.
-pub const STATUS_BAR_HEIGHT: f32 = 20.0;
+/// Includes 1px top separator line.
+pub const STATUS_BAR_HEIGHT: f32 = 21.0;
 
 /// Information needed to render the status bar.
 pub struct StatusBarInfo<'a> {
@@ -55,22 +56,46 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
     };
 
     let shell_text = text(shell)
-        .size(11)
+        .size(10)
         .color(TEXT_SECONDARY())
         .font(status_font);
+
+    // Shell label styled as a small pill badge.
+    let badge_bg = GHOST_HOVER();
+    let shell_badge = container(shell_text)
+        .padding(Padding::from([1, 6]))
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(badge_bg)),
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 4.0.into(),
+            },
+            ..container::Style::default()
+        });
 
     let cwd_text = text(cwd)
         .size(11)
         .color(TEXT_SECONDARY())
         .font(status_font);
 
+    // Dims text slightly brighter for quick readability.
+    let dims_color = {
+        let s = TEXT_SECONDARY();
+        Color::from_rgba(
+            (s.r * 1.2).min(1.0),
+            (s.g * 1.2).min(1.0),
+            (s.b * 1.2).min(1.0),
+            s.a,
+        )
+    };
     let dims_text = text(dims)
         .size(11)
-        .color(TEXT_SECONDARY())
+        .color(dims_color)
         .font(status_font);
 
     let content = row![
-        container(shell_text).padding(Padding::from([0, 8])),
+        container(shell_badge).padding(Padding::from([0, 8])),
         container(cwd_text).padding(Padding::from([0, 4])),
         Space::new().width(Length::Fill),
         container(dims_text).padding(Padding::from([0, 8])),
@@ -78,18 +103,24 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
     .align_y(iced::Alignment::Center)
     .height(Length::Fixed(STATUS_BAR_HEIGHT));
 
-    container(content)
+    // Top separator line to visually close the content area.
+    let separator = rule::horizontal(1).style(|_theme| rule::Style {
+        color: BORDER(),
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    });
+
+    let bar = container(content)
         .width(Length::Fill)
         .height(Length::Fixed(STATUS_BAR_HEIGHT))
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(STATUS_BAR_BG())),
-            border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
-                radius: 0.0.into(),
-            },
             ..container::Style::default()
-        })
+        });
+
+    column![separator, bar]
+        .width(Length::Fill)
         .into()
 }
 
