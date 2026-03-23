@@ -25,6 +25,12 @@ pub struct PersistedSessionState {
     /// Worktree paths associated with terminal sessions (terminal_id → worktree_path).
     #[serde(default)]
     pub terminal_worktree_paths: HashMap<String, String>,
+    /// Maps every terminal to its workspace (terminal_id → workspace_id).
+    /// The layout tree only stores the *visible* terminals; background tabs
+    /// are tracked here so they survive a restart without being turned into
+    /// split panes.
+    #[serde(default)]
+    pub terminal_workspace_assignments: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -72,6 +78,9 @@ pub struct MergedSessionState {
     pub missing_live_terminal_ids: Vec<String>,
     /// Worktree paths for terminals that survived the merge.
     pub terminal_worktree_paths: HashMap<String, String>,
+    /// Workspace assignments for live terminals that are NOT in any layout
+    /// (i.e. background tabs). Maps terminal_id → workspace_id.
+    pub missing_terminal_workspace_assignments: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -329,7 +338,7 @@ pub fn merge_with_live_sessions(
             })
         });
 
-    let missing_live_terminal_ids = live_session_ids
+    let missing_live_terminal_ids: Vec<String> = live_session_ids
         .iter()
         .filter(|terminal_id| !used_terminal_ids.contains(terminal_id.as_str()))
         .cloned()
@@ -341,6 +350,21 @@ pub fn merge_with_live_sessions(
         .iter()
         .filter(|(id, _)| live_terminal_ids.contains(id.as_str()))
         .map(|(id, path)| (id.clone(), path.clone()))
+        .collect();
+
+    // Build workspace assignments for missing live terminals so the caller
+    // can add them as background tabs rather than layout splits.
+    let workspace_ids_in_merged: HashSet<&str> =
+        workspaces.iter().map(|ws| ws.id.as_str()).collect();
+    let missing_terminal_workspace_assignments: HashMap<String, String> = missing_live_terminal_ids
+        .iter()
+        .filter_map(|tid| {
+            persisted
+                .terminal_workspace_assignments
+                .get(tid)
+                .filter(|ws_id| workspace_ids_in_merged.contains(ws_id.as_str()))
+                .map(|ws_id| (tid.clone(), ws_id.clone()))
+        })
         .collect();
 
     MergedSessionState {
@@ -355,6 +379,7 @@ pub fn merge_with_live_sessions(
         workspaces,
         missing_live_terminal_ids,
         terminal_worktree_paths,
+        missing_terminal_workspace_assignments,
     }
 }
 
@@ -395,6 +420,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-2".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![PersistedWorkspaceState {
                 id: "w-1".to_string(),
                 name: "Workspace 1".to_string(),
@@ -433,6 +459,7 @@ mod tests {
             active_workspace_id: Some("w-2".to_string()),
             active_terminal_id: Some("t-3".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-1".to_string(),
@@ -572,6 +599,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![PersistedWorkspaceState {
                 id: "w-1".to_string(),
                 name: "Main".to_string(),
@@ -658,6 +686,7 @@ mod tests {
             active_workspace_id: Some("w-dev".to_string()),
             active_terminal_id: Some("t-old-3".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-default".to_string(),
@@ -762,6 +791,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-old-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-1".to_string(),
@@ -816,6 +846,191 @@ mod tests {
             merged.missing_live_terminal_ids.len(),
             2,
             "unmatched new sessions should be in missing_live_terminal_ids"
+        );
+    }
+
+    #[test]
+    fn merge_returns_workspace_assignments_for_background_tabs() {
+        // Bug: multiple tabs in one workspace get restored as splits instead
+        // of tabs. Root cause: the layout tree only stores the *visible*
+        // terminal; background tabs have no persisted workspace association.
+        //
+        // This test verifies that terminal_workspace_assignments survives
+        // the merge so the caller can add background tabs correctly.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 2,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            // Three terminals, but only t-1 is in the layout (visible).
+            // t-2 and t-3 are background tabs in workspace w-1.
+            terminal_workspace_assignments: HashMap::from([
+                ("t-1".to_string(), "w-1".to_string()),
+                ("t-2".to_string(), "w-1".to_string()),
+                ("t-3".to_string(), "w-1".to_string()),
+            ]),
+            workspaces: vec![PersistedWorkspaceState {
+                id: "w-1".to_string(),
+                name: "Main".to_string(),
+                folder_path: ".".to_string(),
+                worktree_mode: false,
+                focused_terminal: "t-1".to_string(),
+                layout: PersistedLayoutNode::Leaf {
+                    terminal_id: "t-1".to_string(),
+                },
+            }],
+        };
+
+        // All three terminals are still alive in the daemon.
+        let live = vec![
+            "t-1".to_string(),
+            "t-2".to_string(),
+            "t-3".to_string(),
+        ];
+        let merged = merge_with_live_sessions(&persisted, &live);
+
+        // t-1 is in the layout; t-2 and t-3 are missing from any layout.
+        assert_eq!(
+            merged.workspaces[0].layout,
+            Some(LayoutNode::Leaf {
+                terminal_id: "t-1".to_string()
+            })
+        );
+        assert_eq!(
+            merged.missing_live_terminal_ids,
+            vec!["t-2".to_string(), "t-3".to_string()],
+        );
+
+        // The workspace assignments tell the caller where the background
+        // tabs belong — they must NOT be turned into layout splits.
+        assert_eq!(
+            merged.missing_terminal_workspace_assignments.get("t-2"),
+            Some(&"w-1".to_string()),
+            "t-2 should be assigned to w-1"
+        );
+        assert_eq!(
+            merged.missing_terminal_workspace_assignments.get("t-3"),
+            Some(&"w-1".to_string()),
+            "t-3 should be assigned to w-1"
+        );
+    }
+
+    #[test]
+    fn merge_ignores_workspace_assignments_for_dead_workspaces() {
+        // If a terminal's persisted workspace no longer exists in the merged
+        // output, the assignment should be dropped (truly orphaned).
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: false,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 2,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::from([
+                ("t-1".to_string(), "w-1".to_string()),
+                ("t-2".to_string(), "w-gone".to_string()), // workspace doesn't exist
+            ]),
+            workspaces: vec![PersistedWorkspaceState {
+                id: "w-1".to_string(),
+                name: "Main".to_string(),
+                folder_path: ".".to_string(),
+                worktree_mode: false,
+                focused_terminal: "t-1".to_string(),
+                layout: PersistedLayoutNode::Leaf {
+                    terminal_id: "t-1".to_string(),
+                },
+            }],
+        };
+
+        let live = vec!["t-1".to_string(), "t-2".to_string()];
+        let merged = merge_with_live_sessions(&persisted, &live);
+
+        assert_eq!(merged.missing_live_terminal_ids, vec!["t-2".to_string()]);
+        assert!(
+            merged.missing_terminal_workspace_assignments.get("t-2").is_none(),
+            "t-2's assignment to non-existent workspace should be dropped"
+        );
+    }
+
+    #[test]
+    fn workspace_assignments_round_trip_through_serialization() {
+        let state = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 2,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::from([
+                ("t-1".to_string(), "w-1".to_string()),
+                ("t-2".to_string(), "w-1".to_string()),
+            ]),
+            workspaces: vec![PersistedWorkspaceState {
+                id: "w-1".to_string(),
+                name: "Main".to_string(),
+                folder_path: ".".to_string(),
+                worktree_mode: false,
+                focused_terminal: "t-1".to_string(),
+                layout: PersistedLayoutNode::Leaf {
+                    terminal_id: "t-1".to_string(),
+                },
+            }],
+        };
+
+        let json = serde_json::to_string(&state).expect("serialize");
+        let decoded: PersistedSessionState =
+            serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(
+            decoded.terminal_workspace_assignments,
+            state.terminal_workspace_assignments,
+            "workspace assignments must survive serialization round-trip"
+        );
+    }
+
+    #[test]
+    fn old_json_without_workspace_assignments_deserializes_with_empty_default() {
+        // Backwards compatibility: JSON saved before this field existed
+        // should deserialize with an empty HashMap.
+        let json = r#"{
+            "version": 1,
+            "sidebar_visible": true,
+            "settings_open": false,
+            "settings_tab": "shortcuts",
+            "font_size": 13.0,
+            "font_family": "Geist Mono",
+            "next_workspace_num": 2,
+            "active_workspace_id": "w-1",
+            "active_terminal_id": "t-1",
+            "workspaces": [{
+                "id": "w-1",
+                "name": "Main",
+                "folder_path": ".",
+                "worktree_mode": false,
+                "focused_terminal": "t-1",
+                "layout": {"type": "leaf", "terminal_id": "t-1"}
+            }]
+        }"#;
+
+        let state: PersistedSessionState =
+            serde_json::from_str(json).expect("deserialize old format");
+        assert!(
+            state.terminal_workspace_assignments.is_empty(),
+            "missing field should default to empty HashMap"
         );
     }
 }

@@ -1398,6 +1398,15 @@ impl GodlyApp {
                         .map(|path| (t.id.clone(), path.clone()))
                 })
                 .collect(),
+            terminal_workspace_assignments: self
+                .terminals
+                .iter()
+                .filter_map(|t| {
+                    t.workspace_id
+                        .as_ref()
+                        .map(|ws_id| (t.id.clone(), ws_id.clone()))
+                })
+                .collect(),
         }
     }
 
@@ -6482,14 +6491,41 @@ impl GodlyApp {
                         }
                     }
 
-                    // Assign missing live terminals: first fill empty workspaces (one each),
-                    // then overflow remaining into the active workspace.
-                    let mut missing_iter =
-                        merged.missing_live_terminal_ids.into_iter().peekable();
+                    // Separate missing terminals into two pools:
+                    //  1. Terminals with a known workspace assignment (background tabs)
+                    //  2. Truly orphaned terminals (no persisted workspace)
+                    let ws_assignments = merged.missing_terminal_workspace_assignments;
+                    let mut orphan_terminal_ids: Vec<String> = Vec::new();
 
-                    // Fill empty workspaces with one terminal each.
+                    for terminal_id in &merged.missing_live_terminal_ids {
+                        if let Some(ws_id) = ws_assignments.get(terminal_id) {
+                            // Terminal has a known workspace — add as a background tab.
+                            if assigned_terminal_ids.insert(terminal_id.clone()) {
+                                self.terminals.add_to_workspace(
+                                    terminal_id.clone(),
+                                    rows,
+                                    cols,
+                                    ws_id.clone(),
+                                );
+                                if let Some(offset) =
+                                    restored_scrollback_offsets.get(terminal_id)
+                                {
+                                    if let Some(term) = self.terminals.get_mut(terminal_id) {
+                                        term.scrollback_offset = *offset;
+                                    }
+                                }
+                            }
+                        } else {
+                            orphan_terminal_ids.push(terminal_id.clone());
+                        }
+                    }
+
+                    // Fill empty workspaces (those that lost all terminals) with one
+                    // orphan each so the workspace stays alive.
+                    let mut orphan_iter = orphan_terminal_ids.into_iter().peekable();
+
                     for workspace in empty_workspaces {
-                        if let Some(terminal_id) = missing_iter.next() {
+                        if let Some(terminal_id) = orphan_iter.next() {
                             if assigned_terminal_ids.insert(terminal_id.clone()) {
                                 self.terminals.add_to_workspace(
                                     terminal_id.clone(),
@@ -6519,10 +6555,11 @@ impl GodlyApp {
                         // No terminal available — workspace silently dropped.
                     }
 
-                    // Handle remaining unassigned live terminals.
-                    if missing_iter.peek().is_some() {
+                    // Remaining orphans go into the active workspace as background
+                    // tabs (not layout splits).
+                    if orphan_iter.peek().is_some() {
                         if self.workspaces.count() == 0 {
-                            if let Some(first_id) = missing_iter.next() {
+                            if let Some(first_id) = orphan_iter.next() {
                                 if assigned_terminal_ids.insert(first_id.clone()) {
                                     self.terminals.add_to_workspace(
                                         first_id.clone(),
@@ -6550,7 +6587,7 @@ impl GodlyApp {
                             .or_else(|| self.workspaces.active_id().map(str::to_string))
                             .unwrap_or_else(|| "w-default".to_string());
 
-                        for terminal_id in missing_iter {
+                        for terminal_id in orphan_iter {
                             if !assigned_terminal_ids.insert(terminal_id.clone()) {
                                 continue;
                             }
@@ -6564,27 +6601,6 @@ impl GodlyApp {
                                 if let Some(term) = self.terminals.get_mut(&terminal_id) {
                                     term.scrollback_offset = *offset;
                                 }
-                            }
-                            if let Some(workspace) =
-                                self.workspaces.get_mut(&target_workspace_id)
-                            {
-                                if let Some(anchor) = workspace
-                                    .layout
-                                    .all_leaf_ids()
-                                    .first()
-                                    .map(|id| (*id).to_string())
-                                {
-                                    workspace.layout.split_leaf(
-                                        &anchor,
-                                        terminal_id.clone(),
-                                        SplitDirection::Vertical,
-                                    );
-                                } else {
-                                    workspace.layout = LayoutNode::Leaf {
-                                        terminal_id: terminal_id.clone(),
-                                    };
-                                }
-                                workspace.focused_terminal = terminal_id.clone();
                             }
                         }
                     }
