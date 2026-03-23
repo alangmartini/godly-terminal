@@ -30,5 +30,8 @@ rfd = "0.15"
 png = "0.17"
 fontdb = "0.23"
 
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true
+
 [build-dependencies]
 serde_json = "1"
