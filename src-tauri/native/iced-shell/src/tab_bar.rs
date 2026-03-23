@@ -251,11 +251,20 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                         _ => bg,
                     }
                 };
+                // Active tab: rounded top corners only so it visually
+                // connects to the terminal pane below.
+                let radius: iced::border::Radius = if is_active {
+                    iced::border::Radius::new(6.0)
+                        .bottom_right(0.0)
+                        .bottom_left(0.0)
+                } else {
+                    6.0.into()
+                };
                 button::Style {
                     background: Some(iced::Background::Color(bg_color)),
                     text_color,
                     border: Border {
-                        radius: 6.0.into(),
+                        radius,
                         ..Border::default()
                     },
                     ..button::Style::default()
@@ -287,8 +296,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             });
 
         let tab_column = column![
-            container(tab_with_drag).height(Length::Fill),
             indicator,
+            container(tab_with_drag).height(Length::Fill),
         ]
         .height(Length::Fixed(TAB_BAR_HEIGHT))
         .spacing(0);
