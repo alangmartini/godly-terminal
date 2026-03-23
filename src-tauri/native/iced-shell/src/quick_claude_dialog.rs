@@ -35,6 +35,8 @@ pub struct ClaudeSession {
 pub enum SkillScope {
     Project,
     User,
+    /// Installed Claude Code plugin — stores the plugin display name.
+    Plugin(String),
 }
 
 #[derive(Debug, Clone)]
@@ -690,9 +692,10 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     for (i, skill) in filtered.iter().enumerate().take(8) {
                         let is_selected = i == state.skill_autocomplete_selected;
                         let idx = i;
-                        let scope_label = match skill.scope {
+                        let scope_label = match &skill.scope {
                             SkillScope::Project => "project",
                             SkillScope::User => "user",
+                            SkillScope::Plugin(name) => name.as_str(),
                         };
                         let skill_item = button(
                             row![
@@ -1060,7 +1063,7 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
         .into()
 }
 
-/// Discover Claude Code skills from project and user directories.
+/// Discover Claude Code skills from project, user, and installed plugin directories.
 pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
     let mut skills = Vec::new();
 
@@ -1079,9 +1082,59 @@ pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
         if user_skills_dir.exists() {
             collect_skills_from_dir(&user_skills_dir, SkillScope::User, &mut skills);
         }
+
+        // Discover skills from installed Claude Code plugins.
+        let installed_json = std::path::Path::new(&home)
+            .join(".claude")
+            .join("plugins")
+            .join("installed_plugins.json");
+        if installed_json.exists() {
+            collect_plugin_skills(&installed_json, &mut skills);
+        }
     }
 
     skills
+}
+
+/// Read `installed_plugins.json` and collect skills/commands from each installed plugin.
+fn collect_plugin_skills(json_path: &std::path::Path, skills: &mut Vec<SkillEntry>) {
+    let Ok(data) = std::fs::read_to_string(json_path) else {
+        return;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
+    };
+    let Some(plugins) = root.get("plugins").and_then(|v| v.as_object()) else {
+        return;
+    };
+
+    for (key, installs) in plugins {
+        // Plugin key format: "plugin-name@marketplace" — extract the short name.
+        let plugin_name = key.split('@').next().unwrap_or(key);
+
+        // Each plugin may have multiple installs; use the last (most recent) entry.
+        let Some(install) = installs.as_array().and_then(|a| a.last()) else {
+            continue;
+        };
+        let Some(install_path) = install.get("installPath").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let base = std::path::Path::new(install_path);
+
+        let scope = SkillScope::Plugin(plugin_name.to_string());
+
+        // Scan skills/ directory (SKILL.md convention inside subdirectories).
+        let skills_dir = base.join("skills");
+        if skills_dir.exists() {
+            collect_skills_from_dir(&skills_dir, scope.clone(), skills);
+        }
+
+        // Scan commands/ directory (each .md file is a command).
+        let commands_dir = base.join("commands");
+        if commands_dir.exists() {
+            collect_skills_from_dir(&commands_dir, scope, skills);
+        }
+    }
 }
 
 fn collect_skills_from_dir(
@@ -1142,18 +1195,56 @@ fn walkdir_recursive(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, s
     Ok(results)
 }
 
+/// Extract a description from a skill/command markdown file.
+///
+/// Tries two strategies (first 30 lines):
+/// 1. YAML frontmatter `description:` field (between `---` markers)
+/// 2. First `# ` markdown heading
 fn read_first_heading(path: &std::path::Path) -> Option<String> {
     use std::io::BufRead;
     let file = std::fs::File::open(path).ok()?;
     let reader = std::io::BufReader::new(file);
-    for line in reader.lines().take(20) {
+
+    let mut in_frontmatter = false;
+    let mut frontmatter_desc: Option<String> = None;
+
+    for line in reader.lines().take(30) {
         let line = line.ok()?;
         let trimmed = line.trim();
+
+        // Detect frontmatter boundaries.
+        if trimmed == "---" {
+            if !in_frontmatter {
+                in_frontmatter = true;
+                continue;
+            } else {
+                // End of frontmatter — if we found a description, use it.
+                if frontmatter_desc.is_some() {
+                    return frontmatter_desc;
+                }
+                in_frontmatter = false;
+                continue;
+            }
+        }
+
+        if in_frontmatter {
+            // Parse `description: ...` (with optional quotes).
+            if let Some(rest) = trimmed.strip_prefix("description:") {
+                let desc = rest.trim().trim_matches('"').trim_matches('\'');
+                if !desc.is_empty() {
+                    frontmatter_desc = Some(desc.to_string());
+                }
+            }
+            continue;
+        }
+
+        // Outside frontmatter: look for markdown heading.
         if let Some(heading) = trimmed.strip_prefix("# ") {
             return Some(heading.to_string());
         }
     }
-    None
+
+    frontmatter_desc
 }
 
 /// Discover recent Claude Code sessions from JSONL files.
