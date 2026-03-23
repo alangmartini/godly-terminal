@@ -1398,6 +1398,12 @@ impl GodlyApp {
                         .map(|path| (t.id.clone(), path.clone()))
                 })
                 .collect(),
+            terminal_clone_ids: self
+                .terminals
+                .iter()
+                .filter(|t| t.is_clone)
+                .map(|t| t.id.clone())
+                .collect(),
             terminal_workspace_assignments: self
                 .terminals
                 .iter()
@@ -2666,6 +2672,7 @@ impl GodlyApp {
                     launched_at: crate::quick_claude_sessions::now_iso8601(),
                     claude_session_id: Some(claude_session_id),
                     cwd: cwd.clone(),
+                    is_clone: launch_state.is_clone,
                 };
                 let _ = crate::quick_claude_sessions::add_session(session_record);
                 launch_state.session_record_id = Some(record_id);
@@ -6668,6 +6675,11 @@ impl GodlyApp {
                     // Apply persisted worktree paths to restored terminals.
                     for (terminal_id, path) in worktree_paths {
                         self.terminals.set_worktree_path(&terminal_id, path);
+                    }
+
+                    // Apply persisted clone flags to restored terminals.
+                    for terminal_id in &merged.terminal_clone_ids {
+                        self.terminals.set_clone_flag(terminal_id, true);
                     }
                 }
 

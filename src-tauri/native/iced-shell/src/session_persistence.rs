@@ -25,6 +25,9 @@ pub struct PersistedSessionState {
     /// Worktree paths associated with terminal sessions (terminal_id → worktree_path).
     #[serde(default)]
     pub terminal_worktree_paths: HashMap<String, String>,
+    /// Terminal IDs whose worktree_path is actually a clone (not a git worktree).
+    #[serde(default)]
+    pub terminal_clone_ids: HashSet<String>,
     /// Maps every terminal to its workspace (terminal_id → workspace_id).
     /// The layout tree only stores the *visible* terminals; background tabs
     /// are tracked here so they survive a restart without being turned into
@@ -78,6 +81,8 @@ pub struct MergedSessionState {
     pub missing_live_terminal_ids: Vec<String>,
     /// Worktree paths for terminals that survived the merge.
     pub terminal_worktree_paths: HashMap<String, String>,
+    /// Terminal IDs whose worktree_path is actually a clone (not a git worktree).
+    pub terminal_clone_ids: HashSet<String>,
     /// Workspace assignments for live terminals that are NOT in any layout
     /// (i.e. background tabs). Maps terminal_id → workspace_id.
     pub missing_terminal_workspace_assignments: HashMap<String, String>,
@@ -352,6 +357,14 @@ pub fn merge_with_live_sessions(
         .map(|(id, path)| (id.clone(), path.clone()))
         .collect();
 
+    // Filter clone IDs to only include live terminals.
+    let terminal_clone_ids: HashSet<String> = persisted
+        .terminal_clone_ids
+        .iter()
+        .filter(|id| live_terminal_ids.contains(id.as_str()))
+        .cloned()
+        .collect();
+
     // Build workspace assignments for missing live terminals so the caller
     // can add them as background tabs rather than layout splits.
     let workspace_ids_in_merged: HashSet<&str> =
@@ -379,6 +392,7 @@ pub fn merge_with_live_sessions(
         workspaces,
         missing_live_terminal_ids,
         terminal_worktree_paths,
+        terminal_clone_ids,
         missing_terminal_workspace_assignments,
     }
 }
@@ -420,6 +434,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-2".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![PersistedWorkspaceState {
                 id: "w-1".to_string(),
@@ -459,6 +474,7 @@ mod tests {
             active_workspace_id: Some("w-2".to_string()),
             active_terminal_id: Some("t-3".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
@@ -599,6 +615,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![PersistedWorkspaceState {
                 id: "w-1".to_string(),
@@ -686,6 +703,7 @@ mod tests {
             active_workspace_id: Some("w-dev".to_string()),
             active_terminal_id: Some("t-old-3".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
@@ -791,6 +809,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-old-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
@@ -868,6 +887,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             // Three terminals, but only t-1 is in the layout (visible).
             // t-2 and t-3 are background tabs in workspace w-1.
             terminal_workspace_assignments: HashMap::from([
@@ -936,6 +956,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::from([
                 ("t-1".to_string(), "w-1".to_string()),
                 ("t-2".to_string(), "w-gone".to_string()), // workspace doesn't exist
@@ -975,6 +996,7 @@ mod tests {
             active_workspace_id: Some("w-1".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::from([
                 ("t-1".to_string(), "w-1".to_string()),
                 ("t-2".to_string(), "w-1".to_string()),
