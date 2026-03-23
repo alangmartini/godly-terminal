@@ -190,12 +190,19 @@ pub fn view_copy_preview<'a, M: Clone + 'a>(
 /// Remove Worktree (danger), Keep Worktree, Cancel.
 pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
     worktree_path: &'a str,
+    is_clone: bool,
     on_remove: M,
     on_keep: M,
     on_cancel: M,
 ) -> Element<'a, M> {
+    let desc_str = if is_clone { "This terminal uses a git clone at:" } else { "This terminal uses a git worktree at:" };
+    let prompt_str = if is_clone { "Remove the clone from disk, or keep it for later?" } else { "Remove the worktree from disk, or keep it for later?" };
+    let title_str = if is_clone { "Close Clone Terminal?" } else { "Close Worktree Terminal?" };
+    let keep_str = if is_clone { "Keep Clone" } else { "Keep Worktree" };
+    let remove_str = if is_clone { "Remove Clone" } else { "Remove Worktree" };
+
     let body_text = column![
-        text("This terminal uses a git worktree at:")
+        text(desc_str)
             .size(13)
             .color(TEXT_PRIMARY()),
         Space::new().height(6.0),
@@ -214,12 +221,12 @@ pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
             ..container::Style::default()
         }),
         Space::new().height(10.0),
-        text("Remove the worktree from disk, or keep it for later?")
+        text(prompt_str)
             .size(13)
             .color(TEXT_PRIMARY()),
     ];
 
-    let title_text = text("Close Worktree Terminal?").size(16).color(TEXT_ACTIVE());
+    let title_text = text(title_str).size(16).color(TEXT_ACTIVE());
 
     let cancel_btn = button(text("Cancel").size(13).color(TEXT_PRIMARY()))
         .on_press(on_cancel)
@@ -241,7 +248,7 @@ pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
             }
         });
 
-    let keep_btn = button(text("Keep Worktree").size(13).color(TEXT_PRIMARY()))
+    let keep_btn = button(text(keep_str).size(13).color(TEXT_PRIMARY()))
         .on_press(on_keep)
         .padding(Padding::from([7, 18]))
         .style(move |_theme, status| {
@@ -262,7 +269,7 @@ pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
         });
 
     let danger_color = DANGER();
-    let remove_btn = button(text("Remove Worktree").size(13).color(Color::WHITE))
+    let remove_btn = button(text(remove_str).size(13).color(Color::WHITE))
         .on_press(on_remove)
         .padding(Padding::from([7, 18]))
         .style(move |_theme, status| {

@@ -2652,7 +2652,9 @@ impl GodlyApp {
                     (id, name, None, true)
                 };
 
-                let isolation = if dlg.main_branch_mode {
+                let isolation = if dlg.batch_clone_mode {
+                    crate::quick_claude::IsolationMode::Clone
+                } else if dlg.main_branch_mode {
                     crate::quick_claude::IsolationMode::None
                 } else {
                     crate::quick_claude::IsolationMode::Worktree
@@ -2671,6 +2673,7 @@ impl GodlyApp {
                     is_new_ws,
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.is_clone = dlg.batch_clone_mode;
 
                 // Record session for resume tracking
                 let record_id = uuid::Uuid::new_v4().to_string();
@@ -3432,22 +3435,41 @@ impl GodlyApp {
                 self.worktree_close_pending = None;
                 let worktree_path = self.terminals.get(&session_id)
                     .and_then(|t| t.worktree_path.clone());
+                let is_clone = self.terminals.get(&session_id)
+                    .map(|t| t.is_clone)
+                    .unwrap_or(false);
                 let repo_root = self.workspaces.active()
                     .map(|ws| ws.folder_path.clone());
                 let close_task = self.close_terminal_immediate(&session_id);
-                if let (Some(wt_path), Some(root)) = (worktree_path, repo_root) {
+                if let Some(wt_path) = worktree_path {
                     let sid = session_id.clone();
-                    let remove_task = Task::perform(
-                        async move {
-                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
-                            std::thread::spawn(move || {
-                                let result = crate::git_worktree::remove_worktree(&root, &wt_path);
-                                let _ = tx.send(result);
-                            });
-                            rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
-                        },
-                        move |result| Message::WorktreeRemoved { session_id: sid, result },
-                    );
+                    let remove_task = if is_clone {
+                        Task::perform(
+                            async move {
+                                let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                                std::thread::spawn(move || {
+                                    let result = crate::git_worktree::remove_clone(&wt_path);
+                                    let _ = tx.send(result);
+                                });
+                                rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                            },
+                            move |result| Message::WorktreeRemoved { session_id: sid, result },
+                        )
+                    } else if let Some(root) = repo_root {
+                        Task::perform(
+                            async move {
+                                let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                                std::thread::spawn(move || {
+                                    let result = crate::git_worktree::remove_worktree(&root, &wt_path);
+                                    let _ = tx.send(result);
+                                });
+                                rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                            },
+                            move |result| Message::WorktreeRemoved { session_id: sid, result },
+                        )
+                    } else {
+                        Task::none()
+                    };
                     return Task::batch([close_task, remove_task]);
                 }
                 return close_task;
@@ -4112,12 +4134,18 @@ impl GodlyApp {
                 .get(pending_id)
                 .and_then(|t| t.worktree_path.as_deref())
                 .unwrap_or("unknown");
+            let is_clone = self
+                .terminals
+                .get(pending_id)
+                .map(|t| t.is_clone)
+                .unwrap_or(false);
             let pid1 = pending_id.clone();
             let pid2 = pending_id.clone();
             stack![
                 with_quit,
                 crate::confirm_dialog::view_worktree_close_confirm(
                     worktree_path,
+                    is_clone,
                     Message::WorktreeCloseConfirmed { session_id: pid1 },
                     Message::WorktreeCloseKeep { session_id: pid2 },
                     Message::WorktreeCloseCancelled,
@@ -7524,10 +7552,12 @@ impl GodlyApp {
                     if let Some(launch) = &mut self.quick_claude_launch {
                         let si = launch.current_step;
                         let agent_idx = launch.steps.get(si).and_then(|step| {
-                            if let crate::quick_claude::LaunchStep::CreateWorktree { agent_index, .. } = step {
-                                Some(*agent_index)
-                            } else {
-                                None
+                            match step {
+                                crate::quick_claude::LaunchStep::CreateWorktree { agent_index, .. }
+                                | crate::quick_claude::LaunchStep::CreateClone { agent_index, .. } => {
+                                    Some(*agent_index)
+                                }
+                                _ => None,
                             }
                         });
                         if let Some(_ai) = agent_idx {
@@ -7594,6 +7624,9 @@ impl GodlyApp {
                         if let Some(launch) = &mut self.quick_claude_launch {
                             if let Some(wt_path) = launch.pending_worktree_path.take() {
                                 self.terminals.set_worktree_path(session_id, wt_path);
+                            }
+                            if launch.is_clone {
+                                self.terminals.set_clone_flag(session_id, true);
                             }
                         }
                     }
