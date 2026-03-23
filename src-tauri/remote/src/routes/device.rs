@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::Json;
+use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
+use crate::device_lock::DeviceLock;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -105,6 +108,57 @@ pub async fn device_status(
     })
 }
 
+#[derive(Deserialize)]
+pub struct AuthenticateRequest {
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct AuthenticateResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// POST /api/authenticate — Exchange a password for the API key.
+/// This is a public endpoint (no auth middleware) so browser users can
+/// authenticate by entering a password instead of copy-pasting an API key.
+pub async fn authenticate(
+    Extension(device_lock): Extension<Arc<DeviceLock>>,
+    Extension(api_key): Extension<Option<String>>,
+    Json(body): Json<AuthenticateRequest>,
+) -> Result<Json<AuthenticateResponse>, (StatusCode, Json<AuthenticateResponse>)> {
+    if !device_lock.has_password() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(AuthenticateResponse {
+                ok: false,
+                api_key: None,
+                message: Some("No password configured".into()),
+            }),
+        ));
+    }
+
+    if let Err(msg) = device_lock.verify_password(&body.password) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(AuthenticateResponse {
+                ok: false,
+                api_key: None,
+                message: Some(msg.into()),
+            }),
+        ));
+    }
+
+    Ok(Json(AuthenticateResponse {
+        ok: true,
+        api_key,
+        message: None,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +212,40 @@ mod tests {
         assert!(cookie.contains("Path=/"));
         assert!(cookie.contains("Max-Age=604800"));
         assert!(!cookie.contains("Secure")); // Not required for localhost/ngrok
+    }
+
+    #[test]
+    fn authenticate_request_deserializes() {
+        let json = r#"{"password": "hunter2"}"#;
+        let req: AuthenticateRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.password, "hunter2");
+    }
+
+    #[test]
+    fn authenticate_response_success_serializes() {
+        let resp = AuthenticateResponse {
+            ok: true,
+            api_key: Some("abc123".into()),
+            message: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""ok":true"#));
+        assert!(json.contains(r#""api_key":"abc123""#));
+        // message should be omitted when None
+        assert!(!json.contains("message"));
+    }
+
+    #[test]
+    fn authenticate_response_failure_serializes() {
+        let resp = AuthenticateResponse {
+            ok: false,
+            api_key: None,
+            message: Some("Invalid password".into()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""ok":false"#));
+        assert!(json.contains(r#""message":"Invalid password""#));
+        // api_key should be omitted when None
+        assert!(!json.contains("api_key"));
     }
 }

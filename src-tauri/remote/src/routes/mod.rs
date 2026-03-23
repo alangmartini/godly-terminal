@@ -11,6 +11,7 @@ pub mod sse_ticket;
 pub mod workspaces;
 
 use axum::middleware;
+use axum::response::Redirect;
 use axum::routing::{delete, get, post};
 use axum::Router;
 
@@ -20,13 +21,15 @@ use crate::AppState;
 pub fn build_router(state: AppState) -> Router {
     // Public routes (no auth)
     let public = Router::new()
+        .route("/", get(|| async { Redirect::to("/phone") }))
         .route("/health", get(health::health))
-        .route("/phone", get(phone::phone_ui));
+        .route("/phone", get(phone::phone_ui))
+        .route("/api/device-status", get(device::device_status))
+        .route("/api/authenticate", post(device::authenticate));
 
     // Device registration (requires API key but not device token — this IS how you get the token)
     let device_routes = Router::new()
         .route("/api/register-device", post(device::register_device))
-        .route("/api/device-status", get(device::device_status))
         .layer(middleware::from_fn(api_key_auth));
 
     // SSE events — auth is done inline via one-time ticket (no middleware needed).
