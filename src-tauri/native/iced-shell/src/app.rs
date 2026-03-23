@@ -7988,6 +7988,17 @@ impl GodlyApp {
             ]
         };
 
+        // Focused pane gets a subtle accent-colored glow shadow.
+        let focus_shadow = if is_focused {
+            let ac = PANE_FOCUSED_BORDER();
+            iced::Shadow {
+                color: Color::from_rgba(ac.r, ac.g, ac.b, 0.12),
+                offset: iced::Vector::new(0.0, 0.0),
+                blur_radius: 6.0,
+            }
+        } else {
+            iced::Shadow::default()
+        };
         let pane = container(inner)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -7999,6 +8010,7 @@ impl GodlyApp {
             })
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(PANE_BG())),
+                shadow: focus_shadow,
                 ..container::Style::default()
             });
 
