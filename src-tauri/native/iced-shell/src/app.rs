@@ -2360,7 +2360,7 @@ impl GodlyApp {
                     .map(|ws| ws.folder_path.clone())
                     .filter(|p| !p.is_empty());
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], false, None,
+                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], crate::quick_claude::IsolationMode::None, None,
                 );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
@@ -2632,10 +2632,14 @@ impl GodlyApp {
                     (id, name, None, true)
                 };
 
-                let use_worktree = !dlg.main_branch_mode;
+                let isolation = if dlg.main_branch_mode {
+                    crate::quick_claude::IsolationMode::None
+                } else {
+                    crate::quick_claude::IsolationMode::Worktree
+                };
                 let claude_session_id = uuid::Uuid::new_v4().to_string();
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, use_worktree,
+                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, isolation,
                     Some(&claude_session_id),
                 );
 
