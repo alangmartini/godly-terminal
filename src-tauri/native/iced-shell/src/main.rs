@@ -53,10 +53,13 @@ mod font_enumerator;
 mod git_worktree;
 mod keybinding_persistence;
 mod phone_remote;
+mod crash_handler;
 
 use app::{GodlyApp, Message};
 
 fn main() -> iced::Result {
+    crash_handler::init();
+
     env_logger::init();
     log::info!(
         "Starting Godly Terminal (Native) — v{}",
