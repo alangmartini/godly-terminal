@@ -62,6 +62,84 @@ impl<Message> canvas::Program<Message> for TerminalIcon {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Canvas-drawn window control icons (minimize, maximize, close).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+enum WindowControlKind {
+    Minimize,
+    Maximize,
+    Close,
+}
+
+struct WindowControlIcon {
+    kind: WindowControlKind,
+    color: Color,
+}
+
+impl<Message> canvas::Program<Message> for WindowControlIcon {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let w = bounds.size().width;
+        let h = bounds.size().height;
+        let cx = w * 0.5;
+        let cy = h * 0.5;
+
+        let stroke = canvas::Stroke::default()
+            .with_color(self.color)
+            .with_width(1.0)
+            .with_line_cap(canvas::LineCap::Round)
+            .with_line_join(canvas::LineJoin::Round);
+
+        match self.kind {
+            WindowControlKind::Minimize => {
+                // Horizontal line
+                let s = w.min(h) * 0.35;
+                let line = canvas::Path::line(
+                    Point::new(cx - s, cy),
+                    Point::new(cx + s, cy),
+                );
+                frame.stroke(&line, stroke);
+            }
+            WindowControlKind::Maximize => {
+                // Square outline
+                let s = w.min(h) * 0.28;
+                let rect = canvas::Path::rectangle(
+                    Point::new(cx - s, cy - s),
+                    Size::new(s * 2.0, s * 2.0),
+                );
+                frame.stroke(&rect, stroke);
+            }
+            WindowControlKind::Close => {
+                // X shape
+                let s = w.min(h) * 0.28;
+                let line1 = canvas::Path::line(
+                    Point::new(cx - s, cy - s),
+                    Point::new(cx + s, cy + s),
+                );
+                let line2 = canvas::Path::line(
+                    Point::new(cx + s, cy - s),
+                    Point::new(cx - s, cy + s),
+                );
+                frame.stroke(&line1, stroke);
+                frame.stroke(&line2, stroke);
+            }
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
+
 /// Renders the custom window title bar with drag area and control buttons.
 pub fn view_title_bar<'a, M: Clone + 'a>(
     title: String,
@@ -95,9 +173,9 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
     )
     .on_press(on_drag);
 
-    let minimize_btn = window_control_button("\u{2013}", GHOST_HOVER(), on_minimize); // –
-    let maximize_btn = window_control_button("\u{25A1}", GHOST_HOVER(), on_maximize); // □
-    let close_btn = window_control_button("\u{00D7}", DANGER(), on_close); // ×
+    let minimize_btn = window_control_icon_button(WindowControlKind::Minimize, GHOST_HOVER(), on_minimize);
+    let maximize_btn = window_control_icon_button(WindowControlKind::Maximize, GHOST_HOVER(), on_maximize);
+    let close_btn = window_control_icon_button(WindowControlKind::Close, DANGER(), on_close);
 
     let controls = row![minimize_btn, maximize_btn, close_btn].spacing(0);
 
@@ -118,33 +196,34 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
         .into()
 }
 
-fn window_control_button<'a, M: Clone + 'a>(
-    label: &'static str,
+fn window_control_icon_button<'a, M: Clone + 'a>(
+    kind: WindowControlKind,
     hover_bg: Color,
     on_press: M,
 ) -> Element<'a, M> {
-    button(
-        text(label)
-            .size(14)
-            .color(TEXT_SECONDARY())
-            .center(),
-    )
-    .on_press(on_press)
-    .padding(Padding::from([0, 16]))
-    .height(Length::Fixed(TITLE_BAR_HEIGHT))
-    .style(move |_theme, status| {
-        let bg_color = match status {
-            button::Status::Hovered | button::Status::Pressed => hover_bg,
-            _ => Color::TRANSPARENT,
-        };
-        button::Style {
-            background: Some(iced::Background::Color(bg_color)),
-            text_color: TEXT_SECONDARY(),
-            border: Border::default(),
-            ..button::Style::default()
-        }
-    })
-    .into()
+    let icon_color = TEXT_SECONDARY();
+    let icon = canvas(WindowControlIcon { kind, color: icon_color })
+        .width(Length::Fixed(10.0))
+        .height(Length::Fixed(10.0));
+
+    button(container(icon).center_x(Length::Fill).center_y(Length::Fill))
+        .on_press(on_press)
+        .padding(Padding::from([0, 16]))
+        .height(Length::Fixed(TITLE_BAR_HEIGHT))
+        .width(Length::Fixed(46.0))
+        .style(move |_theme, status| {
+            let bg_color = match status {
+                button::Status::Hovered | button::Status::Pressed => hover_bg,
+                _ => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(iced::Background::Color(bg_color)),
+                text_color: icon_color,
+                border: Border::default(),
+                ..button::Style::default()
+            }
+        })
+        .into()
 }
 
 #[cfg(test)]
