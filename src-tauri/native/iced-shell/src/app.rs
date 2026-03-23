@@ -6481,6 +6481,7 @@ impl GodlyApp {
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
                 let mut assigned_terminal_ids = HashSet::new();
+                let mut new_terminal_tasks: Vec<Task<Message>> = Vec::new();
 
                 if let Some(merged) = merged_session_state {
                     // Restore worktree paths for surviving terminals.
@@ -6589,8 +6590,58 @@ impl GodlyApp {
                                     terminal_id,
                                 );
                             }
+                        } else {
+                            // No orphan available — create a fresh session so
+                            // the workspace survives instead of being silently
+                            // dropped (fixes workspace loss across rebuilds).
+                            let terminal_id = uuid::Uuid::new_v4().to_string();
+                            self.terminals.add_to_workspace(
+                                terminal_id.clone(),
+                                rows,
+                                cols,
+                                workspace.id.clone(),
+                            );
+                            let folder_path = workspace.folder_path.clone();
+                            self.workspaces.add_with_details(
+                                workspace.id.clone(),
+                                workspace.name,
+                                folder_path.clone(),
+                                workspace.worktree_mode,
+                                LayoutNode::Leaf {
+                                    terminal_id: terminal_id.clone(),
+                                },
+                                terminal_id.clone(),
+                            );
+                            if let Some(client) = &self.client {
+                                let client = Arc::clone(client);
+                                let cwd = if folder_path.is_empty() {
+                                    None
+                                } else {
+                                    Some(folder_path)
+                                };
+                                new_terminal_tasks.push(Task::perform(
+                                    async move {
+                                        let (tx, rx) = futures_channel::oneshot::channel();
+                                        std::thread::spawn(move || {
+                                            let result = commands::create_terminal(
+                                                &client,
+                                                &terminal_id,
+                                                godly_protocol::ShellType::Windows,
+                                                cwd.as_deref(),
+                                                rows,
+                                                cols,
+                                            )
+                                            .map(|_| terminal_id);
+                                            let _ = tx.send(result);
+                                        });
+                                        rx.await.unwrap_or_else(|_| {
+                                            Err("Background thread panicked".into())
+                                        })
+                                    },
+                                    Message::TerminalCreated,
+                                ));
+                            }
                         }
-                        // No terminal available — workspace silently dropped.
                     }
 
                     // Remaining orphans go into the active workspace as background
@@ -6706,7 +6757,7 @@ impl GodlyApp {
                     &session_ids,
                     &restored_scrollback_offsets,
                 );
-                let tasks: Vec<Task<Message>> = plan
+                let mut tasks: Vec<Task<Message>> = plan
                     .into_iter()
                     .map(|action| match action {
                         scrollback_restore::RecoveryFetchAction::FetchGrid { session_id } => {
@@ -6718,6 +6769,7 @@ impl GodlyApp {
                         } => self.scroll_fetch(&session_id, offset),
                     })
                     .collect();
+                tasks.extend(new_terminal_tasks);
                 Task::batch(tasks)
             }
         }
@@ -8697,15 +8749,26 @@ fn collect_init_result_sync(
                 } else {
                     Some(workspace.folder_path.as_str())
                 };
-                commands::create_terminal(
+                match commands::create_terminal(
                     client,
                     &session_id,
                     godly_protocol::ShellType::Windows,
                     cwd,
                     rows,
                     cols,
-                )?;
-                new_session_ids.push(session_id);
+                ) {
+                    Ok(()) => new_session_ids.push(session_id),
+                    Err(e) => {
+                        // One workspace failing (e.g. folder deleted) should not
+                        // abort restoration of all other workspaces.
+                        log::warn!(
+                            "Failed to create session for workspace '{}' (cwd {:?}): {}",
+                            workspace.name,
+                            workspace.folder_path,
+                            e
+                        );
+                    }
+                }
             }
 
             // merge_with_live_sessions will produce empty layouts for each workspace
