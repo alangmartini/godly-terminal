@@ -48,6 +48,7 @@ mod terminal_context_menu;
 mod whisper_ui;
 mod quick_claude;
 mod quick_claude_dialog;
+mod quick_claude_sessions;
 mod session_persistence;
 mod font_enumerator;
 mod git_worktree;
