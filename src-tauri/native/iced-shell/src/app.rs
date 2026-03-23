@@ -73,6 +73,14 @@ const UI_FONT: Font = Font {
     style: iced::font::Style::Normal,
 };
 
+/// Bold variant of the proportional UI font for headings and emphasis.
+const UI_FONT_BOLD: Font = Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Bold,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
 use godly_app_adapter::clipboard;
 use godly_app_adapter::commands;
 use godly_app_adapter::daemon_client::NativeDaemonClient;
@@ -106,7 +114,7 @@ use crate::title_bar;
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
     ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, GHOST_HOVER,
-    PANE_BG, PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_MD, RADIUS_SM, SHADOW_ACCENT, SHADOW_COLOR,
+    PANE_BG, PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_LG, RADIUS_MD, RADIUS_SM, SHADOW_ACCENT, SHADOW_COLOR,
     TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::url_detector;
@@ -4808,15 +4816,15 @@ impl GodlyApp {
     }
 
     fn view_toast_overlay(&self) -> Element<'_, Message> {
-        let mut toasts_column = column![].spacing(8).width(Length::Fixed(320.0));
+        let mut toasts_column = column![].spacing(8).width(Length::Fixed(380.0));
         for toast in &self.toasts {
             let toast_id = toast.id;
             let has_source = toast.source_workspace_id.is_some();
             let close_btn = button(
-                text("\u{2715}").size(10).color(TEXT_SECONDARY()),
+                text("\u{2715}").size(11).font(UI_FONT).color(TEXT_SECONDARY()),
             )
             .on_press(Message::DismissToast(toast_id))
-            .padding(Padding::from([2, 5]))
+            .padding(Padding::from([3, 6]))
             .style(|_theme, status| button::Style {
                 background: if matches!(status, button::Status::Hovered) {
                     Some(iced::Background::Color(GHOST_HOVER()))
@@ -4831,48 +4839,33 @@ impl GodlyApp {
                 ..button::Style::default()
             });
             let header = row![
-                text(&toast.title).size(13).color(TEXT_ACTIVE()),
+                text(&toast.title).size(13).font(UI_FONT_BOLD).color(TEXT_ACTIVE()),
                 Space::new().width(Length::Fill),
                 close_btn,
             ]
             .align_y(iced::Alignment::Center);
             let card_content = column![
                 header,
-                text(&toast.message).size(11).color(TEXT_SECONDARY()),
+                text(&toast.message).size(12).font(UI_FONT).color(TEXT_SECONDARY()),
             ]
-            .spacing(2);
-            // Outer container with ACCENT background creates the left accent border;
-            // inner container with BG_SECONDARY sits on top with left padding offset.
-            let card = container(
-                container(card_content)
-                    .padding(Padding::from([10, 14]))
-                    .width(Length::Fill)
-                    .style(|_theme| container::Style {
-                        background: Some(iced::Background::Color(BG_SECONDARY())),
-                        ..container::Style::default()
-                    }),
-            )
-            .width(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                right: 0.0,
-                bottom: 0.0,
-                left: 3.0,
-            })
-            .style(|_theme| container::Style {
-                background: Some(iced::Background::Color(ACCENT())),
-                border: iced::Border {
-                    color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.6),
-                    width: 0.5,
-                    radius: RADIUS_MD.into(),
-                },
-                shadow: Shadow {
-                    color: SHADOW_ACCENT(),
-                    offset: Vector::new(0.0, 3.0),
-                    blur_radius: 10.0,
-                },
-                ..container::Style::default()
-            });
+            .spacing(4);
+            let card = container(card_content)
+                .padding(Padding::from([12, 16]))
+                .width(Length::Fill)
+                .style(|_theme| container::Style {
+                    background: Some(iced::Background::Color(BG_SECONDARY())),
+                    border: iced::Border {
+                        color: Color::from_rgba(BORDER().r, BORDER().g, BORDER().b, 0.3),
+                        width: 1.0,
+                        radius: RADIUS_LG.into(),
+                    },
+                    shadow: Shadow {
+                        color: SHADOW_COLOR,
+                        offset: Vector::new(0.0, 4.0),
+                        blur_radius: 16.0,
+                    },
+                    ..container::Style::default()
+                });
             // Make the card clickable to focus the source workspace/terminal.
             let card: Element<'_, Message> = if has_source {
                 mouse_area(card)
@@ -4884,11 +4877,12 @@ impl GodlyApp {
             toasts_column = toasts_column.push(card);
         }
 
-        container(row![Space::new().width(Length::Fill), toasts_column])
+        container(toasts_column)
             .width(Length::Fill)
             .height(Length::Fill)
-            .align_y(iced::alignment::Vertical::Bottom)
-            .padding(Padding::from([14, 14]))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Top)
+            .padding(Padding::from([20, 0]))
             .into()
     }
 
