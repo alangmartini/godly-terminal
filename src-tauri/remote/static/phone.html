@@ -265,7 +265,7 @@
   <div class="login-container">
     <div class="login-icon">&#128274;</div>
     <div class="login-title">Godly Remote</div>
-    <div class="login-subtitle">Enter the password shown in your terminal</div>
+    <div class="login-subtitle">Enter your password to connect</div>
     <form class="login-form" id="godly-login" action="/api/register-device" method="POST" autocomplete="on"
           onsubmit="event.preventDefault(); submitLogin();">
       <input type="text" name="username" value="Godly Terminal" autocomplete="username" style="display:none">
@@ -784,8 +784,9 @@ document.addEventListener('click', () => { userHasInteracted = true; }, { once: 
 // --- Device Registration ---
 async function checkDeviceStatus() {
   try {
-    const data = await api('/api/device-status');
-    return data;
+    const resp = await fetch(baseUrl() + '/api/device-status', { credentials: 'include' });
+    if (!resp.ok) return { locked: false, password_required: false };
+    return await resp.json();
   } catch { return { locked: false, password_required: false }; }
 }
 
@@ -797,6 +798,20 @@ async function tryExistingToken() {
   } catch {
     return false;
   }
+}
+
+async function authenticate(password) {
+  const resp = await fetch(baseUrl() + '/api/authenticate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ password })
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({ message: 'Authentication failed' }));
+    throw new Error(data.message || `${resp.status}`);
+  }
+  return await resp.json();
 }
 
 async function registerDevice(password) {
@@ -813,20 +828,29 @@ function showLoginError(msg) {
 
 async function submitLogin() {
   const pw = document.getElementById('loginPassword').value;
-  if (!pw) { showLoginError('Enter the password from your terminal'); return; }
+  if (!pw) { showLoginError('Enter your password'); return; }
 
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = 'Connecting...';
   showLoginError('');
 
   try {
+    // Step 1: Exchange password for API key
+    const authResult = await authenticate(pw);
+    if (authResult.api_key) {
+      apiKey = authResult.api_key;
+      localStorage.setItem('godly_api_key', apiKey);
+    }
+
+    // Step 2: Register device (now that we have the API key)
     await registerDevice(pw);
     startApp();
   } catch (e) {
     const msg = e.message.includes('already registered')
       ? 'Another device is already registered. Restart the server.'
       : e.message.includes('Too many') ? 'Too many attempts. Wait 5 minutes.'
-      : e.message.includes('Invalid password') ? 'Wrong password'
+      : e.message.includes('No password') ? 'No password configured on server'
+      : e.message.includes('Invalid password') || e.message.includes('password') ? 'Wrong password'
       : 'Connection failed';
     showLoginError(msg);
   } finally {
@@ -878,14 +902,15 @@ function startApp() {
     history.replaceState(null, '', clean);
   }
 
-  // Check if we already have a valid device token
-  if (await tryExistingToken()) {
+  // Try existing device token (works if both API key and device token are valid)
+  if (apiKey && await tryExistingToken()) {
     startApp();
     return;
   }
 
-  // Check if password is required
+  // Check device status (now a public endpoint, no API key needed)
   const status = await checkDeviceStatus();
+
   if (status.locked) {
     // Another device registered
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -896,15 +921,24 @@ function startApp() {
     return;
   }
 
-  if (status.password_required) {
-    // Show login screen
+  if (status.password_required || !apiKey) {
+    // Show login screen — either password is required, or we have no API key
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-login').classList.add('active');
-    document.getElementById('loginPassword').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submitLogin();
-    });
+
+    if (status.password_required) {
+      // Password login flow
+      document.getElementById('loginPassword').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitLogin();
+      });
+    } else if (!apiKey) {
+      // No password configured AND no API key — tell user what to do
+      document.getElementById('loginPassword').style.display = 'none';
+      document.getElementById('loginBtn').style.display = 'none';
+      showLoginError('Set a password in the Remote settings, or use the link with API key from the app.');
+    }
   } else {
-    // No password — register directly
+    // Have API key, no password required — register directly
     try {
       await registerDevice();
       startApp();
