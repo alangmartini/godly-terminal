@@ -360,6 +360,10 @@ pub struct GodlyApp {
     last_global_sound_ms: Option<u64>,
     /// Last native attention request timestamp for debounce.
     last_attention_request_ms: Option<u64>,
+    /// Most recent bell timestamp per terminal (regardless of whether sound played).
+    last_bell_ms: HashMap<String, u64>,
+    /// Count of bells suppressed during current burst per terminal.
+    bell_burst_suppressed: HashMap<String, u32>,
     /// Workspace name/id mute patterns for notification sounds.
     pub(crate) workspace_mute_patterns: Vec<String>,
     /// Current input value for adding a workspace mute pattern.
@@ -533,6 +537,8 @@ impl Default for GodlyApp {
             last_terminal_sound_ms: HashMap::new(),
             last_global_sound_ms: None,
             last_attention_request_ms: None,
+            last_bell_ms: HashMap::new(),
+            bell_burst_suppressed: HashMap::new(),
             workspace_mute_patterns: Vec::new(),
             workspace_mute_pattern_input: String::new(),
             quick_claude_name_input: String::new(),
@@ -1331,6 +1337,60 @@ impl GodlyApp {
         window::request_user_attention(window_id, Some(attention))
     }
 
+    /// Scan for terminals whose bell burst has gone quiet and fire a
+    /// single "settled" notification for each.  Returns a combined Task
+    /// so that window-attention requests (if any) are dispatched.
+    fn check_burst_quiet(&mut self, now_ms: u64) -> Task<Message> {
+        // Extract last_bell_ms ref before iterating bell_burst_suppressed
+        // to avoid borrowing self twice in the closure.
+        let last_bell_ms = &self.last_bell_ms;
+        let quiet_terminals: Vec<(String, u32)> = self
+            .bell_burst_suppressed
+            .iter()
+            .filter(|(tid, &count)| {
+                notifications::is_burst_quiet(
+                    now_ms,
+                    last_bell_ms.get(*tid).copied(),
+                    count,
+                )
+            })
+            .map(|(tid, &count)| (tid.clone(), count))
+            .collect();
+
+        let mut tasks = Vec::new();
+        for (terminal_id, count) in quiet_terminals {
+            self.bell_burst_suppressed.remove(&terminal_id);
+            self.last_bell_ms.remove(&terminal_id);
+
+            let is_focused = self.active_focused() == Some(terminal_id.as_str());
+            if !is_focused {
+                let title = "Activity Settled".to_string();
+                let message = if let Some(term) = self.terminals.get(&terminal_id) {
+                    let workspace = term
+                        .workspace_id
+                        .as_deref()
+                        .and_then(|wid| self.workspaces.get(wid))
+                        .map(|ws| ws.name.as_str())
+                        .unwrap_or("Unknown workspace");
+                    format!(
+                        "{} in {} ({} bells suppressed)",
+                        term.tab_label(),
+                        workspace,
+                        count
+                    )
+                } else {
+                    format!("Terminal {} ({} bells suppressed)", terminal_id, count)
+                };
+                self.enqueue_toast_for_terminal(title, message, &terminal_id);
+            }
+
+            self.play_notification_sound_if_allowed(&terminal_id);
+            tasks.push(self.request_window_attention_if_allowed());
+        }
+
+        Task::batch(tasks)
+    }
+
     fn persist_scrollback_offsets(&self) {
         let offsets: HashMap<String, usize> = self
             .terminals
@@ -1370,6 +1430,8 @@ impl GodlyApp {
         self.last_terminal_sound_ms.clear();
         self.last_global_sound_ms = None;
         self.last_attention_request_ms = None;
+        self.last_bell_ms.clear();
+        self.bell_burst_suppressed.clear();
         self.toasts.clear();
         self.dragging_tab_id = None;
         self.tab_drag_start_pos = None;
@@ -1541,13 +1603,29 @@ impl GodlyApp {
             }
             Message::DaemonEvent(DaemonEventMsg::Bell { session_id }) => {
                 self.notifications.record_bell(&session_id);
-                let is_focused = self.active_focused() == Some(session_id.as_str());
-                if !is_focused {
-                    self.enqueue_bell_toast(&session_id);
+                let now_ms = Self::now_ms();
+                self.last_bell_ms.insert(session_id.clone(), now_ms);
+
+                let last_sound_ms = self.last_terminal_sound_ms.get(&session_id).copied();
+                let burst_active = notifications::is_burst_active(now_ms, last_sound_ms);
+
+                if burst_active {
+                    *self.bell_burst_suppressed.entry(session_id.clone()).or_insert(0) += 1;
+                    log::debug!(
+                        "Bell from session {} (burst-suppressed, {} total)",
+                        session_id,
+                        self.bell_burst_suppressed.get(&session_id).unwrap_or(&0)
+                    );
+                } else {
+                    self.bell_burst_suppressed.remove(&session_id);
+                    let is_focused = self.active_focused() == Some(session_id.as_str());
+                    if !is_focused {
+                        self.enqueue_bell_toast(&session_id);
+                    }
+                    self.play_notification_sound_if_allowed(&session_id);
+                    log::debug!("Bell from session {}", session_id);
+                    return self.request_window_attention_if_allowed();
                 }
-                self.play_notification_sound_if_allowed(&session_id);
-                log::debug!("Bell from session {}", session_id);
-                return self.request_window_attention_if_allowed();
             }
             Message::DaemonEvent(DaemonEventMsg::Heartbeat) => {
                 // Heartbeat from background thread — keeps event loop alive.
@@ -3233,6 +3311,7 @@ impl GodlyApp {
             Message::ToastTick => {
                 let now_ms = Self::now_ms();
                 let _ = prune_expired_toasts(self.toasts.as_mut(), now_ms);
+                return self.check_burst_quiet(now_ms);
             }
             Message::DismissToast(id) => {
                 self.toasts.retain(|t| t.id != id);
@@ -5700,7 +5779,7 @@ impl GodlyApp {
         // through the daemon event channel, NOT via an Iced subscription. Iced
         // stops polling subscriptions when the window is minimized/invisible.
 
-        if !self.toasts.is_empty() {
+        if !self.toasts.is_empty() || !self.bell_burst_suppressed.is_empty() {
             subscriptions.push(
                 iced::time::every(Duration::from_millis(TOAST_TICK_INTERVAL_MS))
                     .map(|_| Message::ToastTick),
@@ -6223,6 +6302,8 @@ impl GodlyApp {
                     self.terminals.remove(&terminal_id);
                     self.notifications.clear(&terminal_id);
                     self.last_terminal_sound_ms.remove(&terminal_id);
+                    self.last_bell_ms.remove(&terminal_id);
+                    self.bell_burst_suppressed.remove(&terminal_id);
                     if let Some(client) = &self.client {
                         let _ = commands::close_terminal(client, &terminal_id);
                     }
@@ -7249,6 +7330,8 @@ impl GodlyApp {
         }
         self.notifications.clear(session_id);
         self.last_terminal_sound_ms.remove(session_id);
+        self.last_bell_ms.remove(session_id);
+        self.bell_burst_suppressed.remove(session_id);
         self.persist_scrollback_offsets();
 
         if let Some(client) = &self.client {
