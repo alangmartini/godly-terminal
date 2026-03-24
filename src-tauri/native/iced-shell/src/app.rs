@@ -895,6 +895,8 @@ pub enum Message {
     PhoneRemoteCopyApiKey,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
+    /// Periodic autosave of session state so workspace layout survives crashes.
+    AutosaveTick,
     /// Dismiss a specific toast notification by ID.
     DismissToast(u64),
     /// User clicked a toast — switch to its source workspace/terminal.
@@ -1555,6 +1557,7 @@ impl GodlyApp {
             Message::KeyboardEvent(_) => {
                 diag::log("UPDATE: KeyboardEvent");
             }
+            Message::AutosaveTick => {}
             _ => {}
         }
 
@@ -3340,6 +3343,13 @@ impl GodlyApp {
                 let now_ms = Self::now_ms();
                 let _ = prune_expired_toasts(self.toasts.as_mut(), now_ms);
                 return self.check_burst_quiet(now_ms);
+            }
+            Message::AutosaveTick => {
+                if let Err(e) = session_persistence::save_to_default_path(
+                    &self.build_persisted_session_state(),
+                ) {
+                    log::warn!("Autosave failed: {}", e);
+                }
             }
             Message::DismissToast(id) => {
                 self.toasts.retain(|t| t.id != id);
@@ -5853,6 +5863,12 @@ impl GodlyApp {
                     .map(|_| Message::TabEntryAnimationTick),
             );
         }
+
+        // Autosave session state periodically so workspace layout survives crashes.
+        subscriptions.push(
+            iced::time::every(Duration::from_secs(session_persistence::AUTOSAVE_INTERVAL_SECS))
+                .map(|_| Message::AutosaveTick),
+        );
 
         // Whisper recording timer (I4/I5)
         if self.whisper_state.as_ref().is_some_and(|s| s.recording) {
