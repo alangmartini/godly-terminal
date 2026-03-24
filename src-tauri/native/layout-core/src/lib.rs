@@ -64,11 +64,35 @@ impl FocusDirection {
     }
 }
 
+/// Content that can be displayed in a non-terminal pane.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaneContent {
+    Terminal { terminal_id: String },
+    FileViewer {
+        pane_id: String,
+        file_path: String,
+        file_type: FileViewerType,
+    },
+}
+
+/// Type of file being viewed in a file pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileViewerType {
+    /// Syntax-highlighted source code
+    Code,
+    /// Rendered markdown
+    Markdown,
+    /// Image display (png, jpg, gif, svg, webp)
+    Image,
+}
+
 /// A binary tree of terminal panes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayoutNode {
     /// A single terminal pane.
     Leaf { terminal_id: String },
+    /// A non-terminal content pane (file viewer, markdown preview, image).
+    ContentPane { content: PaneContent },
     /// A split containing two sub-layouts.
     Split {
         direction: SplitDirection,
@@ -84,6 +108,7 @@ impl LayoutNode {
     pub fn find_leaf(&self, id: &str) -> bool {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id == id,
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => first.find_leaf(id) || second.find_leaf(id),
         }
     }
@@ -92,6 +117,7 @@ impl LayoutNode {
     pub fn leaf_count(&self) -> usize {
         match self {
             LayoutNode::Leaf { .. } => 1,
+            LayoutNode::ContentPane { .. } => 0,
             LayoutNode::Split { first, second, .. } => first.leaf_count() + second.leaf_count(),
         }
     }
@@ -106,6 +132,7 @@ impl LayoutNode {
     fn collect_leaf_ids<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             LayoutNode::Leaf { terminal_id } => out.push(terminal_id),
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.collect_leaf_ids(out);
                 second.collect_leaf_ids(out);
@@ -173,7 +200,7 @@ impl LayoutNode {
                 };
                 true
             }
-            LayoutNode::Leaf { .. } => false,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => {
                 first.split_leaf_with_placement(target_id, new_id.clone(), placement)
                     || second.split_leaf_with_placement(target_id, new_id, placement)
@@ -188,7 +215,7 @@ impl LayoutNode {
     /// Cannot unsplit the root leaf (if the entire tree is a single leaf, returns `None`).
     pub fn unsplit_leaf(&mut self, target_id: &str) -> Option<String> {
         match self {
-            LayoutNode::Leaf { .. } => None,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split { first, second, .. } => {
                 if let LayoutNode::Leaf { terminal_id } = first.as_ref() {
                     if terminal_id == target_id {
@@ -235,18 +262,24 @@ impl LayoutNode {
     }
 
     /// Returns the leftmost/topmost leaf ID (first in depth-first order).
-    pub fn first_leaf_id(&self) -> &str {
+    pub fn first_leaf_id(&self) -> Option<&str> {
         match self {
-            LayoutNode::Leaf { terminal_id } => terminal_id,
-            LayoutNode::Split { first, .. } => first.first_leaf_id(),
+            LayoutNode::Leaf { terminal_id } => Some(terminal_id),
+            LayoutNode::ContentPane { .. } => None,
+            LayoutNode::Split { first, second, .. } => {
+                first.first_leaf_id().or_else(|| second.first_leaf_id())
+            }
         }
     }
 
     /// Returns the rightmost/bottommost leaf ID (last in depth-first order).
-    pub fn last_leaf_id(&self) -> &str {
+    pub fn last_leaf_id(&self) -> Option<&str> {
         match self {
-            LayoutNode::Leaf { terminal_id } => terminal_id,
-            LayoutNode::Split { second, .. } => second.last_leaf_id(),
+            LayoutNode::Leaf { terminal_id } => Some(terminal_id),
+            LayoutNode::ContentPane { .. } => None,
+            LayoutNode::Split { first, second, .. } => {
+                second.last_leaf_id().or_else(|| first.last_leaf_id())
+            }
         }
     }
 
@@ -254,7 +287,7 @@ impl LayoutNode {
     /// or `None` if there is no neighbor in that direction.
     pub fn neighbor_in_direction(&self, current_id: &str, direction: FocusDirection) -> Option<&str> {
         match self {
-            LayoutNode::Leaf { .. } => None,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split {
                 direction: split_dir,
                 first,
@@ -263,10 +296,10 @@ impl LayoutNode {
             } => {
                 if *split_dir == direction.split_direction() {
                     if direction.moves_to_second() && first.find_leaf(current_id) {
-                        return Some(second.first_leaf_id());
+                        return second.first_leaf_id();
                     }
                     if !direction.moves_to_second() && second.find_leaf(current_id) {
-                        return Some(first.last_leaf_id());
+                        return first.last_leaf_id();
                     }
                 }
                 first
@@ -275,11 +308,125 @@ impl LayoutNode {
             }
         }
     }
+
+    // ---- Content pane methods ----
+
+    /// Returns `true` if a content pane with the given pane_id exists.
+    pub fn find_content_pane(&self, pane_id: &str) -> bool {
+        match self {
+            LayoutNode::Leaf { .. } => false,
+            LayoutNode::ContentPane {
+                content: PaneContent::FileViewer { pane_id: id, .. },
+            } => id == pane_id,
+            LayoutNode::ContentPane { .. } => false,
+            LayoutNode::Split { first, second, .. } => {
+                first.find_content_pane(pane_id) || second.find_content_pane(pane_id)
+            }
+        }
+    }
+
+    /// Collects all content pane IDs in depth-first order.
+    pub fn all_content_pane_ids(&self) -> Vec<&str> {
+        let mut ids = Vec::new();
+        self.collect_content_pane_ids(&mut ids);
+        ids
+    }
+
+    fn collect_content_pane_ids<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            LayoutNode::Leaf { .. } => {}
+            LayoutNode::ContentPane {
+                content: PaneContent::FileViewer { pane_id, .. },
+            } => out.push(pane_id),
+            LayoutNode::ContentPane { .. } => {}
+            LayoutNode::Split { first, second, .. } => {
+                first.collect_content_pane_ids(out);
+                second.collect_content_pane_ids(out);
+            }
+        }
+    }
+
+    /// Removes the content pane with `pane_id` from its parent split and
+    /// promotes the sibling. Returns Some(pane_id) if found, None otherwise.
+    pub fn unsplit_content_pane(&mut self, pane_id: &str) -> Option<String> {
+        match self {
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => None,
+            LayoutNode::Split { first, second, .. } => {
+                if let LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer { pane_id: id, .. },
+                } = first.as_ref()
+                {
+                    if id == pane_id {
+                        let removed = id.clone();
+                        let sibling = std::mem::replace(
+                            second.as_mut(),
+                            LayoutNode::Leaf {
+                                terminal_id: String::new(),
+                            },
+                        );
+                        *self = sibling;
+                        return Some(removed);
+                    }
+                }
+                if let LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer { pane_id: id, .. },
+                } = second.as_ref()
+                {
+                    if id == pane_id {
+                        let removed = id.clone();
+                        let sibling = std::mem::replace(
+                            first.as_mut(),
+                            LayoutNode::Leaf {
+                                terminal_id: String::new(),
+                            },
+                        );
+                        *self = sibling;
+                        return Some(removed);
+                    }
+                }
+                first
+                    .unsplit_content_pane(pane_id)
+                    .or_else(|| second.unsplit_content_pane(pane_id))
+            }
+        }
+    }
+
+    /// Splits the leaf `target_id` and inserts `new_node` as the second child.
+    /// This allows inserting a ContentPane beside a terminal.
+    pub fn split_leaf_with_node(
+        &mut self,
+        target_id: &str,
+        new_node: LayoutNode,
+        direction: SplitDirection,
+    ) -> bool {
+        match self {
+            LayoutNode::Leaf { terminal_id } if terminal_id == target_id => {
+                let old = std::mem::replace(
+                    self,
+                    LayoutNode::Leaf {
+                        terminal_id: String::new(),
+                    },
+                );
+                *self = LayoutNode::Split {
+                    direction,
+                    ratio: 0.5,
+                    first: Box::new(old),
+                    second: Box::new(new_node),
+                };
+                true
+            }
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => false,
+            LayoutNode::Split { first, second, .. } => {
+                first.split_leaf_with_node(target_id, new_node.clone(), direction)
+                    || second.split_leaf_with_node(target_id, new_node, direction)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LayoutNode, SplitDirection, SplitPlacement};
+    use super::*;
 
     fn assert_split_shape(
         node: &LayoutNode,
@@ -299,6 +446,17 @@ mod tests {
                 assert_eq!(second.all_leaf_ids(), vec![second_id]);
             }
             LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            LayoutNode::ContentPane { .. } => panic!("expected split layout"),
+        }
+    }
+
+    fn make_content_pane(pane_id: &str, path: &str) -> LayoutNode {
+        LayoutNode::ContentPane {
+            content: PaneContent::FileViewer {
+                pane_id: pane_id.into(),
+                file_path: path.into(),
+                file_type: FileViewerType::Code,
+            },
         }
     }
 
@@ -414,5 +572,180 @@ mod tests {
             terminal_id: "t1".into(),
         };
         assert_eq!(node.unsplit_leaf("t1"), None);
+    }
+
+    // --- Content pane tests ---
+
+    #[test]
+    fn test_content_pane_not_found_by_find_leaf() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(make_content_pane("cp1", "main.rs")),
+        };
+        assert!(node.find_leaf("t1"));
+        assert!(!node.find_leaf("cp1"));
+    }
+
+    #[test]
+    fn test_content_pane_not_counted_in_leaf_count() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(make_content_pane("cp1", "main.rs")),
+        };
+        assert_eq!(node.leaf_count(), 1);
+    }
+
+    #[test]
+    fn test_find_content_pane() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(make_content_pane("cp1", "main.rs")),
+        };
+        assert!(node.find_content_pane("cp1"));
+        assert!(!node.find_content_pane("cp2"));
+        assert!(!node.find_content_pane("t1"));
+    }
+
+    #[test]
+    fn test_all_content_pane_ids() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t1".into(),
+                }),
+                second: Box::new(make_content_pane("cp1", "main.rs")),
+            }),
+            second: Box::new(make_content_pane("cp2", "lib.rs")),
+        };
+        assert_eq!(node.all_content_pane_ids(), vec!["cp1", "cp2"]);
+        assert!(!node.all_content_pane_ids().contains(&"t1"));
+    }
+
+    #[test]
+    fn test_split_leaf_with_node() {
+        let mut node = LayoutNode::Leaf {
+            terminal_id: "t1".into(),
+        };
+        let content = make_content_pane("cp1", "main.rs");
+
+        assert!(node.split_leaf_with_node("t1", content, SplitDirection::Horizontal));
+
+        match &node {
+            LayoutNode::Split {
+                direction,
+                first,
+                second,
+                ..
+            } => {
+                assert_eq!(*direction, SplitDirection::Horizontal);
+                assert_eq!(first.all_leaf_ids(), vec!["t1"]);
+                assert!(second.all_leaf_ids().is_empty());
+                assert_eq!(second.all_content_pane_ids(), vec!["cp1"]);
+            }
+            _ => panic!("expected split layout"),
+        }
+    }
+
+    #[test]
+    fn test_unsplit_content_pane() {
+        let mut node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(make_content_pane("cp1", "main.rs")),
+        };
+
+        assert_eq!(node.unsplit_content_pane("cp1"), Some("cp1".into()));
+        assert_eq!(node.all_leaf_ids(), vec!["t1"]);
+        assert_eq!(node.leaf_count(), 1);
+    }
+
+    #[test]
+    fn test_unsplit_content_pane_nested() {
+        let mut node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t2".into(),
+                }),
+                second: Box::new(make_content_pane("cp1", "main.rs")),
+            }),
+        };
+
+        assert_eq!(node.unsplit_content_pane("cp1"), Some("cp1".into()));
+        // After unsplit, the inner split promoted t2 as the second child
+        assert_eq!(node.all_leaf_ids(), vec!["t1", "t2"]);
+        assert_eq!(node.leaf_count(), 2);
+    }
+
+    #[test]
+    fn test_content_pane_skipped_in_next_leaf_id() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(make_content_pane("cp1", "main.rs")),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t2".into(),
+                }),
+            }),
+        };
+
+        assert_eq!(node.next_leaf_id("t1"), Some("t2"));
+        assert_eq!(node.next_leaf_id("t2"), Some("t1"));
+        assert_eq!(node.next_leaf_id("cp1"), None);
+    }
+
+    #[test]
+    fn test_neighbor_skips_content_pane() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Vertical,
+                ratio: 0.5,
+                first: Box::new(make_content_pane("cp1", "main.rs")),
+                second: Box::new(LayoutNode::Leaf {
+                    terminal_id: "t2".into(),
+                }),
+            }),
+        };
+
+        assert_eq!(
+            node.neighbor_in_direction("t1", FocusDirection::Right),
+            Some("t2")
+        );
     }
 }
