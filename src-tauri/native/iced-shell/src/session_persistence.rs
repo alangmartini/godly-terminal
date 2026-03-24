@@ -196,8 +196,44 @@ pub fn load_from_default_path() -> Option<PersistedSessionState> {
     load_from_path(&default_persistence_path())
 }
 
+fn backup_path(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
 pub fn load_from_path(path: &Path) -> Option<PersistedSessionState> {
+    // Try the primary file first.
+    if let Some(state) = try_load_from_path(path) {
+        return Some(state);
+    }
+
+    // Primary file is missing, empty, or corrupted — try the backup.
+    // This recovers from crashes that corrupt the primary file mid-write.
+    let backup = backup_path(path);
+    if let Some(state) = try_load_from_path(&backup) {
+        log::warn!(
+            "Primary session file {} is corrupt/missing — recovered from backup {}",
+            path.display(),
+            backup.display()
+        );
+        // Restore the backup as the primary so future loads succeed directly.
+        if let Err(e) = std::fs::copy(&backup, path) {
+            log::warn!("Failed to restore backup to primary: {}", e);
+        }
+        return Some(state);
+    }
+
+    None
+}
+
+fn try_load_from_path(path: &Path) -> Option<PersistedSessionState> {
     let json = match std::fs::read_to_string(path) {
+        Ok(json) if json.is_empty() => {
+            log::warn!(
+                "Session file {} is empty (likely corrupted by crash during write)",
+                path.display()
+            );
+            return None;
+        }
         Ok(json) => json,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
@@ -253,8 +289,39 @@ pub fn save_to_path(path: &Path, state: &PersistedSessionState) -> Result<(), St
     let json = serde_json::to_string_pretty(&state)
         .map_err(|error| format!("Failed to serialize native session state: {}", error))?;
 
-    std::fs::write(path, json)
-        .map_err(|error| format!("Failed to write {}: {}", path.display(), error))?;
+    // Atomic write: write to a temp file, then rename over the target.
+    // This prevents file corruption if the process crashes mid-write.
+    // Without this, std::fs::write truncates the file to 0 bytes before
+    // writing, so a crash between truncation and write completion leaves
+    // an empty/corrupt file and all workspace state is lost.
+    let tmp_path = path.with_extension("json.tmp");
+
+    std::fs::write(&tmp_path, &json)
+        .map_err(|error| format!("Failed to write {}: {}", tmp_path.display(), error))?;
+
+    // Back up the current file before replacing it. If the rename below
+    // fails or the process crashes mid-rename, the backup preserves the
+    // previous good state.
+    if path.exists() {
+        let bak_path = backup_path(path);
+        if let Err(e) = std::fs::copy(path, &bak_path) {
+            log::warn!("Failed to create session backup: {}", e);
+            // Non-fatal — proceed with the rename.
+        }
+    }
+
+    // Rename the temp file over the target. On NTFS this is close to
+    // atomic — the target is either the old file or the new file, never
+    // a truncated/empty file.
+    std::fs::rename(&tmp_path, path).map_err(|error| {
+        format!(
+            "Failed to rename {} -> {}: {}",
+            tmp_path.display(),
+            path.display(),
+            error
+        )
+    })?;
+
     Ok(())
 }
 
@@ -1371,6 +1438,112 @@ mod tests {
         );
     }
 
+    #[test]
+    fn atomic_write_creates_backup_and_temp_file_flow() {
+        // Verify that save_to_path uses the atomic write pattern:
+        // write to .tmp → backup .json to .bak → rename .tmp to .json
+        let path = test_persistence_path("atomic-write");
+        let _cleanup = scopeguard(path.clone());
+
+        let state_v1 = make_session(vec![
+            make_workspace("w-1", "First", "C:\\first"),
+        ]);
+        save_to_path(&path, &state_v1).expect("first save");
+        assert!(path.exists(), "primary file must exist after first save");
+
+        // Second save should create a backup of the first version.
+        let state_v2 = make_session(vec![
+            make_workspace("w-1", "First", "C:\\first"),
+            make_workspace("w-2", "Second", "C:\\second"),
+        ]);
+        save_to_path(&path, &state_v2).expect("second save");
+
+        let bak_path = path.with_extension("json.bak");
+        assert!(bak_path.exists(), "backup file must exist after second save");
+
+        // Primary should have v2 (2 workspaces).
+        let loaded = load_from_path(&path).expect("load primary");
+        assert_eq!(loaded.workspaces.len(), 2, "primary should have 2 workspaces");
+
+        // Backup should have v1 (1 workspace).
+        let backup = try_load_from_path(&bak_path).expect("load backup");
+        assert_eq!(backup.workspaces.len(), 1, "backup should have 1 workspace");
+
+        // Temp file should NOT exist (it was renamed to primary).
+        let tmp_path = path.with_extension("json.tmp");
+        assert!(!tmp_path.exists(), "temp file should be cleaned up after rename");
+
+        // Cleanup
+        let _ = std::fs::remove_file(&bak_path);
+    }
+
+    #[test]
+    fn corrupted_primary_recovers_from_backup() {
+        // Bug #619: if the process crashes during std::fs::write, the session
+        // file can be empty/corrupted. The backup provides recovery.
+        let path = test_persistence_path("backup-recovery");
+        let _cleanup = scopeguard(path.clone());
+
+        // Save a good state (creates primary and, on second save, backup).
+        let state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\dev\\mp"),
+        ]);
+        save_to_path(&path, &state).expect("first save");
+        // Save again to create the backup.
+        save_to_path(&path, &state).expect("second save (creates backup)");
+
+        let bak_path = path.with_extension("json.bak");
+        assert!(bak_path.exists(), "backup must exist");
+
+        // Simulate crash corruption: primary file becomes empty.
+        std::fs::write(&path, "").expect("simulate corruption");
+
+        // Load should recover from backup.
+        let recovered = load_from_path(&path).expect(
+            "load should recover from backup when primary is corrupted"
+        );
+        assert_eq!(
+            recovered.workspaces.len(),
+            3,
+            "all 3 workspaces should be recovered from backup"
+        );
+
+        // Primary should be restored from backup.
+        let primary = try_load_from_path(&path).expect("primary should be restored");
+        assert_eq!(primary.workspaces.len(), 3);
+
+        // Cleanup
+        let _ = std::fs::remove_file(&bak_path);
+    }
+
+    #[test]
+    fn truncated_json_recovers_from_backup() {
+        // Crash during write can leave partially-written JSON.
+        let path = test_persistence_path("truncated-recovery");
+        let _cleanup = scopeguard(path.clone());
+
+        let state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\dev\\godly"),
+        ]);
+        save_to_path(&path, &state).expect("first save");
+        save_to_path(&path, &state).expect("second save (creates backup)");
+
+        // Simulate crash mid-write: truncated JSON.
+        std::fs::write(&path, r#"{"version": 1, "workspaces": [{"id":"#)
+            .expect("simulate truncation");
+
+        let recovered = load_from_path(&path).expect(
+            "load should recover from backup when primary is truncated JSON"
+        );
+        assert_eq!(recovered.workspaces.len(), 2);
+
+        // Cleanup
+        let _ = std::fs::remove_file(&path.with_extension("json.bak"));
+    }
+
     /// RAII guard to clean up temp files after test.
     struct ScopeGuard {
         path: PathBuf,
@@ -1378,6 +1551,8 @@ mod tests {
     impl Drop for ScopeGuard {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.path);
+            let _ = std::fs::remove_file(self.path.with_extension("json.bak"));
+            let _ = std::fs::remove_file(self.path.with_extension("json.tmp"));
         }
     }
     fn scopeguard(path: PathBuf) -> ScopeGuard {
