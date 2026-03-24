@@ -28,7 +28,7 @@ pub fn view_layout<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     match node {
         LayoutNode::Leaf { terminal_id } => render_leaf(terminal_id),
-        LayoutNode::ContentPane { pane_id } => render_leaf(pane_id),
+        LayoutNode::ContentPane { content } => render_content_pane(content),
         LayoutNode::Split {
             direction,
             ratio,

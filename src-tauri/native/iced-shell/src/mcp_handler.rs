@@ -1,6 +1,6 @@
 use godly_app_adapter::mcp_pipe::McpEvent;
 use godly_app_adapter::sound;
-use godly_layout_core::{LayoutNode, SplitDirection};
+use godly_layout_core::{FileViewerType, LayoutNode, PaneContent, SplitDirection};
 use godly_protocol::testing::StateDump;
 use godly_protocol::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 use iced::window;
@@ -431,11 +431,19 @@ impl GodlyApp {
 
             // --- File Pane Management ---
             McpRequest::OpenFilePane {
-                workspace_id,
                 file_path,
                 target_terminal_id,
                 direction,
+                ..
             } => {
+                let Some(workspace_id) = self.workspaces.active_id().map(str::to_string) else {
+                    return (
+                        McpResponse::Error {
+                            message: "No active workspace".to_string(),
+                        },
+                        iced::Task::none(),
+                    );
+                };
                 let Some(ws) = self.workspaces.get(&workspace_id) else {
                     return (
                         McpResponse::Error {
@@ -457,6 +465,19 @@ impl GodlyApp {
                     .ok()
                     .and_then(|m| m.modified().ok());
 
+                let viewer_type = match file_type {
+                    "markdown" => FileViewerType::Markdown,
+                    "image" => FileViewerType::Image,
+                    _ => FileViewerType::Code,
+                };
+                let content_node = LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer {
+                        pane_id: pane_id.clone(),
+                        file_path: file_path.clone(),
+                        file_type: viewer_type,
+                    },
+                };
+
                 self.file_panes.insert(
                     pane_id.clone(),
                     crate::app::FilePaneState {
@@ -473,9 +494,6 @@ impl GodlyApp {
                 };
                 let target_id = target_terminal_id
                     .unwrap_or_else(|| ws.focused_terminal.clone());
-                let content_node = godly_layout_core::LayoutNode::ContentPane {
-                    pane_id: pane_id.clone(),
-                };
                 if let Some(ws) = self.workspaces.get_mut(&workspace_id) {
                     ws.layout.split_leaf_with_node(&target_id, content_node, dir);
                 }
@@ -510,7 +528,7 @@ impl GodlyApp {
 
                 for ws in &workspaces {
                     for tid in ws.layout.all_leaf_ids() {
-                        panes.push(godly_protocol::PaneInfo {
+                        panes.push(godly_protocol::mcp_messages::PaneInfo {
                             pane_id: tid.to_string(),
                             pane_type: "terminal".to_string(),
                             workspace_id: ws.id.clone(),
@@ -523,7 +541,7 @@ impl GodlyApp {
                             (None, None),
                             |s| (Some(s.file_path.clone()), Some(s.file_type.clone())),
                         );
-                        panes.push(godly_protocol::PaneInfo {
+                        panes.push(godly_protocol::mcp_messages::PaneInfo {
                             pane_id: pid.to_string(),
                             pane_type: "file".to_string(),
                             workspace_id: ws.id.clone(),
@@ -547,7 +565,8 @@ impl GodlyApp {
                         iced::Task::none(),
                     );
                 };
-                if let Some(new_path) = file_path {
+                {
+                    let new_path = file_path;
                     state.file_type = crate::app::detect_file_type(&new_path).to_string();
                     state.content = if state.file_type == "image" {
                         String::new()

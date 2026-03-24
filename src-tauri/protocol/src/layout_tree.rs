@@ -127,7 +127,7 @@ impl LayoutNode {
                 // Check if the target is a direct child (Leaf or ContentPane)
                 let first_matches = match first.as_ref() {
                     LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
-                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    LayoutNode::ContentPane { pane_id, .. } => pane_id == terminal_id,
                     _ => false,
                 };
                 if first_matches {
@@ -138,7 +138,7 @@ impl LayoutNode {
 
                 let second_matches = match second.as_ref() {
                     LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
-                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    LayoutNode::ContentPane { pane_id, .. } => pane_id == terminal_id,
                     _ => false,
                 };
                 if second_matches {
@@ -166,7 +166,7 @@ impl LayoutNode {
                 // Find which child (if any) is the target leaf or content pane.
                 let target_idx = children.iter().position(|c| match c.as_ref() {
                     LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
-                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    LayoutNode::ContentPane { pane_id, .. } => pane_id == terminal_id,
                     _ => false,
                 });
 

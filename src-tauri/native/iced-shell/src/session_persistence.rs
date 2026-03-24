@@ -113,8 +113,13 @@ impl PersistedLayoutNode {
             },
             // Content panes are transient and not persisted; serialize as a
             // leaf with the pane_id so the slot is preserved in the tree shape.
-            LayoutNode::ContentPane { pane_id } => Self::Leaf {
+            LayoutNode::ContentPane {
+                content: PaneContent::FileViewer { pane_id, .. },
+            } => Self::Leaf {
                 terminal_id: pane_id.clone(),
+            },
+            LayoutNode::ContentPane { .. } => Self::Leaf {
+                terminal_id: String::new(),
             },
             LayoutNode::Split {
                 direction,
@@ -321,7 +326,7 @@ pub fn merge_with_live_sessions(
                 if leaf_ids.is_empty() {
                     // No terminal leaves survived, but the layout may still contain
                     // content panes (file viewers) that should be preserved.
-                    if layout.has_any_content_pane() {
+                    if !layout.all_content_pane_ids().is_empty() {
                         (Some(layout), None)
                     } else {
                         (None, None)

@@ -651,15 +651,6 @@ pub enum McpResponse {
         size: u32,
     },
 
-    // Content pane responses
-    PaneCreated {
-        pane_id: String,
-        file_type: String,
-    },
-    PaneList {
-        panes: Vec<crate::layout_tree::PaneInfo>,
-    },
-
     // Test harness responses
     TestHarnessStatus {
         ready: bool,
