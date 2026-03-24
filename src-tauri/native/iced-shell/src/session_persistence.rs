@@ -1044,6 +1044,7 @@ mod tests {
             active_workspace_id: Some("w-godly".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
@@ -1145,5 +1146,241 @@ mod tests {
             state.terminal_workspace_assignments.is_empty(),
             "missing field should default to empty HashMap"
         );
+    }
+
+    /// Helper: create a temp path unique to the calling test.
+    fn test_persistence_path(suffix: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "godly-test-{}-{}.json",
+                std::process::id(),
+                suffix
+            ))
+    }
+
+    /// Helper: build a minimal persisted workspace.
+    fn make_workspace(id: &str, name: &str, folder: &str) -> PersistedWorkspaceState {
+        PersistedWorkspaceState {
+            id: id.to_string(),
+            name: name.to_string(),
+            folder_path: folder.to_string(),
+            worktree_mode: false,
+            focused_terminal: format!("t-{}", id),
+            layout: PersistedLayoutNode::Leaf {
+                terminal_id: format!("t-{}", id),
+            },
+        }
+    }
+
+    /// Helper: build a minimal persisted session state from workspaces.
+    fn make_session(workspaces: Vec<PersistedWorkspaceState>) -> PersistedSessionState {
+        PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: (workspaces.len() as u32) + 1,
+            active_workspace_id: workspaces.first().map(|w| w.id.clone()),
+            active_terminal_id: workspaces.first().map(|w| w.focused_terminal.clone()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
+            terminal_workspace_assignments: HashMap::new(),
+            workspaces,
+        }
+    }
+
+    #[test]
+    fn deleted_workspace_survives_crash_with_immediate_persist() {
+        // Bug #619 regression: delete_workspace() must call persist_session_state()
+        // so that the deletion is immediately written to disk. Without it, a crash
+        // within the 60-second autosave window restores the deleted workspace.
+        //
+        // This test verifies the fix: after deletion, the file is updated and the
+        // deleted workspace does NOT reappear on crash recovery.
+        let path = test_persistence_path("delete-persist");
+        let _cleanup = scopeguard(path.clone());
+
+        // Step 1: app state has 5 workspaces, saved to disk.
+        let mut state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
+            make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"),
+            make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"),
+        ]);
+        save_to_path(&path, &state).expect("initial save");
+
+        // Step 2: user deletes "Workspace 1".
+        // Fix: delete_workspace() now calls persist_session_state(), which
+        // saves the updated state immediately.
+        state.workspaces.retain(|w| w.id != "w-1");
+        save_to_path(&path, &state).expect("persist after delete");
+
+        // Step 3: app crashes. On restart, load from the file.
+        let loaded = load_from_path(&path).expect("load after crash");
+        let merged = merge_with_live_sessions(&loaded, &[]);
+
+        // Deleted workspace should NOT be in the restored state.
+        let workspace_names: Vec<&str> =
+            merged.workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert!(
+            !workspace_names.contains(&"Workspace 1"),
+            "Bug #619 regression: deleted workspace 'Workspace 1' reappears after crash. \
+             persist_session_state() should be called after delete_workspace(). \
+             Restored workspaces: {:?}",
+            workspace_names
+        );
+        assert_eq!(
+            merged.workspaces.len(),
+            4,
+            "4 workspaces should survive (5 original - 1 deleted)"
+        );
+    }
+
+    #[test]
+    fn created_workspaces_survive_crash_with_immediate_persist() {
+        // Bug #619 regression: create_new_workspace() must call persist_session_state()
+        // so that newly created workspaces are immediately written to disk. Without it,
+        // a crash within the 60-second autosave window loses the new workspaces.
+        //
+        // This test verifies the fix: after creation, the file is updated and
+        // new workspaces survive crash recovery.
+        let path = test_persistence_path("create-persist");
+        let _cleanup = scopeguard(path.clone());
+
+        // Step 1: app state has 3 workspaces, saved to disk.
+        let mut state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
+        ]);
+        save_to_path(&path, &state).expect("initial save");
+
+        // Step 2: user creates 2 new workspaces.
+        // Fix: create_new_workspace() now calls persist_session_state(),
+        // which saves the updated state immediately after each creation.
+        state
+            .workspaces
+            .push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
+        save_to_path(&path, &state).expect("persist after create #1");
+        state.workspaces.push(make_workspace(
+            "w-5",
+            "Design System",
+            "C:\\Users\\dev\\design",
+        ));
+        save_to_path(&path, &state).expect("persist after create #2");
+
+        // Step 3: app crashes. On restart, load from the file.
+        let loaded = load_from_path(&path).expect("load after crash");
+        let merged = merge_with_live_sessions(&loaded, &[]);
+
+        // All 5 workspaces should be restored.
+        assert_eq!(
+            merged.workspaces.len(),
+            5,
+            "Bug #619 regression: workspaces created before crash are lost. \
+             persist_session_state() should be called after create_new_workspace(). \
+             Expected 5, got {}. Restored: {:?}",
+            merged.workspaces.len(),
+            merged
+                .workspaces
+                .iter()
+                .map(|w| w.name.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn crash_after_mixed_mutations_restores_correct_state() {
+        // Bug #619 regression (full scenario): user deletes "Workspace 1",
+        // creates new workspaces, then the app crashes.
+        //
+        // This matches the exact user report: "once again there was a crash/rebuild
+        // and the only workspaces are workspace 1, godly-terminal and Mercado Pago
+        // and none other of the ones we created. I had also deleted workspace 1."
+        //
+        // Fix: persist_session_state() is called after every mutation, so the
+        // session file always reflects the current state.
+        let path = test_persistence_path("mixed-persist");
+        let _cleanup = scopeguard(path.clone());
+
+        // Step 1: initial state with 3 workspaces.
+        let mut state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
+        ]);
+        save_to_path(&path, &state).expect("initial save");
+
+        // Step 2: user deletes "Workspace 1" → persist_session_state() called.
+        state.workspaces.retain(|w| w.id != "w-1");
+        save_to_path(&path, &state).expect("persist after delete");
+
+        // Step 3: user creates "Backend API" → persist_session_state() called.
+        state
+            .workspaces
+            .push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
+        save_to_path(&path, &state).expect("persist after create #1");
+
+        // Step 4: user creates "Design System" → persist_session_state() called.
+        state.workspaces.push(make_workspace(
+            "w-5",
+            "Design System",
+            "C:\\Users\\dev\\design",
+        ));
+        save_to_path(&path, &state).expect("persist after create #2");
+
+        // Step 5: app crashes. On restart, load and merge.
+        let loaded = load_from_path(&path).expect("load after crash");
+        let merged = merge_with_live_sessions(&loaded, &[]);
+
+        let workspace_names: Vec<&str> =
+            merged.workspaces.iter().map(|w| w.name.as_str()).collect();
+
+        // Deleted workspace should NOT reappear.
+        assert!(
+            !workspace_names.contains(&"Workspace 1"),
+            "Bug #619 regression: deleted 'Workspace 1' reappears after crash. \
+             Restored: {:?}",
+            workspace_names
+        );
+
+        // Newly created workspaces should be present.
+        assert!(
+            workspace_names.contains(&"Backend API"),
+            "Bug #619 regression: 'Backend API' created before crash is missing. \
+             Restored: {:?}",
+            workspace_names
+        );
+        assert!(
+            workspace_names.contains(&"Design System"),
+            "Bug #619 regression: 'Design System' created before crash is missing. \
+             Restored: {:?}",
+            workspace_names
+        );
+
+        // Expected final workspace set.
+        assert_eq!(
+            workspace_names,
+            vec!["godly-terminal", "Mercado Pago", "Backend API", "Design System"],
+            "Bug #619 regression: crash after workspace mutations should restore \
+             the current state, not stale autosave state. Restored: {:?}",
+            workspace_names
+        );
+    }
+
+    /// RAII guard to clean up temp files after test.
+    struct ScopeGuard {
+        path: PathBuf,
+    }
+    impl Drop for ScopeGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+    fn scopeguard(path: PathBuf) -> ScopeGuard {
+        ScopeGuard { path }
     }
 }
