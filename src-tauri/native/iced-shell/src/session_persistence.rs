@@ -1003,6 +1003,97 @@ mod tests {
     }
 
     #[test]
+    fn merge_preserves_empty_workspaces_when_some_survive_with_live_sessions() {
+        // Regression: when daemon survives a rebuild but some PTY sessions die,
+        // only running sessions are recovered. Workspaces whose single terminal
+        // died have layout=None after merge. The caller (apply_init_result) must
+        // create fresh sessions for these instead of dropping them.
+        //
+        // Scenario: 3 workspaces. "godly-terminal" has live session t-1,
+        // "typesense" has dead session t-2, "mercadopago" has live session t-3.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 4,
+            active_workspace_id: Some("w-godly".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_workspace_assignments: HashMap::new(),
+            workspaces: vec![
+                PersistedWorkspaceState {
+                    id: "w-godly".to_string(),
+                    name: "godly-terminal".to_string(),
+                    folder_path: "C:\\dev\\godly-terminal".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-1".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-1".to_string(),
+                    },
+                },
+                PersistedWorkspaceState {
+                    id: "w-typesense".to_string(),
+                    name: "typesense".to_string(),
+                    folder_path: "C:\\dev\\typesense".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-2".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-2".to_string(),
+                    },
+                },
+                PersistedWorkspaceState {
+                    id: "w-mercadopago".to_string(),
+                    name: "MercadoPago".to_string(),
+                    folder_path: "C:\\dev\\MercadoPago".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-3".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-3".to_string(),
+                    },
+                },
+            ],
+        };
+
+        // Only t-1 and t-3 survived (t-2's PTY exited).
+        let live_sessions = vec!["t-1".to_string(), "t-3".to_string()];
+        let merged = merge_with_live_sessions(&persisted, &live_sessions);
+
+        // All 3 workspaces must be preserved.
+        assert_eq!(
+            merged.workspaces.len(),
+            3,
+            "all 3 workspaces must survive partial session loss"
+        );
+
+        // godly-terminal: layout survives with t-1.
+        let ws_godly = &merged.workspaces[0];
+        assert_eq!(ws_godly.name, "godly-terminal");
+        assert!(ws_godly.layout.is_some(), "godly-terminal should keep its layout");
+
+        // typesense: layout is None (t-2 died), but metadata survives.
+        let ws_typesense = &merged.workspaces[1];
+        assert_eq!(ws_typesense.name, "typesense");
+        assert_eq!(ws_typesense.folder_path, "C:\\dev\\typesense");
+        assert!(ws_typesense.layout.is_none(), "typesense should have no layout (terminal died)");
+
+        // MercadoPago: layout survives with t-3.
+        let ws_mp = &merged.workspaces[2];
+        assert_eq!(ws_mp.name, "MercadoPago");
+        assert!(ws_mp.layout.is_some(), "MercadoPago should keep its layout");
+
+        // Critical: no orphan terminals exist (all live sessions match their workspaces).
+        // This means apply_init_result MUST create a new session for typesense
+        // rather than silently dropping it.
+        assert!(
+            merged.missing_live_terminal_ids.is_empty(),
+            "no orphan terminals should exist when all live sessions match their workspaces"
+        );
+    }
+
+    #[test]
     fn old_json_without_workspace_assignments_deserializes_with_empty_default() {
         // Backwards compatibility: JSON saved before this field existed
         // should deserialize with an empty HashMap.
