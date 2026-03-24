@@ -849,6 +849,12 @@ impl Backend for DaemonDirectBackend {
             McpRequest::UiAct { .. } => Ok(Self::app_only_error("ui_act")),
             McpRequest::UiWait { .. } => Ok(Self::app_only_error("ui_wait")),
 
+            // File pane tools — require the app frontend
+            McpRequest::OpenFilePane { .. } => Ok(Self::app_only_error("open_file_pane")),
+            McpRequest::ClosePane { .. } => Ok(Self::app_only_error("close_pane")),
+            McpRequest::ListPanes { .. } => Ok(Self::app_only_error("list_panes")),
+            McpRequest::UpdateFilePane { .. } => Ok(Self::app_only_error("update_file_pane")),
+
         }
     }
 
