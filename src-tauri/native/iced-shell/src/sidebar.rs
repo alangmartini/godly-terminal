@@ -6,7 +6,7 @@ use iced::widget::{
 use iced::{Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::theme::{
-    ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
+    ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
     TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::workspace_state::WorkspaceInfo;
@@ -247,7 +247,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let name_label = text(&ws.name).size(13).color(row_text).font(font);
 
         let terminal_count = ws.layout.leaf_count();
-        let badge_bg = GHOST_HOVER();
+        let badge_bg = GHOST_SELECTED();
         let badge_text = TEXT_SECONDARY();
 
         let badge = container(
@@ -255,7 +255,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 .size(11)
                 .color(badge_text),
         )
-        .padding(Padding::from([1, 7]))
+        .padding(Padding::from([2, 8]))
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(badge_bg)),
             border: Border {
@@ -303,8 +303,25 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
+        // Left accent bar: visible on active workspace for visual hierarchy.
+        let accent_bar_color = if is_active { ACCENT() } else { Color::TRANSPARENT };
+        let accent_bar = container(
+            Space::new()
+                .width(Length::Fixed(2.0))
+                .height(Length::Fixed(18.0)),
+        )
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(accent_bar_color)),
+            border: Border {
+                radius: 1.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        });
+
         let ai_mode_icon = workspace_signals.workspace_ai_mode_icon(ws.id.as_str());
         let mut item_content = row![
+            accent_bar,
             worktree_indicator,
             name_label,
         ];
@@ -344,7 +361,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     border: Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
-                        radius: 4.0.into(),
+                        radius: 6.0.into(),
                     },
                     ..button::Style::default()
                 }

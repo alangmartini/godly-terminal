@@ -539,8 +539,8 @@ fn fill_derived_fields(p: &mut ThemePalette) {
     p.surface_bg = p.bg_secondary;
     p.tab_active_bg = p.pane_bg;
     p.tab_inactive_bg = p.bg_secondary;
-    p.title_bar_bg = p.bg_primary;
-    p.status_bar_bg = p.bg_primary;
+    p.title_bar_bg = p.bg_secondary;
+    p.status_bar_bg = p.bg_secondary;
     p.border_variant = Color::from_rgba(p.border.r, p.border.g, p.border.b, 0.50);
     p.border_focused = p.accent;
     p.info = p.accent;
@@ -576,8 +576,8 @@ fn zed_one_dark() -> ThemePalette {
         surface_bg: Color::from_rgb8(0x2f, 0x34, 0x3e),
         tab_active_bg: Color::from_rgb8(0x28, 0x2c, 0x33),
         tab_inactive_bg: Color::from_rgb8(0x2f, 0x34, 0x3e),
-        title_bar_bg: Color::from_rgb8(0x3b, 0x41, 0x4d),
-        status_bar_bg: Color::from_rgb8(0x3b, 0x41, 0x4d),
+        title_bar_bg: Color::from_rgb8(0x2f, 0x34, 0x3e),
+        status_bar_bg: Color::from_rgb8(0x2f, 0x34, 0x3e),
         border_variant: Color::from_rgb8(0x36, 0x3c, 0x46),
         border_focused: Color::from_rgb8(0x74, 0xad, 0xe8),
         info: Color::from_rgb8(0x61, 0xaf, 0xef),
