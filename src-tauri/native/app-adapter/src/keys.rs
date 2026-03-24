@@ -91,7 +91,15 @@ fn ss3_or_csi(letter: u8, modifiers: Modifiers) -> Vec<u8> {
 /// Convert a named key to PTY bytes.
 fn named_key_to_bytes(key: &Named, modifiers: Modifiers) -> Option<Vec<u8>> {
     match key {
-        Named::Enter => Some(b"\r".to_vec()),
+        Named::Enter => {
+            let m = csi_modifier(modifiers);
+            if m == 0 {
+                Some(b"\r".to_vec())
+            } else {
+                // CSI u format: \x1b[13;{mod}u  (keycode 13 = CR/Enter)
+                Some(format!("\x1b[13;{m}u").into_bytes())
+            }
+        }
         Named::Backspace => Some(vec![0x7F]), // DEL
         Named::Tab => {
             if modifiers.shift() {
@@ -259,6 +267,24 @@ mod tests {
     fn ctrl_f5() {
         let bytes = key_to_pty_bytes(&Key::Named(Named::F5), Modifiers::CTRL);
         assert_eq!(bytes, Some(b"\x1b[15;5~".to_vec()));
+    }
+
+    #[test]
+    fn shift_enter() {
+        let bytes = key_to_pty_bytes(&Key::Named(Named::Enter), Modifiers::SHIFT);
+        assert_eq!(bytes, Some(b"\x1b[13;2u".to_vec()));
+    }
+
+    #[test]
+    fn ctrl_enter() {
+        let bytes = key_to_pty_bytes(&Key::Named(Named::Enter), Modifiers::CTRL);
+        assert_eq!(bytes, Some(b"\x1b[13;5u".to_vec()));
+    }
+
+    #[test]
+    fn alt_enter() {
+        let bytes = key_to_pty_bytes(&Key::Named(Named::Enter), Modifiers::ALT);
+        assert_eq!(bytes, Some(b"\x1b[13;3u".to_vec()));
     }
 
     // --- Bug #668: Shift+letter should produce uppercase ---
