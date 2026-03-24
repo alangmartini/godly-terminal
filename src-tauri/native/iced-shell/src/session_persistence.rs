@@ -106,6 +106,13 @@ impl PersistedLayoutNode {
             LayoutNode::Leaf { terminal_id } => Self::Leaf {
                 terminal_id: terminal_id.clone(),
             },
+            LayoutNode::ContentPane { .. } => {
+                // ContentPane nodes are not persisted; emit a placeholder leaf
+                // that will be pruned on restore since its ID won't be live.
+                Self::Leaf {
+                    terminal_id: String::new(),
+                }
+            }
             LayoutNode::Split {
                 direction,
                 ratio,
@@ -566,7 +573,7 @@ mod tests {
                 assert_eq!(*direction, SplitDirection::Vertical, "direction must survive round-trip");
                 assert!((ratio - 0.6).abs() < 0.01, "ratio must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
@@ -596,7 +603,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(*direction, SplitDirection::Horizontal, "direction must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 

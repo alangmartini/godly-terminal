@@ -1300,6 +1300,7 @@ fn rename_leaf(node: &mut godly_layout_core::LayoutNode, from: &str, to: &str) {
                 *terminal_id = to.to_string();
             }
         }
+        godly_layout_core::LayoutNode::ContentPane { .. } => {}
         godly_layout_core::LayoutNode::Split { first, second, .. } => {
             rename_leaf(first, from, to);
             rename_leaf(second, from, to);
