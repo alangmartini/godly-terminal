@@ -1174,7 +1174,19 @@ fn collect_plugin_skills(json_path: &std::path::Path, skills: &mut Vec<SkillEntr
         // Scan commands/ directory (each .md file is a command).
         let commands_dir = base.join("commands");
         if commands_dir.exists() {
-            collect_skills_from_dir(&commands_dir, scope, skills);
+            collect_skills_from_dir(&commands_dir, scope.clone(), skills);
+        }
+
+        // Also check .claude/skills/ and .claude/commands/ — some plugins (e.g. ui-ux-pro-max)
+        // follow the Claude Code convention of nesting under .claude/ rather than at the root.
+        let dot_claude = base.join(".claude");
+        let nested_skills_dir = dot_claude.join("skills");
+        if nested_skills_dir.exists() {
+            collect_skills_from_dir(&nested_skills_dir, scope.clone(), skills);
+        }
+        let nested_commands_dir = dot_claude.join("commands");
+        if nested_commands_dir.exists() {
+            collect_skills_from_dir(&nested_commands_dir, scope, skills);
         }
     }
 }
@@ -1900,5 +1912,154 @@ mod tests {
         let json = r#"{"selected_model":"sonnet","selected_mode":"auto","selected_ai_tool":"Claude Code","selected_workspace_id":null,"auto_suggest_branch":true,"main_branch_mode":false}"#;
         let decoded: QuickClaudePreferences = serde_json::from_str(json).unwrap();
         assert!(!decoded.batch_clone_mode);
+    }
+
+    // Bug #769: Plugin skills nested under .claude/ are not discovered by collect_plugin_skills.
+    // Plugins like ui-ux-pro-max store skills at <installPath>/.claude/skills/ instead of
+    // <installPath>/skills/. The current code only checks the latter, silently skipping the former.
+
+    /// Helper: create a minimal SKILL.md so `collect_skills_from_dir` can parse it.
+    fn write_skill_md(dir: &std::path::Path, skill_name: &str, description: &str) {
+        let skill_dir = dir.join(skill_name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {skill_name}\ndescription: {description}\n---\n\n# {description}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_root_level_skills() {
+        // Baseline: plugins with skills/ at the install root ARE discovered.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("my-plugin").join("1.0.0");
+        let skills_dir = plugin_dir.join("skills");
+        write_skill_md(&skills_dir, "my-skill", "A root-level skill");
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "my-plugin@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        assert!(
+            skills.iter().any(|s| s.name == "my-skill"),
+            "root-level plugin skill should be discovered, got: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_dot_claude_nested_skills() {
+        // Bug #769: plugins with skills at <installPath>/.claude/skills/ must also be discovered.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-nested-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("ui-ux-pro-max").join("2.5.0");
+        let nested_skills_dir = plugin_dir.join(".claude").join("skills");
+        write_skill_md(&nested_skills_dir, "ui-ux-pro-max", "UI/UX design intelligence");
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "ui-ux-pro-max-skill@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        assert!(
+            skills.iter().any(|s| s.name == "ui-ux-pro-max"),
+            "plugin skill nested under .claude/skills/ should be discovered, got: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_dot_claude_nested_commands() {
+        // Bug #769: also test .claude/commands/ path for plugins.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-nested-cmd-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("some-plugin").join("1.0.0");
+        let nested_commands_dir = plugin_dir.join(".claude").join("commands");
+        std::fs::create_dir_all(&nested_commands_dir).unwrap();
+        std::fs::write(
+            nested_commands_dir.join("my-command.md"),
+            "# A nested command\n\nDoes something useful.",
+        )
+        .unwrap();
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "some-plugin@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        assert!(
+            skills.iter().any(|s| s.name == "my-command"),
+            "plugin command nested under .claude/commands/ should be discovered, got: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_both_root_and_nested() {
+        // A plugin with skills at BOTH root and .claude/ should discover all of them.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-both-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("hybrid-plugin").join("1.0.0");
+        let root_skills = plugin_dir.join("skills");
+        write_skill_md(&root_skills, "root-skill", "A root skill");
+
+        let nested_skills = plugin_dir.join(".claude").join("skills");
+        write_skill_md(&nested_skills, "nested-skill", "A nested skill");
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "hybrid-plugin@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"root-skill"), "root-level skill missing, got: {names:?}");
+        assert!(names.contains(&"nested-skill"), "nested .claude/skills/ skill missing, got: {names:?}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
