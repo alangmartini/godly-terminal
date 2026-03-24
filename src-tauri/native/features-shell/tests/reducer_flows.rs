@@ -352,3 +352,87 @@ fn close_tab_then_delete_workspace_flow_retargets_focus_and_read_marking() {
     assert_eq!(post_delete.mark_terminal_read_id.as_deref(), Some("t-3"));
     assert_eq!(post_delete.fetch_grid_terminal_id.as_deref(), Some("t-3"));
 }
+
+/// Bug #763: After creating multiple tabs, the tab state tracks all terminals
+/// even though the workspace layout only contains the currently visible pane.
+///
+/// The sidebar badge must use the tab-state terminal count (provided via the
+/// `workspace_terminal_count` signal), not `layout.leaf_count()`. This test
+/// verifies the data that feeds the signal is correct: all three terminals are
+/// tracked in the tab state while the layout only holds the last-created tab.
+#[test]
+fn sidebar_badge_data_tracks_all_tabs_not_just_layout_leaves() {
+    let mut tabs = TabState::new();
+    assert!(tabs.open("t-1"));
+    assert!(tabs.activate("t-1"));
+
+    let mut workspaces = WorkspaceCollection::new();
+    workspaces.add(workspace("w-1", "t-1", leaf("t-1")));
+
+    // Verify initial state: 1 terminal, leaf_count = 1.
+    let ws = workspaces.active().expect("active workspace");
+    assert_eq!(ws.layout.leaf_count(), 1);
+    assert_eq!(tabs.len(), 1);
+
+    // Create a second tab (not a split) via the new-tab flow.
+    let decision_2 = tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
+        session_id: "t-2".into(),
+        active_workspace_id: workspaces.active_id().map(str::to_string),
+        terminal_in_active_layout: false,
+    });
+    apply_terminal_created(&mut tabs, &mut workspaces, decision_2);
+
+    // Create a third tab.
+    let decision_3 = tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
+        session_id: "t-3".into(),
+        active_workspace_id: workspaces.active_id().map(str::to_string),
+        terminal_in_active_layout: false,
+    });
+    apply_terminal_created(&mut tabs, &mut workspaces, decision_3);
+
+    // The layout only contains the last-created tab (by design).
+    let ws = workspaces.active().expect("active workspace");
+    assert_eq!(
+        ws.layout.leaf_count(),
+        1,
+        "layout should only contain the currently visible pane"
+    );
+
+    // But the tab state has all 3 terminals — this is the data the sidebar
+    // badge should use (via the workspace_terminal_count signal).
+    assert_eq!(tabs.len(), 3, "tab state must track all workspace terminals");
+    assert!(tabs.contains("t-1"));
+    assert!(tabs.contains("t-2"));
+    assert!(tabs.contains("t-3"));
+}
+
+/// Bug #763: Verify the terminal count signal data is correct across
+/// multiple workspaces, each with different tab counts.
+#[test]
+fn sidebar_badge_data_correct_across_multiple_workspaces() {
+    let mut tabs = TabState::new();
+    assert!(tabs.open("t-1"));
+    assert!(tabs.open("t-x"));
+    assert!(tabs.activate("t-1"));
+
+    let mut workspaces = WorkspaceCollection::new();
+    workspaces.add(workspace("w-1", "t-1", leaf("t-1")));
+    workspaces.add(workspace("w-2", "t-x", leaf("t-x")));
+
+    // Add a second tab to w-1 (the active workspace).
+    let decision = tab_reducer::reduce_terminal_created(tab_reducer::TerminalCreatedInput {
+        session_id: "t-2".into(),
+        active_workspace_id: Some("w-1".into()),
+        terminal_in_active_layout: false,
+    });
+    apply_terminal_created(&mut tabs, &mut workspaces, decision);
+
+    // The layout reset to single leaf (by design), but we have 3 total tabs.
+    let ws1 = workspaces.get("w-1").expect("workspace w-1");
+    assert_eq!(ws1.layout.leaf_count(), 1, "layout resets on new tab");
+    assert_eq!(tabs.len(), 3, "tab state has t-1, t-2, t-x");
+
+    // w-2 layout still has its single leaf.
+    let ws2 = workspaces.get("w-2").expect("workspace w-2");
+    assert_eq!(ws2.layout.leaf_count(), 1);
+}
