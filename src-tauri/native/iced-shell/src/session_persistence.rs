@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::split_pane::{LayoutNode, SplitDirection};
+use crate::split_pane::{FileViewerType, LayoutNode, PaneContent, SplitDirection};
 
 pub const PERSISTENCE_VERSION: u32 = 1;
 pub const AUTOSAVE_INTERVAL_SECS: u64 = 60;
@@ -51,6 +51,11 @@ pub struct PersistedWorkspaceState {
 pub enum PersistedLayoutNode {
     Leaf {
         terminal_id: String,
+    },
+    ContentPane {
+        pane_id: String,
+        file_path: String,
+        file_type: String,
     },
     Split {
         direction: PersistedSplitDirection,
@@ -106,6 +111,30 @@ impl PersistedLayoutNode {
             LayoutNode::Leaf { terminal_id } => Self::Leaf {
                 terminal_id: terminal_id.clone(),
             },
+            LayoutNode::ContentPane { content } => match content {
+                PaneContent::FileViewer {
+                    pane_id,
+                    file_path,
+                    file_type,
+                } => {
+                    let file_type_str = match file_type {
+                        FileViewerType::Code => "code",
+                        FileViewerType::Markdown => "markdown",
+                        FileViewerType::Image => "image",
+                    };
+                    Self::ContentPane {
+                        pane_id: pane_id.clone(),
+                        file_path: file_path.clone(),
+                        file_type: file_type_str.to_string(),
+                    }
+                }
+                PaneContent::Terminal { terminal_id } => {
+                    // Terminal content in a ContentPane node is unexpected but handle gracefully.
+                    Self::Leaf {
+                        terminal_id: terminal_id.clone(),
+                    }
+                }
+            },
             LayoutNode::Split {
                 direction,
                 ratio,
@@ -130,6 +159,25 @@ impl PersistedLayoutNode {
                 } else {
                     None
                 }
+            }
+            PersistedLayoutNode::ContentPane {
+                pane_id,
+                file_path,
+                file_type,
+            } => {
+                // File panes always survive — no "live session" filtering needed.
+                let ft = match file_type.as_str() {
+                    "markdown" => FileViewerType::Markdown,
+                    "image" => FileViewerType::Image,
+                    _ => FileViewerType::Code,
+                };
+                Some(LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer {
+                        pane_id: pane_id.clone(),
+                        file_path: file_path.clone(),
+                        file_type: ft,
+                    },
+                })
             }
             PersistedLayoutNode::Split {
                 direction,
@@ -290,8 +338,13 @@ pub fn merge_with_live_sessions(
                     .map(|id| id.to_string())
                     .collect();
                 if leaf_ids.is_empty() {
-                    // Layout filtered down to nothing — preserve workspace metadata only.
-                    (None, None)
+                    // No terminal leaves survived, but the layout may still contain
+                    // content panes (file viewers) that should be preserved.
+                    if layout.has_any_content_pane() {
+                        (Some(layout), None)
+                    } else {
+                        (None, None)
+                    }
                 } else {
                     used_terminal_ids.extend(leaf_ids.iter().cloned());
                     let focused = if leaf_ids.iter().any(|id| id == &workspace.focused_terminal) {
@@ -566,7 +619,7 @@ mod tests {
                 assert_eq!(*direction, SplitDirection::Vertical, "direction must survive round-trip");
                 assert!((ratio - 0.6).abs() < 0.01, "ratio must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
@@ -596,7 +649,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(*direction, SplitDirection::Horizontal, "direction must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
@@ -1044,6 +1097,7 @@ mod tests {
             active_workspace_id: Some("w-godly".to_string()),
             active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
@@ -1145,5 +1199,156 @@ mod tests {
             state.terminal_workspace_assignments.is_empty(),
             "missing field should default to empty HashMap"
         );
+    }
+
+    #[test]
+    fn content_pane_round_trip() {
+        let layout = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::ContentPane {
+                content: PaneContent::FileViewer {
+                    pane_id: "fp-abc123".into(),
+                    file_path: "/tmp/test.rs".into(),
+                    file_type: FileViewerType::Code,
+                },
+            }),
+        };
+
+        let persisted = PersistedLayoutNode::from_layout(&layout);
+
+        let live_ids: HashSet<&str> = ["t1"].into_iter().collect();
+        let restored = persisted.to_layout_filtered(&live_ids);
+
+        assert!(restored.is_some());
+        let restored = restored.unwrap();
+        assert!(restored.find_leaf("t1"));
+        assert!(restored.find_content_pane("fp-abc123"));
+    }
+
+    #[test]
+    fn content_pane_survives_when_terminal_dies() {
+        let layout = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::ContentPane {
+                content: PaneContent::FileViewer {
+                    pane_id: "fp-abc123".into(),
+                    file_path: "/tmp/test.rs".into(),
+                    file_type: FileViewerType::Code,
+                },
+            }),
+        };
+
+        let persisted = PersistedLayoutNode::from_layout(&layout);
+
+        // t1 is NOT live
+        let live_ids: HashSet<&str> = HashSet::new();
+        let restored = persisted.to_layout_filtered(&live_ids);
+
+        // Content pane should survive as the root
+        assert!(restored.is_some());
+        match &restored.unwrap() {
+            LayoutNode::ContentPane { content } => match content {
+                PaneContent::FileViewer { pane_id, .. } => assert_eq!(pane_id, "fp-abc123"),
+                _ => panic!("Expected FileViewer"),
+            },
+            _ => panic!("Expected ContentPane to be promoted"),
+        }
+    }
+
+    #[test]
+    fn content_pane_json_round_trip() {
+        let persisted = PersistedLayoutNode::ContentPane {
+            pane_id: "fp-test".into(),
+            file_path: "/home/user/code.rs".into(),
+            file_type: "code".into(),
+        };
+
+        let json = serde_json::to_string(&persisted).unwrap();
+        let deserialized: PersistedLayoutNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(persisted, deserialized);
+    }
+
+    #[test]
+    fn content_pane_preserved_in_merge_when_terminals_die() {
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 13.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 2,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
+            terminal_workspace_assignments: HashMap::new(),
+            workspaces: vec![PersistedWorkspaceState {
+                id: "w-1".to_string(),
+                name: "Main".to_string(),
+                folder_path: ".".to_string(),
+                worktree_mode: false,
+                focused_terminal: "t-1".to_string(),
+                layout: PersistedLayoutNode::Split {
+                    direction: PersistedSplitDirection::Horizontal,
+                    ratio: 0.5,
+                    first: Box::new(PersistedLayoutNode::Leaf {
+                        terminal_id: "t-1".to_string(),
+                    }),
+                    second: Box::new(PersistedLayoutNode::ContentPane {
+                        pane_id: "fp-1".to_string(),
+                        file_path: "/tmp/test.rs".to_string(),
+                        file_type: "code".to_string(),
+                    }),
+                },
+            }],
+        };
+
+        // t-1 died — no live sessions
+        let merged = merge_with_live_sessions(&persisted, &[]);
+
+        // Content pane should keep the layout alive even though t-1 died.
+        let ws = &merged.workspaces[0];
+        assert!(
+            ws.layout.is_some(),
+            "layout should survive because content pane is present"
+        );
+        let layout = ws.layout.as_ref().unwrap();
+        assert!(layout.find_content_pane("fp-1"));
+    }
+
+    #[test]
+    fn content_pane_file_types_round_trip() {
+        for (type_str, expected_type) in [
+            ("code", FileViewerType::Code),
+            ("markdown", FileViewerType::Markdown),
+            ("image", FileViewerType::Image),
+        ] {
+            let persisted = PersistedLayoutNode::ContentPane {
+                pane_id: "fp-1".into(),
+                file_path: "/tmp/file".into(),
+                file_type: type_str.into(),
+            };
+
+            let live_ids: HashSet<&str> = HashSet::new();
+            let restored = persisted.to_layout_filtered(&live_ids).unwrap();
+
+            match &restored {
+                LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer { file_type, .. },
+                } => {
+                    assert_eq!(*file_type, expected_type, "file type '{}' should round-trip", type_str);
+                }
+                _ => panic!("Expected ContentPane FileViewer"),
+            }
+        }
     }
 }
