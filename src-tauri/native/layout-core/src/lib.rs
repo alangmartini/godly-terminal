@@ -64,11 +64,32 @@ impl FocusDirection {
     }
 }
 
+/// Content type for a non-terminal pane.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaneContent {
+    Terminal { terminal_id: String },
+    FileViewer {
+        pane_id: String,
+        file_path: String,
+        file_type: FileViewerType,
+    },
+}
+
+/// The kind of file being displayed in a file viewer pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileViewerType {
+    Code,
+    Markdown,
+    Image,
+}
+
 /// A binary tree of terminal panes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayoutNode {
     /// A single terminal pane.
     Leaf { terminal_id: String },
+    /// A non-terminal content pane (file viewer, etc.).
+    ContentPane { content: PaneContent },
     /// A split containing two sub-layouts.
     Split {
         direction: SplitDirection,
@@ -84,7 +105,33 @@ impl LayoutNode {
     pub fn find_leaf(&self, id: &str) -> bool {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id == id,
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => first.find_leaf(id) || second.find_leaf(id),
+        }
+    }
+
+    /// Returns `true` if a content pane with the given pane_id exists anywhere in the tree.
+    pub fn find_content_pane(&self, id: &str) -> bool {
+        match self {
+            LayoutNode::Leaf { .. } => false,
+            LayoutNode::ContentPane { content } => match content {
+                PaneContent::FileViewer { pane_id, .. } => pane_id == id,
+                PaneContent::Terminal { .. } => false,
+            },
+            LayoutNode::Split { first, second, .. } => {
+                first.find_content_pane(id) || second.find_content_pane(id)
+            }
+        }
+    }
+
+    /// Returns `true` if the tree contains at least one `ContentPane` node.
+    pub fn has_any_content_pane(&self) -> bool {
+        match self {
+            LayoutNode::ContentPane { .. } => true,
+            LayoutNode::Leaf { .. } => false,
+            LayoutNode::Split { first, second, .. } => {
+                first.has_any_content_pane() || second.has_any_content_pane()
+            }
         }
     }
 
@@ -92,6 +139,7 @@ impl LayoutNode {
     pub fn leaf_count(&self) -> usize {
         match self {
             LayoutNode::Leaf { .. } => 1,
+            LayoutNode::ContentPane { .. } => 0,
             LayoutNode::Split { first, second, .. } => first.leaf_count() + second.leaf_count(),
         }
     }
@@ -106,6 +154,7 @@ impl LayoutNode {
     fn collect_leaf_ids<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             LayoutNode::Leaf { terminal_id } => out.push(terminal_id),
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.collect_leaf_ids(out);
                 second.collect_leaf_ids(out);
@@ -174,6 +223,7 @@ impl LayoutNode {
                 true
             }
             LayoutNode::Leaf { .. } => false,
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => {
                 first.split_leaf_with_placement(target_id, new_id.clone(), placement)
                     || second.split_leaf_with_placement(target_id, new_id, placement)
@@ -189,6 +239,7 @@ impl LayoutNode {
     pub fn unsplit_leaf(&mut self, target_id: &str) -> Option<String> {
         match self {
             LayoutNode::Leaf { .. } => None,
+            LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split { first, second, .. } => {
                 if let LayoutNode::Leaf { terminal_id } = first.as_ref() {
                     if terminal_id == target_id {
@@ -238,6 +289,7 @@ impl LayoutNode {
     pub fn first_leaf_id(&self) -> &str {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id,
+            LayoutNode::ContentPane { .. } => "",
             LayoutNode::Split { first, .. } => first.first_leaf_id(),
         }
     }
@@ -246,6 +298,7 @@ impl LayoutNode {
     pub fn last_leaf_id(&self) -> &str {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id,
+            LayoutNode::ContentPane { .. } => "",
             LayoutNode::Split { second, .. } => second.last_leaf_id(),
         }
     }
@@ -255,6 +308,7 @@ impl LayoutNode {
     pub fn neighbor_in_direction(&self, current_id: &str, direction: FocusDirection) -> Option<&str> {
         match self {
             LayoutNode::Leaf { .. } => None,
+            LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split {
                 direction: split_dir,
                 first,
@@ -298,7 +352,7 @@ mod tests {
                 assert_eq!(first.all_leaf_ids(), vec![first_id]);
                 assert_eq!(second.all_leaf_ids(), vec![second_id]);
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            _ => panic!("expected split layout"),
         }
     }
 

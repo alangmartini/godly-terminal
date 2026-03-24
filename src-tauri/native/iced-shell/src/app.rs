@@ -8445,6 +8445,7 @@ fn pane_rect_for_terminal(
         LayoutNode::Leaf {
             terminal_id: leaf_id,
         } => (leaf_id == terminal_id).then_some(rect),
+        LayoutNode::ContentPane { .. } => None,
         LayoutNode::Split {
             direction,
             ratio,

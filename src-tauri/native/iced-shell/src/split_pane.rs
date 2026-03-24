@@ -1,7 +1,7 @@
 use iced::widget::{column, container, row};
 use iced::{Element, Length};
 
-pub use godly_layout_core::{LayoutNode, SplitDirection};
+pub use godly_layout_core::{FileViewerType, LayoutNode, PaneContent, SplitDirection};
 
 /// Converts a float ratio (0.0..1.0) to integer fill portions for two children.
 ///
@@ -25,6 +25,13 @@ pub fn view_layout<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     match node {
         LayoutNode::Leaf { terminal_id } => render_leaf(terminal_id),
+        LayoutNode::ContentPane { .. } => {
+            // ContentPane rendering is handled separately; return empty placeholder
+            container(iced::widget::text(""))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        }
         LayoutNode::Split {
             direction,
             ratio,
