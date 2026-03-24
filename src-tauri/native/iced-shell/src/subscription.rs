@@ -215,8 +215,8 @@ mod tests {
 
         sink.on_terminal_output("sess1");
 
-        match rx.try_next() {
-            Ok(Some(DaemonEventMsg::TerminalOutput { session_id })) => {
+        match rx.try_recv() {
+            Ok(DaemonEventMsg::TerminalOutput { session_id }) => {
                 assert_eq!(session_id, "sess1");
             }
             other => panic!("Expected TerminalOutput, got: {:?}", other),
@@ -230,11 +230,11 @@ mod tests {
 
         sink.on_session_closed("sess2", Some(0));
 
-        match rx.try_next() {
-            Ok(Some(DaemonEventMsg::SessionClosed {
+        match rx.try_recv() {
+            Ok(DaemonEventMsg::SessionClosed {
                 session_id,
                 exit_code,
-            })) => {
+            }) => {
                 assert_eq!(session_id, "sess2");
                 assert_eq!(exit_code, Some(0));
             }
@@ -249,11 +249,11 @@ mod tests {
 
         sink.on_process_changed("sess3", "vim");
 
-        match rx.try_next() {
-            Ok(Some(DaemonEventMsg::ProcessChanged {
+        match rx.try_recv() {
+            Ok(DaemonEventMsg::ProcessChanged {
                 session_id,
                 process_name,
-            })) => {
+            }) => {
                 assert_eq!(session_id, "sess3");
                 assert_eq!(process_name, "vim");
             }
@@ -268,8 +268,8 @@ mod tests {
 
         sink.on_bell("sess4");
 
-        match rx.try_next() {
-            Ok(Some(DaemonEventMsg::Bell { session_id })) => {
+        match rx.try_recv() {
+            Ok(DaemonEventMsg::Bell { session_id }) => {
                 assert_eq!(session_id, "sess4");
             }
             other => panic!("Expected Bell, got: {:?}", other),
@@ -283,8 +283,8 @@ mod tests {
 
         sink.on_grid_diff("sess5", &[1, 2, 3]);
 
-        match rx.try_next() {
-            Ok(Some(DaemonEventMsg::TerminalOutput { session_id })) => {
+        match rx.try_recv() {
+            Ok(DaemonEventMsg::TerminalOutput { session_id }) => {
                 assert_eq!(session_id, "sess5");
             }
             other => panic!("Expected TerminalOutput from grid_diff, got: {:?}", other),

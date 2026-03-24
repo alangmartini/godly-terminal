@@ -71,14 +71,6 @@ pub fn add_session(record: QuickClaudeSessionRecord) -> Result<(), String> {
     save_sessions(&sessions)
 }
 
-pub fn update_session_status(session_id: &str, status: SessionStatus) -> Result<(), String> {
-    let mut sessions = load_sessions();
-    if let Some(session) = sessions.iter_mut().find(|s| s.id == session_id) {
-        session.status = status;
-    }
-    save_sessions(&sessions)
-}
-
 /// Remove sessions whose terminal_id is not in the set of live terminal IDs.
 pub fn cleanup_stale_sessions(live_terminal_ids: &[String]) -> Result<Vec<QuickClaudeSessionRecord>, String> {
     let mut sessions = load_sessions();

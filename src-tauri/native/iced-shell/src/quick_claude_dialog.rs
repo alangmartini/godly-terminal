@@ -46,6 +46,8 @@ pub struct SkillEntry {
     pub name: String,
     pub description: String,
     pub scope: SkillScope,
+    /// Path to the skill's .md file on disk; stored for future use (e.g., opening in editor).
+    #[allow(dead_code)]
     pub file_path: String,
 }
 
