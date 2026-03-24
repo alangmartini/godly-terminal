@@ -6935,6 +6935,7 @@ impl GodlyApp {
             return Task::none();
         };
 
+        let old_offset = term.scrollback_offset;
         let new_offset = if delta < 0 {
             term.scrollback_offset
                 .saturating_add((-delta) as usize)
@@ -6945,6 +6946,13 @@ impl GodlyApp {
 
         term.scrollback_offset = new_offset;
         self.persist_scrollback_offsets();
+
+        // Adjust selection coordinates so the highlight stays on the same
+        // content after the viewport shifts. Bug #755.
+        let scroll_delta = new_offset as isize - old_offset as isize;
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, new_offset)
     }
@@ -6960,10 +6968,22 @@ impl GodlyApp {
             .map(|t| t.total_scrollback)
             .unwrap_or(0);
 
+        let old_offset = self
+            .terminals
+            .get(&active_id)
+            .map(|t| t.scrollback_offset)
+            .unwrap_or(0);
+
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = max;
         }
         self.persist_scrollback_offsets();
+
+        // Adjust selection for scroll. Bug #755.
+        let scroll_delta = max as isize - old_offset as isize;
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, max)
     }
@@ -6973,10 +6993,22 @@ impl GodlyApp {
             return Task::none();
         };
 
+        let old_offset = self
+            .terminals
+            .get(&active_id)
+            .map(|t| t.scrollback_offset)
+            .unwrap_or(0);
+
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = 0;
         }
         self.persist_scrollback_offsets();
+
+        // Adjust selection for scroll. Bug #755.
+        let scroll_delta = -(old_offset as isize);
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, 0)
     }
