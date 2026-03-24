@@ -106,6 +106,11 @@ impl PersistedLayoutNode {
             LayoutNode::Leaf { terminal_id } => Self::Leaf {
                 terminal_id: terminal_id.clone(),
             },
+            // Content panes are transient and not persisted; serialize as a
+            // leaf with the pane_id so the slot is preserved in the tree shape.
+            LayoutNode::ContentPane { pane_id } => Self::Leaf {
+                terminal_id: pane_id.clone(),
+            },
             LayoutNode::Split {
                 direction,
                 ratio,

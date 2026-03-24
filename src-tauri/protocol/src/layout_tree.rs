@@ -19,6 +19,11 @@ pub enum LayoutNode {
     Leaf {
         terminal_id: String,
     },
+    /// A non-terminal content pane (file viewer, markdown preview, image).
+    #[serde(rename = "content_pane")]
+    ContentPane {
+        pane_id: String,
+    },
     Split {
         direction: SplitDirection,
         /// Fraction of space allocated to `first` (0.0..=1.0).
@@ -45,6 +50,7 @@ impl LayoutNode {
     pub fn find_terminal(&self, terminal_id: &str) -> bool {
         match self {
             LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+            LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
             LayoutNode::Split { first, second, .. } => {
                 first.find_terminal(terminal_id) || second.find_terminal(terminal_id)
             }
@@ -64,6 +70,7 @@ impl LayoutNode {
     fn collect_terminal_ids(&self, out: &mut Vec<String>) {
         match self {
             LayoutNode::Leaf { terminal_id } => out.push(terminal_id.clone()),
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.collect_terminal_ids(out);
                 second.collect_terminal_ids(out);
@@ -79,7 +86,7 @@ impl LayoutNode {
     /// Count the number of leaf (terminal) panes.
     pub fn count_leaves(&self) -> usize {
         match self {
-            LayoutNode::Leaf { .. } => 1,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => 1,
             LayoutNode::Split { first, second, .. } => first.count_leaves() + second.count_leaves(),
             LayoutNode::Grid { children, .. } => children.iter().map(|c| c.count_leaves()).sum(),
         }
@@ -97,36 +104,34 @@ impl LayoutNode {
         match self {
             LayoutNode::Leaf { terminal_id: id } => {
                 if id == terminal_id {
-                    // The root itself is the target — tree becomes empty
                     None
                 } else {
-                    // Not found
                     None
                 }
             }
+            LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split { first, second, .. } => {
-                // Check if the target is a direct child
-                if let LayoutNode::Leaf {
-                    terminal_id: ref id,
-                } = **first
-                {
-                    if id == terminal_id {
-                        // Remove first, replace self with second
-                        let sibling = *second.clone();
-                        *self = sibling.clone();
-                        return Some(sibling);
-                    }
+                // Check if the target is a direct child (Leaf or ContentPane)
+                let first_matches = match first.as_ref() {
+                    LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    _ => false,
+                };
+                if first_matches {
+                    let sibling = *second.clone();
+                    *self = sibling.clone();
+                    return Some(sibling);
                 }
-                if let LayoutNode::Leaf {
-                    terminal_id: ref id,
-                } = **second
-                {
-                    if id == terminal_id {
-                        // Remove second, replace self with first
-                        let sibling = *first.clone();
-                        *self = sibling.clone();
-                        return Some(sibling);
-                    }
+
+                let second_matches = match second.as_ref() {
+                    LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    _ => false,
+                };
+                if second_matches {
+                    let sibling = *first.clone();
+                    *self = sibling.clone();
+                    return Some(sibling);
                 }
 
                 // Recurse into children
@@ -145,9 +150,11 @@ impl LayoutNode {
                 children,
             } => {
                 // Grid children are leaves in practice. Check each child.
-                // Find which child (if any) is the target leaf.
-                let target_idx = children.iter().position(|c| {
-                    matches!(c.as_ref(), LayoutNode::Leaf { terminal_id: id } if id == terminal_id)
+                // Find which child (if any) is the target leaf or content pane.
+                let target_idx = children.iter().position(|c| match c.as_ref() {
+                    LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    _ => false,
                 });
 
                 if let Some(idx) = target_idx {
@@ -257,6 +264,7 @@ impl LayoutNode {
                     false
                 }
             }
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => {
                 if first.split_at(terminal_id, new_terminal_id, direction, ratio) {
                     return true;
@@ -296,6 +304,7 @@ impl LayoutNode {
                     *terminal_id = to.to_string();
                 }
             }
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.rename_terminal(from, to);
                 second.rename_terminal(from, to);
@@ -338,6 +347,13 @@ impl LayoutNode {
         match self {
             LayoutNode::Leaf { terminal_id: id } => {
                 if id == terminal_id {
+                    Some(AdjResult::Propagate)
+                } else {
+                    None
+                }
+            }
+            LayoutNode::ContentPane { pane_id } => {
+                if pane_id == terminal_id {
                     Some(AdjResult::Propagate)
                 } else {
                     None
@@ -446,6 +462,8 @@ impl LayoutNode {
                     None
                 }
             }
+            // Content panes are not tied to terminal liveness; always keep.
+            LayoutNode::ContentPane { .. } => Some(self.clone()),
             LayoutNode::Split {
                 direction,
                 ratio,
@@ -606,6 +624,7 @@ impl LayoutNode {
     fn first_leaf(&self) -> String {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id.clone(),
+            LayoutNode::ContentPane { pane_id } => pane_id.clone(),
             LayoutNode::Split { first, .. } => first.first_leaf(),
             LayoutNode::Grid { children, .. } => children[0].first_leaf(),
         }
@@ -615,6 +634,7 @@ impl LayoutNode {
     fn last_leaf(&self) -> String {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id.clone(),
+            LayoutNode::ContentPane { pane_id } => pane_id.clone(),
             LayoutNode::Split { second, .. } => second.last_leaf(),
             LayoutNode::Grid { children, .. } => children[3].last_leaf(),
         }
@@ -632,7 +652,7 @@ impl LayoutNode {
         delta: f64,
     ) -> bool {
         match self {
-            LayoutNode::Leaf { .. } => false,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split {
                 direction: split_dir,
                 ratio,

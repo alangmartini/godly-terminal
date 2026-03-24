@@ -281,6 +281,15 @@ enum TerminalEmptyState {
     NoTerminalsOpen,
 }
 
+/// State for a file viewer pane (code, markdown, or image).
+#[derive(Debug, Clone)]
+pub struct FilePaneState {
+    pub file_path: String,
+    pub file_type: String,
+    pub content: String,
+    pub last_modified: Option<std::time::SystemTime>,
+}
+
 /// Main Iced application state — multi-terminal with event-driven updates.
 pub struct GodlyApp {
     /// Daemon client (shared with bridge thread).
@@ -488,6 +497,8 @@ pub struct GodlyApp {
     pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer,
     /// Whether to use the new image-based renderer instead of the canvas.
     use_pixel_renderer: bool,
+    /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
+    pub(crate) file_panes: HashMap<String, FilePaneState>,
 }
 
 impl Default for GodlyApp {
@@ -616,6 +627,7 @@ impl Default for GodlyApp {
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
             use_pixel_renderer: false,
+            file_panes: HashMap::new(),
         }
     }
 }
@@ -1010,6 +1022,13 @@ pub enum Message {
     WhisperCancel,
     /// Screenshot captured via iced window API.
     ScreenshotCaptured(iced::window::Screenshot),
+    // --- File Pane Management ---
+    /// Close a file pane by its ID.
+    FilePaneClose(String),
+    /// A watched file's content changed on disk.
+    FilePaneFileChanged { pane_id: String, content: String },
+    /// Periodic tick to check file modification times.
+    FilePaneWatchTick,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -3934,6 +3953,40 @@ impl GodlyApp {
             Message::McpEvent(event) => {
                 return self.handle_mcp_event(event);
             }
+            // --- File Pane Management ---
+            Message::FilePaneClose(pane_id) => {
+                self.file_panes.remove(&pane_id);
+                self.remove_content_pane_from_layouts(&pane_id);
+            }
+            Message::FilePaneFileChanged { pane_id, content } => {
+                if let Some(state) = self.file_panes.get_mut(&pane_id) {
+                    state.content = content;
+                }
+            }
+            Message::FilePaneWatchTick => {
+                // Check file modification times and reload content if changed.
+                let updates: Vec<(String, std::time::SystemTime, String)> = self
+                    .file_panes
+                    .iter()
+                    .filter_map(|(id, state)| {
+                        let modified = std::fs::metadata(&state.file_path)
+                            .ok()
+                            .and_then(|m| m.modified().ok())?;
+                        if state.last_modified.map_or(true, |prev| modified > prev) {
+                            let content = std::fs::read_to_string(&state.file_path).ok()?;
+                            Some((id.clone(), modified, content))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for (pane_id, modified, content) in updates {
+                    if let Some(state) = self.file_panes.get_mut(&pane_id) {
+                        state.last_modified = Some(modified);
+                        state.content = content;
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -5875,6 +5928,14 @@ impl GodlyApp {
             subscriptions.push(
                 iced::time::every(Duration::from_millis(100))
                     .map(|_| Message::WhisperTimerTick),
+            );
+        }
+
+        // File pane watch: poll for file modifications every 500ms.
+        if !self.file_panes.is_empty() {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(500))
+                    .map(|_| Message::FilePaneWatchTick),
             );
         }
 
@@ -8445,6 +8506,7 @@ fn pane_rect_for_terminal(
         LayoutNode::Leaf {
             terminal_id: leaf_id,
         } => (leaf_id == terminal_id).then_some(rect),
+        LayoutNode::ContentPane { pane_id } => (pane_id == terminal_id).then_some(rect),
         LayoutNode::Split {
             direction,
             ratio,
@@ -8527,6 +8589,33 @@ fn replace_leaf_in_layout(layout: &mut LayoutNode, old_id: &str, new_id: String)
             replace_leaf_in_layout(second, old_id, new_id);
         }
         _ => {}
+    }
+}
+
+/// Detect the file viewer type from a file extension.
+pub(crate) fn detect_file_type(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    // Case-insensitive comparison without allocating a lowercase copy.
+    if ext.eq_ignore_ascii_case("md")
+        || ext.eq_ignore_ascii_case("markdown")
+        || ext.eq_ignore_ascii_case("mdx")
+    {
+        "markdown"
+    } else if ext.eq_ignore_ascii_case("png")
+        || ext.eq_ignore_ascii_case("jpg")
+        || ext.eq_ignore_ascii_case("jpeg")
+        || ext.eq_ignore_ascii_case("gif")
+        || ext.eq_ignore_ascii_case("bmp")
+        || ext.eq_ignore_ascii_case("svg")
+        || ext.eq_ignore_ascii_case("webp")
+        || ext.eq_ignore_ascii_case("ico")
+    {
+        "image"
+    } else {
+        "code"
     }
 }
 

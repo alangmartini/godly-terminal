@@ -24,7 +24,7 @@ pub use frame::{
     TAG_SHIM_OUTPUT, TAG_SHIM_WRITE,
 };
 pub use layout_tree::{LayoutNode, SplitDirection};
-pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
+pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo, PaneInfo};
 pub use messages::{DaemonMessage, Event, Request, RequestEnvelope, Response};
 pub use messages::{ShimRequest, ShimResponse};
 pub use types::ShimMetadata;

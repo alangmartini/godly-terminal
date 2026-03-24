@@ -69,6 +69,8 @@ impl FocusDirection {
 pub enum LayoutNode {
     /// A single terminal pane.
     Leaf { terminal_id: String },
+    /// A non-terminal content pane (file viewer, markdown preview, image).
+    ContentPane { pane_id: String },
     /// A split containing two sub-layouts.
     Split {
         direction: SplitDirection,
@@ -84,19 +86,124 @@ impl LayoutNode {
     pub fn find_leaf(&self, id: &str) -> bool {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id == id,
+            LayoutNode::ContentPane { pane_id } => pane_id == id,
             LayoutNode::Split { first, second, .. } => first.find_leaf(id) || second.find_leaf(id),
+        }
+    }
+
+    /// Returns `true` if a content pane with the given id exists anywhere in the tree.
+    pub fn find_content_pane(&self, id: &str) -> bool {
+        match self {
+            LayoutNode::Leaf { .. } => false,
+            LayoutNode::ContentPane { pane_id } => pane_id == id,
+            LayoutNode::Split { first, second, .. } => {
+                first.find_content_pane(id) || second.find_content_pane(id)
+            }
+        }
+    }
+
+    /// Collects all content pane IDs in depth-first order.
+    pub fn all_content_pane_ids(&self) -> Vec<&str> {
+        let mut ids = Vec::new();
+        self.collect_content_pane_ids(&mut ids);
+        ids
+    }
+
+    fn collect_content_pane_ids<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            LayoutNode::Leaf { .. } => {}
+            LayoutNode::ContentPane { pane_id } => out.push(pane_id),
+            LayoutNode::Split { first, second, .. } => {
+                first.collect_content_pane_ids(out);
+                second.collect_content_pane_ids(out);
+            }
+        }
+    }
+
+    /// Removes a content pane from its parent split and promotes the sibling.
+    ///
+    /// Returns `Some(removed_pane_id)` if found, `None` otherwise.
+    pub fn unsplit_content_pane(&mut self, target_id: &str) -> Option<String> {
+        match self {
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => None,
+            LayoutNode::Split { first, second, .. } => {
+                if let LayoutNode::ContentPane { pane_id } = first.as_ref() {
+                    if pane_id == target_id {
+                        let removed = pane_id.clone();
+                        let sibling = std::mem::replace(
+                            second.as_mut(),
+                            LayoutNode::Leaf {
+                                terminal_id: String::new(),
+                            },
+                        );
+                        *self = sibling;
+                        return Some(removed);
+                    }
+                }
+                if let LayoutNode::ContentPane { pane_id } = second.as_ref() {
+                    if pane_id == target_id {
+                        let removed = pane_id.clone();
+                        let sibling = std::mem::replace(
+                            first.as_mut(),
+                            LayoutNode::Leaf {
+                                terminal_id: String::new(),
+                            },
+                        );
+                        *self = sibling;
+                        return Some(removed);
+                    }
+                }
+                first
+                    .unsplit_content_pane(target_id)
+                    .or_else(|| second.unsplit_content_pane(target_id))
+            }
+        }
+    }
+
+    /// Splits a leaf node, inserting an arbitrary `LayoutNode` alongside it.
+    ///
+    /// Finds the leaf with `target_id` and replaces it with a Split containing
+    /// the original leaf and the provided `new_node`. Returns `true` if found.
+    pub fn split_leaf_with_node(
+        &mut self,
+        target_id: &str,
+        new_node: LayoutNode,
+        direction: SplitDirection,
+    ) -> bool {
+        match self {
+            LayoutNode::Leaf { terminal_id } if terminal_id == target_id => {
+                let old = std::mem::replace(
+                    self,
+                    LayoutNode::Leaf {
+                        terminal_id: String::new(),
+                    },
+                );
+                *self = LayoutNode::Split {
+                    direction,
+                    ratio: 0.5,
+                    first: Box::new(old),
+                    second: Box::new(new_node),
+                };
+                true
+            }
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => false,
+            LayoutNode::Split { first, second, .. } => {
+                first.split_leaf_with_node(target_id, new_node.clone(), direction)
+                    || second.split_leaf_with_node(target_id, new_node, direction)
+            }
         }
     }
 
     /// Counts the total number of leaf nodes in the tree.
     pub fn leaf_count(&self) -> usize {
         match self {
-            LayoutNode::Leaf { .. } => 1,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => 1,
             LayoutNode::Split { first, second, .. } => first.leaf_count() + second.leaf_count(),
         }
     }
 
     /// Collects all leaf terminal IDs in depth-first, first-child-first order.
+    /// Content panes are excluded (use `all_content_pane_ids` for those).
     pub fn all_leaf_ids(&self) -> Vec<&str> {
         let mut ids = Vec::new();
         self.collect_leaf_ids(&mut ids);
@@ -106,6 +213,7 @@ impl LayoutNode {
     fn collect_leaf_ids<'a>(&'a self, out: &mut Vec<&'a str>) {
         match self {
             LayoutNode::Leaf { terminal_id } => out.push(terminal_id),
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.collect_leaf_ids(out);
                 second.collect_leaf_ids(out);
@@ -173,7 +281,7 @@ impl LayoutNode {
                 };
                 true
             }
-            LayoutNode::Leaf { .. } => false,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => {
                 first.split_leaf_with_placement(target_id, new_id.clone(), placement)
                     || second.split_leaf_with_placement(target_id, new_id, placement)
@@ -188,7 +296,7 @@ impl LayoutNode {
     /// Cannot unsplit the root leaf (if the entire tree is a single leaf, returns `None`).
     pub fn unsplit_leaf(&mut self, target_id: &str) -> Option<String> {
         match self {
-            LayoutNode::Leaf { .. } => None,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split { first, second, .. } => {
                 if let LayoutNode::Leaf { terminal_id } = first.as_ref() {
                     if terminal_id == target_id {
@@ -238,6 +346,7 @@ impl LayoutNode {
     pub fn first_leaf_id(&self) -> &str {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id,
+            LayoutNode::ContentPane { pane_id } => pane_id,
             LayoutNode::Split { first, .. } => first.first_leaf_id(),
         }
     }
@@ -246,6 +355,7 @@ impl LayoutNode {
     pub fn last_leaf_id(&self) -> &str {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id,
+            LayoutNode::ContentPane { pane_id } => pane_id,
             LayoutNode::Split { second, .. } => second.last_leaf_id(),
         }
     }
@@ -254,7 +364,7 @@ impl LayoutNode {
     /// or `None` if there is no neighbor in that direction.
     pub fn neighbor_in_direction(&self, current_id: &str, direction: FocusDirection) -> Option<&str> {
         match self {
-            LayoutNode::Leaf { .. } => None,
+            LayoutNode::Leaf { .. } | LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split {
                 direction: split_dir,
                 first,
