@@ -117,37 +117,34 @@ impl LayoutNode {
         match self {
             LayoutNode::Leaf { terminal_id: id } => {
                 if id == terminal_id {
-                    // The root itself is the target — tree becomes empty
                     None
                 } else {
-                    // Not found
                     None
                 }
             }
             LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split { first, second, .. } => {
-                // Check if the target is a direct child
-                if let LayoutNode::Leaf {
-                    terminal_id: ref id,
-                } = **first
-                {
-                    if id == terminal_id {
-                        // Remove first, replace self with second
-                        let sibling = *second.clone();
-                        *self = sibling.clone();
-                        return Some(sibling);
-                    }
+                // Check if the target is a direct child (Leaf or ContentPane)
+                let first_matches = match first.as_ref() {
+                    LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    _ => false,
+                };
+                if first_matches {
+                    let sibling = *second.clone();
+                    *self = sibling.clone();
+                    return Some(sibling);
                 }
-                if let LayoutNode::Leaf {
-                    terminal_id: ref id,
-                } = **second
-                {
-                    if id == terminal_id {
-                        // Remove second, replace self with first
-                        let sibling = *first.clone();
-                        *self = sibling.clone();
-                        return Some(sibling);
-                    }
+
+                let second_matches = match second.as_ref() {
+                    LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    _ => false,
+                };
+                if second_matches {
+                    let sibling = *first.clone();
+                    *self = sibling.clone();
+                    return Some(sibling);
                 }
 
                 // Recurse into children
@@ -166,9 +163,11 @@ impl LayoutNode {
                 children,
             } => {
                 // Grid children are leaves in practice. Check each child.
-                // Find which child (if any) is the target leaf.
-                let target_idx = children.iter().position(|c| {
-                    matches!(c.as_ref(), LayoutNode::Leaf { terminal_id: id } if id == terminal_id)
+                // Find which child (if any) is the target leaf or content pane.
+                let target_idx = children.iter().position(|c| match c.as_ref() {
+                    LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+                    LayoutNode::ContentPane { pane_id } => pane_id == terminal_id,
+                    _ => false,
                 });
 
                 if let Some(idx) = target_idx {

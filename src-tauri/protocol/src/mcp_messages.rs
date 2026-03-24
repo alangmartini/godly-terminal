@@ -484,6 +484,18 @@ pub struct McpTerminalInfo {
     pub exit_code: Option<i64>,
 }
 
+/// Pane info returned by ListPanes and pane management tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneInfo {
+    pub pane_id: String,
+    pub pane_type: String,
+    pub workspace_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_type: Option<String>,
+}
+
 /// Workspace info returned by MCP queries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpWorkspaceInfo {
@@ -578,6 +590,13 @@ pub enum McpResponse {
     },
     LayoutTree {
         tree: Option<crate::layout_tree::LayoutNode>,
+    },
+    PaneCreated {
+        pane_id: String,
+        file_type: String,
+    },
+    PaneList {
+        panes: Vec<PaneInfo>,
     },
     JsResult {
         result: Option<String>,
