@@ -107,7 +107,7 @@ use crate::settings_dialog::{self, SettingsTab};
 use crate::shortcuts_tab;
 use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
 use crate::status_bar;
-use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
+use crate::split_pane::{view_layout, LayoutNode, PaneContent, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
@@ -279,6 +279,15 @@ impl PaneRect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerminalEmptyState {
     NoTerminalsOpen,
+}
+
+/// State for a file viewer pane (code, markdown, or image).
+#[derive(Debug, Clone)]
+pub struct FilePaneState {
+    pub file_path: String,
+    pub file_type: String,
+    pub content: String,
+    pub last_modified: Option<std::time::SystemTime>,
 }
 
 /// Main Iced application state — multi-terminal with event-driven updates.
@@ -488,6 +497,8 @@ pub struct GodlyApp {
     pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer,
     /// Whether to use the new image-based renderer instead of the canvas.
     use_pixel_renderer: bool,
+    /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
+    pub(crate) file_panes: HashMap<String, FilePaneState>,
 }
 
 impl Default for GodlyApp {
@@ -616,6 +627,7 @@ impl Default for GodlyApp {
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
             use_pixel_renderer: false,
+            file_panes: HashMap::new(),
         }
     }
 }
@@ -1010,6 +1022,13 @@ pub enum Message {
     WhisperCancel,
     /// Screenshot captured via iced window API.
     ScreenshotCaptured(iced::window::Screenshot),
+    // --- File Pane Management ---
+    /// Close a file pane by its ID.
+    FilePaneClose(String),
+    /// A watched file's content changed on disk.
+    FilePaneFileChanged { pane_id: String, content: String },
+    /// Periodic tick to check file modification times.
+    FilePaneWatchTick,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -3946,6 +3965,40 @@ impl GodlyApp {
             Message::McpEvent(event) => {
                 return self.handle_mcp_event(event);
             }
+            // --- File Pane Management ---
+            Message::FilePaneClose(pane_id) => {
+                self.file_panes.remove(&pane_id);
+                self.remove_content_pane_from_layouts(&pane_id);
+            }
+            Message::FilePaneFileChanged { pane_id, content } => {
+                if let Some(state) = self.file_panes.get_mut(&pane_id) {
+                    state.content = content;
+                }
+            }
+            Message::FilePaneWatchTick => {
+                // Check file modification times and reload content if changed.
+                let updates: Vec<(String, std::time::SystemTime, String)> = self
+                    .file_panes
+                    .iter()
+                    .filter_map(|(id, state)| {
+                        let modified = std::fs::metadata(&state.file_path)
+                            .ok()
+                            .and_then(|m| m.modified().ok())?;
+                        if state.last_modified.map_or(true, |prev| modified > prev) {
+                            let content = std::fs::read_to_string(&state.file_path).ok()?;
+                            Some((id.clone(), modified, content))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for (pane_id, modified, content) in updates {
+                    if let Some(state) = self.file_panes.get_mut(&pane_id) {
+                        state.last_modified = Some(modified);
+                        state.content = content;
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -4076,9 +4129,26 @@ impl GodlyApp {
         {
             self.view_terminal_empty_state()
         } else if let Some(layout) = self.active_layout() {
-            view_layout(layout, &|terminal_id: &str| {
-                self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
-            })
+            view_layout(
+                layout,
+                &|terminal_id: &str| {
+                    self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
+                },
+                &|content: &PaneContent| {
+                    match content {
+                        PaneContent::FileViewer { file_path, .. } => {
+                            container(text(format!("File: {}", file_path)))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .into()
+                        }
+                        _ => container(text(""))
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .into(),
+                    }
+                },
+            )
         } else {
             self.view_terminal_empty_state()
         };
@@ -5890,6 +5960,14 @@ impl GodlyApp {
             );
         }
 
+        // File pane watch: poll for file modifications every 500ms.
+        if !self.file_panes.is_empty() {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(500))
+                    .map(|_| Message::FilePaneWatchTick),
+            );
+        }
+
         Subscription::batch(subscriptions)
     }
 
@@ -6950,6 +7028,7 @@ impl GodlyApp {
             return Task::none();
         };
 
+        let old_offset = term.scrollback_offset;
         let new_offset = if delta < 0 {
             term.scrollback_offset
                 .saturating_add((-delta) as usize)
@@ -6960,6 +7039,13 @@ impl GodlyApp {
 
         term.scrollback_offset = new_offset;
         self.persist_scrollback_offsets();
+
+        // Adjust selection coordinates so the highlight stays on the same
+        // content after the viewport shifts. Bug #755.
+        let scroll_delta = new_offset as isize - old_offset as isize;
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, new_offset)
     }
@@ -6975,10 +7061,22 @@ impl GodlyApp {
             .map(|t| t.total_scrollback)
             .unwrap_or(0);
 
+        let old_offset = self
+            .terminals
+            .get(&active_id)
+            .map(|t| t.scrollback_offset)
+            .unwrap_or(0);
+
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = max;
         }
         self.persist_scrollback_offsets();
+
+        // Adjust selection for scroll. Bug #755.
+        let scroll_delta = max as isize - old_offset as isize;
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, max)
     }
@@ -6988,10 +7086,22 @@ impl GodlyApp {
             return Task::none();
         };
 
+        let old_offset = self
+            .terminals
+            .get(&active_id)
+            .map(|t| t.scrollback_offset)
+            .unwrap_or(0);
+
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = 0;
         }
         self.persist_scrollback_offsets();
+
+        // Adjust selection for scroll. Bug #755.
+        let scroll_delta = -(old_offset as isize);
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, 0)
     }
@@ -8461,6 +8571,7 @@ fn pane_rect_for_terminal(
         LayoutNode::Leaf {
             terminal_id: leaf_id,
         } => (leaf_id == terminal_id).then_some(rect),
+        LayoutNode::ContentPane { .. } => None,
         LayoutNode::Split {
             direction,
             ratio,
@@ -8543,6 +8654,33 @@ fn replace_leaf_in_layout(layout: &mut LayoutNode, old_id: &str, new_id: String)
             replace_leaf_in_layout(second, old_id, new_id);
         }
         _ => {}
+    }
+}
+
+/// Detect the file viewer type from a file extension.
+pub(crate) fn detect_file_type(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    // Case-insensitive comparison without allocating a lowercase copy.
+    if ext.eq_ignore_ascii_case("md")
+        || ext.eq_ignore_ascii_case("markdown")
+        || ext.eq_ignore_ascii_case("mdx")
+    {
+        "markdown"
+    } else if ext.eq_ignore_ascii_case("png")
+        || ext.eq_ignore_ascii_case("jpg")
+        || ext.eq_ignore_ascii_case("jpeg")
+        || ext.eq_ignore_ascii_case("gif")
+        || ext.eq_ignore_ascii_case("bmp")
+        || ext.eq_ignore_ascii_case("svg")
+        || ext.eq_ignore_ascii_case("webp")
+        || ext.eq_ignore_ascii_case("ico")
+    {
+        "image"
+    } else {
+        "code"
     }
 }
 

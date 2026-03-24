@@ -29,6 +29,7 @@ mod settings_dialog;
 mod shortcuts_tab;
 mod sidebar;
 mod split_pane;
+mod file_pane;
 mod subscription;
 mod tab_bar;
 mod terminal_state;

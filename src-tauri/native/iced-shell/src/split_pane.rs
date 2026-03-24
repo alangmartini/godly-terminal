@@ -1,7 +1,8 @@
 use iced::widget::{column, container, row};
 use iced::{Element, Length};
 
-pub use godly_layout_core::{LayoutNode, SplitDirection};
+#[allow(unused_imports)]
+pub use godly_layout_core::{LayoutNode, PaneContent, FileViewerType, SplitDirection};
 
 /// Converts a float ratio (0.0..1.0) to integer fill portions for two children.
 ///
@@ -17,14 +18,17 @@ fn ratio_to_portions(ratio: f32) -> (u16, u16) {
 /// Renders a layout tree into an iced `Element`.
 ///
 /// - For `Leaf` nodes: delegates to `render_leaf` with the terminal ID.
+/// - For `ContentPane` nodes: delegates to `render_content_pane` with the pane content.
 /// - For `Split` nodes with `Horizontal`: uses a `row![]` with proportional widths.
 /// - For `Split` nodes with `Vertical`: uses a `column![]` with proportional heights.
 pub fn view_layout<'a, M: Clone + 'a>(
     node: &LayoutNode,
     render_leaf: &dyn Fn(&str) -> Element<'a, M>,
+    render_content_pane: &dyn Fn(&PaneContent) -> Element<'a, M>,
 ) -> Element<'a, M> {
     match node {
         LayoutNode::Leaf { terminal_id } => render_leaf(terminal_id),
+        LayoutNode::ContentPane { content } => render_content_pane(content),
         LayoutNode::Split {
             direction,
             ratio,
@@ -32,8 +36,8 @@ pub fn view_layout<'a, M: Clone + 'a>(
             second,
         } => {
             let (first_portion, second_portion) = ratio_to_portions(*ratio);
-            let first_el = view_layout(first, render_leaf);
-            let second_el = view_layout(second, render_leaf);
+            let first_el = view_layout(first, render_leaf, render_content_pane);
+            let second_el = view_layout(second, render_leaf, render_content_pane);
 
             match direction {
                 SplitDirection::Horizontal => {
@@ -101,10 +105,10 @@ mod tests {
     fn test_nested_splits() {
         // Structure:
         //   Split(H)
-        //   ├── t1
-        //   └── Split(V)
-        //       ├── t2
-        //       └── t3
+        //   +-- t1
+        //   +-- Split(V)
+        //       +-- t2
+        //       +-- t3
         let node = LayoutNode::Split {
             direction: SplitDirection::Horizontal,
             ratio: 0.5,
@@ -133,10 +137,10 @@ mod tests {
     fn test_all_leaf_ids_order() {
         // Structure:
         //   Split(H)
-        //   ├── Split(V)
-        //   │   ├── t1
-        //   │   └── t2
-        //   └── t3
+        //   +-- Split(V)
+        //   |   +-- t1
+        //   |   +-- t2
+        //   +-- t3
         //
         // Depth-first, first-child-first: t1, t2, t3
         let node = LayoutNode::Split {
@@ -431,5 +435,27 @@ mod tests {
             }),
         };
         assert_eq!(node.next_leaf_id("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_content_pane_not_counted_as_leaf() {
+        let node = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::ContentPane {
+                content: PaneContent::FileViewer {
+                    pane_id: "fp1".into(),
+                    file_path: "/tmp/test.rs".into(),
+                    file_type: FileViewerType::Code,
+                },
+            }),
+        };
+
+        assert_eq!(node.leaf_count(), 1);
+        assert_eq!(node.all_leaf_ids(), vec!["t1"]);
+        assert!(!node.find_leaf("fp1"));
     }
 }

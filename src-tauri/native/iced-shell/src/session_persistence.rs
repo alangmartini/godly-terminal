@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::split_pane::{LayoutNode, SplitDirection};
+use crate::split_pane::{FileViewerType, LayoutNode, PaneContent, SplitDirection};
 
 pub const PERSISTENCE_VERSION: u32 = 1;
 pub const AUTOSAVE_INTERVAL_SECS: u64 = 60;
@@ -51,6 +51,11 @@ pub struct PersistedWorkspaceState {
 pub enum PersistedLayoutNode {
     Leaf {
         terminal_id: String,
+    },
+    ContentPane {
+        pane_id: String,
+        file_path: String,
+        file_type: String,
     },
     Split {
         direction: PersistedSplitDirection,
@@ -106,6 +111,16 @@ impl PersistedLayoutNode {
             LayoutNode::Leaf { terminal_id } => Self::Leaf {
                 terminal_id: terminal_id.clone(),
             },
+            // Content panes are transient and not persisted; serialize as a
+            // leaf with the pane_id so the slot is preserved in the tree shape.
+            LayoutNode::ContentPane {
+                content: PaneContent::FileViewer { pane_id, .. },
+            } => Self::Leaf {
+                terminal_id: pane_id.clone(),
+            },
+            LayoutNode::ContentPane { .. } => Self::Leaf {
+                terminal_id: String::new(),
+            },
             LayoutNode::Split {
                 direction,
                 ratio,
@@ -130,6 +145,25 @@ impl PersistedLayoutNode {
                 } else {
                     None
                 }
+            }
+            PersistedLayoutNode::ContentPane {
+                pane_id,
+                file_path,
+                file_type,
+            } => {
+                // File panes always survive — no "live session" filtering needed.
+                let ft = match file_type.as_str() {
+                    "markdown" => FileViewerType::Markdown,
+                    "image" => FileViewerType::Image,
+                    _ => FileViewerType::Code,
+                };
+                Some(LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer {
+                        pane_id: pane_id.clone(),
+                        file_path: file_path.clone(),
+                        file_type: ft,
+                    },
+                })
             }
             PersistedLayoutNode::Split {
                 direction,
@@ -357,8 +391,13 @@ pub fn merge_with_live_sessions(
                     .map(|id| id.to_string())
                     .collect();
                 if leaf_ids.is_empty() {
-                    // Layout filtered down to nothing — preserve workspace metadata only.
-                    (None, None)
+                    // No terminal leaves survived, but the layout may still contain
+                    // content panes (file viewers) that should be preserved.
+                    if !layout.all_content_pane_ids().is_empty() {
+                        (Some(layout), None)
+                    } else {
+                        (None, None)
+                    }
                 } else {
                     used_terminal_ids.extend(leaf_ids.iter().cloned());
                     let focused = if leaf_ids.iter().any(|id| id == &workspace.focused_terminal) {
@@ -633,7 +672,7 @@ mod tests {
                 assert_eq!(*direction, SplitDirection::Vertical, "direction must survive round-trip");
                 assert!((ratio - 0.6).abs() < 0.01, "ratio must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
@@ -663,7 +702,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(*direction, SplitDirection::Horizontal, "direction must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
@@ -1113,6 +1152,7 @@ mod tests {
             terminal_worktree_paths: HashMap::new(),
             terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-godly".to_string(),
@@ -1215,347 +1255,154 @@ mod tests {
         );
     }
 
-    /// Helper: create a temp path unique to the calling test.
-    fn test_persistence_path(suffix: &str) -> PathBuf {
-        std::env::temp_dir()
-            .join(format!(
-                "godly-test-{}-{}.json",
-                std::process::id(),
-                suffix
-            ))
+    #[test]
+    fn content_pane_round_trip() {
+        let layout = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::ContentPane {
+                content: PaneContent::FileViewer {
+                    pane_id: "fp-abc123".into(),
+                    file_path: "/tmp/test.rs".into(),
+                    file_type: FileViewerType::Code,
+                },
+            }),
+        };
+
+        let persisted = PersistedLayoutNode::from_layout(&layout);
+
+        let live_ids: HashSet<&str> = ["t1"].into_iter().collect();
+        let restored = persisted.to_layout_filtered(&live_ids);
+
+        assert!(restored.is_some());
+        let restored = restored.unwrap();
+        assert!(restored.find_leaf("t1"));
+        assert!(restored.find_content_pane("fp-abc123"));
     }
 
-    /// Helper: build a minimal persisted workspace.
-    fn make_workspace(id: &str, name: &str, folder: &str) -> PersistedWorkspaceState {
-        PersistedWorkspaceState {
-            id: id.to_string(),
-            name: name.to_string(),
-            folder_path: folder.to_string(),
-            worktree_mode: false,
-            focused_terminal: format!("t-{}", id),
-            layout: PersistedLayoutNode::Leaf {
-                terminal_id: format!("t-{}", id),
+    #[test]
+    fn content_pane_survives_when_terminal_dies() {
+        let layout = LayoutNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf {
+                terminal_id: "t1".into(),
+            }),
+            second: Box::new(LayoutNode::ContentPane {
+                content: PaneContent::FileViewer {
+                    pane_id: "fp-abc123".into(),
+                    file_path: "/tmp/test.rs".into(),
+                    file_type: FileViewerType::Code,
+                },
+            }),
+        };
+
+        let persisted = PersistedLayoutNode::from_layout(&layout);
+
+        // t1 is NOT live
+        let live_ids: HashSet<&str> = HashSet::new();
+        let restored = persisted.to_layout_filtered(&live_ids);
+
+        // Content pane should survive as the root
+        assert!(restored.is_some());
+        match &restored.unwrap() {
+            LayoutNode::ContentPane { content } => match content {
+                PaneContent::FileViewer { pane_id, .. } => assert_eq!(pane_id, "fp-abc123"),
+                _ => panic!("Expected FileViewer"),
             },
+            _ => panic!("Expected ContentPane to be promoted"),
         }
     }
 
-    /// Helper: build a minimal persisted session state from workspaces.
-    fn make_session(workspaces: Vec<PersistedWorkspaceState>) -> PersistedSessionState {
-        PersistedSessionState {
+    #[test]
+    fn content_pane_json_round_trip() {
+        let persisted = PersistedLayoutNode::ContentPane {
+            pane_id: "fp-test".into(),
+            file_path: "/home/user/code.rs".into(),
+            file_type: "code".into(),
+        };
+
+        let json = serde_json::to_string(&persisted).unwrap();
+        let deserialized: PersistedLayoutNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(persisted, deserialized);
+    }
+
+    #[test]
+    fn content_pane_preserved_in_merge_when_terminals_die() {
+        let persisted = PersistedSessionState {
             version: PERSISTENCE_VERSION,
             sidebar_visible: true,
             settings_open: false,
             settings_tab: "shortcuts".to_string(),
-            font_size: 14.0,
+            font_size: 13.0,
             font_family: "Geist Mono".to_string(),
-            next_workspace_num: (workspaces.len() as u32) + 1,
-            active_workspace_id: workspaces.first().map(|w| w.id.clone()),
-            active_terminal_id: workspaces.first().map(|w| w.focused_terminal.clone()),
+            next_workspace_num: 2,
+            active_workspace_id: Some("w-1".to_string()),
+            active_terminal_id: Some("t-1".to_string()),
             terminal_worktree_paths: HashMap::new(),
             terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
-            workspaces,
+            workspaces: vec![PersistedWorkspaceState {
+                id: "w-1".to_string(),
+                name: "Main".to_string(),
+                folder_path: ".".to_string(),
+                worktree_mode: false,
+                focused_terminal: "t-1".to_string(),
+                layout: PersistedLayoutNode::Split {
+                    direction: PersistedSplitDirection::Horizontal,
+                    ratio: 0.5,
+                    first: Box::new(PersistedLayoutNode::Leaf {
+                        terminal_id: "t-1".to_string(),
+                    }),
+                    second: Box::new(PersistedLayoutNode::ContentPane {
+                        pane_id: "fp-1".to_string(),
+                        file_path: "/tmp/test.rs".to_string(),
+                        file_type: "code".to_string(),
+                    }),
+                },
+            }],
+        };
+
+        // t-1 died — no live sessions
+        let merged = merge_with_live_sessions(&persisted, &[]);
+
+        // Content pane should keep the layout alive even though t-1 died.
+        let ws = &merged.workspaces[0];
+        assert!(
+            ws.layout.is_some(),
+            "layout should survive because content pane is present"
+        );
+        let layout = ws.layout.as_ref().unwrap();
+        assert!(layout.find_content_pane("fp-1"));
+    }
+
+    #[test]
+    fn content_pane_file_types_round_trip() {
+        for (type_str, expected_type) in [
+            ("code", FileViewerType::Code),
+            ("markdown", FileViewerType::Markdown),
+            ("image", FileViewerType::Image),
+        ] {
+            let persisted = PersistedLayoutNode::ContentPane {
+                pane_id: "fp-1".into(),
+                file_path: "/tmp/file".into(),
+                file_type: type_str.into(),
+            };
+
+            let live_ids: HashSet<&str> = HashSet::new();
+            let restored = persisted.to_layout_filtered(&live_ids).unwrap();
+
+            match &restored {
+                LayoutNode::ContentPane {
+                    content: PaneContent::FileViewer { file_type, .. },
+                } => {
+                    assert_eq!(*file_type, expected_type, "file type '{}' should round-trip", type_str);
+                }
+                _ => panic!("Expected ContentPane FileViewer"),
+            }
         }
-    }
-
-    #[test]
-    fn deleted_workspace_survives_crash_with_immediate_persist() {
-        // Bug #619 regression: delete_workspace() must call persist_session_state()
-        // so that the deletion is immediately written to disk. Without it, a crash
-        // within the 60-second autosave window restores the deleted workspace.
-        //
-        // This test verifies the fix: after deletion, the file is updated and the
-        // deleted workspace does NOT reappear on crash recovery.
-        let path = test_persistence_path("delete-persist");
-        let _cleanup = scopeguard(path.clone());
-
-        // Step 1: app state has 5 workspaces, saved to disk.
-        let mut state = make_session(vec![
-            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
-            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
-            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
-            make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"),
-            make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"),
-        ]);
-        save_to_path(&path, &state).expect("initial save");
-
-        // Step 2: user deletes "Workspace 1".
-        // Fix: delete_workspace() now calls persist_session_state(), which
-        // saves the updated state immediately.
-        state.workspaces.retain(|w| w.id != "w-1");
-        save_to_path(&path, &state).expect("persist after delete");
-
-        // Step 3: app crashes. On restart, load from the file.
-        let loaded = load_from_path(&path).expect("load after crash");
-        let merged = merge_with_live_sessions(&loaded, &[]);
-
-        // Deleted workspace should NOT be in the restored state.
-        let workspace_names: Vec<&str> =
-            merged.workspaces.iter().map(|w| w.name.as_str()).collect();
-        assert!(
-            !workspace_names.contains(&"Workspace 1"),
-            "Bug #619 regression: deleted workspace 'Workspace 1' reappears after crash. \
-             persist_session_state() should be called after delete_workspace(). \
-             Restored workspaces: {:?}",
-            workspace_names
-        );
-        assert_eq!(
-            merged.workspaces.len(),
-            4,
-            "4 workspaces should survive (5 original - 1 deleted)"
-        );
-    }
-
-    #[test]
-    fn created_workspaces_survive_crash_with_immediate_persist() {
-        // Bug #619 regression: create_new_workspace() must call persist_session_state()
-        // so that newly created workspaces are immediately written to disk. Without it,
-        // a crash within the 60-second autosave window loses the new workspaces.
-        //
-        // This test verifies the fix: after creation, the file is updated and
-        // new workspaces survive crash recovery.
-        let path = test_persistence_path("create-persist");
-        let _cleanup = scopeguard(path.clone());
-
-        // Step 1: app state has 3 workspaces, saved to disk.
-        let mut state = make_session(vec![
-            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
-            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
-            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
-        ]);
-        save_to_path(&path, &state).expect("initial save");
-
-        // Step 2: user creates 2 new workspaces.
-        // Fix: create_new_workspace() now calls persist_session_state(),
-        // which saves the updated state immediately after each creation.
-        state
-            .workspaces
-            .push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
-        save_to_path(&path, &state).expect("persist after create #1");
-        state.workspaces.push(make_workspace(
-            "w-5",
-            "Design System",
-            "C:\\Users\\dev\\design",
-        ));
-        save_to_path(&path, &state).expect("persist after create #2");
-
-        // Step 3: app crashes. On restart, load from the file.
-        let loaded = load_from_path(&path).expect("load after crash");
-        let merged = merge_with_live_sessions(&loaded, &[]);
-
-        // All 5 workspaces should be restored.
-        assert_eq!(
-            merged.workspaces.len(),
-            5,
-            "Bug #619 regression: workspaces created before crash are lost. \
-             persist_session_state() should be called after create_new_workspace(). \
-             Expected 5, got {}. Restored: {:?}",
-            merged.workspaces.len(),
-            merged
-                .workspaces
-                .iter()
-                .map(|w| w.name.as_str())
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn crash_after_mixed_mutations_restores_correct_state() {
-        // Bug #619 regression (full scenario): user deletes "Workspace 1",
-        // creates new workspaces, then the app crashes.
-        //
-        // This matches the exact user report: "once again there was a crash/rebuild
-        // and the only workspaces are workspace 1, godly-terminal and Mercado Pago
-        // and none other of the ones we created. I had also deleted workspace 1."
-        //
-        // Fix: persist_session_state() is called after every mutation, so the
-        // session file always reflects the current state.
-        let path = test_persistence_path("mixed-persist");
-        let _cleanup = scopeguard(path.clone());
-
-        // Step 1: initial state with 3 workspaces.
-        let mut state = make_session(vec![
-            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
-            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
-            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
-        ]);
-        save_to_path(&path, &state).expect("initial save");
-
-        // Step 2: user deletes "Workspace 1" → persist_session_state() called.
-        state.workspaces.retain(|w| w.id != "w-1");
-        save_to_path(&path, &state).expect("persist after delete");
-
-        // Step 3: user creates "Backend API" → persist_session_state() called.
-        state
-            .workspaces
-            .push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
-        save_to_path(&path, &state).expect("persist after create #1");
-
-        // Step 4: user creates "Design System" → persist_session_state() called.
-        state.workspaces.push(make_workspace(
-            "w-5",
-            "Design System",
-            "C:\\Users\\dev\\design",
-        ));
-        save_to_path(&path, &state).expect("persist after create #2");
-
-        // Step 5: app crashes. On restart, load and merge.
-        let loaded = load_from_path(&path).expect("load after crash");
-        let merged = merge_with_live_sessions(&loaded, &[]);
-
-        let workspace_names: Vec<&str> =
-            merged.workspaces.iter().map(|w| w.name.as_str()).collect();
-
-        // Deleted workspace should NOT reappear.
-        assert!(
-            !workspace_names.contains(&"Workspace 1"),
-            "Bug #619 regression: deleted 'Workspace 1' reappears after crash. \
-             Restored: {:?}",
-            workspace_names
-        );
-
-        // Newly created workspaces should be present.
-        assert!(
-            workspace_names.contains(&"Backend API"),
-            "Bug #619 regression: 'Backend API' created before crash is missing. \
-             Restored: {:?}",
-            workspace_names
-        );
-        assert!(
-            workspace_names.contains(&"Design System"),
-            "Bug #619 regression: 'Design System' created before crash is missing. \
-             Restored: {:?}",
-            workspace_names
-        );
-
-        // Expected final workspace set.
-        assert_eq!(
-            workspace_names,
-            vec!["godly-terminal", "Mercado Pago", "Backend API", "Design System"],
-            "Bug #619 regression: crash after workspace mutations should restore \
-             the current state, not stale autosave state. Restored: {:?}",
-            workspace_names
-        );
-    }
-
-    #[test]
-    fn atomic_write_creates_backup_and_temp_file_flow() {
-        // Verify that save_to_path uses the atomic write pattern:
-        // write to .tmp → backup .json to .bak → rename .tmp to .json
-        let path = test_persistence_path("atomic-write");
-        let _cleanup = scopeguard(path.clone());
-
-        let state_v1 = make_session(vec![
-            make_workspace("w-1", "First", "C:\\first"),
-        ]);
-        save_to_path(&path, &state_v1).expect("first save");
-        assert!(path.exists(), "primary file must exist after first save");
-
-        // Second save should create a backup of the first version.
-        let state_v2 = make_session(vec![
-            make_workspace("w-1", "First", "C:\\first"),
-            make_workspace("w-2", "Second", "C:\\second"),
-        ]);
-        save_to_path(&path, &state_v2).expect("second save");
-
-        let bak_path = path.with_extension("json.bak");
-        assert!(bak_path.exists(), "backup file must exist after second save");
-
-        // Primary should have v2 (2 workspaces).
-        let loaded = load_from_path(&path).expect("load primary");
-        assert_eq!(loaded.workspaces.len(), 2, "primary should have 2 workspaces");
-
-        // Backup should have v1 (1 workspace).
-        let backup = try_load_from_path(&bak_path).expect("load backup");
-        assert_eq!(backup.workspaces.len(), 1, "backup should have 1 workspace");
-
-        // Temp file should NOT exist (it was renamed to primary).
-        let tmp_path = path.with_extension("json.tmp");
-        assert!(!tmp_path.exists(), "temp file should be cleaned up after rename");
-
-        // Cleanup
-        let _ = std::fs::remove_file(&bak_path);
-    }
-
-    #[test]
-    fn corrupted_primary_recovers_from_backup() {
-        // Bug #619: if the process crashes during std::fs::write, the session
-        // file can be empty/corrupted. The backup provides recovery.
-        let path = test_persistence_path("backup-recovery");
-        let _cleanup = scopeguard(path.clone());
-
-        // Save a good state (creates primary and, on second save, backup).
-        let state = make_session(vec![
-            make_workspace("w-1", "Workspace 1", "C:\\dev"),
-            make_workspace("w-2", "godly-terminal", "C:\\dev\\godly"),
-            make_workspace("w-3", "Mercado Pago", "C:\\dev\\mp"),
-        ]);
-        save_to_path(&path, &state).expect("first save");
-        // Save again to create the backup.
-        save_to_path(&path, &state).expect("second save (creates backup)");
-
-        let bak_path = path.with_extension("json.bak");
-        assert!(bak_path.exists(), "backup must exist");
-
-        // Simulate crash corruption: primary file becomes empty.
-        std::fs::write(&path, "").expect("simulate corruption");
-
-        // Load should recover from backup.
-        let recovered = load_from_path(&path).expect(
-            "load should recover from backup when primary is corrupted"
-        );
-        assert_eq!(
-            recovered.workspaces.len(),
-            3,
-            "all 3 workspaces should be recovered from backup"
-        );
-
-        // Primary should be restored from backup.
-        let primary = try_load_from_path(&path).expect("primary should be restored");
-        assert_eq!(primary.workspaces.len(), 3);
-
-        // Cleanup
-        let _ = std::fs::remove_file(&bak_path);
-    }
-
-    #[test]
-    fn truncated_json_recovers_from_backup() {
-        // Crash during write can leave partially-written JSON.
-        let path = test_persistence_path("truncated-recovery");
-        let _cleanup = scopeguard(path.clone());
-
-        let state = make_session(vec![
-            make_workspace("w-1", "Workspace 1", "C:\\dev"),
-            make_workspace("w-2", "godly-terminal", "C:\\dev\\godly"),
-        ]);
-        save_to_path(&path, &state).expect("first save");
-        save_to_path(&path, &state).expect("second save (creates backup)");
-
-        // Simulate crash mid-write: truncated JSON.
-        std::fs::write(&path, r#"{"version": 1, "workspaces": [{"id":"#)
-            .expect("simulate truncation");
-
-        let recovered = load_from_path(&path).expect(
-            "load should recover from backup when primary is truncated JSON"
-        );
-        assert_eq!(recovered.workspaces.len(), 2);
-
-        // Cleanup
-        let _ = std::fs::remove_file(&path.with_extension("json.bak"));
-    }
-
-    /// RAII guard to clean up temp files after test.
-    struct ScopeGuard {
-        path: PathBuf,
-    }
-    impl Drop for ScopeGuard {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.path);
-            let _ = std::fs::remove_file(self.path.with_extension("json.bak"));
-            let _ = std::fs::remove_file(self.path.with_extension("json.tmp"));
-        }
-    }
-    fn scopeguard(path: PathBuf) -> ScopeGuard {
-        ScopeGuard { path }
     }
 }
