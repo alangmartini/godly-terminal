@@ -95,6 +95,113 @@ pub fn create_worktree(repo_root: &str, dir_name: &str) -> Result<String, String
     Ok(worktree_path_str)
 }
 
+/// Get the remote URL for a repository (defaults to "origin").
+pub fn get_remote_url(repo_root: &str) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(["-C", repo_root, "remote", "get-url", "origin"])
+        .output()
+        .map_err(|e| format!("Failed to run git: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("No remote 'origin': {stderr}"));
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if url.is_empty() {
+        return Err("git remote get-url returned empty URL".to_string());
+    }
+    Ok(url)
+}
+
+/// Get the default branch name from the remote.
+///
+/// Tries `git symbolic-ref refs/remotes/origin/HEAD` first, then falls
+/// back to checking if `main` or `master` exists locally.
+pub fn get_default_branch(repo_root: &str) -> Result<String, String> {
+    // Try symbolic-ref first (works when origin/HEAD is set).
+    let output = Command::new("git")
+        .args(["-C", repo_root, "symbolic-ref", "refs/remotes/origin/HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to run git: {e}"))?;
+
+    if output.status.success() {
+        let full_ref = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // Parse "refs/remotes/origin/main" → "main"
+        if let Some(branch) = full_ref.strip_prefix("refs/remotes/origin/") {
+            if !branch.is_empty() {
+                return Ok(branch.to_string());
+            }
+        }
+    }
+
+    // Fallback: check if main or master branch exists
+    for candidate in &["main", "master"] {
+        let check = Command::new("git")
+            .args([
+                "-C",
+                repo_root,
+                "rev-parse",
+                "--verify",
+                &format!("refs/remotes/origin/{candidate}"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if check.map(|s| s.success()).unwrap_or(false) {
+            return Ok(candidate.to_string());
+        }
+    }
+
+    Err("Could not determine default branch".to_string())
+}
+
+/// Clone a repository from its origin remote.
+///
+/// Creates the clone at `%APPDATA%/com.godly.terminal/worktrees/<dir_name>/`.
+/// Returns the absolute path to the clone directory.
+pub fn create_clone(repo_folder: &str, dir_name: &str) -> Result<String, String> {
+    let repo_root = find_repo_root(repo_folder)?;
+    let url = get_remote_url(&repo_root)?;
+    let branch = get_default_branch(&repo_root)?;
+
+    let worktrees_dir = worktrees_base_dir()?;
+    let clone_path = worktrees_dir.join(dir_name);
+    let clone_path_str = clone_path
+        .to_str()
+        .ok_or_else(|| "Clone path contains invalid characters".to_string())?
+        .to_string();
+
+    if !worktrees_dir.exists() {
+        std::fs::create_dir_all(&worktrees_dir)
+            .map_err(|e| format!("Failed to create worktrees directory: {e}"))?;
+    }
+
+    let output = Command::new("git")
+        .args(["clone", &url, "--branch", &branch, &clone_path_str])
+        .output()
+        .map_err(|e| format!("Failed to run git clone: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git clone failed: {stderr}"));
+    }
+
+    Ok(clone_path_str)
+}
+
+/// Remove a cloned repository directory.
+///
+/// Unlike worktrees, clones have no git bookkeeping — just rm -rf.
+pub fn remove_clone(clone_path: &str) -> Result<(), String> {
+    let path = Path::new(clone_path);
+    if path.exists() {
+        std::fs::remove_dir_all(path)
+            .map_err(|e| format!("Failed to remove clone directory: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Remove a git worktree.
 ///
 /// Attempts `git worktree remove --force`, falling back to manual directory
@@ -146,5 +253,25 @@ mod tests {
     #[test]
     fn is_git_repo_on_nonexistent_dir() {
         assert!(!is_git_repo("/nonexistent/path/that/does/not/exist"));
+    }
+
+    #[test]
+    fn get_remote_url_on_nonexistent_dir() {
+        assert!(get_remote_url("/nonexistent/path").is_err());
+    }
+
+    #[test]
+    fn get_default_branch_on_nonexistent_dir() {
+        assert!(get_default_branch("/nonexistent/path").is_err());
+    }
+
+    #[test]
+    fn create_clone_on_nonexistent_dir() {
+        assert!(create_clone("/nonexistent/path", "test-clone").is_err());
+    }
+
+    #[test]
+    fn remove_clone_nonexistent_is_ok() {
+        assert!(remove_clone("/nonexistent/path/that/does/not/exist").is_ok());
     }
 }

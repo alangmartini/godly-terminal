@@ -24,6 +24,8 @@ pub struct QuickClaudeSessionRecord {
     pub claude_session_id: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub is_clone: bool,
 }
 
 pub fn sessions_path() -> PathBuf {
@@ -146,6 +148,7 @@ mod tests {
             launched_at: "2026-03-20T12:00:00Z".to_string(),
             claude_session_id: None,
             cwd: None,
+            is_clone: false,
         }
     }
 
@@ -296,6 +299,22 @@ mod tests {
         let json = r#"{"id":"s-1","prompt":"test","terminal_id":"t-1","workspace_id":"ws-1","branch":"main","model":"opus","mode":"code","status":"Running","launched_at":"2026-03-20T12:00:00Z","claude_session_id":null}"#;
         let decoded: QuickClaudeSessionRecord = serde_json::from_str(json).expect("old records should deserialize");
         assert_eq!(decoded.cwd, None);
+    }
+
+    #[test]
+    fn test_old_records_without_is_clone_deserialize() {
+        let json = r#"{"id":"s-1","prompt":"test","terminal_id":"t-1","workspace_id":"ws-1","branch":"main","model":"opus","mode":"code","status":"Running","launched_at":"2026-03-20T12:00:00Z","claude_session_id":null}"#;
+        let decoded: QuickClaudeSessionRecord = serde_json::from_str(json).expect("old records should deserialize");
+        assert!(!decoded.is_clone);
+    }
+
+    #[test]
+    fn test_is_clone_roundtrip() {
+        let mut record = make_record("s-clone", "t-clone", SessionStatus::Running);
+        record.is_clone = true;
+        let json = serde_json::to_string(&record).expect("serialize");
+        let decoded: QuickClaudeSessionRecord = serde_json::from_str(&json).expect("deserialize");
+        assert!(decoded.is_clone);
     }
 
     #[test]

@@ -4,6 +4,17 @@ use std::time::Duration;
 use godly_app_adapter::commands;
 use godly_app_adapter::daemon_client::NativeDaemonClient;
 
+/// How the Quick Claude session is isolated from the main repo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IsolationMode {
+    /// No isolation — run in the workspace folder directly.
+    None,
+    /// Create a git worktree (detached HEAD).
+    Worktree,
+    /// Full git clone from origin's default branch.
+    Clone,
+}
+
 /// A single step in a Quick Claude launch sequence.
 #[derive(Debug, Clone)]
 pub enum LaunchStep {
@@ -49,6 +60,12 @@ pub enum LaunchStep {
         agent_index: usize,
         repo_folder: String,
     },
+    /// Clone the repository for isolated work. If not a git repo, has no
+    /// remote, or clone fails, gracefully falls back (returns Ok).
+    CreateClone {
+        agent_index: usize,
+        repo_folder: String,
+    },
 }
 
 /// Build launch steps for resuming an existing Claude session.
@@ -86,7 +103,7 @@ pub fn default_launch_steps(
     mode: &str,
     cwd: Option<&str>,
     image_paths: &[String],
-    use_worktree: bool,
+    isolation: IsolationMode,
     claude_session_id: Option<&str>,
 ) -> Vec<LaunchStep> {
     let mut cmd = "claude".to_string();
@@ -124,13 +141,24 @@ pub fn default_launch_steps(
 
     let mut steps = Vec::new();
     for i in 0..num_agents {
-        if use_worktree {
-            if let Some(folder) = cwd {
-                steps.push(LaunchStep::CreateWorktree {
-                    agent_index: i,
-                    repo_folder: folder.to_string(),
-                });
+        match isolation {
+            IsolationMode::Worktree => {
+                if let Some(folder) = cwd {
+                    steps.push(LaunchStep::CreateWorktree {
+                        agent_index: i,
+                        repo_folder: folder.to_string(),
+                    });
+                }
             }
+            IsolationMode::Clone => {
+                if let Some(folder) = cwd {
+                    steps.push(LaunchStep::CreateClone {
+                        agent_index: i,
+                        repo_folder: folder.to_string(),
+                    });
+                }
+            }
+            IsolationMode::None => {}
         }
         steps.push(LaunchStep::CreateTerminal {
             agent_index: i,
@@ -159,6 +187,8 @@ pub struct LaunchState {
     pub is_new_workspace: bool,
     pub completed: bool,
     pub error: Option<String>,
+    /// Whether this launch uses clone mode (true) or worktree mode (false).
+    pub is_clone: bool,
     /// Worktree path created by a `CreateWorktree` step, applied to the next
     /// terminal that gets created.
     pub pending_worktree_path: Option<String>,
@@ -183,6 +213,7 @@ impl LaunchState {
             is_new_workspace,
             completed: false,
             error: None,
+            is_clone: false,
             pending_worktree_path: None,
             session_record_id: None,
         }
@@ -273,6 +304,20 @@ pub fn execute_step(
         LaunchStep::Delay { ms } => {
             std::thread::sleep(Duration::from_millis(ms));
             Ok(StepResult::Ok)
+        }
+        LaunchStep::CreateClone { repo_folder, .. } => {
+            if !crate::git_worktree::is_git_repo(&repo_folder) {
+                log::warn!("Not a git repo, skipping clone: {repo_folder}");
+                return Ok(StepResult::Ok);
+            }
+            let dir_name = crate::git_worktree::generate_worktree_dir_name();
+            match crate::git_worktree::create_clone(&repo_folder, &dir_name) {
+                Ok(clone_path) => Ok(StepResult::WorktreeCreated { worktree_path: clone_path }),
+                Err(e) => {
+                    log::warn!("Clone failed, falling back to main branch: {e}");
+                    Ok(StepResult::Ok)
+                }
+            }
         }
         LaunchStep::CreateWorktree { repo_folder, .. } => {
             if !crate::git_worktree::is_git_repo(&repo_folder) {
@@ -543,7 +588,7 @@ mod tests {
 
     #[test]
     fn default_steps_single_no_prompt() {
-        let steps = default_launch_steps(1, "", "sonnet", "default", None, &[], false, None);
+        let steps = default_launch_steps(1, "", "sonnet", "default", None, &[], IsolationMode::None, None);
         // CreateTerminal, WaitIdle, RunCommand
         assert_eq!(steps.len(), 3);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
@@ -553,7 +598,7 @@ mod tests {
 
     #[test]
     fn default_steps_single_with_prompt() {
-        let steps = default_launch_steps(1, "build the app", "sonnet", "default", None, &[], false, None);
+        let steps = default_launch_steps(1, "build the app", "sonnet", "default", None, &[], IsolationMode::None, None);
         // Prompt is now a CLI arg — same 3 steps, prompt embedded in command
         assert_eq!(steps.len(), 3);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
@@ -565,7 +610,7 @@ mod tests {
 
     #[test]
     fn default_steps_prompt_with_single_quotes() {
-        let steps = default_launch_steps(1, "fix it's broken", "sonnet", "auto", None, &[], false, None);
+        let steps = default_launch_steps(1, "fix it's broken", "sonnet", "auto", None, &[], IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             // PowerShell escapes single quotes by doubling them
             assert!(command.contains("'fix it''s broken'"), "got: {command}");
@@ -576,7 +621,7 @@ mod tests {
 
     #[test]
     fn default_steps_prompt_with_double_quotes() {
-        let steps = default_launch_steps(1, "what is \"the issue\"", "sonnet", "auto", None, &[], false, None);
+        let steps = default_launch_steps(1, "what is \"the issue\"", "sonnet", "auto", None, &[], IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             // Double quotes inside single-quoted strings are literal (no escaping needed)
             assert!(
@@ -590,14 +635,14 @@ mod tests {
 
     #[test]
     fn default_steps_grid_2x2() {
-        let steps = default_launch_steps(4, "test", "sonnet", "default", None, &[], false, None);
+        let steps = default_launch_steps(4, "test", "sonnet", "default", None, &[], IsolationMode::None, None);
         // Each agent: 3 steps. 4 agents = 12
         assert_eq!(steps.len(), 12);
     }
 
     #[test]
     fn default_steps_with_model_and_mode() {
-        let steps = default_launch_steps(1, "", "opus", "plan", None, &[], false, None);
+        let steps = default_launch_steps(1, "", "opus", "plan", None, &[], IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model opus --permission-mode plan");
         } else {
@@ -607,7 +652,7 @@ mod tests {
 
     #[test]
     fn default_steps_auto_mode() {
-        let steps = default_launch_steps(1, "", "haiku", "auto", None, &[], false, None);
+        let steps = default_launch_steps(1, "", "haiku", "auto", None, &[], IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model haiku --dangerously-skip-permissions");
         } else {
@@ -617,7 +662,7 @@ mod tests {
 
     #[test]
     fn default_steps_default_mode_no_extra_flag() {
-        let steps = default_launch_steps(1, "", "sonnet", "default", None, &[], false, None);
+        let steps = default_launch_steps(1, "", "sonnet", "default", None, &[], IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert_eq!(command, "claude --model sonnet");
         } else {
@@ -627,7 +672,7 @@ mod tests {
 
     #[test]
     fn default_steps_propagates_cwd() {
-        let steps = default_launch_steps(1, "", "sonnet", "default", Some("/my/project"), &[], false, None);
+        let steps = default_launch_steps(1, "", "sonnet", "default", Some("/my/project"), &[], IsolationMode::None, None);
         if let LaunchStep::CreateTerminal { cwd, .. } = &steps[0] {
             assert_eq!(cwd.as_deref(), Some("/my/project"));
         } else {
@@ -641,7 +686,7 @@ mod tests {
             "C:/tmp/godly-clipboard/clipboard-123.png".to_string(),
             "C:/Users/test/screenshot.jpg".to_string(),
         ];
-        let steps = default_launch_steps(1, "fix this bug", "sonnet", "auto", None, &images, false, None);
+        let steps = default_launch_steps(1, "fix this bug", "sonnet", "auto", None, &images, IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert!(command.contains("fix this bug"));
             assert!(command.contains("[Attached images"));
@@ -654,7 +699,7 @@ mod tests {
 
     #[test]
     fn default_steps_empty_images_unchanged() {
-        let with_images = default_launch_steps(1, "hello", "sonnet", "default", None, &[], false, None);
+        let with_images = default_launch_steps(1, "hello", "sonnet", "default", None, &[], IsolationMode::None, None);
         if let LaunchStep::RunCommand { command, .. } = &with_images[2] {
             assert!(!command.contains("[Attached images"));
             assert!(command.contains("'hello'"));
@@ -674,7 +719,7 @@ mod tests {
     #[test]
     fn default_steps_with_worktree_inserts_create_worktree_step() {
         let steps = default_launch_steps(
-            1, "hello", "sonnet", "auto", Some("/my/project"), &[], true, None,
+            1, "hello", "sonnet", "auto", Some("/my/project"), &[], IsolationMode::Worktree, None,
         );
         // CreateWorktree, CreateTerminal, WaitIdle, RunCommand = 4 steps
         assert_eq!(steps.len(), 4);
@@ -684,7 +729,7 @@ mod tests {
 
     #[test]
     fn default_steps_worktree_no_cwd_skips_worktree_step() {
-        let steps = default_launch_steps(1, "hello", "sonnet", "auto", None, &[], true, None);
+        let steps = default_launch_steps(1, "hello", "sonnet", "auto", None, &[], IsolationMode::Worktree, None);
         // No CWD → no CreateWorktree, just normal 3 steps
         assert_eq!(steps.len(), 3);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
@@ -693,16 +738,16 @@ mod tests {
     #[test]
     fn default_steps_worktree_false_no_worktree_step() {
         let steps = default_launch_steps(
-            1, "hello", "sonnet", "auto", Some("/my/project"), &[], false, None,
+            1, "hello", "sonnet", "auto", Some("/my/project"), &[], IsolationMode::None, None,
         );
-        // use_worktree=false → no CreateWorktree
+        // IsolationMode::None → no CreateWorktree
         assert_eq!(steps.len(), 3);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
     }
 
     #[test]
     fn default_steps_includes_session_id_when_provided() {
-        let steps = default_launch_steps(1, "test", "sonnet", "default", None, &[], false, Some("my-uuid-123"));
+        let steps = default_launch_steps(1, "test", "sonnet", "default", None, &[], IsolationMode::None, Some("my-uuid-123"));
         match &steps[2] {
             LaunchStep::RunCommand { command, .. } => {
                 assert!(command.contains("--session-id my-uuid-123"));
@@ -713,12 +758,31 @@ mod tests {
 
     #[test]
     fn default_steps_no_session_id_when_none() {
-        let steps = default_launch_steps(1, "test", "sonnet", "default", None, &[], false, None);
+        let steps = default_launch_steps(1, "test", "sonnet", "default", None, &[], IsolationMode::None, None);
         match &steps[2] {
             LaunchStep::RunCommand { command, .. } => {
                 assert!(!command.contains("--session-id"));
             }
             _ => panic!("Expected RunCommand"),
         }
+    }
+
+    #[test]
+    fn default_steps_clone_mode_inserts_create_clone_step() {
+        let steps = default_launch_steps(
+            1, "hello", "sonnet", "auto", Some("/my/project"), &[], IsolationMode::Clone, None,
+        );
+        // CreateClone, CreateTerminal, WaitIdle, RunCommand = 4 steps
+        assert_eq!(steps.len(), 4);
+        assert!(matches!(steps[0], LaunchStep::CreateClone { agent_index: 0, .. }));
+        assert!(matches!(steps[1], LaunchStep::CreateTerminal { agent_index: 0, .. }));
+    }
+
+    #[test]
+    fn default_steps_clone_mode_no_cwd_skips_clone_step() {
+        let steps = default_launch_steps(1, "hello", "sonnet", "auto", None, &[], IsolationMode::Clone, None);
+        // No CWD → no CreateClone, just normal 3 steps
+        assert_eq!(steps.len(), 3);
+        assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
     }
 }

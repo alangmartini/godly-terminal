@@ -419,6 +419,7 @@ mod tests {
             workspace_id: None,
             custom_name: None,
             worktree_path: None,
+            is_clone: false,
             cached_image_handle: None,
         }
     }

@@ -791,6 +791,8 @@ pub enum Message {
     QuickClaudeDialogMainBranchToggled(bool),
     /// Auto-suggest branch name toggled in Quick Claude dialog.
     QuickClaudeDialogAutoSuggestToggled(bool),
+    /// Batch clone mode toggled in Quick Claude dialog.
+    QuickClaudeDialogBatchCloneToggled(bool),
     /// Launch from Quick Claude dialog.
     QuickClaudeDialogLaunch,
     /// Voice input from Quick Claude dialog.
@@ -1477,6 +1479,12 @@ impl GodlyApp {
                         .as_ref()
                         .map(|path| (t.id.clone(), path.clone()))
                 })
+                .collect(),
+            terminal_clone_ids: self
+                .terminals
+                .iter()
+                .filter(|t| t.is_clone)
+                .map(|t| t.id.clone())
                 .collect(),
             terminal_workspace_assignments: self
                 .terminals
@@ -2460,7 +2468,7 @@ impl GodlyApp {
                     .map(|ws| ws.folder_path.clone())
                     .filter(|p| !p.is_empty());
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], false, None,
+                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], crate::quick_claude::IsolationMode::None, None,
                 );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
@@ -2633,11 +2641,23 @@ impl GodlyApp {
             Message::QuickClaudeDialogMainBranchToggled(val) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.main_branch_mode = val;
+                    if val {
+                        dlg.batch_clone_mode = false;
+                    }
                 }
             }
             Message::QuickClaudeDialogAutoSuggestToggled(val) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.auto_suggest_branch = val;
+                }
+            }
+            Message::QuickClaudeDialogBatchCloneToggled(val) => {
+                if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    dlg.batch_clone_mode = val;
+                    if val {
+                        dlg.main_branch_mode = false;
+                        dlg.auto_suggest_branch = false;
+                    }
                 }
             }
             Message::QuickClaudeDialogModelSelected(model) => {
@@ -2732,10 +2752,16 @@ impl GodlyApp {
                     (id, name, None, true)
                 };
 
-                let use_worktree = !dlg.main_branch_mode;
+                let isolation = if dlg.batch_clone_mode {
+                    crate::quick_claude::IsolationMode::Clone
+                } else if dlg.main_branch_mode {
+                    crate::quick_claude::IsolationMode::None
+                } else {
+                    crate::quick_claude::IsolationMode::Worktree
+                };
                 let claude_session_id = uuid::Uuid::new_v4().to_string();
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, use_worktree,
+                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, isolation,
                     Some(&claude_session_id),
                 );
 
@@ -2747,6 +2773,7 @@ impl GodlyApp {
                     is_new_ws,
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.is_clone = dlg.batch_clone_mode;
 
                 // Record session for resume tracking
                 let record_id = uuid::Uuid::new_v4().to_string();
@@ -2762,6 +2789,7 @@ impl GodlyApp {
                     launched_at: crate::quick_claude_sessions::now_iso8601(),
                     claude_session_id: Some(claude_session_id),
                     cwd: cwd.clone(),
+                    is_clone: launch_state.is_clone,
                 };
                 let _ = crate::quick_claude_sessions::add_session(session_record);
                 launch_state.session_record_id = Some(record_id);
@@ -3508,22 +3536,41 @@ impl GodlyApp {
                 self.worktree_close_pending = None;
                 let worktree_path = self.terminals.get(&session_id)
                     .and_then(|t| t.worktree_path.clone());
+                let is_clone = self.terminals.get(&session_id)
+                    .map(|t| t.is_clone)
+                    .unwrap_or(false);
                 let repo_root = self.workspaces.active()
                     .map(|ws| ws.folder_path.clone());
                 let close_task = self.close_terminal_immediate(&session_id);
-                if let (Some(wt_path), Some(root)) = (worktree_path, repo_root) {
+                if let Some(wt_path) = worktree_path {
                     let sid = session_id.clone();
-                    let remove_task = Task::perform(
-                        async move {
-                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
-                            std::thread::spawn(move || {
-                                let result = crate::git_worktree::remove_worktree(&root, &wt_path);
-                                let _ = tx.send(result);
-                            });
-                            rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
-                        },
-                        move |result| Message::WorktreeRemoved { session_id: sid, result },
-                    );
+                    let remove_task = if is_clone {
+                        Task::perform(
+                            async move {
+                                let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                                std::thread::spawn(move || {
+                                    let result = crate::git_worktree::remove_clone(&wt_path);
+                                    let _ = tx.send(result);
+                                });
+                                rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                            },
+                            move |result| Message::WorktreeRemoved { session_id: sid, result },
+                        )
+                    } else if let Some(root) = repo_root {
+                        Task::perform(
+                            async move {
+                                let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                                std::thread::spawn(move || {
+                                    let result = crate::git_worktree::remove_worktree(&root, &wt_path);
+                                    let _ = tx.send(result);
+                                });
+                                rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                            },
+                            move |result| Message::WorktreeRemoved { session_id: sid, result },
+                        )
+                    } else {
+                        Task::none()
+                    };
                     return Task::batch([close_task, remove_task]);
                 }
                 return close_task;
@@ -4188,12 +4235,18 @@ impl GodlyApp {
                 .get(pending_id)
                 .and_then(|t| t.worktree_path.as_deref())
                 .unwrap_or("unknown");
+            let is_clone = self
+                .terminals
+                .get(pending_id)
+                .map(|t| t.is_clone)
+                .unwrap_or(false);
             let pid1 = pending_id.clone();
             let pid2 = pending_id.clone();
             stack![
                 with_quit,
                 crate::confirm_dialog::view_worktree_close_confirm(
                     worktree_path,
+                    is_clone,
                     Message::WorktreeCloseConfirmed { session_id: pid1 },
                     Message::WorktreeCloseKeep { session_id: pid2 },
                     Message::WorktreeCloseCancelled,
@@ -4247,6 +4300,7 @@ impl GodlyApp {
                 Message::QuickClaudeDialogBranchChanged,
                 Message::QuickClaudeDialogMainBranchToggled,
                 Message::QuickClaudeDialogAutoSuggestToggled,
+                Message::QuickClaudeDialogBatchCloneToggled,
                 Message::QuickClaudeDialogModelSelected,
                 Message::QuickClaudeDialogModelDropdownToggle,
                 Message::QuickClaudeDialogModeSelected,
@@ -6788,6 +6842,11 @@ impl GodlyApp {
                     for (terminal_id, path) in worktree_paths {
                         self.terminals.set_worktree_path(&terminal_id, path);
                     }
+
+                    // Apply persisted clone flags to restored terminals.
+                    for terminal_id in &merged.terminal_clone_ids {
+                        self.terminals.set_clone_flag(terminal_id, true);
+                    }
                 }
 
                 if self.workspaces.count() == 0 && !session_ids.is_empty() {
@@ -7619,10 +7678,12 @@ impl GodlyApp {
                     if let Some(launch) = &mut self.quick_claude_launch {
                         let si = launch.current_step;
                         let agent_idx = launch.steps.get(si).and_then(|step| {
-                            if let crate::quick_claude::LaunchStep::CreateWorktree { agent_index, .. } = step {
-                                Some(*agent_index)
-                            } else {
-                                None
+                            match step {
+                                crate::quick_claude::LaunchStep::CreateWorktree { agent_index, .. }
+                                | crate::quick_claude::LaunchStep::CreateClone { agent_index, .. } => {
+                                    Some(*agent_index)
+                                }
+                                _ => None,
                             }
                         });
                         if let Some(_ai) = agent_idx {
@@ -7689,6 +7750,9 @@ impl GodlyApp {
                         if let Some(launch) = &mut self.quick_claude_launch {
                             if let Some(wt_path) = launch.pending_worktree_path.take() {
                                 self.terminals.set_worktree_path(session_id, wt_path);
+                            }
+                            if launch.is_clone {
+                                self.terminals.set_clone_flag(session_id, true);
                             }
                         }
                     }
