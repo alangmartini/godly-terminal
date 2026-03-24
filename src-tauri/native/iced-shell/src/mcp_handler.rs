@@ -429,6 +429,139 @@ impl GodlyApp {
                 }
             }
 
+            // --- File Pane Management ---
+            McpRequest::OpenFilePane {
+                workspace_id,
+                file_path,
+                target_terminal_id,
+                direction,
+            } => {
+                let Some(ws) = self.workspaces.get(&workspace_id) else {
+                    return (
+                        McpResponse::Error {
+                            message: format!("Workspace {} not found", workspace_id),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+
+                let pane_id = format!("fp-{}", uuid::Uuid::new_v4());
+                let file_type = crate::app::detect_file_type(&file_path);
+                let content = if file_type == "image" {
+                    String::new()
+                } else {
+                    std::fs::read_to_string(&file_path).unwrap_or_default()
+                };
+
+                let last_modified = std::fs::metadata(&file_path)
+                    .ok()
+                    .and_then(|m| m.modified().ok());
+
+                self.file_panes.insert(
+                    pane_id.clone(),
+                    crate::app::FilePaneState {
+                        file_path,
+                        file_type: file_type.to_string(),
+                        content,
+                        last_modified,
+                    },
+                );
+
+                let dir = match direction.as_str() {
+                    "vertical" => SplitDirection::Vertical,
+                    _ => SplitDirection::Horizontal,
+                };
+                let target_id = target_terminal_id
+                    .unwrap_or_else(|| ws.focused_terminal.clone());
+                let content_node = godly_layout_core::LayoutNode::ContentPane {
+                    pane_id: pane_id.clone(),
+                };
+                if let Some(ws) = self.workspaces.get_mut(&workspace_id) {
+                    ws.layout.split_leaf_with_node(&target_id, content_node, dir);
+                }
+
+                (
+                    McpResponse::PaneCreated {
+                        pane_id,
+                        file_type: file_type.to_string(),
+                    },
+                    iced::Task::none(),
+                )
+            }
+            McpRequest::ClosePane { pane_id } => {
+                if self.file_panes.remove(&pane_id).is_none() {
+                    return (
+                        McpResponse::Error {
+                            message: format!("Pane {} not found", pane_id),
+                        },
+                        iced::Task::none(),
+                    );
+                }
+                self.remove_content_pane_from_layouts(&pane_id);
+                (McpResponse::Ok, iced::Task::none())
+            }
+            McpRequest::ListPanes { workspace_id } => {
+                let mut panes = Vec::new();
+                let workspaces: Vec<_> = if let Some(ref ws_id) = workspace_id {
+                    self.workspaces.iter().filter(|ws| ws.id == *ws_id).collect()
+                } else {
+                    self.workspaces.iter().collect()
+                };
+
+                for ws in &workspaces {
+                    for tid in ws.layout.all_leaf_ids() {
+                        panes.push(godly_protocol::PaneInfo {
+                            pane_id: tid.to_string(),
+                            pane_type: "terminal".to_string(),
+                            workspace_id: ws.id.clone(),
+                            file_path: None,
+                            file_type: None,
+                        });
+                    }
+                    for pid in ws.layout.all_content_pane_ids() {
+                        let (fp, ft) = self.file_panes.get(pid).map_or(
+                            (None, None),
+                            |s| (Some(s.file_path.clone()), Some(s.file_type.clone())),
+                        );
+                        panes.push(godly_protocol::PaneInfo {
+                            pane_id: pid.to_string(),
+                            pane_type: "file".to_string(),
+                            workspace_id: ws.id.clone(),
+                            file_path: fp,
+                            file_type: ft,
+                        });
+                    }
+                }
+
+                (McpResponse::PaneList { panes }, iced::Task::none())
+            }
+            McpRequest::UpdateFilePane {
+                pane_id,
+                file_path,
+            } => {
+                let Some(state) = self.file_panes.get_mut(&pane_id) else {
+                    return (
+                        McpResponse::Error {
+                            message: format!("File pane {} not found", pane_id),
+                        },
+                        iced::Task::none(),
+                    );
+                };
+                if let Some(new_path) = file_path {
+                    state.file_type = crate::app::detect_file_type(&new_path).to_string();
+                    state.content = if state.file_type == "image" {
+                        String::new()
+                    } else {
+                        std::fs::read_to_string(&new_path).unwrap_or_default()
+                    };
+                    state.last_modified = std::fs::metadata(&new_path)
+                        .ok()
+                        .and_then(|m| m.modified().ok());
+                    state.file_path = new_path;
+                }
+                (McpResponse::Ok, iced::Task::none())
+            }
+
             other => (
                 McpResponse::Error {
                     message: format!("Unsupported native MCP request: {:?}", other),
@@ -1263,6 +1396,16 @@ impl GodlyApp {
         })
     }
 
+    /// Remove a content pane from all workspace layout trees.
+    pub(crate) fn remove_content_pane_from_layouts(&mut self, pane_id: &str) {
+        let ws_ids: Vec<String> = self.workspaces.iter().map(|ws| ws.id.clone()).collect();
+        for ws_id in ws_ids {
+            if let Some(ws) = self.workspaces.get_mut(&ws_id) {
+                ws.layout.unsplit_content_pane(pane_id);
+            }
+        }
+    }
+
     /// Find which workspace contains a given terminal ID by searching layout trees.
     fn find_workspace_for_terminal(&self, terminal_id: &str) -> Option<String> {
         for ws in self.workspaces.iter() {
@@ -1300,6 +1443,7 @@ fn rename_leaf(node: &mut godly_layout_core::LayoutNode, from: &str, to: &str) {
                 *terminal_id = to.to_string();
             }
         }
+        godly_layout_core::LayoutNode::ContentPane { .. } => {}
         godly_layout_core::LayoutNode::Split { first, second, .. } => {
             rename_leaf(first, from, to);
             rename_leaf(second, from, to);
