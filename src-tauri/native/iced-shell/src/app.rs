@@ -107,7 +107,7 @@ use crate::settings_dialog::{self, SettingsTab};
 use crate::shortcuts_tab;
 use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
 use crate::status_bar;
-use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
+use crate::split_pane::{view_layout, LayoutNode, PaneContent, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
@@ -4064,9 +4064,26 @@ impl GodlyApp {
         {
             self.view_terminal_empty_state()
         } else if let Some(layout) = self.active_layout() {
-            view_layout(layout, &|terminal_id: &str| {
-                self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
-            })
+            view_layout(
+                layout,
+                &|terminal_id: &str| {
+                    self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
+                },
+                &|content: &PaneContent| {
+                    match content {
+                        PaneContent::FileViewer { file_path, .. } => {
+                            container(text(format!("File: {}", file_path)))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .into()
+                        }
+                        _ => container(text(""))
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .into(),
+                    }
+                },
+            )
         } else {
             self.view_terminal_empty_state()
         };
@@ -8445,6 +8462,7 @@ fn pane_rect_for_terminal(
         LayoutNode::Leaf {
             terminal_id: leaf_id,
         } => (leaf_id == terminal_id).then_some(rect),
+        LayoutNode::ContentPane { .. } => None,
         LayoutNode::Split {
             direction,
             ratio,
