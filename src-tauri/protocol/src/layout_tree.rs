@@ -9,6 +9,16 @@ pub enum SplitDirection {
     Vertical,
 }
 
+/// Metadata for a single pane in a workspace, returned by the `list_panes` MCP tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneInfo {
+    pub id: String,
+    pub pane_type: String,
+    pub terminal_id: Option<String>,
+    pub file_path: Option<String>,
+    pub file_type: Option<String>,
+}
+
 /// A recursive binary tree representing the pane layout of a workspace.
 ///
 /// Each leaf holds a terminal ID; each internal node splits space between
