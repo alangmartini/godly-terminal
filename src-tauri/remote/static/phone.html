@@ -212,6 +212,69 @@
   }
   .menu-option-label { flex: 1; line-height: 1.3; }
 
+  /* --- Quick Claude FAB --- */
+  .fab {
+    position: fixed; bottom: 24px; right: 24px; z-index: 90;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--accent-dim); color: #fff; border: none;
+    font-size: 24px; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .fab:active { transform: scale(0.92); background: var(--accent); }
+  .fab.hidden { display: none; }
+
+  /* --- Quick Claude Dialog --- */
+  .qc-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.6); display: none;
+    align-items: flex-end; justify-content: center;
+  }
+  .qc-overlay.active { display: flex; }
+  .qc-sheet {
+    width: 100%; max-width: 480px;
+    background: var(--bg-card); border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0; padding: 20px 16px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    animation: slide-up 0.2s ease-out;
+  }
+  @keyframes slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  .qc-title {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .qc-title-icon { font-size: 20px; }
+  .qc-textarea {
+    width: 100%; min-height: 100px; max-height: 40dvh;
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); padding: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 15px; line-height: 1.4; resize: vertical;
+  }
+  .qc-textarea:focus { outline: none; border-color: var(--accent); }
+  .qc-textarea::placeholder { color: var(--text-dim); }
+  .qc-options { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  .qc-toggle {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-dim); cursor: pointer;
+    user-select: none;
+  }
+  .qc-toggle input { accent-color: var(--accent); width: 18px; height: 18px; }
+  .qc-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .qc-actions button {
+    flex: 1; min-height: var(--touch-min); border: none; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .qc-cancel { background: var(--bg-input); color: var(--text); border: 1px solid var(--border) !important; }
+  .qc-cancel:active { background: var(--border); }
+  .qc-launch { background: var(--accent-dim); color: #fff; }
+  .qc-launch:active { background: var(--accent); }
+  .qc-launch:disabled { opacity: 0.5; }
+
   /* --- Settings --- */
   .settings-group {
     background: var(--bg-card); border: 1px solid var(--border);
@@ -311,6 +374,24 @@
   </div>
 </div>
 
+<!-- Quick Claude FAB -->
+<button class="fab hidden" id="qcFab" onclick="openQuickClaude()" title="Quick Claude">&#9889;</button>
+
+<!-- Quick Claude Dialog -->
+<div class="qc-overlay" id="qcOverlay" onclick="if(event.target===this)closeQuickClaude()">
+  <div class="qc-sheet">
+    <div class="qc-title"><span class="qc-title-icon">&#9889;</span> Quick Claude</div>
+    <textarea class="qc-textarea" id="qcPrompt" placeholder="Describe the task..." rows="4"></textarea>
+    <div class="qc-options">
+      <label class="qc-toggle"><input type="checkbox" id="qcMonitor" checked> Monitor prompts</label>
+    </div>
+    <div class="qc-actions">
+      <button class="qc-cancel" onclick="closeQuickClaude()">Cancel</button>
+      <button class="qc-launch" id="qcLaunchBtn" onclick="launchQuickClaude()">Launch</button>
+    </div>
+  </div>
+</div>
+
 <!-- Settings -->
 <div class="view" id="view-settings">
   <div class="section-title">Connection</div>
@@ -394,14 +475,17 @@ function showView(name, title) {
   const navTitle = document.getElementById('navTitle');
   const inputBar = document.getElementById('inputBar');
 
+  const fab = document.getElementById('qcFab');
   if (name === 'dashboard') {
     navBack.style.display = 'none';
     navTitle.textContent = 'Godly Remote';
     inputBar.classList.remove('active');
+    fab.classList.remove('hidden');
   } else {
     navBack.style.display = 'block';
     navTitle.textContent = title || name;
     inputBar.classList.toggle('active', name === 'session');
+    fab.classList.add('hidden');
   }
 
   if (name === 'session') startSessionRefresh();
@@ -712,6 +796,42 @@ async function connectSSE() {
     };
   } catch (e) {
     setConnected(false);
+  }
+}
+
+// --- Quick Claude ---
+function openQuickClaude() {
+  document.getElementById('qcOverlay').classList.add('active');
+  document.getElementById('qcPrompt').value = '';
+  document.getElementById('qcPrompt').focus();
+}
+
+function closeQuickClaude() {
+  document.getElementById('qcOverlay').classList.remove('active');
+}
+
+async function launchQuickClaude() {
+  const prompt = document.getElementById('qcPrompt').value.trim();
+  if (!prompt) return;
+
+  const btn = document.getElementById('qcLaunchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Launching...';
+
+  try {
+    const resp = await apiPost('/api/quick-claude', {
+      prompt,
+      monitor: document.getElementById('qcMonitor').checked,
+    });
+    closeQuickClaude();
+    // Refresh dashboard to show the new session once it appears
+    setTimeout(refreshDashboard, 2000);
+  } catch (e) {
+    console.error('Quick Claude failed:', e);
+    btn.textContent = 'Failed — Retry';
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === 'Launching...') btn.textContent = 'Launch';
   }
 }
 
