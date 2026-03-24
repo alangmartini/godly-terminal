@@ -1100,6 +1100,12 @@ pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
         if project_skills_dir.exists() {
             collect_skills_from_dir(&project_skills_dir, SkillScope::Project, &mut skills);
         }
+
+        // Also scan .claude/commands/ — Claude Code's project-level commands directory.
+        let project_commands_dir = std::path::Path::new(folder).join(".claude").join("commands");
+        if project_commands_dir.exists() {
+            collect_skills_from_dir(&project_commands_dir, SkillScope::Project, &mut skills);
+        }
     }
 
     if let Some(home) = std::env::var("USERPROFILE")
@@ -1109,6 +1115,12 @@ pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
         let user_skills_dir = std::path::Path::new(&home).join(".claude").join("skills");
         if user_skills_dir.exists() {
             collect_skills_from_dir(&user_skills_dir, SkillScope::User, &mut skills);
+        }
+
+        // Also scan ~/.claude/commands/ — Claude Code's user-level commands directory.
+        let user_commands_dir = std::path::Path::new(&home).join(".claude").join("commands");
+        if user_commands_dir.exists() {
+            collect_skills_from_dir(&user_commands_dir, SkillScope::User, &mut skills);
         }
 
         // Discover skills from installed Claude Code plugins.
