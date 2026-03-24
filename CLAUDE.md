@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+## Disabled Skills
+
+- **Never invoke `superpowers:brainstorming`**. For focused, well-scoped changes, just do the work. For genuinely ambiguous large-scope work, ask one clarifying question at most, then proceed.
 
 ## Git Workflow
 
