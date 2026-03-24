@@ -8,6 +8,9 @@ use crate::backend::Backend;
 pub fn list_tools() -> Value {
     json!({
         "tools": [
+            // ──────────────────────────────────────────────
+            // READ / QUERY TOOLS (existing)
+            // ──────────────────────────────────────────────
             {
                 "name": "get_current_terminal",
                 "description": "Get info about the terminal Claude is running in (uses GODLY_SESSION_ID env var)",
@@ -410,6 +413,54 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "open_file_pane",
+                "description": "Open a file as a viewer pane (code, markdown, or image) split beside a terminal. File type is auto-detected from extension.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Absolute path to the file to open" },
+                        "target_terminal_id": { "type": "string", "description": "Terminal to split beside (optional — defaults to the agent's own terminal)" },
+                        "direction": { "type": "string", "enum": ["horizontal", "vertical"], "description": "Split direction (default: horizontal)" },
+                        "ratio": { "type": "number", "description": "Split ratio 0.0-1.0, proportion for existing pane (default: 0.5)" }
+                    },
+                    "required": ["file_path"]
+                }
+            },
+            {
+                "name": "close_pane",
+                "description": "Close a non-terminal pane (file viewer, markdown preview, or image). Use list_panes to find pane IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "ID of the pane to close" }
+                    },
+                    "required": ["pane_id"]
+                }
+            },
+            {
+                "name": "list_panes",
+                "description": "List all panes in a workspace, including terminals and file viewers. Returns pane IDs, types, and metadata.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": { "type": "string", "description": "Workspace to list panes for (optional — defaults to active workspace)" }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "update_file_pane",
+                "description": "Update the file shown in an existing file viewer pane. Reuses the pane without changing the layout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "ID of the file pane to update" },
+                        "file_path": { "type": "string", "description": "New file path to display" }
+                    },
+                    "required": ["pane_id", "file_path"]
+                }
+            },
+            {
                 "name": "ui_query",
                 "description": "Query a UI element using a semantic target identifier (e.g. 'workspace.active', 'tab.active', 'terminal.grid').",
                 "inputSchema": {
@@ -452,6 +503,968 @@ pub fn list_tools() -> Value {
                     },
                     "required": ["condition"]
                 }
+            },
+
+            // ──────────────────────────────────────────────
+            // ACTION / MUTATION TOOLS (new)
+            // ──────────────────────────────────────────────
+
+            // --- Terminal Management ---
+            {
+                "name": "create_terminal",
+                "description": "Create a new terminal in a workspace. Returns the new terminal ID. Optionally specify shell type, working directory, or a command to run on startup.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to create the terminal in"
+                        },
+                        "shell_type": {
+                            "type": "string",
+                            "description": "Shell type (e.g. 'powershell', 'cmd', 'wsl', 'bash'). Uses default shell if omitted."
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the new terminal"
+                        },
+                        "worktree_name": {
+                            "type": "string",
+                            "description": "Name for a new git worktree to create"
+                        },
+                        "worktree": {
+                            "type": "boolean",
+                            "description": "If true, create a git worktree for this terminal"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to execute on startup (e.g. 'npm run dev')"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to focus the new terminal (default: true)"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "close_terminal",
+                "description": "Close a terminal and kill its process.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to close"
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
+                "name": "rename_terminal",
+                "description": "Rename a terminal's tab label.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to rename"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "New name for the terminal tab"
+                        }
+                    },
+                    "required": ["terminal_id", "name"]
+                }
+            },
+            {
+                "name": "focus_terminal",
+                "description": "Focus/select a terminal, making it the active tab.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to focus"
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+
+            // --- Terminal I/O ---
+            {
+                "name": "write_to_terminal",
+                "description": "Write raw text or keypresses to a terminal. Use this for interactive input — the text is sent exactly as-is to the terminal's PTY. For running a command and reading output, prefer `execute_command`.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to write to"
+                        },
+                        "data": {
+                            "type": "string",
+                            "description": "Text to write (sent raw to PTY — include \\r\\n for Enter)"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to focus the terminal before writing"
+                        }
+                    },
+                    "required": ["terminal_id", "data"]
+                }
+            },
+            {
+                "name": "send_keys",
+                "description": "Send named key presses to a terminal. Supports special keys like 'Enter', 'Tab', 'Escape', 'Backspace', 'Up', 'Down', 'Left', 'Right', 'Ctrl+C', 'Ctrl+D', etc.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to send keys to"
+                        },
+                        "keys": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Array of key names to send (e.g. ['Ctrl+C', 'Enter'])"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to focus the terminal before sending keys"
+                        }
+                    },
+                    "required": ["terminal_id", "keys"]
+                }
+            },
+            {
+                "name": "erase_content",
+                "description": "Erase characters at the cursor (sends Backspace key presses). Useful for clearing typed input.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal"
+                        },
+                        "count": {
+                            "type": "integer",
+                            "default": 1,
+                            "description": "Number of characters to erase (default: 1)"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to focus the terminal first"
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
+                "name": "execute_command",
+                "description": "Run a shell command in a terminal and wait for it to complete. Returns the command output, completion status, and timing info. This is the recommended way to run commands — it handles write + wait + read in a single call.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to run the command in"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Shell command to execute"
+                        },
+                        "idle_ms": {
+                            "type": "number",
+                            "default": 2000,
+                            "description": "Milliseconds of silence before considering the command done (default: 2000)"
+                        },
+                        "timeout_ms": {
+                            "type": "number",
+                            "default": 30000,
+                            "description": "Maximum time to wait in milliseconds (default: 30000)"
+                        },
+                        "focus": {
+                            "type": "boolean",
+                            "description": "Whether to focus the terminal before running"
+                        }
+                    },
+                    "required": ["terminal_id", "command"]
+                }
+            },
+            {
+                "name": "resize_terminal",
+                "description": "Resize a terminal to specific dimensions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to resize"
+                        },
+                        "rows": {
+                            "type": "integer",
+                            "description": "New row count"
+                        },
+                        "cols": {
+                            "type": "integer",
+                            "description": "New column count"
+                        }
+                    },
+                    "required": ["terminal_id", "rows", "cols"]
+                }
+            },
+
+            // --- Workspace Management ---
+            {
+                "name": "create_workspace",
+                "description": "Create a new workspace with the given name and folder path.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Display name for the workspace"
+                        },
+                        "folder_path": {
+                            "type": "string",
+                            "description": "Folder path associated with the workspace"
+                        }
+                    },
+                    "required": ["name", "folder_path"]
+                }
+            },
+            {
+                "name": "delete_workspace",
+                "description": "Delete a workspace and close all its terminals.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to delete"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "switch_workspace",
+                "description": "Switch to a different workspace, making it the active workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to switch to"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "rename_workspace",
+                "description": "Rename a workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to rename"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "New name for the workspace"
+                        }
+                    },
+                    "required": ["workspace_id", "name"]
+                }
+            },
+            {
+                "name": "reorder_workspaces",
+                "description": "Reorder the workspace list by providing the desired order of workspace IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Ordered list of all workspace IDs"
+                        }
+                    },
+                    "required": ["workspace_ids"]
+                }
+            },
+            {
+                "name": "move_terminal_to_workspace",
+                "description": "Move a terminal from its current workspace to a different workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to move"
+                        },
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the destination workspace"
+                        }
+                    },
+                    "required": ["terminal_id", "workspace_id"]
+                }
+            },
+
+            // --- Workspace Modes ---
+            {
+                "name": "toggle_worktree_mode",
+                "description": "Toggle git worktree isolation mode for a workspace. When enabled, each new terminal gets its own git worktree.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "toggle_claude_code_mode",
+                "description": "Toggle Claude Code mode for a workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "remove_worktree",
+                "description": "Remove a git worktree by its path.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "worktree_path": {
+                            "type": "string",
+                            "description": "Filesystem path of the worktree to remove"
+                        }
+                    },
+                    "required": ["worktree_path"]
+                }
+            },
+
+            // --- Layout / Split Management ---
+            {
+                "name": "split_terminal",
+                "description": "Split an existing terminal pane into two. Creates a split at the target terminal's position in the layout tree.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "target_terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to split"
+                        },
+                        "new_terminal_id": {
+                            "type": "string",
+                            "description": "ID of the new terminal to place in the split"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["horizontal", "vertical"],
+                            "default": "horizontal",
+                            "description": "Split direction (default: horizontal)"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Split ratio from 0.0 to 1.0 (default: 0.5)"
+                        }
+                    },
+                    "required": ["workspace_id", "target_terminal_id", "new_terminal_id"]
+                }
+            },
+            {
+                "name": "self_split",
+                "description": "Split the current terminal session into two panes. Creates a new terminal session alongside the current one.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID of the terminal to split (uses GODLY_SESSION_ID if omitted)"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["horizontal", "vertical"],
+                            "default": "horizontal",
+                            "description": "Split direction (default: horizontal)"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "default": 0.5,
+                            "description": "Split ratio (default: 0.5)"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the new pane"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Command to run in the new pane"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "unsplit_terminal",
+                "description": "Remove a terminal from its split, closing the split and keeping the other pane.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to remove from the split"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_id"]
+                }
+            },
+            {
+                "name": "swap_panes",
+                "description": "Swap the positions of two terminal panes in the layout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_id_a": {
+                            "type": "string",
+                            "description": "ID of the first terminal"
+                        },
+                        "terminal_id_b": {
+                            "type": "string",
+                            "description": "ID of the second terminal"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_id_a", "terminal_id_b"]
+                }
+            },
+            {
+                "name": "zoom_pane",
+                "description": "Toggle zoom (maximize/restore) on a terminal pane. When zoomed, the pane fills the entire workspace area.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal to zoom (optional — uses active terminal)"
+                        }
+                    },
+                    "required": ["workspace_id"]
+                }
+            },
+            {
+                "name": "focus_pane",
+                "description": "Move focus to a pane in the given direction relative to the currently focused pane.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["left", "right", "up", "down"],
+                            "description": "Direction to move focus"
+                        }
+                    },
+                    "required": ["direction"]
+                }
+            },
+            {
+                "name": "focus_other_pane",
+                "description": "Move focus to the other pane in a two-pane split.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "resize_pane",
+                "description": "Resize the current split by moving the divider in the given direction.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["left", "right", "up", "down"],
+                            "description": "Direction to resize (moves the split divider)"
+                        },
+                        "delta": {
+                            "type": "number",
+                            "default": 0.05,
+                            "description": "Amount to resize as a fraction of total space (default: 0.05)"
+                        }
+                    },
+                    "required": ["direction"]
+                }
+            },
+            {
+                "name": "set_split_ratio",
+                "description": "Set the split ratio of the current split to an exact value.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        },
+                        "ratio": {
+                            "type": "number",
+                            "description": "Split ratio from 0.0 to 1.0"
+                        }
+                    },
+                    "required": ["ratio"]
+                }
+            },
+            {
+                "name": "rotate_split",
+                "description": "Rotate the current split direction (horizontal ↔ vertical).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+
+            // --- Tab Navigation ---
+            {
+                "name": "next_tab",
+                "description": "Switch to the next terminal tab in the current workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "previous_tab",
+                "description": "Switch to the previous terminal tab in the current workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "go_to_tab",
+                "description": "Switch to a specific terminal tab by its index (0-based).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional — uses active workspace)"
+                        },
+                        "index": {
+                            "type": "integer",
+                            "description": "Tab index (0-based)"
+                        }
+                    },
+                    "required": ["index"]
+                }
+            },
+            {
+                "name": "reorder_tabs",
+                "description": "Reorder terminal tabs by providing the desired order of terminal IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace"
+                        },
+                        "terminal_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Ordered list of terminal IDs"
+                        }
+                    },
+                    "required": ["workspace_id", "terminal_ids"]
+                }
+            },
+
+            // --- Scrollback ---
+            {
+                "name": "scroll_page_up",
+                "description": "Scroll the terminal viewport up by one page.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal (optional — uses active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "scroll_page_down",
+                "description": "Scroll the terminal viewport down by one page.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal (optional — uses active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "scroll_to_top",
+                "description": "Scroll the terminal viewport to the top of the scrollback buffer.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal (optional — uses active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "scroll_to_bottom",
+                "description": "Scroll the terminal viewport to the bottom (live view).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal (optional — uses active terminal)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+
+            // --- Appearance ---
+            {
+                "name": "set_theme",
+                "description": "Set the active terminal color theme. Use `list_themes` to see available themes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "theme_name": {
+                            "type": "string",
+                            "description": "Name of the theme to activate"
+                        }
+                    },
+                    "required": ["theme_name"]
+                }
+            },
+            {
+                "name": "zoom_in",
+                "description": "Increase the terminal font size by one step.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "zoom_out",
+                "description": "Decrease the terminal font size by one step.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "zoom_reset",
+                "description": "Reset the terminal font size to the default.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+
+            // --- Shell Settings ---
+            {
+                "name": "set_default_shell",
+                "description": "Set the default shell used for new terminals.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "shell_type": {
+                            "type": "string",
+                            "description": "Shell type (e.g. 'powershell', 'cmd', 'wsl', 'bash', 'custom')"
+                        },
+                        "wsl_distribution": {
+                            "type": "string",
+                            "description": "WSL distribution name (required when shell_type is 'wsl')"
+                        },
+                        "custom_program": {
+                            "type": "string",
+                            "description": "Program path (required when shell_type is 'custom')"
+                        },
+                        "custom_args": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Arguments for custom program"
+                        }
+                    },
+                    "required": ["shell_type"]
+                }
+            },
+
+            // --- Notifications ---
+            {
+                "name": "notify",
+                "description": "Trigger a notification for a terminal. The notification appears based on the terminal's notification settings.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal that triggered the notification"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Optional notification message"
+                        }
+                    },
+                    "required": ["terminal_id"]
+                }
+            },
+            {
+                "name": "set_notification_enabled",
+                "description": "Enable or disable notifications for a specific terminal or workspace.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "terminal_id": {
+                            "type": "string",
+                            "description": "ID of the terminal (optional)"
+                        },
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace (optional)"
+                        },
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Whether to enable (true) or disable (false) notifications"
+                        }
+                    },
+                    "required": ["enabled"]
+                }
+            },
+            {
+                "name": "set_notification_sound",
+                "description": "Set the notification sound preset.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "preset": {
+                            "type": "string",
+                            "description": "Sound preset name"
+                        }
+                    },
+                    "required": ["preset"]
+                }
+            },
+            {
+                "name": "add_mute_pattern",
+                "description": "Add a glob pattern to mute notifications for matching workspaces.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern (e.g. '**/node_modules/**')"
+                        }
+                    },
+                    "required": ["pattern"]
+                }
+            },
+            {
+                "name": "remove_mute_pattern",
+                "description": "Remove a notification mute pattern.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern to remove"
+                        }
+                    },
+                    "required": ["pattern"]
+                }
+            },
+
+            // --- App Control ---
+            {
+                "name": "save_layout",
+                "description": "Save the current workspace layout to disk. Persists tab order, splits, and workspace configuration.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "open_in_explorer",
+                "description": "Open a file or folder in the system file explorer.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Filesystem path to open"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            },
+            {
+                "name": "copy_to_clipboard",
+                "description": "Copy text to the system clipboard.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Text to copy to clipboard"
+                        }
+                    },
+                    "required": ["text"]
+                }
+            },
+            {
+                "name": "open_settings",
+                "description": "Open the Godly Terminal settings panel.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "tab": {
+                            "type": "string",
+                            "description": "Settings tab to open (optional)"
+                        }
+                    },
+                    "required": []
+                }
+            },
+
+            // --- Quick Claude ---
+            {
+                "name": "quick_claude",
+                "description": "Launch a fire-and-forget Claude Code task in a workspace. Creates a new terminal, optionally in a git worktree, and starts Claude Code with the given prompt.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {
+                            "type": "string",
+                            "description": "ID of the workspace to launch in"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Prompt/task for Claude Code to work on"
+                        },
+                        "branch_name": {
+                            "type": "string",
+                            "description": "Git branch name for the worktree"
+                        },
+                        "skip_fetch": {
+                            "type": "boolean",
+                            "description": "Skip git fetch before creating worktree"
+                        },
+                        "no_worktree": {
+                            "type": "boolean",
+                            "description": "Run in the workspace directory instead of a worktree"
+                        }
+                    },
+                    "required": ["workspace_id", "prompt"]
+                }
+            },
+
+            // --- Semantic Testing ---
+            {
+                "name": "ui_act",
+                "description": "Perform an action on a UI element using a semantic target and action identifier.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "description": "Semantic target identifier for the UI element."
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "Action to perform on the target."
+                        },
+                        "args": {
+                            "type": "object",
+                            "description": "Optional arguments for the action."
+                        }
+                    },
+                    "required": ["target", "action"]
+                }
             }
         ]
     })
@@ -465,6 +1478,9 @@ pub fn call_tool(
     session_id: &Option<String>,
 ) -> Result<Value, String> {
     let request = match name {
+        // ──────────────────────────────────────────────
+        // READ / QUERY TOOLS (existing)
+        // ──────────────────────────────────────────────
         "get_current_terminal" => {
             let sid = session_id
                 .as_ref()
@@ -699,7 +1715,6 @@ pub fn call_tool(
             McpRequest::CollectArtifactBundle { run_id }
         }
 
-        // Test harness tools
         "test_harness_status" => McpRequest::TestHarnessStatus,
 
         "ui_query" => {
@@ -722,6 +1737,352 @@ pub fn call_tool(
             let poll_interval_ms = args.get("poll_interval_ms").and_then(|v| v.as_u64());
             let wait_args = args.get("args").cloned();
             McpRequest::UiWait { condition, timeout_ms, poll_interval_ms, args: wait_args }
+        }
+
+        // ──────────────────────────────────────────────
+        // ACTION / MUTATION TOOLS (new)
+        // ──────────────────────────────────────────────
+
+        // --- Terminal Management ---
+        "create_terminal" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            // ShellType is a tagged enum — accepts "windows", "pwsh", "cmd",
+            // or {"wsl": {"distribution": "..."}} / {"custom": {"program": "...", "args": [...]}}
+            let shell_type = args.get("shell_type").and_then(|v| {
+                serde_json::from_value::<godly_protocol::types::ShellType>(v.clone()).ok()
+            });
+            let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+            let worktree_name = args.get("worktree_name").and_then(|v| v.as_str()).map(String::from);
+            let worktree = args.get("worktree").and_then(|v| v.as_bool());
+            let command = args.get("command").and_then(|v| v.as_str()).map(String::from);
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::CreateTerminal {
+                workspace_id,
+                shell_type,
+                cwd,
+                worktree_name,
+                worktree,
+                command,
+                focus,
+            }
+        }
+
+        "close_terminal" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            McpRequest::CloseTerminal { terminal_id }
+        }
+
+        "rename_terminal" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing name")?.to_string();
+            McpRequest::RenameTerminal { terminal_id, name }
+        }
+
+        "focus_terminal" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            McpRequest::FocusTerminal { terminal_id }
+        }
+
+        // --- Terminal I/O ---
+        "write_to_terminal" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let data = args.get("data").and_then(|v| v.as_str()).ok_or("Missing data")?.to_string();
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::WriteToTerminal { terminal_id, data, focus }
+        }
+
+        "send_keys" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let keys: Vec<String> = args.get("keys")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing keys array")?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::SendKeys { terminal_id, keys, focus }
+        }
+
+        "erase_content" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::EraseContent { terminal_id, count, focus }
+        }
+
+        "execute_command" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let command = args.get("command").and_then(|v| v.as_str()).ok_or("Missing command")?.to_string();
+            let idle_ms = args.get("idle_ms").and_then(|v| v.as_u64()).unwrap_or(2000);
+            let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(30000);
+            let focus = args.get("focus").and_then(|v| v.as_bool());
+            McpRequest::ExecuteCommand { terminal_id, command, idle_ms, timeout_ms, focus }
+        }
+
+        "resize_terminal" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let rows = args.get("rows").and_then(|v| v.as_u64()).ok_or("Missing rows")? as u16;
+            let cols = args.get("cols").and_then(|v| v.as_u64()).ok_or("Missing cols")? as u16;
+            McpRequest::ResizeTerminal { terminal_id, rows, cols }
+        }
+
+        // --- Workspace Management ---
+        "create_workspace" => {
+            let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing name")?.to_string();
+            let folder_path = args.get("folder_path").and_then(|v| v.as_str()).ok_or("Missing folder_path")?.to_string();
+            McpRequest::CreateWorkspace { name, folder_path }
+        }
+
+        "delete_workspace" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::DeleteWorkspace { workspace_id }
+        }
+
+        "switch_workspace" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::SwitchWorkspace { workspace_id }
+        }
+
+        "rename_workspace" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing name")?.to_string();
+            McpRequest::RenameWorkspace { workspace_id, name }
+        }
+
+        "reorder_workspaces" => {
+            let workspace_ids: Vec<String> = args.get("workspace_ids")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing workspace_ids array")?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            McpRequest::ReorderWorkspaces { workspace_ids }
+        }
+
+        "move_terminal_to_workspace" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::MoveTerminalToWorkspace { terminal_id, workspace_id }
+        }
+
+        // --- Workspace Modes ---
+        "toggle_worktree_mode" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::ToggleWorktreeMode { workspace_id }
+        }
+
+        "toggle_claude_code_mode" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            McpRequest::ToggleClaudeCodeMode { workspace_id }
+        }
+
+        "remove_worktree" => {
+            let worktree_path = args.get("worktree_path").and_then(|v| v.as_str()).ok_or("Missing worktree_path")?.to_string();
+            McpRequest::RemoveWorktree { worktree_path }
+        }
+
+        // --- Layout / Split Management ---
+        "split_terminal" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let target_terminal_id = args.get("target_terminal_id").and_then(|v| v.as_str()).ok_or("Missing target_terminal_id")?.to_string();
+            let new_terminal_id = args.get("new_terminal_id").and_then(|v| v.as_str()).ok_or("Missing new_terminal_id")?.to_string();
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("horizontal").to_string();
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            McpRequest::SplitTerminal { workspace_id, target_terminal_id, new_terminal_id, direction, ratio }
+        }
+
+        "self_split" => {
+            let sid = args.get("session_id").and_then(|v| v.as_str()).map(String::from)
+                .or_else(|| session_id.clone())
+                .ok_or("Missing session_id (and GODLY_SESSION_ID not set)")?;
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("horizontal").to_string();
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+            let command = args.get("command").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::SelfSplit { session_id: sid, direction, ratio, cwd, command }
+        }
+
+        "unsplit_terminal" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            McpRequest::UnsplitTerminal { workspace_id, terminal_id }
+        }
+
+        "swap_panes" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_id_a = args.get("terminal_id_a").and_then(|v| v.as_str()).ok_or("Missing terminal_id_a")?.to_string();
+            let terminal_id_b = args.get("terminal_id_b").and_then(|v| v.as_str()).ok_or("Missing terminal_id_b")?.to_string();
+            McpRequest::SwapPanes { workspace_id, terminal_id_a, terminal_id_b }
+        }
+
+        "zoom_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ZoomPane { workspace_id, terminal_id }
+        }
+
+        "focus_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let direction = args.get("direction").and_then(|v| v.as_str()).ok_or("Missing direction")?.to_string();
+            McpRequest::FocusPane { workspace_id, direction }
+        }
+
+        "focus_other_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::FocusOtherPane { workspace_id }
+        }
+
+        "resize_pane" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let direction = args.get("direction").and_then(|v| v.as_str()).ok_or("Missing direction")?.to_string();
+            let delta = args.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.05);
+            McpRequest::ResizePane { workspace_id, direction, delta }
+        }
+
+        "set_split_ratio" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let ratio = args.get("ratio").and_then(|v| v.as_f64()).ok_or("Missing ratio")?;
+            McpRequest::SetSplitRatio { workspace_id, ratio }
+        }
+
+        "rotate_split" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::RotateSplit { workspace_id }
+        }
+
+        // --- Tab Navigation ---
+        "next_tab" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::NextTab { workspace_id }
+        }
+
+        "previous_tab" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::PreviousTab { workspace_id }
+        }
+
+        "go_to_tab" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let index = args.get("index").and_then(|v| v.as_u64()).ok_or("Missing index")? as u32;
+            McpRequest::GoToTab { workspace_id, index }
+        }
+
+        "reorder_tabs" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let terminal_ids: Vec<String> = args.get("terminal_ids")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing terminal_ids array")?
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            McpRequest::ReorderTabs { workspace_id, terminal_ids }
+        }
+
+        // --- Scrollback ---
+        "scroll_page_up" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollPageUp { terminal_id }
+        }
+
+        "scroll_page_down" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollPageDown { terminal_id }
+        }
+
+        "scroll_to_top" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollToTop { terminal_id }
+        }
+
+        "scroll_to_bottom" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::ScrollToBottom { terminal_id }
+        }
+
+        // --- Appearance ---
+        "set_theme" => {
+            let theme_name = args.get("theme_name").and_then(|v| v.as_str()).ok_or("Missing theme_name")?.to_string();
+            McpRequest::SetTheme { theme_name }
+        }
+
+        "zoom_in" => McpRequest::ZoomIn,
+        "zoom_out" => McpRequest::ZoomOut,
+        "zoom_reset" => McpRequest::ZoomReset,
+
+        // --- Shell Settings ---
+        "set_default_shell" => {
+            let shell_type = args.get("shell_type").and_then(|v| v.as_str()).ok_or("Missing shell_type")?.to_string();
+            let wsl_distribution = args.get("wsl_distribution").and_then(|v| v.as_str()).map(String::from);
+            let custom_program = args.get("custom_program").and_then(|v| v.as_str()).map(String::from);
+            let custom_args = args.get("custom_args").and_then(|v| v.as_array()).map(|arr| {
+                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+            });
+            McpRequest::SetDefaultShell { shell_type, wsl_distribution, custom_program, custom_args }
+        }
+
+        // --- Notifications ---
+        "notify" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
+            let message = args.get("message").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::Notify { terminal_id, message }
+        }
+
+        "set_notification_enabled" => {
+            let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).map(String::from);
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).map(String::from);
+            let enabled = args.get("enabled").and_then(|v| v.as_bool()).ok_or("Missing enabled")?;
+            McpRequest::SetNotificationEnabled { terminal_id, workspace_id, enabled }
+        }
+
+        "set_notification_sound" => {
+            let preset = args.get("preset").and_then(|v| v.as_str()).ok_or("Missing preset")?.to_string();
+            McpRequest::SetNotificationSound { preset }
+        }
+
+        "add_mute_pattern" => {
+            let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("Missing pattern")?.to_string();
+            McpRequest::AddMutePattern { pattern }
+        }
+
+        "remove_mute_pattern" => {
+            let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("Missing pattern")?.to_string();
+            McpRequest::RemoveMutePattern { pattern }
+        }
+
+        // --- App Control ---
+        "save_layout" => McpRequest::SaveLayout,
+
+        "open_in_explorer" => {
+            let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing path")?.to_string();
+            McpRequest::OpenInExplorer { path }
+        }
+
+        "copy_to_clipboard" => {
+            let text = args.get("text").and_then(|v| v.as_str()).ok_or("Missing text")?.to_string();
+            McpRequest::CopyToClipboard { text }
+        }
+
+        "open_settings" => {
+            let tab = args.get("tab").and_then(|v| v.as_str()).map(String::from);
+            McpRequest::OpenSettings { tab }
+        }
+
+        // --- Quick Claude ---
+        "quick_claude" => {
+            let workspace_id = args.get("workspace_id").and_then(|v| v.as_str()).ok_or("Missing workspace_id")?.to_string();
+            let prompt = args.get("prompt").and_then(|v| v.as_str()).ok_or("Missing prompt")?.to_string();
+            let branch_name = args.get("branch_name").and_then(|v| v.as_str()).map(String::from);
+            let skip_fetch = args.get("skip_fetch").and_then(|v| v.as_bool());
+            let no_worktree = args.get("no_worktree").and_then(|v| v.as_bool());
+            McpRequest::QuickClaude { workspace_id, prompt, branch_name, skip_fetch, no_worktree }
+        }
+
+        // --- Semantic Testing ---
+        "ui_act" => {
+            let target = args.get("target").and_then(|v| v.as_str()).ok_or("Missing target")?.to_string();
+            let action = args.get("action").and_then(|v| v.as_str()).ok_or("Missing action")?.to_string();
+            let act_args = args.get("args").cloned();
+            McpRequest::UiAct { target, action, args: act_args }
         }
 
         _ => return Err(format!("Unknown tool: {}", name)),
@@ -970,6 +2331,21 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
             "font_size": size,
         })),
 
+        // File pane responses
+        McpResponse::PaneCreated { pane_id, file_type } => Ok(json!({
+            "pane_id": pane_id,
+            "file_type": file_type,
+        })),
+        McpResponse::PaneList { panes } => Ok(json!({
+            "panes": panes.iter().map(|p| json!({
+                "pane_id": p.pane_id,
+                "pane_type": p.pane_type,
+                "workspace_id": p.workspace_id,
+                "file_path": p.file_path,
+                "file_type": p.file_type,
+            })).collect::<Vec<_>>(),
+        })),
+
         // Test harness responses
         McpResponse::TestHarnessStatus {
             ready,
@@ -1037,4 +2413,3 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
     }
 }
-

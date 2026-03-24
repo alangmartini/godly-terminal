@@ -23,7 +23,7 @@ pub use frame::{
     read_shim_frame, write_shim_binary, write_shim_json, ShimFrame, TAG_SHIM_BUFFER_DATA,
     TAG_SHIM_OUTPUT, TAG_SHIM_WRITE,
 };
-pub use layout_tree::{LayoutNode, SplitDirection};
+pub use layout_tree::{LayoutNode, PaneInfo, SplitDirection};
 pub use mcp_messages::{McpRequest, McpResponse, McpTerminalInfo, McpWorkspaceInfo};
 pub use messages::{DaemonMessage, Event, Request, RequestEnvelope, Response};
 pub use messages::{ShimRequest, ShimResponse};

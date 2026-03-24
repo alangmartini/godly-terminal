@@ -361,7 +361,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(direction, SplitDirection::Horizontal);
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            _ => panic!("expected split layout"),
         }
     }
 
@@ -381,7 +381,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(direction, SplitDirection::Horizontal);
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            _ => panic!("expected split layout"),
         }
     }
 
@@ -401,7 +401,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(direction, SplitDirection::Vertical);
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            _ => panic!("expected split layout"),
         }
     }
 
@@ -421,7 +421,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(direction, SplitDirection::Vertical);
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            _ => panic!("expected split layout"),
         }
     }
 
