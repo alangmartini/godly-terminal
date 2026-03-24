@@ -9,6 +9,16 @@ pub enum SplitDirection {
     Vertical,
 }
 
+/// Metadata for any pane (terminal or content) in the layout tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneInfo {
+    pub id: String,
+    pub pane_type: String,
+    pub terminal_id: Option<String>,
+    pub file_path: Option<String>,
+    pub file_type: Option<String>,
+}
+
 /// A recursive binary tree representing the pane layout of a workspace.
 ///
 /// Each leaf holds a terminal ID; each internal node splits space between
@@ -18,6 +28,13 @@ pub enum SplitDirection {
 pub enum LayoutNode {
     Leaf {
         terminal_id: String,
+    },
+    /// A non-terminal content pane (file viewer).
+    #[serde(rename = "content_pane")]
+    ContentPane {
+        pane_id: String,
+        file_path: String,
+        file_type: String, // "code", "markdown", "image"
     },
     Split {
         direction: SplitDirection,
@@ -45,6 +62,7 @@ impl LayoutNode {
     pub fn find_terminal(&self, terminal_id: &str) -> bool {
         match self {
             LayoutNode::Leaf { terminal_id: id } => id == terminal_id,
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => {
                 first.find_terminal(terminal_id) || second.find_terminal(terminal_id)
             }
@@ -64,6 +82,7 @@ impl LayoutNode {
     fn collect_terminal_ids(&self, out: &mut Vec<String>) {
         match self {
             LayoutNode::Leaf { terminal_id } => out.push(terminal_id.clone()),
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.collect_terminal_ids(out);
                 second.collect_terminal_ids(out);
@@ -76,10 +95,11 @@ impl LayoutNode {
         }
     }
 
-    /// Count the number of leaf (terminal) panes.
+    /// Count the number of leaf panes (terminals and content panes).
     pub fn count_leaves(&self) -> usize {
         match self {
             LayoutNode::Leaf { .. } => 1,
+            LayoutNode::ContentPane { .. } => 1,
             LayoutNode::Split { first, second, .. } => first.count_leaves() + second.count_leaves(),
             LayoutNode::Grid { children, .. } => children.iter().map(|c| c.count_leaves()).sum(),
         }
@@ -104,6 +124,7 @@ impl LayoutNode {
                     None
                 }
             }
+            LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split { first, second, .. } => {
                 // Check if the target is a direct child
                 if let LayoutNode::Leaf {
@@ -151,64 +172,8 @@ impl LayoutNode {
                 });
 
                 if let Some(idx) = target_idx {
-                    // Collapse the grid to a 3-pane SplitNode tree.
-                    // Children: TL(0), TR(1), BL(2), BR(3)
-                    let [tl, tr, bl, br] = children.clone();
-                    let col_r = *col_ratios;
-                    let row_r = *row_ratios;
-
-                    let replacement = match idx {
-                        // Remove TL: Split(V, rowR[1], TR, Split(H, colR[1], BL, BR))
-                        0 => LayoutNode::Split {
-                            direction: SplitDirection::Vertical,
-                            ratio: row_r[1],
-                            first: tr,
-                            second: Box::new(LayoutNode::Split {
-                                direction: SplitDirection::Horizontal,
-                                ratio: col_r[1],
-                                first: bl,
-                                second: br,
-                            }),
-                        },
-                        // Remove TR: Split(V, rowR[0], TL, Split(H, colR[1], BL, BR))
-                        1 => LayoutNode::Split {
-                            direction: SplitDirection::Vertical,
-                            ratio: row_r[0],
-                            first: tl,
-                            second: Box::new(LayoutNode::Split {
-                                direction: SplitDirection::Horizontal,
-                                ratio: col_r[1],
-                                first: bl,
-                                second: br,
-                            }),
-                        },
-                        // Remove BL: Split(V, rowR[0], Split(H, colR[0], TL, TR), BR)
-                        2 => LayoutNode::Split {
-                            direction: SplitDirection::Vertical,
-                            ratio: row_r[0],
-                            first: Box::new(LayoutNode::Split {
-                                direction: SplitDirection::Horizontal,
-                                ratio: col_r[0],
-                                first: tl,
-                                second: tr,
-                            }),
-                            second: br,
-                        },
-                        // Remove BR: Split(V, rowR[0], Split(H, colR[0], TL, TR), BL)
-                        3 => LayoutNode::Split {
-                            direction: SplitDirection::Vertical,
-                            ratio: row_r[0],
-                            first: Box::new(LayoutNode::Split {
-                                direction: SplitDirection::Horizontal,
-                                ratio: col_r[0],
-                                first: tl,
-                                second: tr,
-                            }),
-                            second: bl,
-                        },
-                        _ => unreachable!(),
-                    };
-
+                    let replacement =
+                        grid_collapse_without(idx, children, col_ratios, row_ratios);
                     let result = replacement.clone();
                     *self = replacement;
                     return Some(result);
@@ -257,6 +222,7 @@ impl LayoutNode {
                     false
                 }
             }
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split { first, second, .. } => {
                 if first.split_at(terminal_id, new_terminal_id, direction, ratio) {
                     return true;
@@ -296,6 +262,7 @@ impl LayoutNode {
                     *terminal_id = to.to_string();
                 }
             }
+            LayoutNode::ContentPane { .. } => {}
             LayoutNode::Split { first, second, .. } => {
                 first.rename_terminal(from, to);
                 second.rename_terminal(from, to);
@@ -343,6 +310,7 @@ impl LayoutNode {
                     None
                 }
             }
+            LayoutNode::ContentPane { .. } => None,
             LayoutNode::Split {
                 direction: split_dir,
                 first,
@@ -446,6 +414,8 @@ impl LayoutNode {
                     None
                 }
             }
+            // Content panes always survive pruning (they are not terminals)
+            LayoutNode::ContentPane { .. } => Some(self.clone()),
             LayoutNode::Split {
                 direction,
                 ratio,
@@ -603,20 +573,54 @@ impl LayoutNode {
     }
 
     /// Get the first (leftmost/topmost) leaf terminal ID.
+    /// Skips ContentPane nodes; returns empty string if no terminal leaf exists.
     fn first_leaf(&self) -> String {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id.clone(),
-            LayoutNode::Split { first, .. } => first.first_leaf(),
-            LayoutNode::Grid { children, .. } => children[0].first_leaf(),
+            LayoutNode::ContentPane { .. } => String::new(),
+            LayoutNode::Split { first, second, .. } => {
+                let f = first.first_leaf();
+                if !f.is_empty() {
+                    f
+                } else {
+                    second.first_leaf()
+                }
+            }
+            LayoutNode::Grid { children, .. } => {
+                for child in children {
+                    let id = child.first_leaf();
+                    if !id.is_empty() {
+                        return id;
+                    }
+                }
+                String::new()
+            }
         }
     }
 
     /// Get the last (rightmost/bottommost) leaf terminal ID.
+    /// Skips ContentPane nodes; returns empty string if no terminal leaf exists.
     fn last_leaf(&self) -> String {
         match self {
             LayoutNode::Leaf { terminal_id } => terminal_id.clone(),
-            LayoutNode::Split { second, .. } => second.last_leaf(),
-            LayoutNode::Grid { children, .. } => children[3].last_leaf(),
+            LayoutNode::ContentPane { .. } => String::new(),
+            LayoutNode::Split { first, second, .. } => {
+                let s = second.last_leaf();
+                if !s.is_empty() {
+                    s
+                } else {
+                    first.last_leaf()
+                }
+            }
+            LayoutNode::Grid { children, .. } => {
+                for child in children.iter().rev() {
+                    let id = child.last_leaf();
+                    if !id.is_empty() {
+                        return id;
+                    }
+                }
+                String::new()
+            }
         }
     }
 
@@ -633,6 +637,7 @@ impl LayoutNode {
     ) -> bool {
         match self {
             LayoutNode::Leaf { .. } => false,
+            LayoutNode::ContentPane { .. } => false,
             LayoutNode::Split {
                 direction: split_dir,
                 ratio,
@@ -673,6 +678,171 @@ impl LayoutNode {
                 false
             }
         }
+    }
+
+    /// Check if a content pane with the given pane_id exists anywhere in this tree.
+    pub fn find_content_pane(&self, pane_id: &str) -> bool {
+        match self {
+            LayoutNode::Leaf { .. } => false,
+            LayoutNode::ContentPane {
+                pane_id: id, ..
+            } => id == pane_id,
+            LayoutNode::Split { first, second, .. } => {
+                first.find_content_pane(pane_id) || second.find_content_pane(pane_id)
+            }
+            LayoutNode::Grid { children, .. } => {
+                children.iter().any(|c| c.find_content_pane(pane_id))
+            }
+        }
+    }
+
+    /// Collect all content pane IDs in this tree.
+    pub fn content_pane_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        self.collect_content_pane_ids(&mut ids);
+        ids
+    }
+
+    fn collect_content_pane_ids(&self, out: &mut Vec<String>) {
+        match self {
+            LayoutNode::Leaf { .. } => {}
+            LayoutNode::ContentPane { pane_id, .. } => out.push(pane_id.clone()),
+            LayoutNode::Split { first, second, .. } => {
+                first.collect_content_pane_ids(out);
+                second.collect_content_pane_ids(out);
+            }
+            LayoutNode::Grid { children, .. } => {
+                for child in children {
+                    child.collect_content_pane_ids(out);
+                }
+            }
+        }
+    }
+
+    /// Remove a content pane from the tree by collapsing its parent split.
+    ///
+    /// Returns `Some(sibling)` when the pane is found and removed, or `None`
+    /// if the pane is the only leaf (tree becomes empty) or was not found.
+    pub fn remove_content_pane(&mut self, pane_id: &str) -> Option<LayoutNode> {
+        match self {
+            LayoutNode::Leaf { .. } => None,
+            // Root is the target or not found — either way, tree becomes empty/unchanged
+            LayoutNode::ContentPane { .. } => None,
+            LayoutNode::Split { first, second, .. } => {
+                // Check if the target is a direct child
+                if let LayoutNode::ContentPane { pane_id: ref id, .. } = **first {
+                    if id == pane_id {
+                        let sibling = *second.clone();
+                        *self = sibling.clone();
+                        return Some(sibling);
+                    }
+                }
+                if let LayoutNode::ContentPane { pane_id: ref id, .. } = **second {
+                    if id == pane_id {
+                        let sibling = *first.clone();
+                        *self = sibling.clone();
+                        return Some(sibling);
+                    }
+                }
+
+                // Recurse into children
+                if first.find_content_pane(pane_id) {
+                    return first.remove_content_pane(pane_id);
+                }
+                if second.find_content_pane(pane_id) {
+                    return second.remove_content_pane(pane_id);
+                }
+
+                None
+            }
+            LayoutNode::Grid {
+                col_ratios,
+                row_ratios,
+                children,
+            } => {
+                // Check each child for a direct content pane match
+                let target_idx = children.iter().position(|c| {
+                    matches!(c.as_ref(), LayoutNode::ContentPane { pane_id: id, .. } if id == pane_id)
+                });
+
+                if let Some(idx) = target_idx {
+                    let replacement =
+                        grid_collapse_without(idx, children, col_ratios, row_ratios);
+                    let result = replacement.clone();
+                    *self = replacement;
+                    return Some(result);
+                }
+
+                // Target not a direct child leaf — recurse into children
+                for child in children.iter_mut() {
+                    if child.find_content_pane(pane_id) {
+                        return child.remove_content_pane(pane_id);
+                    }
+                }
+
+                None
+            }
+        }
+    }
+}
+
+/// Collapse a 2x2 grid into a 3-pane split tree after removing the child at `idx`.
+fn grid_collapse_without(
+    idx: usize,
+    children: &[Box<LayoutNode>; 4],
+    col_ratios: &[f64; 2],
+    row_ratios: &[f64; 2],
+) -> LayoutNode {
+    let [tl, tr, bl, br] = children.clone();
+    let col_r = *col_ratios;
+    let row_r = *row_ratios;
+
+    match idx {
+        0 => LayoutNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: row_r[1],
+            first: tr,
+            second: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: col_r[1],
+                first: bl,
+                second: br,
+            }),
+        },
+        1 => LayoutNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: row_r[0],
+            first: tl,
+            second: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: col_r[1],
+                first: bl,
+                second: br,
+            }),
+        },
+        2 => LayoutNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: row_r[0],
+            first: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: col_r[0],
+                first: tl,
+                second: tr,
+            }),
+            second: br,
+        },
+        3 => LayoutNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: row_r[0],
+            first: Box::new(LayoutNode::Split {
+                direction: SplitDirection::Horizontal,
+                ratio: col_r[0],
+                first: tl,
+                second: tr,
+            }),
+            second: bl,
+        },
+        _ => unreachable!(),
     }
 }
 
