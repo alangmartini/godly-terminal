@@ -1500,6 +1500,17 @@ impl GodlyApp {
         }
     }
 
+    /// Persist the full session state (workspaces, layout, settings) to disk.
+    /// Called after every workspace mutation (create, delete, rename) so that
+    /// crashes within the 60-second autosave window don't lose changes.
+    fn persist_session_state(&self) {
+        if let Err(e) = session_persistence::save_to_default_path(
+            &self.build_persisted_session_state(),
+        ) {
+            log::warn!("Failed to persist session state after mutation: {}", e);
+        }
+    }
+
     pub(crate) fn save_layout_for_testing(&self) -> Result<(), String> {
         self.persist_scrollback_offsets();
         session_persistence::save_to_default_path(&self.build_persisted_session_state())
@@ -2314,6 +2325,7 @@ impl GodlyApp {
                     let next_name = self.rename_workspace_value.trim().to_string();
                     if !next_name.is_empty() {
                         let _ = self.workspaces.rename(&workspace_id, next_name);
+                        self.persist_session_state();
                     }
                 }
                 self.rename_workspace_value.clear();
@@ -6380,6 +6392,7 @@ impl GodlyApp {
                 }
                 self.persist_scrollback_offsets();
                 self.workspaces.remove(workspace_id);
+                self.persist_session_state();
                 if clear_context_menu {
                     self.workspace_context_menu_id = None;
                 }
@@ -6535,6 +6548,7 @@ impl GodlyApp {
         self.workspaces.set_active(&decision.workspace_id);
         self.terminals.set_active(&decision.session_id);
         self.workspace_context_menu_id = None;
+        self.persist_session_state();
 
         self.create_terminal_task(decision.session_id)
     }
@@ -6571,6 +6585,7 @@ impl GodlyApp {
         self.terminals.set_active(&session_id);
         self.workspace_context_menu_id = None;
         self.next_workspace_num = self.next_workspace_num.saturating_add(1);
+        self.persist_session_state();
 
         self.create_terminal_task_with_cwd(session_id, Some(folder_path))
     }
@@ -7239,6 +7254,7 @@ impl GodlyApp {
         self.next_workspace_num = self.next_workspace_num.saturating_add(1);
         self.last_test_workspace_id = Some(workspace_id.clone());
         self.last_test_terminal_id = Some(session_id.clone());
+        self.persist_session_state();
 
         Ok((workspace_id, self.fetch_grid(&session_id)))
     }
