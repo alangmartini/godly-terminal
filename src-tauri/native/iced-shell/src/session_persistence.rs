@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::split_pane::{LayoutNode, SplitDirection};
 
 pub const PERSISTENCE_VERSION: u32 = 1;
-pub const AUTOSAVE_INTERVAL_SECS: u64 = 5 * 60;
+pub const AUTOSAVE_INTERVAL_SECS: u64 = 60;
 const PERSISTENCE_FILE_NAME: &str = "iced-shell-session.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -179,6 +179,18 @@ pub fn install_exception_handler() {
             0xC00000FD => "STACK_OVERFLOW",
             0xC0000374 => "HEAP_CORRUPTION",
             0xC0000409 => "STACK_BUFFER_OVERRUN",
+            // GPU / device related
+            0xC000000E => "NO_SUCH_DEVICE",
+            0xC0000017 => "NO_MEMORY",
+            0xC0000008 => "INVALID_HANDLE",
+            // Code / driver integrity
+            0xC000001D => "ILLEGAL_INSTRUCTION",
+            0xC0000025 => "NONCONTINUABLE_EXCEPTION",
+            0xC0000026 => "INVALID_DISPOSITION",
+            // Arithmetic (shader/driver)
+            0xC0000094 => "INTEGER_DIVIDE_BY_ZERO",
+            0xC000008E => "FLOAT_DIVIDE_BY_ZERO",
+            0xC0000091 => "FLOAT_OVERFLOW",
             _ => "UNKNOWN",
         };
 
@@ -212,6 +224,23 @@ pub fn install_exception_handler() {
 #[cfg(not(windows))]
 pub fn install_exception_handler() {
     // No-op on non-Windows
+}
+
+/// Register a C-level atexit handler that logs when the process exits.
+/// This catches `std::process::exit()`, `ExitProcess()`, and normal returns
+/// from main — all of which bypass panic hooks and SEH handlers.
+pub fn install_atexit_handler() {
+    extern "C" {
+        fn atexit(cb: extern "C" fn()) -> i32;
+    }
+
+    extern "C" fn on_exit() {
+        log("PROCESS EXIT — atexit handler fired (process terminating)");
+    }
+
+    unsafe {
+        atexit(on_exit);
+    }
 }
 
 fn rotate(state: &mut LogState) {

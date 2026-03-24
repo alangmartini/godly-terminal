@@ -55,6 +55,7 @@ mod git_worktree;
 mod keybinding_persistence;
 mod phone_remote;
 mod crash_handler;
+mod gpu_watchdog;
 
 use app::{GodlyApp, Message};
 
@@ -62,6 +63,8 @@ fn main() -> iced::Result {
     crash_handler::init();
     crash_handler::install_panic_hook();
     crash_handler::install_exception_handler();
+    crash_handler::install_atexit_handler();
+    gpu_watchdog::start();
 
     env_logger::init();
     log::info!(
@@ -87,7 +90,7 @@ fn main() -> iced::Result {
         SetTimer(std::ptr::null_mut(), 0, 1000, std::ptr::null());
     }
 
-    iced::application(boot, GodlyApp::update, GodlyApp::view)
+    let result = iced::application(boot, GodlyApp::update, GodlyApp::view)
         .title(GodlyApp::title)
         .subscription(GodlyApp::subscription)
         .antialiasing(true)
@@ -102,7 +105,14 @@ fn main() -> iced::Result {
             decorations: false,
             ..Default::default()
         })
-        .run()
+        .run();
+
+    match &result {
+        Ok(()) => crash_handler::log("CLEAN EXIT — iced::application().run() returned Ok(())"),
+        Err(e) => crash_handler::log(&format!("ICED ERROR EXIT — run() returned Err: {e}")),
+    }
+
+    result
 }
 
 fn boot() -> (GodlyApp, iced::Task<Message>) {
