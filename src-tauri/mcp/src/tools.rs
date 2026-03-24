@@ -413,6 +413,54 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "open_file_pane",
+                "description": "Open a file as a viewer pane (code, markdown, or image) split beside a terminal. File type is auto-detected from extension.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string", "description": "Absolute path to the file to open" },
+                        "target_terminal_id": { "type": "string", "description": "Terminal to split beside (optional — defaults to the agent's own terminal)" },
+                        "direction": { "type": "string", "enum": ["horizontal", "vertical"], "description": "Split direction (default: horizontal)" },
+                        "ratio": { "type": "number", "description": "Split ratio 0.0-1.0, proportion for existing pane (default: 0.5)" }
+                    },
+                    "required": ["file_path"]
+                }
+            },
+            {
+                "name": "close_pane",
+                "description": "Close a non-terminal pane (file viewer, markdown preview, or image). Use list_panes to find pane IDs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "ID of the pane to close" }
+                    },
+                    "required": ["pane_id"]
+                }
+            },
+            {
+                "name": "list_panes",
+                "description": "List all panes in a workspace, including terminals and file viewers. Returns pane IDs, types, and metadata.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": { "type": "string", "description": "Workspace to list panes for (optional — defaults to active workspace)" }
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "update_file_pane",
+                "description": "Update the file shown in an existing file viewer pane. Reuses the pane without changing the layout.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pane_id": { "type": "string", "description": "ID of the file pane to update" },
+                        "file_path": { "type": "string", "description": "New file path to display" }
+                    },
+                    "required": ["pane_id", "file_path"]
+                }
+            },
+            {
                 "name": "ui_query",
                 "description": "Query a UI element using a semantic target identifier (e.g. 'workspace.active', 'tab.active', 'terminal.grid').",
                 "inputSchema": {
@@ -2281,6 +2329,21 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         }
         McpResponse::FontSize { size } => Ok(json!({
             "font_size": size,
+        })),
+
+        // File pane responses
+        McpResponse::PaneCreated { pane_id, file_type } => Ok(json!({
+            "pane_id": pane_id,
+            "file_type": file_type,
+        })),
+        McpResponse::PaneList { panes } => Ok(json!({
+            "panes": panes.iter().map(|p| json!({
+                "id": p.id,
+                "pane_type": p.pane_type,
+                "terminal_id": p.terminal_id,
+                "file_path": p.file_path,
+                "file_type": p.file_type,
+            })).collect::<Vec<_>>(),
         })),
 
         // Test harness responses
