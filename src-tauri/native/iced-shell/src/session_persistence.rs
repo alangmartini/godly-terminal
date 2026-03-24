@@ -1405,4 +1405,168 @@ mod tests {
             }
         }
     }
+
+    /// Helper: create a temp path unique to the calling test.
+    fn test_persistence_path(suffix: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("godly-test-{}-{}.json", std::process::id(), suffix))
+    }
+
+    fn make_workspace(id: &str, name: &str, folder: &str) -> PersistedWorkspaceState {
+        PersistedWorkspaceState {
+            id: id.to_string(),
+            name: name.to_string(),
+            folder_path: folder.to_string(),
+            worktree_mode: false,
+            focused_terminal: format!("t-{}", id),
+            layout: PersistedLayoutNode::Leaf { terminal_id: format!("t-{}", id) },
+        }
+    }
+
+    fn make_session(workspaces: Vec<PersistedWorkspaceState>) -> PersistedSessionState {
+        PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: (workspaces.len() as u32) + 1,
+            active_workspace_id: workspaces.first().map(|w| w.id.clone()),
+            active_terminal_id: workspaces.first().map(|w| w.focused_terminal.clone()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
+            terminal_workspace_assignments: HashMap::new(),
+            workspaces,
+        }
+    }
+
+    #[test]
+    fn deleted_workspace_survives_crash_with_immediate_persist() {
+        let path = test_persistence_path("delete-persist");
+        let _cleanup = scopeguard(path.clone());
+        let mut state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
+            make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"),
+            make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"),
+        ]);
+        save_to_path(&path, &state).expect("initial save");
+        state.workspaces.retain(|w| w.id != "w-1");
+        save_to_path(&path, &state).expect("persist after delete");
+        let loaded = load_from_path(&path).expect("load after crash");
+        let merged = merge_with_live_sessions(&loaded, &[]);
+        let names: Vec<&str> = merged.workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert!(!names.contains(&"Workspace 1"));
+        assert_eq!(merged.workspaces.len(), 4);
+    }
+
+    #[test]
+    fn created_workspaces_survive_crash_with_immediate_persist() {
+        let path = test_persistence_path("create-persist");
+        let _cleanup = scopeguard(path.clone());
+        let mut state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
+        ]);
+        save_to_path(&path, &state).expect("initial save");
+        state.workspaces.push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
+        save_to_path(&path, &state).expect("persist after create #1");
+        state.workspaces.push(make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"));
+        save_to_path(&path, &state).expect("persist after create #2");
+        let loaded = load_from_path(&path).expect("load after crash");
+        let merged = merge_with_live_sessions(&loaded, &[]);
+        assert_eq!(merged.workspaces.len(), 5);
+    }
+
+    #[test]
+    fn crash_after_mixed_mutations_restores_correct_state() {
+        let path = test_persistence_path("mixed-persist");
+        let _cleanup = scopeguard(path.clone());
+        let mut state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\Users\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\Users\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
+        ]);
+        save_to_path(&path, &state).expect("initial save");
+        state.workspaces.retain(|w| w.id != "w-1");
+        save_to_path(&path, &state).expect("persist after delete");
+        state.workspaces.push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
+        save_to_path(&path, &state).expect("persist after create #1");
+        state.workspaces.push(make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"));
+        save_to_path(&path, &state).expect("persist after create #2");
+        let loaded = load_from_path(&path).expect("load after crash");
+        let merged = merge_with_live_sessions(&loaded, &[]);
+        let names: Vec<&str> = merged.workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert!(!names.contains(&"Workspace 1"));
+        assert!(names.contains(&"Backend API"));
+        assert!(names.contains(&"Design System"));
+        assert_eq!(names, vec!["godly-terminal", "Mercado Pago", "Backend API", "Design System"]);
+    }
+
+    #[test]
+    fn atomic_write_creates_backup_and_temp_file_flow() {
+        let path = test_persistence_path("atomic-write");
+        let _cleanup = scopeguard(path.clone());
+        let state_v1 = make_session(vec![make_workspace("w-1", "First", "C:\\first")]);
+        save_to_path(&path, &state_v1).expect("first save");
+        assert!(path.exists());
+        let state_v2 = make_session(vec![
+            make_workspace("w-1", "First", "C:\\first"),
+            make_workspace("w-2", "Second", "C:\\second"),
+        ]);
+        save_to_path(&path, &state_v2).expect("second save");
+        let bak_path = path.with_extension("json.bak");
+        assert!(bak_path.exists());
+        let loaded = load_from_path(&path).expect("load primary");
+        assert_eq!(loaded.workspaces.len(), 2);
+        let backup = try_load_from_path(&bak_path).expect("load backup");
+        assert_eq!(backup.workspaces.len(), 1);
+        let _ = std::fs::remove_file(&bak_path);
+    }
+
+    #[test]
+    fn corrupted_primary_recovers_from_backup() {
+        let path = test_persistence_path("backup-recovery");
+        let _cleanup = scopeguard(path.clone());
+        let state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\dev\\godly"),
+            make_workspace("w-3", "Mercado Pago", "C:\\dev\\mp"),
+        ]);
+        save_to_path(&path, &state).expect("first save");
+        save_to_path(&path, &state).expect("second save");
+        std::fs::write(&path, "").expect("simulate corruption");
+        let recovered = load_from_path(&path).expect("recover from backup");
+        assert_eq!(recovered.workspaces.len(), 3);
+        let _ = std::fs::remove_file(&path.with_extension("json.bak"));
+    }
+
+    #[test]
+    fn truncated_json_recovers_from_backup() {
+        let path = test_persistence_path("truncated-recovery");
+        let _cleanup = scopeguard(path.clone());
+        let state = make_session(vec![
+            make_workspace("w-1", "Workspace 1", "C:\\dev"),
+            make_workspace("w-2", "godly-terminal", "C:\\dev\\godly"),
+        ]);
+        save_to_path(&path, &state).expect("first save");
+        save_to_path(&path, &state).expect("second save");
+        std::fs::write(&path, r#"{"version": 1, "workspaces": [{"id":"#).expect("simulate truncation");
+        let recovered = load_from_path(&path).expect("recover from backup");
+        assert_eq!(recovered.workspaces.len(), 2);
+        let _ = std::fs::remove_file(&path.with_extension("json.bak"));
+    }
+
+    struct ScopeGuard { path: PathBuf }
+    impl Drop for ScopeGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+            let _ = std::fs::remove_file(self.path.with_extension("json.bak"));
+            let _ = std::fs::remove_file(self.path.with_extension("json.tmp"));
+        }
+    }
+    fn scopeguard(path: PathBuf) -> ScopeGuard { ScopeGuard { path } }
 }
