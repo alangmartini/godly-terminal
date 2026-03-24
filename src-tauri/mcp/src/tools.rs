@@ -2338,9 +2338,9 @@ fn response_to_json(response: McpResponse) -> Result<Value, String> {
         })),
         McpResponse::PaneList { panes } => Ok(json!({
             "panes": panes.iter().map(|p| json!({
-                "id": p.id,
+                "pane_id": p.pane_id,
                 "pane_type": p.pane_type,
-                "terminal_id": p.terminal_id,
+                "workspace_id": p.workspace_id,
                 "file_path": p.file_path,
                 "file_type": p.file_type,
             })).collect::<Vec<_>>(),
