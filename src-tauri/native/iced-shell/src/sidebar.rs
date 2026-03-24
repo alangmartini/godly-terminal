@@ -177,6 +177,16 @@ pub trait SidebarWorkspaceSignals {
     fn workspace_ai_mode_icon(&self, _workspace_id: &str) -> Option<&'static str> {
         None
     }
+
+    /// Returns the total number of terminals in the workspace.
+    ///
+    /// Defaults to `None`, which makes the sidebar fall back to `layout.leaf_count()`.
+    /// Callers should provide an implementation that returns the actual terminal count
+    /// from the terminal collection so the badge is accurate even when the layout tree
+    /// only contains the currently visible pane(s).
+    fn workspace_terminal_count(&self, _workspace_id: &str) -> Option<usize> {
+        None
+    }
 }
 
 impl<'a> SidebarWorkspaceSignals for Option<&'a str> {
@@ -216,6 +226,29 @@ where
     }
 }
 
+impl<'a, F, G, H> SidebarWorkspaceSignals for (Option<&'a str>, F, G, H)
+where
+    F: for<'b> Fn(&'b str) -> bool,
+    G: for<'b> Fn(&'b str) -> Option<&'static str>,
+    H: for<'b> Fn(&'b str) -> usize,
+{
+    fn context_menu_workspace_id(&self) -> Option<&str> {
+        self.0
+    }
+
+    fn has_workspace_notification(&self, workspace_id: &str) -> bool {
+        (self.1)(workspace_id)
+    }
+
+    fn workspace_ai_mode_icon(&self, workspace_id: &str) -> Option<&'static str> {
+        (self.2)(workspace_id)
+    }
+
+    fn workspace_terminal_count(&self, workspace_id: &str) -> Option<usize> {
+        Some((self.3)(workspace_id))
+    }
+}
+
 /// Renders the workspace sidebar as a vertical list.
 ///
 /// - fixed header ("WORKSPACES") with compact controls
@@ -246,7 +279,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
         let name_label = text(&ws.name).size(13).color(row_text).font(font);
 
-        let terminal_count = ws.layout.leaf_count();
+        let terminal_count = workspace_signals
+            .workspace_terminal_count(ws.id.as_str())
+            .unwrap_or_else(|| ws.layout.leaf_count());
         let badge_bg = GHOST_SELECTED();
         let badge_text = TEXT_SECONDARY();
 

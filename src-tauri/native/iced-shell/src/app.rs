@@ -4191,6 +4191,9 @@ impl GodlyApp {
                             _ => None,
                         }
                     },
+                    |workspace_id: &str| -> usize {
+                        self.terminals.terminals_for_workspace(workspace_id).len()
+                    },
                 ),
                 sidebar_width,
                 self.terminal_font,
