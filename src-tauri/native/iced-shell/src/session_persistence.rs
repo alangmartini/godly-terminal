@@ -571,7 +571,7 @@ mod tests {
                 assert_eq!(*direction, SplitDirection::Vertical, "direction must survive round-trip");
                 assert!((ratio - 0.6).abs() < 0.01, "ratio must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
@@ -601,7 +601,7 @@ mod tests {
             LayoutNode::Split { direction, .. } => {
                 assert_eq!(*direction, SplitDirection::Horizontal, "direction must survive round-trip");
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout after round-trip"),
+            _ => panic!("expected split layout after round-trip"),
         }
     }
 
