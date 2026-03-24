@@ -26,6 +26,8 @@ pub struct TerminalInfo {
     pub custom_name: Option<String>,
     /// Path to a git worktree created for this terminal (None = normal terminal).
     pub worktree_path: Option<String>,
+    /// Whether this terminal's worktree_path points to a clone (true) or a git worktree (false).
+    pub is_clone: bool,
     /// Cached image handle for the pixel-rendered terminal (None = needs render).
     pub cached_image_handle: Option<iced::widget::image::Handle>,
 }
@@ -365,6 +367,7 @@ impl TerminalCollection {
                 workspace_id,
                 custom_name: None,
                 worktree_path: None,
+                is_clone: false,
                 cached_image_handle: None,
             },
         );
@@ -390,6 +393,13 @@ impl TerminalCollection {
     pub fn set_worktree_path(&mut self, id: &str, path: String) {
         if let Some(term) = self.get_mut(id) {
             term.worktree_path = Some(path);
+        }
+    }
+
+    /// Set whether a terminal's worktree_path is a clone (true) or a git worktree (false).
+    pub fn set_clone_flag(&mut self, id: &str, is_clone: bool) {
+        if let Some(term) = self.terminals.get_mut(id) {
+            term.is_clone = is_clone;
         }
     }
 
