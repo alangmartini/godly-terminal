@@ -426,6 +426,28 @@ pub enum McpRequest {
         timeout_ms: Option<u64>,
     },
 
+    // File pane tools
+    OpenFilePane {
+        file_path: String,
+        #[serde(default)]
+        target_terminal_id: Option<String>,
+        #[serde(default = "default_split_direction")]
+        direction: String,
+        #[serde(default = "default_split_ratio")]
+        ratio: f64,
+    },
+    ClosePane {
+        pane_id: String,
+    },
+    ListPanes {
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
+    UpdateFilePane {
+        pane_id: String,
+        file_path: String,
+    },
+
     // Semantic testing API
     UiQuery {
         target: String,
@@ -608,6 +630,15 @@ pub enum McpResponse {
     },
     FontSize {
         size: u32,
+    },
+
+    // File pane responses
+    PaneCreated {
+        pane_id: String,
+        file_type: String,
+    },
+    PaneList {
+        panes: Vec<crate::layout_tree::PaneInfo>,
     },
 
     // Test harness responses
