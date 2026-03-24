@@ -1,6 +1,7 @@
 ### Fixed
-- **Workspace persistence regression** — workspace mutations (create, delete, rename) now immediately persist session state to disk so crashes within the autosave window don't lose changes (#619)
-- **Missing field in persistence test** — added missing `terminal_clone_ids` field in existing test case
+- **Workspace persistence crash safety** — session file writes are now atomic (write to temp + rename) with automatic backup recovery, preventing workspace loss from file corruption during crashes (#619)
+- **Workspace mutations persisted immediately** — workspace create, delete, and rename now write session state to disk instantly instead of waiting for the 60-second autosave (#619)
 
 ### Tests
-- Added 3 regression tests verifying workspace mutations survive crash recovery with immediate persistence
+- Added 3 regression tests for workspace mutation persistence across crash recovery
+- Added 3 tests for atomic write flow, backup recovery from corruption, and truncated JSON recovery
