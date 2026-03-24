@@ -408,7 +408,7 @@ mod tests {
                 assert_eq!(first.all_leaf_ids(), vec![first_id]);
                 assert_eq!(second.all_leaf_ids(), vec![second_id]);
             }
-            LayoutNode::Leaf { .. } => panic!("expected split layout"),
+            _ => panic!("expected split layout"),
         }
     }
 
