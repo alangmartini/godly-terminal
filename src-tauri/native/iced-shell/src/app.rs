@@ -7539,7 +7539,7 @@ impl GodlyApp {
             let _ = commands::close_terminal(client, session_id);
         }
 
-        Task::none()
+        self.resize_all_terminals()
     }
 
     fn handle_terminal_created(&mut self, result: Result<String, String>) -> Task<Message> {
