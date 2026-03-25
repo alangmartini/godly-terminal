@@ -8043,7 +8043,7 @@ impl GodlyApp {
                                     );
                                 }
                                 self.terminals.remove(&placeholder);
-                                if let Some(launch) = &mut self.quick_claude_launch {
+                                for launch in &mut self.quick_claude_launches {
                                     launch.placeholder_ids.remove(&placeholder);
                                 }
                             }
@@ -8436,28 +8436,30 @@ impl GodlyApp {
 
     /// Returns launch progress info if terminal_id belongs to an active Quick Claude launch.
     fn quick_claude_launch_info(&self, terminal_id: &str) -> Option<LaunchProgressInfo> {
-        let launch = self.quick_claude_launch.as_ref()?;
-        if launch.completed || launch.error.is_some() {
-            return None;
+        for launch in &self.quick_claude_launches {
+            if launch.completed || launch.error.is_some() {
+                continue;
+            }
+
+            let is_placeholder = launch.placeholder_ids.contains(terminal_id);
+            let is_active_agent = launch
+                .agent_terminal_ids
+                .iter()
+                .any(|opt: &Option<String>| opt.as_deref() == Some(terminal_id));
+
+            if !is_placeholder && !is_active_agent {
+                continue;
+            }
+
+            return Some(LaunchProgressInfo {
+                preset_name: launch.preset_name.clone(),
+                step_label: launch.current_step_label(),
+                current_step: launch.current_step + 1,
+                total_steps: launch.total_steps(),
+                is_placeholder,
+            });
         }
-
-        let is_placeholder = launch.placeholder_ids.contains(terminal_id);
-        let is_active_agent = launch
-            .agent_terminal_ids
-            .iter()
-            .any(|opt| opt.as_deref() == Some(terminal_id));
-
-        if !is_placeholder && !is_active_agent {
-            return None;
-        }
-
-        Some(LaunchProgressInfo {
-            preset_name: launch.preset_name.clone(),
-            step_label: launch.current_step_label(),
-            current_step: launch.current_step + 1,
-            total_steps: launch.total_steps(),
-            is_placeholder,
-        })
+        None
     }
 
     fn render_launch_placeholder<'a>(
