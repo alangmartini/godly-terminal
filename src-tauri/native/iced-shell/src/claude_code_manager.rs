@@ -210,9 +210,141 @@ impl ClaudeCodeManagerState {
     }
 }
 
-/// Stub -- will be replaced in Task 2 with the real analyzer.
-pub fn analyze_skill(_content: &str) -> Vec<SkillDiagnostic> {
-    Vec::new()
+/// Analyze a SKILL.md file content and produce diagnostics.
+pub fn analyze_skill(content: &str) -> Vec<SkillDiagnostic> {
+    let mut diags = Vec::new();
+    let (name, description) = parse_frontmatter(content);
+
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("---") {
+        diags.push(SkillDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message: "Missing YAML frontmatter block (---).".to_string(),
+            suggestion: Some("Add a frontmatter block at the top:\n---\nname: my-skill\ndescription: When to use this skill\n---".to_string()),
+        });
+        return diags;
+    }
+
+    if name.is_none() {
+        diags.push(SkillDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message: "Missing required 'name' field in frontmatter.".to_string(),
+            suggestion: Some("Add: name: my-skill-name".to_string()),
+        });
+    }
+
+    if description.is_none() {
+        diags.push(SkillDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            message: "Missing required 'description' field in frontmatter.".to_string(),
+            suggestion: Some("Add: description: Use this skill when...".to_string()),
+        });
+    }
+
+    if let Some(ref desc) = description {
+        let word_count = desc.split_whitespace().count();
+        if word_count < 5 {
+            diags.push(SkillDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: format!(
+                    "Description is too short ({} words). Aim for 10-30 words to help with skill triggering.",
+                    word_count
+                ),
+                suggestion: Some("Describe WHEN to use this skill: 'Use this skill when...'".to_string()),
+            });
+        } else if word_count > 100 {
+            diags.push(SkillDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: format!(
+                    "Description is very long ({} words). Keep it under ~100 words for the autocomplete menu.",
+                    word_count
+                ),
+                suggestion: Some("Move detailed instructions to the body; keep description as a concise trigger guide.".to_string()),
+            });
+        }
+
+        if !desc.contains("when") && !desc.contains("Use") && !desc.contains("use") {
+            diags.push(SkillDiagnostic {
+                severity: DiagnosticSeverity::Tip,
+                message: "Description doesn't mention when to use this skill.".to_string(),
+                suggestion: Some("Start with 'Use when...' or 'Use this skill when...' for better discoverability.".to_string()),
+            });
+        }
+    }
+
+    let body = extract_body(content);
+    if body.trim().is_empty() {
+        diags.push(SkillDiagnostic {
+            severity: DiagnosticSeverity::Warning,
+            message: "Skill has no body content after frontmatter.".to_string(),
+            suggestion: Some("Add instructions that tell the agent what to do when this skill is invoked.".to_string()),
+        });
+    } else {
+        for line in body.lines() {
+            let line = line.trim();
+            if let Some(heading) = line.strip_prefix("# ") {
+                let heading = heading.trim();
+                let words: Vec<&str> = heading.split_whitespace().collect();
+                if words.len() <= 3 {
+                    let first = words.first().map(|w| w.to_lowercase()).unwrap_or_default();
+                    let action_starters = [
+                        "run", "create", "build", "fix", "analyze", "check", "deploy",
+                        "test", "generate", "implement", "design", "write", "update",
+                        "scan", "audit", "review", "debug", "profile", "monitor",
+                        "diagnose", "validate", "verify", "configure", "setup", "install",
+                    ];
+                    if !action_starters.iter().any(|v| first == *v) {
+                        diags.push(SkillDiagnostic {
+                            severity: DiagnosticSeverity::Tip,
+                            message: format!(
+                                "Top-level heading '# {}' looks like a noun phrase. The # heading becomes the skill description in autocomplete.",
+                                heading
+                            ),
+                            suggestion: Some("Write it as a usage-oriented sentence: '# Run analysis and fix issues' instead of '# Fix Contract'.".to_string()),
+                        });
+                    }
+                }
+                break;
+            }
+        }
+
+        let body_lines = body.lines().count();
+        if body_lines > 500 {
+            diags.push(SkillDiagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: format!(
+                    "Skill body is {} lines long. Very long skills consume context window budget.",
+                    body_lines
+                ),
+                suggestion: Some("Consider splitting into sub-skills or moving reference docs to a references/ subdirectory.".to_string()),
+            });
+        }
+    }
+
+    if diags.is_empty() {
+        diags.push(SkillDiagnostic {
+            severity: DiagnosticSeverity::Tip,
+            message: "Skill looks well-structured! No issues found.".to_string(),
+            suggestion: None,
+        });
+    }
+
+    diags
+}
+
+/// Extract the body content after the frontmatter block.
+fn extract_body(content: &str) -> &str {
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("---") {
+        return content;
+    }
+    let after_open = &trimmed[3..];
+    if let Some(close_pos) = after_open.find("\n---") {
+        let after_close = &after_open[close_pos + 4..];
+        after_close.strip_prefix('\n').unwrap_or(after_close)
+    } else {
+        ""
+    }
 }
 
 fn parse_frontmatter_from_file(path: &std::path::Path) -> (Option<String>, Option<String>) {
@@ -315,5 +447,65 @@ mod tests {
         ]);
         // User + Proj A + Proj B = 3 (duplicate /proj/a deduplicated)
         assert_eq!(state.scopes.len(), 3);
+    }
+
+    #[test]
+    fn test_analyze_missing_frontmatter() {
+        let diags = analyze_skill("# Just a heading\nNo frontmatter.");
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Error
+            && d.message.contains("frontmatter")));
+    }
+
+    #[test]
+    fn test_analyze_missing_name() {
+        let diags = analyze_skill("---\ndescription: foo\n---\n# Body");
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Error
+            && d.message.contains("name")));
+    }
+
+    #[test]
+    fn test_analyze_missing_description() {
+        let diags = analyze_skill("---\nname: my-skill\n---\n# Body");
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Error
+            && d.message.contains("description")));
+    }
+
+    #[test]
+    fn test_analyze_short_description() {
+        let diags = analyze_skill("---\nname: x\ndescription: Short\n---\n");
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
+            && d.message.contains("Description") && d.message.contains("short")));
+    }
+
+    #[test]
+    fn test_analyze_bad_heading() {
+        let content = "---\nname: helper\ndescription: Helps with things quickly for the project\n---\n\n# My Helper\n";
+        let diags = analyze_skill(content);
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Tip
+            && d.message.contains("heading")));
+    }
+
+    #[test]
+    fn test_analyze_good_skill() {
+        let content = "---\nname: my-skill\ndescription: Use this skill when you need to do something important and complex that requires careful analysis\n---\n\n# Run analysis and produce a detailed report\n\nInstructions here.";
+        let diags = analyze_skill(content);
+        assert!(!diags.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+    }
+
+    #[test]
+    fn test_analyze_no_body() {
+        let content = "---\nname: empty\ndescription: Has a reasonable description for this\n---\n";
+        let diags = analyze_skill(content);
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
+            && d.message.contains("body")));
+    }
+
+    #[test]
+    fn test_analyze_long_description() {
+        let long_desc = "word ".repeat(200);
+        let content = format!("---\nname: verbose\ndescription: {}\n---\n# Do stuff\nBody.", long_desc);
+        let diags = analyze_skill(&content);
+        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
+            && d.message.contains("long")));
     }
 }
