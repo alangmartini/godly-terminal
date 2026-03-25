@@ -308,7 +308,7 @@ pub struct GodlyApp {
     /// Native window id captured from runtime events.
     pub(crate) window_id: Option<window::Id>,
     /// Whether the app window is currently focused.
-    window_focused: bool,
+    pub(crate) window_focused: bool,
     /// Font metrics for cell sizing and grid dimension calculations.
     font_metrics: FontMetrics,
     /// Mouse text selection state.
@@ -336,7 +336,7 @@ pub struct GodlyApp {
     /// Resolver that routes key events through custom overrides + defaults.
     shortcut_resolver: ShortcutResolver,
     /// Notification tracker for terminals.
-    notifications: NotificationTracker,
+    pub(crate) notifications: NotificationTracker,
     /// Startup timestamp used for test harness uptime reporting.
     pub(crate) started_at_ms: u64,
     /// Counter for generating workspace names.
@@ -1053,7 +1053,7 @@ impl GodlyApp {
     }
 
     /// Get the active workspace's focused terminal ID.
-    fn active_focused(&self) -> Option<&str> {
+    pub(crate) fn active_focused(&self) -> Option<&str> {
         self.workspaces
             .active()
             .map(|ws| ws.focused_terminal.as_str())
