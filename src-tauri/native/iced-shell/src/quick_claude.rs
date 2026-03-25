@@ -601,10 +601,17 @@ fn handle_trust_prompt_if_needed(
     let timeout = Duration::from_millis(timeout_ms);
     let poll_interval = Duration::from_millis(300);
     let start = std::time::Instant::now();
+    let max_accept_attempts = 5;
+    let mut accept_attempts = 0;
 
     loop {
         if start.elapsed() > timeout {
-            // No trust prompt appeared — project is already trusted
+            if accept_attempts > 0 {
+                log::warn!(
+                    "Quick Claude: trust prompt still visible after {} accept attempts and timeout",
+                    accept_attempts,
+                );
+            }
             return Ok(());
         }
 
@@ -613,9 +620,37 @@ fn handle_trust_prompt_if_needed(
 
         // Trust prompt detected — accept it
         if has_trust_prompt_text(&text) {
-            log::info!("Quick Claude: trust prompt detected, auto-accepting");
+            accept_attempts += 1;
+            if accept_attempts == 1 {
+                log::info!("Quick Claude: trust prompt detected, waiting for input handler to stabilize");
+                // First detection: wait for Claude Code's TUI input handler to
+                // fully initialize before sending the keypress. Without this
+                // delay the \r often arrives before the prompt is ready to
+                // accept input and gets silently swallowed.
+                std::thread::sleep(Duration::from_millis(800));
+            }
+            log::info!(
+                "Quick Claude: sending Enter to accept trust prompt (attempt {}/{})",
+                accept_attempts, max_accept_attempts,
+            );
             commands::write_to_terminal(client, session_id, b"\r")?;
-            std::thread::sleep(Duration::from_millis(1_000));
+
+            if accept_attempts >= max_accept_attempts {
+                log::warn!("Quick Claude: exhausted accept attempts, giving up");
+                return Ok(());
+            }
+
+            // Wait for the prompt to process the keypress before re-checking
+            std::thread::sleep(Duration::from_millis(1_500));
+            continue;
+        }
+
+        // If we previously sent Enter and the trust prompt is now gone, success
+        if accept_attempts > 0 {
+            log::info!(
+                "Quick Claude: trust prompt dismissed after {} attempt(s)",
+                accept_attempts,
+            );
             return Ok(());
         }
 
