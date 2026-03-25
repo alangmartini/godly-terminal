@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::sync::Mutex;
 
 use godly_protocol::{McpRequest, McpResponse};
@@ -67,7 +67,6 @@ impl McpPipeClient {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Mutex poisoned: {}", e)))?;
 
         godly_protocol::write_message(&mut *pipe, request)?;
-        use std::io::Write;
         pipe.flush().ok();
 
         match godly_protocol::read_message::<_, McpResponse>(&mut *pipe)? {
@@ -76,6 +75,83 @@ impl McpPipeClient {
                 io::ErrorKind::UnexpectedEof,
                 "MCP pipe closed",
             )),
+        }
+    }
+
+    /// Create a terminal in a workspace, returning the new terminal ID.
+    pub fn create_terminal(
+        &self,
+        workspace_id: &str,
+        cwd: Option<String>,
+    ) -> Result<String, String> {
+        let resp = self
+            .send_request(&McpRequest::CreateTerminal {
+                workspace_id: workspace_id.to_string(),
+                shell_type: None,
+                cwd,
+                worktree_name: None,
+                worktree: None,
+                command: None,
+                focus: Some(false),
+            })
+            .map_err(|e| format!("MCP error: {}", e))?;
+        match resp {
+            McpResponse::Created { id, .. } => Ok(id),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Split a terminal, placing new_terminal_id beside target_terminal_id.
+    pub fn split_terminal(
+        &self,
+        workspace_id: &str,
+        target_terminal_id: &str,
+        new_terminal_id: &str,
+        direction: &str,
+        ratio: f64,
+    ) -> Result<(), String> {
+        let resp = self
+            .send_request(&McpRequest::SplitTerminal {
+                workspace_id: workspace_id.to_string(),
+                target_terminal_id: target_terminal_id.to_string(),
+                new_terminal_id: new_terminal_id.to_string(),
+                direction: direction.to_string(),
+                ratio,
+            })
+            .map_err(|e| format!("MCP error: {}", e))?;
+        match resp {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Focus a terminal.
+    pub fn focus_terminal(&self, terminal_id: &str) -> Result<(), String> {
+        let resp = self
+            .send_request(&McpRequest::FocusTerminal {
+                terminal_id: terminal_id.to_string(),
+            })
+            .map_err(|e| format!("MCP error: {}", e))?;
+        match resp {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Close a terminal.
+    pub fn close_terminal(&self, terminal_id: &str) -> Result<(), String> {
+        let resp = self
+            .send_request(&McpRequest::CloseTerminal {
+                terminal_id: terminal_id.to_string(),
+            })
+            .map_err(|e| format!("MCP error: {}", e))?;
+        match resp {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
         }
     }
 }

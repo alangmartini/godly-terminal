@@ -145,6 +145,7 @@ fn new_session(args: &[String]) -> i32 {
             pane_width: 80,
             pane_height: 24,
             window_index: 0,
+            ..Default::default()
         };
         println!("{}", format::expand(format_str, &vars));
     }

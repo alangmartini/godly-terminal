@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::sync::Mutex;
 
 use godly_protocol::{DaemonMessage, Request, Response};
@@ -67,7 +67,6 @@ impl DaemonPipeClient {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Mutex poisoned: {}", e)))?;
 
         godly_protocol::write_request(&mut *pipe, request)?;
-        use std::io::Write;
         pipe.flush().ok();
 
         // Read messages, discarding Events until we get a Response
@@ -81,6 +80,35 @@ impl DaemonPipeClient {
                 DaemonMessage::Response(resp) => return Ok(resp),
                 DaemonMessage::Event(_) => continue,
             }
+        }
+    }
+
+    /// Write data to a terminal session.
+    pub fn write_to_terminal(&self, session_id: &str, data: Vec<u8>) -> Result<(), String> {
+        let resp = self
+            .send_request(&Request::Write {
+                session_id: session_id.to_string(),
+                data,
+            })
+            .map_err(|e| format!("daemon write error: {}", e))?;
+        match resp {
+            Response::Ok => Ok(()),
+            Response::Error { message } => Err(format!("daemon error: {}", message)),
+            other => Err(format!("unexpected daemon response: {:?}", other)),
+        }
+    }
+
+    /// Read the grid dimensions (cols, rows) for a terminal session.
+    pub fn read_grid_size(&self, session_id: &str) -> Result<(u16, u16), String> {
+        let resp = self
+            .send_request(&Request::ReadGrid {
+                session_id: session_id.to_string(),
+            })
+            .map_err(|e| format!("daemon read error: {}", e))?;
+        match resp {
+            Response::Grid { grid } => Ok((grid.cols, grid.num_rows)),
+            Response::Error { message } => Err(message),
+            other => Err(format!("unexpected daemon response: {:?}", other)),
         }
     }
 }

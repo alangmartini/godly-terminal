@@ -57,6 +57,97 @@ impl TmuxState {
         self.sessions.remove(session_name);
         self.panes.retain(|_, v| v.session != session_name);
     }
+
+    /// Resolve a target pane spec to a terminal_id.
+    ///
+    /// Target can be:
+    /// - `%N` — direct pane ID
+    /// - A session name (returns the first pane in that session)
+    /// - None — uses `$TMUX_PANE` env var, then falls back to last allocated pane
+    pub fn resolve_pane(&self, target: Option<&str>) -> Result<String, String> {
+        let pane_id = self.resolve_pane_id_inner(target)?;
+        self.panes
+            .get(&pane_id)
+            .map(|p| p.terminal_id.clone())
+            .ok_or_else(|| format!("pane '{}' not found in state", pane_id))
+    }
+
+    /// Resolve a target to a pane ID string (e.g. `%0`).
+    /// Falls back to `$TMUX_PANE` then the last allocated pane.
+    pub fn resolve_pane_id(&self, target: Option<&str>) -> String {
+        self.resolve_pane_id_inner(target)
+            .unwrap_or_else(|_| "%0".to_string())
+    }
+
+    fn resolve_pane_id_inner(&self, target: Option<&str>) -> Result<String, String> {
+        match target {
+            Some(t) if t.starts_with('%') => Ok(t.to_string()),
+            Some(session_name) => {
+                // Find first pane belonging to this session
+                self.panes
+                    .iter()
+                    .find(|(_, ps)| ps.session == session_name)
+                    .map(|(id, _)| id.clone())
+                    .ok_or_else(|| format!("no panes in session '{}'", session_name))
+            }
+            None => {
+                // Try $TMUX_PANE first
+                if let Ok(pane) = std::env::var("TMUX_PANE") {
+                    if !pane.is_empty() {
+                        return Ok(pane);
+                    }
+                }
+                // Fall back to last allocated pane
+                self.last_pane_key()
+            }
+        }
+    }
+
+    /// Look up the session name for a pane.
+    pub fn pane_session(&self, pane_id: &str) -> Option<&str> {
+        self.panes.get(pane_id).map(|p| p.session.as_str())
+    }
+
+    /// Get the index of a pane within its session (0-based, sorted).
+    pub fn pane_index(&self, pane_id: &str) -> usize {
+        let session = match self.panes.get(pane_id) {
+            Some(p) => &p.session,
+            None => return 0,
+        };
+        let mut session_panes: Vec<&str> = self
+            .panes
+            .iter()
+            .filter(|(_, ps)| ps.session == *session)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        session_panes.sort();
+        session_panes
+            .iter()
+            .position(|&id| id == pane_id)
+            .unwrap_or(0)
+    }
+
+    /// Get the workspace_id for a session name.
+    pub fn workspace_for_session(&self, session: &str) -> Result<String, String> {
+        self.sessions
+            .get(session)
+            .map(|s| s.workspace_id.clone())
+            .ok_or_else(|| format!("session '{}' not found", session))
+    }
+
+    /// Find the key of the most recently allocated pane (highest ID that still exists).
+    fn last_pane_key(&self) -> Result<String, String> {
+        if self.next_pane_id == 0 || self.panes.is_empty() {
+            return Err("no panes exist".to_string());
+        }
+        for i in (0..self.next_pane_id).rev() {
+            let key = format!("%{}", i);
+            if self.panes.contains_key(&key) {
+                return Ok(key);
+            }
+        }
+        Err("no panes exist".to_string())
+    }
 }
 
 /// Get the path to the tmux state file.
@@ -166,7 +257,6 @@ impl LockGuard {
 
     #[cfg(not(windows))]
     fn acquire(path: &std::path::Path) -> Result<Self, io::Error> {
-        // On non-Windows, just open the file — no real locking needed for stubs
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
@@ -180,6 +270,32 @@ impl LockGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_state() -> TmuxState {
+        let mut state = TmuxState::default();
+        state.sessions.insert(
+            "main".to_string(),
+            SessionMapping {
+                workspace_id: "ws-uuid-1".to_string(),
+            },
+        );
+        state.panes.insert(
+            "%0".to_string(),
+            PaneMapping {
+                terminal_id: "term-uuid-0".to_string(),
+                session: "main".to_string(),
+            },
+        );
+        state.panes.insert(
+            "%1".to_string(),
+            PaneMapping {
+                terminal_id: "term-uuid-1".to_string(),
+                session: "main".to_string(),
+            },
+        );
+        state.next_pane_id = 2;
+        state
+    }
 
     #[test]
     fn default_state_is_empty() {
@@ -236,6 +352,52 @@ mod tests {
     }
 
     #[test]
+    fn resolve_direct_pane_id() {
+        let state = test_state();
+        assert_eq!(state.resolve_pane(Some("%0")).unwrap(), "term-uuid-0");
+        assert_eq!(state.resolve_pane(Some("%1")).unwrap(), "term-uuid-1");
+    }
+
+    #[test]
+    fn resolve_by_session_name() {
+        let state = test_state();
+        let result = state.resolve_pane(Some("main")).unwrap();
+        assert!(result == "term-uuid-0" || result == "term-uuid-1");
+    }
+
+    #[test]
+    fn resolve_missing_pane_returns_error() {
+        let state = test_state();
+        assert!(state.resolve_pane(Some("%99")).is_err());
+    }
+
+    #[test]
+    fn pane_index_returns_sorted_position() {
+        let state = test_state();
+        assert_eq!(state.pane_index("%0"), 0);
+        assert_eq!(state.pane_index("%1"), 1);
+    }
+
+    #[test]
+    fn pane_session_lookup() {
+        let state = test_state();
+        assert_eq!(state.pane_session("%0"), Some("main"));
+        assert_eq!(state.pane_session("%99"), None);
+    }
+
+    #[test]
+    fn workspace_for_session_found() {
+        let state = test_state();
+        assert_eq!(state.workspace_for_session("main").unwrap(), "ws-uuid-1");
+    }
+
+    #[test]
+    fn workspace_for_session_not_found() {
+        let state = test_state();
+        assert!(state.workspace_for_session("nonexistent").is_err());
+    }
+
+    #[test]
     fn state_roundtrip_json() {
         let mut state = TmuxState::default();
         state.sessions.insert(
@@ -255,12 +417,5 @@ mod tests {
         assert_eq!(restored.panes["%0"].terminal_id, "term-abc");
         assert_eq!(restored.panes["%0"].session, "work");
         assert_eq!(restored.next_pane_id, 1);
-    }
-
-    #[test]
-    fn load_nonexistent_returns_default() {
-        // This test relies on a non-existent path; we just verify the default state behavior
-        let state = TmuxState::default();
-        assert!(state.sessions.is_empty());
     }
 }
