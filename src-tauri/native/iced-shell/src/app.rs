@@ -6800,6 +6800,22 @@ impl GodlyApp {
                     let mut orphan_iter = orphan_terminal_ids.into_iter().peekable();
 
                     for workspace in empty_workspaces {
+                        // Bug #771: skip workspaces that were intentionally empty.
+                        // focused_terminal=Some("") means the user closed all terminals
+                        // before shutdown — don't create a terminal for these.
+                        if workspace.focused_terminal == Some(String::new()) {
+                            self.workspaces.add_with_details(
+                                workspace.id.clone(),
+                                workspace.name,
+                                workspace.folder_path,
+                                workspace.worktree_mode,
+                                LayoutNode::Leaf {
+                                    terminal_id: String::new(),
+                                },
+                                String::new(),
+                            );
+                            continue;
+                        }
                         if let Some(terminal_id) = orphan_iter.next() {
                             if assigned_terminal_ids.insert(terminal_id.clone()) {
                                 self.terminals.add_to_workspace(
@@ -9064,6 +9080,11 @@ fn collect_init_result_sync(
             );
             let mut new_session_ids = Vec::new();
             for workspace in &persisted.workspaces {
+                // Bug #771: skip workspaces that were intentionally empty
+                // (focused_terminal="" means the user closed all terminals).
+                if workspace.focused_terminal.is_empty() {
+                    continue;
+                }
                 let session_id = uuid::Uuid::new_v4().to_string();
                 let cwd = if workspace.folder_path.is_empty() {
                     None

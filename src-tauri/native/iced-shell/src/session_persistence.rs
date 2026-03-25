@@ -393,10 +393,16 @@ pub fn merge_with_live_sessions(
                 if leaf_ids.is_empty() {
                     // No terminal leaves survived, but the layout may still contain
                     // content panes (file viewers) that should be preserved.
-                    if !layout.all_content_pane_ids().is_empty() {
-                        (Some(layout), None)
+                    // Bug #771: preserve "was intentionally empty" signal.
+                    let focused = if workspace.focused_terminal.is_empty() {
+                        Some(String::new())
                     } else {
-                        (None, None)
+                        None
+                    };
+                    if !layout.all_content_pane_ids().is_empty() {
+                        (Some(layout), focused)
+                    } else {
+                        (None, focused)
                     }
                 } else {
                     used_terminal_ids.extend(leaf_ids.iter().cloned());
