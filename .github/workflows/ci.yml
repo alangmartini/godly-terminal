@@ -133,7 +133,30 @@ jobs:
         timeout-minutes: 12
 
   # ---------------------------------------------------------------------------
-  # Job 6: Contract tests — parity-harness test suite (~3 min)
+  # Job 6: Native crate unit tests (Windows — iced-shell, app-adapter, etc.)
+  # ---------------------------------------------------------------------------
+  native-unit-tests:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+      - uses: taiki-e/install-action@nextest
+      - name: Test native crates
+        run: >
+          cd src-tauri && cargo nextest run --profile ci
+          -p godly-iced-shell
+          -p godly-app-adapter
+          -p godly-layout-core
+          -p godly-workspaces-core
+          -p godly-tabs-core
+        timeout-minutes: 15
+
+  # ---------------------------------------------------------------------------
+  # Job 7: Contract tests — parity-harness test suite (~3 min)
   # ---------------------------------------------------------------------------
   contract-tests:
     runs-on: ubuntu-latest
