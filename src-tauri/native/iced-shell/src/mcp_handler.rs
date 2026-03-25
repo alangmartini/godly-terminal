@@ -117,14 +117,31 @@ impl GodlyApp {
                 terminal_id,
                 message,
             } => {
+                // Skip if the terminal is currently focused and the window is focused —
+                // the user is already looking at it.
+                let is_focused = self.window_focused
+                    && self.active_focused() == Some(terminal_id.as_str());
+                if is_focused {
+                    return iced::Task::none();
+                }
+
                 let msg = message.unwrap_or_else(|| "Notification".to_string());
+
+                // Suppress duplicate MCP notifications from stale terminals:
+                // if the same message was already shown for this terminal and the
+                // user hasn't focused it since, skip.
+                if self.notifications.is_mcp_duplicate(&terminal_id, &msg) {
+                    return iced::Task::none();
+                }
+
                 let title = if let Some(term) = self.terminals.get(&terminal_id) {
                     term.tab_label().to_string()
                 } else {
                     terminal_id.clone()
                 };
-                self.enqueue_toast_for_terminal(title, msg, &terminal_id);
+                self.enqueue_toast_for_terminal(title, msg.clone(), &terminal_id);
                 self.play_notification_sound_if_allowed(&terminal_id);
+                self.notifications.record_mcp_notify(&terminal_id, &msg);
                 iced::Task::none()
             }
 
