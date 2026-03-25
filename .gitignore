@@ -4,7 +4,11 @@ node_modules/
 # Build outputs
 dist/
 **/target/
+**/target-*/
 plugin/bin/
+
+# Production installers (large binaries)
+installations/
 
 # Generated files
 src-tauri/gen/
