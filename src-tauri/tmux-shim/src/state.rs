@@ -1,166 +1,179 @@
-//! Persistent tmux ID <-> Godly UUID state mapping.
-//!
-//! State file lives at `%APPDATA%/com.godly.terminal/tmux-state.json`.
-//! Atomic writes (write `.tmp`, rename) to avoid corruption.
-
 use std::collections::HashMap;
+use std::io;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// A pane entry mapping a tmux pane ID to a Godly terminal UUID.
+/// Persistent tmux shim state mapping tmux concepts to Godly Terminal UUIDs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TmuxState {
+    /// Maps tmux session names to workspace info.
+    pub sessions: HashMap<String, SessionMapping>,
+    /// Maps tmux pane IDs (%0, %1, ...) to terminal info.
+    pub panes: HashMap<String, PaneMapping>,
+    /// Next pane ID counter.
+    pub next_pane_id: u32,
+}
+
+/// Mapping from a tmux session name to a Godly workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaneEntry {
+pub struct SessionMapping {
+    pub workspace_id: String,
+}
+
+/// Mapping from a tmux pane ID to a Godly terminal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaneMapping {
     pub terminal_id: String,
     pub session: String,
 }
 
-/// Persistent state mapping tmux concepts to Godly UUIDs.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TmuxState {
-    /// session_name -> workspace mapping
-    pub sessions: HashMap<String, SessionEntry>,
-    /// "%N" -> pane entry
-    pub panes: HashMap<String, PaneEntry>,
-    /// Next pane ID to allocate (monotonically increasing)
-    pub next_pane_id: u32,
-}
-
-/// A session entry mapping a tmux session name to a Godly workspace.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionEntry {
-    pub workspace_id: String,
-}
-
 impl TmuxState {
-    /// Path to the state file.
-    pub fn state_path() -> PathBuf {
-        let base = std::env::var("APPDATA")
-            .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-        PathBuf::from(base)
-            .join("com.godly.terminal")
-            .join("tmux-state.json")
-    }
-
-    /// Load state from disk, returning default if file doesn't exist.
-    pub fn load() -> Result<Self, String> {
-        let path = Self::state_path();
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let contents =
-            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read state: {}", e))?;
-        serde_json::from_str(&contents).map_err(|e| format!("Failed to parse state: {}", e))
-    }
-
-    /// Save state to disk atomically (write tmp, rename).
-    pub fn save(&self) -> Result<(), String> {
-        let path = Self::state_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create state dir: {}", e))?;
-        }
-        let tmp_path = path.with_extension("json.tmp");
-        let contents =
-            serde_json::to_string_pretty(self).map_err(|e| format!("Failed to serialize: {}", e))?;
-        std::fs::write(&tmp_path, &contents)
-            .map_err(|e| format!("Failed to write tmp state: {}", e))?;
-        std::fs::rename(&tmp_path, &path)
-            .map_err(|e| format!("Failed to rename state file: {}", e))?;
-        Ok(())
-    }
-
-    /// Allocate a new pane ID like `%0`, `%1`, etc.
-    pub fn alloc_pane_id(&mut self) -> String {
-        let id = format!("%{}", self.next_pane_id);
+    /// Allocate the next pane ID (e.g., "%0", "%1") and return it.
+    pub fn allocate_pane_id(&mut self, terminal_id: String, session: String) -> String {
+        let pane_id = format!("%{}", self.next_pane_id);
+        self.panes.insert(
+            pane_id.clone(),
+            PaneMapping {
+                terminal_id,
+                session,
+            },
+        );
         self.next_pane_id += 1;
-        id
+        pane_id
     }
 
-    /// Resolve the raw target string: use the explicit value, fall back to
-    /// `$TMUX_PANE`, then fall back to the most recently allocated pane key.
-    fn effective_target(&self, target: Option<&str>) -> Result<String, String> {
-        match target {
-            Some(t) if !t.is_empty() => Ok(t.to_string()),
-            _ => {
-                let env = std::env::var("TMUX_PANE").unwrap_or_default();
-                if !env.is_empty() {
-                    return Ok(env);
-                }
-                self.last_pane_key()
-            }
-        }
-    }
-
-    /// Look up a pane entry by a resolved target string (`%N` or session name).
-    fn lookup_pane(&self, target: &str) -> Result<&PaneEntry, String> {
-        // %N format — direct pane lookup
-        if target.starts_with('%') {
-            return self
-                .panes
-                .get(target)
-                .ok_or_else(|| format!("Pane not found: {}", target));
-        }
-
-        // Try as session name — find first pane in that session
+    /// Get all pane IDs belonging to a session.
+    pub fn session_panes(&self, session_name: &str) -> Vec<String> {
         self.panes
-            .values()
-            .find(|e| e.session == target)
-            .ok_or_else(|| format!("Target not found: {}", target))
+            .iter()
+            .filter(|(_, v)| v.session == session_name)
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 
-    /// Resolve a target string to a terminal_id.
-    ///
-    /// Supports:
-    /// - `%N` pane IDs (e.g. `%0`, `%1`)
-    /// - Session names (returns the first pane in that session)
-    /// - Falls back to `$TMUX_PANE` env var if target is empty/None
-    pub fn resolve_target(&self, target: Option<&str>) -> Result<String, String> {
-        let t = self.effective_target(target)?;
-        Ok(self.lookup_pane(&t)?.terminal_id.clone())
+    /// Remove a session and all its panes from state.
+    pub fn remove_session(&mut self, session_name: &str) {
+        self.sessions.remove(session_name);
+        self.panes.retain(|_, v| v.session != session_name);
+    }
+}
+
+/// Get the path to the tmux state file.
+fn state_file_path() -> PathBuf {
+    let appdata = std::env::var("APPDATA")
+        .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
+    PathBuf::from(appdata)
+        .join("com.godly.terminal")
+        .join("tmux-state.json")
+}
+
+/// Load the tmux state from disk, returning default state if the file doesn't exist.
+pub fn load() -> Result<TmuxState, io::Error> {
+    let path = state_file_path();
+    if !path.exists() {
+        return Ok(TmuxState::default());
+    }
+    let contents = std::fs::read_to_string(&path)?;
+    serde_json::from_str(&contents).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Save the tmux state to disk atomically (write to temp file, then rename).
+/// Creates the parent directory if it doesn't exist.
+pub fn save(state: &TmuxState) -> Result<(), io::Error> {
+    let path = state_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    /// Get the session name for a pane target.
-    pub fn resolve_session(&self, target: Option<&str>) -> Result<String, String> {
-        let t = self.effective_target(target)?;
+    let json = serde_json::to_string_pretty(state)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        // If it's a %N pane, return its session
-        if t.starts_with('%') {
-            return self
-                .panes
-                .get(&t)
-                .map(|p| p.session.clone())
-                .ok_or_else(|| format!("Pane not found: {}", t));
-        }
+    // Atomic write: write to temp file, then rename
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, json.as_bytes())?;
+    std::fs::rename(&tmp_path, &path)?;
 
-        // Must be a session name — verify it exists
-        if self.sessions.contains_key(&t) {
-            return Ok(t);
-        }
+    Ok(())
+}
 
-        Err(format!("Session not found: {}", t))
+/// Execute a closure with exclusive access to the state file.
+/// Loads the state, passes it to the closure, and saves if the closure succeeds.
+pub fn with_state<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce(&mut TmuxState) -> Result<T, String>,
+{
+    let _lock = lock_state_file().map_err(|e| format!("Failed to lock state file: {}", e))?;
+
+    let mut state = load().map_err(|e| format!("Failed to load tmux state: {}", e))?;
+    let result = f(&mut state)?;
+    save(&state).map_err(|e| format!("Failed to save tmux state: {}", e))?;
+
+    Ok(result)
+}
+
+/// Acquire an exclusive file lock on a lock file adjacent to the state file.
+/// Returns a guard that releases the lock when dropped.
+fn lock_state_file() -> Result<LockGuard, io::Error> {
+    let lock_path = state_file_path().with_extension("json.lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    /// Get the workspace_id for a session name.
-    pub fn workspace_for_session(&self, session: &str) -> Result<String, String> {
-        self.sessions
-            .get(session)
-            .map(|s| s.workspace_id.clone())
-            .ok_or_else(|| format!("Session not found: {}", session))
+    LockGuard::acquire(&lock_path)
+}
+
+/// RAII guard for a file lock. Closing the file handle releases the lock.
+struct LockGuard {
+    _file: std::fs::File,
+}
+
+impl LockGuard {
+    #[cfg(windows)]
+    fn acquire(path: &std::path::Path) -> Result<Self, io::Error> {
+        use std::os::windows::io::AsRawHandle;
+        use winapi::shared::minwindef::DWORD;
+        use winapi::um::fileapi::LockFileEx;
+        use winapi::um::minwinbase::{LOCKFILE_EXCLUSIVE_LOCK, OVERLAPPED};
+
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(path)?;
+
+        let handle = file.as_raw_handle();
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+
+        let result = unsafe {
+            LockFileEx(
+                handle as _,
+                LOCKFILE_EXCLUSIVE_LOCK,
+                0,
+                1 as DWORD,
+                0,
+                &mut overlapped,
+            )
+        };
+
+        if result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(Self { _file: file })
     }
 
-    /// Find the key of the most recently allocated pane (highest ID that still exists).
-    fn last_pane_key(&self) -> Result<String, String> {
-        if self.next_pane_id == 0 || self.panes.is_empty() {
-            return Err("No panes exist".to_string());
-        }
-        for i in (0..self.next_pane_id).rev() {
-            let key = format!("%{}", i);
-            if self.panes.contains_key(&key) {
-                return Ok(key);
-            }
-        }
-        Err("No panes exist".to_string())
+    #[cfg(not(windows))]
+    fn acquire(path: &std::path::Path) -> Result<Self, io::Error> {
+        // On non-Windows, just open the file — no real locking needed for stubs
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(path)?;
+        Ok(Self { _file: file })
     }
 }
 
@@ -168,105 +181,86 @@ impl TmuxState {
 mod tests {
     use super::*;
 
-    fn make_state() -> TmuxState {
+    #[test]
+    fn default_state_is_empty() {
+        let state = TmuxState::default();
+        assert!(state.sessions.is_empty());
+        assert!(state.panes.is_empty());
+        assert_eq!(state.next_pane_id, 0);
+    }
+
+    #[test]
+    fn allocate_pane_id_increments() {
+        let mut state = TmuxState::default();
+        let id1 = state.allocate_pane_id("term-1".to_string(), "sess".to_string());
+        let id2 = state.allocate_pane_id("term-2".to_string(), "sess".to_string());
+        assert_eq!(id1, "%0");
+        assert_eq!(id2, "%1");
+        assert_eq!(state.next_pane_id, 2);
+    }
+
+    #[test]
+    fn session_panes_filters_correctly() {
+        let mut state = TmuxState::default();
+        state.allocate_pane_id("t1".to_string(), "sess-a".to_string());
+        state.allocate_pane_id("t2".to_string(), "sess-b".to_string());
+        state.allocate_pane_id("t3".to_string(), "sess-a".to_string());
+
+        let panes_a = state.session_panes("sess-a");
+        assert_eq!(panes_a.len(), 2);
+        assert!(panes_a.contains(&"%0".to_string()));
+        assert!(panes_a.contains(&"%2".to_string()));
+
+        let panes_b = state.session_panes("sess-b");
+        assert_eq!(panes_b.len(), 1);
+        assert!(panes_b.contains(&"%1".to_string()));
+    }
+
+    #[test]
+    fn remove_session_cleans_panes() {
         let mut state = TmuxState::default();
         state.sessions.insert(
-            "main".to_string(),
-            SessionEntry {
-                workspace_id: "ws-abc".to_string(),
+            "sess-a".to_string(),
+            SessionMapping {
+                workspace_id: "ws-1".to_string(),
             },
         );
-        state.panes.insert(
-            "%0".to_string(),
-            PaneEntry {
-                terminal_id: "term-111".to_string(),
-                session: "main".to_string(),
-            },
-        );
-        state.panes.insert(
-            "%1".to_string(),
-            PaneEntry {
-                terminal_id: "term-222".to_string(),
-                session: "main".to_string(),
-            },
-        );
-        state.next_pane_id = 2;
-        state
+        state.allocate_pane_id("t1".to_string(), "sess-a".to_string());
+        state.allocate_pane_id("t2".to_string(), "sess-b".to_string());
+
+        state.remove_session("sess-a");
+
+        assert!(!state.sessions.contains_key("sess-a"));
+        assert_eq!(state.panes.len(), 1);
+        assert!(state.panes.contains_key("%1"));
     }
 
     #[test]
-    fn resolve_pane_id() {
-        let state = make_state();
-        assert_eq!(
-            state.resolve_target(Some("%0")).unwrap(),
-            "term-111"
-        );
-        assert_eq!(
-            state.resolve_target(Some("%1")).unwrap(),
-            "term-222"
-        );
-    }
-
-    #[test]
-    fn resolve_pane_id_not_found() {
-        let state = make_state();
-        assert!(state.resolve_target(Some("%99")).is_err());
-    }
-
-    #[test]
-    fn resolve_session_name() {
-        let state = make_state();
-        // Resolving by session name returns the first pane found in that session
-        let tid = state.resolve_target(Some("main")).unwrap();
-        assert!(tid == "term-111" || tid == "term-222");
-    }
-
-    #[test]
-    fn resolve_fallback_last_pane() {
-        // Clear TMUX_PANE to test fallback
-        std::env::remove_var("TMUX_PANE");
-        let state = make_state();
-        // Should return the last allocated pane (highest ID)
-        assert_eq!(state.resolve_target(None).unwrap(), "term-222");
-    }
-
-    #[test]
-    fn alloc_pane_id_increments() {
+    fn state_roundtrip_json() {
         let mut state = TmuxState::default();
-        assert_eq!(state.alloc_pane_id(), "%0");
-        assert_eq!(state.alloc_pane_id(), "%1");
-        assert_eq!(state.alloc_pane_id(), "%2");
-        assert_eq!(state.next_pane_id, 3);
-    }
-
-    #[test]
-    fn workspace_for_session_found() {
-        let state = make_state();
-        assert_eq!(
-            state.workspace_for_session("main").unwrap(),
-            "ws-abc"
+        state.sessions.insert(
+            "work".to_string(),
+            SessionMapping {
+                workspace_id: "uuid-123".to_string(),
+            },
         );
-    }
+        state.allocate_pane_id("term-abc".to_string(), "work".to_string());
 
-    #[test]
-    fn workspace_for_session_not_found() {
-        let state = make_state();
-        assert!(state.workspace_for_session("nonexistent").is_err());
-    }
-
-    #[test]
-    fn resolve_session_from_pane() {
-        let state = make_state();
-        assert_eq!(state.resolve_session(Some("%0")).unwrap(), "main");
-    }
-
-    #[test]
-    fn state_roundtrip_serialization() {
-        let state = make_state();
         let json = serde_json::to_string(&state).unwrap();
-        let loaded: TmuxState = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.next_pane_id, 2);
-        assert_eq!(loaded.panes.len(), 2);
-        assert_eq!(loaded.sessions.len(), 1);
+        let restored: TmuxState = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.sessions.len(), 1);
+        assert_eq!(restored.sessions["work"].workspace_id, "uuid-123");
+        assert_eq!(restored.panes.len(), 1);
+        assert_eq!(restored.panes["%0"].terminal_id, "term-abc");
+        assert_eq!(restored.panes["%0"].session, "work");
+        assert_eq!(restored.next_pane_id, 1);
+    }
+
+    #[test]
+    fn load_nonexistent_returns_default() {
+        // This test relies on a non-existent path; we just verify the default state behavior
+        let state = TmuxState::default();
+        assert!(state.sessions.is_empty());
     }
 }

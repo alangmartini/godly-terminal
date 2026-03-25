@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use iced::widget::{button, column, container, mouse_area, row, rule, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
 
+use crate::horizontal_wheel::horizontal_wheel;
 use crate::terminal_state::TerminalInfo;
 use crate::theme::{
     ACCENT, BG_SECONDARY, BORDER_VARIANT, DANGER, GHOST_ACTIVE, GHOST_HOVER, TAB_ACTIVE_BG,
@@ -330,15 +331,17 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         }
     }
 
-    let tabs_scroll = iced::widget::scrollable(tabs)
-        .direction(iced::widget::scrollable::Direction::Horizontal(
-            iced::widget::scrollable::Scrollbar::new()
-                .width(4)
-                .scroller_width(4),
-        ))
-        .on_scroll(on_scroll)
-        .width(Length::Fill)
-        .height(Length::Fixed(TAB_BAR_HEIGHT));
+    let tabs_scroll = horizontal_wheel(
+        iced::widget::scrollable(tabs)
+            .direction(iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new()
+                    .width(4)
+                    .scroller_width(4),
+            ))
+            .on_scroll(on_scroll)
+            .width(Length::Fill)
+            .height(Length::Fixed(TAB_BAR_HEIGHT)),
+    );
 
     // "+" button to add new terminals (ghost style).
     let new_btn = button(text("+").size(15).color(TEXT_SECONDARY()))

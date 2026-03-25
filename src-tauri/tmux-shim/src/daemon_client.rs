@@ -1,29 +1,27 @@
-//! Daemon pipe client for reading terminal grid state.
-//!
-//! Connects to the daemon pipe and sends `Request` messages,
-//! reading `DaemonMessage` replies (discarding async Events).
+use std::io;
+use std::sync::Mutex;
 
-use std::io::Write;
+use godly_protocol::{DaemonMessage, Request, Response};
 
-use godly_protocol::{read_daemon_message, write_request, DaemonMessage, Request, Response};
-
-/// Client that communicates with the Godly Terminal daemon pipe.
-pub struct DaemonClient {
-    pipe: std::fs::File,
+/// Client that communicates with the Godly Terminal daemon via the daemon named pipe.
+pub struct DaemonPipeClient {
+    pipe: Mutex<std::fs::File>,
 }
 
-impl DaemonClient {
+impl DaemonPipeClient {
     /// Connect to the daemon named pipe.
     #[cfg(windows)]
     pub fn connect() -> Result<Self, String> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::FromRawHandle;
         use winapi::um::errhandlingapi::GetLastError;
         use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
         use winapi::um::handleapi::INVALID_HANDLE_VALUE;
         use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
 
         let pipe_name_str = godly_protocol::pipe_name();
+
         let pipe_name: Vec<u16> = OsStr::new(&pipe_name_str)
             .encode_wide()
             .chain(std::iter::once(0))
@@ -44,46 +42,45 @@ impl DaemonClient {
         if handle == INVALID_HANDLE_VALUE {
             let err = unsafe { GetLastError() };
             return Err(format!(
-                "Cannot connect to daemon pipe (error: {}). Is the daemon running?",
-                err
+                "Cannot connect to daemon pipe '{}' (error: {}). Is the daemon running?",
+                pipe_name_str, err
             ));
         }
 
-        use std::os::windows::io::FromRawHandle;
         let pipe = unsafe { std::fs::File::from_raw_handle(handle as _) };
-        Ok(Self { pipe })
+
+        Ok(Self {
+            pipe: Mutex::new(pipe),
+        })
     }
 
     #[cfg(not(windows))]
     pub fn connect() -> Result<Self, String> {
-        Err("Daemon pipe is only supported on Windows".to_string())
+        Err("Daemon named pipes are only supported on Windows".to_string())
     }
 
     /// Send a daemon Request and read the Response, discarding async Events.
-    pub fn request(&mut self, req: &Request) -> Result<Response, String> {
-        write_request(&mut self.pipe, req).map_err(|e| format!("Daemon write error: {}", e))?;
-        self.pipe.flush().ok();
+    pub fn send_request(&self, request: &Request) -> Result<Response, io::Error> {
+        let mut pipe = self
+            .pipe
+            .lock()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Mutex poisoned: {}", e)))?;
 
+        godly_protocol::write_request(&mut *pipe, request)?;
+        use std::io::Write;
+        pipe.flush().ok();
+
+        // Read messages, discarding Events until we get a Response
         loop {
-            let msg: DaemonMessage = read_daemon_message(&mut self.pipe)
-                .map_err(|e| format!("Daemon read error: {}", e))?
-                .ok_or_else(|| "Daemon pipe closed".to_string())?;
+            let msg: DaemonMessage =
+                godly_protocol::read_daemon_message(&mut *pipe)?.ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::UnexpectedEof, "Daemon pipe closed")
+                })?;
 
             match msg {
                 DaemonMessage::Response(resp) => return Ok(resp),
-                DaemonMessage::Event(_) => continue, // discard async events
+                DaemonMessage::Event(_) => continue,
             }
-        }
-    }
-
-    /// Read the grid state for a terminal/session, returning (cols, rows).
-    pub fn read_grid_size(&mut self, session_id: &str) -> Result<(u16, u16), String> {
-        match self.request(&Request::ReadGrid {
-            session_id: session_id.to_string(),
-        })? {
-            Response::Grid { grid } => Ok((grid.cols, grid.num_rows)),
-            Response::Error { message } => Err(message),
-            other => Err(format!("Unexpected response: {:?}", other)),
         }
     }
 }
