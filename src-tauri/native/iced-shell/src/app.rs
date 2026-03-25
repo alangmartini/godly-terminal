@@ -274,6 +274,16 @@ impl PaneRect {
     }
 }
 
+/// Progress information for a Quick Claude launch, used to render loading overlays.
+struct LaunchProgressInfo {
+    preset_name: String,
+    step_label: &'static str,
+    current_step: usize,
+    total_steps: usize,
+    /// True if the terminal pane is still the placeholder (no grid data yet).
+    is_placeholder: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerminalEmptyState {
     NoTerminalsOpen,
@@ -2579,7 +2589,8 @@ impl GodlyApp {
                     ws_id.clone(),
                     true, // new workspace
                 );
-                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
+                launch_state.placeholder_ids.insert(placeholder_id);
 
                 self.quick_claude_launches.push(launch_state);
                 self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
@@ -2871,7 +2882,8 @@ impl GodlyApp {
                     ws_id.clone(),
                     is_new_ws,
                 );
-                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
+                launch_state.placeholder_ids.insert(placeholder_id);
                 launch_state.is_clone = dlg.batch_clone_mode;
 
                 // Record session for resume tracking
@@ -3082,7 +3094,8 @@ impl GodlyApp {
                     ws_id,
                     is_new_ws,
                 );
-                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
+                launch_state.placeholder_ids.insert(placeholder_id);
 
                 let launch_ws_id = launch_state.workspace_id.clone();
                 self.quick_claude_launches.push(launch_state);
@@ -8030,6 +8043,9 @@ impl GodlyApp {
                                     );
                                 }
                                 self.terminals.remove(&placeholder);
+                                for launch in &mut self.quick_claude_launches {
+                                    launch.placeholder_ids.remove(&placeholder);
+                                }
                             }
                         }
 
@@ -8418,6 +8434,172 @@ impl GodlyApp {
     // Rendering helpers
     // -----------------------------------------------------------------------
 
+    /// Returns launch progress info if terminal_id belongs to an active Quick Claude launch.
+    fn quick_claude_launch_info(&self, terminal_id: &str) -> Option<LaunchProgressInfo> {
+        for launch in &self.quick_claude_launches {
+            if launch.completed || launch.error.is_some() {
+                continue;
+            }
+
+            let is_placeholder = launch.placeholder_ids.contains(terminal_id);
+            let is_active_agent = launch
+                .agent_terminal_ids
+                .iter()
+                .any(|opt: &Option<String>| opt.as_deref() == Some(terminal_id));
+
+            if !is_placeholder && !is_active_agent {
+                continue;
+            }
+
+            return Some(LaunchProgressInfo {
+                preset_name: launch.preset_name.clone(),
+                step_label: launch.current_step_label(),
+                current_step: launch.current_step + 1,
+                total_steps: launch.total_steps(),
+                is_placeholder,
+            });
+        }
+        None
+    }
+
+    fn render_launch_placeholder<'a>(
+        &'a self,
+        terminal_id: &str,
+        focused_id: Option<&str>,
+        info: &LaunchProgressInfo,
+    ) -> Element<'a, Message> {
+        let is_focused = focused_id == Some(terminal_id);
+
+        let progress_text = format!("Step {} of {}", info.current_step, info.total_steps);
+        let filled_frac = info.current_step as f32 / info.total_steps as f32;
+        let bar_width = 200.0_f32;
+        let filled_width = (filled_frac * bar_width).min(bar_width);
+        let remaining_width = bar_width - filled_width;
+
+        let progress_bar = row![
+            container(Space::new().width(Length::Fixed(filled_width)).height(Length::Fixed(3.0)))
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(ACCENT())),
+                    border: iced::Border {
+                        radius: 1.5.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+            container(
+                Space::new()
+                    .width(Length::Fixed(remaining_width))
+                    .height(Length::Fixed(3.0))
+            )
+            .style(move |_theme| {
+                let c = TEXT_SECONDARY();
+                container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        c.r, c.g, c.b, 0.2,
+                    ))),
+                    border: iced::Border {
+                        radius: 1.5.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }),
+        ];
+
+        let preset_name = info.preset_name.clone();
+        let step_label = info.step_label;
+
+        let card = container(
+            column![
+                text(preset_name).size(16).color(TEXT_ACTIVE()),
+                Space::new().height(8),
+                text(step_label).size(13).color(ACCENT()),
+                Space::new().height(8),
+                progress_bar,
+                Space::new().height(4),
+                text(progress_text).size(11).color(TEXT_SECONDARY()),
+            ]
+            .align_x(iced::Alignment::Center)
+            .width(Length::Fixed(260.0)),
+        )
+        .padding(Padding::from([28, 24]))
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(EMPTY_STATE_BG())),
+            border: iced::Border {
+                color: Color::from_rgba(
+                    PANE_BORDER().r,
+                    PANE_BORDER().g,
+                    PANE_BORDER().b,
+                    0.5,
+                ),
+                width: 0.5,
+                radius: 10.0.into(),
+            },
+            ..container::Style::default()
+        });
+
+        let accent_color = if is_focused {
+            PANE_FOCUSED_BORDER()
+        } else {
+            Color::TRANSPARENT
+        };
+        let accent_bar = container(Space::new().width(Length::Fill).height(Length::Fixed(
+            if is_focused { 1.0 } else { 0.0 },
+        )))
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(accent_color)),
+            ..container::Style::default()
+        });
+
+        let inner = column![
+            accent_bar,
+            center(card).width(Length::Fill).height(Length::Fill),
+        ];
+
+        let pane = container(inner)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding {
+                top: TERMINAL_VIEWPORT_INSET_Y,
+                right: TERMINAL_VIEWPORT_INSET_X,
+                bottom: TERMINAL_VIEWPORT_INSET_Y,
+                left: TERMINAL_VIEWPORT_INSET_X,
+            })
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(PANE_BG())),
+                ..container::Style::default()
+            });
+
+        let tid = terminal_id.to_string();
+        mouse_area(pane).on_press(Message::PaneClicked(tid)).into()
+    }
+
+    fn render_launch_status_bar<'a>(&'a self, info: &LaunchProgressInfo) -> Element<'a, Message> {
+        let label = format!(
+            "{} ({}/{})",
+            info.step_label, info.current_step, info.total_steps,
+        );
+
+        let bar = container(text(label).size(11).color(TEXT_SECONDARY()))
+            .padding(Padding::from([3, 10]))
+            .width(Length::Fill)
+            .style(move |_theme| {
+                let bg = PANE_BG();
+                container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        bg.r, bg.g, bg.b, 0.85,
+                    ))),
+                    ..Default::default()
+                }
+            });
+
+        column![Space::new().width(Length::Fill).height(Length::Fill), bar,]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
     fn render_terminal_pane<'a>(
         &'a self,
         terminal_id: &str,
@@ -8426,6 +8608,16 @@ impl GodlyApp {
         let Some(term) = self.terminals.get(terminal_id) else {
             return center(text("Session not found").size(14)).into();
         };
+
+        // Check if this terminal belongs to an active Quick Claude launch
+        let launch_info = self.quick_claude_launch_info(terminal_id);
+
+        // Phase A: Placeholder terminal — show full loading card instead of empty canvas
+        if let Some(ref info) = launch_info {
+            if info.is_placeholder {
+                return self.render_launch_placeholder(terminal_id, focused_id, info);
+            }
+        }
 
         let is_focused = focused_id == Some(terminal_id);
         let selection = if is_focused && (self.selection.active || self.has_selection()) {
@@ -8518,6 +8710,17 @@ impl GodlyApp {
                 shadow: focus_shadow,
                 ..container::Style::default()
             });
+
+        // Phase B: Real terminal with launch in progress — overlay status at bottom
+        if let Some(ref info) = launch_info {
+            let status_overlay = self.render_launch_status_bar(info);
+            let pane_with_overlay: Element<'_, Message> =
+                stack![pane, status_overlay].into();
+            let tid = terminal_id.to_string();
+            return mouse_area(pane_with_overlay)
+                .on_press(Message::PaneClicked(tid))
+                .into();
+        }
 
         let tid = terminal_id.to_string();
         mouse_area(pane)
