@@ -4467,6 +4467,10 @@ impl GodlyApp {
                 self.perf_stats.render_ms(),
                 if self.use_pixel_renderer { "Pixel" } else { "Canvas" },
                 self.terminals.count(),
+                self.perf_stats.dropped_frames(),
+                self.perf_stats.render_phase_ms(),
+                self.perf_stats.cells_rendered(),
+                self.perf_stats.histogram(),
             );
             let positioned = container(perf)
                 .width(Length::Fill)
@@ -8261,7 +8265,7 @@ impl GodlyApp {
             }
         }
 
-        self.perf_stats.record_render_duration_us(t0.elapsed().as_micros() as f64);
+        self.perf_stats.record_render_stats(self.pixel_renderer.last_stats());
     }
 
     // -----------------------------------------------------------------------
