@@ -1,4 +1,16 @@
-use iced::widget::text_editor;
+use iced::widget::{
+    button, column, container, row, scrollable, text, text_editor, text_input, Space,
+};
+use iced::{Background, Border, Color, Element, Length, Padding};
+
+use crate::theme::{
+    ACCENT, ACCENT_HOVER, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, BORDER, BORDER_FOCUSED,
+    GHOST_HOVER, GHOST_SELECTED, RADIUS_MD, RADIUS_SM, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+};
+
+fn tint(color: Color, alpha: f32) -> Color {
+    Color::from_rgba(color.r, color.g, color.b, alpha)
+}
 
 /// A discovered skill on the filesystem.
 #[derive(Debug, Clone)]
@@ -383,6 +395,323 @@ fn parse_frontmatter(content: &str) -> (Option<String>, Option<String>) {
     (name, description)
 }
 
+/// Renders the full Claude Code Manager tab content.
+/// Layout: [ Vertical Scope Tabs | Content (list or editor) ]
+pub fn view_claude_code_manager<'a, M: Clone + 'a>(
+    state: &'a ClaudeCodeManagerState,
+    on_scope_click: impl Fn(usize) -> M + 'a,
+    on_skill_click: impl Fn(usize) -> M + 'a,
+    on_editor_action: impl Fn(text_editor::Action) -> M + 'a,
+    on_save: M,
+    on_close_editor: M,
+    on_new_skill_name: impl Fn(String) -> M + 'a,
+    on_create_skill: M,
+) -> Element<'a, M> {
+    let mut scope_col = column![
+        text("Scope").size(11).color(TEXT_SECONDARY()),
+    ]
+    .spacing(4)
+    .width(Length::Fixed(160.0));
+
+    for (i, scope) in state.scopes.iter().enumerate() {
+        let is_active = i == state.active_scope;
+        let label = scope.label();
+        let icon = match scope {
+            SkillScope::User => "\u{1F464} ",
+            SkillScope::Project { .. } => "\u{1F4C1} ",
+        };
+
+        let btn = button(
+            text(format!("{}{}", icon, label)).size(12)
+        )
+        .on_press(on_scope_click(i))
+        .width(Length::Fill)
+        .padding(Padding::from([6, 10]))
+        .style(move |_theme, status| {
+            let (bg, border_color) = if is_active {
+                (GHOST_SELECTED(), BORDER_FOCUSED())
+            } else {
+                match status {
+                    button::Status::Hovered => (GHOST_HOVER(), Color::TRANSPARENT),
+                    _ => (Color::TRANSPARENT, Color::TRANSPARENT),
+                }
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() },
+                border: Border {
+                    color: border_color,
+                    width: if is_active { 1.0 } else { 0.0 },
+                    radius: RADIUS_SM.into(),
+                },
+                ..button::Style::default()
+            }
+        });
+        scope_col = scope_col.push(btn);
+    }
+
+    let scope_panel = container(scrollable(scope_col).height(Length::Fill))
+        .padding(Padding::from([8, 8]))
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(tint(BG_PRIMARY(), 0.6))),
+            border: Border {
+                color: tint(BORDER(), 0.5),
+                width: 0.0,
+                radius: RADIUS_MD.into(),
+            },
+            ..container::Style::default()
+        });
+
+    let content_panel = if let Some(edit_idx) = state.editing_skill_index {
+        view_skill_editor(state, edit_idx, on_editor_action, on_save, on_close_editor)
+    } else {
+        view_skill_list(state, on_skill_click, on_new_skill_name, on_create_skill)
+    };
+
+    row![scope_panel, content_panel]
+        .spacing(8)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn view_skill_list<'a, M: Clone + 'a>(
+    state: &'a ClaudeCodeManagerState,
+    on_skill_click: impl Fn(usize) -> M + 'a,
+    on_new_skill_name: impl Fn(String) -> M + 'a,
+    on_create_skill: M,
+) -> Element<'a, M> {
+    let scope_label = state
+        .scopes
+        .get(state.active_scope)
+        .map(|s| s.label())
+        .unwrap_or_else(|| "Skills".to_string());
+
+    let mut skill_cards = column![].spacing(6).width(Length::Fill);
+
+    if state.skills.is_empty() {
+        skill_cards = skill_cards.push(
+            container(
+                text("No skills found in this scope.")
+                    .size(12)
+                    .color(TEXT_SECONDARY()),
+            )
+            .padding(20),
+        );
+    } else {
+        for (i, skill) in state.skills.iter().enumerate() {
+            let type_badge = if skill.is_directory { "dir" } else { "file" };
+            let desc_preview = if skill.description.chars().count() > 80 {
+                let truncated: String = skill.description.chars().take(77).collect();
+                format!("{}...", truncated)
+            } else if skill.description.is_empty() {
+                "(no description)".to_string()
+            } else {
+                skill.description.clone()
+            };
+
+            let card = button(
+                column![
+                    row![
+                        text(&skill.name).size(13).color(TEXT_ACTIVE()),
+                        Space::new().width(Length::Fill),
+                        text(type_badge).size(10).color(TEXT_SECONDARY()),
+                    ]
+                    .align_y(iced::Alignment::Center),
+                    text(desc_preview).size(11).color(TEXT_PRIMARY()),
+                ]
+                .spacing(3)
+                .width(Length::Fill),
+            )
+            .on_press(on_skill_click(i))
+            .width(Length::Fill)
+            .padding(Padding::from([8, 12]))
+            .style(|_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => BG_TERTIARY(),
+                    _ => BG_SECONDARY(),
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    text_color: TEXT_PRIMARY(),
+                    border: Border {
+                        color: tint(BORDER(), 0.6),
+                        width: 1.0,
+                        radius: RADIUS_SM.into(),
+                    },
+                    ..button::Style::default()
+                }
+            });
+            skill_cards = skill_cards.push(card);
+        }
+    }
+
+    let create_row = row![
+        text_input("New skill name...", &state.new_skill_name)
+            .on_input(on_new_skill_name)
+            .padding(Padding::from([4, 8]))
+            .size(12)
+            .width(Length::Fill),
+        button(text("Create").size(12).color(TEXT_PRIMARY()))
+            .on_press(on_create_skill)
+            .padding(Padding::from([4, 10])),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
+
+    container(
+        column![
+            text(scope_label).size(14).color(TEXT_ACTIVE()),
+            create_row,
+            scrollable(skill_cards).height(Length::Fill),
+        ]
+        .spacing(10)
+        .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(Padding::from([0, 4]))
+    .into()
+}
+
+fn view_skill_editor<'a, M: Clone + 'a>(
+    state: &'a ClaudeCodeManagerState,
+    edit_idx: usize,
+    on_editor_action: impl Fn(text_editor::Action) -> M + 'a,
+    on_save: M,
+    on_close_editor: M,
+) -> Element<'a, M> {
+    let skill = &state.skills[edit_idx];
+    let title = format!("Editing: {}", skill.name);
+    let save_label = if state.editor_dirty { "Save *" } else { "Save" };
+
+    let header = row![
+        button(text("\u{2190} Back").size(12).color(TEXT_PRIMARY()))
+            .on_press(on_close_editor)
+            .padding(Padding::from([4, 8]))
+            .style(|_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered => GHOST_HOVER(),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    text_color: TEXT_PRIMARY(),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: RADIUS_SM.into(),
+                    },
+                    ..button::Style::default()
+                }
+            }),
+        text(title).size(14).color(TEXT_ACTIVE()),
+        Space::new().width(Length::Fill),
+        text("Ctrl+S to save").size(10).color(TEXT_SECONDARY()),
+        button(text(save_label).size(12).color(TEXT_PRIMARY()))
+            .on_press(on_save)
+            .padding(Padding::from([4, 10]))
+            .style(|_theme, status| {
+                let (bg, border_c) = match status {
+                    button::Status::Hovered => (tint(ACCENT(), 0.30), ACCENT_HOVER()),
+                    _ => (tint(ACCENT(), 0.18), ACCENT()),
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    text_color: TEXT_ACTIVE(),
+                    border: Border {
+                        color: border_c,
+                        width: 1.0,
+                        radius: RADIUS_SM.into(),
+                    },
+                    ..button::Style::default()
+                }
+            }),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    let editor = text_editor(&state.editor_content)
+        .on_action(on_editor_action)
+        .padding(10)
+        .height(Length::Fill);
+
+    let editor_pane = container(editor)
+        .width(Length::Fill)
+        .height(Length::FillPortion(3))
+        .style(|_theme| container::Style {
+            background: Some(Background::Color(tint(BG_PRIMARY(), 0.85))),
+            border: Border {
+                color: tint(BORDER(), 0.6),
+                width: 1.0,
+                radius: RADIUS_SM.into(),
+            },
+            ..container::Style::default()
+        });
+
+    let mut diag_items = column![
+        text("Skill Analysis").size(12).color(TEXT_SECONDARY()),
+    ]
+    .spacing(4)
+    .width(Length::Fill);
+
+    for diag in &state.diagnostics {
+        let (icon, color) = match diag.severity {
+            DiagnosticSeverity::Error => ("\u{2716}", Color::from_rgb(0.9, 0.3, 0.3)),
+            DiagnosticSeverity::Warning => ("\u{26A0}", Color::from_rgb(0.9, 0.7, 0.2)),
+            DiagnosticSeverity::Tip => ("\u{2139}", Color::from_rgb(0.3, 0.7, 0.9)),
+        };
+
+        let mut card_content = column![
+            text(format!("{} {}", icon, diag.message)).size(12).color(color),
+        ]
+        .spacing(2);
+
+        if let Some(ref suggestion) = diag.suggestion {
+            card_content = card_content.push(
+                text(format!("  \u{2192} {}", suggestion))
+                    .size(11)
+                    .color(TEXT_SECONDARY()),
+            );
+        }
+
+        let card = container(card_content)
+            .padding(Padding::from([6, 10]))
+            .width(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(Background::Color(tint(BG_TERTIARY(), 0.5))),
+                border: Border {
+                    color: tint(BORDER(), 0.4),
+                    width: 1.0,
+                    radius: RADIUS_SM.into(),
+                },
+                ..container::Style::default()
+            });
+        diag_items = diag_items.push(card);
+    }
+
+    let diag_panel = container(scrollable(diag_items).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::FillPortion(1))
+        .padding(Padding::from([4, 0]));
+
+    let footer = text(format!("{}", skill.file_path))
+        .size(10)
+        .color(TEXT_SECONDARY());
+
+    container(
+        column![header, editor_pane, diag_panel, footer]
+            .spacing(6)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(Padding::from([0, 4]))
+    .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +836,39 @@ mod tests {
         let diags = analyze_skill(&content);
         assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
             && d.message.contains("long")));
+    }
+
+    #[test]
+    fn test_view_does_not_panic() {
+        #[derive(Debug, Clone)]
+        enum Msg {
+            Scope(usize),
+            Skill(usize),
+            EditorAction(text_editor::Action),
+            Save,
+            CloseEditor,
+            NewName(String),
+            Create,
+        }
+
+        let mut state = ClaudeCodeManagerState::new();
+        state.scopes.push(SkillScope::User);
+        state.skills.push(SkillEntry {
+            name: "test".into(),
+            description: "A test skill".into(),
+            file_path: "/tmp/test.md".into(),
+            is_directory: false,
+        });
+
+        let _el: Element<'_, Msg> = view_claude_code_manager(
+            &state,
+            Msg::Scope,
+            Msg::Skill,
+            Msg::EditorAction,
+            Msg::Save,
+            Msg::CloseEditor,
+            Msg::NewName,
+            Msg::Create,
+        );
     }
 }
