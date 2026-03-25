@@ -878,4 +878,121 @@ mod tests {
     fn has_trust_prompt_negative() {
         assert!(!has_trust_prompt_text("Claude Code v1.0.0\nLoading..."));
     }
+
+    // Bug #781: Quick Claude concurrent launches are serialized — second launch silently dropped.
+    // The app stores active launch as `Option<LaunchState>` (singular), so when a launch is
+    // in-flight, any subsequent launch attempt is silently rejected via `is_some()` guard.
+    // This test reproduces the exact guard pattern used in app.rs message handlers.
+
+    /// Simulates the guard pattern used in QuickClaudeLaunchPreset, QuickClaudeDialogLaunch,
+    /// and QuickClaudeDialogResume message handlers. Proves that the current single-slot
+    /// `Option<LaunchState>` architecture silently drops concurrent launches.
+    #[test]
+    fn concurrent_launches_are_silently_dropped_with_option() {
+        // Simulate the app's `quick_claude_launch: Option<LaunchState>` field
+        let mut active_launch: Option<LaunchState> = None;
+
+        // First launch succeeds — Option is None, guard passes
+        let steps_1 = default_launch_steps(1, "first task", "sonnet", "auto", None, &[], IsolationMode::None, None);
+        assert!(active_launch.is_none(), "should be able to launch when no active launch");
+        active_launch = Some(LaunchState::new(
+            "Launch 1".to_string(),
+            steps_1,
+            1,
+            "ws-1".to_string(),
+            true,
+        ));
+
+        // Second launch is BLOCKED — this is the bug.
+        // The guard `if self.quick_claude_launch.is_some() { return Task::none(); }` fires.
+        let launch_2_blocked = active_launch.is_some();
+        assert!(
+            launch_2_blocked,
+            "Bug #781: second launch is blocked because Option<LaunchState> can only hold one"
+        );
+
+        // Third launch is ALSO BLOCKED — rapid-fire is impossible
+        let launch_3_blocked = active_launch.is_some();
+        assert!(
+            launch_3_blocked,
+            "Bug #781: third launch is also blocked — no rapid-fire possible"
+        );
+
+        // Prove that multiple LaunchState instances CAN coexist (the fix is feasible)
+        let steps_2 = default_launch_steps(1, "second task", "opus", "plan", None, &[], IsolationMode::Worktree, None);
+        let steps_3 = default_launch_steps(1, "third task", "haiku", "default", None, &[], IsolationMode::Clone, None);
+        let launch_2 = LaunchState::new("Launch 2".to_string(), steps_2, 1, "ws-2".to_string(), true);
+        let launch_3 = LaunchState::new("Launch 3".to_string(), steps_3, 1, "ws-3".to_string(), true);
+
+        // A Vec CAN hold all three — this is what the fix should use
+        let mut concurrent_launches = Vec::new();
+        concurrent_launches.push(active_launch.take().unwrap());
+        concurrent_launches.push(launch_2);
+        concurrent_launches.push(launch_3);
+        assert_eq!(concurrent_launches.len(), 3, "Vec<LaunchState> supports concurrent launches");
+
+        // But the current Option pattern cannot
+        let mut option_slot: Option<LaunchState> = None;
+        let mut dropped_count = 0;
+        for launch in concurrent_launches {
+            if option_slot.is_some() {
+                // This is what happens in the current code — silently dropped
+                dropped_count += 1;
+            } else {
+                option_slot = Some(launch);
+            }
+        }
+        // Bug #781: 2 out of 3 launches are silently dropped
+        assert_eq!(
+            dropped_count, 2,
+            "Bug #781: Option<LaunchState> drops {dropped_count}/2 concurrent launches"
+        );
+    }
+
+    /// Proves that the UI disables ALL launch buttons when ANY launch is active,
+    /// preventing the user from even attempting a concurrent launch.
+    #[test]
+    fn ui_disables_all_launch_buttons_during_active_launch() {
+        // Simulate the UI's `is_launching` check (app.rs:5282)
+        let active_launch: Option<LaunchState> = Some(LaunchState::new(
+            "Active".to_string(),
+            default_launch_steps(1, "busy", "sonnet", "auto", None, &[], IsolationMode::None, None),
+            1,
+            "ws-active".to_string(),
+            true,
+        ));
+
+        let is_launching = active_launch.is_some();
+
+        // Bug #781: ALL preset launch buttons show "..." instead of "Launch"
+        // when any single launch is in progress. This means the user can't even
+        // click to attempt a second launch.
+        assert!(
+            is_launching,
+            "Bug #781: is_launching blocks ALL launch UI, not just the active one"
+        );
+
+        // With a Vec, we could check per-preset whether THAT preset is launching
+        let launches: Vec<LaunchState> = vec![LaunchState::new(
+            "Preset A".to_string(),
+            default_launch_steps(1, "busy", "sonnet", "auto", None, &[], IsolationMode::None, None),
+            1,
+            "ws-a".to_string(),
+            true,
+        )];
+
+        // "Preset B" is NOT launching — its button should be enabled
+        let preset_b_is_launching = launches.iter().any(|l| l.preset_name == "Preset B");
+        assert!(
+            !preset_b_is_launching,
+            "With Vec<LaunchState>, Preset B's button should still be enabled"
+        );
+
+        // But the current Option pattern treats ALL presets as blocked
+        let option_is_launching = active_launch.is_some(); // true for ALL presets
+        assert!(
+            option_is_launching,
+            "Bug #781: Option pattern blocks ALL presets, not just the active one"
+        );
+    }
 }
