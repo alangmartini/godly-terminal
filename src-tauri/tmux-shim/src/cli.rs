@@ -1,72 +1,76 @@
-//! Minimal tmux CLI argument parser.
-//!
-//! Parses tmux-style command lines like:
-//!   tmux split-window -h -t %0 -c /some/dir
-//!   tmux select-pane -t %1
-//!   tmux list-panes -t main -F "#{pane_id}"
-
 use std::collections::HashMap;
 
-/// Parsed tmux command with subcommand and flags.
-#[derive(Debug)]
+/// Parsed tmux CLI arguments.
+///
+/// tmux uses single-dash single-letter flags:
+///   - Boolean flags: `-d`, `-h`, `-v`, `-P`
+///   - Value flags: `-s name`, `-t target`, `-F format`, `-c dir`, `-x W`, `-y H`
+#[derive(Debug, Default)]
 pub struct TmuxArgs {
-    pub subcommand: String,
-    /// Flag -> value mappings (e.g., "-t" -> "%0")
-    pub flags: HashMap<String, String>,
-    /// Boolean flags that don't take values (e.g., "-h", "-v", "-P")
-    pub bool_flags: Vec<String>,
-    /// Remaining positional arguments
+    /// Boolean flags that were present (e.g., 'd', 'h', 'v', 'P')
+    pub flags: Vec<char>,
+    /// Key-value options (e.g., 's' -> "my-session", 't' -> "target")
+    pub options: HashMap<char, String>,
+    /// Positional arguments after all flags
     pub positional: Vec<String>,
 }
 
-/// Flags that take a value argument (the next arg).
-const VALUE_FLAGS: &[&str] = &["-t", "-F", "-c", "-s", "-n", "-x", "-y"];
-
-/// Flags that are boolean (no value).
-const BOOL_FLAGS: &[&str] = &["-h", "-v", "-P", "-d", "-l", "-a"];
-
 impl TmuxArgs {
-    /// Parse args from an iterator (typically `std::env::args().skip(1)`).
-    pub fn parse<I: Iterator<Item = String>>(mut args: I) -> Result<Self, String> {
-        let subcommand = args.next().ok_or_else(|| "No subcommand provided".to_string())?;
+    /// Flags that take a value argument.
+    const VALUE_FLAGS: &[char] = &['s', 't', 'F', 'c', 'x', 'y', 'f', 'n', 'e'];
 
-        let mut flags = HashMap::new();
-        let mut bool_flags = Vec::new();
-        let mut positional = Vec::new();
+    /// Parse tmux-style arguments from a slice of strings.
+    pub fn parse(args: &[String]) -> Self {
+        let mut result = TmuxArgs::default();
+        let mut i = 0;
 
-        let mut iter = args.peekable();
-        while let Some(arg) = iter.next() {
-            if arg.starts_with('-') {
-                if BOOL_FLAGS.contains(&arg.as_str()) {
-                    bool_flags.push(arg);
-                } else if VALUE_FLAGS.contains(&arg.as_str()) {
-                    let value = iter.next().ok_or_else(|| format!("Flag {} requires a value", arg))?;
-                    flags.insert(arg, value);
-                } else {
-                    // Unknown flag — treat as boolean
-                    bool_flags.push(arg);
+        while i < args.len() {
+            let arg = &args[i];
+
+            if arg.starts_with('-') && arg.len() >= 2 && arg.as_bytes()[1] != b'-' {
+                // Single-dash flag(s): could be `-d` or `-dt target` (combined)
+                let chars: Vec<char> = arg[1..].chars().collect();
+                let mut j = 0;
+
+                while j < chars.len() {
+                    let ch = chars[j];
+
+                    if Self::VALUE_FLAGS.contains(&ch) {
+                        // This flag takes a value
+                        let remaining: String = chars[j + 1..].iter().collect();
+                        if !remaining.is_empty() {
+                            // Value is concatenated: `-sMySession`
+                            result.options.insert(ch, remaining);
+                        } else if i + 1 < args.len() {
+                            // Value is the next argument: `-s MySession`
+                            i += 1;
+                            result.options.insert(ch, args[i].clone());
+                        }
+                        // Either way, we consumed the rest of this flag group
+                        break;
+                    } else {
+                        result.flags.push(ch);
+                    }
+                    j += 1;
                 }
             } else {
-                positional.push(arg);
+                result.positional.push(arg.clone());
             }
+
+            i += 1;
         }
 
-        Ok(Self {
-            subcommand,
-            flags,
-            bool_flags,
-            positional,
-        })
+        result
     }
 
-    /// Get the value of a flag like `-t`.
-    pub fn flag(&self, name: &str) -> Option<&str> {
-        self.flags.get(name).map(|s| s.as_str())
+    /// Check if a boolean flag is set.
+    pub fn has_flag(&self, flag: char) -> bool {
+        self.flags.contains(&flag)
     }
 
-    /// Check if a boolean flag is present.
-    pub fn has_flag(&self, name: &str) -> bool {
-        self.bool_flags.iter().any(|f| f == name)
+    /// Get the value of an option flag.
+    pub fn get_option(&self, key: char) -> Option<&str> {
+        self.options.get(&key).map(|s| s.as_str())
     }
 }
 
@@ -74,66 +78,98 @@ impl TmuxArgs {
 mod tests {
     use super::*;
 
-    fn parse(args: &[&str]) -> TmuxArgs {
-        TmuxArgs::parse(args.iter().map(|s| s.to_string())).unwrap()
+    fn args(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
     }
 
     #[test]
-    fn parse_split_window_horizontal() {
-        let args = parse(&["split-window", "-h", "-t", "%0", "-c", "/tmp"]);
-        assert_eq!(args.subcommand, "split-window");
-        assert!(args.has_flag("-h"));
-        assert!(!args.has_flag("-v"));
-        assert_eq!(args.flag("-t"), Some("%0"));
-        assert_eq!(args.flag("-c"), Some("/tmp"));
+    fn parse_empty() {
+        let parsed = TmuxArgs::parse(&[]);
+        assert!(parsed.flags.is_empty());
+        assert!(parsed.options.is_empty());
+        assert!(parsed.positional.is_empty());
     }
 
     #[test]
-    fn parse_split_window_vertical_default() {
-        let args = parse(&["split-window", "-v"]);
-        assert_eq!(args.subcommand, "split-window");
-        assert!(args.has_flag("-v"));
-        assert!(!args.has_flag("-h"));
+    fn parse_boolean_flags() {
+        let parsed = TmuxArgs::parse(&args(&["-d", "-P"]));
+        assert!(parsed.has_flag('d'));
+        assert!(parsed.has_flag('P'));
+        assert!(!parsed.has_flag('v'));
     }
 
     #[test]
-    fn parse_split_window_with_print() {
-        let args = parse(&["split-window", "-h", "-P", "-F", "#{pane_id}"]);
-        assert!(args.has_flag("-P"));
-        assert_eq!(args.flag("-F"), Some("#{pane_id}"));
+    fn parse_combined_boolean_flags() {
+        let parsed = TmuxArgs::parse(&args(&["-dP"]));
+        assert!(parsed.has_flag('d'));
+        assert!(parsed.has_flag('P'));
     }
 
     #[test]
-    fn parse_select_pane() {
-        let args = parse(&["select-pane", "-t", "%1"]);
-        assert_eq!(args.subcommand, "select-pane");
-        assert_eq!(args.flag("-t"), Some("%1"));
+    fn parse_value_flag_separate() {
+        let parsed = TmuxArgs::parse(&args(&["-s", "my-session"]));
+        assert_eq!(parsed.get_option('s'), Some("my-session"));
     }
 
     #[test]
-    fn parse_list_panes() {
-        let args = parse(&["list-panes", "-t", "main", "-F", "#{pane_id}"]);
-        assert_eq!(args.subcommand, "list-panes");
-        assert_eq!(args.flag("-t"), Some("main"));
-        assert_eq!(args.flag("-F"), Some("#{pane_id}"));
+    fn parse_value_flag_concatenated() {
+        let parsed = TmuxArgs::parse(&args(&["-smy-session"]));
+        assert_eq!(parsed.get_option('s'), Some("my-session"));
     }
 
     #[test]
-    fn parse_kill_pane() {
-        let args = parse(&["kill-pane", "-t", "%2"]);
-        assert_eq!(args.subcommand, "kill-pane");
-        assert_eq!(args.flag("-t"), Some("%2"));
+    fn parse_combined_boolean_then_value() {
+        let parsed = TmuxArgs::parse(&args(&["-ds", "my-session"]));
+        assert!(parsed.has_flag('d'));
+        assert_eq!(parsed.get_option('s'), Some("my-session"));
     }
 
     #[test]
-    fn parse_no_subcommand_errors() {
-        let result = TmuxArgs::parse(std::iter::empty());
-        assert!(result.is_err());
+    fn parse_format_flag() {
+        let parsed = TmuxArgs::parse(&args(&["-P", "-F", "#{pane_id}"]));
+        assert!(parsed.has_flag('P'));
+        assert_eq!(parsed.get_option('F'), Some("#{pane_id}"));
     }
 
     #[test]
-    fn parse_flag_missing_value_errors() {
-        let result = TmuxArgs::parse(["split-window", "-t"].iter().map(|s| s.to_string()));
-        assert!(result.is_err());
+    fn parse_multiple_value_flags() {
+        let parsed = TmuxArgs::parse(&args(&["-s", "sess", "-t", "target", "-c", "/tmp"]));
+        assert_eq!(parsed.get_option('s'), Some("sess"));
+        assert_eq!(parsed.get_option('t'), Some("target"));
+        assert_eq!(parsed.get_option('c'), Some("/tmp"));
+    }
+
+    #[test]
+    fn parse_dimensions() {
+        let parsed = TmuxArgs::parse(&args(&["-x", "120", "-y", "40"]));
+        assert_eq!(parsed.get_option('x'), Some("120"));
+        assert_eq!(parsed.get_option('y'), Some("40"));
+    }
+
+    #[test]
+    fn parse_positional_args() {
+        let parsed = TmuxArgs::parse(&args(&["-d", "bash", "--login"]));
+        assert!(parsed.has_flag('d'));
+        assert_eq!(parsed.positional, vec!["bash", "--login"]);
+    }
+
+    #[test]
+    fn parse_mixed_everything() {
+        let parsed = TmuxArgs::parse(&args(&[
+            "-dP",
+            "-s",
+            "work",
+            "-F",
+            "#{pane_id}",
+            "-c",
+            "/home/user",
+            "bash",
+        ]));
+        assert!(parsed.has_flag('d'));
+        assert!(parsed.has_flag('P'));
+        assert_eq!(parsed.get_option('s'), Some("work"));
+        assert_eq!(parsed.get_option('F'), Some("#{pane_id}"));
+        assert_eq!(parsed.get_option('c'), Some("/home/user"));
+        assert_eq!(parsed.positional, vec!["bash"]);
     }
 }
