@@ -54,6 +54,7 @@ mod font_enumerator;
 mod git_worktree;
 mod keybinding_persistence;
 mod phone_remote;
+mod claude_code_manager;
 mod crash_handler;
 
 use app::{GodlyApp, Message};
