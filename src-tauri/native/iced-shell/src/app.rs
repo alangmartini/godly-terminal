@@ -471,6 +471,8 @@ pub struct GodlyApp {
     perf_stats: crate::perf_stats::PerfStats,
     // --- K1: CLAUDE.md Editor ---
     claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
+    // --- Claude Code Manager ---
+    claude_code_manager: crate::claude_code_manager::ClaudeCodeManagerState,
     // --- I4/I5: Voice/Whisper Integration ---
     whisper_available: bool,
     whisper_state: Option<whisper_ui::WhisperState>,
@@ -600,6 +602,7 @@ impl Default for GodlyApp {
             perf_overlay_visible: false,
             perf_stats: crate::perf_stats::PerfStats::new(),
             claude_md_editor: None,
+            claude_code_manager: crate::claude_code_manager::ClaudeCodeManagerState::new(),
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
             whisper_state: None,
             whisper_service: None,
@@ -674,6 +677,8 @@ pub enum Message {
     TabDragEnd,
     /// User wants a new terminal.
     NewTabRequested,
+    /// Tab bar scrolled horizontally (scroll offset updated).
+    TabBarScroll(iced::widget::scrollable::Viewport),
     /// User wants to close a terminal.
     CloseTabRequested(String),
     /// New terminal created by daemon.
@@ -835,6 +840,9 @@ pub enum Message {
     QuickClaudeDialogModelsLoaded(Vec<(String, String)>),
     /// Image(s) pasted from clipboard into Quick Claude dialog.
     QuickClaudeDialogImagePasted(Result<Vec<crate::quick_claude_dialog::ImageAttachment>, String>),
+    /// A widget (text_editor) captured a Ctrl+V paste event.
+    /// Fired by event::listen_with() to detect pastes that keyboard::listen() misses.
+    WidgetCapturedPaste,
     /// Remove an attached image from Quick Claude dialog by index.
     QuickClaudeDialogImageRemoved(usize),
     /// AI tool display name input changed.
@@ -1009,6 +1017,21 @@ pub enum Message {
     ClaudeMdSave,
     ClaudeMdSaved(Result<(), String>),
     ClaudeMdClose,
+    // --- Claude Code Manager ---
+    /// Claude Code Manager: scope tab clicked.
+    CcmScopeClicked(usize),
+    /// Claude Code Manager: skill clicked in list.
+    CcmSkillClicked(usize),
+    /// Claude Code Manager: editor text action.
+    CcmEditorAction(iced::widget::text_editor::Action),
+    /// Claude Code Manager: save current skill.
+    CcmSave,
+    /// Claude Code Manager: close editor / back to list.
+    CcmCloseEditor,
+    /// Claude Code Manager: new skill name input changed.
+    CcmNewSkillNameChanged(String),
+    /// Claude Code Manager: create new skill.
+    CcmCreateSkill,
     // --- J1-J9: MCP Event Integration ---
     McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
     // --- I4/I5: Voice/Whisper Integration ---
@@ -1708,7 +1731,19 @@ impl GodlyApp {
                     }
                     term.fetching = false;
                     term.dirty = false;
-                    term.title = grid.title.clone();
+                    // Only overwrite a meaningful (non-path) title with another
+                    // meaningful title.  Shells frequently reset the OSC title
+                    // to the CWD which would erase a user-set tab name.
+                    let new_title = grid.title.trim();
+                    let new_is_meaningful =
+                        !new_title.is_empty() && !looks_like_path(new_title);
+                    let current_is_meaningful = {
+                        let cur = term.title.trim();
+                        !cur.is_empty() && !looks_like_path(cur)
+                    };
+                    if new_is_meaningful || !current_is_meaningful {
+                        term.title = grid.title.clone();
+                    }
                     term.total_scrollback = grid.total_scrollback;
                     term.scrollback_offset = grid.scrollback_offset.min(grid.total_scrollback);
                     term.grid = Some(grid);
@@ -1849,6 +1884,20 @@ impl GodlyApp {
                         if self.mru_switcher.is_some() {
                             if is_escape_key(&key) {
                                 self.cancel_mru_switcher();
+                            }
+                            return Task::none();
+                        }
+                        // Claude Code Manager skill editor: intercept all keys
+                        if self.settings_open
+                            && self.settings_tab == "claude-code"
+                            && self.claude_code_manager.editing_skill_index.is_some()
+                        {
+                            if modifiers.control()
+                                && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s")
+                            {
+                                if let Err(e) = self.claude_code_manager.save_current() {
+                                    log::error!("Failed to save skill: {}", e);
+                                }
                             }
                             return Task::none();
                         }
@@ -1993,6 +2042,9 @@ impl GodlyApp {
                 let lines = -(delta_y * 3.0) as isize;
                 return self.scroll_active(lines);
             }
+
+            // --- Tab bar horizontal scroll (no-op: Iced scrollable handles it) ---
+            Message::TabBarScroll(_) => {}
 
             // --- Tab management ---
             Message::TabClicked(id) => {
@@ -2620,17 +2672,9 @@ impl GodlyApp {
                 }
             }
             Message::QuickClaudeDialogPromptAction(action) => {
-                // Detect paste action BEFORE consuming action via perform().
-                // keyboard::listen() only sees Status::Ignored events, but the
-                // text_editor widget captures Ctrl+V (Status::Captured) for its
-                // own text paste, so the keyboard-based image check never fires.
-                // Instead, detect the Paste action here and also check for images.
-                let is_paste = matches!(
-                    &action,
-                    iced::widget::text_editor::Action::Edit(
-                        iced::widget::text_editor::Edit::Paste(_)
-                    )
-                );
+                // Image paste detection moved to WidgetCapturedPaste (bug #732).
+                // event::listen_with() catches Ctrl+V regardless of clipboard
+                // content, so both image-only and text+image pastes are handled.
 
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     // When the skill autocomplete popup is open, intercept
@@ -2691,10 +2735,6 @@ impl GodlyApp {
                             dlg.skill_autocomplete_filter.clear();
                         }
                     }
-                }
-
-                if is_paste {
-                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogBranchChanged(val) => {
@@ -2942,6 +2982,10 @@ impl GodlyApp {
             Message::QuickClaudeDialogImagePasted(result) => {
                 match result {
                     Ok(attachments) => {
+                        diag::log(&format!(
+                            "UPDATE: QuickClaudeDialogImagePasted(Ok, {} images)",
+                            attachments.len()
+                        ));
                         if let Some(ref mut dlg) = self.quick_claude_dialog {
                             for attachment in attachments {
                                 if dlg.attached_images.len() < 10 {
@@ -2954,6 +2998,7 @@ impl GodlyApp {
                         }
                     }
                     Err(e) => {
+                        diag::log(&format!("UPDATE: QuickClaudeDialogImagePasted(Err: {})", e));
                         log::error!("Quick Claude image paste failed: {}", e);
                     }
                 }
@@ -2963,6 +3008,16 @@ impl GodlyApp {
                     if index < dlg.attached_images.len() {
                         dlg.attached_images.remove(index);
                     }
+                }
+            }
+            Message::WidgetCapturedPaste => {
+                // Bug #732: A widget (text_editor) captured Ctrl+V. When the
+                // Quick Claude dialog is open, check clipboard for images.
+                // This is the sole image-paste trigger — it fires for both
+                // image-only and text+image clipboard content.
+                if self.quick_claude_dialog.is_some() {
+                    diag::log("UPDATE: WidgetCapturedPaste → checking clipboard for image");
+                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogResume => {
@@ -3533,6 +3588,14 @@ impl GodlyApp {
                         async { font_enumerator::enumerate_monospace_fonts() },
                         Message::FontsEnumerated,
                     );
+                } else if tab_id == "claude-code" {
+                    let ws_data: Vec<(String, String, String)> = self
+                        .workspaces
+                        .iter()
+                        .map(|ws| (ws.id.clone(), ws.name.clone(), ws.folder_path.clone()))
+                        .collect();
+                    self.claude_code_manager.refresh_scopes(&ws_data);
+                    self.claude_code_manager.discover_skills();
                 }
             }
             Message::FontFamilyChanged(name) => {
@@ -3917,6 +3980,34 @@ impl GodlyApp {
             Message::ClaudeMdClose => {
                 self.claude_md_editor = None;
             }
+            // --- Claude Code Manager ---
+            Message::CcmScopeClicked(index) => {
+                self.claude_code_manager.active_scope = index;
+                self.claude_code_manager.discover_skills();
+            }
+            Message::CcmSkillClicked(index) => {
+                self.claude_code_manager.open_skill(index);
+            }
+            Message::CcmEditorAction(action) => {
+                self.claude_code_manager.editor_content.perform(action);
+                self.claude_code_manager.editor_dirty = true;
+            }
+            Message::CcmSave => {
+                if let Err(e) = self.claude_code_manager.save_current() {
+                    log::error!("Failed to save skill: {}", e);
+                }
+            }
+            Message::CcmCloseEditor => {
+                self.claude_code_manager.close_editor();
+            }
+            Message::CcmNewSkillNameChanged(val) => {
+                self.claude_code_manager.new_skill_name = val;
+            }
+            Message::CcmCreateSkill => {
+                if let Err(e) = self.claude_code_manager.create_skill() {
+                    log::error!("Failed to create skill: {}", e);
+                }
+            }
             // --- I4/I5: Voice/Whisper Integration ---
             Message::WhisperToggle => {
                 if !self.whisper_available {
@@ -4134,6 +4225,7 @@ impl GodlyApp {
             |id| Message::TabContextToggle(id),
             Message::TabDragEnd,
             Message::NewTabRequested,
+            Message::TabBarScroll,
         );
 
         // Mic button for whisper (I4/I5)
@@ -4278,6 +4370,10 @@ impl GodlyApp {
                     label: "Flows",
                 },
                 SettingsTab {
+                    id: "claude-code",
+                    label: "Claude Code",
+                },
+                SettingsTab {
                     id: "remote",
                     label: "Remote",
                 },
@@ -4289,6 +4385,7 @@ impl GodlyApp {
                 "ai-tools" => self.view_ai_tools_tab(),
                 "plugins" => self.view_plugins_tab(),
                 "flows" => self.view_flows_tab(),
+                "claude-code" => self.view_claude_code_tab(),
                 "remote" => self.view_remote_tab(),
                 _ => shortcuts_tab::view_shortcuts_tab(
                     self.shortcut_capturing_index,
@@ -4499,6 +4596,10 @@ impl GodlyApp {
                 self.perf_stats.render_ms(),
                 if self.use_pixel_renderer { "Pixel" } else { "Canvas" },
                 self.terminals.count(),
+                self.perf_stats.dropped_frames(),
+                self.perf_stats.render_phase_ms(),
+                self.perf_stats.cells_rendered(),
+                self.perf_stats.histogram(),
             );
             let positioned = container(perf)
                 .width(Length::Fill)
@@ -5890,6 +5991,19 @@ impl GodlyApp {
         container(content).width(Length::Fill).into()
     }
 
+    fn view_claude_code_tab(&self) -> Element<'_, Message> {
+        crate::claude_code_manager::view_claude_code_manager(
+            &self.claude_code_manager,
+            |i| Message::CcmScopeClicked(i),
+            |i| Message::CcmSkillClicked(i),
+            Message::CcmEditorAction,
+            Message::CcmSave,
+            Message::CcmCloseEditor,
+            Message::CcmNewSkillNameChanged,
+            Message::CcmCreateSkill,
+        )
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
             // Keyboard events.
@@ -5949,6 +6063,19 @@ impl GodlyApp {
                         x: position.x,
                         y: position.y,
                     })
+                }
+                // Bug #732: Detect Ctrl+V captured by a widget (text_editor).
+                // keyboard::listen() only sees Status::Ignored events, so when
+                // text_editor captures Ctrl+V but clipboard has no text (image-only),
+                // it emits no Edit::Paste action and the image check never runs.
+                // This catches that case by listening for captured paste keys.
+                event::Event::Keyboard(keyboard::Event::KeyPressed {
+                    ref key, modifiers, ..
+                }) if status == event::Status::Captured
+                    && modifiers.control()
+                    && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "v" || ch.as_str() == "V") =>
+                {
+                    Some(Message::WidgetCapturedPaste)
                 }
                 _ => None,
             }),
@@ -8293,7 +8420,7 @@ impl GodlyApp {
             }
         }
 
-        self.perf_stats.record_render_duration_us(t0.elapsed().as_micros() as f64);
+        self.perf_stats.record_render_stats(self.pixel_renderer.last_stats());
     }
 
     // -----------------------------------------------------------------------
@@ -9018,6 +9145,16 @@ fn resolve_key_event(
     KeyRoutingResult::ForwardToPty
 }
 
+/// Returns `true` if the string looks like a filesystem path (CWD).
+///
+/// Shells frequently set the OSC window title to the current directory.
+/// This helper mirrors `TerminalInfo::extract_cwd` so that we can detect
+/// path-like titles before updating the terminal state.
+fn looks_like_path(s: &str) -> bool {
+    let t = s.trim();
+    t.contains(":\\") || t.starts_with('/')
+}
+
 fn is_control_key(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Control))
 }
@@ -9338,7 +9475,7 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 #[cfg(test)]
 mod helper_tests {
     use super::tab_reducer::TabMruCycleDirection;
-    use super::{
+    use super::{looks_like_path,
         begin_sidebar_animation, enqueue_toast_entry, grid_dimensions_for_viewport,
         inset_terminal_pane_rect, mru_cycle_direction_from_shortcut_key,
         next_mru_switcher_selection, next_tab_id_from_mru, normalize_ai_tool_field,
@@ -9790,6 +9927,28 @@ mod helper_tests {
         let (rows, cols) = grid_dimensions_for_viewport(viewport, font_metrics);
         assert!(rows >= 1);
         assert!(cols >= 1);
+    }
+
+    // --- looks_like_path tests ---
+
+    #[test]
+    fn looks_like_path_detects_windows_path() {
+        assert!(looks_like_path(r"C:\Users\alanm"));
+        assert!(looks_like_path(r"  D:\projects\foo  "));
+    }
+
+    #[test]
+    fn looks_like_path_detects_unix_path() {
+        assert!(looks_like_path("/home/user"));
+        assert!(looks_like_path("  /tmp/foo  "));
+    }
+
+    #[test]
+    fn looks_like_path_rejects_meaningful_titles() {
+        assert!(!looks_like_path("Fix tab hotkeys"));
+        assert!(!looks_like_path("Claude"));
+        assert!(!looks_like_path("my-project"));
+        assert!(!looks_like_path(""));
     }
 }
 

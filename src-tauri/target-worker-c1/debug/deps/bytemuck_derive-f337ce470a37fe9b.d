@@ -1,0 +1,6 @@
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\bytemuck_derive-f337ce470a37fe9b.d: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck_derive-1.10.2\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck_derive-1.10.2\src\traits.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\bytemuck_derive-f337ce470a37fe9b.dll: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck_derive-1.10.2\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck_derive-1.10.2\src\traits.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck_derive-1.10.2\src\lib.rs:
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\bytemuck_derive-1.10.2\src\traits.rs:

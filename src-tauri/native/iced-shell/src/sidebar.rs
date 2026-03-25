@@ -207,7 +207,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let row_text = TEXT_PRIMARY();
 
         let name_font = if is_active { SIDEBAR_FONT_SEMIBOLD } else { SIDEBAR_FONT };
-        let name_label = text(&ws.name).size(12).color(row_text).font(name_font);
+        let name_label = text(&ws.name)
+            .size(12)
+            .color(row_text)
+            .font(name_font)
+            .wrapping(text::Wrapping::None);
+        let name_clipped = container(name_label).width(Length::Fill).clip(true);
 
         let terminal_count = workspace_signals
             .workspace_terminal_count(ws.id.as_str())
@@ -295,12 +300,11 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             accent_bar,
             worktree_indicator,
             workspace_icon,
-            name_label,
+            name_clipped,
         ];
         if let Some(icon) = ai_mode_icon {
             item_content = item_content.push(text(icon).size(11));
         }
-        item_content = item_content.push(Space::new().width(Length::Fill));
         if has_workspace_notification {
             item_content = item_content.push(notification_indicator);
         }

@@ -195,28 +195,22 @@ impl DaemonServer {
         eprintln!("[daemon] Server shutting down");
         daemon_log!("Server shutting down");
 
-        // Close all sessions before exiting — sends Shutdown to each shim
-        // so they don't become orphan processes.
-        self.shutdown_all_sessions();
+        // Do NOT call shutdown_all_sessions() here. When the daemon exits,
+        // shim processes must survive so the next daemon instance can recover
+        // them via reconnect_surviving_shims(). Shims have a 90-second orphan
+        // timeout and will self-terminate if no daemon reconnects.
+        let session_count = self.sessions.read().len();
+        if session_count > 0 {
+            daemon_log!(
+                "Leaving {} session(s) alive for recovery (shims will self-terminate after 90s if not recovered)",
+                session_count
+            );
+        }
     }
 
-    /// Close all active sessions, sending Shutdown to each shim process.
-    /// Called during daemon shutdown to prevent orphaned pty-shim processes.
-    fn shutdown_all_sessions(&self) {
-        let sessions = self.sessions.read();
-        let count = sessions.len();
-        if count == 0 {
-            return;
-        }
-        daemon_log!("Shutting down {} session(s)", count);
-        for (id, session) in sessions.iter() {
-            daemon_log!("Closing session {} on shutdown", id);
-            session.close();
-        }
-        drop(sessions);
-        self.sessions.write().clear();
-        daemon_log!("All sessions closed");
-    }
+    // NOTE: shutdown_all_sessions was removed. The daemon must NOT kill shims
+    // on exit — they need to survive for recovery by the next daemon instance.
+    // Shims self-terminate after ORPHAN_TIMEOUT_SECS (90s) if no daemon reconnects.
 
     /// Accept a single named pipe connection (Windows implementation).
     /// Returns a single File handle used for both reading and writing.

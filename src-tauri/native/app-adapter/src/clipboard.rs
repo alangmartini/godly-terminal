@@ -235,4 +235,118 @@ mod tests {
         // Clean up.
         let _ = std::fs::remove_file(&path);
     }
+
+    // ── Bug #732 reproduction ──────────────────────────────────────────
+    //
+    // Quick Claude image paste fails when clipboard has ONLY image data
+    // (no text). The app.rs paste flow has two detection paths:
+    //
+    //   Path A — keyboard::listen() Ctrl+V handler (app.rs:1904-1908):
+    //     Dead when text_editor has focus because Iced marks the event
+    //     as Status::Captured; keyboard::listen() only sees Ignored.
+    //
+    //   Path B — QuickClaudeDialogPromptAction handler (app.rs:2622-2666):
+    //     Checks `is_paste` which is true only when text_editor emits
+    //     Edit::Paste. Iced's text_editor only emits Edit::Paste when
+    //     clipboard.read(Kind::Standard) returns Some(text).
+    //
+    // Result: image-only clipboard → no text → no Edit::Paste → no
+    // image detection. Both paths are dead for the most common
+    // screenshot paste scenario.
+
+    /// Bug #732: Image-only clipboard paste is detectable by our
+    /// clipboard module, but the text-based paste trigger that app.rs
+    /// relies on does not fire — proving the detection gap.
+    ///
+    /// This test puts image-only data on the clipboard and asserts the
+    /// contract that SHOULD hold: a paste operation should trigger image
+    /// detection regardless of whether clipboard also has text.
+    /// It FAILS on current code because the paste trigger requires text.
+    #[test]
+    #[ignore]
+    fn image_only_clipboard_paste_detection_gap() {
+        // 1. Put image-only data on the clipboard (simulate a screenshot).
+        let mut clipboard = Clipboard::new().expect("clipboard access");
+        clipboard.clear().expect("clear clipboard");
+
+        let img = arboard::ImageData {
+            width: 2,
+            height: 2,
+            bytes: std::borrow::Cow::Owned(vec![
+                255, 0, 0, 255, 0, 255, 0, 255,
+                0, 0, 255, 255, 255, 255, 0, 255,
+            ]),
+        };
+        clipboard.set_image(img).expect("set image on clipboard");
+
+        // 2. Confirm check_clipboard_image() CAN find the image.
+        //    The detection function itself works fine.
+        let detected = check_clipboard_image().expect("detection should not error");
+        assert!(
+            detected.is_some(),
+            "check_clipboard_image() should find the image — detection works"
+        );
+        // Clean up temp file.
+        if let Some(ref path) = detected {
+            let _ = std::fs::remove_file(path);
+        }
+
+        // 3. Simulate what Iced's text_editor does on Ctrl+V:
+        //    It calls clipboard.read(Kind::Standard) → arboard get_text().
+        //    If text is present → Edit::Paste(text) is emitted.
+        //    If text is absent  → NO action is emitted (event still Captured).
+        let text_result = clipboard.get_text();
+        let iced_would_emit_paste = text_result
+            .as_ref()
+            .map(|t| !t.is_empty())
+            .unwrap_or(false);
+
+        // 4. In app.rs, image detection only runs when is_paste is true,
+        //    which requires Edit::Paste to have been emitted.
+        //    Bug #732: is_paste is the ONLY trigger for image detection
+        //    when text_editor has focus. No paste action = no image check.
+        let image_check_would_run = iced_would_emit_paste;
+
+        // EXPECTED: image detection triggers on paste regardless of text.
+        // ACTUAL (buggy): image detection requires text to be present.
+        assert!(
+            image_check_would_run,
+            "Bug #732: Image-only clipboard (no text) does not trigger image \
+             detection in Quick Claude. Iced text_editor requires text for \
+             Edit::Paste, but clipboard has only image data. Neither the \
+             keyboard listener (captured by widget) nor the prompt action \
+             handler (no Paste action) reaches check_clipboard_for_quick_claude_image()."
+        );
+    }
+
+    /// Companion to image_only_clipboard_paste_detection_gap: confirms
+    /// that text-based clipboard paste DOES trigger the image detection
+    /// path (the working case from PR #729).
+    #[test]
+    #[ignore]
+    fn text_plus_image_clipboard_paste_detection_works() {
+        let mut clipboard = Clipboard::new().expect("clipboard access");
+        clipboard.clear().expect("clear clipboard");
+
+        // Set text on clipboard (simulates copy from a web page with
+        // both text and image content).
+        clipboard
+            .set_text("hello world")
+            .expect("set text on clipboard");
+
+        // Iced text_editor will call clipboard.read() → finds text →
+        // emits Edit::Paste("hello world") → app.rs detects is_paste →
+        // calls check_clipboard_for_quick_claude_image().
+        let text_result = clipboard.get_text();
+        let iced_would_emit_paste = text_result
+            .as_ref()
+            .map(|t| !t.is_empty())
+            .unwrap_or(false);
+
+        assert!(
+            iced_would_emit_paste,
+            "Text clipboard should trigger Iced text_editor Edit::Paste — \
+             this is the working path that PR #729 fixed"
+        );
+    }
 }
