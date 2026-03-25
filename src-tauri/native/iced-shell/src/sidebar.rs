@@ -33,6 +33,22 @@ const ICON_ADD: &str = "\u{EA60}";
 /// Codicon: folder (workspace icon)
 const ICON_FOLDER: &str = "\u{EA83}";
 
+/// Proportional sans-serif for sidebar labels and workspace names.
+const SIDEBAR_FONT: Font = Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+/// Semibold variant for active workspace name and section headers.
+const SIDEBAR_FONT_SEMIBOLD: Font = Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Semibold,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
 /// Clamp a sidebar width into the supported resize range.
 pub fn clamp_sidebar_width(width: f32) -> f32 {
     width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
@@ -170,7 +186,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     active_id: Option<&str>,
     workspace_signals: S,
     sidebar_width: f32,
-    font: Font,
+    _font: Font,
     on_action: impl Fn(SidebarAction) -> M + 'a,
     on_resize_start: M,
     on_resize_end: M,
@@ -188,7 +204,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
         let row_text = TEXT_PRIMARY();
 
-        let name_label = text(&ws.name).size(13).color(row_text).font(font);
+        let name_font = if is_active { SIDEBAR_FONT_SEMIBOLD } else { SIDEBAR_FONT };
+        let name_label = text(&ws.name).size(12).color(row_text).font(name_font);
 
         let terminal_count = workspace_signals
             .workspace_terminal_count(ws.id.as_str())
@@ -337,7 +354,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             let move_down_id = ws.id.clone();
             let delete_id = ws.id.clone();
 
-            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY()))
+            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::RenameWorkspace(rename_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
@@ -354,7 +371,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     }
                 });
 
-            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY()))
+            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::OpenWorkspaceInExplorer(open_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
@@ -376,7 +393,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             } else {
                 "Enable Worktree Mode"
             };
-            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY()))
+            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::ToggleWorkspaceWorktreeMode(
                     worktree_id,
                 )))
@@ -396,7 +413,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 });
 
             let move_up_btn = if idx > 0 {
-                button(text("Move Up").size(12).color(TEXT_PRIMARY()))
+                button(text("Move Up").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                     .on_press(on_action(SidebarAction::MoveWorkspaceUp(move_up_id)))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
@@ -413,14 +430,14 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                         }
                     })
             } else {
-                button(text("Move Up").size(12).color(TEXT_SECONDARY()))
+                button(text("Move Up").size(12).color(TEXT_SECONDARY()).font(SIDEBAR_FONT))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style::default())
             };
 
             let move_down_btn = if idx + 1 < workspaces.len() {
-                button(text("Move Down").size(12).color(TEXT_PRIMARY()))
+                button(text("Move Down").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                     .on_press(on_action(SidebarAction::MoveWorkspaceDown(move_down_id)))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
@@ -437,13 +454,13 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                         }
                     })
             } else {
-                button(text("Move Down").size(12).color(TEXT_SECONDARY()))
+                button(text("Move Down").size(12).color(TEXT_SECONDARY()).font(SIDEBAR_FONT))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style::default())
             };
 
-            let delete_btn = button(text("Delete").size(12).color(DANGER()))
+            let delete_btn = button(text("Delete").size(12).color(DANGER()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::DeleteWorkspace(delete_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
@@ -507,7 +524,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let header = container(
         row![
-            text("Workspaces").size(10).color(TEXT_SECONDARY()),
+            text("Workspaces").size(11).color(TEXT_SECONDARY()).font(SIDEBAR_FONT_SEMIBOLD),
             Space::new().width(Length::Fill),
             settings_btn,
             new_btn,
@@ -539,8 +556,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let prefixed = label.to_string();
         button(
             text(prefixed)
-                .size(10)
-                .color(TEXT_SECONDARY()),
+                .size(11)
+                .color(TEXT_SECONDARY())
+                .font(SIDEBAR_FONT),
         )
         .on_press(on_action(action))
         .padding(Padding::from([4, 8]))
