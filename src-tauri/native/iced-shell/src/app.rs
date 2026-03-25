@@ -840,6 +840,9 @@ pub enum Message {
     QuickClaudeDialogModelsLoaded(Vec<(String, String)>),
     /// Image(s) pasted from clipboard into Quick Claude dialog.
     QuickClaudeDialogImagePasted(Result<Vec<crate::quick_claude_dialog::ImageAttachment>, String>),
+    /// A widget (text_editor) captured a Ctrl+V paste event.
+    /// Fired by event::listen_with() to detect pastes that keyboard::listen() misses.
+    WidgetCapturedPaste,
     /// Remove an attached image from Quick Claude dialog by index.
     QuickClaudeDialogImageRemoved(usize),
     /// AI tool display name input changed.
@@ -2669,17 +2672,9 @@ impl GodlyApp {
                 }
             }
             Message::QuickClaudeDialogPromptAction(action) => {
-                // Detect paste action BEFORE consuming action via perform().
-                // keyboard::listen() only sees Status::Ignored events, but the
-                // text_editor widget captures Ctrl+V (Status::Captured) for its
-                // own text paste, so the keyboard-based image check never fires.
-                // Instead, detect the Paste action here and also check for images.
-                let is_paste = matches!(
-                    &action,
-                    iced::widget::text_editor::Action::Edit(
-                        iced::widget::text_editor::Edit::Paste(_)
-                    )
-                );
+                // Image paste detection moved to WidgetCapturedPaste (bug #732).
+                // event::listen_with() catches Ctrl+V regardless of clipboard
+                // content, so both image-only and text+image pastes are handled.
 
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     dlg.prompt_content.perform(action);
@@ -2708,10 +2703,6 @@ impl GodlyApp {
                             dlg.skill_autocomplete_filter.clear();
                         }
                     }
-                }
-
-                if is_paste {
-                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogBranchChanged(val) => {
@@ -2959,6 +2950,10 @@ impl GodlyApp {
             Message::QuickClaudeDialogImagePasted(result) => {
                 match result {
                     Ok(attachments) => {
+                        diag::log(&format!(
+                            "UPDATE: QuickClaudeDialogImagePasted(Ok, {} images)",
+                            attachments.len()
+                        ));
                         if let Some(ref mut dlg) = self.quick_claude_dialog {
                             for attachment in attachments {
                                 if dlg.attached_images.len() < 10 {
@@ -2971,6 +2966,7 @@ impl GodlyApp {
                         }
                     }
                     Err(e) => {
+                        diag::log(&format!("UPDATE: QuickClaudeDialogImagePasted(Err: {})", e));
                         log::error!("Quick Claude image paste failed: {}", e);
                     }
                 }
@@ -2980,6 +2976,16 @@ impl GodlyApp {
                     if index < dlg.attached_images.len() {
                         dlg.attached_images.remove(index);
                     }
+                }
+            }
+            Message::WidgetCapturedPaste => {
+                // Bug #732: A widget (text_editor) captured Ctrl+V. When the
+                // Quick Claude dialog is open, check clipboard for images.
+                // This is the sole image-paste trigger — it fires for both
+                // image-only and text+image clipboard content.
+                if self.quick_claude_dialog.is_some() {
+                    diag::log("UPDATE: WidgetCapturedPaste → checking clipboard for image");
+                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogResume => {
@@ -6025,6 +6031,19 @@ impl GodlyApp {
                         x: position.x,
                         y: position.y,
                     })
+                }
+                // Bug #732: Detect Ctrl+V captured by a widget (text_editor).
+                // keyboard::listen() only sees Status::Ignored events, so when
+                // text_editor captures Ctrl+V but clipboard has no text (image-only),
+                // it emits no Edit::Paste action and the image check never runs.
+                // This catches that case by listening for captured paste keys.
+                event::Event::Keyboard(keyboard::Event::KeyPressed {
+                    ref key, modifiers, ..
+                }) if status == event::Status::Captured
+                    && modifiers.control()
+                    && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "v" || ch.as_str() == "V") =>
+                {
+                    Some(Message::WidgetCapturedPaste)
                 }
                 _ => None,
             }),
