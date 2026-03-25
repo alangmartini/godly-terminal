@@ -416,7 +416,16 @@ pub fn merge_with_live_sessions(
             }
             None => {
                 // Bug #619: preserve workspace metadata even when no terminal IDs match.
-                (None, None)
+                // Bug #771: preserve the "was intentionally empty" signal so the
+                // caller can distinguish empty-by-design workspaces from those
+                // that lost their terminals. focused_terminal="" in persisted state
+                // means the user closed all terminals before shutdown.
+                let focused = if workspace.focused_terminal.is_empty() {
+                    Some(String::new())
+                } else {
+                    None
+                };
+                (None, focused)
             }
         };
 
@@ -1158,7 +1167,6 @@ mod tests {
             terminal_worktree_paths: HashMap::new(),
             terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
-            terminal_clone_ids: HashSet::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-godly".to_string(),
@@ -1575,4 +1583,244 @@ mod tests {
         }
     }
     fn scopeguard(path: PathBuf) -> ScopeGuard { ScopeGuard { path } }
+
+    fn make_empty_workspace(id: &str, name: &str, folder: &str) -> PersistedWorkspaceState {
+        // Represents a workspace where the user closed all terminals.
+        // close_terminal_immediate sets focused_terminal="" when the last
+        // terminal is closed (app.rs:7529). The layout retains a stale leaf
+        // from the last terminal before closure.
+        PersistedWorkspaceState {
+            id: id.to_string(),
+            name: name.to_string(),
+            folder_path: folder.to_string(),
+            worktree_mode: false,
+            focused_terminal: String::new(),
+            layout: PersistedLayoutNode::Leaf {
+                terminal_id: format!("t-stale-{}", id),
+            },
+        }
+    }
+
+    #[test]
+    fn tier2_rebuild_should_not_create_terminal_for_empty_workspace() {
+        // Bug #771: collect_init_result_sync (app.rs:9066) should skip workspaces
+        // with focused_terminal="" (intentionally empty) during Tier 2 restoration.
+        // Only non-empty workspaces should get a new terminal session.
+        let persisted = make_session(vec![
+            make_workspace("w-main", "Main", "C:\\dev\\main"),
+            make_empty_workspace("w-empty", "Empty Workspace", "C:\\dev\\empty"),
+            make_workspace("w-backend", "Backend", "C:\\dev\\backend"),
+        ]);
+
+        // Simulate the fixed collect_init_result_sync: only create terminals
+        // for workspaces that had active terminals (focused_terminal != "").
+        let new_sessions: Vec<String> = persisted
+            .workspaces
+            .iter()
+            .filter(|w| !w.focused_terminal.is_empty())
+            .map(|_| uuid::Uuid::new_v4().to_string())
+            .collect();
+
+        assert_eq!(
+            new_sessions.len(),
+            2,
+            "only 2 of 3 workspaces had active terminals"
+        );
+
+        let merged = merge_with_live_sessions(&persisted, &new_sessions);
+
+        // All 3 workspaces preserved.
+        assert_eq!(merged.workspaces.len(), 3);
+
+        // Empty workspace should be identifiable as intentionally empty.
+        let empty_ws = &merged.workspaces[1];
+        assert_eq!(empty_ws.name, "Empty Workspace");
+        assert!(empty_ws.layout.is_none());
+        assert_eq!(
+            empty_ws.focused_terminal,
+            Some(String::new()),
+            "empty workspace should have focused_terminal=Some('') to signal \
+             it was intentionally empty"
+        );
+
+        // The orphan pool should only have 2 terminals (for Main and Backend).
+        assert_eq!(
+            merged.missing_live_terminal_ids.len(),
+            2,
+            "only 2 orphan terminals should exist, one per non-empty workspace"
+        );
+    }
+
+    #[test]
+    fn merge_distinguishes_empty_workspace_from_workspace_that_lost_terminals() {
+        // Bug #771: after merge_with_live_sessions, an intentionally empty
+        // workspace (focused_terminal="" in persisted state) is indistinguishable
+        // from a workspace that lost its terminals (focused_terminal="t-dead").
+        // Both produce layout=None, focused_terminal=None in the merge output.
+        //
+        // This prevents apply_init_result from knowing which workspaces to skip
+        // during terminal backfill (app.rs:6830), so empty workspaces get a
+        // fresh terminal they shouldn't.
+        //
+        // Expected: the merge output should preserve the "was intentionally empty"
+        // signal so the caller can decide not to create a terminal for it.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 3,
+            active_workspace_id: Some("w-lost".to_string()),
+            active_terminal_id: Some("t-dead".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
+            terminal_workspace_assignments: HashMap::new(),
+            workspaces: vec![
+                // Workspace that lost its terminal (daemon killed it)
+                PersistedWorkspaceState {
+                    id: "w-lost".to_string(),
+                    name: "Lost Terminal".to_string(),
+                    folder_path: "C:\\dev\\lost".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-dead".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-dead".to_string(),
+                    },
+                },
+                // Workspace that was intentionally empty (user closed all terminals)
+                PersistedWorkspaceState {
+                    id: "w-empty".to_string(),
+                    name: "Empty Workspace".to_string(),
+                    folder_path: "C:\\dev\\empty".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: String::new(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-stale".to_string(),
+                    },
+                },
+            ],
+        };
+
+        // No live sessions (Tier 2 / full rebuild scenario).
+        let merged = merge_with_live_sessions(&persisted, &[]);
+
+        let ws_lost = &merged.workspaces[0];
+        let ws_empty = &merged.workspaces[1];
+
+        // Both should exist (metadata preserved).
+        assert_eq!(ws_lost.name, "Lost Terminal");
+        assert_eq!(ws_empty.name, "Empty Workspace");
+
+        // Both should have no layout (no live terminals).
+        assert!(ws_lost.layout.is_none());
+        assert!(ws_empty.layout.is_none());
+
+        // The caller needs to distinguish these two cases:
+        // - ws_lost SHOULD receive a fresh terminal (it had one before)
+        // - ws_empty should NOT receive a terminal (intentionally empty)
+        //
+        // Bug: both have focused_terminal=None, making them identical.
+        // Expected: the empty workspace should be identifiable, e.g. via
+        // focused_terminal=Some("") to distinguish from None.
+        assert_ne!(
+            ws_lost.focused_terminal, ws_empty.focused_terminal,
+            "Bug #771: merge output must distinguish workspace that lost terminals \
+             (should get backfill) from intentionally empty workspace (should stay empty); \
+             both have focused_terminal={:?}",
+            ws_lost.focused_terminal,
+        );
+    }
+
+    #[test]
+    fn empty_workspace_not_backfilled_during_recovery_with_live_sessions() {
+        // Bug #771: when daemon has live sessions for some workspaces but not
+        // all, apply_init_result (app.rs:6830) creates a fresh terminal for
+        // workspaces with no live terminals and no orphans. This includes
+        // workspaces that were intentionally empty, which should stay empty.
+        //
+        // This test verifies the merge output provides the signal needed for
+        // the caller to skip backfill on intentionally empty workspaces.
+        let persisted = PersistedSessionState {
+            version: PERSISTENCE_VERSION,
+            sidebar_visible: true,
+            settings_open: false,
+            settings_tab: "shortcuts".to_string(),
+            font_size: 14.0,
+            font_family: "Geist Mono".to_string(),
+            next_workspace_num: 4,
+            active_workspace_id: Some("w-active".to_string()),
+            active_terminal_id: Some("t-alive".to_string()),
+            terminal_worktree_paths: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
+            terminal_workspace_assignments: HashMap::new(),
+            workspaces: vec![
+                PersistedWorkspaceState {
+                    id: "w-active".to_string(),
+                    name: "Active".to_string(),
+                    folder_path: "C:\\dev\\active".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-alive".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-alive".to_string(),
+                    },
+                },
+                // Empty workspace (user closed all terminals)
+                PersistedWorkspaceState {
+                    id: "w-empty".to_string(),
+                    name: "Empty Workspace".to_string(),
+                    folder_path: "C:\\dev\\empty".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: String::new(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-stale".to_string(),
+                    },
+                },
+                PersistedWorkspaceState {
+                    id: "w-other".to_string(),
+                    name: "Other".to_string(),
+                    folder_path: "C:\\dev\\other".to_string(),
+                    worktree_mode: false,
+                    focused_terminal: "t-other".to_string(),
+                    layout: PersistedLayoutNode::Leaf {
+                        terminal_id: "t-other".to_string(),
+                    },
+                },
+            ],
+        };
+
+        // Tier 1 recovery: t-alive is live, t-other died, t-stale was already dead.
+        let live = vec!["t-alive".to_string()];
+        let merged = merge_with_live_sessions(&persisted, &live);
+
+        // All 3 workspaces preserved.
+        assert_eq!(merged.workspaces.len(), 3);
+
+        // w-active has its terminal.
+        assert!(merged.workspaces[0].layout.is_some());
+
+        // w-empty and w-other both have no layout.
+        assert!(merged.workspaces[1].layout.is_none());
+        assert!(merged.workspaces[2].layout.is_none());
+
+        // No orphans (t-alive is in w-active's layout).
+        assert!(merged.missing_live_terminal_ids.is_empty());
+
+        // apply_init_result will create a fresh terminal for BOTH w-empty and
+        // w-other (app.rs:6830). But only w-other should get one — w-empty was
+        // intentionally empty.
+        //
+        // The merge output must distinguish them. Assert the signal exists:
+        let ws_empty = &merged.workspaces[1];
+        let ws_other = &merged.workspaces[2];
+
+        assert_ne!(
+            ws_empty.focused_terminal, ws_other.focused_terminal,
+            "Bug #771: merge output must distinguish intentionally empty workspace \
+             from workspace that lost its terminal during recovery; \
+             both have focused_terminal={:?}",
+            ws_empty.focused_terminal,
+        );
+    }
 }
