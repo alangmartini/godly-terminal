@@ -9,9 +9,18 @@ pub mod fonts {
     pub const ITALIC: &[u8] = include_bytes!("../fonts/GeistMono-Italic.ttf");
     pub const BOLD_ITALIC: &[u8] = include_bytes!("../fonts/GeistMono-BoldItalic.ttf");
 
+    pub const CODICONS: &[u8] = include_bytes!("../fonts/codicon.ttf");
+
     /// The Geist Mono font for normal-weight text.
     pub const GEIST_MONO: Font = Font {
         family: iced::font::Family::Name("Geist Mono"),
+        weight: iced::font::Weight::Normal,
+        stretch: iced::font::Stretch::Normal,
+        style: iced::font::Style::Normal,
+    };
+
+    pub const CODICON_FONT: Font = Font {
+        family: iced::font::Family::Name("codicon"),
         weight: iced::font::Weight::Normal,
         stretch: iced::font::Stretch::Normal,
         style: iced::font::Style::Normal,
@@ -99,6 +108,7 @@ fn main() -> iced::Result {
         .font(fonts::BOLD)
         .font(fonts::ITALIC)
         .font(fonts::BOLD_ITALIC)
+        .font(fonts::CODICONS)
         .default_font(fonts::GEIST_MONO)
         .window(window::Settings {
             size: iced::Size::new(1200.0, 800.0),
