@@ -18,6 +18,8 @@ pub const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 /// Resize handle width in logical pixels.
 pub const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
+const HEADER_ICON_SIZE: f32 = 16.0;
+
 /// Codicon font for pixel-hinted icons.
 const CODICON_FONT: Font = Font {
     family: iced::font::Family::Name("codicon"),
