@@ -1,0 +1,75 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "src-tauri/native/terminal-surface/**"
+      - "src-tauri/godly-vt/**"
+      - "src-tauri/protocol/**"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libvulkan-dev
+
+      - name: Install critcmp
+        run: cargo install critcmp
+
+      - name: Run benchmarks on PR branch
+        run: |
+          cd src-tauri
+          cargo bench -p godly-terminal-surface --bench render_benchmark -- --save-baseline pr
+          cargo bench -p godly-terminal-surface --bench throughput_stress -- --save-baseline pr
+          cargo bench -p godly-terminal-surface --bench pipeline_benchmark -- --save-baseline pr 2>/dev/null || true
+          cargo bench -p godly-vt --bench throughput -- --save-baseline pr
+
+      - name: Checkout base branch
+        run: git checkout ${{ github.event.pull_request.base.sha }}
+
+      - name: Run benchmarks on base branch
+        run: |
+          cd src-tauri
+          cargo bench -p godly-terminal-surface --bench render_benchmark -- --save-baseline base 2>/dev/null || true
+          cargo bench -p godly-terminal-surface --bench throughput_stress -- --save-baseline base 2>/dev/null || true
+          cargo bench -p godly-terminal-surface --bench pipeline_benchmark -- --save-baseline base 2>/dev/null || true
+          cargo bench -p godly-vt --bench throughput -- --save-baseline base 2>/dev/null || true
+
+      - name: Compare benchmarks
+        run: critcmp base pr --threshold 15 | tee /tmp/bench-comparison.txt
+
+      - name: Post benchmark results as PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body;
+            try {
+              body = fs.readFileSync('/tmp/bench-comparison.txt', 'utf8');
+            } catch {
+              body = 'Benchmark comparison file not found — benchmarks may have failed on both branches.';
+            }
+            const truncated = body.length > 60000 ? body.slice(0, 60000) + '\n...(truncated)' : body;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Benchmark Results\n\`\`\`\n${truncated}\n\`\`\``
+            });
