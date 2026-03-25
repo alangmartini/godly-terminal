@@ -1167,6 +1167,7 @@ mod tests {
             terminal_worktree_paths: HashMap::new(),
             terminal_clone_ids: HashSet::new(),
             terminal_workspace_assignments: HashMap::new(),
+            terminal_clone_ids: HashSet::new(),
             workspaces: vec![
                 PersistedWorkspaceState {
                     id: "w-godly".to_string(),
