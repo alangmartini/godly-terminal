@@ -2115,6 +2115,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "godly-tmux-shim"
+version = "0.1.0"
+dependencies = [
+ "godly-protocol",
+ "serde",
+ "serde_json",
+ "winapi",
+]
+
+[[package]]
 name = "godly-vt"
 version = "0.9.0"
 dependencies = [

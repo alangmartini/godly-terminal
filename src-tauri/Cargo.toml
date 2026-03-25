@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "protocol", "daemon", "mcp", "notify", "godly-vt", "remote", "pty-shim", "whisper",
+    "tmux-shim",
     "native/app-adapter",
     "native/iced-shell",
     "native/terminal-surface",
