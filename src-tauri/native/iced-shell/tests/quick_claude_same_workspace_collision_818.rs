@@ -195,8 +195,7 @@ fn launch_state_has_unique_launch_id() {
     // Read ~600 chars to cover all fields
     let struct_body = &source[struct_start..(struct_start + 600).min(source.len())];
 
-    let has_launch_id = struct_body.contains("launch_id:")
-        || struct_body.contains("pub id:");
+    let has_launch_id = struct_body.contains("launch_id:") || struct_body.contains("pub id:");
 
     assert!(
         has_launch_id,
