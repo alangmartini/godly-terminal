@@ -82,6 +82,13 @@ Architecture docs, design specs, and testing guides stay in `docs/` — only inv
 - Ask yourself: "Would a staff engineer approve this?"\
 - Run tests, check logs, demonstrate correctness\
 \
+### 4a. Delegate Builds to CI\
+- **Never build heavy crates locally** (e.g., `godly-iced-shell`, `godly-app-adapter`) just to run tests. These pull 150+ deps and take 10+ minutes from a cold cache.\
+- Instead: **commit, push, open a PR, and let GitHub Actions CI run the tests**. Monitor with `gh run watch`.\
+- For quick library crates (`godly-protocol`, `godly-vt`, `godly-layout-core`), local `cargo nextest run` is fine — they compile fast.\
+- The CI pipeline (`ci.yml`) runs: library checks, unit tests (protocol/vt), daemon tests (Windows, 3 partitions), native crate tests (Windows, iced-shell + adapter), release build, contract tests.\
+- After pushing, verify CI passes before marking work complete. Fix CI failures without being asked.\
+\
 ### 5. Demand Elegance (Balanced)\
 - For non-trivial changes: pause and ask "is there a more elegant way?"\
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"\
