@@ -33,6 +33,7 @@ pub mod quick_claude_dialog;
 pub mod font_enumerator;
 pub mod git_worktree;
 pub mod phone_remote;
+pub mod claude_code_manager;
 
 #[cfg(test)]
 pub mod testing;
