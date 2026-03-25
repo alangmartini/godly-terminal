@@ -674,6 +674,8 @@ pub enum Message {
     TabDragEnd,
     /// User wants a new terminal.
     NewTabRequested,
+    /// Tab bar scrolled horizontally (scroll offset updated).
+    TabBarScroll(iced::widget::scrollable::Viewport),
     /// User wants to close a terminal.
     CloseTabRequested(String),
     /// New terminal created by daemon.
@@ -1993,6 +1995,9 @@ impl GodlyApp {
                 let lines = -(delta_y * 3.0) as isize;
                 return self.scroll_active(lines);
             }
+
+            // --- Tab bar horizontal scroll (no-op: Iced scrollable handles it) ---
+            Message::TabBarScroll(_) => {}
 
             // --- Tab management ---
             Message::TabClicked(id) => {
@@ -4102,6 +4107,7 @@ impl GodlyApp {
             |id| Message::TabContextToggle(id),
             Message::TabDragEnd,
             Message::NewTabRequested,
+            Message::TabBarScroll,
         );
 
         // Mic button for whisper (I4/I5)
