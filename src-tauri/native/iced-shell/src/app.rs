@@ -8402,7 +8402,7 @@ impl GodlyApp {
         let default_fg = palette.foreground;
         let default_bg = palette.background;
 
-        let t0 = std::time::Instant::now();
+        let _t0 = std::time::Instant::now();
         let (pixels, w, h) = self.pixel_renderer.render(
             &grid_clone,
             &metrics,

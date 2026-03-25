@@ -42,13 +42,13 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
@@ -73,10 +73,10 @@ where
         );
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &Renderer,
@@ -86,11 +86,12 @@ where
     ) -> iced::event::Status {
         // If the cursor is over our bounds and we get a vertical wheel
         // event, rewrite it so the Y delta becomes X delta.
-        let event = match &event {
+        let redirected;
+        let event = match event {
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if cursor.is_over(layout.bounds()) =>
             {
-                let redirected = match *delta {
+                let new_delta = match *delta {
                     mouse::ScrollDelta::Lines { x, y } => {
                         mouse::ScrollDelta::Lines { x: x + y, y: 0.0 }
                     }
@@ -98,14 +99,15 @@ where
                         mouse::ScrollDelta::Pixels { x: x + y, y: 0.0 }
                     }
                 };
-                Event::Mouse(mouse::Event::WheelScrolled {
-                    delta: redirected,
-                })
+                redirected = Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: new_delta,
+                });
+                &redirected
             }
             _ => event,
         };
 
-        self.content.as_widget_mut().on_event(
+        self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
             layout,
@@ -131,28 +133,30 @@ where
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, Renderer>> {
         self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
             renderer,
+            viewport,
             translation,
         )
     }
