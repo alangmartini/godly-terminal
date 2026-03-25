@@ -531,7 +531,7 @@ fn fill_derived_fields(p: &mut ThemePalette) {
         p.bg_active.r, p.bg_active.g, p.bg_active.b, 0.70,
     );
     p.ghost_selected = Color::from_rgba(
-        p.bg_tertiary.r, p.bg_tertiary.g, p.bg_tertiary.b, 0.50,
+        p.bg_tertiary.r, p.bg_tertiary.g, p.bg_tertiary.b, 0.70,
     );
     p.element_bg = p.bg_tertiary;
     p.element_hover = p.bg_active;
@@ -569,7 +569,7 @@ fn zed_one_dark() -> ThemePalette {
         text_placeholder: Color::from_rgb8(0x87, 0x8a, 0x98),
         ghost_hover: Color::from_rgb8(0x36, 0x3c, 0x46),
         ghost_active: Color::from_rgb8(0x45, 0x4a, 0x56),
-        ghost_selected: Color::from_rgb8(0x36, 0x3c, 0x46),
+        ghost_selected: Color::from_rgb8(0x3c, 0x42, 0x4e),
         element_bg: Color::from_rgb8(0x36, 0x3c, 0x46),
         element_hover: Color::from_rgb8(0x45, 0x4a, 0x56),
         element_active: Color::from_rgba8(0x74, 0xad, 0xe8, 0.20),
