@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,6 +75,26 @@ pub enum LaunchStep {
         agent_index: usize,
         timeout_ms: u64,
     },
+}
+
+impl LaunchStep {
+    /// Human-readable label for display in the loading overlay.
+    pub fn label(&self) -> &'static str {
+        match self {
+            LaunchStep::CreateWorktree { .. } => "Creating worktree",
+            LaunchStep::CreateClone { .. } => "Cloning repository",
+            LaunchStep::CreateTerminal { .. } => "Starting terminal",
+            LaunchStep::WaitIdle { .. } => "Waiting for shell",
+            LaunchStep::RunCommand { .. } => "Launching Claude",
+            LaunchStep::WaitReady { .. } => "Waiting for Claude",
+            LaunchStep::WaitForClaudeReady { .. } => "Waiting for Claude",
+            LaunchStep::SendEnter { .. } => "Sending input",
+            LaunchStep::SendPrompt { .. } => "Sending prompt",
+            LaunchStep::WaitForEcho { .. } => "Confirming input",
+            LaunchStep::Delay { .. } => "Preparing",
+            LaunchStep::HandleTrustPromptIfNeeded { .. } => "Finalizing setup",
+        }
+    }
 }
 
 /// Build launch steps for resuming an existing Claude session.
@@ -213,6 +234,9 @@ pub struct LaunchState {
     pub pending_worktree_path: Option<String>,
     /// ID of the QuickClaudeSessionRecord, for updating CWD/terminal_id after async steps.
     pub session_record_id: Option<String>,
+    /// Placeholder terminal IDs created before the real terminal.
+    /// Used by the UI to detect which panes should show the launch progress overlay.
+    pub placeholder_ids: HashSet<String>,
 }
 
 impl LaunchState {
@@ -235,11 +259,20 @@ impl LaunchState {
             is_clone: false,
             pending_worktree_path: None,
             session_record_id: None,
+            placeholder_ids: HashSet::new(),
         }
     }
 
     pub fn total_steps(&self) -> usize {
         self.steps.len()
+    }
+
+    /// Human-readable label of the current launch step.
+    pub fn current_step_label(&self) -> &'static str {
+        self.steps
+            .get(self.current_step)
+            .map(|s| s.label())
+            .unwrap_or("Launching")
     }
 }
 
