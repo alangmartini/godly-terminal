@@ -464,6 +464,8 @@ pub struct GodlyApp {
     perf_stats: crate::perf_stats::PerfStats,
     // --- K1: CLAUDE.md Editor ---
     claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
+    // --- Claude Code Manager ---
+    claude_code_manager: crate::claude_code_manager::ClaudeCodeManagerState,
     // --- I4/I5: Voice/Whisper Integration ---
     whisper_available: bool,
     whisper_state: Option<whisper_ui::WhisperState>,
@@ -591,6 +593,7 @@ impl Default for GodlyApp {
             perf_overlay_visible: false,
             perf_stats: crate::perf_stats::PerfStats::new(),
             claude_md_editor: None,
+            claude_code_manager: crate::claude_code_manager::ClaudeCodeManagerState::new(),
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
             whisper_state: None,
             whisper_service: None,
@@ -997,6 +1000,21 @@ pub enum Message {
     ClaudeMdSave,
     ClaudeMdSaved(Result<(), String>),
     ClaudeMdClose,
+    // --- Claude Code Manager ---
+    /// Claude Code Manager: scope tab clicked.
+    CcmScopeClicked(usize),
+    /// Claude Code Manager: skill clicked in list.
+    CcmSkillClicked(usize),
+    /// Claude Code Manager: editor text action.
+    CcmEditorAction(iced::widget::text_editor::Action),
+    /// Claude Code Manager: save current skill.
+    CcmSave,
+    /// Claude Code Manager: close editor / back to list.
+    CcmCloseEditor,
+    /// Claude Code Manager: new skill name input changed.
+    CcmNewSkillNameChanged(String),
+    /// Claude Code Manager: create new skill.
+    CcmCreateSkill,
     // --- J1-J9: MCP Event Integration ---
     McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
     // --- I4/I5: Voice/Whisper Integration ---
@@ -3462,6 +3480,14 @@ impl GodlyApp {
                         async { font_enumerator::enumerate_monospace_fonts() },
                         Message::FontsEnumerated,
                     );
+                } else if tab_id == "claude-code" {
+                    let ws_data: Vec<(String, String, String)> = self
+                        .workspaces
+                        .iter()
+                        .map(|ws| (ws.id.clone(), ws.name.clone(), ws.folder_path.clone()))
+                        .collect();
+                    self.claude_code_manager.refresh_scopes(&ws_data);
+                    self.claude_code_manager.discover_skills();
                 }
             }
             Message::FontFamilyChanged(name) => {
@@ -3846,6 +3872,34 @@ impl GodlyApp {
             Message::ClaudeMdClose => {
                 self.claude_md_editor = None;
             }
+            // --- Claude Code Manager ---
+            Message::CcmScopeClicked(index) => {
+                self.claude_code_manager.active_scope = index;
+                self.claude_code_manager.discover_skills();
+            }
+            Message::CcmSkillClicked(index) => {
+                self.claude_code_manager.open_skill(index);
+            }
+            Message::CcmEditorAction(action) => {
+                self.claude_code_manager.editor_content.perform(action);
+                self.claude_code_manager.editor_dirty = true;
+            }
+            Message::CcmSave => {
+                if let Err(e) = self.claude_code_manager.save_current() {
+                    log::error!("Failed to save skill: {}", e);
+                }
+            }
+            Message::CcmCloseEditor => {
+                self.claude_code_manager.close_editor();
+            }
+            Message::CcmNewSkillNameChanged(val) => {
+                self.claude_code_manager.new_skill_name = val;
+            }
+            Message::CcmCreateSkill => {
+                if let Err(e) = self.claude_code_manager.create_skill() {
+                    log::error!("Failed to create skill: {}", e);
+                }
+            }
             // --- I4/I5: Voice/Whisper Integration ---
             Message::WhisperToggle => {
                 if !self.whisper_available {
@@ -4153,6 +4207,10 @@ impl GodlyApp {
                     label: "Flows",
                 },
                 SettingsTab {
+                    id: "claude-code",
+                    label: "Claude Code",
+                },
+                SettingsTab {
                     id: "remote",
                     label: "Remote",
                 },
@@ -4164,6 +4222,7 @@ impl GodlyApp {
                 "ai-tools" => self.view_ai_tools_tab(),
                 "plugins" => self.view_plugins_tab(),
                 "flows" => self.view_flows_tab(),
+                "claude-code" => self.view_claude_code_tab(),
                 "remote" => self.view_remote_tab(),
                 _ => shortcuts_tab::view_shortcuts_tab(
                     self.shortcut_capturing_index,
@@ -5763,6 +5822,19 @@ impl GodlyApp {
         }
 
         container(content).width(Length::Fill).into()
+    }
+
+    fn view_claude_code_tab(&self) -> Element<'_, Message> {
+        crate::claude_code_manager::view_claude_code_manager(
+            &self.claude_code_manager,
+            |i| Message::CcmScopeClicked(i),
+            |i| Message::CcmSkillClicked(i),
+            Message::CcmEditorAction,
+            Message::CcmSave,
+            Message::CcmCloseEditor,
+            Message::CcmNewSkillNameChanged,
+            Message::CcmCreateSkill,
+        )
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
