@@ -1,9 +1,7 @@
-use std::f32::consts::TAU;
-
 use iced::widget::{
-    button, canvas, column, container, mouse_area, row, rule, scrollable, text, Space,
+    button, column, container, mouse_area, row, rule, scrollable, text, Space,
 };
-use iced::{Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
+use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::theme::{
     ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
@@ -19,112 +17,22 @@ pub const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 pub const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 /// Resize handle width in logical pixels.
 pub const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
-const HEADER_ICON_SIZE: f32 = 12.0;
+const HEADER_ICON_SIZE: f32 = 16.0;
+
+/// Codicon: folder (workspace icon)
+const ICON_FOLDER: &str = "\u{EA83}";
+
+/// Codicon icon font for workspace and header icons.
+const CODICON_FONT: Font = Font {
+    family: iced::font::Family::Name("codicon"),
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
 
 /// Clamp a sidebar width into the supported resize range.
 pub fn clamp_sidebar_width(width: f32) -> f32 {
     width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SidebarHeaderIconKind {
-    Settings,
-    NewWorkspace,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SidebarHeaderIcon {
-    kind: SidebarHeaderIconKind,
-    color: Color,
-}
-
-impl SidebarHeaderIcon {
-    fn settings(color: Color) -> Self {
-        Self {
-            kind: SidebarHeaderIconKind::Settings,
-            color,
-        }
-    }
-
-    fn new_workspace(color: Color) -> Self {
-        Self {
-            kind: SidebarHeaderIconKind::NewWorkspace,
-            color,
-        }
-    }
-}
-
-impl<Message> canvas::Program<Message> for SidebarHeaderIcon {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: iced::mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let size = bounds.size();
-        let center = Point::new(size.width * 0.5, size.height * 0.5);
-
-        match self.kind {
-            SidebarHeaderIconKind::Settings => {
-                let ring_radius = size.width.min(size.height) * 0.28;
-                let ring = canvas::Path::circle(center, ring_radius);
-                let ring_stroke = canvas::Stroke::default()
-                    .with_color(self.color)
-                    .with_width(1.2);
-                frame.stroke(&ring, ring_stroke);
-
-                for index in 0..8 {
-                    let angle = index as f32 * TAU / 8.0;
-                    let (sin, cos) = angle.sin_cos();
-                    let inner = Point::new(
-                        center.x + cos * (ring_radius + 0.6),
-                        center.y + sin * (ring_radius + 0.6),
-                    );
-                    let outer = Point::new(
-                        center.x + cos * (ring_radius + 2.4),
-                        center.y + sin * (ring_radius + 2.4),
-                    );
-                    let spoke = canvas::Path::line(inner, outer);
-                    frame.stroke(&spoke, ring_stroke);
-                }
-
-                let hub = canvas::Path::circle(center, ring_radius * 0.34);
-                frame.fill(&hub, self.color);
-            }
-            SidebarHeaderIconKind::NewWorkspace => {
-                let box_size = size.width.min(size.height) * 0.72;
-                let top_left = Point::new(center.x - box_size * 0.5, center.y - box_size * 0.5);
-                let outline = canvas::Path::rectangle(top_left, Size::new(box_size, box_size));
-                let box_stroke = canvas::Stroke::default()
-                    .with_color(self.color)
-                    .with_width(1.1);
-                frame.stroke(&outline, box_stroke);
-
-                let arm = box_size * 0.24;
-                let vertical = canvas::Path::line(
-                    Point::new(center.x, center.y - arm),
-                    Point::new(center.x, center.y + arm),
-                );
-                let horizontal = canvas::Path::line(
-                    Point::new(center.x - arm, center.y),
-                    Point::new(center.x + arm, center.y),
-                );
-                let plus_stroke = canvas::Stroke::default()
-                    .with_color(self.color)
-                    .with_width(1.4)
-                    .with_line_cap(canvas::LineCap::Round);
-                frame.stroke(&vertical, plus_stroke);
-                frame.stroke(&horizontal, plus_stroke);
-            }
-        }
-
-        vec![frame.into_geometry()]
-    }
 }
 
 fn header_action_button_style(status: button::Status) -> button::Style {
@@ -354,10 +262,17 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
+        let folder_color = if is_active { ACCENT() } else { TEXT_SECONDARY() };
+        let workspace_icon = text(ICON_FOLDER)
+            .font(CODICON_FONT)
+            .size(14)
+            .color(folder_color);
+
         let ai_mode_icon = workspace_signals.workspace_ai_mode_icon(ws.id.as_str());
         let mut item_content = row![
             accent_bar,
             worktree_indicator,
+            workspace_icon,
             name_label,
         ];
         if let Some(icon) = ai_mode_icon {
@@ -568,18 +483,20 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     }
 
     let settings_btn = button(
-        canvas(SidebarHeaderIcon::settings(TEXT_PRIMARY()))
-            .width(Length::Fixed(HEADER_ICON_SIZE))
-            .height(Length::Fixed(HEADER_ICON_SIZE)),
+        text(ICON_SETTINGS)
+            .font(CODICON_FONT)
+            .size(14)
+            .color(TEXT_PRIMARY()),
     )
     .on_press(on_action(SidebarAction::ToggleSettings))
     .padding(Padding::from([2, 7]))
     .style(|_theme, status| header_action_button_style(status));
 
     let new_btn = button(
-        canvas(SidebarHeaderIcon::new_workspace(TEXT_PRIMARY()))
-            .width(Length::Fixed(HEADER_ICON_SIZE))
-            .height(Length::Fixed(HEADER_ICON_SIZE)),
+        text(ICON_ADD)
+            .font(CODICON_FONT)
+            .size(14)
+            .color(TEXT_PRIMARY()),
     )
     .on_press(on_action(SidebarAction::NewWorkspace))
     .padding(Padding::from([1, 7]))
