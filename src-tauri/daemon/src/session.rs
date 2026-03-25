@@ -1484,15 +1484,19 @@ impl DaemonSession {
 
 impl Drop for DaemonSession {
     fn drop(&mut self) {
-        // Safety net: if the session is dropped without an explicit close(),
-        // send Shutdown to the shim so it doesn't become an orphan process.
+        // Do NOT kill the shim or remove metadata here. When the daemon exits
+        // (crash, restart, idle timeout), shims must survive so the next daemon
+        // can recover them via reconnect_surviving_shims(). The shim has its own
+        // 90-second orphan timeout (ORPHAN_TIMEOUT_SECS) and will self-terminate
+        // if no daemon reconnects.
+        //
+        // Explicit session closure (user closes a tab) uses close(), which
+        // correctly kills the shim and removes metadata.
         if self.running.load(Ordering::Relaxed) {
-            let _ = self
-                .shim_io_tx
-                .send(ShimIoMessage::Control(ShimRequest::Shutdown));
-            shim_metadata::remove_metadata(&self.id);
-            // Kill the shim process directly as a belt-and-suspenders measure
-            shim_client::kill_process(self.shim_pid);
+            eprintln!(
+                "[daemon] Session {} dropped without close() — shim pid={} left alive for recovery",
+                self.id, self.shim_pid
+            );
         }
     }
 }
