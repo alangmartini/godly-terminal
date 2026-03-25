@@ -83,7 +83,7 @@ where
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> iced::event::Status {
+    ) {
         // If the cursor is over our bounds and we get a vertical wheel
         // event, rewrite it so the Y delta becomes X delta.
         let redirected;
@@ -116,7 +116,7 @@ where
             clipboard,
             shell,
             viewport,
-        )
+        );
     }
 
     fn mouse_interaction(
