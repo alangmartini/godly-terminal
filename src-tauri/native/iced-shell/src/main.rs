@@ -25,13 +25,6 @@ pub mod fonts {
         stretch: iced::font::Stretch::Normal,
         style: iced::font::Style::Normal,
     };
-
-    pub const CODICON_FONT: Font = Font {
-        family: iced::font::Family::Name("codicon"),
-        weight: iced::font::Weight::Normal,
-        stretch: iced::font::Stretch::Normal,
-        style: iced::font::Style::Normal,
-    };
 }
 
 mod app;
