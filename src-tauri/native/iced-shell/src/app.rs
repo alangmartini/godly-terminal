@@ -1839,6 +1839,20 @@ impl GodlyApp {
                             }
                             return Task::none();
                         }
+                        // Claude Code Manager skill editor: intercept all keys
+                        if self.settings_open
+                            && self.settings_tab == "claude-code"
+                            && self.claude_code_manager.editing_skill_index.is_some()
+                        {
+                            if modifiers.control()
+                                && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s")
+                            {
+                                if let Err(e) = self.claude_code_manager.save_current() {
+                                    log::error!("Failed to save skill: {}", e);
+                                }
+                            }
+                            return Task::none();
+                        }
                         if self.claude_md_editor.is_some() {
                             if modifiers.control()
                                 && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s")
