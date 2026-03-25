@@ -76,26 +76,6 @@ impl PromptDetector {
         None
     }
 
-    /// Check text and return all matches (not just the first).
-    pub fn detect_all(&self, text: &str) -> Vec<DetectedPrompt> {
-        let mut results = Vec::new();
-        for (regex, source, type_label) in &self.patterns {
-            if regex.is_match(text) {
-                let menu_options = if type_label == "select_menu" {
-                    Some(parse_select_menu(text))
-                } else {
-                    None
-                };
-                results.push(DetectedPrompt {
-                    matched_pattern: source.clone(),
-                    prompt_type: type_label.clone(),
-                    context_text: text.to_string(),
-                    menu_options,
-                });
-            }
-        }
-        results
-    }
 }
 
 /// Parse a Claude Code select menu from terminal output.
@@ -203,14 +183,6 @@ mod tests {
     fn no_match_on_empty() {
         let detector = PromptDetector::new();
         assert!(detector.detect("").is_none());
-    }
-
-    #[test]
-    fn detect_all_returns_multiple() {
-        let detector = PromptDetector::new();
-        // Text that matches both yes_no and tool_approval
-        let result = detector.detect_all("Do you want to allow this? (Y)es (N)o");
-        assert!(result.len() >= 2);
     }
 
     #[test]

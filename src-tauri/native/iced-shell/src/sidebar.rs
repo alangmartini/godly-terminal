@@ -1,9 +1,7 @@
-use std::f32::consts::TAU;
-
 use iced::widget::{
-    button, canvas, column, container, mouse_area, row, rule, scrollable, text, Space,
+    button, column, container, mouse_area, row, rule, scrollable, text, Space,
 };
-use iced::{Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
+use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::theme::{
     ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
@@ -19,112 +17,43 @@ pub const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 pub const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 /// Resize handle width in logical pixels.
 pub const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
-const HEADER_ICON_SIZE: f32 = 12.0;
+
+const HEADER_ICON_SIZE: f32 = 16.0;
+
+/// Codicon font for pixel-hinted icons.
+const CODICON_FONT: Font = Font {
+    family: iced::font::Family::Name("codicon"),
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+/// Codicon: gear (settings)
+const ICON_SETTINGS: &str = "\u{EB51}";
+/// Codicon: add (new workspace)
+const ICON_ADD: &str = "\u{EA60}";
+/// Codicon: folder (workspace icon)
+const ICON_FOLDER: &str = "\u{EA83}";
+
+/// Proportional sans-serif for sidebar labels and workspace names.
+const SIDEBAR_FONT: Font = Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+/// Semibold variant for active workspace name and section headers.
+const SIDEBAR_FONT_SEMIBOLD: Font = Font {
+    family: iced::font::Family::SansSerif,
+    weight: iced::font::Weight::Semibold,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
 
 /// Clamp a sidebar width into the supported resize range.
 pub fn clamp_sidebar_width(width: f32) -> f32 {
     width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SidebarHeaderIconKind {
-    Settings,
-    NewWorkspace,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SidebarHeaderIcon {
-    kind: SidebarHeaderIconKind,
-    color: Color,
-}
-
-impl SidebarHeaderIcon {
-    fn settings(color: Color) -> Self {
-        Self {
-            kind: SidebarHeaderIconKind::Settings,
-            color,
-        }
-    }
-
-    fn new_workspace(color: Color) -> Self {
-        Self {
-            kind: SidebarHeaderIconKind::NewWorkspace,
-            color,
-        }
-    }
-}
-
-impl<Message> canvas::Program<Message> for SidebarHeaderIcon {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: iced::mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let size = bounds.size();
-        let center = Point::new(size.width * 0.5, size.height * 0.5);
-
-        match self.kind {
-            SidebarHeaderIconKind::Settings => {
-                let ring_radius = size.width.min(size.height) * 0.28;
-                let ring = canvas::Path::circle(center, ring_radius);
-                let ring_stroke = canvas::Stroke::default()
-                    .with_color(self.color)
-                    .with_width(1.2);
-                frame.stroke(&ring, ring_stroke);
-
-                for index in 0..8 {
-                    let angle = index as f32 * TAU / 8.0;
-                    let (sin, cos) = angle.sin_cos();
-                    let inner = Point::new(
-                        center.x + cos * (ring_radius + 0.6),
-                        center.y + sin * (ring_radius + 0.6),
-                    );
-                    let outer = Point::new(
-                        center.x + cos * (ring_radius + 2.4),
-                        center.y + sin * (ring_radius + 2.4),
-                    );
-                    let spoke = canvas::Path::line(inner, outer);
-                    frame.stroke(&spoke, ring_stroke);
-                }
-
-                let hub = canvas::Path::circle(center, ring_radius * 0.34);
-                frame.fill(&hub, self.color);
-            }
-            SidebarHeaderIconKind::NewWorkspace => {
-                let box_size = size.width.min(size.height) * 0.72;
-                let top_left = Point::new(center.x - box_size * 0.5, center.y - box_size * 0.5);
-                let outline = canvas::Path::rectangle(top_left, Size::new(box_size, box_size));
-                let box_stroke = canvas::Stroke::default()
-                    .with_color(self.color)
-                    .with_width(1.1);
-                frame.stroke(&outline, box_stroke);
-
-                let arm = box_size * 0.24;
-                let vertical = canvas::Path::line(
-                    Point::new(center.x, center.y - arm),
-                    Point::new(center.x, center.y + arm),
-                );
-                let horizontal = canvas::Path::line(
-                    Point::new(center.x - arm, center.y),
-                    Point::new(center.x + arm, center.y),
-                );
-                let plus_stroke = canvas::Stroke::default()
-                    .with_color(self.color)
-                    .with_width(1.4)
-                    .with_line_cap(canvas::LineCap::Round);
-                frame.stroke(&vertical, plus_stroke);
-                frame.stroke(&horizontal, plus_stroke);
-            }
-        }
-
-        vec![frame.into_geometry()]
-    }
 }
 
 fn header_action_button_style(status: button::Status) -> button::Style {
@@ -177,6 +106,16 @@ pub trait SidebarWorkspaceSignals {
     fn workspace_ai_mode_icon(&self, _workspace_id: &str) -> Option<&'static str> {
         None
     }
+
+    /// Returns the total number of terminals in the workspace.
+    ///
+    /// Defaults to `None`, which makes the sidebar fall back to `layout.leaf_count()`.
+    /// Callers should provide an implementation that returns the actual terminal count
+    /// from the terminal collection so the badge is accurate even when the layout tree
+    /// only contains the currently visible pane(s).
+    fn workspace_terminal_count(&self, _workspace_id: &str) -> Option<usize> {
+        None
+    }
 }
 
 impl<'a> SidebarWorkspaceSignals for Option<&'a str> {
@@ -213,6 +152,29 @@ where
 
     fn workspace_ai_mode_icon(&self, workspace_id: &str) -> Option<&'static str> {
         (self.2)(workspace_id)
+    }
+}
+
+impl<'a, F, G, H> SidebarWorkspaceSignals for (Option<&'a str>, F, G, H)
+where
+    F: for<'b> Fn(&'b str) -> bool,
+    G: for<'b> Fn(&'b str) -> Option<&'static str>,
+    H: for<'b> Fn(&'b str) -> usize,
+{
+    fn context_menu_workspace_id(&self) -> Option<&str> {
+        self.0
+    }
+
+    fn has_workspace_notification(&self, workspace_id: &str) -> bool {
+        (self.1)(workspace_id)
+    }
+
+    fn workspace_ai_mode_icon(&self, workspace_id: &str) -> Option<&'static str> {
+        (self.2)(workspace_id)
+    }
+
+    fn workspace_terminal_count(&self, workspace_id: &str) -> Option<usize> {
+        Some((self.3)(workspace_id))
     }
 }
 
@@ -410,7 +372,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             let move_down_id = ws.id.clone();
             let delete_id = ws.id.clone();
 
-            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY()))
+            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::RenameWorkspace(rename_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
@@ -427,7 +389,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     }
                 });
 
-            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY()))
+            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::OpenWorkspaceInExplorer(open_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
@@ -449,7 +411,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             } else {
                 "Enable Worktree Mode"
             };
-            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY()))
+            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::ToggleWorkspaceWorktreeMode(
                     worktree_id,
                 )))
@@ -469,7 +431,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 });
 
             let move_up_btn = if idx > 0 {
-                button(text("Move Up").size(12).color(TEXT_PRIMARY()))
+                button(text("Move Up").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                     .on_press(on_action(SidebarAction::MoveWorkspaceUp(move_up_id)))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
@@ -486,14 +448,14 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                         }
                     })
             } else {
-                button(text("Move Up").size(12).color(TEXT_SECONDARY()))
+                button(text("Move Up").size(12).color(TEXT_SECONDARY()).font(SIDEBAR_FONT))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style::default())
             };
 
             let move_down_btn = if idx + 1 < workspaces.len() {
-                button(text("Move Down").size(12).color(TEXT_PRIMARY()))
+                button(text("Move Down").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
                     .on_press(on_action(SidebarAction::MoveWorkspaceDown(move_down_id)))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
@@ -510,13 +472,13 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                         }
                     })
             } else {
-                button(text("Move Down").size(12).color(TEXT_SECONDARY()))
+                button(text("Move Down").size(12).color(TEXT_SECONDARY()).font(SIDEBAR_FONT))
                     .padding(Padding::from([5, 8]))
                     .width(Length::Fill)
                     .style(|_theme, _status| button::Style::default())
             };
 
-            let delete_btn = button(text("Delete").size(12).color(DANGER()))
+            let delete_btn = button(text("Delete").size(12).color(DANGER()).font(SIDEBAR_FONT))
                 .on_press(on_action(SidebarAction::DeleteWorkspace(delete_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
@@ -559,18 +521,20 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     }
 
     let settings_btn = button(
-        canvas(SidebarHeaderIcon::settings(TEXT_PRIMARY()))
-            .width(Length::Fixed(HEADER_ICON_SIZE))
-            .height(Length::Fixed(HEADER_ICON_SIZE)),
+        text(ICON_SETTINGS)
+            .font(CODICON_FONT)
+            .size(14)
+            .color(TEXT_PRIMARY()),
     )
     .on_press(on_action(SidebarAction::ToggleSettings))
     .padding(Padding::from([2, 7]))
     .style(|_theme, status| header_action_button_style(status));
 
     let new_btn = button(
-        canvas(SidebarHeaderIcon::new_workspace(TEXT_PRIMARY()))
-            .width(Length::Fixed(HEADER_ICON_SIZE))
-            .height(Length::Fixed(HEADER_ICON_SIZE)),
+        text(ICON_ADD)
+            .font(CODICON_FONT)
+            .size(14)
+            .color(TEXT_PRIMARY()),
     )
     .on_press(on_action(SidebarAction::NewWorkspace))
     .padding(Padding::from([1, 7]))
@@ -610,8 +574,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let prefixed = label.to_string();
         button(
             text(prefixed)
-                .size(10)
-                .color(TEXT_SECONDARY()),
+                .size(11)
+                .color(TEXT_SECONDARY())
+                .font(SIDEBAR_FONT),
         )
         .on_press(on_action(action))
         .padding(Padding::from([4, 8]))

@@ -1,0 +1,85 @@
+name: "Bug #189 — Tab bar does not scroll when tabs overflow"
+tags: [tab-bar, scroll, overflow, regression, bug-189]
+---
+# Bug #189: When enough terminals are open, the tab bar overflows but users
+# cannot scroll to reach the last tabs. The scrollbar is hidden and mouse
+# wheel events go to terminal scrollback instead of horizontal tab scrolling.
+
+- resetApp
+- waitForReady
+
+- getActiveWorkspace:
+  store: ws
+
+# Create 12 terminals — enough to overflow the tab bar in any reasonable
+# window width (~200px per tab × 12 = 2400px needed).
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t1
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t2
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t3
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t4
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t5
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t6
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t7
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t8
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t9
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t10
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t11
+- createTerminal:
+    workspace_id: $ws.workspace_id
+  store: t12
+
+# Verify all terminals exist (including the default one = 13 total)
+- assertTerminalCount:
+    min: 13
+
+# Get the tab order to confirm all tabs are registered
+- get_tab_order:
+    workspace_id: $ws.workspace_id
+  store: tabOrder
+
+# Capture screenshot showing overflow state for visual evidence
+- captureScreenshot
+
+# Focus the first terminal
+- focusTerminal:
+    terminal_id: $t1.terminal_id
+
+- sleep:
+    ms: 500
+
+# Now focus the last terminal — this bypasses the scroll bug via MCP,
+# but the screenshot below will show whether the tab bar scrolled to
+# reveal the active tab.
+- focusTerminal:
+    terminal_id: $t12.terminal_id
+
+- sleep:
+    ms: 500
+
+# Capture screenshot after switching to the last tab.
+# Bug #189: The tab bar should auto-scroll to reveal the active tab.
+# If the scrollbar is hidden and there's no auto-scroll, the active
+# tab indicator will be off-screen (invisible to the user).
+- captureScreenshot

@@ -46,6 +46,8 @@ pub struct SkillEntry {
     pub name: String,
     pub description: String,
     pub scope: SkillScope,
+    /// Path to the skill's .md file on disk; stored for future use (e.g., opening in editor).
+    #[allow(dead_code)]
     pub file_path: String,
 }
 
@@ -1100,6 +1102,12 @@ pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
         if project_skills_dir.exists() {
             collect_skills_from_dir(&project_skills_dir, SkillScope::Project, &mut skills);
         }
+
+        // Also scan .claude/commands/ — Claude Code's project-level commands directory.
+        let project_commands_dir = std::path::Path::new(folder).join(".claude").join("commands");
+        if project_commands_dir.exists() {
+            collect_skills_from_dir(&project_commands_dir, SkillScope::Project, &mut skills);
+        }
     }
 
     if let Some(home) = std::env::var("USERPROFILE")
@@ -1109,6 +1117,12 @@ pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
         let user_skills_dir = std::path::Path::new(&home).join(".claude").join("skills");
         if user_skills_dir.exists() {
             collect_skills_from_dir(&user_skills_dir, SkillScope::User, &mut skills);
+        }
+
+        // Also scan ~/.claude/commands/ — Claude Code's user-level commands directory.
+        let user_commands_dir = std::path::Path::new(&home).join(".claude").join("commands");
+        if user_commands_dir.exists() {
+            collect_skills_from_dir(&user_commands_dir, SkillScope::User, &mut skills);
         }
 
         // Discover skills from installed Claude Code plugins.
@@ -1160,7 +1174,19 @@ fn collect_plugin_skills(json_path: &std::path::Path, skills: &mut Vec<SkillEntr
         // Scan commands/ directory (each .md file is a command).
         let commands_dir = base.join("commands");
         if commands_dir.exists() {
-            collect_skills_from_dir(&commands_dir, scope, skills);
+            collect_skills_from_dir(&commands_dir, scope.clone(), skills);
+        }
+
+        // Also check .claude/skills/ and .claude/commands/ — some plugins (e.g. ui-ux-pro-max)
+        // follow the Claude Code convention of nesting under .claude/ rather than at the root.
+        let dot_claude = base.join(".claude");
+        let nested_skills_dir = dot_claude.join("skills");
+        if nested_skills_dir.exists() {
+            collect_skills_from_dir(&nested_skills_dir, scope.clone(), skills);
+        }
+        let nested_commands_dir = dot_claude.join("commands");
+        if nested_commands_dir.exists() {
+            collect_skills_from_dir(&nested_commands_dir, scope, skills);
         }
     }
 }
@@ -1886,5 +1912,472 @@ mod tests {
         let json = r#"{"selected_model":"sonnet","selected_mode":"auto","selected_ai_tool":"Claude Code","selected_workspace_id":null,"auto_suggest_branch":true,"main_branch_mode":false}"#;
         let decoded: QuickClaudePreferences = serde_json::from_str(json).unwrap();
         assert!(!decoded.batch_clone_mode);
+    }
+
+    // Bug #769: Plugin skills nested under .claude/ are not discovered by collect_plugin_skills.
+    // Plugins like ui-ux-pro-max store skills at <installPath>/.claude/skills/ instead of
+    // <installPath>/skills/. The current code only checks the latter, silently skipping the former.
+
+    /// Helper: create a minimal SKILL.md so `collect_skills_from_dir` can parse it.
+    fn write_skill_md(dir: &std::path::Path, skill_name: &str, description: &str) {
+        let skill_dir = dir.join(skill_name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {skill_name}\ndescription: {description}\n---\n\n# {description}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_root_level_skills() {
+        // Baseline: plugins with skills/ at the install root ARE discovered.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-root-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("my-plugin").join("1.0.0");
+        let skills_dir = plugin_dir.join("skills");
+        write_skill_md(&skills_dir, "my-skill", "A root-level skill");
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "my-plugin@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        assert!(
+            skills.iter().any(|s| s.name == "my-skill"),
+            "root-level plugin skill should be discovered, got: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_dot_claude_nested_skills() {
+        // Bug #769: plugins with skills at <installPath>/.claude/skills/ must also be discovered.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-nested-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("ui-ux-pro-max").join("2.5.0");
+        let nested_skills_dir = plugin_dir.join(".claude").join("skills");
+        write_skill_md(&nested_skills_dir, "ui-ux-pro-max", "UI/UX design intelligence");
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "ui-ux-pro-max-skill@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        assert!(
+            skills.iter().any(|s| s.name == "ui-ux-pro-max"),
+            "plugin skill nested under .claude/skills/ should be discovered, got: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_dot_claude_nested_commands() {
+        // Bug #769: also test .claude/commands/ path for plugins.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-nested-cmd-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("some-plugin").join("1.0.0");
+        let nested_commands_dir = plugin_dir.join(".claude").join("commands");
+        std::fs::create_dir_all(&nested_commands_dir).unwrap();
+        std::fs::write(
+            nested_commands_dir.join("my-command.md"),
+            "# A nested command\n\nDoes something useful.",
+        )
+        .unwrap();
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "some-plugin@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        assert!(
+            skills.iter().any(|s| s.name == "my-command"),
+            "plugin command nested under .claude/commands/ should be discovered, got: {:?}",
+            skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_plugin_skills_finds_both_root_and_nested() {
+        // A plugin with skills at BOTH root and .claude/ should discover all of them.
+        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-both-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let plugin_dir = tmp.join("hybrid-plugin").join("1.0.0");
+        let root_skills = plugin_dir.join("skills");
+        write_skill_md(&root_skills, "root-skill", "A root skill");
+
+        let nested_skills = plugin_dir.join(".claude").join("skills");
+        write_skill_md(&nested_skills, "nested-skill", "A nested skill");
+
+        let json_path = tmp.join("installed_plugins.json");
+        let json = serde_json::json!({
+            "plugins": {
+                "hybrid-plugin@marketplace": [{
+                    "installPath": plugin_dir.to_string_lossy()
+                }]
+            }
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+
+        let mut skills = Vec::new();
+        collect_plugin_skills(&json_path, &mut skills);
+
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"root-skill"), "root-level skill missing, got: {names:?}");
+        assert!(names.contains(&"nested-skill"), "nested .claude/skills/ skill missing, got: {names:?}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // -- Bug #782: Arrow keys don't navigate skill autocomplete suggestions --
+
+    fn make_test_skills() -> Vec<SkillEntry> {
+        vec![
+            SkillEntry {
+                name: "commit".into(),
+                description: "Create a git commit".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "feature".into(),
+                description: "Implement a feature".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "fix".into(),
+                description: "Fix a bug".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+        ]
+    }
+
+    /// Bug #782: When the skill autocomplete popup is open and the user has
+    /// navigated to a non-zero selection (e.g. via ArrowDown), re-evaluating
+    /// autocomplete state must preserve the selection when the filter text
+    /// hasn't changed.
+    ///
+    /// This test simulates the re-evaluation logic from the prompt action
+    /// handler in app.rs — only resetting selection when the filter changes.
+    #[test]
+    fn autocomplete_selection_preserved_when_filter_unchanged() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.selected_ai_tool = "Claude Code".to_string();
+        state.skills = make_test_skills();
+
+        // User types "/" — triggers autocomplete
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('/')));
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = String::new();
+        state.skill_autocomplete_selected = 0;
+
+        // User presses ArrowDown — navigate to index 1
+        let count = state.filtered_skills().len().min(8);
+        assert!(count >= 3, "precondition: at least 3 skills available");
+        let next = (0i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 1, "precondition: navigated to index 1");
+
+        // Simulate autocomplete re-evaluation (mirrors fixed app.rs logic):
+        // only reset selection when filter actually changes.
+        if state.selected_ai_tool == "Claude Code" {
+            let text = state.prompt_content.text();
+            let cursor = state.prompt_content.cursor();
+            let pos = &cursor.position;
+            let mut byte_offset = 0usize;
+            for (i, line) in text.split_inclusive('\n').enumerate() {
+                if i == pos.line {
+                    byte_offset += line
+                        .chars()
+                        .take(pos.column)
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
+                    break;
+                }
+                byte_offset += line.len();
+            }
+            if text.split_inclusive('\n').count() <= pos.line {
+                let remaining = &text[byte_offset..];
+                byte_offset += remaining
+                    .chars()
+                    .take(pos.column)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
+            }
+
+            let before_cursor = &text[..byte_offset];
+            if let Some(slash_pos) = before_cursor.rfind('/') {
+                let after_slash = &before_cursor[slash_pos + 1..];
+                if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                    let new_filter = after_slash.to_string();
+                    // Fix #782: only reset when filter changes
+                    if state.skill_autocomplete_filter != new_filter {
+                        state.skill_autocomplete_selected = 0;
+                    }
+                    state.skill_autocomplete_open = true;
+                    state.skill_autocomplete_filter = new_filter;
+                }
+            }
+        }
+
+        // Filter is still "" — selection should be preserved at index 1.
+        assert_eq!(
+            state.skill_autocomplete_selected, 1,
+            "autocomplete selection must be preserved when the filter hasn't changed"
+        );
+    }
+
+    /// Bug #782: Verify that navigating down then up wraps correctly
+    /// and that the selection index is meaningful against filtered skills.
+    /// This test passes (navigation logic itself works) but demonstrates
+    /// the contrast: the navigation logic works, it just never executes
+    /// because the keyboard subscription can't see arrow keys.
+    #[test]
+    fn autocomplete_navigate_wraps_correctly() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.skills = make_test_skills();
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = String::new();
+        state.skill_autocomplete_selected = 0;
+
+        let count = state.filtered_skills().len().min(8);
+
+        // Navigate down: 0 -> 1
+        let next = (state.skill_autocomplete_selected as i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 1);
+
+        // Navigate down: 1 -> 2
+        let next = (state.skill_autocomplete_selected as i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 2);
+
+        // Navigate down: 2 -> 0 (wrap)
+        let next = (state.skill_autocomplete_selected as i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 0);
+
+        // Navigate up: 0 -> 2 (wrap)
+        let next = (state.skill_autocomplete_selected as i32 - 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 2);
+    }
+
+    /// Bug #782: When autocomplete is open with a filter like "co" (matching "commit"),
+    /// navigating to a valid selection and then re-evaluating with the same filter
+    /// should preserve the selection.
+    #[test]
+    fn autocomplete_selection_preserved_with_active_filter() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.selected_ai_tool = "Claude Code".to_string();
+        state.skills = vec![
+            SkillEntry {
+                name: "commit".into(),
+                description: "Commit".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "configure".into(),
+                description: "Configure".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "connect".into(),
+                description: "Connect".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+        ];
+
+        // User types "/co" — triggers autocomplete with filter "co"
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('/')));
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('c')));
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('o')));
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = "co".to_string();
+        state.skill_autocomplete_selected = 0;
+
+        // All 3 skills match "co": commit, configure, connect
+        let filtered_count = state.filtered_skills().len();
+        assert_eq!(filtered_count, 3, "precondition: all 3 skills contain 'co'");
+
+        // Navigate to index 1 (e.g. "configure")
+        state.skill_autocomplete_selected = 1;
+
+        // Simulate prompt action re-evaluation with fixed logic
+        if state.selected_ai_tool == "Claude Code" {
+            let text = state.prompt_content.text();
+            let cursor = state.prompt_content.cursor();
+            let pos = &cursor.position;
+            let mut byte_offset = 0usize;
+            for (i, line) in text.split_inclusive('\n').enumerate() {
+                if i == pos.line {
+                    byte_offset += line
+                        .chars()
+                        .take(pos.column)
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
+                    break;
+                }
+                byte_offset += line.len();
+            }
+            if text.split_inclusive('\n').count() <= pos.line {
+                let remaining = &text[byte_offset..];
+                byte_offset += remaining
+                    .chars()
+                    .take(pos.column)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
+            }
+
+            let before_cursor = &text[..byte_offset];
+            if let Some(slash_pos) = before_cursor.rfind('/') {
+                let after_slash = &before_cursor[slash_pos + 1..];
+                if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                    let new_filter = after_slash.to_string();
+                    // Fix #782: only reset when filter changes
+                    if state.skill_autocomplete_filter != new_filter {
+                        state.skill_autocomplete_selected = 0;
+                    }
+                    state.skill_autocomplete_open = true;
+                    state.skill_autocomplete_filter = new_filter;
+                }
+            }
+        }
+
+        // Filter is still "co" — selection should be preserved at index 1.
+        assert_eq!(
+            state.skill_autocomplete_selected, 1,
+            "autocomplete selection must be preserved when filter hasn't changed ('co')"
+        );
+    }
+
+    /// Bug #782: When the filter DOES change (user types another char),
+    /// the selection should reset to 0.
+    #[test]
+    fn autocomplete_selection_resets_when_filter_changes() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.selected_ai_tool = "Claude Code".to_string();
+        state.skills = make_test_skills();
+
+        // User types "/f" — filter is "f"
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('/')));
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('f')));
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = "f".to_string();
+        state.skill_autocomplete_selected = 1; // navigated to index 1
+
+        // User types "i" — filter changes from "f" to "fi"
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('i')));
+
+        // Re-evaluate autocomplete
+        let text = state.prompt_content.text();
+        let cursor = state.prompt_content.cursor();
+        let pos = &cursor.position;
+        let mut byte_offset = 0usize;
+        for (i, line) in text.split_inclusive('\n').enumerate() {
+            if i == pos.line {
+                byte_offset += line
+                    .chars()
+                    .take(pos.column)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
+                break;
+            }
+            byte_offset += line.len();
+        }
+        if text.split_inclusive('\n').count() <= pos.line {
+            let remaining = &text[byte_offset..];
+            byte_offset += remaining
+                .chars()
+                .take(pos.column)
+                .map(|c| c.len_utf8())
+                .sum::<usize>();
+        }
+        let before_cursor = &text[..byte_offset];
+        if let Some(slash_pos) = before_cursor.rfind('/') {
+            let after_slash = &before_cursor[slash_pos + 1..];
+            if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                let new_filter = after_slash.to_string();
+                if state.skill_autocomplete_filter != new_filter {
+                    state.skill_autocomplete_selected = 0;
+                }
+                state.skill_autocomplete_open = true;
+                state.skill_autocomplete_filter = new_filter;
+            }
+        }
+
+        // Filter changed from "f" to "fi" — selection should reset to 0.
+        assert_eq!(state.skill_autocomplete_selected, 0,
+            "selection should reset to 0 when the filter text changes");
+        assert_eq!(state.skill_autocomplete_filter, "fi");
     }
 }

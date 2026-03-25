@@ -1,0 +1,6 @@
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\gpu_descriptor-ea261e204d5e4531.d: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\gpu-descriptor-0.3.2\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\gpu-descriptor-0.3.2\src\allocator.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\libgpu_descriptor-ea261e204d5e4531.rmeta: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\gpu-descriptor-0.3.2\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\gpu-descriptor-0.3.2\src\allocator.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\gpu-descriptor-0.3.2\src\lib.rs:
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\gpu-descriptor-0.3.2\src\allocator.rs:

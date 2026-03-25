@@ -9,9 +9,18 @@ pub mod fonts {
     pub const ITALIC: &[u8] = include_bytes!("../fonts/GeistMono-Italic.ttf");
     pub const BOLD_ITALIC: &[u8] = include_bytes!("../fonts/GeistMono-BoldItalic.ttf");
 
+    pub const CODICONS: &[u8] = include_bytes!("../fonts/codicon.ttf");
+
     /// The Geist Mono font for normal-weight text.
     pub const GEIST_MONO: Font = Font {
         family: iced::font::Family::Name("Geist Mono"),
+        weight: iced::font::Weight::Normal,
+        stretch: iced::font::Stretch::Normal,
+        style: iced::font::Style::Normal,
+    };
+
+    pub const CODICON_FONT: Font = Font {
+        family: iced::font::Family::Name("codicon"),
         weight: iced::font::Weight::Normal,
         stretch: iced::font::Stretch::Normal,
         style: iced::font::Style::Normal,
@@ -29,6 +38,7 @@ mod settings_dialog;
 mod shortcuts_tab;
 mod sidebar;
 mod split_pane;
+mod file_pane;
 mod subscription;
 mod tab_bar;
 mod terminal_state;
@@ -54,7 +64,9 @@ mod font_enumerator;
 mod git_worktree;
 mod keybinding_persistence;
 mod phone_remote;
+mod claude_code_manager;
 mod crash_handler;
+mod gpu_watchdog;
 
 use app::{GodlyApp, Message};
 
@@ -62,6 +74,8 @@ fn main() -> iced::Result {
     crash_handler::init();
     crash_handler::install_panic_hook();
     crash_handler::install_exception_handler();
+    crash_handler::install_atexit_handler();
+    gpu_watchdog::start();
 
     env_logger::init();
     log::info!(
@@ -87,7 +101,7 @@ fn main() -> iced::Result {
         SetTimer(std::ptr::null_mut(), 0, 1000, std::ptr::null());
     }
 
-    iced::application(boot, GodlyApp::update, GodlyApp::view)
+    let result = iced::application(boot, GodlyApp::update, GodlyApp::view)
         .title(GodlyApp::title)
         .subscription(GodlyApp::subscription)
         .antialiasing(true)
@@ -95,6 +109,7 @@ fn main() -> iced::Result {
         .font(fonts::BOLD)
         .font(fonts::ITALIC)
         .font(fonts::BOLD_ITALIC)
+        .font(fonts::CODICONS)
         .default_font(fonts::GEIST_MONO)
         .window(window::Settings {
             size: iced::Size::new(1200.0, 800.0),
@@ -102,7 +117,14 @@ fn main() -> iced::Result {
             decorations: false,
             ..Default::default()
         })
-        .run()
+        .run();
+
+    match &result {
+        Ok(()) => crash_handler::log("CLEAN EXIT — iced::application().run() returned Ok(())"),
+        Err(e) => crash_handler::log(&format!("ICED ERROR EXIT — run() returned Err: {e}")),
+    }
+
+    result
 }
 
 fn boot() -> (GodlyApp, iced::Task<Message>) {

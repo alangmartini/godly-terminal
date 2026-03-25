@@ -1,6 +1,4 @@
 use std::collections::{HashMap, HashSet};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -66,7 +64,7 @@ use iced::{event, window, Color, Element, Font, Length, Padding, Point, Shadow, 
 
 /// Proportional UI font for chrome elements (title bar, tab bar, status bar).
 /// Uses the system's default sans-serif (Segoe UI on Windows, SF Pro on macOS).
-const UI_FONT: Font = Font {
+pub(crate) const UI_FONT: Font = Font {
     family: iced::font::Family::SansSerif,
     weight: iced::font::Weight::Normal,
     stretch: iced::font::Stretch::Normal,
@@ -74,7 +72,7 @@ const UI_FONT: Font = Font {
 };
 
 /// Bold variant of the proportional UI font for headings and emphasis.
-const UI_FONT_BOLD: Font = Font {
+pub(crate) const UI_FONT_BOLD: Font = Font {
     family: iced::font::Family::SansSerif,
     weight: iced::font::Weight::Bold,
     stretch: iced::font::Stretch::Normal,
@@ -107,7 +105,7 @@ use crate::settings_dialog::{self, SettingsTab};
 use crate::shortcuts_tab;
 use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
 use crate::status_bar;
-use crate::split_pane::{view_layout, LayoutNode, SplitDirection};
+use crate::split_pane::{view_layout, LayoutNode, PaneContent, SplitDirection};
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::title_bar;
@@ -281,6 +279,15 @@ enum TerminalEmptyState {
     NoTerminalsOpen,
 }
 
+/// State for a file viewer pane (code, markdown, or image).
+#[derive(Debug, Clone)]
+pub struct FilePaneState {
+    pub file_path: String,
+    pub file_type: String,
+    pub content: String,
+    pub last_modified: Option<std::time::SystemTime>,
+}
+
 /// Main Iced application state — multi-terminal with event-driven updates.
 pub struct GodlyApp {
     /// Daemon client (shared with bridge thread).
@@ -301,7 +308,7 @@ pub struct GodlyApp {
     /// Native window id captured from runtime events.
     pub(crate) window_id: Option<window::Id>,
     /// Whether the app window is currently focused.
-    window_focused: bool,
+    pub(crate) window_focused: bool,
     /// Font metrics for cell sizing and grid dimension calculations.
     font_metrics: FontMetrics,
     /// Mouse text selection state.
@@ -329,7 +336,7 @@ pub struct GodlyApp {
     /// Resolver that routes key events through custom overrides + defaults.
     shortcut_resolver: ShortcutResolver,
     /// Notification tracker for terminals.
-    notifications: NotificationTracker,
+    pub(crate) notifications: NotificationTracker,
     /// Startup timestamp used for test harness uptime reporting.
     pub(crate) started_at_ms: u64,
     /// Counter for generating workspace names.
@@ -464,6 +471,8 @@ pub struct GodlyApp {
     perf_stats: crate::perf_stats::PerfStats,
     // --- K1: CLAUDE.md Editor ---
     claude_md_editor: Option<crate::claude_md_editor::ClaudeMdEditorState>,
+    // --- Claude Code Manager ---
+    claude_code_manager: crate::claude_code_manager::ClaudeCodeManagerState,
     // --- I4/I5: Voice/Whisper Integration ---
     whisper_available: bool,
     whisper_state: Option<whisper_ui::WhisperState>,
@@ -488,6 +497,8 @@ pub struct GodlyApp {
     pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer,
     /// Whether to use the new image-based renderer instead of the canvas.
     use_pixel_renderer: bool,
+    /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
+    pub(crate) file_panes: HashMap<String, FilePaneState>,
 }
 
 impl Default for GodlyApp {
@@ -591,6 +602,7 @@ impl Default for GodlyApp {
             perf_overlay_visible: false,
             perf_stats: crate::perf_stats::PerfStats::new(),
             claude_md_editor: None,
+            claude_code_manager: crate::claude_code_manager::ClaudeCodeManagerState::new(),
             whisper_available: godly_app_adapter::whisper::whisper_binary_path().is_some(),
             whisper_state: None,
             whisper_service: None,
@@ -616,6 +628,7 @@ impl Default for GodlyApp {
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
             use_pixel_renderer: false,
+            file_panes: HashMap::new(),
         }
     }
 }
@@ -664,6 +677,8 @@ pub enum Message {
     TabDragEnd,
     /// User wants a new terminal.
     NewTabRequested,
+    /// Tab bar scrolled horizontally (scroll offset updated).
+    TabBarScroll(iced::widget::scrollable::Viewport),
     /// User wants to close a terminal.
     CloseTabRequested(String),
     /// New terminal created by daemon.
@@ -825,6 +840,9 @@ pub enum Message {
     QuickClaudeDialogModelsLoaded(Vec<(String, String)>),
     /// Image(s) pasted from clipboard into Quick Claude dialog.
     QuickClaudeDialogImagePasted(Result<Vec<crate::quick_claude_dialog::ImageAttachment>, String>),
+    /// A widget (text_editor) captured a Ctrl+V paste event.
+    /// Fired by event::listen_with() to detect pastes that keyboard::listen() misses.
+    WidgetCapturedPaste,
     /// Remove an attached image from Quick Claude dialog by index.
     QuickClaudeDialogImageRemoved(usize),
     /// AI tool display name input changed.
@@ -895,6 +913,8 @@ pub enum Message {
     PhoneRemoteCopyApiKey,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
+    /// Periodic autosave of session state so workspace layout survives crashes.
+    AutosaveTick,
     /// Dismiss a specific toast notification by ID.
     DismissToast(u64),
     /// User clicked a toast — switch to its source workspace/terminal.
@@ -997,6 +1017,21 @@ pub enum Message {
     ClaudeMdSave,
     ClaudeMdSaved(Result<(), String>),
     ClaudeMdClose,
+    // --- Claude Code Manager ---
+    /// Claude Code Manager: scope tab clicked.
+    CcmScopeClicked(usize),
+    /// Claude Code Manager: skill clicked in list.
+    CcmSkillClicked(usize),
+    /// Claude Code Manager: editor text action.
+    CcmEditorAction(iced::widget::text_editor::Action),
+    /// Claude Code Manager: save current skill.
+    CcmSave,
+    /// Claude Code Manager: close editor / back to list.
+    CcmCloseEditor,
+    /// Claude Code Manager: new skill name input changed.
+    CcmNewSkillNameChanged(String),
+    /// Claude Code Manager: create new skill.
+    CcmCreateSkill,
     // --- J1-J9: MCP Event Integration ---
     McpEvent(godly_app_adapter::mcp_pipe::McpEvent),
     // --- I4/I5: Voice/Whisper Integration ---
@@ -1008,6 +1043,13 @@ pub enum Message {
     WhisperCancel,
     /// Screenshot captured via iced window API.
     ScreenshotCaptured(iced::window::Screenshot),
+    // --- File Pane Management ---
+    /// Close a file pane by its ID.
+    FilePaneClose(String),
+    /// A watched file's content changed on disk.
+    FilePaneFileChanged { pane_id: String, content: String },
+    /// Periodic tick to check file modification times.
+    FilePaneWatchTick,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -1034,7 +1076,7 @@ impl GodlyApp {
     }
 
     /// Get the active workspace's focused terminal ID.
-    fn active_focused(&self) -> Option<&str> {
+    pub(crate) fn active_focused(&self) -> Option<&str> {
         self.workspaces
             .active()
             .map(|ws| ws.focused_terminal.as_str())
@@ -1498,6 +1540,17 @@ impl GodlyApp {
         }
     }
 
+    /// Persist the full session state (workspaces, layout, settings) to disk.
+    /// Called after every workspace mutation (create, delete, rename) so that
+    /// crashes within the 60-second autosave window don't lose changes.
+    fn persist_session_state(&self) {
+        if let Err(e) = session_persistence::save_to_default_path(
+            &self.build_persisted_session_state(),
+        ) {
+            log::warn!("Failed to persist session state after mutation: {}", e);
+        }
+    }
+
     pub(crate) fn save_layout_for_testing(&self) -> Result<(), String> {
         self.persist_scrollback_offsets();
         session_persistence::save_to_default_path(&self.build_persisted_session_state())
@@ -1555,6 +1608,7 @@ impl GodlyApp {
             Message::KeyboardEvent(_) => {
                 diag::log("UPDATE: KeyboardEvent");
             }
+            Message::AutosaveTick => {}
             _ => {}
         }
 
@@ -1677,7 +1731,19 @@ impl GodlyApp {
                     }
                     term.fetching = false;
                     term.dirty = false;
-                    term.title = grid.title.clone();
+                    // Only overwrite a meaningful (non-path) title with another
+                    // meaningful title.  Shells frequently reset the OSC title
+                    // to the CWD which would erase a user-set tab name.
+                    let new_title = grid.title.trim();
+                    let new_is_meaningful =
+                        !new_title.is_empty() && !looks_like_path(new_title);
+                    let current_is_meaningful = {
+                        let cur = term.title.trim();
+                        !cur.is_empty() && !looks_like_path(cur)
+                    };
+                    if new_is_meaningful || !current_is_meaningful {
+                        term.title = grid.title.clone();
+                    }
                     term.total_scrollback = grid.total_scrollback;
                     term.scrollback_offset = grid.scrollback_offset.min(grid.total_scrollback);
                     term.grid = Some(grid);
@@ -1818,6 +1884,20 @@ impl GodlyApp {
                         if self.mru_switcher.is_some() {
                             if is_escape_key(&key) {
                                 self.cancel_mru_switcher();
+                            }
+                            return Task::none();
+                        }
+                        // Claude Code Manager skill editor: intercept all keys
+                        if self.settings_open
+                            && self.settings_tab == "claude-code"
+                            && self.claude_code_manager.editing_skill_index.is_some()
+                        {
+                            if modifiers.control()
+                                && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "s")
+                            {
+                                if let Err(e) = self.claude_code_manager.save_current() {
+                                    log::error!("Failed to save skill: {}", e);
+                                }
                             }
                             return Task::none();
                         }
@@ -1962,6 +2042,9 @@ impl GodlyApp {
                 let lines = -(delta_y * 3.0) as isize;
                 return self.scroll_active(lines);
             }
+
+            // --- Tab bar horizontal scroll (no-op: Iced scrollable handles it) ---
+            Message::TabBarScroll(_) => {}
 
             // --- Tab management ---
             Message::TabClicked(id) => {
@@ -2311,6 +2394,7 @@ impl GodlyApp {
                     let next_name = self.rename_workspace_value.trim().to_string();
                     if !next_name.is_empty() {
                         let _ = self.workspaces.rename(&workspace_id, next_name);
+                        self.persist_session_state();
                     }
                 }
                 self.rename_workspace_value.clear();
@@ -2588,19 +2672,37 @@ impl GodlyApp {
                 }
             }
             Message::QuickClaudeDialogPromptAction(action) => {
-                // Detect paste action BEFORE consuming action via perform().
-                // keyboard::listen() only sees Status::Ignored events, but the
-                // text_editor widget captures Ctrl+V (Status::Captured) for its
-                // own text paste, so the keyboard-based image check never fires.
-                // Instead, detect the Paste action here and also check for images.
-                let is_paste = matches!(
-                    &action,
-                    iced::widget::text_editor::Action::Edit(
-                        iced::widget::text_editor::Edit::Paste(_)
-                    )
-                );
+                // Image paste detection moved to WidgetCapturedPaste (bug #732).
+                // event::listen_with() catches Ctrl+V regardless of clipboard
+                // content, so both image-only and text+image pastes are handled.
 
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    // When the skill autocomplete popup is open, intercept
+                    // arrow-key cursor movements and navigate the popup instead.
+                    // keyboard::listen() only sees Status::Ignored events, but the
+                    // text_editor widget captures ArrowUp/ArrowDown (Status::Captured),
+                    // so the keyboard-based autocomplete handler never fires for them.
+                    // Handle navigation here where we DO receive the action.
+                    if dlg.skill_autocomplete_open {
+                        match &action {
+                            iced::widget::text_editor::Action::Move(
+                                iced::widget::text_editor::Motion::Up,
+                            ) => {
+                                return self.update(
+                                    Message::QuickClaudeDialogSkillAutocompleteNavigate(-1),
+                                );
+                            }
+                            iced::widget::text_editor::Action::Move(
+                                iced::widget::text_editor::Motion::Down,
+                            ) => {
+                                return self.update(
+                                    Message::QuickClaudeDialogSkillAutocompleteNavigate(1),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+
                     dlg.prompt_content.perform(action);
 
                     // Detect skill autocomplete trigger based on cursor position
@@ -2615,9 +2717,15 @@ impl GodlyApp {
                             let after_slash = &before_cursor[slash_pos + 1..];
                             // Only trigger if there's no space/newline between slash and cursor
                             if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                                let new_filter = after_slash.to_string();
+                                // Only reset selection when the filter text changes;
+                                // preserve it on cursor-only movements so arrow-key
+                                // navigation isn't destroyed.
+                                if dlg.skill_autocomplete_filter != new_filter {
+                                    dlg.skill_autocomplete_selected = 0;
+                                }
                                 dlg.skill_autocomplete_open = true;
-                                dlg.skill_autocomplete_filter = after_slash.to_string();
-                                dlg.skill_autocomplete_selected = 0;
+                                dlg.skill_autocomplete_filter = new_filter;
                             } else {
                                 dlg.skill_autocomplete_open = false;
                                 dlg.skill_autocomplete_filter.clear();
@@ -2627,10 +2735,6 @@ impl GodlyApp {
                             dlg.skill_autocomplete_filter.clear();
                         }
                     }
-                }
-
-                if is_paste {
-                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogBranchChanged(val) => {
@@ -2878,6 +2982,10 @@ impl GodlyApp {
             Message::QuickClaudeDialogImagePasted(result) => {
                 match result {
                     Ok(attachments) => {
+                        diag::log(&format!(
+                            "UPDATE: QuickClaudeDialogImagePasted(Ok, {} images)",
+                            attachments.len()
+                        ));
                         if let Some(ref mut dlg) = self.quick_claude_dialog {
                             for attachment in attachments {
                                 if dlg.attached_images.len() < 10 {
@@ -2890,6 +2998,7 @@ impl GodlyApp {
                         }
                     }
                     Err(e) => {
+                        diag::log(&format!("UPDATE: QuickClaudeDialogImagePasted(Err: {})", e));
                         log::error!("Quick Claude image paste failed: {}", e);
                     }
                 }
@@ -2899,6 +3008,16 @@ impl GodlyApp {
                     if index < dlg.attached_images.len() {
                         dlg.attached_images.remove(index);
                     }
+                }
+            }
+            Message::WidgetCapturedPaste => {
+                // Bug #732: A widget (text_editor) captured Ctrl+V. When the
+                // Quick Claude dialog is open, check clipboard for images.
+                // This is the sole image-paste trigger — it fires for both
+                // image-only and text+image clipboard content.
+                if self.quick_claude_dialog.is_some() {
+                    diag::log("UPDATE: WidgetCapturedPaste → checking clipboard for image");
+                    return self.check_clipboard_for_quick_claude_image();
                 }
             }
             Message::QuickClaudeDialogResume => {
@@ -3341,6 +3460,13 @@ impl GodlyApp {
                 let _ = prune_expired_toasts(self.toasts.as_mut(), now_ms);
                 return self.check_burst_quiet(now_ms);
             }
+            Message::AutosaveTick => {
+                if let Err(e) = session_persistence::save_to_default_path(
+                    &self.build_persisted_session_state(),
+                ) {
+                    log::warn!("Autosave failed: {}", e);
+                }
+            }
             Message::DismissToast(id) => {
                 self.toasts.retain(|t| t.id != id);
             }
@@ -3462,6 +3588,14 @@ impl GodlyApp {
                         async { font_enumerator::enumerate_monospace_fonts() },
                         Message::FontsEnumerated,
                     );
+                } else if tab_id == "claude-code" {
+                    let ws_data: Vec<(String, String, String)> = self
+                        .workspaces
+                        .iter()
+                        .map(|ws| (ws.id.clone(), ws.name.clone(), ws.folder_path.clone()))
+                        .collect();
+                    self.claude_code_manager.refresh_scopes(&ws_data);
+                    self.claude_code_manager.discover_skills();
                 }
             }
             Message::FontFamilyChanged(name) => {
@@ -3846,6 +3980,34 @@ impl GodlyApp {
             Message::ClaudeMdClose => {
                 self.claude_md_editor = None;
             }
+            // --- Claude Code Manager ---
+            Message::CcmScopeClicked(index) => {
+                self.claude_code_manager.active_scope = index;
+                self.claude_code_manager.discover_skills();
+            }
+            Message::CcmSkillClicked(index) => {
+                self.claude_code_manager.open_skill(index);
+            }
+            Message::CcmEditorAction(action) => {
+                self.claude_code_manager.editor_content.perform(action);
+                self.claude_code_manager.editor_dirty = true;
+            }
+            Message::CcmSave => {
+                if let Err(e) = self.claude_code_manager.save_current() {
+                    log::error!("Failed to save skill: {}", e);
+                }
+            }
+            Message::CcmCloseEditor => {
+                self.claude_code_manager.close_editor();
+            }
+            Message::CcmNewSkillNameChanged(val) => {
+                self.claude_code_manager.new_skill_name = val;
+            }
+            Message::CcmCreateSkill => {
+                if let Err(e) = self.claude_code_manager.create_skill() {
+                    log::error!("Failed to create skill: {}", e);
+                }
+            }
             // --- I4/I5: Voice/Whisper Integration ---
             Message::WhisperToggle => {
                 if !self.whisper_available {
@@ -3923,6 +4085,40 @@ impl GodlyApp {
             // --- J1-J9: MCP Event Integration ---
             Message::McpEvent(event) => {
                 return self.handle_mcp_event(event);
+            }
+            // --- File Pane Management ---
+            Message::FilePaneClose(pane_id) => {
+                self.file_panes.remove(&pane_id);
+                self.remove_content_pane_from_layouts(&pane_id);
+            }
+            Message::FilePaneFileChanged { pane_id, content } => {
+                if let Some(state) = self.file_panes.get_mut(&pane_id) {
+                    state.content = content;
+                }
+            }
+            Message::FilePaneWatchTick => {
+                // Check file modification times and reload content if changed.
+                let updates: Vec<(String, std::time::SystemTime, String)> = self
+                    .file_panes
+                    .iter()
+                    .filter_map(|(id, state)| {
+                        let modified = std::fs::metadata(&state.file_path)
+                            .ok()
+                            .and_then(|m| m.modified().ok())?;
+                        if state.last_modified.map_or(true, |prev| modified > prev) {
+                            let content = std::fs::read_to_string(&state.file_path).ok()?;
+                            Some((id.clone(), modified, content))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for (pane_id, modified, content) in updates {
+                    if let Some(state) = self.file_panes.get_mut(&pane_id) {
+                        state.last_modified = Some(modified);
+                        state.content = content;
+                    }
+                }
             }
         }
         Task::none()
@@ -4029,6 +4225,7 @@ impl GodlyApp {
             |id| Message::TabContextToggle(id),
             Message::TabDragEnd,
             Message::NewTabRequested,
+            Message::TabBarScroll,
         );
 
         // Mic button for whisper (I4/I5)
@@ -4054,9 +4251,26 @@ impl GodlyApp {
         {
             self.view_terminal_empty_state()
         } else if let Some(layout) = self.active_layout() {
-            view_layout(layout, &|terminal_id: &str| {
-                self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
-            })
+            view_layout(
+                layout,
+                &|terminal_id: &str| {
+                    self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
+                },
+                &|content: &PaneContent| {
+                    match content {
+                        PaneContent::FileViewer { file_path, .. } => {
+                            container(text(format!("File: {}", file_path)))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .into()
+                        }
+                        _ => container(text(""))
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .into(),
+                    }
+                },
+            )
         } else {
             self.view_terminal_empty_state()
         };
@@ -4101,9 +4315,12 @@ impl GodlyApp {
                             _ => None,
                         }
                     },
+                    |workspace_id: &str| -> usize {
+                        self.terminals.terminals_for_workspace(workspace_id).len()
+                    },
                 ),
                 sidebar_width,
-                self.terminal_font,
+                UI_FONT,
                 Message::SidebarAction,
                 Message::SidebarResizeStart,
                 Message::SidebarResizeEnd,
@@ -4153,6 +4370,10 @@ impl GodlyApp {
                     label: "Flows",
                 },
                 SettingsTab {
+                    id: "claude-code",
+                    label: "Claude Code",
+                },
+                SettingsTab {
                     id: "remote",
                     label: "Remote",
                 },
@@ -4164,6 +4385,7 @@ impl GodlyApp {
                 "ai-tools" => self.view_ai_tools_tab(),
                 "plugins" => self.view_plugins_tab(),
                 "flows" => self.view_flows_tab(),
+                "claude-code" => self.view_claude_code_tab(),
                 "remote" => self.view_remote_tab(),
                 _ => shortcuts_tab::view_shortcuts_tab(
                     self.shortcut_capturing_index,
@@ -4374,6 +4596,10 @@ impl GodlyApp {
                 self.perf_stats.render_ms(),
                 if self.use_pixel_renderer { "Pixel" } else { "Canvas" },
                 self.terminals.count(),
+                self.perf_stats.dropped_frames(),
+                self.perf_stats.render_phase_ms(),
+                self.perf_stats.cells_rendered(),
+                self.perf_stats.histogram(),
             );
             let positioned = container(perf)
                 .width(Length::Fill)
@@ -5765,6 +5991,19 @@ impl GodlyApp {
         container(content).width(Length::Fill).into()
     }
 
+    fn view_claude_code_tab(&self) -> Element<'_, Message> {
+        crate::claude_code_manager::view_claude_code_manager(
+            &self.claude_code_manager,
+            |i| Message::CcmScopeClicked(i),
+            |i| Message::CcmSkillClicked(i),
+            Message::CcmEditorAction,
+            Message::CcmSave,
+            Message::CcmCloseEditor,
+            Message::CcmNewSkillNameChanged,
+            Message::CcmCreateSkill,
+        )
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
             // Keyboard events.
@@ -5825,6 +6064,19 @@ impl GodlyApp {
                         y: position.y,
                     })
                 }
+                // Bug #732: Detect Ctrl+V captured by a widget (text_editor).
+                // keyboard::listen() only sees Status::Ignored events, so when
+                // text_editor captures Ctrl+V but clipboard has no text (image-only),
+                // it emits no Edit::Paste action and the image check never runs.
+                // This catches that case by listening for captured paste keys.
+                event::Event::Keyboard(keyboard::Event::KeyPressed {
+                    ref key, modifiers, ..
+                }) if status == event::Status::Captured
+                    && modifiers.control()
+                    && matches!(key, keyboard::Key::Character(ref ch) if ch.as_str() == "v" || ch.as_str() == "V") =>
+                {
+                    Some(Message::WidgetCapturedPaste)
+                }
                 _ => None,
             }),
         ];
@@ -5854,11 +6106,25 @@ impl GodlyApp {
             );
         }
 
+        // Autosave session state periodically so workspace layout survives crashes.
+        subscriptions.push(
+            iced::time::every(Duration::from_secs(session_persistence::AUTOSAVE_INTERVAL_SECS))
+                .map(|_| Message::AutosaveTick),
+        );
+
         // Whisper recording timer (I4/I5)
         if self.whisper_state.as_ref().is_some_and(|s| s.recording) {
             subscriptions.push(
                 iced::time::every(Duration::from_millis(100))
                     .map(|_| Message::WhisperTimerTick),
+            );
+        }
+
+        // File pane watch: poll for file modifications every 500ms.
+        if !self.file_panes.is_empty() {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(500))
+                    .map(|_| Message::FilePaneWatchTick),
             );
         }
 
@@ -6364,6 +6630,7 @@ impl GodlyApp {
                 }
                 self.persist_scrollback_offsets();
                 self.workspaces.remove(workspace_id);
+                self.persist_session_state();
                 if clear_context_menu {
                     self.workspace_context_menu_id = None;
                 }
@@ -6519,6 +6786,7 @@ impl GodlyApp {
         self.workspaces.set_active(&decision.workspace_id);
         self.terminals.set_active(&decision.session_id);
         self.workspace_context_menu_id = None;
+        self.persist_session_state();
 
         self.create_terminal_task(decision.session_id)
     }
@@ -6555,6 +6823,7 @@ impl GodlyApp {
         self.terminals.set_active(&session_id);
         self.workspace_context_menu_id = None;
         self.next_workspace_num = self.next_workspace_num.saturating_add(1);
+        self.persist_session_state();
 
         self.create_terminal_task_with_cwd(session_id, Some(folder_path))
     }
@@ -6690,6 +6959,22 @@ impl GodlyApp {
                     let mut orphan_iter = orphan_terminal_ids.into_iter().peekable();
 
                     for workspace in empty_workspaces {
+                        // Bug #771: skip workspaces that were intentionally empty.
+                        // focused_terminal=Some("") means the user closed all terminals
+                        // before shutdown — don't create a terminal for these.
+                        if workspace.focused_terminal == Some(String::new()) {
+                            self.workspaces.add_with_details(
+                                workspace.id.clone(),
+                                workspace.name,
+                                workspace.folder_path,
+                                workspace.worktree_mode,
+                                LayoutNode::Leaf {
+                                    terminal_id: String::new(),
+                                },
+                                String::new(),
+                            );
+                            continue;
+                        }
                         if let Some(terminal_id) = orphan_iter.next() {
                             if assigned_terminal_ids.insert(terminal_id.clone()) {
                                 self.terminals.add_to_workspace(
@@ -6919,6 +7204,7 @@ impl GodlyApp {
             return Task::none();
         };
 
+        let old_offset = term.scrollback_offset;
         let new_offset = if delta < 0 {
             term.scrollback_offset
                 .saturating_add((-delta) as usize)
@@ -6929,6 +7215,13 @@ impl GodlyApp {
 
         term.scrollback_offset = new_offset;
         self.persist_scrollback_offsets();
+
+        // Adjust selection coordinates so the highlight stays on the same
+        // content after the viewport shifts. Bug #755.
+        let scroll_delta = new_offset as isize - old_offset as isize;
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, new_offset)
     }
@@ -6944,10 +7237,22 @@ impl GodlyApp {
             .map(|t| t.total_scrollback)
             .unwrap_or(0);
 
+        let old_offset = self
+            .terminals
+            .get(&active_id)
+            .map(|t| t.scrollback_offset)
+            .unwrap_or(0);
+
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = max;
         }
         self.persist_scrollback_offsets();
+
+        // Adjust selection for scroll. Bug #755.
+        let scroll_delta = max as isize - old_offset as isize;
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, max)
     }
@@ -6957,10 +7262,22 @@ impl GodlyApp {
             return Task::none();
         };
 
+        let old_offset = self
+            .terminals
+            .get(&active_id)
+            .map(|t| t.scrollback_offset)
+            .unwrap_or(0);
+
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = 0;
         }
         self.persist_scrollback_offsets();
+
+        // Adjust selection for scroll. Bug #755.
+        let scroll_delta = -(old_offset as isize);
+        if scroll_delta != 0 && (self.selection.active || self.has_selection()) {
+            self.selection.adjust_for_scroll(scroll_delta);
+        }
 
         self.scroll_fetch(&active_id, 0)
     }
@@ -7223,6 +7540,7 @@ impl GodlyApp {
         self.next_workspace_num = self.next_workspace_num.saturating_add(1);
         self.last_test_workspace_id = Some(workspace_id.clone());
         self.last_test_terminal_id = Some(session_id.clone());
+        self.persist_session_state();
 
         Ok((workspace_id, self.fetch_grid(&session_id)))
     }
@@ -7397,7 +7715,7 @@ impl GodlyApp {
             let _ = commands::close_terminal(client, session_id);
         }
 
-        Task::none()
+        self.resize_all_terminals()
     }
 
     fn handle_terminal_created(&mut self, result: Result<String, String>) -> Task<Message> {
@@ -8102,7 +8420,7 @@ impl GodlyApp {
             }
         }
 
-        self.perf_stats.record_render_duration_us(t0.elapsed().as_micros() as f64);
+        self.perf_stats.record_render_stats(self.pixel_renderer.last_stats());
     }
 
     // -----------------------------------------------------------------------
@@ -8429,6 +8747,7 @@ fn pane_rect_for_terminal(
         LayoutNode::Leaf {
             terminal_id: leaf_id,
         } => (leaf_id == terminal_id).then_some(rect),
+        LayoutNode::ContentPane { .. } => None,
         LayoutNode::Split {
             direction,
             ratio,
@@ -8511,6 +8830,33 @@ fn replace_leaf_in_layout(layout: &mut LayoutNode, old_id: &str, new_id: String)
             replace_leaf_in_layout(second, old_id, new_id);
         }
         _ => {}
+    }
+}
+
+/// Detect the file viewer type from a file extension.
+pub(crate) fn detect_file_type(path: &str) -> &'static str {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    // Case-insensitive comparison without allocating a lowercase copy.
+    if ext.eq_ignore_ascii_case("md")
+        || ext.eq_ignore_ascii_case("markdown")
+        || ext.eq_ignore_ascii_case("mdx")
+    {
+        "markdown"
+    } else if ext.eq_ignore_ascii_case("png")
+        || ext.eq_ignore_ascii_case("jpg")
+        || ext.eq_ignore_ascii_case("jpeg")
+        || ext.eq_ignore_ascii_case("gif")
+        || ext.eq_ignore_ascii_case("bmp")
+        || ext.eq_ignore_ascii_case("svg")
+        || ext.eq_ignore_ascii_case("webp")
+        || ext.eq_ignore_ascii_case("ico")
+    {
+        "image"
+    } else {
+        "code"
     }
 }
 
@@ -8799,6 +9145,16 @@ fn resolve_key_event(
     KeyRoutingResult::ForwardToPty
 }
 
+/// Returns `true` if the string looks like a filesystem path (CWD).
+///
+/// Shells frequently set the OSC window title to the current directory.
+/// This helper mirrors `TerminalInfo::extract_cwd` so that we can detect
+/// path-like titles before updating the terminal state.
+fn looks_like_path(s: &str) -> bool {
+    let t = s.trim();
+    t.contains(":\\") || t.starts_with('/')
+}
+
 fn is_control_key(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Control))
 }
@@ -8893,6 +9249,11 @@ fn collect_init_result_sync(
             );
             let mut new_session_ids = Vec::new();
             for workspace in &persisted.workspaces {
+                // Bug #771: skip workspaces that were intentionally empty
+                // (focused_terminal="" means the user closed all terminals).
+                if workspace.focused_terminal.is_empty() {
+                    continue;
+                }
                 let session_id = uuid::Uuid::new_v4().to_string();
                 let cwd = if workspace.folder_path.is_empty() {
                     None
@@ -9114,7 +9475,7 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 #[cfg(test)]
 mod helper_tests {
     use super::tab_reducer::TabMruCycleDirection;
-    use super::{
+    use super::{looks_like_path,
         begin_sidebar_animation, enqueue_toast_entry, grid_dimensions_for_viewport,
         inset_terminal_pane_rect, mru_cycle_direction_from_shortcut_key,
         next_mru_switcher_selection, next_tab_id_from_mru, normalize_ai_tool_field,
@@ -9566,6 +9927,28 @@ mod helper_tests {
         let (rows, cols) = grid_dimensions_for_viewport(viewport, font_metrics);
         assert!(rows >= 1);
         assert!(cols >= 1);
+    }
+
+    // --- looks_like_path tests ---
+
+    #[test]
+    fn looks_like_path_detects_windows_path() {
+        assert!(looks_like_path(r"C:\Users\alanm"));
+        assert!(looks_like_path(r"  D:\projects\foo  "));
+    }
+
+    #[test]
+    fn looks_like_path_detects_unix_path() {
+        assert!(looks_like_path("/home/user"));
+        assert!(looks_like_path("  /tmp/foo  "));
+    }
+
+    #[test]
+    fn looks_like_path_rejects_meaningful_titles() {
+        assert!(!looks_like_path("Fix tab hotkeys"));
+        assert!(!looks_like_path("Claude"));
+        assert!(!looks_like_path("my-project"));
+        assert!(!looks_like_path(""));
     }
 }
 

@@ -46,6 +46,16 @@ impl SelectionState {
         self.active = false;
     }
 
+    /// Adjust selection coordinates when the viewport scrolls.
+    ///
+    /// `delta` is the change in scrollback offset (positive = scrolled up into
+    /// history, content moved down in viewport). Both anchor and end shift by
+    /// `delta` so the selection stays on the same content.
+    pub fn adjust_for_scroll(&mut self, delta: isize) {
+        self.anchor.row = (self.anchor.row as isize + delta).max(0) as usize;
+        self.end.row = (self.end.row as isize + delta).max(0) as usize;
+    }
+
     /// Reset to no selection.
     pub fn clear(&mut self) {
         self.anchor = GridPos { row: 0, col: 0 };
@@ -481,5 +491,155 @@ mod tests {
         assert!(!clean.contains('\x1b'));
         assert!(clean.contains("hello"));
         assert!(clean.contains("world"));
+    }
+
+    /// Helper: build a RichGridData with the given text lines and scrollback metadata.
+    fn make_grid_with_scrollback(
+        lines: &[&str],
+        scrollback_offset: usize,
+        total_scrollback: usize,
+    ) -> RichGridData {
+        let mut grid = make_grid(lines);
+        grid.scrollback_offset = scrollback_offset;
+        grid.total_scrollback = total_scrollback;
+        grid
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug #755: Selection anchor not fixed when scrolling during drag
+    // -----------------------------------------------------------------------
+    //
+    // When a user selects text and then scrolls, the selection coordinates
+    // are viewport-relative and don't account for scrollback offset changes.
+    // After scrolling, the same viewport row shows different content, but
+    // the selection still indexes into the viewport rows — returning the
+    // wrong text.
+
+    #[test]
+    fn test_selection_text_stable_after_scroll() {
+        // Bug #755: selected_text() must return the originally-selected
+        // content even after the viewport scrolls.
+        //
+        // Scenario:
+        // 1. Viewport shows rows A-E at scrollback_offset=0
+        // 2. User selects rows 1-2 ("line B", "line C")
+        // 3. User scrolls up 2 lines → scrollback_offset=2
+        // 4. scroll_active() calls adjust_for_scroll(2)
+        // 5. Viewport now shows [hist X, hist Y, line A, line B, line C]
+        // 6. selected_text() should return "line B\nline C" (rows 3-4)
+
+        let grid_before = make_grid_with_scrollback(
+            &["line A", "line B", "line C", "line D", "line E"],
+            0, 10,
+        );
+
+        let mut sel = SelectionState::default();
+        sel.start(GridPos { row: 1, col: 0 });
+        sel.update(GridPos { row: 2, col: 5 });
+        assert_eq!(sel.selected_text(&grid_before), "line B\nline C");
+
+        // Scroll up 2 lines — scroll_active() adjusts selection.
+        sel.adjust_for_scroll(2);
+
+        let grid_after = make_grid_with_scrollback(
+            &["hist X", "hist Y", "line A", "line B", "line C"],
+            2, 10,
+        );
+
+        let text = sel.selected_text(&grid_after);
+        assert_eq!(
+            text, "line B\nline C",
+            "Bug #755: selected_text() should return original content after scroll"
+        );
+    }
+
+    #[test]
+    fn test_selection_highlight_follows_content_after_scroll() {
+        // Bug #755: is_selected() must track content, not viewport position.
+        //
+        // Select rows 2-3, scroll up 2 → content shifts to rows 4-5.
+        // adjust_for_scroll(2) should move the selection to match.
+
+        let mut sel = SelectionState::default();
+        sel.start(GridPos { row: 2, col: 0 });
+        sel.update(GridPos { row: 3, col: 5 });
+
+        assert!(sel.is_selected(2, 0), "row 2 selected before scroll");
+        assert!(sel.is_selected(3, 0), "row 3 selected before scroll");
+        assert!(!sel.is_selected(4, 0), "row 4 not selected before scroll");
+
+        // Scroll up 2 — content at viewport row 2 moves to row 4.
+        sel.adjust_for_scroll(2);
+
+        assert!(
+            sel.is_selected(4, 0),
+            "Bug #755: After scroll up 2, row 4 should be selected (content moved there)"
+        );
+        assert!(
+            sel.is_selected(5, 0),
+            "Bug #755: After scroll up 2, row 5 should be selected (content moved there)"
+        );
+        assert!(
+            !sel.is_selected(2, 0),
+            "Bug #755: Row 2 now has different content and should not be selected"
+        );
+    }
+
+    #[test]
+    fn test_active_drag_extends_selection_via_scroll() {
+        // Bug #755: During active drag, scrolling should extend selection.
+        //
+        // 1. Click row 4
+        // 2. Scroll up 3 → adjust_for_scroll(3) shifts anchor to row 7
+        // 3. Drag to row 0
+        // 4. Selection spans rows 0-7 (8 rows of content)
+
+        let mut sel = SelectionState::default();
+        sel.start(GridPos { row: 4, col: 0 });
+
+        // Scroll up 3 — anchor shifts from row 4 to row 7.
+        sel.adjust_for_scroll(3);
+
+        // User drags to top of viewport.
+        sel.update(GridPos { row: 0, col: 0 });
+
+        let (start, end) = sel.normalized();
+        assert_eq!(start.row, 0);
+        assert_eq!(
+            end.row, 7,
+            "Bug #755: After scroll up 3 during drag from row 4, anchor should be at row 7"
+        );
+    }
+
+    #[test]
+    fn test_copy_after_scroll_returns_correct_content() {
+        // Bug #755: After selecting and scrolling, Ctrl+C must copy the
+        // originally-selected text, not whatever is now at those viewport rows.
+
+        // 6-row viewport.
+        let grid_before = make_grid_with_scrollback(
+            &["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"],
+            0, 10,
+        );
+
+        let mut sel = SelectionState::default();
+        sel.start(GridPos { row: 1, col: 0 });
+        sel.update(GridPos { row: 2, col: 6 });
+        sel.finish();
+        assert_eq!(sel.selected_text(&grid_before), "bravo\ncharlie");
+
+        // Scroll up 2 — adjust_for_scroll(2) shifts selection to rows 3-4.
+        sel.adjust_for_scroll(2);
+
+        let grid_after = make_grid_with_scrollback(
+            &["hist 2", "hist 1", "alpha", "bravo", "charlie", "delta"],
+            2, 10,
+        );
+
+        let copied = sel.selected_text(&grid_after);
+        assert_eq!(
+            copied, "bravo\ncharlie",
+            "Bug #755: Copy after scroll should return originally-selected content"
+        );
     }
 }

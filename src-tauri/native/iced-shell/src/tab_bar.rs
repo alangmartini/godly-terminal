@@ -163,6 +163,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     on_context_toggle: impl Fn(String) -> M + 'a,
     on_drag_end: M,
     on_new: M,
+    on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> M + 'a,
 ) -> Element<'a, M> {
     let active_index = active_id.and_then(|id| terminals.iter().position(|term| term.id == id));
     let mut tabs = row![].spacing(0);
@@ -331,8 +332,11 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 
     let tabs_scroll = iced::widget::scrollable(tabs)
         .direction(iced::widget::scrollable::Direction::Horizontal(
-            iced::widget::scrollable::Scrollbar::hidden(),
+            iced::widget::scrollable::Scrollbar::new()
+                .width(4)
+                .scroller_width(4),
         ))
+        .on_scroll(on_scroll)
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT));
 
@@ -399,6 +403,7 @@ mod tests {
         TabContextToggle,
         TabDragEnd,
         NewTabRequested,
+        TabBarScrolled,
     }
 
     fn sample_terminal(id: &str) -> TerminalInfo {
@@ -496,6 +501,7 @@ mod tests {
             |_| TestMessage::TabContextToggle,
             TestMessage::TabDragEnd,
             TestMessage::NewTabRequested,
+            |_| TestMessage::TabBarScrolled,
         );
     }
 
@@ -519,6 +525,7 @@ mod tests {
             |_| TestMessage::TabContextToggle,
             TestMessage::TabDragEnd,
             TestMessage::NewTabRequested,
+            |_| TestMessage::TabBarScrolled,
         );
     }
 
@@ -542,6 +549,7 @@ mod tests {
             |_| TestMessage::TabContextToggle,
             TestMessage::TabDragEnd,
             TestMessage::NewTabRequested,
+            |_| TestMessage::TabBarScrolled,
         );
     }
 

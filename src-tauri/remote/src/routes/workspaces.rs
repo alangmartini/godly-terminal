@@ -86,16 +86,16 @@ pub async fn list_workspaces(
                 .terminals
                 .iter()
                 .filter(|t| t.workspace_id == ws.id)
-                .map(|t| {
-                    let session = live_sessions.get(&t.id);
-                    WorkspaceTerminal {
+                .filter_map(|t| {
+                    let session = live_sessions.get(&t.id)?;
+                    Some(WorkspaceTerminal {
                         id: t.id.clone(),
                         name: t.name.clone(),
-                        title: session.map(|s| s.title.clone()).unwrap_or_default(),
+                        title: session.title.clone(),
                         shell_type: t.shell_type.display_name(),
                         cwd: t.cwd.as_deref().map(redact_cwd),
-                        alive: session.is_some(),
-                    }
+                        alive: true,
+                    })
                 })
                 .collect();
 
