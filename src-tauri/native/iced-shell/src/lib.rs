@@ -14,6 +14,7 @@ pub mod shortcuts_tab;
 pub mod sidebar;
 pub mod split_pane;
 pub mod subscription;
+pub mod horizontal_wheel;
 pub mod tab_bar;
 pub mod terminal_state;
 pub mod title_bar;
