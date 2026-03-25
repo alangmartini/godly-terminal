@@ -581,6 +581,20 @@ pub fn list_tools() -> Value {
                 }
             },
             {
+                "name": "rename_self",
+                "description": "Rename the current terminal tab with a single call, no terminal ID needed. Uses GODLY_SESSION_ID internally.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "New name for the terminal tab"
+                        }
+                    },
+                    "required": ["name"]
+                }
+            },
+            {
                 "name": "focus_terminal",
                 "description": "Focus/select a terminal, making it the active tab.",
                 "inputSchema": {
@@ -1775,6 +1789,15 @@ pub fn call_tool(
         "rename_terminal" => {
             let terminal_id = args.get("terminal_id").and_then(|v| v.as_str()).ok_or("Missing terminal_id")?.to_string();
             let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing name")?.to_string();
+            McpRequest::RenameTerminal { terminal_id, name }
+        }
+
+        "rename_self" => {
+            let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing name")?.to_string();
+            let terminal_id = session_id
+                .as_ref()
+                .cloned()
+                .ok_or("GODLY_SESSION_ID not set")?;
             McpRequest::RenameTerminal { terminal_id, name }
         }
 

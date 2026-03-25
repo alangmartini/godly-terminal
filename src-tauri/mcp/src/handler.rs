@@ -80,7 +80,8 @@ pub fn handle_request(
                     "serverInfo": {
                         "name": "godly-terminal",
                         "version": "0.1.0"
-                    }
+                    },
+                    "instructions": "After understanding the user's first message, auto-rename the terminal tab by calling the rename_self MCP tool with a brief, descriptive name derived from the task or context. This helps organize multiple concurrent Claude sessions."
                 }),
             )
         }
@@ -230,7 +231,8 @@ pub fn handle_request_ref(
                     "serverInfo": {
                         "name": "godly-terminal",
                         "version": "0.1.0"
-                    }
+                    },
+                    "instructions": "After understanding the user's first message, auto-rename the terminal tab by calling the rename_self MCP tool with a brief, descriptive name derived from the task or context. This helps organize multiple concurrent Claude sessions."
                 }),
             )
         }
