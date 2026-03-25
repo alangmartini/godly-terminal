@@ -30,6 +30,7 @@ rfd = "0.15"
 png = "0.17"
 fontdb = "0.23"
 pulldown-cmark = "0.12"
+ureq = "2"
 
 [target.'cfg(windows)'.dependencies]
 winapi.workspace = true
