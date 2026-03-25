@@ -454,7 +454,7 @@ pub struct GodlyApp {
     shell_picker: ShellPickerState,
     workspace_ai_modes: HashMap<String, AiToolMode>,
     // --- I1-I3: Quick Claude Launcher ---
-    quick_claude_launch: Option<crate::quick_claude::LaunchState>,
+    quick_claude_launches: Vec<crate::quick_claude::LaunchState>,
     // --- Quick Claude Dialog (modal) ---
     quick_claude_dialog: Option<crate::quick_claude_dialog::QuickClaudeDialogState>,
     quick_claude_prefs: crate::quick_claude_dialog::QuickClaudePreferences,
@@ -591,7 +591,7 @@ impl Default for GodlyApp {
             active_custom_theme_id: None,
             shell_picker: ShellPickerState::default(),
             workspace_ai_modes: HashMap::new(),
-            quick_claude_launch: None,
+            quick_claude_launches: Vec::new(),
             quick_claude_dialog: None,
             quick_claude_prefs: crate::quick_claude_dialog::load_preferences(),
             terminal_context_menu_pos: None,
@@ -781,10 +781,11 @@ pub enum Message {
     QuickClaudeClearEditor,
     /// Launch a Quick Claude preset by index.
     QuickClaudeLaunchPreset(usize),
-    /// A launch step completed (Ok) or failed (Err).
-    QuickClaudeLaunchStepComplete(Result<crate::quick_claude::StepResult, String>),
-    /// Cancel a running Quick Claude launch.
-    QuickClaudeLaunchCancel,
+    /// A launch step completed (Ok) or failed (Err). Carries the workspace_id
+    /// to identify which concurrent launch this result belongs to.
+    QuickClaudeLaunchStepComplete(String, Result<crate::quick_claude::StepResult, String>),
+    /// Cancel a running Quick Claude launch by workspace_id.
+    QuickClaudeLaunchCancel(String),
     // --- Quick Claude Dialog (modal) ---
     /// Open the Quick Claude dialog.
     QuickClaudeDialogOpen,
@@ -2535,9 +2536,6 @@ impl GodlyApp {
                 self.quick_claude_layout = QuickClaudeLayout::Single;
             }
             Message::QuickClaudeLaunchPreset(index) => {
-                if self.quick_claude_launch.is_some() {
-                    return Task::none();
-                }
                 let Some(preset) = self.quick_claude_presets.get(index).cloned() else {
                     return Task::none();
                 };
@@ -2578,20 +2576,20 @@ impl GodlyApp {
                     preset.name.clone(),
                     steps,
                     num_agents,
-                    ws_id,
+                    ws_id.clone(),
                     true, // new workspace
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
-                self.quick_claude_launch = Some(launch_state);
+                self.quick_claude_launches.push(launch_state);
                 self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
-                return self.execute_next_launch_step();
+                return self.execute_next_launch_step(&ws_id);
             }
-            Message::QuickClaudeLaunchStepComplete(result) => {
-                return self.handle_launch_step_result(result);
+            Message::QuickClaudeLaunchStepComplete(ws_id, result) => {
+                return self.handle_launch_step_result(ws_id, result);
             }
-            Message::QuickClaudeLaunchCancel => {
-                self.quick_claude_launch = None;
+            Message::QuickClaudeLaunchCancel(ws_id) => {
+                self.quick_claude_launches.retain(|l| l.workspace_id != ws_id);
             }
             // --- Quick Claude Dialog (modal) ---
             Message::QuickClaudeDialogOpen => {
@@ -2787,9 +2785,6 @@ impl GodlyApp {
                 }
             }
             Message::QuickClaudeDialogLaunch => {
-                if self.quick_claude_launch.is_some() {
-                    return Task::none();
-                }
                 let Some(dlg) = self.quick_claude_dialog.take() else {
                     return Task::none();
                 };
@@ -2898,9 +2893,10 @@ impl GodlyApp {
                 let _ = crate::quick_claude_sessions::add_session(session_record);
                 launch_state.session_record_id = Some(record_id);
 
-                self.quick_claude_launch = Some(launch_state);
+                let launch_ws_id = launch_state.workspace_id.clone();
+                self.quick_claude_launches.push(launch_state);
                 self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
-                return self.execute_next_launch_step();
+                return self.execute_next_launch_step(&launch_ws_id);
             }
             Message::QuickClaudeDialogVoice => {
                 // Voice integration — forward to whisper toggle if available
@@ -3021,9 +3017,6 @@ impl GodlyApp {
                 }
             }
             Message::QuickClaudeDialogResume => {
-                if self.quick_claude_launch.is_some() {
-                    return Task::none();
-                }
                 let Some(dlg) = self.quick_claude_dialog.take() else {
                     return Task::none();
                 };
@@ -3091,9 +3084,10 @@ impl GodlyApp {
                 );
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id);
 
-                self.quick_claude_launch = Some(launch_state);
+                let launch_ws_id = launch_state.workspace_id.clone();
+                self.quick_claude_launches.push(launch_state);
                 self.enqueue_toast("Quick Claude".into(), "Resuming in background...".into());
-                return self.execute_next_launch_step();
+                return self.execute_next_launch_step(&launch_ws_id);
             }
             Message::AiToolNameInputChanged(value) => {
                 self.ai_tool_name_input = value;
@@ -5412,17 +5406,11 @@ impl GodlyApp {
                 } else {
                     BG_SECONDARY()
                 };
-                let is_launching = self.quick_claude_launch.is_some();
-                let launch_button: Element<'_, Message> = if is_launching {
-                    button(text("...").size(11).color(TEXT_SECONDARY()))
-                        .padding(Padding::from([2, 7]))
-                        .into()
-                } else {
+                let launch_button: Element<'_, Message> =
                     button(text("Launch").size(11).color(ACCENT()))
                         .on_press(Message::QuickClaudeLaunchPreset(index))
                         .padding(Padding::from([2, 7]))
-                        .into()
-                };
+                        .into();
                 let card = container(column![
                     row![
                         text(&preset.name).size(13).color(TEXT_ACTIVE()),
@@ -5484,27 +5472,32 @@ impl GodlyApp {
                 .spacing(8),
                 text("Saved Presets").size(12).color(TEXT_SECONDARY()),
                 {
-                    let launch_status: Element<'_, Message> = if let Some(launch) = &self.quick_claude_launch {
-                        let step = launch.current_step;
-                        let total = launch.total_steps();
-                        if let Some(ref err) = launch.error {
-                            column![
-                                text(format!("Launch failed: {}", err)).size(11).color(iced::Color::from_rgb(0.9, 0.3, 0.3)),
-                                button(text("Dismiss").size(11).color(TEXT_PRIMARY()))
-                                    .on_press(Message::QuickClaudeLaunchCancel)
-                                    .padding(Padding::from([2, 7])),
-                            ].spacing(4).into()
-                        } else {
-                            row![
-                                text(format!("Launching {}... step {}/{}", launch.preset_name, step + 1, total))
-                                    .size(11).color(ACCENT()),
-                                button(text("Cancel").size(11).color(TEXT_PRIMARY()))
-                                    .on_press(Message::QuickClaudeLaunchCancel)
-                                    .padding(Padding::from([2, 7])),
-                            ].spacing(8).align_y(iced::Alignment::Center).into()
-                        }
-                    } else {
+                    let launch_status: Element<'_, Message> = if self.quick_claude_launches.is_empty() {
                         Space::new().height(0).into()
+                    } else {
+                        let mut status_col = column![].spacing(4);
+                        for launch in &self.quick_claude_launches {
+                            let ws_id = launch.workspace_id.clone();
+                            let step = launch.current_step;
+                            let total = launch.total_steps();
+                            if let Some(ref err) = launch.error {
+                                status_col = status_col.push(column![
+                                    text(format!("Launch failed: {}", err)).size(11).color(iced::Color::from_rgb(0.9, 0.3, 0.3)),
+                                    button(text("Dismiss").size(11).color(TEXT_PRIMARY()))
+                                        .on_press(Message::QuickClaudeLaunchCancel(ws_id))
+                                        .padding(Padding::from([2, 7])),
+                                ].spacing(4));
+                            } else {
+                                status_col = status_col.push(row![
+                                    text(format!("Launching {}... step {}/{}", launch.preset_name, step + 1, total))
+                                        .size(11).color(ACCENT()),
+                                    button(text("Cancel").size(11).color(TEXT_PRIMARY()))
+                                        .on_press(Message::QuickClaudeLaunchCancel(ws_id))
+                                        .padding(Padding::from([2, 7])),
+                                ].spacing(8).align_y(iced::Alignment::Center));
+                            }
+                        }
+                        status_col.into()
                     };
                     launch_status
                 },
@@ -6585,11 +6578,10 @@ impl GodlyApp {
 
     pub(crate) fn delete_workspace(&mut self, workspace_id: &str) -> Task<Message> {
         // Cancel any in-flight Quick Claude launch targeting this workspace
-        if let Some(ref launch) = self.quick_claude_launch {
-            if launch.workspace_id == workspace_id {
-                log::warn!("Cancelling Quick Claude launch: target workspace is being deleted");
-                self.quick_claude_launch = None;
-            }
+        let had_launch = self.quick_claude_launches.iter().any(|l| l.workspace_id == workspace_id);
+        if had_launch {
+            log::warn!("Cancelling Quick Claude launch: target workspace is being deleted");
+            self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
         }
 
         let terminal_ids: Vec<String> = self
@@ -7920,15 +7912,16 @@ impl GodlyApp {
     // Quick Claude Launcher
     // -----------------------------------------------------------------------
 
-    fn execute_next_launch_step(&mut self) -> Task<Message> {
-        let launch = match &self.quick_claude_launch {
+    fn execute_next_launch_step(&mut self, workspace_id: &str) -> Task<Message> {
+        let launch = match self.quick_claude_launches.iter().find(|l| l.workspace_id == workspace_id) {
             Some(l) if !l.completed && l.error.is_none() => l,
             _ => return Task::none(),
         };
 
         let step_index = launch.current_step;
         if step_index >= launch.steps.len() {
-            return self.finalize_launch();
+            let ws_id = workspace_id.to_string();
+            return self.finalize_launch(&ws_id);
         }
 
         let mut step = launch.steps[step_index].clone();
@@ -7939,6 +7932,7 @@ impl GodlyApp {
             }
         }
         let agent_ids = launch.agent_terminal_ids.clone();
+        let ws_id_for_msg = workspace_id.to_string();
 
         let Some(client) = &self.client else {
             return Task::none();
@@ -7957,22 +7951,23 @@ impl GodlyApp {
                 });
                 rx.await.unwrap_or_else(|_| Err("Launch step thread panicked".into()))
             },
-            Message::QuickClaudeLaunchStepComplete,
+            move |result| Message::QuickClaudeLaunchStepComplete(ws_id_for_msg, result),
         )
     }
 
     fn handle_launch_step_result(
         &mut self,
+        workspace_id: String,
         result: Result<crate::quick_claude::StepResult, String>,
     ) -> Task<Message> {
-        if self.quick_claude_launch.is_none() {
+        if !self.quick_claude_launches.iter().any(|l| l.workspace_id == workspace_id) {
             return Task::none();
         }
 
         match result {
             Ok(step_result) => {
-                let (agent_index_opt, placeholder_opt, ws_id) = {
-                    let launch = self.quick_claude_launch.as_ref().unwrap();
+                let (agent_index_opt, placeholder_opt) = {
+                    let launch = self.quick_claude_launches.iter().find(|l| l.workspace_id == workspace_id).unwrap();
                     let si = launch.current_step;
                     let ai = launch.steps.get(si).and_then(|step| {
                         if let crate::quick_claude::LaunchStep::CreateTerminal { agent_index, .. } = step {
@@ -7986,14 +7981,13 @@ impl GodlyApp {
                     } else {
                         None
                     };
-                    let wid = launch.workspace_id.clone();
-                    (ai, ph, wid)
+                    (ai, ph)
                 };
 
                 // Handle WorktreeCreated: override the CWD of the next
                 // CreateTerminal step for this agent.
                 if let crate::quick_claude::StepResult::WorktreeCreated { ref worktree_path } = step_result {
-                    if let Some(launch) = &mut self.quick_claude_launch {
+                    if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
                         let si = launch.current_step;
                         let agent_idx = launch.steps.get(si).and_then(|step| {
                             match step {
@@ -8024,7 +8018,7 @@ impl GodlyApp {
                     if let Some(agent_index) = agent_index_opt {
                         if agent_index == 0 {
                             if let Some(placeholder) = placeholder_opt {
-                                if let Some(ws) = self.workspaces.get_mut(&ws_id) {
+                                if let Some(ws) = self.workspaces.get_mut(&workspace_id) {
                                     // Replace placeholder in layout (only meaningful
                                     // for new workspaces where placeholder is the
                                     // initial leaf; for existing workspaces the
@@ -8039,7 +8033,7 @@ impl GodlyApp {
                             }
                         }
 
-                        if let Some(launch) = &mut self.quick_claude_launch {
+                        if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
                             launch.agent_terminal_ids[agent_index] = Some(session_id.clone());
                             // Update session record terminal_id
                             if let Some(ref record_id) = launch.session_record_id {
@@ -8058,14 +8052,14 @@ impl GodlyApp {
                             session_id.clone(),
                             rows,
                             cols,
-                            ws_id,
+                            workspace_id.clone(),
                         );
                         // Background launch: do NOT switch focus
                         self.entering_tabs
                             .insert(session_id.clone(), Self::now_ms());
 
                         // Apply pending worktree path so terminal cleanup works on close
-                        if let Some(launch) = &mut self.quick_claude_launch {
+                        if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
                             if let Some(wt_path) = launch.pending_worktree_path.take() {
                                 self.terminals.set_worktree_path(session_id, wt_path);
                             }
@@ -8076,10 +8070,10 @@ impl GodlyApp {
                     }
                 }
 
-                if let Some(launch) = &mut self.quick_claude_launch {
+                if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
                     launch.current_step += 1;
                 }
-                self.execute_next_launch_step()
+                self.execute_next_launch_step(&workspace_id)
             }
             Err(e) => {
                 log::error!("Quick Claude launch step failed: {}", e);
@@ -8087,14 +8081,14 @@ impl GodlyApp {
                     "Quick Claude Failed".to_string(),
                     e,
                 );
-                self.quick_claude_launch = None;
+                self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
                 Task::none()
             }
         }
     }
 
-    fn finalize_launch(&mut self) -> Task<Message> {
-        let launch = match &mut self.quick_claude_launch {
+    fn finalize_launch(&mut self, workspace_id: &str) -> Task<Message> {
+        let launch = match self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
             Some(l) => l,
             None => return Task::none(),
         };
@@ -8107,24 +8101,24 @@ impl GodlyApp {
             .collect();
 
         if terminal_ids.is_empty() {
-            self.quick_claude_launch = None;
+            self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
             return Task::none();
         }
 
         let num_agents = terminal_ids.len();
         let ws_id = launch.workspace_id.clone();
         let is_new_workspace = launch.is_new_workspace;
+        let launch_name = launch.preset_name.clone();
 
         // Only set up the workspace layout for NEW workspaces.
         // For existing workspaces the terminal is already in the tab bar;
         // modifying the layout would destroy the user's current view.
         if is_new_workspace {
             let two_agent_direction = {
-                let preset_name = launch.preset_name.clone();
                 let matching_preset = self
                     .quick_claude_presets
                     .iter()
-                    .find(|p| p.name == preset_name);
+                    .find(|p| p.name == launch_name);
                 match matching_preset.map(|p| p.layout) {
                     Some(QuickClaudeLayout::HSplit) => SplitDirection::Vertical,
                     _ => SplitDirection::Horizontal,
@@ -8187,10 +8181,7 @@ impl GodlyApp {
             }
         }
 
-        let launch_name = self.quick_claude_launch.as_ref()
-            .map(|l| l.preset_name.clone())
-            .unwrap_or_default();
-        self.quick_claude_launch = None;
+        self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
         self.enqueue_toast(
             "Quick Claude Ready".into(),
             format!("{} is ready", launch_name),
