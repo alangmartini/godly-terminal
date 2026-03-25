@@ -17,18 +17,21 @@ pub const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 pub const SIDEBAR_MAX_WIDTH: f32 = 420.0;
 /// Resize handle width in logical pixels.
 pub const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
-const HEADER_ICON_SIZE: f32 = 16.0;
 
-/// Codicon: folder (workspace icon)
-const ICON_FOLDER: &str = "\u{EA83}";
-
-/// Codicon icon font for workspace and header icons.
+/// Codicon font for pixel-hinted icons.
 const CODICON_FONT: Font = Font {
     family: iced::font::Family::Name("codicon"),
     weight: iced::font::Weight::Normal,
     stretch: iced::font::Stretch::Normal,
     style: iced::font::Style::Normal,
 };
+
+/// Codicon: gear (settings)
+const ICON_SETTINGS: &str = "\u{EB51}";
+/// Codicon: add (new workspace)
+const ICON_ADD: &str = "\u{EA60}";
+/// Codicon: folder (workspace icon)
+const ICON_FOLDER: &str = "\u{EA83}";
 
 /// Clamp a sidebar width into the supported resize range.
 pub fn clamp_sidebar_width(width: f32) -> f32 {
