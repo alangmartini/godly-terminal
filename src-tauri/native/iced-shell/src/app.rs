@@ -3671,12 +3671,12 @@ impl GodlyApp {
                 if let Some(cf_path) = self.cf_cloudflared_path.clone() {
                     return Task::perform(
                         async move {
-                            let (tx, rx) = futures_channel::oneshot::channel();
+                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
                             std::thread::spawn(move || {
                                 let result = crate::cf_tunnel::cloudflared_login(&cf_path);
                                 let _ = tx.send(result);
                             });
-                            rx.await.unwrap_or(Err("Login panicked".into()))
+                            rx.await.unwrap_or(Err("Login panicked".to_string()))
                         },
                         Message::CfLoginDone,
                     );
@@ -3699,7 +3699,7 @@ impl GodlyApp {
                     }
                     return Task::perform(
                         async move {
-                            let (tx, rx) = futures_channel::oneshot::channel();
+                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
                             std::thread::spawn(move || {
                                 let r = crate::cf_tunnel::create_tunnel(&cf_path, &name)
                                     .and_then(|_| {
@@ -3713,7 +3713,7 @@ impl GodlyApp {
                                     });
                                 let _ = tx.send(r);
                             });
-                            rx.await.unwrap_or(Err("Create panicked".into()))
+                            rx.await.unwrap_or(Err("Create panicked".to_string()))
                         },
                         Message::CfCreateTunnelDone,
                     );
@@ -3785,7 +3785,7 @@ impl GodlyApp {
                 let old_app_id = self.cf_tunnel_prefs.access_app_id.clone();
                 return Task::perform(
                     async move {
-                        let (tx, rx) = futures_channel::oneshot::channel();
+                        let (tx, rx) = futures_channel::oneshot::channel::<Result<String, String>>();
                         std::thread::spawn(move || {
                             // Remove old app if exists
                             if !old_app_id.is_empty() {
@@ -3800,7 +3800,7 @@ impl GodlyApp {
                             );
                             let _ = tx.send(result);
                         });
-                        rx.await.unwrap_or(Err("Access setup panicked".into()))
+                        rx.await.unwrap_or(Err("Access setup panicked".to_string()))
                     },
                     Message::CfSetupAccessDone,
                 );
@@ -3829,14 +3829,14 @@ impl GodlyApp {
                 }
                 return Task::perform(
                     async move {
-                        let (tx, rx) = futures_channel::oneshot::channel();
+                        let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
                         std::thread::spawn(move || {
                             let result = crate::cf_tunnel::remove_cloudflare_access(
                                 &token, &acct, &app_id,
                             );
                             let _ = tx.send(result);
                         });
-                        rx.await.unwrap_or(Err("Access removal panicked".into()))
+                        rx.await.unwrap_or(Err("Access removal panicked".to_string()))
                     },
                     Message::CfRemoveAccessDone,
                 );
