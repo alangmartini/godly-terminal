@@ -141,9 +141,16 @@ pub fn default_launch_steps(
     };
     // Pass prompt as CLI positional argument
     if !effective_prompt.is_empty() {
+        // Collapse newlines/carriage-returns into spaces — embedded newlines in
+        // the PTY write buffer are interpreted as Enter keypresses by the shell,
+        // splitting the command across multiple input lines.
+        let oneline = effective_prompt
+            .replace("\r\n", " ")
+            .replace('\r', " ")
+            .replace('\n', " ");
         // Shell-escape: wrap in single quotes, escape embedded single quotes
         // PowerShell escapes single quotes by doubling them: 'isn''t' -> isn't
-        let escaped = effective_prompt.replace('\'', "''");
+        let escaped = oneline.replace('\'', "''");
         cmd.push_str(&format!(" '{}'", escaped));
     }
 
@@ -692,6 +699,20 @@ mod tests {
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             // PowerShell escapes single quotes by doubling them
             assert!(command.contains("'fix it''s broken'"), "got: {command}");
+        } else {
+            panic!("Expected RunCommand");
+        }
+    }
+
+    #[test]
+    fn default_steps_prompt_with_embedded_newlines() {
+        let prompt = "Lets implement it :)\n\n   ⎿  Error\nclaude stuff";
+        let steps = default_launch_steps(1, prompt, "sonnet", "auto", None, &[], IsolationMode::None, None);
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            // Newlines must be collapsed to spaces so the command stays on one PTY line
+            assert!(!command.contains('\n'), "command must not contain newlines: {command}");
+            assert!(!command.contains('\r'), "command must not contain carriage returns: {command}");
+            assert!(command.contains("Lets implement it :)"), "got: {command}");
         } else {
             panic!("Expected RunCommand");
         }
