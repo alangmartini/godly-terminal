@@ -35,6 +35,7 @@ pub mod font_enumerator;
 pub mod git_worktree;
 pub mod phone_remote;
 pub mod claude_code_manager;
+pub mod mcp_install_prompt;
 pub mod cf_tunnel;
 
 #[cfg(test)]

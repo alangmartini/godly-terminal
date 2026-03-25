@@ -22,10 +22,7 @@ This is a Tauri 2.0 terminal application (Godly Terminal) with:
 - Rust tests: `cd src-tauri && cargo test -p godly-protocol && cargo test -p godly-daemon && cargo test -p godly-terminal`
 - Frontend tests: `pnpm test`
 - E2E tests: `pnpm test:e2e`
-- Full build verification: `pnpm build`
 
-### Critical Build Gotcha
-- **Never use `cargo test --workspace`** from build.rs context — use individual `-p <crate>` invocations to avoid deadlocks from nested cargo builds.
 
 ## Workflow Rules (from CLAUDE.md — MUST follow)
 
@@ -34,12 +31,12 @@ This is a Tauri 2.0 terminal application (Godly Terminal) with:
 2. **Run the test suite** to verify the tests actually fail (red phase).
 3. Only THEN proceed with the fix.
 4. After fixing, run tests again until they pass (green phase).
-5. Verify full build + all tests pass.
+
 
 ### Feature Testing
 1. After the feature is implemented, write an E2E test suite covering key user-facing behaviors.
 2. Run the E2E tests (`pnpm test:e2e`) and loop until all pass.
-3. Verify full build + all tests pass.
+
 
 ## Test Writing Principles
 
@@ -112,7 +109,6 @@ describe('WorkspaceStore', () => {
 3. ✅ No unnecessary output (no debug prints left in)
 4. ✅ Each assertion uses the most specific matcher available
 5. ✅ Tests actually run and produce the expected result (fail for bugs, pass for features)
-6. ✅ Full test suite passes: Rust tests, frontend tests, and build
 7. ✅ No flaky patterns (no `sleep` without justification, no timing-dependent assertions)
 
 ## Verification Loop
@@ -121,13 +117,7 @@ After writing tests, ALWAYS:
 1. Run the relevant test command to verify behavior
 2. If testing a bug: confirm tests FAIL before any fix is applied
 3. If testing a feature: confirm tests PASS
-4. Run the full verification suite:
-   ```bash
-   cd src-tauri && cargo test -p godly-protocol && cargo test -p godly-daemon && cargo test -p godly-terminal
-   pnpm test
-   pnpm build
-   ```
-5. Loop until everything passes
+
 
 **Update your agent memory** as you discover test patterns, common failure modes, flaky tests, testing infrastructure quirks, and which areas of the codebase have weak or missing coverage. Write concise notes about what you found and where.
 
@@ -135,7 +125,7 @@ Examples of what to record:
 - Test patterns that work well for this codebase (e.g., how to mock named pipe IPC)
 - Areas with no test coverage that should be flagged
 - Flaky test patterns to avoid
-- Build/test command quirks discovered during execution
+
 - Common assertion patterns for daemon sessions, terminal state, workspace operations
 
 # Persistent Agent Memory

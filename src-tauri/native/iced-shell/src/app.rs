@@ -532,6 +532,8 @@ pub struct GodlyApp {
     use_pixel_renderer: bool,
     /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
     pub(crate) file_panes: HashMap<String, FilePaneState>,
+    /// Whether the MCP install prompt banner has been dismissed.
+    mcp_install_prompt_dismissed: bool,
 }
 
 impl Default for GodlyApp {
@@ -681,6 +683,7 @@ impl Default for GodlyApp {
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
             use_pixel_renderer: false,
             file_panes: HashMap::new(),
+            mcp_install_prompt_dismissed: crate::mcp_install_prompt::is_dismissed(),
         }
     }
 }
@@ -1141,6 +1144,11 @@ pub enum Message {
     FilePaneFileChanged { pane_id: String, content: String },
     /// Periodic tick to check file modification times.
     FilePaneWatchTick,
+    // --- MCP Install Prompt ---
+    /// User dismissed the MCP install prompt banner.
+    McpInstallDismiss,
+    /// User clicked "Learn more" on the MCP install prompt.
+    McpInstallLearnMore,
 }
 
 /// Result of initialization — either a fresh terminal or recovered sessions.
@@ -4537,6 +4545,28 @@ impl GodlyApp {
                     }
                 }
             }
+            Message::McpInstallDismiss => {
+                self.mcp_install_prompt_dismissed = true;
+                crate::mcp_install_prompt::save_dismissed();
+            }
+            Message::McpInstallLearnMore => {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", "start", "", "https://godly.website/docs/mcp"])
+                        .creation_flags(0x08000000)
+                        .spawn();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg("https://godly.website/docs/mcp")
+                        .spawn();
+                }
+                self.mcp_install_prompt_dismissed = true;
+                crate::mcp_install_prompt::save_dismissed();
+            }
         }
         Task::none()
     }
@@ -4703,13 +4733,21 @@ impl GodlyApp {
             });
         let status_bar_el: Element<'_, Message> = status_bar::view_status_bar(status_info);
 
-        let main_area = column![
+        let mut main_area = column![
             tab_bar,
             container(terminal_view).height(Length::Fill),
-            status_bar_el,
         ]
         .width(Length::Fill)
         .height(Length::Fill);
+
+        // MCP install prompt banner — sits above the status bar.
+        if let Some(banner) = crate::mcp_install_prompt::view_mcp_install_banner(
+            self.mcp_install_prompt_dismissed,
+        ) {
+            main_area = main_area.push(banner);
+        }
+
+        let main_area = main_area.push(status_bar_el);
 
         let sidebar_width = self.current_sidebar_width();
         let body_content: Element<'_, Message> = if sidebar_width > 0.0 {

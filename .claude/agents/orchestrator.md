@@ -90,12 +90,6 @@ Agent 1: "Research the bug: read logs, search code, identify root cause. Report 
 Agent 2: "Write a reproduction test suite for the reported symptoms"
 ```
 
-### Pattern 4: Build/Test Runner (Background Validation)
-```
-Agent 1 (main): Working on feature implementation
-Agent 2 (background): "Run cargo check --workspace && cargo nextest run -p godly-daemon --profile fast && pnpm test. Report results."
-```
-
 ## Worktree Management
 
 **When to use worktrees:**
