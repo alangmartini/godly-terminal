@@ -1,30 +1,27 @@
-//! MCP pipe client for layout operations (split, resize, etc.).
-//!
-//! Connects to the MCP named pipe and sends `McpRequest` messages.
-//! This is a stub — the pane/session commands (implemented by other units)
-//! will use this client.
-
-use std::io::Write;
+use std::io;
+use std::sync::Mutex;
 
 use godly_protocol::{McpRequest, McpResponse};
 
-/// Client for the Godly Terminal MCP pipe.
-pub struct McpClient {
-    pipe: std::fs::File,
+/// Client that communicates with the Godly Terminal app via the MCP named pipe.
+pub struct McpPipeClient {
+    pipe: Mutex<std::fs::File>,
 }
 
-impl McpClient {
+impl McpPipeClient {
     /// Connect to the MCP named pipe.
     #[cfg(windows)]
     pub fn connect() -> Result<Self, String> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::FromRawHandle;
         use winapi::um::errhandlingapi::GetLastError;
         use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
         use winapi::um::handleapi::INVALID_HANDLE_VALUE;
         use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE, GENERIC_READ, GENERIC_WRITE};
 
         let pipe_name_str = godly_protocol::mcp_pipe_name();
+
         let pipe_name: Vec<u16> = OsStr::new(&pipe_name_str)
             .encode_wide()
             .chain(std::iter::once(0))
@@ -45,29 +42,40 @@ impl McpClient {
         if handle == INVALID_HANDLE_VALUE {
             let err = unsafe { GetLastError() };
             return Err(format!(
-                "cannot connect to MCP pipe (error: {}). Is Godly Terminal running?",
-                err
+                "Cannot connect to MCP pipe '{}' (error: {}). Is Godly Terminal running?",
+                pipe_name_str, err
             ));
         }
 
-        use std::os::windows::io::FromRawHandle;
         let pipe = unsafe { std::fs::File::from_raw_handle(handle as _) };
-        Ok(Self { pipe })
+
+        Ok(Self {
+            pipe: Mutex::new(pipe),
+        })
     }
 
     #[cfg(not(windows))]
     pub fn connect() -> Result<Self, String> {
-        Err("MCP pipe is only supported on Windows".to_string())
+        Err("MCP named pipes are only supported on Windows".to_string())
     }
 
     /// Send an MCP request and wait for the response.
-    pub fn request(&mut self, req: &McpRequest) -> Result<McpResponse, String> {
-        godly_protocol::write_message(&mut self.pipe, req)
-            .map_err(|e| format!("MCP write error: {}", e))?;
-        self.pipe.flush().ok();
+    pub fn send_request(&self, request: &McpRequest) -> Result<McpResponse, io::Error> {
+        let mut pipe = self
+            .pipe
+            .lock()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Mutex poisoned: {}", e)))?;
 
-        godly_protocol::read_message::<_, McpResponse>(&mut self.pipe)
-            .map_err(|e| format!("MCP read error: {}", e))?
-            .ok_or_else(|| "MCP pipe closed".to_string())
+        godly_protocol::write_message(&mut *pipe, request)?;
+        use std::io::Write;
+        pipe.flush().ok();
+
+        match godly_protocol::read_message::<_, McpResponse>(&mut *pipe)? {
+            Some(response) => Ok(response),
+            None => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "MCP pipe closed",
+            )),
+        }
     }
 }

@@ -195,6 +195,7 @@ struct FlowEntry {
 }
 
 use crate::phone_remote::{PhoneRemotePreferences, PhoneRemoteStatus};
+use crate::cf_tunnel::{CfTunnelPreferences, CfTunnelStatus, CfTunnelMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToastNotification {
@@ -272,6 +273,16 @@ impl PaneRect {
 
         Point::new(point.x.clamp(self.x, max_x), point.y.clamp(self.y, max_y))
     }
+}
+
+/// Progress information for a Quick Claude launch, used to render loading overlays.
+struct LaunchProgressInfo {
+    preset_name: String,
+    step_label: &'static str,
+    current_step: usize,
+    total_steps: usize,
+    /// True if the terminal pane is still the placeholder (no grid data yet).
+    is_placeholder: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,6 +438,28 @@ pub struct GodlyApp {
     phone_remote_api_key_input: String,
     /// Phone remote settings form: password input.
     phone_remote_password_input: String,
+    /// Cloudflare tunnel preferences (persisted).
+    cf_tunnel_prefs: CfTunnelPreferences,
+    /// Cloudflare tunnel runtime status.
+    cf_tunnel_status: CfTunnelStatus,
+    /// Cloudflare tunnel child process handle.
+    cf_tunnel_process: Option<std::process::Child>,
+    /// Public URL of the running tunnel.
+    cf_tunnel_url: String,
+    /// Detected path to cloudflared binary (None = not found).
+    cf_cloudflared_path: Option<std::path::PathBuf>,
+    /// Whether cloudflared login check has been done / result.
+    cf_logged_in: Option<bool>,
+    /// CF tunnel form: tunnel name input.
+    cf_tunnel_name_input: String,
+    /// CF tunnel form: hostname input.
+    cf_hostname_input: String,
+    /// CF tunnel form: API token input.
+    cf_api_token_input: String,
+    /// CF tunnel form: account ID input.
+    cf_account_id_input: String,
+    /// CF tunnel form: access email input.
+    cf_access_email_input: String,
     /// Active toast notifications rendered as overlay cards.
     toasts: Vec<ToastNotification>,
     /// Monotonic id source for toast notifications.
@@ -508,6 +541,14 @@ impl Default for GodlyApp {
         let phone_port_input = phone_prefs.port.to_string();
         let phone_key_input = phone_prefs.api_key.clone();
         let phone_password_input = phone_prefs.password.clone();
+
+        let cf_prefs = crate::cf_tunnel::load_preferences();
+        let cf_cloudflared_path = crate::cf_tunnel::find_cloudflared();
+        let cf_tunnel_name_input = cf_prefs.tunnel_name.clone();
+        let cf_hostname_input = cf_prefs.hostname.clone();
+        let cf_api_token_input = cf_prefs.api_token.clone();
+        let cf_account_id_input = cf_prefs.account_id.clone();
+        let cf_access_email_input = cf_prefs.access_email.clone();
         Self {
             client: None,
             terminals: TerminalCollection::new(),
@@ -578,6 +619,17 @@ impl Default for GodlyApp {
             phone_remote_port_input: phone_port_input,
             phone_remote_api_key_input: phone_key_input,
             phone_remote_password_input: phone_password_input,
+            cf_tunnel_prefs: cf_prefs,
+            cf_tunnel_status: CfTunnelStatus::Stopped,
+            cf_tunnel_process: None,
+            cf_tunnel_url: String::new(),
+            cf_cloudflared_path,
+            cf_logged_in: None,
+            cf_tunnel_name_input,
+            cf_hostname_input,
+            cf_api_token_input,
+            cf_account_id_input,
+            cf_access_email_input,
             toasts: Vec::new(),
             next_toast_id: 1,
             dragging_tab_id: None,
@@ -912,6 +964,44 @@ pub enum Message {
     PhoneRemoteCopyUrl,
     /// Copy the API key to clipboard.
     PhoneRemoteCopyApiKey,
+    /// Toggle Cloudflare tunnel on/off.
+    CfTunnelToggle,
+    /// Switch tunnel mode (true = quick, false = named).
+    CfTunnelModeChanged(bool),
+    /// CF tunnel name input changed.
+    CfTunnelNameChanged(String),
+    /// CF hostname input changed.
+    CfHostnameChanged(String),
+    /// CF API token input changed.
+    CfApiTokenChanged(String),
+    /// CF account ID input changed.
+    CfAccountIdChanged(String),
+    /// CF access email input changed.
+    CfAccessEmailChanged(String),
+    /// Initiate cloudflared login (opens browser).
+    CfLogin,
+    /// Result of cloudflared login.
+    CfLoginDone(Result<(), String>),
+    /// Create a named tunnel + DNS route.
+    CfCreateTunnel,
+    /// Result of tunnel creation.
+    CfCreateTunnelDone(Result<(), String>),
+    /// Quick tunnel started — Ok(url) or Err(msg).
+    CfTunnelStarted(Result<String, String>),
+    /// Named tunnel health-check result.
+    CfNamedTunnelStarted(Result<(), String>),
+    /// Setup Cloudflare Access protection.
+    CfSetupAccess,
+    /// Result of Access setup — Ok(app_id) or Err(msg).
+    CfSetupAccessDone(Result<String, String>),
+    /// Remove Cloudflare Access protection.
+    CfRemoveAccess,
+    /// Result of Access removal.
+    CfRemoveAccessDone(Result<(), String>),
+    /// Save CF tunnel settings to disk.
+    CfSaveSettings,
+    /// Copy tunnel URL to clipboard.
+    CfCopyTunnelUrl,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
     /// Periodic autosave of session state so workspace layout survives crashes.
@@ -1565,6 +1655,10 @@ impl GodlyApp {
             crate::phone_remote::stop_remote_server(child);
         }
         self.phone_remote_process = None;
+        if let Some(ref mut child) = self.cf_tunnel_process {
+            crate::cf_tunnel::stop_tunnel(child);
+        }
+        self.cf_tunnel_process = None;
     }
 
     pub fn title(&self) -> String {
@@ -2579,7 +2673,8 @@ impl GodlyApp {
                     ws_id.clone(),
                     true, // new workspace
                 );
-                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
+                launch_state.placeholder_ids.insert(placeholder_id);
 
                 self.quick_claude_launches.push(launch_state);
                 self.enqueue_toast("Quick Claude".into(), "Launching in background...".into());
@@ -2871,7 +2966,8 @@ impl GodlyApp {
                     ws_id.clone(),
                     is_new_ws,
                 );
-                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
+                launch_state.placeholder_ids.insert(placeholder_id);
                 launch_state.is_clone = dlg.batch_clone_mode;
 
                 // Record session for resume tracking
@@ -3082,7 +3178,8 @@ impl GodlyApp {
                     ws_id,
                     is_new_ws,
                 );
-                launch_state.agent_terminal_ids[0] = Some(placeholder_id);
+                launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
+                launch_state.placeholder_ids.insert(placeholder_id);
 
                 let launch_ws_id = launch_state.workspace_id.clone();
                 self.quick_claude_launches.push(launch_state);
@@ -3448,6 +3545,332 @@ impl GodlyApp {
             }
             Message::PhoneRemoteCopyApiKey => {
                 return iced::clipboard::write(self.phone_remote_prefs.api_key.clone());
+            }
+            // ── Cloudflare Tunnel handlers ──────────────────────────────
+            Message::CfTunnelToggle => {
+                let cf_path = match &self.cf_cloudflared_path {
+                    Some(p) => p.clone(),
+                    None => {
+                        self.cf_tunnel_status =
+                            CfTunnelStatus::Failed("cloudflared not found".into());
+                        return Task::none();
+                    }
+                };
+                match &self.cf_tunnel_status {
+                    CfTunnelStatus::Stopped | CfTunnelStatus::Failed(_) => {
+                        // Apply form inputs to prefs
+                        self.cf_tunnel_prefs.tunnel_name =
+                            self.cf_tunnel_name_input.trim().to_string();
+                        self.cf_tunnel_prefs.hostname =
+                            self.cf_hostname_input.trim().to_string();
+                        crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
+
+                        let port = self.phone_remote_prefs.port;
+                        match self.cf_tunnel_prefs.mode {
+                            CfTunnelMode::Quick => {
+                                match crate::cf_tunnel::spawn_quick_tunnel(&cf_path, port) {
+                                    Ok(mut child) => {
+                                        let stderr = child.stderr.take();
+                                        self.cf_tunnel_process = Some(child);
+                                        self.cf_tunnel_status = CfTunnelStatus::Starting;
+                                        if let Some(stderr) = stderr {
+                                            let rx =
+                                                crate::cf_tunnel::read_quick_tunnel_url(stderr);
+                                            return Task::perform(
+                                                async move {
+                                                    match rx.await {
+                                                        Ok(url) => Ok(url),
+                                                        Err(_) => Err(
+                                                            "Could not detect tunnel URL"
+                                                                .to_string(),
+                                                        ),
+                                                    }
+                                                },
+                                                Message::CfTunnelStarted,
+                                            );
+                                        } else {
+                                            self.cf_tunnel_status = CfTunnelStatus::Failed(
+                                                "No stderr pipe".into(),
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.cf_tunnel_status = CfTunnelStatus::Failed(e);
+                                    }
+                                }
+                            }
+                            CfTunnelMode::Named => {
+                                let name = self.cf_tunnel_prefs.tunnel_name.clone();
+                                if name.is_empty() {
+                                    self.cf_tunnel_status = CfTunnelStatus::Failed(
+                                        "Tunnel name is required".into(),
+                                    );
+                                    return Task::none();
+                                }
+                                match crate::cf_tunnel::spawn_named_tunnel(&cf_path, &name) {
+                                    Ok(child) => {
+                                        self.cf_tunnel_process = Some(child);
+                                        self.cf_tunnel_status = CfTunnelStatus::Starting;
+                                        let hostname =
+                                            self.cf_tunnel_prefs.hostname.clone();
+                                        // Health-check: wait then verify the process is alive
+                                        return Task::perform(
+                                            async move {
+                                                let (tx, rx) =
+                                                    futures_channel::oneshot::channel();
+                                                std::thread::spawn(move || {
+                                                    std::thread::sleep(
+                                                        std::time::Duration::from_secs(3),
+                                                    );
+                                                    let _ = tx.send(Ok(()));
+                                                });
+                                                rx.await
+                                                    .unwrap_or(Err("check panicked".into()))
+                                            },
+                                            move |r: Result<(), String>| {
+                                                Message::CfNamedTunnelStarted(
+                                                    r.map(|_| ()),
+                                                )
+                                            },
+                                        );
+                                    }
+                                    Err(e) => {
+                                        self.cf_tunnel_status = CfTunnelStatus::Failed(e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    CfTunnelStatus::Running | CfTunnelStatus::Starting => {
+                        if let Some(ref mut child) = self.cf_tunnel_process {
+                            crate::cf_tunnel::stop_tunnel(child);
+                        }
+                        self.cf_tunnel_process = None;
+                        self.cf_tunnel_status = CfTunnelStatus::Stopped;
+                        self.cf_tunnel_url.clear();
+                    }
+                }
+            }
+            Message::CfTunnelModeChanged(is_quick) => {
+                self.cf_tunnel_prefs.mode = if is_quick {
+                    CfTunnelMode::Quick
+                } else {
+                    CfTunnelMode::Named
+                };
+                crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
+            }
+            Message::CfTunnelNameChanged(v) => {
+                self.cf_tunnel_name_input = v;
+            }
+            Message::CfHostnameChanged(v) => {
+                self.cf_hostname_input = v;
+            }
+            Message::CfApiTokenChanged(v) => {
+                self.cf_api_token_input = v;
+            }
+            Message::CfAccountIdChanged(v) => {
+                self.cf_account_id_input = v;
+            }
+            Message::CfAccessEmailChanged(v) => {
+                self.cf_access_email_input = v;
+            }
+            Message::CfLogin => {
+                if let Some(cf_path) = self.cf_cloudflared_path.clone() {
+                    return Task::perform(
+                        async move {
+                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                            std::thread::spawn(move || {
+                                let result = crate::cf_tunnel::cloudflared_login(&cf_path);
+                                let _ = tx.send(result);
+                            });
+                            rx.await.unwrap_or(Err("Login panicked".to_string()))
+                        },
+                        Message::CfLoginDone,
+                    );
+                }
+            }
+            Message::CfLoginDone(result) => {
+                self.cf_logged_in = Some(result.is_ok());
+                if let Err(e) = result {
+                    log::warn!("cloudflared login failed: {e}");
+                }
+            }
+            Message::CfCreateTunnel => {
+                if let Some(cf_path) = self.cf_cloudflared_path.clone() {
+                    let name = self.cf_tunnel_name_input.trim().to_string();
+                    let hostname = self.cf_hostname_input.trim().to_string();
+                    if name.is_empty() {
+                        self.cf_tunnel_status =
+                            CfTunnelStatus::Failed("Tunnel name is required".into());
+                        return Task::none();
+                    }
+                    return Task::perform(
+                        async move {
+                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                            std::thread::spawn(move || {
+                                let r = crate::cf_tunnel::create_tunnel(&cf_path, &name)
+                                    .and_then(|_| {
+                                        if !hostname.is_empty() {
+                                            crate::cf_tunnel::route_dns(
+                                                &cf_path, &name, &hostname,
+                                            )
+                                        } else {
+                                            Ok(())
+                                        }
+                                    });
+                                let _ = tx.send(r);
+                            });
+                            rx.await.unwrap_or(Err("Create panicked".to_string()))
+                        },
+                        Message::CfCreateTunnelDone,
+                    );
+                }
+            }
+            Message::CfCreateTunnelDone(result) => {
+                if let Err(e) = result {
+                    self.cf_tunnel_status = CfTunnelStatus::Failed(e);
+                }
+                // Save the tunnel name/hostname
+                self.cf_tunnel_prefs.tunnel_name =
+                    self.cf_tunnel_name_input.trim().to_string();
+                self.cf_tunnel_prefs.hostname = self.cf_hostname_input.trim().to_string();
+                crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
+            }
+            Message::CfTunnelStarted(result) => match result {
+                Ok(url) => {
+                    self.cf_tunnel_url = url;
+                    self.cf_tunnel_status = CfTunnelStatus::Running;
+                }
+                Err(msg) => {
+                    if let Some(ref mut child) = self.cf_tunnel_process {
+                        crate::cf_tunnel::stop_tunnel(child);
+                    }
+                    self.cf_tunnel_process = None;
+                    self.cf_tunnel_status = CfTunnelStatus::Failed(msg);
+                }
+            },
+            Message::CfNamedTunnelStarted(result) => match result {
+                Ok(()) => {
+                    // Check if process is still alive
+                    let alive = self
+                        .cf_tunnel_process
+                        .as_mut()
+                        .map(|c| c.try_wait().ok().flatten().is_none())
+                        .unwrap_or(false);
+                    if alive {
+                        let hostname = self.cf_tunnel_prefs.hostname.clone();
+                        self.cf_tunnel_url = if hostname.is_empty() {
+                            "(tunnel running)".to_string()
+                        } else {
+                            format!("https://{hostname}")
+                        };
+                        self.cf_tunnel_status = CfTunnelStatus::Running;
+                    } else {
+                        self.cf_tunnel_status = CfTunnelStatus::Failed(
+                            "cloudflared exited unexpectedly".into(),
+                        );
+                        self.cf_tunnel_process = None;
+                    }
+                }
+                Err(msg) => {
+                    self.cf_tunnel_status = CfTunnelStatus::Failed(msg);
+                    if let Some(ref mut child) = self.cf_tunnel_process {
+                        crate::cf_tunnel::stop_tunnel(child);
+                    }
+                    self.cf_tunnel_process = None;
+                }
+            },
+            Message::CfSetupAccess => {
+                let token = self.cf_api_token_input.trim().to_string();
+                let acct = self.cf_account_id_input.trim().to_string();
+                let hostname = self.cf_hostname_input.trim().to_string();
+                let email = self.cf_access_email_input.trim().to_string();
+                if token.is_empty() || acct.is_empty() || email.is_empty() {
+                    return Task::none();
+                }
+                // Remove existing app if any
+                let old_app_id = self.cf_tunnel_prefs.access_app_id.clone();
+                return Task::perform(
+                    async move {
+                        let (tx, rx) = futures_channel::oneshot::channel::<Result<String, String>>();
+                        std::thread::spawn(move || {
+                            // Remove old app if exists
+                            if !old_app_id.is_empty() {
+                                let _ = crate::cf_tunnel::remove_cloudflare_access(
+                                    &token,
+                                    &acct,
+                                    &old_app_id,
+                                );
+                            }
+                            let result = crate::cf_tunnel::setup_cloudflare_access(
+                                &token, &acct, &hostname, &email,
+                            );
+                            let _ = tx.send(result);
+                        });
+                        rx.await.unwrap_or(Err("Access setup panicked".to_string()))
+                    },
+                    Message::CfSetupAccessDone,
+                );
+            }
+            Message::CfSetupAccessDone(result) => match result {
+                Ok(app_id) => {
+                    self.cf_tunnel_prefs.access_app_id = app_id;
+                    self.cf_tunnel_prefs.api_token =
+                        self.cf_api_token_input.trim().to_string();
+                    self.cf_tunnel_prefs.account_id =
+                        self.cf_account_id_input.trim().to_string();
+                    self.cf_tunnel_prefs.access_email =
+                        self.cf_access_email_input.trim().to_string();
+                    crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
+                }
+                Err(e) => {
+                    log::warn!("CF Access setup failed: {e}");
+                }
+            },
+            Message::CfRemoveAccess => {
+                let token = self.cf_api_token_input.trim().to_string();
+                let acct = self.cf_account_id_input.trim().to_string();
+                let app_id = self.cf_tunnel_prefs.access_app_id.clone();
+                if token.is_empty() || acct.is_empty() || app_id.is_empty() {
+                    return Task::none();
+                }
+                return Task::perform(
+                    async move {
+                        let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                        std::thread::spawn(move || {
+                            let result = crate::cf_tunnel::remove_cloudflare_access(
+                                &token, &acct, &app_id,
+                            );
+                            let _ = tx.send(result);
+                        });
+                        rx.await.unwrap_or(Err("Access removal panicked".to_string()))
+                    },
+                    Message::CfRemoveAccessDone,
+                );
+            }
+            Message::CfRemoveAccessDone(result) => {
+                if result.is_ok() {
+                    self.cf_tunnel_prefs.access_app_id.clear();
+                    crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
+                } else if let Err(e) = result {
+                    log::warn!("CF Access removal failed: {e}");
+                }
+            }
+            Message::CfSaveSettings => {
+                self.cf_tunnel_prefs.tunnel_name =
+                    self.cf_tunnel_name_input.trim().to_string();
+                self.cf_tunnel_prefs.hostname = self.cf_hostname_input.trim().to_string();
+                self.cf_tunnel_prefs.api_token = self.cf_api_token_input.trim().to_string();
+                self.cf_tunnel_prefs.account_id =
+                    self.cf_account_id_input.trim().to_string();
+                self.cf_tunnel_prefs.access_email =
+                    self.cf_access_email_input.trim().to_string();
+                crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
+            }
+            Message::CfCopyTunnelUrl => {
+                if !self.cf_tunnel_url.is_empty() {
+                    return iced::clipboard::write(self.cf_tunnel_url.clone());
+                }
             }
             Message::ToastTick => {
                 let now_ms = Self::now_ms();
@@ -5981,6 +6404,354 @@ impl GodlyApp {
                 );
         }
 
+        // ── Cloudflare Tunnel section ──────────────────────────────
+        // Horizontal divider
+        content = content.push(
+            container(Space::new().width(Length::Fill).height(1))
+                .width(Length::Fill)
+                .style(|_theme| container::Style {
+                    background: Some(iced::Background::Color(BORDER())),
+                    ..container::Style::default()
+                }),
+        );
+
+        content = content.push(
+            text("Cloudflare Tunnel")
+                .size(14)
+                .color(TEXT_ACTIVE()),
+        );
+        content = content.push(
+            text("Expose your remote server securely over the internet via Cloudflare Tunnel.")
+                .size(12)
+                .color(TEXT_PRIMARY()),
+        );
+
+        // cloudflared detection
+        let cf_found = self.cf_cloudflared_path.is_some();
+        let cf_status_text = if cf_found {
+            "cloudflared: Found"
+        } else {
+            "cloudflared: Not found"
+        };
+        let cf_status_color = if cf_found {
+            iced::Color::from_rgb(0.3, 0.85, 0.4)
+        } else {
+            iced::Color::from_rgb(0.9, 0.3, 0.3)
+        };
+        let mut cf_detect_row = row![
+            text(cf_status_text).size(12).color(cf_status_color),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+
+        if !cf_found {
+            cf_detect_row = cf_detect_row.push(
+                text("Install: winget install Cloudflare.cloudflared")
+                    .size(11)
+                    .color(TEXT_SECONDARY()),
+            );
+        }
+        content = content.push(cf_detect_row);
+
+        // Only show the rest if cloudflared is found
+        if cf_found {
+            // Mode selector
+            let quick_active = self.cf_tunnel_prefs.mode == CfTunnelMode::Quick;
+            let named_active = !quick_active;
+
+            let quick_bg = if quick_active {
+                iced::Color::from_rgb(0.2, 0.5, 0.7)
+            } else {
+                BG_SECONDARY()
+            };
+            let named_bg = if named_active {
+                iced::Color::from_rgb(0.2, 0.5, 0.7)
+            } else {
+                BG_SECONDARY()
+            };
+
+            let mode_row = row![
+                button(text("Quick Tunnel").size(11).color(TEXT_PRIMARY()))
+                    .on_press(Message::CfTunnelModeChanged(true))
+                    .padding(Padding::from([4, 10]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(iced::Background::Color(quick_bg)),
+                        text_color: TEXT_PRIMARY(),
+                        border: iced::Border {
+                            color: BORDER(),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..button::Style::default()
+                    }),
+                button(text("Named Tunnel").size(11).color(TEXT_PRIMARY()))
+                    .on_press(Message::CfTunnelModeChanged(false))
+                    .padding(Padding::from([4, 10]))
+                    .style(move |_theme, _status| button::Style {
+                        background: Some(iced::Background::Color(named_bg)),
+                        text_color: TEXT_PRIMARY(),
+                        border: iced::Border {
+                            color: BORDER(),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..button::Style::default()
+                    }),
+            ]
+            .spacing(6);
+            content = content.push(mode_row);
+
+            if quick_active {
+                content = content.push(
+                    text("One-click temporary URL. No account needed.")
+                        .size(11)
+                        .color(TEXT_SECONDARY()),
+                );
+            } else {
+                // Named tunnel fields
+                content = content.push(
+                    text("Tunnel Name").size(12).color(TEXT_SECONDARY()),
+                );
+                content = content.push(
+                    text_input("e.g. my-godly-tunnel", &self.cf_tunnel_name_input)
+                        .on_input(Message::CfTunnelNameChanged)
+                        .padding(Padding::from([4, 8]))
+                        .size(12),
+                );
+                content = content.push(
+                    text("Hostname").size(12).color(TEXT_SECONDARY()),
+                );
+                content = content.push(
+                    text_input("e.g. phone.example.com", &self.cf_hostname_input)
+                        .on_input(Message::CfHostnameChanged)
+                        .padding(Padding::from([4, 8]))
+                        .size(12),
+                );
+
+                // Login + Create buttons
+                let login_label = match self.cf_logged_in {
+                    Some(true) => "Logged In",
+                    Some(false) => "Login Failed — Retry",
+                    None => "Login to Cloudflare",
+                };
+                let login_color = match self.cf_logged_in {
+                    Some(true) => iced::Color::from_rgb(0.3, 0.85, 0.4),
+                    Some(false) => iced::Color::from_rgb(0.9, 0.3, 0.3),
+                    None => TEXT_PRIMARY(),
+                };
+                content = content.push(
+                    row![
+                        button(text(login_label).size(11).color(login_color))
+                            .on_press(Message::CfLogin)
+                            .padding(Padding::from([4, 10])),
+                        button(
+                            text("Create Tunnel & DNS Route")
+                                .size(11)
+                                .color(TEXT_PRIMARY()),
+                        )
+                        .on_press(Message::CfCreateTunnel)
+                        .padding(Padding::from([4, 10])),
+                    ]
+                    .spacing(8),
+                );
+            }
+
+            // Tunnel status
+            let (cf_status_text, cf_status_color) = match &self.cf_tunnel_status {
+                CfTunnelStatus::Stopped => ("Stopped", TEXT_SECONDARY()),
+                CfTunnelStatus::Starting => {
+                    ("Starting...", iced::Color::from_rgb(0.9, 0.8, 0.2))
+                }
+                CfTunnelStatus::Running => {
+                    ("Running", iced::Color::from_rgb(0.3, 0.85, 0.4))
+                }
+                CfTunnelStatus::Failed(_) => {
+                    ("Failed", iced::Color::from_rgb(0.9, 0.3, 0.3))
+                }
+            };
+            let mut tunnel_status_row = row![
+                text("Tunnel: ").size(12).color(TEXT_SECONDARY()),
+                text(cf_status_text).size(12).color(cf_status_color),
+            ]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+            if let CfTunnelStatus::Failed(msg) = &self.cf_tunnel_status {
+                tunnel_status_row = tunnel_status_row.push(
+                    text(format!(" — {msg}")).size(11).color(TEXT_SECONDARY()),
+                );
+            }
+            content = content.push(tunnel_status_row);
+
+            // Start/Stop button
+            let cf_is_active = matches!(
+                self.cf_tunnel_status,
+                CfTunnelStatus::Running | CfTunnelStatus::Starting
+            );
+            let cf_toggle_label = if cf_is_active {
+                "Stop Tunnel"
+            } else {
+                "Start Tunnel"
+            };
+            let cf_toggle_bg = if cf_is_active {
+                iced::Color::from_rgb(0.7, 0.2, 0.2)
+            } else {
+                iced::Color::from_rgb(0.2, 0.6, 0.3)
+            };
+            content = content.push(
+                button(text(cf_toggle_label).size(12).color(TEXT_PRIMARY()))
+                    .on_press(Message::CfTunnelToggle)
+                    .padding(Padding::from([6, 14]))
+                    .style(move |_theme, status| {
+                        let bg = match status {
+                            button::Status::Hovered | button::Status::Pressed => iced::Color {
+                                a: 0.9,
+                                ..cf_toggle_bg
+                            },
+                            _ => cf_toggle_bg,
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            text_color: TEXT_PRIMARY(),
+                            border: iced::Border {
+                                color: BORDER(),
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..button::Style::default()
+                        }
+                    }),
+            );
+
+            // Show tunnel URL when running
+            if self.cf_tunnel_status == CfTunnelStatus::Running
+                && !self.cf_tunnel_url.is_empty()
+            {
+                content = content.push(
+                    container(
+                        row![
+                            text("Tunnel URL: ").size(12).color(TEXT_SECONDARY()),
+                            text(&self.cf_tunnel_url).size(12).color(TEXT_ACTIVE()),
+                            button(text("Copy").size(11).color(TEXT_PRIMARY()))
+                                .on_press(Message::CfCopyTunnelUrl)
+                                .padding(Padding::from([2, 8])),
+                        ]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center),
+                    )
+                    .padding(Padding::from([8, 10]))
+                    .width(Length::Fill)
+                    .style(|_theme| container::Style {
+                        background: Some(iced::Background::Color(BG_SECONDARY())),
+                        border: iced::Border {
+                            color: BORDER(),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+                );
+            }
+
+            // ── Access Protection section (Named tunnel only) ────────
+            if named_active {
+                content = content.push(
+                    container(Space::new().width(Length::Fill).height(1))
+                        .width(Length::Fill)
+                        .style(|_theme| container::Style {
+                            background: Some(iced::Background::Color(BORDER())),
+                            ..container::Style::default()
+                        }),
+                );
+                content = content.push(
+                    text("Access Protection")
+                        .size(13)
+                        .color(TEXT_ACTIVE()),
+                );
+                content = content.push(
+                    text("Restrict access with email verification — Cloudflare sends a one-time code to your email.")
+                        .size(11)
+                        .color(TEXT_PRIMARY()),
+                );
+
+                content = content.push(
+                    text("Email (for one-time code)")
+                        .size(12)
+                        .color(TEXT_SECONDARY()),
+                );
+                content = content.push(
+                    text_input("alan@example.com", &self.cf_access_email_input)
+                        .on_input(Message::CfAccessEmailChanged)
+                        .padding(Padding::from([4, 8]))
+                        .size(12),
+                );
+
+                content = content.push(
+                    text("Cloudflare Account ID")
+                        .size(12)
+                        .color(TEXT_SECONDARY()),
+                );
+                content = content.push(
+                    text_input("Account ID from Cloudflare dashboard", &self.cf_account_id_input)
+                        .on_input(Message::CfAccountIdChanged)
+                        .padding(Padding::from([4, 8]))
+                        .size(12),
+                );
+
+                content = content.push(
+                    text("API Token (Access: Apps Edit permission)")
+                        .size(12)
+                        .color(TEXT_SECONDARY()),
+                );
+                content = content.push(
+                    text_input("Cloudflare API token", &self.cf_api_token_input)
+                        .on_input(Message::CfApiTokenChanged)
+                        .padding(Padding::from([4, 8]))
+                        .size(12)
+                        .secure(true),
+                );
+
+                // Access status + buttons
+                let has_access = !self.cf_tunnel_prefs.access_app_id.is_empty();
+                if has_access {
+                    let protected_email = &self.cf_tunnel_prefs.access_email;
+                    content = content.push(
+                        row![
+                            text(format!("Protected — only {protected_email} can access"))
+                                .size(12)
+                                .color(iced::Color::from_rgb(0.3, 0.85, 0.4)),
+                            button(text("Remove Protection").size(11).color(TEXT_PRIMARY()))
+                                .on_press(Message::CfRemoveAccess)
+                                .padding(Padding::from([4, 10])),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    );
+                } else {
+                    content = content.push(
+                        row![
+                            text("Not configured").size(12).color(TEXT_SECONDARY()),
+                            button(
+                                text("Setup Access Protection")
+                                    .size(11)
+                                    .color(TEXT_PRIMARY()),
+                            )
+                            .on_press(Message::CfSetupAccess)
+                            .padding(Padding::from([4, 10])),
+                        ]
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                    );
+                }
+            }
+
+            // Save settings button
+            content = content.push(
+                button(text("Save Tunnel Settings").size(12).color(TEXT_PRIMARY()))
+                    .on_press(Message::CfSaveSettings)
+                    .padding(Padding::from([6, 14])),
+            );
+        }
+
         container(content).width(Length::Fill).into()
     }
 
@@ -8030,6 +8801,9 @@ impl GodlyApp {
                                     );
                                 }
                                 self.terminals.remove(&placeholder);
+                                for launch in &mut self.quick_claude_launches {
+                                    launch.placeholder_ids.remove(&placeholder);
+                                }
                             }
                         }
 
@@ -8393,7 +9167,7 @@ impl GodlyApp {
         let default_fg = palette.foreground;
         let default_bg = palette.background;
 
-        let t0 = std::time::Instant::now();
+        let _t0 = std::time::Instant::now();
         let (pixels, w, h) = self.pixel_renderer.render(
             &grid_clone,
             &metrics,
@@ -8418,6 +9192,172 @@ impl GodlyApp {
     // Rendering helpers
     // -----------------------------------------------------------------------
 
+    /// Returns launch progress info if terminal_id belongs to an active Quick Claude launch.
+    fn quick_claude_launch_info(&self, terminal_id: &str) -> Option<LaunchProgressInfo> {
+        for launch in &self.quick_claude_launches {
+            if launch.completed || launch.error.is_some() {
+                continue;
+            }
+
+            let is_placeholder = launch.placeholder_ids.contains(terminal_id);
+            let is_active_agent = launch
+                .agent_terminal_ids
+                .iter()
+                .any(|opt: &Option<String>| opt.as_deref() == Some(terminal_id));
+
+            if !is_placeholder && !is_active_agent {
+                continue;
+            }
+
+            return Some(LaunchProgressInfo {
+                preset_name: launch.preset_name.clone(),
+                step_label: launch.current_step_label(),
+                current_step: launch.current_step + 1,
+                total_steps: launch.total_steps(),
+                is_placeholder,
+            });
+        }
+        None
+    }
+
+    fn render_launch_placeholder<'a>(
+        &'a self,
+        terminal_id: &str,
+        focused_id: Option<&str>,
+        info: &LaunchProgressInfo,
+    ) -> Element<'a, Message> {
+        let is_focused = focused_id == Some(terminal_id);
+
+        let progress_text = format!("Step {} of {}", info.current_step, info.total_steps);
+        let filled_frac = info.current_step as f32 / info.total_steps as f32;
+        let bar_width = 200.0_f32;
+        let filled_width = (filled_frac * bar_width).min(bar_width);
+        let remaining_width = bar_width - filled_width;
+
+        let progress_bar = row![
+            container(Space::new().width(Length::Fixed(filled_width)).height(Length::Fixed(3.0)))
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(ACCENT())),
+                    border: iced::Border {
+                        radius: 1.5.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+            container(
+                Space::new()
+                    .width(Length::Fixed(remaining_width))
+                    .height(Length::Fixed(3.0))
+            )
+            .style(move |_theme| {
+                let c = TEXT_SECONDARY();
+                container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        c.r, c.g, c.b, 0.2,
+                    ))),
+                    border: iced::Border {
+                        radius: 1.5.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }),
+        ];
+
+        let preset_name = info.preset_name.clone();
+        let step_label = info.step_label;
+
+        let card = container(
+            column![
+                text(preset_name).size(16).color(TEXT_ACTIVE()),
+                Space::new().height(8),
+                text(step_label).size(13).color(ACCENT()),
+                Space::new().height(8),
+                progress_bar,
+                Space::new().height(4),
+                text(progress_text).size(11).color(TEXT_SECONDARY()),
+            ]
+            .align_x(iced::Alignment::Center)
+            .width(Length::Fixed(260.0)),
+        )
+        .padding(Padding::from([28, 24]))
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(EMPTY_STATE_BG())),
+            border: iced::Border {
+                color: Color::from_rgba(
+                    PANE_BORDER().r,
+                    PANE_BORDER().g,
+                    PANE_BORDER().b,
+                    0.5,
+                ),
+                width: 0.5,
+                radius: 10.0.into(),
+            },
+            ..container::Style::default()
+        });
+
+        let accent_color = if is_focused {
+            PANE_FOCUSED_BORDER()
+        } else {
+            Color::TRANSPARENT
+        };
+        let accent_bar = container(Space::new().width(Length::Fill).height(Length::Fixed(
+            if is_focused { 1.0 } else { 0.0 },
+        )))
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(accent_color)),
+            ..container::Style::default()
+        });
+
+        let inner = column![
+            accent_bar,
+            center(card).width(Length::Fill).height(Length::Fill),
+        ];
+
+        let pane = container(inner)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding {
+                top: TERMINAL_VIEWPORT_INSET_Y,
+                right: TERMINAL_VIEWPORT_INSET_X,
+                bottom: TERMINAL_VIEWPORT_INSET_Y,
+                left: TERMINAL_VIEWPORT_INSET_X,
+            })
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(PANE_BG())),
+                ..container::Style::default()
+            });
+
+        let tid = terminal_id.to_string();
+        mouse_area(pane).on_press(Message::PaneClicked(tid)).into()
+    }
+
+    fn render_launch_status_bar<'a>(&'a self, info: &LaunchProgressInfo) -> Element<'a, Message> {
+        let label = format!(
+            "{} ({}/{})",
+            info.step_label, info.current_step, info.total_steps,
+        );
+
+        let bar = container(text(label).size(11).color(TEXT_SECONDARY()))
+            .padding(Padding::from([3, 10]))
+            .width(Length::Fill)
+            .style(move |_theme| {
+                let bg = PANE_BG();
+                container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        bg.r, bg.g, bg.b, 0.85,
+                    ))),
+                    ..Default::default()
+                }
+            });
+
+        column![Space::new().width(Length::Fill).height(Length::Fill), bar,]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
     fn render_terminal_pane<'a>(
         &'a self,
         terminal_id: &str,
@@ -8426,6 +9366,16 @@ impl GodlyApp {
         let Some(term) = self.terminals.get(terminal_id) else {
             return center(text("Session not found").size(14)).into();
         };
+
+        // Check if this terminal belongs to an active Quick Claude launch
+        let launch_info = self.quick_claude_launch_info(terminal_id);
+
+        // Phase A: Placeholder terminal — show full loading card instead of empty canvas
+        if let Some(ref info) = launch_info {
+            if info.is_placeholder {
+                return self.render_launch_placeholder(terminal_id, focused_id, info);
+            }
+        }
 
         let is_focused = focused_id == Some(terminal_id);
         let selection = if is_focused && (self.selection.active || self.has_selection()) {
@@ -8518,6 +9468,17 @@ impl GodlyApp {
                 shadow: focus_shadow,
                 ..container::Style::default()
             });
+
+        // Phase B: Real terminal with launch in progress — overlay status at bottom
+        if let Some(ref info) = launch_info {
+            let status_overlay = self.render_launch_status_bar(info);
+            let pane_with_overlay: Element<'_, Message> =
+                stack![pane, status_overlay].into();
+            let tid = terminal_id.to_string();
+            return mouse_area(pane_with_overlay)
+                .on_press(Message::PaneClicked(tid))
+                .into();
+        }
 
         let tid = terminal_id.to_string();
         mouse_area(pane)

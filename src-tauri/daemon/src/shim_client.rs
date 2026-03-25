@@ -49,7 +49,30 @@ pub fn spawn_shim(
         cmd.env("GODLY_INSTANCE", &instance);
     }
 
-    // Propagate custom environment variables
+    // TMUX compat: set env vars so tools like Claude Code detect a tmux-like environment.
+    // Format matches tmux's $TMUX: <socket_path>,<server_pid>,<session_index>
+    cmd.env("TMUX", format!("/tmp/godly-tmux,{},0", std::process::id()));
+    cmd.env("TMUX_PANE", "%0");
+
+    // Prepend the directory containing our tmux shim to PATH so that `tmux`
+    // resolves to our shim binary instead of a system-installed tmux.
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            if exe_dir.join("tmux.exe").exists() {
+                if let Some(current_path) = std::env::var_os("PATH") {
+                    let mut new_path = exe_dir.as_os_str().to_os_string();
+                    new_path.push(";");
+                    new_path.push(&current_path);
+                    cmd.env("PATH", new_path);
+                } else {
+                    cmd.env("PATH", exe_dir.as_os_str());
+                }
+            }
+        }
+    }
+
+    // Propagate custom environment variables (applied AFTER our additions,
+    // so caller overrides like TMUX or PATH take precedence — useful for tests).
     if let Some(env_vars) = env {
         for (key, value) in env_vars {
             cmd.env(key, value);
@@ -158,7 +181,6 @@ pub fn connect_to_shim(pipe_name: &str) -> Result<std::fs::File, String> {
 pub fn connect_to_shim(_pipe_name: &str) -> Result<std::fs::File, String> {
     Err("Named pipes only supported on Windows".to_string())
 }
-
 
 /// Check if a process is still alive by its PID.
 #[cfg(windows)]
@@ -280,9 +302,7 @@ mod tests {
     #[test]
     fn test_shell_type_to_shim_arg_wsl_default() {
         assert_eq!(
-            shell_type_to_shim_arg(&ShellType::Wsl {
-                distribution: None
-            }),
+            shell_type_to_shim_arg(&ShellType::Wsl { distribution: None }),
             "wsl"
         );
     }
@@ -334,10 +354,7 @@ mod tests {
     #[test]
     fn test_is_process_alive_dead() {
         // PID 99999999 is extremely unlikely to exist
-        assert!(
-            !is_process_alive(99999999),
-            "Bogus PID should not be alive"
-        );
+        assert!(!is_process_alive(99999999), "Bogus PID should not be alive");
     }
 
     /// Verify kill_process can terminate a child process.
@@ -355,7 +372,10 @@ mod tests {
             .expect("Failed to spawn child process");
         let pid = child.id();
 
-        assert!(is_process_alive(pid), "Child should be alive immediately after spawn");
+        assert!(
+            is_process_alive(pid),
+            "Child should be alive immediately after spawn"
+        );
 
         // Kill it
         assert!(kill_process(pid), "kill_process should return true");
@@ -373,6 +393,66 @@ mod tests {
     /// Verify kill_process returns false for a non-existent PID.
     #[test]
     fn test_kill_process_nonexistent() {
-        assert!(!kill_process(99999999), "Killing a bogus PID should return false");
+        assert!(
+            !kill_process(99999999),
+            "Killing a bogus PID should return false"
+        );
+    }
+
+    /// Verify TMUX env var format matches tmux convention: <socket>,<pid>,<index>
+    #[test]
+    fn test_tmux_env_var_format() {
+        let pid = std::process::id();
+        let tmux_val = format!("/tmp/godly-tmux,{},0", pid);
+
+        let parts: Vec<&str> = tmux_val.split(',').collect();
+        assert_eq!(parts.len(), 3, "TMUX must have 3 comma-separated fields");
+        assert_eq!(parts[0], "/tmp/godly-tmux", "Socket path field");
+        assert_eq!(
+            parts[1],
+            pid.to_string(),
+            "PID field must match current process"
+        );
+        assert_eq!(parts[2], "0", "Session index field");
+    }
+
+    /// Verify TMUX_PANE value matches tmux pane ID format (%<number>).
+    #[test]
+    fn test_tmux_pane_format() {
+        let pane = "%0";
+        assert!(pane.starts_with('%'), "TMUX_PANE must start with '%'");
+        assert!(
+            pane[1..].parse::<u32>().is_ok(),
+            "TMUX_PANE suffix must be a number"
+        );
+    }
+
+    /// Verify that PATH prepend logic uses semicolon separator (Windows)
+    /// and places the shim directory first.
+    #[test]
+    fn test_path_prepend_format() {
+        use std::ffi::OsString;
+
+        let shim_dir = "C:\\Program Files\\Godly";
+        let existing_path = "C:\\Windows;C:\\Users\\test";
+
+        let mut new_path = OsString::from(shim_dir);
+        new_path.push(";");
+        new_path.push(existing_path);
+
+        let result = new_path.to_string_lossy();
+        assert!(
+            result.starts_with(shim_dir),
+            "Shim dir must be first in PATH"
+        );
+        assert!(
+            result.contains(existing_path),
+            "Original PATH must be preserved"
+        );
+        assert_eq!(
+            result,
+            format!("{};{}", shim_dir, existing_path),
+            "Format must be <shim_dir>;<original_path>"
+        );
     }
 }

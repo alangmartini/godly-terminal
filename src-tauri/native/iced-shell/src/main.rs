@@ -64,9 +64,11 @@ mod font_enumerator;
 mod git_worktree;
 mod keybinding_persistence;
 mod phone_remote;
+mod cf_tunnel;
 mod claude_code_manager;
 mod crash_handler;
 mod gpu_watchdog;
+mod horizontal_wheel;
 
 use app::{GodlyApp, Message};
 
