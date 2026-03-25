@@ -179,7 +179,7 @@ pub fn view_claude_md_editor<'a, M: Clone + 'a>(
     let editor_pane = container(
         column![
             container(pane_label::<M>("SOURCE"))
-                .padding(Padding::from([8, 10, 0, 10])),
+                .padding(Padding { top: 8.0, right: 10.0, bottom: 0.0, left: 10.0 }),
             editor,
         ]
         .spacing(0),
@@ -201,10 +201,10 @@ pub fn view_claude_md_editor<'a, M: Clone + 'a>(
     let preview_pane = container(
         column![
             container(pane_label::<M>("PREVIEW"))
-                .padding(Padding::from([8, 10, 0, 10])),
+                .padding(Padding { top: 8.0, right: 10.0, bottom: 0.0, left: 10.0 }),
             scrollable(
                 container(preview_content)
-                    .padding(Padding::from([8, 20, 20, 20]))
+                    .padding(Padding { top: 8.0, right: 20.0, bottom: 20.0, left: 20.0 })
                     .width(Length::Fill),
             )
             .height(Length::Fill),
@@ -226,7 +226,7 @@ pub fn view_claude_md_editor<'a, M: Clone + 'a>(
     let content_area = row![editor_pane, preview_pane]
         .spacing(6)
         .height(Length::Fill)
-        .padding(Padding::from([6, 12, 12, 12]));
+        .padding(Padding { top: 6.0, right: 12.0, bottom: 12.0, left: 12.0 });
 
     // Footer — path + modified indicator
     let path_display = state.file_path.display().to_string();
@@ -312,7 +312,7 @@ fn render_code_block<'a, M: 'a>(code_text: String) -> Element<'a, M> {
             border: Border {
                 color: tint(BORDER(), 0.3),
                 width: 1.0,
-                radius: [0.0, 6.0, 6.0, 0.0].into(),
+                radius: 6.0.into(),
             },
             ..container::Style::default()
         });
@@ -322,7 +322,7 @@ fn render_code_block<'a, M: 'a>(code_text: String) -> Element<'a, M> {
         .style(|_theme| container::Style {
             background: Some(Background::Color(tint(ACCENT(), 0.5))),
             border: Border {
-                radius: [6.0, 0.0, 0.0, 6.0].into(),
+                radius: 6.0.into(),
                 ..Border::default()
             },
             ..container::Style::default()
@@ -381,7 +381,7 @@ fn render_bullet<'a, M: 'a>(content: &str) -> Element<'a, M> {
         .size(13)
         .color(TEXT_PRIMARY());
     container(row![dot, body].spacing(8).align_y(iced::Alignment::Start))
-        .padding(Padding::from([0, 0, 0, 12]))
+        .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 12.0 })
         .width(Length::Fill)
         .into()
 }
@@ -474,7 +474,7 @@ fn render_markdown_preview<'a, M: 'a>(markdown: &str) -> Element<'a, M> {
                             .spacing(6)
                             .align_y(iced::Alignment::Start),
                     )
-                    .padding(Padding::from([0, 0, 0, 12]))
+                    .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 12.0 })
                     .width(Length::Fill)
                     .into(),
                 );
