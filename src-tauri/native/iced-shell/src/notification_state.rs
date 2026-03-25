@@ -10,6 +10,9 @@ pub struct NotificationTracker {
     unread: HashMap<String, u32>,
     /// Whether a bell has fired since last focus (per terminal).
     bell: HashMap<String, bool>,
+    /// Last MCP notification message shown per terminal (cleared on focus).
+    /// Used to suppress duplicate notifications from stale terminals.
+    last_mcp_message: HashMap<String, String>,
 }
 
 impl NotificationTracker {
@@ -28,11 +31,12 @@ impl NotificationTracker {
         self.bell.insert(terminal_id.to_string(), true);
     }
 
-    /// Mark a terminal as read (reset unread count and bell flag).
+    /// Mark a terminal as read (reset unread count, bell flag, and MCP dedup).
     /// Called when the terminal gains focus.
     pub fn mark_read(&mut self, terminal_id: &str) {
         self.unread.remove(terminal_id);
         self.bell.remove(terminal_id);
+        self.last_mcp_message.remove(terminal_id);
     }
 
     /// Returns the unread output count for a terminal.
@@ -45,10 +49,25 @@ impl NotificationTracker {
         self.bell.get(terminal_id).copied().unwrap_or(false)
     }
 
+    /// Record that an MCP notification was shown for a terminal.
+    pub fn record_mcp_notify(&mut self, terminal_id: &str, message: &str) {
+        self.last_mcp_message
+            .insert(terminal_id.to_string(), message.to_string());
+    }
+
+    /// Returns true if the same MCP notification message was already shown
+    /// for this terminal since the user last focused it.
+    pub fn is_mcp_duplicate(&self, terminal_id: &str, message: &str) -> bool {
+        self.last_mcp_message
+            .get(terminal_id)
+            .is_some_and(|m| m == message)
+    }
+
     /// Remove all notification state for a terminal (on close).
     pub fn clear(&mut self, terminal_id: &str) {
         self.unread.remove(terminal_id);
         self.bell.remove(terminal_id);
+        self.last_mcp_message.remove(terminal_id);
     }
 }
 
@@ -88,10 +107,12 @@ mod tests {
         tracker.record_output("t1");
         tracker.record_output("t1");
         tracker.record_bell("t1");
+        tracker.record_mcp_notify("t1", "Claude finished");
 
         tracker.mark_read("t1");
         assert_eq!(tracker.unread_count("t1"), 0);
         assert!(!tracker.has_bell("t1"));
+        assert!(!tracker.is_mcp_duplicate("t1", "Claude finished"));
     }
 
     #[test]
@@ -106,10 +127,12 @@ mod tests {
         let mut tracker = NotificationTracker::new();
         tracker.record_output("t1");
         tracker.record_bell("t1");
+        tracker.record_mcp_notify("t1", "test");
 
         tracker.clear("t1");
         assert_eq!(tracker.unread_count("t1"), 0);
         assert!(!tracker.has_bell("t1"));
+        assert!(!tracker.is_mcp_duplicate("t1", "test"));
     }
 
     #[test]
@@ -135,5 +158,54 @@ mod tests {
         let tracker = NotificationTracker::default();
         assert_eq!(tracker.unread_count("any"), 0);
         assert!(!tracker.has_bell("any"));
+    }
+
+    #[test]
+    fn test_mcp_duplicate_same_message_suppressed() {
+        let mut tracker = NotificationTracker::new();
+        assert!(!tracker.is_mcp_duplicate("t1", "Claude is idle"));
+
+        tracker.record_mcp_notify("t1", "Claude is idle");
+        assert!(tracker.is_mcp_duplicate("t1", "Claude is idle"));
+    }
+
+    #[test]
+    fn test_mcp_different_message_not_suppressed() {
+        let mut tracker = NotificationTracker::new();
+        tracker.record_mcp_notify("t1", "Claude finished");
+
+        // Different message should NOT be suppressed
+        assert!(!tracker.is_mcp_duplicate("t1", "Needs permission"));
+    }
+
+    #[test]
+    fn test_mcp_dedup_cleared_on_focus() {
+        let mut tracker = NotificationTracker::new();
+        tracker.record_mcp_notify("t1", "Claude is idle");
+        assert!(tracker.is_mcp_duplicate("t1", "Claude is idle"));
+
+        // User focuses the terminal
+        tracker.mark_read("t1");
+        assert!(!tracker.is_mcp_duplicate("t1", "Claude is idle"));
+    }
+
+    #[test]
+    fn test_mcp_dedup_independent_terminals() {
+        let mut tracker = NotificationTracker::new();
+        tracker.record_mcp_notify("t1", "Claude is idle");
+
+        // Different terminal is not affected
+        assert!(!tracker.is_mcp_duplicate("t2", "Claude is idle"));
+    }
+
+    #[test]
+    fn test_mcp_message_updates_on_new_message() {
+        let mut tracker = NotificationTracker::new();
+        tracker.record_mcp_notify("t1", "Claude finished");
+
+        // New different message replaces the old one
+        tracker.record_mcp_notify("t1", "Claude is idle");
+        assert!(!tracker.is_mcp_duplicate("t1", "Claude finished"));
+        assert!(tracker.is_mcp_duplicate("t1", "Claude is idle"));
     }
 }
