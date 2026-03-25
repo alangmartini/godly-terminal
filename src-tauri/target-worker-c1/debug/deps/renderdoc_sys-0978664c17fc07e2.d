@@ -1,0 +1,6 @@
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\renderdoc_sys-0978664c17fc07e2.d: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\renderdoc-sys-1.1.0\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\renderdoc-sys-1.1.0\src\./bindings.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\target-worker-c1\debug\deps\librenderdoc_sys-0978664c17fc07e2.rmeta: C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\renderdoc-sys-1.1.0\src\lib.rs C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\renderdoc-sys-1.1.0\src\./bindings.rs
+
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\renderdoc-sys-1.1.0\src\lib.rs:
+C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\.cargo-worker\registry\src\index.crates.io-1949cf8c6b5b557f\renderdoc-sys-1.1.0\src\./bindings.rs:
