@@ -1,2 +1,0 @@
-### Added
-- **MCP action tools** — exposed 50 new MCP tools enabling full terminal self-management: create/close/rename/focus terminals, write/send keys/execute commands, create/delete/switch/rename workspaces, split/zoom/swap panes, navigate tabs, control scrollback, change themes and fonts, manage notifications, and more. All protocol infrastructure was already in place; this wires up tool definitions and dispatch for semantic automation.
