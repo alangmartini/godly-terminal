@@ -2062,4 +2062,266 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    // -- Bug #782: Arrow keys don't navigate skill autocomplete suggestions --
+
+    fn make_test_skills() -> Vec<SkillEntry> {
+        vec![
+            SkillEntry {
+                name: "commit".into(),
+                description: "Create a git commit".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "feature".into(),
+                description: "Implement a feature".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "fix".into(),
+                description: "Fix a bug".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+        ]
+    }
+
+    /// Bug #782: When the skill autocomplete popup is open and the user has
+    /// navigated to a non-zero selection (e.g. via ArrowDown), pressing any
+    /// key that triggers a text_editor action causes the prompt action handler
+    /// to re-evaluate autocomplete state and unconditionally reset
+    /// `skill_autocomplete_selected` to 0.
+    ///
+    /// This means arrow-key navigation of the autocomplete is impossible:
+    /// 1. keyboard::listen() never sees ArrowDown (text_editor widget captures it)
+    /// 2. The prompt action handler fires instead and resets selection to 0
+    ///
+    /// This test reproduces the reset by simulating the exact re-evaluation
+    /// logic from app.rs lines 2638-2661.
+    #[test]
+    fn autocomplete_selection_preserved_when_filter_unchanged() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.selected_ai_tool = "Claude Code".to_string();
+        state.skills = make_test_skills();
+
+        // User types "/" — this triggers autocomplete in the prompt action handler.
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('/')));
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = String::new();
+        state.skill_autocomplete_selected = 0;
+
+        // User presses ArrowDown — selection should advance to index 1.
+        // This is what SkillAutocompleteNavigate(1) does (app.rs lines 2872-2880).
+        let count = state.filtered_skills().len().min(8);
+        assert!(count >= 3, "precondition: at least 3 skills available");
+        let next = (0i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 1, "precondition: navigated to index 1");
+
+        // Now simulate what ACTUALLY happens when ArrowDown is pressed:
+        // The text_editor widget captures the key and fires a Move(Down) action.
+        // The prompt action handler (app.rs QuickClaudeDialogPromptAction) then:
+        // 1. Performs the action on the text editor content (cursor move)
+        // 2. Re-evaluates autocomplete state from cursor position
+        //
+        // Step 1: perform the cursor move on the content
+        state
+            .prompt_content
+            .perform(text_editor::Action::Move(text_editor::Motion::Down));
+
+        // Step 2: re-evaluate autocomplete state (mirrors app.rs lines 2638-2661)
+        if state.selected_ai_tool == "Claude Code" {
+            let text = state.prompt_content.text();
+            let cursor = state.prompt_content.cursor();
+
+            // Compute cursor byte offset (mirrors text_editor_cursor_byte_offset in app.rs)
+            let pos = &cursor.position;
+            let mut byte_offset = 0usize;
+            for (i, line) in text.split_inclusive('\n').enumerate() {
+                if i == pos.line {
+                    byte_offset += line
+                        .chars()
+                        .take(pos.column)
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
+                    break;
+                }
+                byte_offset += line.len();
+            }
+            // Handle cursor past last newline-terminated line
+            if text.split_inclusive('\n').count() <= pos.line {
+                let remaining = &text[byte_offset..];
+                byte_offset += remaining
+                    .chars()
+                    .take(pos.column)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
+            }
+
+            let before_cursor = &text[..byte_offset];
+            if let Some(slash_pos) = before_cursor.rfind('/') {
+                let after_slash = &before_cursor[slash_pos + 1..];
+                if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                    state.skill_autocomplete_open = true;
+                    state.skill_autocomplete_filter = after_slash.to_string();
+                    // Bug #782: this unconditionally resets to 0, destroying navigation
+                    state.skill_autocomplete_selected = 0;
+                }
+            }
+        }
+
+        // The autocomplete popup is still open with the same filter (""),
+        // so the selection should have been preserved at index 1.
+        assert_eq!(
+            state.skill_autocomplete_selected, 1,
+            "Bug #782: autocomplete selection should be preserved when the filter \
+             hasn't changed, but the prompt action handler unconditionally resets it to 0"
+        );
+    }
+
+    /// Bug #782: Verify that navigating down then up wraps correctly
+    /// and that the selection index is meaningful against filtered skills.
+    /// This test passes (navigation logic itself works) but demonstrates
+    /// the contrast: the navigation logic works, it just never executes
+    /// because the keyboard subscription can't see arrow keys.
+    #[test]
+    fn autocomplete_navigate_wraps_correctly() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.skills = make_test_skills();
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = String::new();
+        state.skill_autocomplete_selected = 0;
+
+        let count = state.filtered_skills().len().min(8);
+
+        // Navigate down: 0 -> 1
+        let next = (state.skill_autocomplete_selected as i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 1);
+
+        // Navigate down: 1 -> 2
+        let next = (state.skill_autocomplete_selected as i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 2);
+
+        // Navigate down: 2 -> 0 (wrap)
+        let next = (state.skill_autocomplete_selected as i32 + 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 0);
+
+        // Navigate up: 0 -> 2 (wrap)
+        let next = (state.skill_autocomplete_selected as i32 - 1).rem_euclid(count as i32);
+        state.skill_autocomplete_selected = next as usize;
+        assert_eq!(state.skill_autocomplete_selected, 2);
+    }
+
+    /// Bug #782: When autocomplete is open with a filter like "co" (matching "commit"),
+    /// navigating to a valid selection and then re-evaluating with the same filter
+    /// should preserve the selection. Currently resets to 0.
+    #[test]
+    fn autocomplete_selection_preserved_with_active_filter() {
+        let mut state = QuickClaudeDialogState::new(
+            None,
+            vec![],
+            &QuickClaudePreferences::default(),
+        );
+        state.selected_ai_tool = "Claude Code".to_string();
+        state.skills = vec![
+            SkillEntry {
+                name: "commit".into(),
+                description: "Commit".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "configure".into(),
+                description: "Configure".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+            SkillEntry {
+                name: "connect".into(),
+                description: "Connect".into(),
+                scope: SkillScope::User,
+                file_path: String::new(),
+            },
+        ];
+
+        // User types "/co" — triggers autocomplete with filter "co"
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('/')));
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('c')));
+        state
+            .prompt_content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Insert('o')));
+        state.skill_autocomplete_open = true;
+        state.skill_autocomplete_filter = "co".to_string();
+        state.skill_autocomplete_selected = 0;
+
+        // All 3 skills match "co": commit, configure, connect
+        let filtered_count = state.filtered_skills().len();
+        assert_eq!(filtered_count, 3, "precondition: all 3 skills contain 'co'");
+
+        // Navigate to index 1 (e.g. "configure")
+        state.skill_autocomplete_selected = 1;
+
+        // Simulate prompt action re-evaluation (app.rs lines 2638-2661)
+        if state.selected_ai_tool == "Claude Code" {
+            let text = state.prompt_content.text();
+            let cursor = state.prompt_content.cursor();
+            let pos = &cursor.position;
+            let mut byte_offset = 0usize;
+            for (i, line) in text.split_inclusive('\n').enumerate() {
+                if i == pos.line {
+                    byte_offset += line
+                        .chars()
+                        .take(pos.column)
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
+                    break;
+                }
+                byte_offset += line.len();
+            }
+            if text.split_inclusive('\n').count() <= pos.line {
+                let remaining = &text[byte_offset..];
+                byte_offset += remaining
+                    .chars()
+                    .take(pos.column)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
+            }
+
+            let before_cursor = &text[..byte_offset];
+            if let Some(slash_pos) = before_cursor.rfind('/') {
+                let after_slash = &before_cursor[slash_pos + 1..];
+                if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                    state.skill_autocomplete_open = true;
+                    state.skill_autocomplete_filter = after_slash.to_string();
+                    // Bug #782: unconditional reset
+                    state.skill_autocomplete_selected = 0;
+                }
+            }
+        }
+
+        assert_eq!(
+            state.skill_autocomplete_selected, 1,
+            "Bug #782: autocomplete selection should be preserved when the filter \
+             hasn't changed ('co'), but re-evaluation unconditionally resets to 0"
+        );
+    }
 }
