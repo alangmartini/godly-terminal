@@ -1708,7 +1708,19 @@ impl GodlyApp {
                     }
                     term.fetching = false;
                     term.dirty = false;
-                    term.title = grid.title.clone();
+                    // Only overwrite a meaningful (non-path) title with another
+                    // meaningful title.  Shells frequently reset the OSC title
+                    // to the CWD which would erase a user-set tab name.
+                    let new_title = grid.title.trim();
+                    let new_is_meaningful =
+                        !new_title.is_empty() && !looks_like_path(new_title);
+                    let current_is_meaningful = {
+                        let cur = term.title.trim();
+                        !cur.is_empty() && !looks_like_path(cur)
+                    };
+                    if new_is_meaningful || !current_is_meaningful {
+                        term.title = grid.title.clone();
+                    }
                     term.total_scrollback = grid.total_scrollback;
                     term.scrollback_offset = grid.scrollback_offset.min(grid.total_scrollback);
                     term.grid = Some(grid);
@@ -8986,6 +8998,16 @@ fn resolve_key_event(
     KeyRoutingResult::ForwardToPty
 }
 
+/// Returns `true` if the string looks like a filesystem path (CWD).
+///
+/// Shells frequently set the OSC window title to the current directory.
+/// This helper mirrors `TerminalInfo::extract_cwd` so that we can detect
+/// path-like titles before updating the terminal state.
+fn looks_like_path(s: &str) -> bool {
+    let t = s.trim();
+    t.contains(":\\") || t.starts_with('/')
+}
+
 fn is_control_key(key: &keyboard::Key) -> bool {
     matches!(key, keyboard::Key::Named(keyboard::key::Named::Control))
 }
@@ -9306,7 +9328,7 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 #[cfg(test)]
 mod helper_tests {
     use super::tab_reducer::TabMruCycleDirection;
-    use super::{
+    use super::{looks_like_path,
         begin_sidebar_animation, enqueue_toast_entry, grid_dimensions_for_viewport,
         inset_terminal_pane_rect, mru_cycle_direction_from_shortcut_key,
         next_mru_switcher_selection, next_tab_id_from_mru, normalize_ai_tool_field,
@@ -9758,6 +9780,28 @@ mod helper_tests {
         let (rows, cols) = grid_dimensions_for_viewport(viewport, font_metrics);
         assert!(rows >= 1);
         assert!(cols >= 1);
+    }
+
+    // --- looks_like_path tests ---
+
+    #[test]
+    fn looks_like_path_detects_windows_path() {
+        assert!(looks_like_path(r"C:\Users\alanm"));
+        assert!(looks_like_path(r"  D:\projects\foo  "));
+    }
+
+    #[test]
+    fn looks_like_path_detects_unix_path() {
+        assert!(looks_like_path("/home/user"));
+        assert!(looks_like_path("  /tmp/foo  "));
+    }
+
+    #[test]
+    fn looks_like_path_rejects_meaningful_titles() {
+        assert!(!looks_like_path("Fix tab hotkeys"));
+        assert!(!looks_like_path("Claude"));
+        assert!(!looks_like_path("my-project"));
+        assert!(!looks_like_path(""));
     }
 }
 
