@@ -35,7 +35,6 @@ pub fn view_perf_overlay<'a, M: 'a>(
         text(format!("Terminals: {}", terminal_count))
             .size(11)
             .color(green),
-        // --- Render Phases ---
         text("── Render Phases ──")
             .size(10)
             .color(dim_green),
@@ -48,7 +47,6 @@ pub fn view_perf_overlay<'a, M: 'a>(
         text(format!("Cells: {}", cells_rendered))
             .size(10)
             .color(green),
-        // --- Frame Health ---
         text("── Frame Health ──")
             .size(10)
             .color(dim_green),
