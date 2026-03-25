@@ -235,7 +235,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     let resize_handle_width = sidebar_width.min(SIDEBAR_RESIZE_HANDLE_WIDTH);
     let sidebar_content_width = (sidebar_width - resize_handle_width).max(0.0);
     let context_menu_workspace_id = workspace_signals.context_menu_workspace_id();
-    let mut items = column![].spacing(2);
+    let mut items = column![].spacing(1);
 
     for (idx, ws) in workspaces.iter().enumerate() {
         let is_active = active_id == Some(ws.id.as_str());
@@ -243,33 +243,43 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             workspace_signals.has_workspace_notification(ws.id.as_str());
 
         let row_text = TEXT_PRIMARY();
-
         let name_label = text(&ws.name).size(13).color(row_text).font(font);
 
+        // Extract folder name for subtitle
+        let folder_display = std::path::Path::new(&ws.folder_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+
         let terminal_count = ws.layout.leaf_count();
-        let badge_bg = GHOST_SELECTED();
-        let badge_text = TEXT_SECONDARY();
+        let badge_bg = if is_active {
+            Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.15)
+        } else {
+            GHOST_SELECTED()
+        };
+        let badge_text_color = if is_active { ACCENT_HOVER() } else { TEXT_SECONDARY() };
 
         let badge = container(
             text(format!("{}", terminal_count))
-                .size(11)
-                .color(badge_text),
+                .size(10)
+                .color(badge_text_color),
         )
-        .padding(Padding::from([2, 8]))
+        .padding(Padding::from([1, 6]))
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(badge_bg)),
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
-                radius: 10.0.into(),
+                radius: 8.0.into(),
             },
             ..container::Style::default()
         });
 
+        // Worktree indicator: always visible, bright when active, dim when off
         let worktree_indicator_bg = if ws.worktree_mode {
             ACCENT_HOVER()
         } else {
-            Color::from_rgba(TEXT_SECONDARY().r, TEXT_SECONDARY().g, TEXT_SECONDARY().b, 0.25)
+            Color::from_rgba(TEXT_SECONDARY().r, TEXT_SECONDARY().g, TEXT_SECONDARY().b, 0.15)
         };
         let worktree_indicator = container(
             Space::new()
@@ -290,8 +300,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let notification_indicator_border = if is_active { BORDER() } else { BG_SECONDARY() };
         let notification_indicator = container(
             Space::new()
-                .width(Length::Fixed(8.0))
-                .height(Length::Fixed(8.0)),
+                .width(Length::Fixed(7.0))
+                .height(Length::Fixed(7.0)),
         )
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(notification_indicator_bg)),
@@ -303,51 +313,67 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
-        // Left accent bar: visible on active workspace for visual hierarchy.
+        // Left accent bar: visible on active workspace.
         let accent_bar_color = if is_active { ACCENT() } else { Color::TRANSPARENT };
         let accent_bar = container(
             Space::new()
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(18.0)),
+                .width(Length::Fixed(3.0))
+                .height(Length::Fixed(26.0)),
         )
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(accent_bar_color)),
             border: Border {
-                radius: 1.0.into(),
+                radius: 2.0.into(),
                 ..Border::default()
             },
             ..container::Style::default()
         });
 
+        // Top row: workspace name + right-side indicators
         let ai_mode_icon = workspace_signals.workspace_ai_mode_icon(ws.id.as_str());
-        let mut item_content = row![
-            accent_bar,
-            worktree_indicator,
-            name_label,
-        ];
+        let mut top_row = row![name_label];
         if let Some(icon) = ai_mode_icon {
-            item_content = item_content.push(text(icon).size(11));
+            top_row = top_row.push(text(icon).size(10).color(TEXT_SECONDARY()));
         }
-        item_content = item_content.push(Space::new().width(Length::Fill));
+        top_row = top_row.push(Space::new().width(Length::Fill));
         if has_workspace_notification {
-            item_content = item_content.push(notification_indicator);
+            top_row = top_row.push(notification_indicator);
         }
         if terminal_count > 0 {
-            item_content = item_content.push(badge);
+            top_row = top_row.push(badge);
         }
-        let item_content = item_content
-            .spacing(8)
+        let top_row = top_row
+            .spacing(6)
             .align_y(iced::Alignment::Center)
             .width(Length::Fill);
+
+        // Bottom row: worktree indicator + folder path
+        let folder_color = if ws.worktree_mode {
+            ACCENT_HOVER()
+        } else {
+            Color::from_rgba(TEXT_SECONDARY().r, TEXT_SECONDARY().g, TEXT_SECONDARY().b, 0.7)
+        };
+        let folder_label = text(folder_display).size(10).color(folder_color).font(font);
+        let bottom_row = row![worktree_indicator, folder_label]
+            .spacing(4)
+            .align_y(iced::Alignment::Center);
+
+        let item_content = row![
+            accent_bar,
+            column![top_row, bottom_row].spacing(2).width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .width(Length::Fill);
 
         let select_id = ws.id.clone();
         let row_btn = button(item_content)
             .on_press(on_action(SidebarAction::SelectWorkspace(select_id)))
-            .padding(Padding::from([7, 10]))
+            .padding(Padding::from([8, 12]))
             .width(Length::Fill)
             .style(move |_theme, status| {
                 let bg = if is_active {
-                    GHOST_SELECTED()
+                    Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.08)
                 } else {
                     match status {
                         button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
@@ -361,7 +387,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     border: Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
-                        radius: 6.0.into(),
+                        radius: 8.0.into(),
                     },
                     ..button::Style::default()
                 }
@@ -552,7 +578,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let header = container(
         row![
-            text("Workspaces").size(10).color(TEXT_SECONDARY()),
+            text("WORKSPACES").size(11).color(TEXT_SECONDARY()),
             Space::new().width(Length::Fill),
             settings_btn,
             new_btn,
@@ -624,7 +650,17 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .padding(Padding::from([4, 8]))
     .width(Length::Fill);
 
-    let sidebar_content = container(column![header, scrollable_list, claude_md_footer])
+    let header_divider = container(
+        rule::horizontal(1).style(|_theme| rule::Style {
+            color: BORDER(),
+            radius: 0.0.into(),
+            fill_mode: rule::FillMode::Full,
+            snap: true,
+        }),
+    )
+    .padding(Padding::from([0, 10]));
+
+    let sidebar_content = container(column![header, header_divider, scrollable_list, claude_md_footer])
         .width(Length::Fixed(sidebar_content_width))
         .height(Length::Fill)
         .clip(true)
