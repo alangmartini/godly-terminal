@@ -221,6 +221,20 @@ impl GodlyApp {
                 },
                 iced::Task::none(),
             ),
+            McpRequest::GetCurrentSession { session_id } => match self.terminals.get(&session_id) {
+                Some(terminal) => (
+                    McpResponse::TerminalInfo {
+                        terminal: self.to_mcp_terminal_info(terminal),
+                    },
+                    iced::Task::none(),
+                ),
+                None => (
+                    McpResponse::Error {
+                        message: format!("Terminal not found for session_id: {}", session_id),
+                    },
+                    iced::Task::none(),
+                ),
+            },
             McpRequest::GetActiveTerminal => (
                 McpResponse::ActiveTerminal {
                     terminal: self

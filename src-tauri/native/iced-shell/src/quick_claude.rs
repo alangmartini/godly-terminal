@@ -162,9 +162,16 @@ pub fn default_launch_steps(
     };
     // Pass prompt as CLI positional argument
     if !effective_prompt.is_empty() {
+        // Collapse newlines/carriage-returns into spaces — embedded newlines in
+        // the PTY write buffer are interpreted as Enter keypresses by the shell,
+        // splitting the command across multiple input lines.
+        let oneline = effective_prompt
+            .replace("\r\n", " ")
+            .replace('\r', " ")
+            .replace('\n', " ");
         // Shell-escape: wrap in single quotes, escape embedded single quotes
         // PowerShell escapes single quotes by doubling them: 'isn''t' -> isn't
-        let escaped = effective_prompt.replace('\'', "''");
+        let escaped = oneline.replace('\'', "''");
         cmd.push_str(&format!(" '{}'", escaped));
     }
 
@@ -203,7 +210,7 @@ pub fn default_launch_steps(
         });
         steps.push(LaunchStep::HandleTrustPromptIfNeeded {
             agent_index: i,
-            timeout_ms: 8_000,
+            timeout_ms: 20_000,
         });
     }
     steps
@@ -612,15 +619,21 @@ fn handle_trust_prompt_if_needed(
             return Ok(());
         }
 
-        // Early exit: if Claude is already working (shows tool use, output markers,
-        // or the input prompt ">"), the trust prompt was never shown
-        let past_startup = text.contains("Task(")
-            || text.contains("Claude Code")
-            || text.lines().rev().any(|l| {
-                let t = l.trim();
-                t == ">" || t == "> "
-            });
-        if past_startup && start.elapsed() > Duration::from_millis(2_000) {
+        // Early exit: if Claude is genuinely past startup (not on the trust
+        // prompt screen), the trust prompt was never shown.
+        // NOTE: Do NOT use `text.contains("Claude Code")` here — the trust
+        // prompt screen itself shows "Claude Code'll be able to read, edit,
+        // and execute files here." which causes a false positive.
+        let on_trust_screen = text.contains("safety check")
+            || text.contains("Accessing workspace")
+            || text.contains("Esc to cancel");
+        let past_startup = !on_trust_screen
+            && (text.contains("Task(")
+                || text.lines().rev().any(|l| {
+                    let t = l.trim();
+                    t == ">" || t == "> "
+                }));
+        if past_startup && start.elapsed() > Duration::from_millis(3_000) {
             return Ok(());
         }
 
@@ -725,6 +738,20 @@ mod tests {
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             // PowerShell escapes single quotes by doubling them
             assert!(command.contains("'fix it''s broken'"), "got: {command}");
+        } else {
+            panic!("Expected RunCommand");
+        }
+    }
+
+    #[test]
+    fn default_steps_prompt_with_embedded_newlines() {
+        let prompt = "Lets implement it :)\n\n   ⎿  Error\nclaude stuff";
+        let steps = default_launch_steps(1, prompt, "sonnet", "auto", None, &[], IsolationMode::None, None);
+        if let LaunchStep::RunCommand { command, .. } = &steps[2] {
+            // Newlines must be collapsed to spaces so the command stays on one PTY line
+            assert!(!command.contains('\n'), "command must not contain newlines: {command}");
+            assert!(!command.contains('\r'), "command must not contain carriage returns: {command}");
+            assert!(command.contains("Lets implement it :)"), "got: {command}");
         } else {
             panic!("Expected RunCommand");
         }
@@ -910,5 +937,16 @@ mod tests {
     #[test]
     fn has_trust_prompt_negative() {
         assert!(!has_trust_prompt_text("Claude Code v1.0.0\nLoading..."));
+    }
+
+    #[test]
+    fn default_steps_trust_timeout_is_20s() {
+        let steps = default_launch_steps(1, "test", "sonnet", "default", None, &[], IsolationMode::None, None);
+        match &steps[3] {
+            LaunchStep::HandleTrustPromptIfNeeded { timeout_ms, .. } => {
+                assert_eq!(*timeout_ms, 20_000);
+            }
+            _ => panic!("Expected HandleTrustPromptIfNeeded"),
+        }
     }
 }
