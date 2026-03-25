@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-03-25
+
+### Added
+- **tmux compatibility shim** — New `tmux.exe` binary that intercepts tmux CLI commands and translates them to Godly Terminal operations, enabling Claude Code's Agent Teams split-pane feature to work natively without a real tmux installation. Includes session lifecycle, pane management, I/O commands (`send-keys`, `display-message`), and TMUX environment injection (#814, #815, #817)
+- **File viewer panes** — Open code, markdown, and image files as split panes alongside terminals with auto-detection by file extension, syntax-highlighted code, rendered markdown, and native image display. File watching auto-refreshes when files change on disk. Full MCP tool support (`open_file_pane`, `close_pane`, `list_panes`, `update_file_pane`) for agent workspace control
+- **MCP action tools** — 50 new MCP tools enabling full terminal self-management: create/close/rename/focus terminals, write/send keys/execute commands, create/delete/switch/rename workspaces, split/zoom/swap panes, navigate tabs, control scrollback, change themes and fonts, manage notifications, and more
+- **Cloudflare Tunnel setup UI** — Configure and manage Cloudflare Tunnel directly from Settings > Remote, with Quick Tunnel (temporary URL) and Named Tunnel (persistent hostname) modes, plus Cloudflare Access email protection
+- **Claude Code Manager** — New settings tab for browsing and editing Claude Code skills with scope-based navigation and built-in skill analyzer with quality diagnostics
+- **Bell burst suppression** — Rapid-fire bell notifications are now suppressed after the first bell, with a single "Activity Settled" notification after 10s of silence
+- **Quick Claude trigger on phone UI** — Floating action button on dashboard view opens bottom sheet to invoke Quick Claude with custom prompt (#769)
+- **Quick Claude session resumption** — Sessions track ID, CWD, and workspace for resume on worktree context loss with automatic stale session cleanup
+- **Full clone mode** — Quick Claude dialog has a "Full clone (batch-friendly)" checkbox for Claude Code's `/batch` command
+- **Visual loading feedback in Quick Claude** — Placeholder card shows preset name, step label, progress bar, and step counter during launch
+- **CI benchmark regression detection** — GitHub Actions workflow runs Criterion benchmarks on PRs touching rendering/VT paths and posts comparison as PR comment (#783)
+- **Enhanced performance overlay** — Per-phase render breakdown, dropped frame detection, frame time histogram, and cell count in the Ctrl+Shift+O overlay
+- **End-to-end pipeline benchmark** — Criterion benchmark measuring full VT parse → grid conversion → pixel render pipeline
+- **GPU crash observability** — D3D11 watchdog thread, expanded SEH exception handler for GPU/driver crashes, and atexit handler for silent process exits
+- **Crash handler for iced-shell** — Panics, wgpu failures, and Windows structured exceptions now log to `iced-crash.log`
+- **`rename_self` MCP tool** — Rename the current terminal tab with a single call, no terminal ID needed
+- **Workspace folder icons** — Each workspace row displays a folder icon, accent-colored when active (#801)
+- **ContentPane layout variant** — Protocol supports non-terminal content panes in the split-pane layout tree with session persistence
+
+### Changed
+- **Workspace sidebar redesign** — Two-line workspace items with folder name subtitle, stronger active state with accent-tinted background and wider accent bar, refined badge styling, uppercase header with horizontal divider (#801)
+- **CLAUDE.md editor modal redesign** — Modernized appearance with cleaner layout, distinct panes, accent-colored UI elements, better markdown preview, and improved dialog styling
+- **UI depth hierarchy** — Title bar and status bar use darker backgrounds; active tab connects to content with rounded top corners; focus glow on active terminal pane
+- **Sidebar typography** — Semibold header at 11pt, active workspace names use semibold, footer labels bumped to 11pt, proportional sans-serif throughout
+- **Sidebar icons** — Header icons now use the Codicons icon font for crisp rendering at all sizes; icon size increased to 16px
+- **Sidebar font** — Workspace names render in system proportional sans-serif instead of terminal monospace
+
+### Fixed
+- **Terminal sessions lost after crash** — Daemon no longer kills shim processes on exit, allowing next instance to recover surviving sessions (#794)
+- **Workspace persistence crash safety** — Session file writes are now atomic (write to temp + rename) with automatic backup recovery (#619)
+- **Workspace mutations persisted immediately** — Create, delete, and rename now write to disk instantly instead of waiting for autosave (#619)
+- **Workspace layout lost on crash** — Session state autosaves every 60 seconds (#619)
+- **Workspace persistence across rebuilds** — Dead PTY sessions no longer silently drop workspaces; fresh sessions created to preserve metadata
+- **Empty workspaces get unwanted terminal on restart** — Intentionally empty workspaces no longer get a new terminal on restart (#771)
+- **Selection anchored to content during scroll** — Selection highlight stays on originally-selected content when scrolling (#761)
+- **Text selection cleared on modifier key press** — Pressing Ctrl/Shift/Alt/Super no longer clears selection (#738)
+- **Shift+Enter now sends CSI u escape sequence** — Enter with modifiers sends CSI u format for Kitty keyboard protocol
+- **Image paste in Quick Claude** — Ctrl+V now detects image-only clipboard data (#732)
+- **Quick Claude concurrent launches** — Multiple sessions can now launch simultaneously (#803)
+- **Quick Claude autocomplete arrow key navigation** — Arrow keys navigate suggestions instead of moving cursor (#782)
+- **Quick Claude trust prompt not auto-accepted** — Trust prompt is now detected and dismissed during launch
+- **Quick Claude stuck at trust prompt** — Fixed false positive early exit and increased startup timeout to 20s
+- **Quick Claude multi-line input** — Newlines collapsed to spaces before embedding in CLI argument
+- **Quick Claude skill discovery** — Now scans `~/.claude/commands/` and `.claude/commands/` directories
+- **Quick Claude resume syntax** — Fixed `claude --resume` command syntax for session ID
+- **Plugin skills nested under `.claude/`** — Quick Claude discovers skills at `<installPath>/.claude/skills/` and `commands/` (#769)
+- **Tab bar scroll overflow** — Tab bar scrolls horizontally with visible scrollbar and mouse wheel support (#189)
+- **Tab bar mouse wheel scrolling** — Vertical wheel scrolls tab bar horizontally
+- **Tab names from session hooks overwritten by CWD** — OSC window title set by hooks no longer reset by shell
+- **Sidebar workspace badge shows wrong terminal count** — Badge now shows actual terminal count from tab state (#763)
+- **Sidebar active workspace contrast** — Stronger background contrast (alpha 0.50 → 0.70)
+- **Workspace name text wrapping** — Long names truncated instead of wrapping to multiple lines
+- **Workspace notification badge appearing on switch** — Fixed false badge when switching away from workspace
+- **Terminal remains half-size after closing split** — Remaining terminal resizes to fill full viewport (#764)
+- **godly-remote layout reader** — Fixed reading stale data from Tauri-era `layout.json` instead of `iced-shell-session.json` (#742)
+- **Godly Remote shows stale terminal sessions** — Dead terminals excluded entirely from API response
+- **Close button visibility** — Close buttons hidden on inactive tabs until directly hovered
+
+### Tests
+- Added 3 regression tests for workspace mutation persistence across crash recovery
+- Added 3 tests for atomic write flow, backup recovery, and truncated JSON recovery
+
 ## [0.17.0] - 2026-03-23
 
 ### Added

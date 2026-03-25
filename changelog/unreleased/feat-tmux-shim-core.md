@@ -1,2 +1,0 @@
-### Added
-- **Tmux shim crate** — `godly-tmux-shim` binary crate that intercepts tmux CLI commands and translates them to Godly Terminal operations via named pipes, enabling Claude Code agent teams support. Includes session lifecycle commands (new-session, has-session, kill-session, list-sessions), MCP and daemon pipe clients, tmux CLI arg parser, format string expansion, and persistent state file with file locking.
