@@ -64,7 +64,7 @@ use iced::{event, window, Color, Element, Font, Length, Padding, Point, Shadow, 
 
 /// Proportional UI font for chrome elements (title bar, tab bar, status bar).
 /// Uses the system's default sans-serif (Segoe UI on Windows, SF Pro on macOS).
-const UI_FONT: Font = Font {
+pub(crate) const UI_FONT: Font = Font {
     family: iced::font::Family::SansSerif,
     weight: iced::font::Weight::Normal,
     stretch: iced::font::Stretch::Normal,
@@ -72,7 +72,7 @@ const UI_FONT: Font = Font {
 };
 
 /// Bold variant of the proportional UI font for headings and emphasis.
-const UI_FONT_BOLD: Font = Font {
+pub(crate) const UI_FONT_BOLD: Font = Font {
     family: iced::font::Family::SansSerif,
     weight: iced::font::Weight::Bold,
     stretch: iced::font::Stretch::Normal,
@@ -4196,7 +4196,7 @@ impl GodlyApp {
                     },
                 ),
                 sidebar_width,
-                self.terminal_font,
+                UI_FONT,
                 Message::SidebarAction,
                 Message::SidebarResizeStart,
                 Message::SidebarResizeEnd,
