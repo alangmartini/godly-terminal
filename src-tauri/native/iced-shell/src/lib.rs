@@ -14,6 +14,7 @@ pub mod shortcuts_tab;
 pub mod sidebar;
 pub mod split_pane;
 pub mod subscription;
+pub mod horizontal_wheel;
 pub mod tab_bar;
 pub mod terminal_state;
 pub mod title_bar;
@@ -34,6 +35,7 @@ pub mod font_enumerator;
 pub mod git_worktree;
 pub mod phone_remote;
 pub mod claude_code_manager;
+pub mod cf_tunnel;
 
 #[cfg(test)]
 pub mod testing;
