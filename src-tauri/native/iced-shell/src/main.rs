@@ -67,6 +67,7 @@ mod phone_remote;
 mod claude_code_manager;
 mod crash_handler;
 mod gpu_watchdog;
+mod horizontal_wheel;
 
 use app::{GodlyApp, Message};
 
