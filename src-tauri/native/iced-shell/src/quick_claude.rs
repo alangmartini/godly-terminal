@@ -66,6 +66,14 @@ pub enum LaunchStep {
         agent_index: usize,
         repo_folder: String,
     },
+    /// Handle the Claude Code workspace trust prompt if it appears.
+    /// Polls the terminal grid for trust prompt indicators and sends Enter to accept.
+    /// Non-blocking: returns Ok silently if no trust prompt appears within timeout
+    /// or if Claude has moved past startup (producing working output).
+    HandleTrustPromptIfNeeded {
+        agent_index: usize,
+        timeout_ms: u64,
+    },
 }
 
 /// Build launch steps for resuming an existing Claude session.
@@ -171,6 +179,10 @@ pub fn default_launch_steps(
         steps.push(LaunchStep::RunCommand {
             agent_index: i,
             command: cmd.clone(),
+        });
+        steps.push(LaunchStep::HandleTrustPromptIfNeeded {
+            agent_index: i,
+            timeout_ms: 8_000,
         });
     }
     steps
@@ -340,6 +352,14 @@ pub fn execute_step(
                 }
             }
         }
+        LaunchStep::HandleTrustPromptIfNeeded {
+            agent_index,
+            timeout_ms,
+        } => {
+            let session_id = resolve_session_id(&agent_terminal_ids, agent_index)?;
+            handle_trust_prompt_if_needed(&client, &session_id, timeout_ms)?;
+            Ok(StepResult::Ok)
+        }
     }
 }
 
@@ -492,7 +512,7 @@ fn wait_for_claude_ready(
         let text = grid_to_text(&grid);
 
         // Handle trust prompt if present and not skipped
-        if !skip_trust && !trust_handled && text.contains("Do you trust") {
+        if !skip_trust && !trust_handled && has_trust_prompt_text(&text) {
             commands::write_to_terminal(client, session_id, b"\r")?;
             trust_handled = true;
             std::thread::sleep(poll_interval);
@@ -510,7 +530,64 @@ fn wait_for_claude_ready(
                 trimmed == ">" || trimmed == "> "
             })
             .unwrap_or(false);
-        if has_prompt && (skip_trust || trust_handled || !text.contains("Do you trust")) {
+        if has_prompt && (skip_trust || trust_handled || !has_trust_prompt_text(&text)) {
+            return Ok(());
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Check if the grid text contains trust prompt indicators.
+/// Matches both old ("Do you trust the files") and current
+/// ("I trust this folder") Claude Code wording.
+fn has_trust_prompt_text(text: &str) -> bool {
+    text.contains("I trust this folder")
+        || text.contains("Do you trust the files")
+        || text.contains("Do you trust")
+}
+
+/// Non-blocking trust prompt handler for CLI-arg launches.
+///
+/// When Claude Code is launched with a prompt as a CLI positional argument,
+/// the trust prompt blocks processing. This function detects and dismisses it.
+/// If no trust prompt appears within the timeout, returns Ok (the project may
+/// already be trusted or Claude has moved past startup).
+fn handle_trust_prompt_if_needed(
+    client: &NativeDaemonClient,
+    session_id: &str,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    let timeout = Duration::from_millis(timeout_ms);
+    let poll_interval = Duration::from_millis(300);
+    let start = std::time::Instant::now();
+
+    loop {
+        if start.elapsed() > timeout {
+            // No trust prompt appeared — project is already trusted
+            return Ok(());
+        }
+
+        let grid = commands::get_grid_snapshot(client, session_id)?;
+        let text = grid_to_text(&grid);
+
+        // Trust prompt detected — accept it
+        if has_trust_prompt_text(&text) {
+            log::info!("Quick Claude: trust prompt detected, auto-accepting");
+            commands::write_to_terminal(client, session_id, b"\r")?;
+            std::thread::sleep(Duration::from_millis(1_000));
+            return Ok(());
+        }
+
+        // Early exit: if Claude is already working (shows tool use, output markers,
+        // or the input prompt ">"), the trust prompt was never shown
+        let past_startup = text.contains("Task(")
+            || text.contains("Claude Code")
+            || text.lines().rev().any(|l| {
+                let t = l.trim();
+                t == ">" || t == "> "
+            });
+        if past_startup && start.elapsed() > Duration::from_millis(2_000) {
             return Ok(());
         }
 
@@ -589,18 +666,19 @@ mod tests {
     #[test]
     fn default_steps_single_no_prompt() {
         let steps = default_launch_steps(1, "", "sonnet", "default", None, &[], IsolationMode::None, None);
-        // CreateTerminal, WaitIdle, RunCommand
-        assert_eq!(steps.len(), 3);
+        // CreateTerminal, WaitIdle, RunCommand, HandleTrustPromptIfNeeded
+        assert_eq!(steps.len(), 4);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
         assert!(matches!(steps[1], LaunchStep::WaitIdle { agent_index: 0, .. }));
         assert!(matches!(steps[2], LaunchStep::RunCommand { agent_index: 0, .. }));
+        assert!(matches!(steps[3], LaunchStep::HandleTrustPromptIfNeeded { agent_index: 0, .. }));
     }
 
     #[test]
     fn default_steps_single_with_prompt() {
         let steps = default_launch_steps(1, "build the app", "sonnet", "default", None, &[], IsolationMode::None, None);
-        // Prompt is now a CLI arg — same 3 steps, prompt embedded in command
-        assert_eq!(steps.len(), 3);
+        // Prompt is now a CLI arg — 4 steps, prompt embedded in command
+        assert_eq!(steps.len(), 4);
         if let LaunchStep::RunCommand { command, .. } = &steps[2] {
             assert!(command.contains("'build the app'"));
         } else {
@@ -636,8 +714,8 @@ mod tests {
     #[test]
     fn default_steps_grid_2x2() {
         let steps = default_launch_steps(4, "test", "sonnet", "default", None, &[], IsolationMode::None, None);
-        // Each agent: 3 steps. 4 agents = 12
-        assert_eq!(steps.len(), 12);
+        // Each agent: 4 steps. 4 agents = 16
+        assert_eq!(steps.len(), 16);
     }
 
     #[test]
@@ -721,8 +799,8 @@ mod tests {
         let steps = default_launch_steps(
             1, "hello", "sonnet", "auto", Some("/my/project"), &[], IsolationMode::Worktree, None,
         );
-        // CreateWorktree, CreateTerminal, WaitIdle, RunCommand = 4 steps
-        assert_eq!(steps.len(), 4);
+        // CreateWorktree, CreateTerminal, WaitIdle, RunCommand, HandleTrustPromptIfNeeded = 5 steps
+        assert_eq!(steps.len(), 5);
         assert!(matches!(steps[0], LaunchStep::CreateWorktree { agent_index: 0, .. }));
         assert!(matches!(steps[1], LaunchStep::CreateTerminal { agent_index: 0, .. }));
     }
@@ -730,8 +808,8 @@ mod tests {
     #[test]
     fn default_steps_worktree_no_cwd_skips_worktree_step() {
         let steps = default_launch_steps(1, "hello", "sonnet", "auto", None, &[], IsolationMode::Worktree, None);
-        // No CWD → no CreateWorktree, just normal 3 steps
-        assert_eq!(steps.len(), 3);
+        // No CWD → no CreateWorktree, just normal 4 steps
+        assert_eq!(steps.len(), 4);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
     }
 
@@ -740,8 +818,8 @@ mod tests {
         let steps = default_launch_steps(
             1, "hello", "sonnet", "auto", Some("/my/project"), &[], IsolationMode::None, None,
         );
-        // IsolationMode::None → no CreateWorktree
-        assert_eq!(steps.len(), 3);
+        // IsolationMode::None → no CreateWorktree, just normal 4 steps
+        assert_eq!(steps.len(), 4);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
     }
 
@@ -772,8 +850,8 @@ mod tests {
         let steps = default_launch_steps(
             1, "hello", "sonnet", "auto", Some("/my/project"), &[], IsolationMode::Clone, None,
         );
-        // CreateClone, CreateTerminal, WaitIdle, RunCommand = 4 steps
-        assert_eq!(steps.len(), 4);
+        // CreateClone, CreateTerminal, WaitIdle, RunCommand, HandleTrustPromptIfNeeded = 5 steps
+        assert_eq!(steps.len(), 5);
         assert!(matches!(steps[0], LaunchStep::CreateClone { agent_index: 0, .. }));
         assert!(matches!(steps[1], LaunchStep::CreateTerminal { agent_index: 0, .. }));
     }
@@ -781,8 +859,23 @@ mod tests {
     #[test]
     fn default_steps_clone_mode_no_cwd_skips_clone_step() {
         let steps = default_launch_steps(1, "hello", "sonnet", "auto", None, &[], IsolationMode::Clone, None);
-        // No CWD → no CreateClone, just normal 3 steps
-        assert_eq!(steps.len(), 3);
+        // No CWD → no CreateClone, just normal 4 steps
+        assert_eq!(steps.len(), 4);
         assert!(matches!(steps[0], LaunchStep::CreateTerminal { agent_index: 0, .. }));
+    }
+
+    #[test]
+    fn has_trust_prompt_detects_current_wording() {
+        assert!(has_trust_prompt_text("  > 1. Yes, I trust this folder\n  2. No, exit"));
+    }
+
+    #[test]
+    fn has_trust_prompt_detects_old_wording() {
+        assert!(has_trust_prompt_text("Do you trust the files in this folder?"));
+    }
+
+    #[test]
+    fn has_trust_prompt_negative() {
+        assert!(!has_trust_prompt_text("Claude Code v1.0.0\nLoading..."));
     }
 }
