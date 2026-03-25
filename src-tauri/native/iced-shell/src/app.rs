@@ -2633,6 +2633,32 @@ impl GodlyApp {
                 );
 
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
+                    // When the skill autocomplete popup is open, intercept
+                    // arrow-key cursor movements and navigate the popup instead.
+                    // keyboard::listen() only sees Status::Ignored events, but the
+                    // text_editor widget captures ArrowUp/ArrowDown (Status::Captured),
+                    // so the keyboard-based autocomplete handler never fires for them.
+                    // Handle navigation here where we DO receive the action.
+                    if dlg.skill_autocomplete_open {
+                        match &action {
+                            iced::widget::text_editor::Action::Move(
+                                iced::widget::text_editor::Motion::Up,
+                            ) => {
+                                return self.update(
+                                    Message::QuickClaudeDialogSkillAutocompleteNavigate(-1),
+                                );
+                            }
+                            iced::widget::text_editor::Action::Move(
+                                iced::widget::text_editor::Motion::Down,
+                            ) => {
+                                return self.update(
+                                    Message::QuickClaudeDialogSkillAutocompleteNavigate(1),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+
                     dlg.prompt_content.perform(action);
 
                     // Detect skill autocomplete trigger based on cursor position
@@ -2647,9 +2673,15 @@ impl GodlyApp {
                             let after_slash = &before_cursor[slash_pos + 1..];
                             // Only trigger if there's no space/newline between slash and cursor
                             if !after_slash.contains(' ') && !after_slash.contains('\n') {
+                                let new_filter = after_slash.to_string();
+                                // Only reset selection when the filter text changes;
+                                // preserve it on cursor-only movements so arrow-key
+                                // navigation isn't destroyed.
+                                if dlg.skill_autocomplete_filter != new_filter {
+                                    dlg.skill_autocomplete_selected = 0;
+                                }
                                 dlg.skill_autocomplete_open = true;
-                                dlg.skill_autocomplete_filter = after_slash.to_string();
-                                dlg.skill_autocomplete_selected = 0;
+                                dlg.skill_autocomplete_filter = new_filter;
                             } else {
                                 dlg.skill_autocomplete_open = false;
                                 dlg.skill_autocomplete_filter.clear();
