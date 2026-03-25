@@ -100,10 +100,10 @@ impl PerfStats {
     pub fn render_phase_ms(&self) -> (f32, f32, f32, f32) {
         let s = &self.last_render_stats;
         (
-            s.bg_fill.as_micros() as f32 / 1000.0,
-            s.glyph_phase.as_micros() as f32 / 1000.0,
-            s.cursor_phase.as_micros() as f32 / 1000.0,
-            s.selection_phase.as_micros() as f32 / 1000.0,
+            s.bg_fill.as_secs_f32() * 1000.0,
+            s.glyph_phase.as_secs_f32() * 1000.0,
+            s.cursor_phase.as_secs_f32() * 1000.0,
+            s.selection_phase.as_secs_f32() * 1000.0,
         )
     }
 
