@@ -2088,6 +2088,7 @@ dependencies = [
  "criterion",
  "fontdb",
  "godly-protocol",
+ "godly-vt",
  "iced",
  "log",
  "swash",
