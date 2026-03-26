@@ -683,8 +683,14 @@ mod tests {
             .expect("both terminals are live");
 
         match &restored {
-            LayoutNode::Split { direction, ratio, .. } => {
-                assert_eq!(*direction, SplitDirection::Vertical, "direction must survive round-trip");
+            LayoutNode::Split {
+                direction, ratio, ..
+            } => {
+                assert_eq!(
+                    *direction,
+                    SplitDirection::Vertical,
+                    "direction must survive round-trip"
+                );
                 assert!((ratio - 0.6).abs() < 0.01, "ratio must survive round-trip");
             }
             _ => panic!("expected split layout after round-trip"),
@@ -715,7 +721,11 @@ mod tests {
 
         match &restored {
             LayoutNode::Split { direction, .. } => {
-                assert_eq!(*direction, SplitDirection::Horizontal, "direction must survive round-trip");
+                assert_eq!(
+                    *direction,
+                    SplitDirection::Horizontal,
+                    "direction must survive round-trip"
+                );
             }
             _ => panic!("expected split layout after round-trip"),
         }
@@ -768,7 +778,10 @@ mod tests {
         let merged = merge_with_live_sessions(&persisted, &live);
 
         let ws = &merged.workspaces[0];
-        let layout = ws.layout.as_ref().expect("all terminals are live, layout should be Some");
+        let layout = ws
+            .layout
+            .as_ref()
+            .expect("all terminals are live, layout should be Some");
         match layout {
             LayoutNode::Split {
                 direction,
@@ -783,7 +796,9 @@ mod tests {
                     }
                     _ => panic!("inner node should be a split"),
                 }
-                assert!(matches!(first.as_ref(), LayoutNode::Leaf { terminal_id } if terminal_id == "t-1"));
+                assert!(
+                    matches!(first.as_ref(), LayoutNode::Leaf { terminal_id } if terminal_id == "t-1")
+                );
             }
             _ => panic!("expected split layout"),
         }
@@ -910,8 +925,16 @@ mod tests {
 
         // All workspaces should have None layout (no live terminals to match).
         for ws in &merged.workspaces {
-            assert!(ws.layout.is_none(), "workspace '{}' should have no layout", ws.name);
-            assert!(ws.focused_terminal.is_none(), "workspace '{}' should have no focused terminal", ws.name);
+            assert!(
+                ws.layout.is_none(),
+                "workspace '{}' should have no layout",
+                ws.name
+            );
+            assert!(
+                ws.focused_terminal.is_none(),
+                "workspace '{}' should have no focused terminal",
+                ws.name
+            );
         }
     }
 
@@ -957,10 +980,7 @@ mod tests {
         };
 
         // Daemon restarted and spawned new sessions with different UUIDs
-        let new_live_sessions = vec![
-            "new-uuid-aaa".to_string(),
-            "new-uuid-bbb".to_string(),
-        ];
+        let new_live_sessions = vec!["new-uuid-aaa".to_string(), "new-uuid-bbb".to_string()];
         let merged = merge_with_live_sessions(&persisted, &new_live_sessions);
 
         // Workspace metadata must survive even though no old terminal IDs match
@@ -977,7 +997,11 @@ mod tests {
 
         // Workspaces should have None layout (old terminal IDs don't match new ones).
         for ws in &merged.workspaces {
-            assert!(ws.layout.is_none(), "workspace '{}' should have no layout", ws.name);
+            assert!(
+                ws.layout.is_none(),
+                "workspace '{}' should have no layout",
+                ws.name
+            );
             assert!(ws.focused_terminal.is_none());
         }
 
@@ -1029,11 +1053,7 @@ mod tests {
         };
 
         // All three terminals are still alive in the daemon.
-        let live = vec![
-            "t-1".to_string(),
-            "t-2".to_string(),
-            "t-3".to_string(),
-        ];
+        let live = vec!["t-1".to_string(), "t-2".to_string(), "t-3".to_string()];
         let merged = merge_with_live_sessions(&persisted, &live);
 
         // t-1 is in the layout; t-2 and t-3 are missing from any layout.
@@ -1099,7 +1119,10 @@ mod tests {
 
         assert_eq!(merged.missing_live_terminal_ids, vec!["t-2".to_string()]);
         assert!(
-            merged.missing_terminal_workspace_assignments.get("t-2").is_none(),
+            merged
+                .missing_terminal_workspace_assignments
+                .get("t-2")
+                .is_none(),
             "t-2's assignment to non-existent workspace should be dropped"
         );
     }
@@ -1135,12 +1158,10 @@ mod tests {
         };
 
         let json = serde_json::to_string(&state).expect("serialize");
-        let decoded: PersistedSessionState =
-            serde_json::from_str(&json).expect("deserialize");
+        let decoded: PersistedSessionState = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(
-            decoded.terminal_workspace_assignments,
-            state.terminal_workspace_assignments,
+            decoded.terminal_workspace_assignments, state.terminal_workspace_assignments,
             "workspace assignments must survive serialization round-trip"
         );
     }
@@ -1216,13 +1237,19 @@ mod tests {
         // godly-terminal: layout survives with t-1.
         let ws_godly = &merged.workspaces[0];
         assert_eq!(ws_godly.name, "godly-terminal");
-        assert!(ws_godly.layout.is_some(), "godly-terminal should keep its layout");
+        assert!(
+            ws_godly.layout.is_some(),
+            "godly-terminal should keep its layout"
+        );
 
         // typesense: layout is None (t-2 died), but metadata survives.
         let ws_typesense = &merged.workspaces[1];
         assert_eq!(ws_typesense.name, "typesense");
         assert_eq!(ws_typesense.folder_path, "C:\\dev\\typesense");
-        assert!(ws_typesense.layout.is_none(), "typesense should have no layout (terminal died)");
+        assert!(
+            ws_typesense.layout.is_none(),
+            "typesense should have no layout (terminal died)"
+        );
 
         // MercadoPago: layout survives with t-3.
         let ws_mp = &merged.workspaces[2];
@@ -1414,7 +1441,11 @@ mod tests {
                 LayoutNode::ContentPane {
                     content: PaneContent::FileViewer { file_type, .. },
                 } => {
-                    assert_eq!(*file_type, expected_type, "file type '{}' should round-trip", type_str);
+                    assert_eq!(
+                        *file_type, expected_type,
+                        "file type '{}' should round-trip",
+                        type_str
+                    );
                 }
                 _ => panic!("Expected ContentPane FileViewer"),
             }
@@ -1423,8 +1454,7 @@ mod tests {
 
     /// Helper: create a temp path unique to the calling test.
     fn test_persistence_path(suffix: &str) -> PathBuf {
-        std::env::temp_dir()
-            .join(format!("godly-test-{}-{}.json", std::process::id(), suffix))
+        std::env::temp_dir().join(format!("godly-test-{}-{}.json", std::process::id(), suffix))
     }
 
     fn make_workspace(id: &str, name: &str, folder: &str) -> PersistedWorkspaceState {
@@ -1434,7 +1464,9 @@ mod tests {
             folder_path: folder.to_string(),
             worktree_mode: false,
             focused_terminal: format!("t-{}", id),
-            layout: PersistedLayoutNode::Leaf { terminal_id: format!("t-{}", id) },
+            layout: PersistedLayoutNode::Leaf {
+                terminal_id: format!("t-{}", id),
+            },
         }
     }
 
@@ -1487,9 +1519,15 @@ mod tests {
             make_workspace("w-3", "Mercado Pago", "C:\\Users\\dev\\mp"),
         ]);
         save_to_path(&path, &state).expect("initial save");
-        state.workspaces.push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
+        state
+            .workspaces
+            .push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
         save_to_path(&path, &state).expect("persist after create #1");
-        state.workspaces.push(make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"));
+        state.workspaces.push(make_workspace(
+            "w-5",
+            "Design System",
+            "C:\\Users\\dev\\design",
+        ));
         save_to_path(&path, &state).expect("persist after create #2");
         let loaded = load_from_path(&path).expect("load after crash");
         let merged = merge_with_live_sessions(&loaded, &[]);
@@ -1508,9 +1546,15 @@ mod tests {
         save_to_path(&path, &state).expect("initial save");
         state.workspaces.retain(|w| w.id != "w-1");
         save_to_path(&path, &state).expect("persist after delete");
-        state.workspaces.push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
+        state
+            .workspaces
+            .push(make_workspace("w-4", "Backend API", "C:\\Users\\dev\\api"));
         save_to_path(&path, &state).expect("persist after create #1");
-        state.workspaces.push(make_workspace("w-5", "Design System", "C:\\Users\\dev\\design"));
+        state.workspaces.push(make_workspace(
+            "w-5",
+            "Design System",
+            "C:\\Users\\dev\\design",
+        ));
         save_to_path(&path, &state).expect("persist after create #2");
         let loaded = load_from_path(&path).expect("load after crash");
         let merged = merge_with_live_sessions(&loaded, &[]);
@@ -1518,7 +1562,15 @@ mod tests {
         assert!(!names.contains(&"Workspace 1"));
         assert!(names.contains(&"Backend API"));
         assert!(names.contains(&"Design System"));
-        assert_eq!(names, vec!["godly-terminal", "Mercado Pago", "Backend API", "Design System"]);
+        assert_eq!(
+            names,
+            vec![
+                "godly-terminal",
+                "Mercado Pago",
+                "Backend API",
+                "Design System"
+            ]
+        );
     }
 
     #[test]
@@ -1569,13 +1621,16 @@ mod tests {
         ]);
         save_to_path(&path, &state).expect("first save");
         save_to_path(&path, &state).expect("second save");
-        std::fs::write(&path, r#"{"version": 1, "workspaces": [{"id":"#).expect("simulate truncation");
+        std::fs::write(&path, r#"{"version": 1, "workspaces": [{"id":"#)
+            .expect("simulate truncation");
         let recovered = load_from_path(&path).expect("recover from backup");
         assert_eq!(recovered.workspaces.len(), 2);
         let _ = std::fs::remove_file(&path.with_extension("json.bak"));
     }
 
-    struct ScopeGuard { path: PathBuf }
+    struct ScopeGuard {
+        path: PathBuf,
+    }
     impl Drop for ScopeGuard {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.path);
@@ -1583,7 +1638,9 @@ mod tests {
             let _ = std::fs::remove_file(self.path.with_extension("json.tmp"));
         }
     }
-    fn scopeguard(path: PathBuf) -> ScopeGuard { ScopeGuard { path } }
+    fn scopeguard(path: PathBuf) -> ScopeGuard {
+        ScopeGuard { path }
+    }
 
     fn make_empty_workspace(id: &str, name: &str, folder: &str) -> PersistedWorkspaceState {
         // Represents a workspace where the user closed all terminals.

@@ -99,9 +99,7 @@ where
                         mouse::ScrollDelta::Pixels { x: x + y, y: 0.0 }
                     }
                 };
-                redirected = Event::Mouse(mouse::Event::WheelScrolled {
-                    delta: new_delta,
-                });
+                redirected = Event::Mouse(mouse::Event::WheelScrolled { delta: new_delta });
                 &redirected
             }
             _ => event,
@@ -127,9 +125,13 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content
-            .as_widget()
-            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 
     fn operate(

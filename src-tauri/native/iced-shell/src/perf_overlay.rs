@@ -20,9 +20,7 @@ pub fn view_perf_overlay<'a, M: 'a>(
     let dropped_color = if dropped_frames > 0 { red } else { green };
 
     let content = column![
-        text(format!("FPS: {:.0}", fps))
-            .size(11)
-            .color(green),
+        text(format!("FPS: {:.0}", fps)).size(11).color(green),
         text(format!("Frame: {:.1}ms", frame_ms))
             .size(11)
             .color(green),
@@ -35,21 +33,23 @@ pub fn view_perf_overlay<'a, M: 'a>(
         text(format!("Terminals: {}", terminal_count))
             .size(11)
             .color(green),
-        text("── Render Phases ──")
-            .size(10)
-            .color(dim_green),
-        text(format!("BG: {:.2}ms | Glyph: {:.2}ms", phase_ms.0, phase_ms.1))
-            .size(10)
-            .color(green),
-        text(format!("Cursor: {:.2}ms | Select: {:.2}ms", phase_ms.2, phase_ms.3))
-            .size(10)
-            .color(green),
+        text("── Render Phases ──").size(10).color(dim_green),
+        text(format!(
+            "BG: {:.2}ms | Glyph: {:.2}ms",
+            phase_ms.0, phase_ms.1
+        ))
+        .size(10)
+        .color(green),
+        text(format!(
+            "Cursor: {:.2}ms | Select: {:.2}ms",
+            phase_ms.2, phase_ms.3
+        ))
+        .size(10)
+        .color(green),
         text(format!("Cells: {}", cells_rendered))
             .size(10)
             .color(green),
-        text("── Frame Health ──")
-            .size(10)
-            .color(dim_green),
+        text("── Frame Health ──").size(10).color(dim_green),
         text(format!("Dropped: {}", dropped_frames))
             .size(10)
             .color(dropped_color),
@@ -57,8 +57,8 @@ pub fn view_perf_overlay<'a, M: 'a>(
             "<8: {} | 8-16: {} | 16-33: {} | 33-100: {} | >100: {}",
             histogram[0], histogram[1], histogram[2], histogram[3], histogram[4]
         ))
-            .size(10)
-            .color(green),
+        .size(10)
+        .color(green),
     ]
     .spacing(2);
 

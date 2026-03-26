@@ -129,9 +129,9 @@ impl AiToolMode {
     pub fn icon(self) -> Option<&'static str> {
         match self {
             Self::None => None,
-            Self::Claude => Some("\u{2728}"),  // sparkles
-            Self::Codex => Some("\u{26A1}"),   // lightning
-            Self::Both => Some("\u{1F680}"),   // rocket
+            Self::Claude => Some("\u{2728}"), // sparkles
+            Self::Codex => Some("\u{26A1}"),  // lightning
+            Self::Both => Some("\u{1F680}"),  // rocket
         }
     }
 }
@@ -179,7 +179,11 @@ pub fn view_shell_picker<'a, M: Clone + 'a>(
                 };
                 button::Style {
                     background: Some(Background::Color(bg)),
-                    text_color: if is_active { text_active } else { text_secondary },
+                    text_color: if is_active {
+                        text_active
+                    } else {
+                        text_secondary
+                    },
                     border: Border {
                         color: if is_active { accent } else { border_color },
                         width: 1.0,
@@ -212,11 +216,11 @@ pub fn view_shell_picker<'a, M: Clone + 'a>(
 
             // Default distro option
             let is_selected = state.selected_distro.is_none();
-            let default_btn = button(
-                text("Default")
-                    .size(13)
-                    .color(if is_selected { text_active } else { text_primary }),
-            )
+            let default_btn = button(text("Default").size(13).color(if is_selected {
+                text_active
+            } else {
+                text_primary
+            }))
             .on_press(on_distro_select(None))
             .padding(Padding::from([5, 10]))
             .width(Length::Fill)
@@ -235,11 +239,11 @@ pub fn view_shell_picker<'a, M: Clone + 'a>(
             for distro in &state.wsl_distros {
                 let d2 = distro.clone();
                 let is_selected = state.selected_distro.as_deref() == Some(distro.as_str());
-                let btn = button(
-                    text(distro.as_str())
-                        .size(13)
-                        .color(if is_selected { text_active } else { text_primary }),
-                )
+                let btn = button(text(distro.as_str()).size(13).color(if is_selected {
+                    text_active
+                } else {
+                    text_primary
+                }))
                 .on_press(on_distro_select(Some(d2)))
                 .padding(Padding::from([5, 10]))
                 .width(Length::Fill)
@@ -367,11 +371,9 @@ mod tests {
     #[test]
     fn shell_choice_labels() {
         assert_eq!(ShellChoice::PowerShell.label(), "PowerShell");
-        assert!(ShellChoice::Wsl {
-            distribution: None
-        }
-        .label()
-        .contains("default"));
+        assert!(ShellChoice::Wsl { distribution: None }
+            .label()
+            .contains("default"));
         assert!(ShellChoice::Wsl {
             distribution: Some("Ubuntu".into())
         }

@@ -85,7 +85,10 @@ fn is_url_char(c: char) -> bool {
 }
 
 fn is_trailing_punct(c: char) -> bool {
-    matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | ')' | ']')
+    matches!(
+        c,
+        '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | ')' | ']'
+    )
 }
 
 #[cfg(test)]
@@ -187,8 +190,14 @@ mod tests {
     fn url_at_col_hit() {
         let line = "visit https://example.com ok";
         assert_eq!(url_at_col(line, 6), Some("https://example.com".to_string()));
-        assert_eq!(url_at_col(line, 15), Some("https://example.com".to_string()));
-        assert_eq!(url_at_col(line, 24), Some("https://example.com".to_string()));
+        assert_eq!(
+            url_at_col(line, 15),
+            Some("https://example.com".to_string())
+        );
+        assert_eq!(
+            url_at_col(line, 24),
+            Some("https://example.com".to_string())
+        );
     }
 
     #[test]

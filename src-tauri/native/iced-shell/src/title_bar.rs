@@ -1,5 +1,7 @@
 use iced::widget::{button, canvas, container, mouse_area, row, text};
-use iced::{Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
+use iced::{
+    Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
+};
 
 use crate::theme::{DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
 
@@ -105,10 +107,7 @@ impl<Message> canvas::Program<Message> for WindowControlIcon {
             WindowControlKind::Minimize => {
                 // Horizontal line
                 let s = w.min(h) * 0.35;
-                let line = canvas::Path::line(
-                    Point::new(cx - s, cy),
-                    Point::new(cx + s, cy),
-                );
+                let line = canvas::Path::line(Point::new(cx - s, cy), Point::new(cx + s, cy));
                 frame.stroke(&line, stroke);
             }
             WindowControlKind::Maximize => {
@@ -123,14 +122,10 @@ impl<Message> canvas::Program<Message> for WindowControlIcon {
             WindowControlKind::Close => {
                 // X shape
                 let s = w.min(h) * 0.28;
-                let line1 = canvas::Path::line(
-                    Point::new(cx - s, cy - s),
-                    Point::new(cx + s, cy + s),
-                );
-                let line2 = canvas::Path::line(
-                    Point::new(cx + s, cy - s),
-                    Point::new(cx - s, cy + s),
-                );
+                let line1 =
+                    canvas::Path::line(Point::new(cx - s, cy - s), Point::new(cx + s, cy + s));
+                let line2 =
+                    canvas::Path::line(Point::new(cx + s, cy - s), Point::new(cx - s, cy + s));
                 frame.stroke(&line1, stroke);
                 frame.stroke(&line2, stroke);
             }
@@ -155,13 +150,15 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
     .width(Length::Fixed(16.0))
     .height(Length::Fixed(16.0));
 
-    let title_text = text(title)
-        .size(12.5)
-        .font(font)
-        .color(TEXT_SECONDARY());
+    let title_text = text(title).size(12.5).font(font).color(TEXT_SECONDARY());
 
     let title_content = row![
-        container(icon).padding(Padding { top: 0.0, right: 6.0, bottom: 0.0, left: 8.0 }),
+        container(icon).padding(Padding {
+            top: 0.0,
+            right: 6.0,
+            bottom: 0.0,
+            left: 8.0
+        }),
         title_text,
     ]
     .align_y(iced::Alignment::Center);
@@ -173,18 +170,17 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
     )
     .on_press(on_drag);
 
-    let minimize_btn = window_control_icon_button(WindowControlKind::Minimize, GHOST_HOVER(), on_minimize);
-    let maximize_btn = window_control_icon_button(WindowControlKind::Maximize, GHOST_HOVER(), on_maximize);
+    let minimize_btn =
+        window_control_icon_button(WindowControlKind::Minimize, GHOST_HOVER(), on_minimize);
+    let maximize_btn =
+        window_control_icon_button(WindowControlKind::Maximize, GHOST_HOVER(), on_maximize);
     let close_btn = window_control_icon_button(WindowControlKind::Close, DANGER(), on_close);
 
     let controls = row![minimize_btn, maximize_btn, close_btn].spacing(0);
 
-    let content = row![
-        container(drag_area).width(Length::Fill),
-        controls,
-    ]
-    .align_y(iced::Alignment::Center)
-    .height(Length::Fixed(TITLE_BAR_HEIGHT));
+    let content = row![container(drag_area).width(Length::Fill), controls,]
+        .align_y(iced::Alignment::Center)
+        .height(Length::Fixed(TITLE_BAR_HEIGHT));
 
     container(content)
         .width(Length::Fill)
@@ -202,28 +198,35 @@ fn window_control_icon_button<'a, M: Clone + 'a>(
     on_press: M,
 ) -> Element<'a, M> {
     let icon_color = TEXT_SECONDARY();
-    let icon = canvas(WindowControlIcon { kind, color: icon_color })
-        .width(Length::Fixed(10.0))
-        .height(Length::Fixed(10.0));
+    let icon = canvas(WindowControlIcon {
+        kind,
+        color: icon_color,
+    })
+    .width(Length::Fixed(10.0))
+    .height(Length::Fixed(10.0));
 
-    button(container(icon).center_x(Length::Fill).center_y(Length::Fill))
-        .on_press(on_press)
-        .padding(Padding::from([0, 16]))
-        .height(Length::Fixed(TITLE_BAR_HEIGHT))
-        .width(Length::Fixed(46.0))
-        .style(move |_theme, status| {
-            let bg_color = match status {
-                button::Status::Hovered | button::Status::Pressed => hover_bg,
-                _ => Color::TRANSPARENT,
-            };
-            button::Style {
-                background: Some(iced::Background::Color(bg_color)),
-                text_color: icon_color,
-                border: Border::default(),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    button(
+        container(icon)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .on_press(on_press)
+    .padding(Padding::from([0, 16]))
+    .height(Length::Fixed(TITLE_BAR_HEIGHT))
+    .width(Length::Fixed(46.0))
+    .style(move |_theme, status| {
+        let bg_color = match status {
+            button::Status::Hovered | button::Status::Pressed => hover_bg,
+            _ => Color::TRANSPARENT,
+        };
+        button::Style {
+            background: Some(iced::Background::Color(bg_color)),
+            text_color: icon_color,
+            border: Border::default(),
+            ..button::Style::default()
+        }
+    })
+    .into()
 }
 
 #[cfg(test)]

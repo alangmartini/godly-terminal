@@ -27,11 +27,7 @@ pub const ALL_STATIC_IDS: &[&str] = &[
 ];
 
 /// Dynamic ID prefixes for parameterized elements.
-const DYNAMIC_PREFIXES: &[&str] = &[
-    "terminal.surface:",
-    "tab.close:",
-    "pane.divider:",
-];
+const DYNAMIC_PREFIXES: &[&str] = &["terminal.surface:", "tab.close:", "pane.divider:"];
 
 /// Generate a dynamic terminal surface ID for a specific terminal.
 pub fn terminal_surface_id(terminal_id: &str) -> String {
@@ -50,8 +46,7 @@ pub fn pane_divider_id(workspace_id: &str) -> String {
 
 /// Check if a semantic ID is valid (known static ID or valid dynamic pattern).
 pub fn is_valid_semantic_id(id: &str) -> bool {
-    ALL_STATIC_IDS.contains(&id)
-        || DYNAMIC_PREFIXES.iter().any(|prefix| id.starts_with(prefix))
+    ALL_STATIC_IDS.contains(&id) || DYNAMIC_PREFIXES.iter().any(|prefix| id.starts_with(prefix))
 }
 
 #[cfg(test)]

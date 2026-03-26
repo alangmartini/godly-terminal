@@ -633,7 +633,9 @@ fn handle_trust_prompt_if_needed(
         if has_trust_prompt_text(&text) {
             accept_attempts += 1;
             if accept_attempts == 1 {
-                log::info!("Quick Claude: trust prompt detected, waiting for input handler to stabilize");
+                log::info!(
+                    "Quick Claude: trust prompt detected, waiting for input handler to stabilize"
+                );
                 // First detection: wait for Claude Code's TUI input handler to
                 // fully initialize before sending the keypress. Without this
                 // delay the \r often arrives before the prompt is ready to
@@ -642,7 +644,8 @@ fn handle_trust_prompt_if_needed(
             }
             log::info!(
                 "Quick Claude: sending Enter to accept trust prompt (attempt {}/{})",
-                accept_attempts, max_accept_attempts,
+                accept_attempts,
+                max_accept_attempts,
             );
             commands::write_to_terminal(client, session_id, b"\r")?;
 

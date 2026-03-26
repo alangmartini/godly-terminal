@@ -86,8 +86,7 @@ fn process_badge_label(process_name: &str) -> Option<&'static str> {
         "VI"
     } else if contains_ascii_insensitive(trimmed, "ssh") {
         "SS"
-    } else if trimmed.eq_ignore_ascii_case("git")
-        || contains_ascii_insensitive(trimmed, "git.exe")
+    } else if trimmed.eq_ignore_ascii_case("git") || contains_ascii_insensitive(trimmed, "git.exe")
     {
         "GI"
     } else if contains_ascii_insensitive(trimmed, "ruby")
@@ -185,7 +184,11 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         let truncated = truncate_label(&terminal.tab_label(), 30);
         let label = text(truncated).size(13).font(font).color(text_color);
         let icon_glyph = process_icon_glyph(terminal).map(|glyph| {
-            let icon_color = if is_active { ACCENT() } else { TEXT_SECONDARY() };
+            let icon_color = if is_active {
+                ACCENT()
+            } else {
+                TEXT_SECONDARY()
+            };
             text(glyph).size(14).color(icon_color)
         });
 
@@ -291,7 +294,11 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .on_release(on_drag_end.clone());
 
         // Active tab accent indicator (2px colored line at bottom edge).
-        let accent_color = if is_active { ACCENT() } else { Color::TRANSPARENT };
+        let accent_color = if is_active {
+            ACCENT()
+        } else {
+            Color::TRANSPARENT
+        };
         let indicator = container(Space::new().width(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fixed(ACCENT_INDICATOR_HEIGHT))
@@ -300,19 +307,14 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                 ..container::Style::default()
             });
 
-        let tab_column = column![
-            indicator,
-            container(tab_with_drag).height(Length::Fill),
-        ]
-        .height(Length::Fixed(TAB_BAR_HEIGHT))
-        .spacing(0);
+        let tab_column = column![indicator, container(tab_with_drag).height(Length::Fill),]
+            .height(Length::Fixed(TAB_BAR_HEIGHT))
+            .spacing(0);
 
         // Animate entry: clip max_width during the entry animation.
         if let Some(&progress) = entry_progress.get(&terminal.id) {
             let max_w = (TAB_ENTRY_MAX_WIDTH * progress).max(1.0);
-            let clip_container = container(tab_column)
-                .max_width(max_w)
-                .clip(true);
+            let clip_container = container(tab_column).max_width(max_w).clip(true);
             tabs = tabs.push(clip_container);
         } else {
             tabs = tabs.push(tab_column);
@@ -462,7 +464,10 @@ mod tests {
     fn truncate_label_short_strings_unchanged() {
         assert_eq!(truncate_label("hello", 30), "hello");
         assert_eq!(truncate_label("", 30), "");
-        assert_eq!(truncate_label("exactly 30 chars long padded!!", 30), "exactly 30 chars long padded!!");
+        assert_eq!(
+            truncate_label("exactly 30 chars long padded!!", 30),
+            "exactly 30 chars long padded!!"
+        );
     }
 
     #[test]

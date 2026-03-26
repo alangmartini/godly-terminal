@@ -169,13 +169,19 @@ impl<T> Drop for RestoringStream<T> {
 ///
 /// Uses the same restoring-stream pattern as `daemon_events`.
 pub fn mcp_events(
-    receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
+    receiver: Arc<
+        parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>,
+    >,
 ) -> iced::Subscription<godly_app_adapter::mcp_pipe::McpEvent> {
     use iced::advanced::subscription::{self, EventStream, Hasher, Recipe};
     use std::hash::Hash;
 
     struct McpEventRecipe {
-        receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
+        receiver: Arc<
+            parking_lot::Mutex<
+                Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>,
+            >,
+        >,
     }
 
     impl Recipe for McpEventRecipe {

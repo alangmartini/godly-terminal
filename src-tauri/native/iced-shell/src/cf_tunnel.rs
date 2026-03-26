@@ -348,9 +348,7 @@ pub fn setup_cloudflare_access(
     hostname: &str,
     email: &str,
 ) -> Result<String, String> {
-    let base = format!(
-        "https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps"
-    );
+    let base = format!("https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps");
 
     // 1. Create Access Application
     let app_body = serde_json::json!({
@@ -416,9 +414,8 @@ pub fn remove_cloudflare_access(
     account_id: &str,
     app_id: &str,
 ) -> Result<(), String> {
-    let url = format!(
-        "https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps/{app_id}"
-    );
+    let url =
+        format!("https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps/{app_id}");
 
     let resp = ureq::delete(&url)
         .set("Authorization", &format!("Bearer {api_token}"))

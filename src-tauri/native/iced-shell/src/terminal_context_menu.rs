@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, mouse_area, text};
 use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
-    BORDER_VARIANT, GHOST_HOVER, SURFACE_BG, BACKDROP, RADIUS_MD, SHADOW_COLOR, TEXT_PRIMARY,
+    BACKDROP, BORDER_VARIANT, GHOST_HOVER, RADIUS_MD, SHADOW_COLOR, SURFACE_BG, TEXT_PRIMARY,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -100,8 +100,7 @@ fn watchdog_loop() -> Result<(), String> {
         return Err("d3d11.dll not found".into());
     }
 
-    let create_device_ptr =
-        unsafe { GetProcAddress(module, b"D3D11CreateDevice\0".as_ptr()) };
+    let create_device_ptr = unsafe { GetProcAddress(module, b"D3D11CreateDevice\0".as_ptr()) };
     if create_device_ptr.is_null() {
         return Err("D3D11CreateDevice not found in d3d11.dll".into());
     }
@@ -127,7 +126,10 @@ fn watchdog_loop() -> Result<(), String> {
     };
 
     if hr != S_OK || device.is_null() {
-        return Err(format!("D3D11CreateDevice failed: HRESULT=0x{:08X}", hr as u32));
+        return Err(format!(
+            "D3D11CreateDevice failed: HRESULT=0x{:08X}",
+            hr as u32
+        ));
     }
 
     // Release the immediate context — we don't need it
@@ -141,8 +143,7 @@ fn watchdog_loop() -> Result<(), String> {
     loop {
         std::thread::sleep(std::time::Duration::from_secs(2));
 
-        let reason =
-            unsafe { com_call_no_args(device, VTABLE_GET_DEVICE_REMOVED_REASON) };
+        let reason = unsafe { com_call_no_args(device, VTABLE_GET_DEVICE_REMOVED_REASON) };
 
         if reason != S_OK {
             let name = dxgi_error_name(reason);

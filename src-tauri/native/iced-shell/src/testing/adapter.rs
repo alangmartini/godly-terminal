@@ -100,7 +100,11 @@ mod tests {
         let adapter = NativeTestAdapter::default();
         let result = adapter.query("workspace.active", None);
         assert!(!result.ok);
-        assert!(result.error.as_deref().unwrap().contains("not yet implemented"));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("not yet implemented"));
     }
 
     #[test]
@@ -108,7 +112,11 @@ mod tests {
         let adapter = NativeTestAdapter::default();
         let result = adapter.act("workspace.sidebar.toggle", "click", None);
         assert!(!result.ok);
-        assert!(result.error.as_deref().unwrap().contains("not yet implemented"));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("not yet implemented"));
     }
 
     #[test]
