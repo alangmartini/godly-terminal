@@ -399,6 +399,8 @@ pub struct GodlyApp {
     /// Whether the "remember" checkbox in the prompt is checked.
     desktop_notify_prompt_remember: bool,
     /// Pending notification payload to send if user enables from prompt.
+    /// Only the most recent payload is kept — earlier ones are intentionally
+    /// dropped to avoid a burst of OS toasts after the user clicks Enable.
     desktop_notify_pending_payload: Option<(String, String)>,
     /// Whether the prompt has been shown this session (avoid repeating).
     desktop_notify_prompted_this_session: bool,
@@ -1512,7 +1514,7 @@ impl GodlyApp {
         self.last_global_sound_ms = Some(now_ms);
     }
 
-    fn send_desktop_notification_if_allowed(&mut self, title: &str, body: &str) {
+    pub(crate) fn send_desktop_notification_if_allowed(&mut self, title: &str, body: &str) {
         if self.window_focused {
             return;
         }
@@ -2067,6 +2069,7 @@ impl GodlyApp {
                     self.mru_switcher.is_some(),
                     self.claude_md_editor.is_some(),
                     self.quick_claude_dialog.is_some(),
+                    self.desktop_notify_prompt_pending,
                 );
 
                 // Write capture mutations back.
@@ -2191,16 +2194,16 @@ impl GodlyApp {
                             // All other keys are forwarded to the dialog's text_editor
                             return Task::none();
                         }
-                        return Task::none();
-                    }
-                    KeyRoutingResult::ForwardToPty => {
-                        // Dismiss desktop notification prompt on Escape
-                        if self.desktop_notify_prompt_pending && is_escape_key(&key) {
-                            self.desktop_notify_prompt_pending = false;
-                            self.desktop_notify_pending_payload = None;
+                        if self.desktop_notify_prompt_pending {
+                            if is_escape_key(&key) {
+                                self.desktop_notify_prompt_pending = false;
+                                self.desktop_notify_pending_payload = None;
+                            }
                             return Task::none();
                         }
+                        return Task::none();
                     }
+                    KeyRoutingResult::ForwardToPty => {}
                 }
 
                 // Forward to PTY — send to focused terminal, not just active tab.
@@ -10368,6 +10371,7 @@ fn resolve_key_event(
     mru_switcher_open: bool,
     claude_md_editor_open: bool,
     quick_claude_dialog_open: bool,
+    desktop_notify_prompt_pending: bool,
 ) -> KeyRoutingResult {
     // 1. Capture mode
     if let Some(cap_index) = capture.capturing_index {
@@ -10410,6 +10414,11 @@ fn resolve_key_event(
 
     // 3b. Quick Claude dialog intercepts all keys
     if quick_claude_dialog_open {
+        return KeyRoutingResult::Intercepted;
+    }
+
+    // 3c. Desktop notification prompt intercepts all keys
+    if desktop_notify_prompt_pending {
         return KeyRoutingResult::Intercepted;
     }
 
@@ -11268,6 +11277,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Override was recorded.
@@ -11281,6 +11291,7 @@ mod keyboard_routing_tests {
             ctrl_shift(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11303,6 +11314,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
 
         // Original Ctrl+\ should no longer trigger SplitRight.
@@ -11311,6 +11323,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11331,6 +11344,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
@@ -11345,6 +11359,7 @@ mod keyboard_routing_tests {
             Modifiers::empty(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11365,6 +11380,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11389,6 +11405,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
 
         // Rebind SplitDown (6) to Ctrl+Shift+.
@@ -11398,6 +11415,7 @@ mod keyboard_routing_tests {
             ctrl_shift(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11412,6 +11430,7 @@ mod keyboard_routing_tests {
                 &mut cap,
                 false,
                 false,
+                false,
                 false
             ),
             KeyRoutingResult::Action(AppAction::SplitRight)
@@ -11422,6 +11441,7 @@ mod keyboard_routing_tests {
                 ctrl_shift(),
                 &PHYS_UNIDENT,
                 &mut cap,
+                false,
                 false,
                 false,
                 false
@@ -11438,6 +11458,7 @@ mod keyboard_routing_tests {
                 &mut cap,
                 false,
                 false,
+                false,
                 false
             ),
             KeyRoutingResult::ForwardToPty
@@ -11448,6 +11469,7 @@ mod keyboard_routing_tests {
                 Modifiers::CTRL.union(Modifiers::ALT),
                 &PHYS_UNIDENT,
                 &mut cap,
+                false,
                 false,
                 false,
                 false,
@@ -11462,6 +11484,7 @@ mod keyboard_routing_tests {
                 Modifiers::CTRL,
                 &PHYS_UNIDENT,
                 &mut cap,
+                false,
                 false,
                 false,
                 false
@@ -11486,6 +11509,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
@@ -11503,6 +11527,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Should normalize 0x1C to "\" in the stored chord.
@@ -11514,6 +11539,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11532,6 +11558,7 @@ mod keyboard_routing_tests {
             Modifiers::empty(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,

@@ -5,7 +5,7 @@
 pub fn send_desktop_notification(title: &str, body: &str) {
     let title = title.to_string();
     let body = body.to_string();
-    let _ = std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("desktop-notify".to_string())
         .spawn(move || {
             if let Err(e) = notify_rust::Notification::new()
@@ -16,7 +16,10 @@ pub fn send_desktop_notification(title: &str, body: &str) {
             {
                 log::warn!("Desktop notification failed: {e}");
             }
-        });
+        })
+    {
+        log::warn!("Failed to spawn desktop-notify thread: {e}");
+    }
 }
 
 #[cfg(test)]
