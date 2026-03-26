@@ -4,7 +4,7 @@
 //! panes — sending keystrokes/text, querying pane info, and reading output.
 
 use crate::cli::TmuxArgs;
-use crate::format::{self, FormatVars};
+use crate::format;
 use crate::mcp_client::McpPipeClient;
 use crate::state;
 
@@ -36,21 +36,8 @@ fn send_keys(args: &[String]) -> i32 {
         return 0; // tmux silently succeeds with no keys
     }
 
-    let st = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
-
-    let terminal_id = match st.resolve_target(target) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
+    let st = tmux_try!(state::load(), "failed to read state");
+    let terminal_id = tmux_try!(st.resolve_target(target));
 
     let mut data = String::new();
     for key_arg in &parsed.positional {
@@ -61,29 +48,20 @@ fn send_keys(args: &[String]) -> i32 {
         }
     }
 
-    let client = match McpPipeClient::connect() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    if let Err(e) = client.write_to_terminal(&terminal_id, &data) {
-        eprintln!("tmux: {}", e);
-        return 1;
-    }
+    let client = tmux_try!(McpPipeClient::connect());
+    tmux_try!(client.write_to_terminal(&terminal_id, &data));
 
     0
 }
 
 /// Translate a tmux key name to its byte sequence.
 ///
-/// Named keys (Enter, C-c, Up, etc.) are translated to escape sequences.
+/// Named keys (Enter, Escape, Up, etc.) are translated to escape sequences.
+/// The generic `C-<letter>` handler covers all ctrl sequences.
 /// Anything else passes through unchanged.
 pub fn translate_key(key: &str) -> String {
     match key {
-        // Basic control keys
+        // Named keys with special byte sequences
         "Enter" | "C-m" => "\r".to_string(),
         "Escape" | "C-[" => "\x1b".to_string(),
         "Tab" | "C-i" => "\t".to_string(),
@@ -116,17 +94,7 @@ pub fn translate_key(key: &str) -> String {
         "F11" => "\x1b[23~".to_string(),
         "F12" => "\x1b[24~".to_string(),
 
-        // Named control sequences
-        "C-c" => "\x03".to_string(),
-        "C-d" => "\x04".to_string(),
-        "C-z" => "\x1a".to_string(),
-        "C-l" => "\x0c".to_string(),
-        "C-a" => "\x01".to_string(),
-        "C-b" => "\x02".to_string(),
-        "C-u" => "\x15".to_string(),
-        "C-w" => "\x17".to_string(),
-
-        // Generic C-<letter> pattern
+        // Generic C-<letter> pattern (covers C-a through C-z)
         _ if key.starts_with("C-") && key.len() == 3 => {
             let letter = key.as_bytes()[2];
             if letter.is_ascii_lowercase() {
@@ -160,26 +128,12 @@ fn display_message(args: &[String]) -> i32 {
         "#{session_name}".to_string()
     };
 
-    let st = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
-
+    let st = tmux_try!(state::load(), "failed to read state");
     let pane_id = st.resolve_pane_id(target);
     let session_name = st.pane_session(&pane_id).unwrap_or("default").to_string();
 
-    let vars = FormatVars {
-        pane_id,
-        session_name,
-        pane_width: 80,
-        pane_height: 24,
-        window_index: 0,
-    };
-
-    println!("{}", format::expand(&message, &vars));
+    let vars = format::session_format_vars(&pane_id, &session_name);
+    println!("{}", format::expand_format(&message, &vars));
 
     0
 }
@@ -191,29 +145,9 @@ fn capture_pane(args: &[String]) -> i32 {
     let parsed = TmuxArgs::parse(args);
     let target = parsed.get_option('t');
 
-    let st = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
-
-    let terminal_id = match st.resolve_target(target) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    let client = match McpPipeClient::connect() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
+    let st = tmux_try!(state::load(), "failed to read state");
+    let terminal_id = tmux_try!(st.resolve_target(target));
+    let client = tmux_try!(McpPipeClient::connect());
 
     match client.read_terminal(&terminal_id) {
         Ok(content) => {
@@ -298,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn translate_named_ctrl_sequences() {
+    fn translate_ctrl_sequences_via_generic_handler() {
         assert_eq!(translate_key("C-c"), "\x03");
         assert_eq!(translate_key("C-d"), "\x04");
         assert_eq!(translate_key("C-z"), "\x1a");

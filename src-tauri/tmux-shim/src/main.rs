@@ -4,6 +4,7 @@
 //! This binary is named `tmux.exe` so that tools expecting tmux (e.g. Claude
 //! Code's Agent Teams) can use it as a drop-in replacement.
 
+#[macro_use]
 mod cli;
 mod commands;
 #[allow(dead_code)]

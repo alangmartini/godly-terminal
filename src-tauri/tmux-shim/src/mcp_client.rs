@@ -163,6 +163,20 @@ impl McpPipeClient {
         }
     }
 
+    /// Get the active workspace.
+    pub fn get_active_workspace(&self) -> Result<godly_protocol::McpWorkspaceInfo, String> {
+        match self.request(&McpRequest::GetActiveWorkspace)? {
+            McpResponse::ActiveWorkspace {
+                workspace: Some(ws),
+            } => Ok(ws),
+            McpResponse::ActiveWorkspace { workspace: None } => {
+                Err("no active workspace".to_string())
+            }
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
     /// Read terminal content (capture-pane).
     pub fn read_terminal(&self, terminal_id: &str) -> Result<String, String> {
         match self.request(&McpRequest::ReadTerminal {

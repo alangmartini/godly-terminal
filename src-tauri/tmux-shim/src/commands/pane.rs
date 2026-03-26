@@ -3,7 +3,7 @@
 //! These translate tmux pane commands into Godly Terminal MCP operations.
 
 use crate::cli::TmuxArgs;
-use crate::format;
+use crate::format::{self, DEFAULT_PANE_COLS, DEFAULT_PANE_ROWS};
 use crate::mcp_client::McpPipeClient;
 use crate::state;
 
@@ -43,53 +43,16 @@ fn split_window(args: &[String]) -> i32 {
     let cwd = parsed.get_option('c').map(|s| s.to_string());
     let direction = direction_from_flags(&parsed);
 
-    // Load state to resolve target
-    let current_state = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
+    let current_state = tmux_try!(state::load(), "failed to read state");
+    let target_terminal_id = tmux_try!(current_state.resolve_target(target));
+    let session_name = tmux_try!(current_state.resolve_session(target));
+    let workspace_id = tmux_try!(current_state.workspace_for_session(&session_name));
 
-    let target_terminal_id = match current_state.resolve_target(target) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-    let session_name = match current_state.resolve_session(target) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-    let workspace_id = match current_state.workspace_for_session(&session_name) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    // MCP: create terminal and split
-    let client = match McpPipeClient::connect() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    let new_terminal_id = match client.create_terminal(&workspace_id, cwd) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: failed to create terminal: {}", e);
-            return 1;
-        }
-    };
+    let client = tmux_try!(McpPipeClient::connect());
+    let new_terminal_id = tmux_try!(
+        client.create_terminal(&workspace_id, cwd),
+        "failed to create terminal"
+    );
 
     if let Err(e) = client.split_terminal(
         &workspace_id,
@@ -102,22 +65,21 @@ fn split_window(args: &[String]) -> i32 {
         return 1;
     }
 
-    // Store the new pane in state
-    let pane_id = match state::with_state(|st| {
+    let pane_id = tmux_try!(state::with_state(|st| {
         let id = st.allocate_pane_id(new_terminal_id.clone(), session_name.clone());
         Ok(id)
-    }) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
+    }));
 
-    // Print info if -P was specified
     if parsed.has_flag('P') {
         if let Some(fmt) = parsed.get_option('F') {
-            let vars = format::pane_format_vars(&pane_id, 0, 80, 24, false, &session_name);
+            let vars = format::pane_format_vars(
+                &pane_id,
+                0,
+                DEFAULT_PANE_COLS,
+                DEFAULT_PANE_ROWS,
+                false,
+                &session_name,
+            );
             println!("{}", format::expand_format(fmt, &vars));
         } else {
             println!("{}:0.{}", session_name, pane_id);
@@ -134,34 +96,10 @@ fn select_pane(args: &[String]) -> i32 {
     let parsed = TmuxArgs::parse(args);
     let target = parsed.get_option('t');
 
-    let state = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
-
-    let terminal_id = match state.resolve_target(target) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    let client = match McpPipeClient::connect() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    if let Err(e) = client.focus_terminal(&terminal_id) {
-        eprintln!("tmux: {}", e);
-        return 1;
-    }
+    let state = tmux_try!(state::load(), "failed to read state");
+    let terminal_id = tmux_try!(state.resolve_target(target));
+    let client = tmux_try!(McpPipeClient::connect());
+    tmux_try!(client.focus_terminal(&terminal_id));
 
     0
 }
@@ -174,13 +112,7 @@ fn list_panes(args: &[String]) -> i32 {
     let session_filter = parsed.get_option('t');
     let format_str = parsed.get_option('F');
 
-    let state = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
+    let state = tmux_try!(state::load(), "failed to read state");
 
     let mut panes: Vec<(String, &state::PaneMapping)> = state
         .panes
@@ -200,16 +132,28 @@ fn list_panes(args: &[String]) -> i32 {
     }
 
     for (idx, (pane_id, entry)) in panes.iter().enumerate() {
-        let (cols, rows): (u16, u16) = (80, 24);
         let active = idx == 0;
 
         if let Some(fmt) = format_str {
-            let vars = format::pane_format_vars(pane_id, idx, cols, rows, active, &entry.session);
+            let vars = format::pane_format_vars(
+                pane_id,
+                idx,
+                DEFAULT_PANE_COLS,
+                DEFAULT_PANE_ROWS,
+                active,
+                &entry.session,
+            );
             println!("{}", format::expand_format(fmt, &vars));
         } else {
             println!(
                 "{}",
-                format::default_list_panes_line(idx, cols, rows, pane_id, active)
+                format::default_list_panes_line(
+                    idx,
+                    DEFAULT_PANE_COLS,
+                    DEFAULT_PANE_ROWS,
+                    pane_id,
+                    active,
+                )
             );
         }
     }
@@ -224,25 +168,10 @@ fn kill_pane(args: &[String]) -> i32 {
     let parsed = TmuxArgs::parse(args);
     let target = parsed.get_option('t');
 
-    // Resolve pane -> terminal ID from current state
     let (terminal_id, pane_id_to_remove) = {
-        let st = match state::load() {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("tmux: failed to read state: {}", e);
-                return 1;
-            }
-        };
+        let st = tmux_try!(state::load(), "failed to read state");
+        let tid = tmux_try!(st.resolve_target(target));
 
-        let tid = match st.resolve_target(target) {
-            Ok(id) => id,
-            Err(e) => {
-                eprintln!("tmux: {}", e);
-                return 1;
-            }
-        };
-
-        // Find the pane_id key for this terminal
         let pid = st
             .panes
             .iter()
@@ -252,29 +181,14 @@ fn kill_pane(args: &[String]) -> i32 {
         (tid, pid)
     };
 
-    // Close via MCP
-    let client = match McpPipeClient::connect() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
+    let client = tmux_try!(McpPipeClient::connect());
+    tmux_try!(client.close_terminal(&terminal_id));
 
-    if let Err(e) = client.close_terminal(&terminal_id) {
-        eprintln!("tmux: {}", e);
-        return 1;
-    }
-
-    // Remove from state
     if let Some(pid) = pane_id_to_remove {
-        if let Err(e) = state::with_state(|st| {
+        tmux_try!(state::with_state(|st| {
             st.panes.remove(&pid);
             Ok(())
-        }) {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
+        }));
     }
 
     0

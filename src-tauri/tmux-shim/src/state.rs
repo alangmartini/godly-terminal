@@ -111,25 +111,6 @@ impl TmuxState {
         self.panes.get(pane_id).map(|p| p.session.as_str())
     }
 
-    /// Get the index of a pane within its session (0-based, sorted by pane ID).
-    pub fn pane_index(&self, pane_id: &str) -> usize {
-        let session = match self.panes.get(pane_id) {
-            Some(p) => &p.session,
-            None => return 0,
-        };
-        let mut session_panes: Vec<&str> = self
-            .panes
-            .iter()
-            .filter(|(_, p)| p.session == *session)
-            .map(|(id, _)| id.as_str())
-            .collect();
-        session_panes.sort();
-        session_panes
-            .iter()
-            .position(|&id| id == pane_id)
-            .unwrap_or(0)
-    }
-
     /// Resolve the raw target: explicit value → `$TMUX_PANE` → last allocated pane.
     fn effective_target(&self, target: Option<&str>) -> Result<String, String> {
         match target {
@@ -434,13 +415,6 @@ mod tests {
     fn workspace_for_session_not_found() {
         let state = make_state_with_panes();
         assert!(state.workspace_for_session("nonexistent").is_err());
-    }
-
-    #[test]
-    fn pane_index_returns_sorted_position() {
-        let state = make_state_with_panes();
-        assert_eq!(state.pane_index("%0"), 0);
-        assert_eq!(state.pane_index("%1"), 1);
     }
 
     #[test]

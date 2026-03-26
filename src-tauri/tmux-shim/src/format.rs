@@ -1,28 +1,8 @@
 use std::collections::HashMap;
 
-/// Variables available for tmux format string expansion.
-#[derive(Debug, Default)]
-pub struct FormatVars {
-    pub pane_id: String,
-    pub session_name: String,
-    pub pane_width: u32,
-    pub pane_height: u32,
-    pub window_index: u32,
-}
-
-/// Expand tmux format strings using the fixed `FormatVars` struct.
-///
-/// Supported: `#{pane_id}`, `#{session_name}`, `#{pane_width}`,
-/// `#{pane_height}`, `#{window_index}`.
-pub fn expand(format: &str, vars: &FormatVars) -> String {
-    let mut result = format.to_string();
-    result = result.replace("#{pane_id}", &vars.pane_id);
-    result = result.replace("#{session_name}", &vars.session_name);
-    result = result.replace("#{pane_width}", &vars.pane_width.to_string());
-    result = result.replace("#{pane_height}", &vars.pane_height.to_string());
-    result = result.replace("#{window_index}", &vars.window_index.to_string());
-    result
-}
+/// Default pane dimensions when actual terminal size is not queryable.
+pub const DEFAULT_PANE_COLS: u16 = 80;
+pub const DEFAULT_PANE_ROWS: u16 = 24;
 
 /// Expand tmux format variables using a HashMap.
 ///
@@ -73,6 +53,18 @@ pub fn pane_format_vars<'a>(
     vars
 }
 
+/// Build format variables for session-level display (new-session, display-message).
+pub fn session_format_vars<'a>(pane_id: &'a str, session: &'a str) -> HashMap<&'a str, String> {
+    pane_format_vars(
+        pane_id,
+        0,
+        DEFAULT_PANE_COLS,
+        DEFAULT_PANE_ROWS,
+        false,
+        session,
+    )
+}
+
 /// Default tmux `list-panes` output format.
 ///
 /// `0: [80x24] [history 0/0, 0 bytes] %0 (active)`
@@ -93,64 +85,6 @@ pub fn default_list_panes_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn expand_pane_id() {
-        let vars = FormatVars {
-            pane_id: "%0".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(expand("#{pane_id}", &vars), "%0");
-    }
-
-    #[test]
-    fn expand_session_name() {
-        let vars = FormatVars {
-            session_name: "work".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(expand("#{session_name}", &vars), "work");
-    }
-
-    #[test]
-    fn expand_multiple_vars() {
-        let vars = FormatVars {
-            pane_id: "%3".to_string(),
-            session_name: "dev".to_string(),
-            pane_width: 120,
-            pane_height: 40,
-            window_index: 0,
-        };
-        let result = expand("#{session_name}:#{window_index}.#{pane_id}", &vars);
-        assert_eq!(result, "dev:0.%3");
-    }
-
-    #[test]
-    fn expand_dimensions() {
-        let vars = FormatVars {
-            pane_width: 200,
-            pane_height: 50,
-            ..Default::default()
-        };
-        assert_eq!(expand("#{pane_width}x#{pane_height}", &vars), "200x50");
-    }
-
-    #[test]
-    fn expand_no_vars() {
-        let vars = FormatVars::default();
-        assert_eq!(expand("plain text", &vars), "plain text");
-    }
-
-    #[test]
-    fn expand_just_pane_id_format() {
-        let vars = FormatVars {
-            pane_id: "%5".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(expand("#{pane_id}", &vars), "%5");
-    }
-
-    // ── HashMap-based expand_format tests ──
 
     #[test]
     fn expand_format_simple_variable() {
@@ -185,6 +119,24 @@ mod tests {
     }
 
     #[test]
+    fn expand_format_no_vars() {
+        let vars = HashMap::new();
+        assert_eq!(expand_format("plain text", &vars), "plain text");
+    }
+
+    #[test]
+    fn expand_format_session_pattern() {
+        let mut vars = HashMap::new();
+        vars.insert("session_name", "dev".to_string());
+        vars.insert("window_index", "0".to_string());
+        vars.insert("pane_id", "%3".to_string());
+        assert_eq!(
+            expand_format("#{session_name}:#{window_index}.#{pane_id}", &vars),
+            "dev:0.%3"
+        );
+    }
+
+    #[test]
     fn default_list_panes_active() {
         let line = default_list_panes_line(0, 80, 24, "%0", true);
         assert_eq!(line, "0: [80x24] [history 0/0, 0 bytes] %0 (active)");
@@ -204,5 +156,14 @@ mod tests {
         assert_eq!(vars.get("pane_height"), Some(&"24".to_string()));
         assert_eq!(vars.get("pane_active"), Some(&"1".to_string()));
         assert_eq!(vars.get("session_name"), Some(&"main".to_string()));
+    }
+
+    #[test]
+    fn session_format_vars_uses_defaults() {
+        let vars = session_format_vars("%0", "work");
+        assert_eq!(vars.get("pane_id"), Some(&"%0".to_string()));
+        assert_eq!(vars.get("session_name"), Some(&"work".to_string()));
+        assert_eq!(vars.get("pane_width"), Some(&"80".to_string()));
+        assert_eq!(vars.get("pane_height"), Some(&"24".to_string()));
     }
 }
