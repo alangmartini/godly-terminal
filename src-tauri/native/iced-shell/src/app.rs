@@ -7114,6 +7114,7 @@ impl GodlyApp {
             .mark_read(&decision.mark_terminal_read_id);
         self.tab_context_menu_id = None;
         self.mru_switcher = None;
+        self.scroll_accumulator = 0.0;
 
         if layout_changed {
             // Fetch the grid for the newly focused terminal so the canvas
