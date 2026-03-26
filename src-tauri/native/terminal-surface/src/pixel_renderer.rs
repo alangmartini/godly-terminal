@@ -739,6 +739,72 @@ mod tests {
     }
 
     #[test]
+    fn blit_alpha_fully_opaque_writes_fg_directly() {
+        let w = 4u32;
+        let h = 4u32;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+
+        // Start with a grey background
+        fill_solid(&mut buf, 128, 128, 128, 255);
+
+        let glyph = CachedGlyph {
+            alpha: vec![255; 4], // 2x2, fully opaque
+            width: 2,
+            height: 2,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance: 8.0,
+        };
+
+        blit_alpha(&mut buf, w, h, &glyph, 1, 1, 0, 200, 50);
+
+        let idx = ((1 * w + 1) * 4) as usize;
+        assert_eq!(buf[idx], 0);
+        assert_eq!(buf[idx + 1], 200);
+        assert_eq!(buf[idx + 2], 50);
+        assert_eq!(buf[idx + 3], 255);
+    }
+
+    #[test]
+    fn blend_rect_gamma_correct() {
+        let w = 4u32;
+        let h = 4u32;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+
+        // White background
+        fill_solid(&mut buf, 255, 255, 255, 255);
+
+        // Blend a 50% opaque black rectangle at (1,1) size 2x2
+        blend_rect(&mut buf, w, h, 1, 1, 2, 2, 0, 0, 0, 128);
+
+        // Gamma-correct: black (0,0,0) at ~50% over white
+        // linear: 0.0 * 0.502 + 1.0 * 0.498 = 0.498
+        // sRGB(0.498) ~= 188
+        let idx = ((1 * w + 1) * 4) as usize;
+        assert!(
+            (buf[idx] as i32 - 188).abs() <= 2,
+            "R expected ~188, got {}",
+            buf[idx]
+        );
+        assert!(
+            (buf[idx + 1] as i32 - 188).abs() <= 2,
+            "G expected ~188, got {}",
+            buf[idx + 1]
+        );
+        assert!(
+            (buf[idx + 2] as i32 - 188).abs() <= 2,
+            "B expected ~188, got {}",
+            buf[idx + 2]
+        );
+        assert_eq!(buf[idx + 3], 255);
+
+        // Untouched corner remains white
+        assert_eq!(buf[0], 255);
+        assert_eq!(buf[1], 255);
+        assert_eq!(buf[2], 255);
+    }
+
+    #[test]
     fn render_populates_glyph_cache() {
         let grid = make_grid(1, 2, vec![vec![make_cell("A"), make_cell("B")]]);
         let metrics = FontMetrics::from_font_size(14.0);
