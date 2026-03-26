@@ -1,4 +1,4 @@
-use godly_protocol::types::{RichGridData, SessionInfo};
+use godly_protocol::types::{GridData, RichGridData, SessionInfo};
 use godly_protocol::{Request, Response, ShellType};
 
 use crate::daemon_client::NativeDaemonClient;
@@ -121,6 +121,24 @@ pub fn get_grid_snapshot(
 
     match response {
         Response::RichGrid { grid } => Ok(grid),
+        Response::Error { message } => Err(message),
+        other => Err(format!("Unexpected grid response: {:?}", other)),
+    }
+}
+
+/// Fetch the grid as plain-text rows (no per-cell attributes).
+/// Uses the VT library's own `row.write_contents()` which correctly fills
+/// empty-cell gaps with spaces — unlike `ReadRichGrid` + manual concatenation.
+pub fn get_plain_grid(
+    client: &NativeDaemonClient,
+    session_id: &str,
+) -> Result<GridData, String> {
+    let response = client.send_request(&Request::ReadGrid {
+        session_id: session_id.to_string(),
+    })?;
+
+    match response {
+        Response::Grid { grid } => Ok(grid),
         Response::Error { message } => Err(message),
         other => Err(format!("Unexpected grid response: {:?}", other)),
     }

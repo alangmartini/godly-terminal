@@ -446,8 +446,8 @@ fn wait_for_idle(
             return Ok(());
         }
 
-        let grid = commands::get_grid_snapshot(client, session_id)?;
-        let hash = simple_grid_hash(&grid);
+        let plain = commands::get_plain_grid(client, session_id)?;
+        let hash = simple_rows_hash(&plain.rows);
 
         if last_snapshot_hash == Some(hash) {
             if last_change.elapsed() >= idle_duration {
@@ -481,8 +481,8 @@ fn wait_for_marker(
             ));
         }
 
-        let grid = commands::get_grid_snapshot(client, session_id)?;
-        let text = grid_to_text(&grid);
+        let plain = commands::get_plain_grid(client, session_id)?;
+        let text = plain.rows.join("\n");
         if text.contains(marker) {
             return Ok(());
         }
@@ -514,8 +514,8 @@ fn wait_for_echo(
             return Ok(());
         }
 
-        let grid = commands::get_grid_snapshot(client, session_id)?;
-        let text = grid_to_text(&grid);
+        let plain = commands::get_plain_grid(client, session_id)?;
+        let text = plain.rows.join("\n");
         if text.contains(&search_text) {
             // Small buffer to ensure TUI read loop is stable
             std::thread::sleep(Duration::from_millis(100));
@@ -554,8 +554,8 @@ fn wait_for_claude_ready(
             ));
         }
 
-        let grid = commands::get_grid_snapshot(client, session_id)?;
-        let text = grid_to_text(&grid);
+        let plain = commands::get_plain_grid(client, session_id)?;
+        let text = plain.rows.join("\n");
 
         // Handle trust prompt if present and not skipped
         if !skip_trust && !trust_handled && has_trust_prompt_text(&text) {
@@ -621,8 +621,13 @@ fn handle_trust_prompt_if_needed(
             return Ok(());
         }
 
-        let grid = commands::get_grid_snapshot(client, session_id)?;
-        let text = grid_to_text(&grid);
+        let plain = commands::get_plain_grid(client, session_id)?;
+        let text = plain.rows.join("\n");
+
+        log::debug!(
+            "Quick Claude: grid text (first 200 chars): {:?}",
+            &text[..text.len().min(200)]
+        );
 
         // Trust prompt detected — accept it
         if has_trust_prompt_text(&text) {
@@ -682,26 +687,12 @@ fn handle_trust_prompt_if_needed(
     }
 }
 
-/// Extract all text content from a RichGridData snapshot.
-fn grid_to_text(grid: &godly_protocol::types::RichGridData) -> String {
-    let mut text = String::new();
-    for row in &grid.rows {
-        for cell in &row.cells {
-            text.push_str(&cell.content);
-        }
-        text.push('\n');
-    }
-    text
-}
-
-/// Simple hash of grid content for change detection.
-fn simple_grid_hash(grid: &godly_protocol::types::RichGridData) -> u64 {
+/// Simple hash of plain-text rows for change detection.
+fn simple_rows_hash(rows: &[String]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for row in &grid.rows {
-        for cell in &row.cells {
-            cell.content.hash(&mut hasher);
-        }
+    for row in rows {
+        row.hash(&mut hasher);
     }
     hasher.finish()
 }
