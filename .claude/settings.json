@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$(git rev-parse --show-toplevel)\" && python .claude/hooks/block-cargo-compile.py",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-cargo-compile.py\"",
             "timeout": 5,
             "statusMessage": "Checking cargo command..."
           }
