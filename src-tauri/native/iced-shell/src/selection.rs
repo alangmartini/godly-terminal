@@ -234,7 +234,11 @@ mod tests {
 
         RichGridData {
             rows,
-            cursor: CursorState { row: 0, col: 0, cursor_style: Default::default() },
+            cursor: CursorState {
+                row: 0,
+                col: 0,
+                cursor_style: Default::default(),
+            },
             dimensions: GridDimensions {
                 rows: num_rows as u16,
                 cols: num_cols as u16,
@@ -528,10 +532,8 @@ mod tests {
         // 5. Viewport now shows [hist X, hist Y, line A, line B, line C]
         // 6. selected_text() should return "line B\nline C" (rows 3-4)
 
-        let grid_before = make_grid_with_scrollback(
-            &["line A", "line B", "line C", "line D", "line E"],
-            0, 10,
-        );
+        let grid_before =
+            make_grid_with_scrollback(&["line A", "line B", "line C", "line D", "line E"], 0, 10);
 
         let mut sel = SelectionState::default();
         sel.start(GridPos { row: 1, col: 0 });
@@ -541,10 +543,8 @@ mod tests {
         // Scroll up 2 lines — scroll_active() adjusts selection.
         sel.adjust_for_scroll(2);
 
-        let grid_after = make_grid_with_scrollback(
-            &["hist X", "hist Y", "line A", "line B", "line C"],
-            2, 10,
-        );
+        let grid_after =
+            make_grid_with_scrollback(&["hist X", "hist Y", "line A", "line B", "line C"], 2, 10);
 
         let text = sel.selected_text(&grid_after);
         assert_eq!(
@@ -619,7 +619,8 @@ mod tests {
         // 6-row viewport.
         let grid_before = make_grid_with_scrollback(
             &["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"],
-            0, 10,
+            0,
+            10,
         );
 
         let mut sel = SelectionState::default();
@@ -633,7 +634,8 @@ mod tests {
 
         let grid_after = make_grid_with_scrollback(
             &["hist 2", "hist 1", "alpha", "bravo", "charlie", "delta"],
-            2, 10,
+            2,
+            10,
         );
 
         let copied = sel.selected_text(&grid_after);

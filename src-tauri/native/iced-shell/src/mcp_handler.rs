@@ -62,9 +62,7 @@ impl GodlyApp {
 
             // J4: Create a terminal — delegate to the existing NewTabRequested flow
             // which handles daemon IPC for session creation.
-            McpEvent::CreateTerminal { .. } => {
-                iced::Task::done(Message::NewTabRequested)
-            }
+            McpEvent::CreateTerminal { .. } => iced::Task::done(Message::NewTabRequested),
 
             // J5: Close a terminal.
             McpEvent::CloseTerminal { terminal_id } => {
@@ -119,8 +117,8 @@ impl GodlyApp {
             } => {
                 // Skip if the terminal is currently focused and the window is focused —
                 // the user is already looking at it.
-                let is_focused = self.window_focused
-                    && self.active_focused() == Some(terminal_id.as_str());
+                let is_focused =
+                    self.window_focused && self.active_focused() == Some(terminal_id.as_str());
                 if is_focused {
                     return iced::Task::none();
                 }
@@ -245,9 +243,7 @@ impl GodlyApp {
                 iced::Task::none(),
             ),
             McpRequest::CreateTerminal {
-                workspace_id,
-                cwd,
-                ..
+                workspace_id, cwd, ..
             } => match self.create_terminal_for_testing(&workspace_id, cwd, None) {
                 Ok((terminal_id, task)) => (
                     McpResponse::Created {
@@ -354,7 +350,9 @@ impl GodlyApp {
                 action,
                 args,
             } => self.handle_ui_action(&target, &action, args.as_ref()),
-            McpRequest::UiWait { condition, args, .. } => (
+            McpRequest::UiWait {
+                condition, args, ..
+            } => (
                 self.handle_ui_wait(&condition, args.as_ref()),
                 iced::Task::none(),
             ),
@@ -385,9 +383,7 @@ impl GodlyApp {
                     ),
                 }
             }
-            McpRequest::SetNotificationEnabled {
-                enabled, ..
-            } => {
+            McpRequest::SetNotificationEnabled { enabled, .. } => {
                 self.notification_sounds_enabled = enabled;
                 (McpResponse::Ok, iced::Task::none())
             }
@@ -523,10 +519,10 @@ impl GodlyApp {
                     "vertical" => SplitDirection::Vertical,
                     _ => SplitDirection::Horizontal,
                 };
-                let target_id = target_terminal_id
-                    .unwrap_or_else(|| ws.focused_terminal.clone());
+                let target_id = target_terminal_id.unwrap_or_else(|| ws.focused_terminal.clone());
                 if let Some(ws) = self.workspaces.get_mut(&workspace_id) {
-                    ws.layout.split_leaf_with_node(&target_id, content_node, dir);
+                    ws.layout
+                        .split_leaf_with_node(&target_id, content_node, dir);
                 }
 
                 (
@@ -552,7 +548,10 @@ impl GodlyApp {
             McpRequest::ListPanes { workspace_id } => {
                 let mut panes = Vec::new();
                 let workspaces: Vec<_> = if let Some(ref ws_id) = workspace_id {
-                    self.workspaces.iter().filter(|ws| ws.id == *ws_id).collect()
+                    self.workspaces
+                        .iter()
+                        .filter(|ws| ws.id == *ws_id)
+                        .collect()
                 } else {
                     self.workspaces.iter().collect()
                 };
@@ -568,10 +567,9 @@ impl GodlyApp {
                         });
                     }
                     for pid in ws.layout.all_content_pane_ids() {
-                        let (fp, ft) = self.file_panes.get(pid).map_or(
-                            (None, None),
-                            |s| (Some(s.file_path.clone()), Some(s.file_type.clone())),
-                        );
+                        let (fp, ft) = self.file_panes.get(pid).map_or((None, None), |s| {
+                            (Some(s.file_path.clone()), Some(s.file_type.clone()))
+                        });
                         panes.push(godly_protocol::mcp_messages::PaneInfo {
                             pane_id: pid.to_string(),
                             pane_type: "file".to_string(),
@@ -584,10 +582,7 @@ impl GodlyApp {
 
                 (McpResponse::PaneList { panes }, iced::Task::none())
             }
-            McpRequest::UpdateFilePane {
-                pane_id,
-                file_path,
-            } => {
+            McpRequest::UpdateFilePane { pane_id, file_path } => {
                 let Some(state) = self.file_panes.get_mut(&pane_id) else {
                     return (
                         McpResponse::Error {
@@ -685,7 +680,8 @@ impl GodlyApp {
                 }
             }
             "workspace.switch" => {
-                let Some(workspace_id) = self.resolve_workspace_id_from_args(args, true, false) else {
+                let Some(workspace_id) = self.resolve_workspace_id_from_args(args, true, false)
+                else {
                     return (
                         McpResponse::ActionResult {
                             ok: false,
@@ -726,7 +722,8 @@ impl GodlyApp {
                 )
             }
             "workspace.delete" => {
-                let Some(workspace_id) = self.resolve_workspace_id_from_args(args, true, false) else {
+                let Some(workspace_id) = self.resolve_workspace_id_from_args(args, true, false)
+                else {
                     return (
                         McpResponse::ActionResult {
                             ok: false,
@@ -1027,7 +1024,12 @@ impl GodlyApp {
                         iced::Task::none(),
                     );
                 };
-                let leaf_ids: Vec<String> = workspace.layout.all_leaf_ids().into_iter().map(str::to_string).collect();
+                let leaf_ids: Vec<String> = workspace
+                    .layout
+                    .all_leaf_ids()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect();
                 let all_terminals = self.terminals.terminals_for_workspace(&workspace_id);
                 let unlisted: Option<String> = all_terminals
                     .iter()
@@ -1176,9 +1178,7 @@ impl GodlyApp {
                 let workspace = workspace_id
                     .as_deref()
                     .and_then(|id| self.workspaces.get(id));
-                Ok(workspace
-                    .map(Self::workspace_json)
-                    .unwrap_or(Value::Null))
+                Ok(workspace.map(Self::workspace_json).unwrap_or(Value::Null))
             }
             "workspace.list" => Ok(Value::Array(
                 self.workspaces.iter().map(Self::workspace_json).collect(),
@@ -1232,10 +1232,7 @@ impl GodlyApp {
                     .map(|id| self.terminals.terminals_for_workspace(id))
                     .unwrap_or_default();
                 Ok(Value::Array(
-                    terminals
-                        .into_iter()
-                        .map(Self::terminal_json)
-                        .collect(),
+                    terminals.into_iter().map(Self::terminal_json).collect(),
                 ))
             }
             "terminal.cwd" => {
@@ -1257,7 +1254,11 @@ impl GodlyApp {
                     .and_then(|v| v.get("index"))
                     .and_then(Value::as_u64)
                     .unwrap_or(0) as usize;
-                match shortcuts_tab::get_badge_info(index, self.shortcut_capturing_index, &self.shortcut_overrides) {
+                match shortcuts_tab::get_badge_info(
+                    index,
+                    self.shortcut_capturing_index,
+                    &self.shortcut_overrides,
+                ) {
                     Some((action, text, capturing)) => Ok(json!({
                         "action": action,
                         "text": text,
@@ -1306,13 +1307,19 @@ impl GodlyApp {
                     .unwrap_or(false))
             }
             "terminal.count" => {
-                let Some(expected) = args.and_then(|value| value.get("count")).and_then(Value::as_u64) else {
+                let Some(expected) = args
+                    .and_then(|value| value.get("count"))
+                    .and_then(Value::as_u64)
+                else {
                     return Err("count required".to_string());
                 };
                 let workspace_id = self
                     .resolve_workspace_id_from_args(args, true, true)
                     .ok_or_else(|| "No active workspace".to_string())?;
-                Ok(self.terminals.terminals_for_workspace(&workspace_id).len() == expected as usize)
+                Ok(
+                    self.terminals.terminals_for_workspace(&workspace_id).len()
+                        == expected as usize,
+                )
             }
             _ => Err(format!("Unknown condition: {}", condition)),
         }
@@ -1378,18 +1385,15 @@ impl GodlyApp {
     }
 
     fn build_state_dump_json(&self) -> Value {
-        let workspaces = Value::Array(
-            self.workspaces.iter().map(Self::workspace_json).collect(),
-        );
-        let terminals = Value::Array(
-            self.terminals.iter().map(Self::terminal_json).collect(),
-        );
+        let workspaces = Value::Array(self.workspaces.iter().map(Self::workspace_json).collect());
+        let terminals = Value::Array(self.terminals.iter().map(Self::terminal_json).collect());
         let layout_trees = Value::Object(
             self.workspaces
                 .iter()
                 .map(|workspace| {
-                    let value = serde_json::to_value(PersistedLayoutNode::from_layout(&workspace.layout))
-                        .unwrap_or(Value::Null);
+                    let value =
+                        serde_json::to_value(PersistedLayoutNode::from_layout(&workspace.layout))
+                            .unwrap_or(Value::Null);
                     (workspace.id.clone(), value)
                 })
                 .collect(),
@@ -1405,7 +1409,9 @@ impl GodlyApp {
         serde_json::to_value(dump).unwrap_or_else(|_| json!({}))
     }
 
-    fn to_mcp_workspace_info(workspace: &crate::workspace_state::WorkspaceInfo) -> McpWorkspaceInfo {
+    fn to_mcp_workspace_info(
+        workspace: &crate::workspace_state::WorkspaceInfo,
+    ) -> McpWorkspaceInfo {
         McpWorkspaceInfo {
             id: workspace.id.clone(),
             name: workspace.name.clone(),
@@ -1475,11 +1481,7 @@ fn default_workspace_folder() -> String {
 }
 
 /// Swap two leaf terminal IDs in a layout tree using a three-step rename.
-fn swap_leaves_in_layout(
-    node: &mut godly_layout_core::LayoutNode,
-    id_a: &str,
-    id_b: &str,
-) {
+fn swap_leaves_in_layout(node: &mut godly_layout_core::LayoutNode, id_a: &str, id_b: &str) {
     let placeholder = format!("__swap_{}_{}", id_a, id_b);
     rename_leaf(node, id_a, &placeholder);
     rename_leaf(node, id_b, id_a);

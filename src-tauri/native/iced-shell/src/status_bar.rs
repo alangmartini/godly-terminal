@@ -74,10 +74,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
             ..container::Style::default()
         });
 
-    let cwd_text = text(cwd)
-        .size(11)
-        .color(TEXT_SECONDARY())
-        .font(status_font);
+    let cwd_text = text(cwd).size(11).color(TEXT_SECONDARY()).font(status_font);
 
     // Dims text slightly brighter for quick readability.
     let dims_color = {
@@ -89,10 +86,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
             s.a,
         )
     };
-    let dims_text = text(dims)
-        .size(11)
-        .color(dims_color)
-        .font(status_font);
+    let dims_text = text(dims).size(11).color(dims_color).font(status_font);
 
     let content = row![
         container(shell_badge).padding(Padding::from([0, 8])),
@@ -119,9 +113,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
             ..container::Style::default()
         });
 
-    column![separator, bar]
-        .width(Length::Fill)
-        .into()
+    column![separator, bar].width(Length::Fill).into()
 }
 
 #[cfg(test)]

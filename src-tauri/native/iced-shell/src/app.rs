@@ -45,7 +45,10 @@ pub mod diag {
     pub fn log(msg: &str) {
         if let Ok(mut guard) = LOG.lock() {
             if let Some(f) = guard.as_mut() {
-                let elapsed = START.get().map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+                let elapsed = START
+                    .get()
+                    .map(|s| s.elapsed().as_secs_f64())
+                    .unwrap_or(0.0);
                 let _ = writeln!(f, "[{:>8.3}] {}", elapsed, msg);
                 let _ = f.flush();
             }
@@ -53,14 +56,14 @@ pub mod diag {
     }
 }
 
-
-
 use futures_channel::mpsc;
 use iced::keyboard;
 use iced::widget::{
     button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
 };
-use iced::{event, window, Color, Element, Font, Length, Padding, Point, Shadow, Subscription, Task, Vector};
+use iced::{
+    event, window, Color, Element, Font, Length, Padding, Point, Shadow, Subscription, Task, Vector,
+};
 
 /// Proportional UI font for chrome elements (title bar, tab bar, status bar).
 /// Uses the system's default sans-serif (Segoe UI on Windows, SF Pro on macOS).
@@ -95,32 +98,32 @@ use godly_protocol::McpResponse;
 use godly_terminal_surface::{FontMetrics, GridPos as SurfaceGridPos, TerminalCanvas};
 
 use crate::font_enumerator;
+use crate::keybinding_persistence;
 use crate::notification_state::NotificationTracker;
 use crate::notifications;
 use crate::scrollback_restore;
-use crate::keybinding_persistence;
-use crate::session_persistence;
+use crate::search::SearchState;
 use crate::selection::{GridPos, SelectionState};
+use crate::session_persistence;
 use crate::settings_dialog::{self, SettingsTab};
+use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
 use crate::shortcuts_tab;
 use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
-use crate::status_bar;
 use crate::split_pane::{view_layout, LayoutNode, PaneContent, SplitDirection};
+use crate::status_bar;
 use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
-use crate::title_bar;
+use crate::terminal_context_menu::{self, TermCtxAction};
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
     ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, GHOST_HOVER,
     PANE_BG, PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_LG, RADIUS_MD, RADIUS_SM, SHADOW_COLOR,
     TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
+use crate::title_bar;
 use crate::url_detector;
-use crate::workspace_state::WorkspaceCollection;
-use crate::search::SearchState;
-use crate::terminal_context_menu::{self, TermCtxAction};
-use crate::shell_picker::{self, AiToolMode, ShellPickerState, ShellPickerTab};
 use crate::whisper_ui;
+use crate::workspace_state::WorkspaceCollection;
 
 /// Default font family name for the bundled Geist Mono font.
 const DEFAULT_FONT_FAMILY: &str = "Geist Mono";
@@ -194,8 +197,8 @@ struct FlowEntry {
     enabled: bool,
 }
 
+use crate::cf_tunnel::{CfTunnelMode, CfTunnelPreferences, CfTunnelStatus};
 use crate::phone_remote::{PhoneRemotePreferences, PhoneRemoteStatus};
-use crate::cf_tunnel::{CfTunnelPreferences, CfTunnelStatus, CfTunnelMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToastNotification {
@@ -312,7 +315,9 @@ pub struct GodlyApp {
     /// Event receiver for the daemon subscription (taken once by the subscription).
     event_receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<DaemonEventMsg>>>>,
     /// Event receiver for MCP pipe events (taken once by the subscription).
-    mcp_event_receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>>,
+    mcp_event_receiver: Arc<
+        parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>,
+    >,
     /// Window dimensions in logical pixels.
     window_width: f32,
     window_height: f32,
@@ -509,7 +514,8 @@ pub struct GodlyApp {
     // --- I4/I5: Voice/Whisper Integration ---
     whisper_available: bool,
     whisper_state: Option<whisper_ui::WhisperState>,
-    whisper_service: Option<Arc<parking_lot::Mutex<Option<godly_app_adapter::whisper::WhisperService>>>>,
+    whisper_service:
+        Option<Arc<parking_lot::Mutex<Option<godly_app_adapter::whisper::WhisperService>>>>,
     /// Pending reply channel for async screenshot capture.
     pub(crate) pending_screenshot_reply: Option<std::sync::mpsc::Sender<McpResponse>>,
     // --- Font Family Selector ---
@@ -532,6 +538,8 @@ pub struct GodlyApp {
     use_pixel_renderer: bool,
     /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
     pub(crate) file_panes: HashMap<String, FilePaneState>,
+    /// Fractional mouse-wheel accumulator for sub-line trackpad deltas.
+    scroll_accumulator: f64,
 }
 
 impl Default for GodlyApp {
@@ -672,15 +680,13 @@ impl Default for GodlyApp {
             glyph_rasterizer: {
                 use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer as _;
                 let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
-                r.load_font(
-                    include_bytes!("../fonts/GeistMono-Regular.ttf"),
-                    0,
-                );
+                r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
                 r
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
             use_pixel_renderer: false,
             file_panes: HashMap::new(),
+            scroll_accumulator: 0.0,
         }
     }
 }
@@ -694,9 +700,15 @@ pub enum Message {
     GridFetched {
         session_id: String,
         grid: RichGridData,
+        /// True when this grid was fetched in response to a scroll action
+        /// (scroll_fetch), false for regular grid fetches (fetch_grid).
+        is_scroll_fetch: bool,
     },
     /// Grid fetch failed for a specific session.
-    GridFetchFailed { session_id: String, error: String },
+    GridFetchFailed {
+        session_id: String,
+        error: String,
+    },
     /// Keyboard event from iced.
     KeyboardEvent(keyboard::Event),
     /// Initialization complete.
@@ -757,15 +769,25 @@ pub enum Message {
     /// Close the window via the title bar button.
     TitleBarClose,
     /// Mouse wheel scrolled (for scrollback).
-    MouseWheel { delta_y: f32 },
+    MouseWheel {
+        delta_y: f32,
+    },
     /// Mouse button pressed at pixel position (starts selection).
-    SelectionStart { x: f32, y: f32 },
+    SelectionStart {
+        x: f32,
+        y: f32,
+    },
     /// Mouse dragged to pixel position (updates selection).
-    SelectionUpdate { x: f32, y: f32 },
+    SelectionUpdate {
+        x: f32,
+        y: f32,
+    },
     /// Mouse button released (finishes selection).
     SelectionEnd,
     /// Split the focused pane in a direction, creating a new terminal.
-    SplitPane { direction: SplitDirection },
+    SplitPane {
+        direction: SplitDirection,
+    },
     /// Remove the focused pane from its split, promoting its sibling.
     UnsplitPane,
     /// Cycle focus to the next pane in the layout tree.
@@ -1032,7 +1054,10 @@ pub enum Message {
     /// User cancelled shortcut capture (e.g. pressed Escape).
     ShortcutCaptureCancelled,
     /// Clipboard text read successfully in background — write to terminal.
-    ClipboardPasted { terminal_id: String, text: String },
+    ClipboardPasted {
+        terminal_id: String,
+        text: String,
+    },
     /// Clipboard read failed in background.
     ClipboardPasteFailed(String),
     // --- G3: URL Detection ---
@@ -1054,9 +1079,13 @@ pub enum Message {
         worktree_path: String,
     },
     /// User confirmed worktree cleanup on terminal close.
-    WorktreeCloseConfirmed { session_id: String },
+    WorktreeCloseConfirmed {
+        session_id: String,
+    },
     /// User chose to keep worktree on terminal close.
-    WorktreeCloseKeep { session_id: String },
+    WorktreeCloseKeep {
+        session_id: String,
+    },
     /// Background worktree removal completed.
     WorktreeRemoved {
         session_id: String,
@@ -1088,7 +1117,11 @@ pub enum Message {
         mode: AiToolMode,
     },
     // --- G1/G2: Terminal Context Menu ---
-    TerminalContextOpen { id: String, x: f32, y: f32 },
+    TerminalContextOpen {
+        id: String,
+        x: f32,
+        y: f32,
+    },
     TerminalContextClose,
     TerminalContextAction(TermCtxAction),
     // --- G4: Find in Terminal ---
@@ -1101,8 +1134,13 @@ pub enum Message {
     // --- G6/G7: Scrollbar + Performance Overlay ---
     TogglePerfOverlay,
     // --- K1: CLAUDE.md Editor ---
-    ClaudeMdOpen { path: std::path::PathBuf },
-    ClaudeMdLoaded { content: String, path: std::path::PathBuf },
+    ClaudeMdOpen {
+        path: std::path::PathBuf,
+    },
+    ClaudeMdLoaded {
+        content: String,
+        path: std::path::PathBuf,
+    },
     ClaudeMdLoadFailed(String),
     ClaudeMdEditorAction(iced::widget::text_editor::Action),
     ClaudeMdSave,
@@ -1138,7 +1176,10 @@ pub enum Message {
     /// Close a file pane by its ID.
     FilePaneClose(String),
     /// A watched file's content changed on disk.
-    FilePaneFileChanged { pane_id: String, content: String },
+    FilePaneFileChanged {
+        pane_id: String,
+        content: String,
+    },
     /// Periodic tick to check file modification times.
     FilePaneWatchTick,
 }
@@ -1210,7 +1251,12 @@ impl GodlyApp {
     /// Mark all terminals in the active workspace as read.
     fn mark_active_workspace_read(&mut self) {
         if let Some(ws) = self.workspaces.active() {
-            let ids: Vec<String> = ws.layout.all_leaf_ids().iter().map(|s| s.to_string()).collect();
+            let ids: Vec<String> = ws
+                .layout
+                .all_leaf_ids()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
             for terminal_id in ids {
                 self.notifications.mark_read(&terminal_id);
             }
@@ -1483,11 +1529,7 @@ impl GodlyApp {
             .bell_burst_suppressed
             .iter()
             .filter(|(tid, &count)| {
-                notifications::is_burst_quiet(
-                    now_ms,
-                    last_bell_ms.get(*tid).copied(),
-                    count,
-                )
+                notifications::is_burst_quiet(now_ms, last_bell_ms.get(*tid).copied(), count)
             })
             .map(|(tid, &count)| (tid.clone(), count))
             .collect();
@@ -1601,7 +1643,9 @@ impl GodlyApp {
                     folder_path: workspace.folder_path.clone(),
                     worktree_mode: workspace.worktree_mode,
                     focused_terminal: workspace.focused_terminal.clone(),
-                    layout: session_persistence::PersistedLayoutNode::from_layout(&workspace.layout),
+                    layout: session_persistence::PersistedLayoutNode::from_layout(
+                        &workspace.layout,
+                    ),
                 })
                 .collect(),
             terminal_worktree_paths: self
@@ -1635,9 +1679,9 @@ impl GodlyApp {
     /// Called after every workspace mutation (create, delete, rename) so that
     /// crashes within the 60-second autosave window don't lose changes.
     fn persist_session_state(&self) {
-        if let Err(e) = session_persistence::save_to_default_path(
-            &self.build_persisted_session_state(),
-        ) {
+        if let Err(e) =
+            session_persistence::save_to_default_path(&self.build_persisted_session_state())
+        {
             log::warn!("Failed to persist session state after mutation: {}", e);
         }
     }
@@ -1686,13 +1730,31 @@ impl GodlyApp {
         // Diagnostic: log key messages for freeze debugging
         match &message {
             Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
-                diag::log(&format!("UPDATE: TerminalOutput({})", &session_id[..8.min(session_id.len())]));
+                diag::log(&format!(
+                    "UPDATE: TerminalOutput({})",
+                    &session_id[..8.min(session_id.len())]
+                ));
             }
-            Message::GridFetched { session_id, .. } => {
-                diag::log(&format!("UPDATE: GridFetched({})", &session_id[..8.min(session_id.len())]));
+            Message::GridFetched {
+                session_id,
+                is_scroll_fetch,
+                ..
+            } => {
+                diag::log(&format!(
+                    "UPDATE: GridFetched({}, scroll={})",
+                    &session_id[..8.min(session_id.len())],
+                    is_scroll_fetch
+                ));
             }
-            Message::GridFetchFailed { session_id, ref error } => {
-                diag::log(&format!("UPDATE: GridFetchFailed({}) err={}", &session_id[..8.min(session_id.len())], error));
+            Message::GridFetchFailed {
+                session_id,
+                ref error,
+            } => {
+                diag::log(&format!(
+                    "UPDATE: GridFetchFailed({}) err={}",
+                    &session_id[..8.min(session_id.len())],
+                    error
+                ));
             }
             Message::WindowFocusChanged { focused, .. } => {
                 diag::log(&format!("UPDATE: WindowFocusChanged(focused={})", focused));
@@ -1767,7 +1829,10 @@ impl GodlyApp {
                 let burst_active = notifications::is_burst_active(now_ms, last_sound_ms);
 
                 if burst_active {
-                    *self.bell_burst_suppressed.entry(session_id.clone()).or_insert(0) += 1;
+                    *self
+                        .bell_burst_suppressed
+                        .entry(session_id.clone())
+                        .or_insert(0) += 1;
                     log::debug!(
                         "Bell from session {} (burst-suppressed, {} total)",
                         session_id,
@@ -1791,7 +1856,10 @@ impl GodlyApp {
                 {
                     extern "system" {
                         fn GetForegroundWindow() -> *mut std::ffi::c_void;
-                        fn GetWindowThreadProcessId(hwnd: *mut std::ffi::c_void, pid: *mut u32) -> u32;
+                        fn GetWindowThreadProcessId(
+                            hwnd: *mut std::ffi::c_void,
+                            pid: *mut u32,
+                        ) -> u32;
                         fn GetCurrentProcessId() -> u32;
                     }
                     let is_actually_focused = unsafe {
@@ -1818,7 +1886,21 @@ impl GodlyApp {
             }
 
             // --- Grid fetch results ---
-            Message::GridFetched { session_id, grid } => {
+            Message::GridFetched {
+                session_id,
+                grid,
+                is_scroll_fetch,
+            } => {
+                // Discard stale scroll responses — the user has already scrolled
+                // past this offset, so applying it would cause a visible rollback.
+                if is_scroll_fetch {
+                    if let Some(term) = self.terminals.get(&session_id) {
+                        if grid.scrollback_offset != term.scrollback_offset {
+                            return Task::none();
+                        }
+                    }
+                }
+
                 let mut should_persist_clamp = false;
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     if grid.scrollback_offset < term.scrollback_offset {
@@ -1830,8 +1912,7 @@ impl GodlyApp {
                     // meaningful title.  Shells frequently reset the OSC title
                     // to the CWD which would erase a user-set tab name.
                     let new_title = grid.title.trim();
-                    let new_is_meaningful =
-                        !new_title.is_empty() && !looks_like_path(new_title);
+                    let new_is_meaningful = !new_title.is_empty() && !looks_like_path(new_title);
                     let current_is_meaningful = {
                         let cur = term.title.trim();
                         !cur.is_empty() && !looks_like_path(cur)
@@ -1881,9 +1962,7 @@ impl GodlyApp {
                 }
                 #[cfg(not(windows))]
                 {
-                    let _ = std::process::Command::new("xdg-open")
-                        .arg(&url)
-                        .spawn();
+                    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
                 }
             }
             Message::FileDropped(path) => {
@@ -2014,16 +2093,12 @@ impl GodlyApp {
                                 match &key {
                                     keyboard::Key::Named(Named::ArrowUp) => {
                                         return self.update(
-                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(
-                                                -1,
-                                            ),
+                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(-1),
                                         );
                                     }
                                     keyboard::Key::Named(Named::ArrowDown) => {
                                         return self.update(
-                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(
-                                                1,
-                                            ),
+                                            Message::QuickClaudeDialogSkillAutocompleteNavigate(1),
                                         );
                                     }
                                     keyboard::Key::Named(Named::Enter)
@@ -2054,7 +2129,8 @@ impl GodlyApp {
                             if modifiers.control()
                                 && matches!(key, keyboard::Key::Named(keyboard::key::Named::Enter))
                             {
-                                if dlg.active_tab == crate::quick_claude_dialog::QuickClaudeTab::ResumeSession
+                                if dlg.active_tab
+                                    == crate::quick_claude_dialog::QuickClaudeTab::ResumeSession
                                     && dlg.selected_session.is_some()
                                 {
                                     return self.update(Message::QuickClaudeDialogResume);
@@ -2065,7 +2141,8 @@ impl GodlyApp {
                             if matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))
                                 && !modifiers.control()
                             {
-                                if dlg.active_tab == crate::quick_claude_dialog::QuickClaudeTab::ResumeSession
+                                if dlg.active_tab
+                                    == crate::quick_claude_dialog::QuickClaudeTab::ResumeSession
                                     && dlg.selected_session.is_some()
                                 {
                                     return self.update(Message::QuickClaudeDialogResume);
@@ -2088,18 +2165,17 @@ impl GodlyApp {
                 // Named keys (Tab, Enter, arrows, etc.) always go through
                 // key_to_pty_bytes which encodes modifiers correctly
                 // (e.g. Shift+Tab → ESC[Z, not bare \t).
-                let bytes =
-                    if !modifiers.control() && matches!(key, keyboard::Key::Character(_)) {
-                        // Use platform-composed text for printable characters.
-                        // If `text` is None this is a dead-key press — return None
-                        // so no bytes are sent until the composition resolves.
-                        // Falling through to key_to_pty_bytes here would send
-                        // the raw character prematurely, causing duplicates
-                        // when the dead key is later cancelled or composed.
-                        text.as_ref().map(|t| t.as_bytes().to_vec())
-                    } else {
-                        key_to_pty_bytes(&key, modifiers)
-                    };
+                let bytes = if !modifiers.control() && matches!(key, keyboard::Key::Character(_)) {
+                    // Use platform-composed text for printable characters.
+                    // If `text` is None this is a dead-key press — return None
+                    // so no bytes are sent until the composition resolves.
+                    // Falling through to key_to_pty_bytes here would send
+                    // the raw character prematurely, causing duplicates
+                    // when the dead key is later cancelled or composed.
+                    text.as_ref().map(|t| t.as_bytes().to_vec())
+                } else {
+                    key_to_pty_bytes(&key, modifiers)
+                };
 
                 if let Some(bytes) = bytes {
                     // Clear selection when an actual key produces PTY output.
@@ -2134,8 +2210,12 @@ impl GodlyApp {
 
             // --- Mouse wheel scrollback ---
             Message::MouseWheel { delta_y } => {
-                let lines = -(delta_y * 3.0) as isize;
-                return self.scroll_active(lines);
+                self.scroll_accumulator += -(delta_y as f64) * 3.0;
+                let lines = self.scroll_accumulator as isize;
+                if lines != 0 {
+                    self.scroll_accumulator -= lines as f64;
+                    return self.scroll_active(lines);
+                }
             }
 
             // --- Tab bar horizontal scroll (no-op: Iced scrollable handles it) ---
@@ -2313,12 +2393,18 @@ impl GodlyApp {
                 // Iced may report tiny pixel dimensions that compute to ≤2 rows/cols).
                 // Resizing terminals to near-zero destroys viewport content.
                 if new_rows <= 2 || new_cols <= 2 {
-                    diag::log(&format!("RESIZE: ignored — degenerate grid {}x{} (minimized?)", new_cols, new_rows));
+                    diag::log(&format!(
+                        "RESIZE: ignored — degenerate grid {}x{} (minimized?)",
+                        new_cols, new_rows
+                    ));
                     // Revert stored dimensions so the next real resize computes correctly.
                     self.window_width = old_cols as f32 * self.font_metrics.cell_width;
                     self.window_height = old_rows as f32 * self.font_metrics.cell_height;
                 } else if new_cols != old_cols || new_rows != old_rows {
-                    diag::log(&format!("RESIZE: {}x{} -> {}x{}", old_cols, old_rows, new_cols, new_rows));
+                    diag::log(&format!(
+                        "RESIZE: {}x{} -> {}x{}",
+                        old_cols, old_rows, new_cols, new_rows
+                    ));
                     // Resize terminals AND force-fetch all grids. After minimize/restore
                     // the subscription stream may be dead, so this is the only way to
                     // get fresh content. Clear fetching flags to bypass coalescing.
@@ -2330,10 +2416,8 @@ impl GodlyApp {
                         }
                     }
                     let resize_task = self.resize_all_terminals();
-                    let fetch_tasks: Vec<Task<Message>> = ids
-                        .into_iter()
-                        .map(|id| self.fetch_grid(&id))
-                        .collect();
+                    let fetch_tasks: Vec<Task<Message>> =
+                        ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
                     let mut tasks = vec![resize_task];
                     tasks.extend(fetch_tasks);
                     return Task::batch(tasks);
@@ -2348,8 +2432,12 @@ impl GodlyApp {
                     // event traffic while the window isn't visible.
                     // Only pause if we can identify the active terminal — if we
                     // can't, don't pause anything (safe default).
-                    if let (Some(active_id), Some(client)) = (self.active_focused().map(str::to_string), &self.client) {
-                        let bg_ids: Vec<String> = self.terminals.iter()
+                    if let (Some(active_id), Some(client)) =
+                        (self.active_focused().map(str::to_string), &self.client)
+                    {
+                        let bg_ids: Vec<String> = self
+                            .terminals
+                            .iter()
                             .filter(|t| t.id != active_id)
                             .map(|t| t.id.clone())
                             .collect();
@@ -2362,7 +2450,8 @@ impl GodlyApp {
                     self.last_attention_request_ms = None;
                     // Resume all sessions that may have been paused on unfocus.
                     if let Some(client) = &self.client {
-                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        let ids: Vec<String> =
+                            self.terminals.iter().map(|t| t.id.clone()).collect();
                         commands::resume_all_sessions(client, &ids);
                     }
                     return window::request_user_attention(window_id, None);
@@ -2640,11 +2729,20 @@ impl GodlyApp {
                 };
 
                 // Use active workspace's folder as CWD for presets
-                let cwd = self.workspaces.active()
+                let cwd = self
+                    .workspaces
+                    .active()
                     .map(|ws| ws.folder_path.clone())
                     .filter(|p| !p.is_empty());
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, &preset.prompt_template, "sonnet", "default", cwd.as_deref(), &[], crate::quick_claude::IsolationMode::None, None,
+                    num_agents,
+                    &preset.prompt_template,
+                    "sonnet",
+                    "default",
+                    cwd.as_deref(),
+                    &[],
+                    crate::quick_claude::IsolationMode::None,
+                    None,
                 );
 
                 let ws_id = uuid::Uuid::new_v4().to_string();
@@ -2652,17 +2750,10 @@ impl GodlyApp {
                 let placeholder_id = uuid::Uuid::new_v4().to_string();
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
-                self.terminals.add_to_workspace(
-                    placeholder_id.clone(),
-                    rows,
-                    cols,
-                    ws_id.clone(),
-                );
-                self.workspaces.add(
-                    ws_id.clone(),
-                    ws_name,
-                    placeholder_id.clone(),
-                );
+                self.terminals
+                    .add_to_workspace(placeholder_id.clone(), rows, cols, ws_id.clone());
+                self.workspaces
+                    .add(ws_id.clone(), ws_name, placeholder_id.clone());
                 // Background launch: do NOT switch focus
                 self.next_workspace_num += 1;
 
@@ -2684,7 +2775,8 @@ impl GodlyApp {
                 return self.handle_launch_step_result(ws_id, result);
             }
             Message::QuickClaudeLaunchCancel(ws_id) => {
-                self.quick_claude_launches.retain(|l| l.workspace_id != ws_id);
+                self.quick_claude_launches
+                    .retain(|l| l.workspace_id != ws_id);
             }
             // --- Quick Claude Dialog (modal) ---
             Message::QuickClaudeDialogOpen => {
@@ -2694,49 +2786,38 @@ impl GodlyApp {
                     .iter()
                     .map(|ws| (ws.id.clone(), ws.name.clone()))
                     .collect();
-                self.quick_claude_dialog = Some(
-                    crate::quick_claude_dialog::QuickClaudeDialogState::new(
+                self.quick_claude_dialog =
+                    Some(crate::quick_claude_dialog::QuickClaudeDialogState::new(
                         ws_id,
                         ws_list,
                         &self.quick_claude_prefs,
-                    ),
-                );
+                    ));
 
                 // Load skills, sessions, and models asynchronously
-                let ws_folder: Option<String> = self
-                    .workspaces
-                    .active()
-                    .and_then(|ws| {
-                        if ws.folder_path.is_empty() {
-                            None
-                        } else {
-                            Some(ws.folder_path.clone())
-                        }
-                    });
+                let ws_folder: Option<String> = self.workspaces.active().and_then(|ws| {
+                    if ws.folder_path.is_empty() {
+                        None
+                    } else {
+                        Some(ws.folder_path.clone())
+                    }
+                });
                 let skills_task = iced::Task::perform(
-                    async move {
-                        crate::quick_claude_dialog::discover_skills(ws_folder.as_deref())
-                    },
+                    async move { crate::quick_claude_dialog::discover_skills(ws_folder.as_deref()) },
                     Message::QuickClaudeDialogSkillsLoaded,
                 );
                 // Clean up stale session records before loading
                 let live_ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
                 let _ = crate::quick_claude_sessions::cleanup_stale_sessions(&live_ids);
                 let sessions_task = iced::Task::perform(
-                    async move {
-                        crate::quick_claude_dialog::discover_sessions()
-                    },
+                    async move { crate::quick_claude_dialog::discover_sessions() },
                     Message::QuickClaudeDialogSessionsLoaded,
                 );
                 let models_task = iced::Task::perform(
-                    async move {
-                        crate::quick_claude_dialog::discover_models()
-                    },
+                    async move { crate::quick_claude_dialog::discover_models() },
                     Message::QuickClaudeDialogModelsLoaded,
                 );
-                let focus_task = iced::widget::operation::focus(
-                    crate::quick_claude_dialog::prompt_editor_id(),
-                );
+                let focus_task =
+                    iced::widget::operation::focus(crate::quick_claude_dialog::prompt_editor_id());
                 return iced::Task::batch([skills_task, sessions_task, models_task, focus_task]);
             }
             Message::QuickClaudeDialogClose => {
@@ -2803,7 +2884,8 @@ impl GodlyApp {
                         let text = dlg.prompt_content.text();
                         let cursor = dlg.prompt_content.cursor();
                         // Compute byte offset of cursor in the full text
-                        let cursor_byte_offset = text_editor_cursor_byte_offset(&text, &cursor.position);
+                        let cursor_byte_offset =
+                            text_editor_cursor_byte_offset(&text, &cursor.position);
                         let before_cursor = &text[..cursor_byte_offset];
                         // Find the last '/' before the cursor
                         if let Some(slash_pos) = before_cursor.rfind('/') {
@@ -2909,17 +2991,18 @@ impl GodlyApp {
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
 
-                let (ws_id, ws_name, cwd, is_new_ws) = if let Some((id, name, folder)) = selected_ws {
+                let (ws_id, ws_name, cwd, is_new_ws) = if let Some((id, name, folder)) = selected_ws
+                {
                     // Add terminal to the EXISTING workspace — it appears in
                     // the tab bar without modifying the current layout or focus.
-                    self.terminals.add_to_workspace(
-                        placeholder_id.clone(),
-                        rows,
-                        cols,
-                        id.clone(),
-                    );
+                    self.terminals
+                        .add_to_workspace(placeholder_id.clone(), rows, cols, id.clone());
                     // Background launch: do NOT split, do NOT switch focus
-                    let cwd = if folder.is_empty() { None } else { Some(folder) };
+                    let cwd = if folder.is_empty() {
+                        None
+                    } else {
+                        Some(folder)
+                    };
                     (id, name, cwd, false)
                 } else {
                     // No workspace selected — create a new one
@@ -2930,17 +3013,10 @@ impl GodlyApp {
                     } else {
                         format!("QC: {}", snippet.trim())
                     };
-                    self.terminals.add_to_workspace(
-                        placeholder_id.clone(),
-                        rows,
-                        cols,
-                        id.clone(),
-                    );
-                    self.workspaces.add(
-                        id.clone(),
-                        name.clone(),
-                        placeholder_id.clone(),
-                    );
+                    self.terminals
+                        .add_to_workspace(placeholder_id.clone(), rows, cols, id.clone());
+                    self.workspaces
+                        .add(id.clone(), name.clone(), placeholder_id.clone());
                     // Background launch: do NOT switch focus
                     self.next_workspace_num += 1;
                     (id, name, None, true)
@@ -2955,7 +3031,13 @@ impl GodlyApp {
                 };
                 let claude_session_id = uuid::Uuid::new_v4().to_string();
                 let steps = crate::quick_claude::default_launch_steps(
-                    num_agents, prompt, &model, &mode, cwd.as_deref(), &image_paths, isolation,
+                    num_agents,
+                    prompt,
+                    &model,
+                    &mode,
+                    cwd.as_deref(),
+                    &image_paths,
+                    isolation,
                     Some(&claude_session_id),
                 );
 
@@ -3012,21 +3094,28 @@ impl GodlyApp {
                         // Replace the /partial text in prompt with the selected skill name
                         let current_text = dlg.prompt_content.text();
                         let cursor = dlg.prompt_content.cursor();
-                        let cursor_byte_offset = text_editor_cursor_byte_offset(&current_text, &cursor.position);
+                        let cursor_byte_offset =
+                            text_editor_cursor_byte_offset(&current_text, &cursor.position);
                         let before_cursor = &current_text[..cursor_byte_offset];
                         let after_cursor = &current_text[cursor_byte_offset..];
                         if let Some(slash_pos) = before_cursor.rfind('/') {
-                            let new_text =
-                                format!("{}{} {}", &current_text[..slash_pos], skill_name, after_cursor);
+                            let new_text = format!(
+                                "{}{} {}",
+                                &current_text[..slash_pos],
+                                skill_name,
+                                after_cursor
+                            );
                             let new_cursor_offset = slash_pos + skill_name.len() + 1; // after the space
                             dlg.prompt_content =
                                 iced::widget::text_editor::Content::with_text(&new_text);
                             // Move cursor to right after the inserted skill name + space
-                            let new_cursor_pos = byte_offset_to_editor_position(&new_text, new_cursor_offset);
-                            dlg.prompt_content.move_to(iced::widget::text_editor::Cursor {
-                                position: new_cursor_pos,
-                                selection: None,
-                            });
+                            let new_cursor_pos =
+                                byte_offset_to_editor_position(&new_text, new_cursor_offset);
+                            dlg.prompt_content
+                                .move_to(iced::widget::text_editor::Cursor {
+                                    position: new_cursor_pos,
+                                    selection: None,
+                                });
                         }
                         dlg.skill_autocomplete_open = false;
                         dlg.skill_autocomplete_filter.clear();
@@ -3071,30 +3160,28 @@ impl GodlyApp {
                     dlg.sessions = sessions;
                 }
             }
-            Message::QuickClaudeDialogImagePasted(result) => {
-                match result {
-                    Ok(attachments) => {
-                        diag::log(&format!(
-                            "UPDATE: QuickClaudeDialogImagePasted(Ok, {} images)",
-                            attachments.len()
-                        ));
-                        if let Some(ref mut dlg) = self.quick_claude_dialog {
-                            for attachment in attachments {
-                                if dlg.attached_images.len() < 10 {
-                                    dlg.attached_images.push(attachment);
-                                } else {
-                                    log::warn!("Quick Claude: max 10 image attachments reached");
-                                    break;
-                                }
+            Message::QuickClaudeDialogImagePasted(result) => match result {
+                Ok(attachments) => {
+                    diag::log(&format!(
+                        "UPDATE: QuickClaudeDialogImagePasted(Ok, {} images)",
+                        attachments.len()
+                    ));
+                    if let Some(ref mut dlg) = self.quick_claude_dialog {
+                        for attachment in attachments {
+                            if dlg.attached_images.len() < 10 {
+                                dlg.attached_images.push(attachment);
+                            } else {
+                                log::warn!("Quick Claude: max 10 image attachments reached");
+                                break;
                             }
                         }
                     }
-                    Err(e) => {
-                        diag::log(&format!("UPDATE: QuickClaudeDialogImagePasted(Err: {})", e));
-                        log::error!("Quick Claude image paste failed: {}", e);
-                    }
                 }
-            }
+                Err(e) => {
+                    diag::log(&format!("UPDATE: QuickClaudeDialogImagePasted(Err: {})", e));
+                    log::error!("Quick Claude image paste failed: {}", e);
+                }
+            },
             Message::QuickClaudeDialogImageRemoved(index) => {
                 if let Some(ref mut dlg) = self.quick_claude_dialog {
                     if index < dlg.attached_images.len() {
@@ -3128,7 +3215,9 @@ impl GodlyApp {
 
                 // Use session's stored CWD if it still exists on disk,
                 // falling back to selected workspace folder.
-                let cwd = session.cwd.clone()
+                let cwd = session
+                    .cwd
+                    .clone()
                     .filter(|p| std::path::Path::new(p).exists())
                     .or_else(|| {
                         dlg.selected_workspace_id
@@ -3139,45 +3228,41 @@ impl GodlyApp {
                     });
 
                 let session_id = session.session_id.clone();
-                let steps = crate::quick_claude::resume_launch_steps(
-                    &session_id, cwd.as_deref(),
-                );
+                let steps = crate::quick_claude::resume_launch_steps(&session_id, cwd.as_deref());
 
                 let placeholder_id = uuid::Uuid::new_v4().to_string();
                 let rows = self.calculate_rows();
                 let cols = self.calculate_cols();
 
                 // Reuse the original workspace if it still exists
-                let (ws_id, ws_name, is_new_ws) = if self.workspaces.get(&session.workspace_id).is_some() {
-                    let name = self.workspaces.get(&session.workspace_id).unwrap().name.clone();
-                    (session.workspace_id.clone(), name, false)
-                } else {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let snippet: String = session.first_message.chars().take(30).collect();
-                    let name = if snippet.is_empty() {
-                        "Quick Claude (Resume)".to_string()
+                let (ws_id, ws_name, is_new_ws) =
+                    if self.workspaces.get(&session.workspace_id).is_some() {
+                        let name = self
+                            .workspaces
+                            .get(&session.workspace_id)
+                            .unwrap()
+                            .name
+                            .clone();
+                        (session.workspace_id.clone(), name, false)
                     } else {
-                        format!("QC: {}", snippet.trim())
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let snippet: String = session.first_message.chars().take(30).collect();
+                        let name = if snippet.is_empty() {
+                            "Quick Claude (Resume)".to_string()
+                        } else {
+                            format!("QC: {}", snippet.trim())
+                        };
+                        self.workspaces
+                            .add(id.clone(), name.clone(), placeholder_id.clone());
+                        self.next_workspace_num += 1;
+                        (id, name, true)
                     };
-                    self.workspaces.add(id.clone(), name.clone(), placeholder_id.clone());
-                    self.next_workspace_num += 1;
-                    (id, name, true)
-                };
 
-                self.terminals.add_to_workspace(
-                    placeholder_id.clone(),
-                    rows,
-                    cols,
-                    ws_id.clone(),
-                );
+                self.terminals
+                    .add_to_workspace(placeholder_id.clone(), rows, cols, ws_id.clone());
 
-                let mut launch_state = crate::quick_claude::LaunchState::new(
-                    ws_name,
-                    steps,
-                    1,
-                    ws_id,
-                    is_new_ws,
-                );
+                let mut launch_state =
+                    crate::quick_claude::LaunchState::new(ws_name, steps, 1, ws_id, is_new_ws);
                 launch_state.agent_terminal_ids[0] = Some(placeholder_id.clone());
                 launch_state.placeholder_ids.insert(placeholder_id);
 
@@ -3429,7 +3514,9 @@ impl GodlyApp {
                                     async move {
                                         let (tx, rx) = futures_channel::oneshot::channel();
                                         std::thread::spawn(move || {
-                                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                                            std::thread::sleep(std::time::Duration::from_millis(
+                                                1500,
+                                            ));
                                             // 0.0.0.0 is valid for binding (all interfaces) but
                                             // not for connecting on Windows (WSAEADDRNOTAVAIL).
                                             // Use loopback for the health check instead.
@@ -3439,7 +3526,8 @@ impl GodlyApp {
                                                 &h
                                             };
                                             let addr = format!("{}:{}", connect_host, p);
-                                            let result = match addr.parse::<std::net::SocketAddr>() {
+                                            let result = match addr.parse::<std::net::SocketAddr>()
+                                            {
                                                 Ok(sock) => std::net::TcpStream::connect_timeout(
                                                     &sock,
                                                     std::time::Duration::from_secs(3),
@@ -3561,8 +3649,7 @@ impl GodlyApp {
                         // Apply form inputs to prefs
                         self.cf_tunnel_prefs.tunnel_name =
                             self.cf_tunnel_name_input.trim().to_string();
-                        self.cf_tunnel_prefs.hostname =
-                            self.cf_hostname_input.trim().to_string();
+                        self.cf_tunnel_prefs.hostname = self.cf_hostname_input.trim().to_string();
                         crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
 
                         let port = self.phone_remote_prefs.port;
@@ -3580,18 +3667,17 @@ impl GodlyApp {
                                                 async move {
                                                     match rx.await {
                                                         Ok(url) => Ok(url),
-                                                        Err(_) => Err(
-                                                            "Could not detect tunnel URL"
-                                                                .to_string(),
-                                                        ),
+                                                        Err(_) => {
+                                                            Err("Could not detect tunnel URL"
+                                                                .to_string())
+                                                        }
                                                     }
                                                 },
                                                 Message::CfTunnelStarted,
                                             );
                                         } else {
-                                            self.cf_tunnel_status = CfTunnelStatus::Failed(
-                                                "No stderr pipe".into(),
-                                            );
+                                            self.cf_tunnel_status =
+                                                CfTunnelStatus::Failed("No stderr pipe".into());
                                         }
                                     }
                                     Err(e) => {
@@ -3602,35 +3688,29 @@ impl GodlyApp {
                             CfTunnelMode::Named => {
                                 let name = self.cf_tunnel_prefs.tunnel_name.clone();
                                 if name.is_empty() {
-                                    self.cf_tunnel_status = CfTunnelStatus::Failed(
-                                        "Tunnel name is required".into(),
-                                    );
+                                    self.cf_tunnel_status =
+                                        CfTunnelStatus::Failed("Tunnel name is required".into());
                                     return Task::none();
                                 }
                                 match crate::cf_tunnel::spawn_named_tunnel(&cf_path, &name) {
                                     Ok(child) => {
                                         self.cf_tunnel_process = Some(child);
                                         self.cf_tunnel_status = CfTunnelStatus::Starting;
-                                        let hostname =
-                                            self.cf_tunnel_prefs.hostname.clone();
+                                        let hostname = self.cf_tunnel_prefs.hostname.clone();
                                         // Health-check: wait then verify the process is alive
                                         return Task::perform(
                                             async move {
-                                                let (tx, rx) =
-                                                    futures_channel::oneshot::channel();
+                                                let (tx, rx) = futures_channel::oneshot::channel();
                                                 std::thread::spawn(move || {
                                                     std::thread::sleep(
                                                         std::time::Duration::from_secs(3),
                                                     );
                                                     let _ = tx.send(Ok(()));
                                                 });
-                                                rx.await
-                                                    .unwrap_or(Err("check panicked".into()))
+                                                rx.await.unwrap_or(Err("check panicked".into()))
                                             },
                                             move |r: Result<(), String>| {
-                                                Message::CfNamedTunnelStarted(
-                                                    r.map(|_| ()),
-                                                )
+                                                Message::CfNamedTunnelStarted(r.map(|_| ()))
                                             },
                                         );
                                     }
@@ -3678,7 +3758,8 @@ impl GodlyApp {
                 if let Some(cf_path) = self.cf_cloudflared_path.clone() {
                     return Task::perform(
                         async move {
-                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                            let (tx, rx) =
+                                futures_channel::oneshot::channel::<Result<(), String>>();
                             std::thread::spawn(move || {
                                 let result = crate::cf_tunnel::cloudflared_login(&cf_path);
                                 let _ = tx.send(result);
@@ -3706,18 +3787,18 @@ impl GodlyApp {
                     }
                     return Task::perform(
                         async move {
-                            let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                            let (tx, rx) =
+                                futures_channel::oneshot::channel::<Result<(), String>>();
                             std::thread::spawn(move || {
-                                let r = crate::cf_tunnel::create_tunnel(&cf_path, &name)
-                                    .and_then(|_| {
+                                let r = crate::cf_tunnel::create_tunnel(&cf_path, &name).and_then(
+                                    |_| {
                                         if !hostname.is_empty() {
-                                            crate::cf_tunnel::route_dns(
-                                                &cf_path, &name, &hostname,
-                                            )
+                                            crate::cf_tunnel::route_dns(&cf_path, &name, &hostname)
                                         } else {
                                             Ok(())
                                         }
-                                    });
+                                    },
+                                );
                                 let _ = tx.send(r);
                             });
                             rx.await.unwrap_or(Err("Create panicked".to_string()))
@@ -3731,8 +3812,7 @@ impl GodlyApp {
                     self.cf_tunnel_status = CfTunnelStatus::Failed(e);
                 }
                 // Save the tunnel name/hostname
-                self.cf_tunnel_prefs.tunnel_name =
-                    self.cf_tunnel_name_input.trim().to_string();
+                self.cf_tunnel_prefs.tunnel_name = self.cf_tunnel_name_input.trim().to_string();
                 self.cf_tunnel_prefs.hostname = self.cf_hostname_input.trim().to_string();
                 crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
             }
@@ -3766,9 +3846,8 @@ impl GodlyApp {
                         };
                         self.cf_tunnel_status = CfTunnelStatus::Running;
                     } else {
-                        self.cf_tunnel_status = CfTunnelStatus::Failed(
-                            "cloudflared exited unexpectedly".into(),
-                        );
+                        self.cf_tunnel_status =
+                            CfTunnelStatus::Failed("cloudflared exited unexpectedly".into());
                         self.cf_tunnel_process = None;
                     }
                 }
@@ -3792,7 +3871,8 @@ impl GodlyApp {
                 let old_app_id = self.cf_tunnel_prefs.access_app_id.clone();
                 return Task::perform(
                     async move {
-                        let (tx, rx) = futures_channel::oneshot::channel::<Result<String, String>>();
+                        let (tx, rx) =
+                            futures_channel::oneshot::channel::<Result<String, String>>();
                         std::thread::spawn(move || {
                             // Remove old app if exists
                             if !old_app_id.is_empty() {
@@ -3815,10 +3895,8 @@ impl GodlyApp {
             Message::CfSetupAccessDone(result) => match result {
                 Ok(app_id) => {
                     self.cf_tunnel_prefs.access_app_id = app_id;
-                    self.cf_tunnel_prefs.api_token =
-                        self.cf_api_token_input.trim().to_string();
-                    self.cf_tunnel_prefs.account_id =
-                        self.cf_account_id_input.trim().to_string();
+                    self.cf_tunnel_prefs.api_token = self.cf_api_token_input.trim().to_string();
+                    self.cf_tunnel_prefs.account_id = self.cf_account_id_input.trim().to_string();
                     self.cf_tunnel_prefs.access_email =
                         self.cf_access_email_input.trim().to_string();
                     crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
@@ -3838,12 +3916,12 @@ impl GodlyApp {
                     async move {
                         let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
                         std::thread::spawn(move || {
-                            let result = crate::cf_tunnel::remove_cloudflare_access(
-                                &token, &acct, &app_id,
-                            );
+                            let result =
+                                crate::cf_tunnel::remove_cloudflare_access(&token, &acct, &app_id);
                             let _ = tx.send(result);
                         });
-                        rx.await.unwrap_or(Err("Access removal panicked".to_string()))
+                        rx.await
+                            .unwrap_or(Err("Access removal panicked".to_string()))
                     },
                     Message::CfRemoveAccessDone,
                 );
@@ -3857,14 +3935,11 @@ impl GodlyApp {
                 }
             }
             Message::CfSaveSettings => {
-                self.cf_tunnel_prefs.tunnel_name =
-                    self.cf_tunnel_name_input.trim().to_string();
+                self.cf_tunnel_prefs.tunnel_name = self.cf_tunnel_name_input.trim().to_string();
                 self.cf_tunnel_prefs.hostname = self.cf_hostname_input.trim().to_string();
                 self.cf_tunnel_prefs.api_token = self.cf_api_token_input.trim().to_string();
-                self.cf_tunnel_prefs.account_id =
-                    self.cf_account_id_input.trim().to_string();
-                self.cf_tunnel_prefs.access_email =
-                    self.cf_access_email_input.trim().to_string();
+                self.cf_tunnel_prefs.account_id = self.cf_account_id_input.trim().to_string();
+                self.cf_tunnel_prefs.access_email = self.cf_access_email_input.trim().to_string();
                 crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
             }
             Message::CfCopyTunnelUrl => {
@@ -3878,9 +3953,9 @@ impl GodlyApp {
                 return self.check_burst_quiet(now_ms);
             }
             Message::AutosaveTick => {
-                if let Err(e) = session_persistence::save_to_default_path(
-                    &self.build_persisted_session_state(),
-                ) {
+                if let Err(e) =
+                    session_persistence::save_to_default_path(&self.build_persisted_session_state())
+                {
                     log::warn!("Autosave failed: {}", e);
                 }
             }
@@ -3890,14 +3965,11 @@ impl GodlyApp {
             Message::ToastClicked(id) => {
                 if let Some(toast) = self.toasts.iter().find(|t| t.id == id) {
                     if let Some(ws_id) = toast.source_workspace_id.clone() {
-                        let terminal_id = toast
-                            .source_terminal_id
-                            .clone()
-                            .or_else(|| {
-                                self.workspaces
-                                    .get(&ws_id)
-                                    .map(|ws| ws.focused_terminal.clone())
-                            });
+                        let terminal_id = toast.source_terminal_id.clone().or_else(|| {
+                            self.workspaces
+                                .get(&ws_id)
+                                .map(|ws| ws.focused_terminal.clone())
+                        });
                         self.workspaces.set_active(&ws_id);
                         if let Some(tid) = terminal_id {
                             self.notifications.mark_read(&tid);
@@ -3915,7 +3987,10 @@ impl GodlyApp {
                 {
                     extern "system" {
                         fn GetForegroundWindow() -> *mut std::ffi::c_void;
-                        fn GetWindowThreadProcessId(hwnd: *mut std::ffi::c_void, pid: *mut u32) -> u32;
+                        fn GetWindowThreadProcessId(
+                            hwnd: *mut std::ffi::c_void,
+                            pid: *mut u32,
+                        ) -> u32;
                         fn GetCurrentProcessId() -> u32;
                     }
                     let is_actually_focused = unsafe {
@@ -3938,7 +4013,8 @@ impl GodlyApp {
                             self.last_attention_request_ms = None;
                             // Resume any paused sessions
                             if let Some(client) = &self.client {
-                                let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                                let ids: Vec<String> =
+                                    self.terminals.iter().map(|t| t.id.clone()).collect();
                                 commands::resume_all_sessions(client, &ids);
                             }
                         }
@@ -3947,16 +4023,15 @@ impl GodlyApp {
                     // This compensates for the daemon event subscription dying after
                     // minimize/restore (bridge pipe can break during dormancy).
                     if is_actually_focused && self.client.is_some() {
-                        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+                        let ids: Vec<String> =
+                            self.terminals.iter().map(|t| t.id.clone()).collect();
                         for id in &ids {
                             if let Some(t) = self.terminals.get_mut(id) {
                                 t.fetching = false; // Force-allow fetch
                             }
                         }
-                        let tasks: Vec<Task<Message>> = ids
-                            .into_iter()
-                            .map(|id| self.fetch_grid(&id))
-                            .collect();
+                        let tasks: Vec<Task<Message>> =
+                            ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
                         if !tasks.is_empty() {
                             return Task::batch(tasks);
                         }
@@ -4034,13 +4109,22 @@ impl GodlyApp {
                 self.font_filter_query = query;
             }
             Message::FontSizeIncrement => {
-                log::info!("[FONT] size increment: {} -> {}", self.font_metrics.font_size, self.font_metrics.font_size + 1.0);
-                self.font_metrics = measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
+                log::info!(
+                    "[FONT] size increment: {} -> {}",
+                    self.font_metrics.font_size,
+                    self.font_metrics.font_size + 1.0
+                );
+                self.font_metrics =
+                    measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
                 return self.resize_all_terminals();
             }
             Message::FontSizeDecrement => {
                 let new_size = (self.font_metrics.font_size - 1.0).max(8.0);
-                log::info!("[FONT] size decrement: {} -> {}", self.font_metrics.font_size, new_size);
+                log::info!(
+                    "[FONT] size decrement: {} -> {}",
+                    self.font_metrics.font_size,
+                    new_size
+                );
                 self.font_metrics = measured_font_metrics(new_size, &self.font_family);
                 return self.resize_all_terminals();
             }
@@ -4079,45 +4163,62 @@ impl GodlyApp {
                 self.copy_preview_text = None;
             }
             // --- Worktree Mode ---
-            Message::WorktreeCreated { session_id, worktree_path } => {
+            Message::WorktreeCreated {
+                session_id,
+                worktree_path,
+            } => {
                 self.terminals.set_worktree_path(&session_id, worktree_path);
                 return self.handle_terminal_created(Ok(session_id));
             }
             Message::WorktreeCloseConfirmed { session_id } => {
                 self.worktree_close_pending = None;
-                let worktree_path = self.terminals.get(&session_id)
+                let worktree_path = self
+                    .terminals
+                    .get(&session_id)
                     .and_then(|t| t.worktree_path.clone());
-                let is_clone = self.terminals.get(&session_id)
+                let is_clone = self
+                    .terminals
+                    .get(&session_id)
                     .map(|t| t.is_clone)
                     .unwrap_or(false);
-                let repo_root = self.workspaces.active()
-                    .map(|ws| ws.folder_path.clone());
+                let repo_root = self.workspaces.active().map(|ws| ws.folder_path.clone());
                 let close_task = self.close_terminal_immediate(&session_id);
                 if let Some(wt_path) = worktree_path {
                     let sid = session_id.clone();
                     let remove_task = if is_clone {
                         Task::perform(
                             async move {
-                                let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                                let (tx, rx) =
+                                    futures_channel::oneshot::channel::<Result<(), String>>();
                                 std::thread::spawn(move || {
                                     let result = crate::git_worktree::remove_clone(&wt_path);
                                     let _ = tx.send(result);
                                 });
-                                rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                                rx.await
+                                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
                             },
-                            move |result| Message::WorktreeRemoved { session_id: sid, result },
+                            move |result| Message::WorktreeRemoved {
+                                session_id: sid,
+                                result,
+                            },
                         )
                     } else if let Some(root) = repo_root {
                         Task::perform(
                             async move {
-                                let (tx, rx) = futures_channel::oneshot::channel::<Result<(), String>>();
+                                let (tx, rx) =
+                                    futures_channel::oneshot::channel::<Result<(), String>>();
                                 std::thread::spawn(move || {
-                                    let result = crate::git_worktree::remove_worktree(&root, &wt_path);
+                                    let result =
+                                        crate::git_worktree::remove_worktree(&root, &wt_path);
                                     let _ = tx.send(result);
                                 });
-                                rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                                rx.await
+                                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
                             },
-                            move |result| Message::WorktreeRemoved { session_id: sid, result },
+                            move |result| Message::WorktreeRemoved {
+                                session_id: sid,
+                                result,
+                            },
                         )
                     } else {
                         Task::none()
@@ -4130,12 +4231,10 @@ impl GodlyApp {
                 self.worktree_close_pending = None;
                 return self.close_terminal_immediate(&session_id);
             }
-            Message::WorktreeRemoved { session_id, result } => {
-                match result {
-                    Ok(()) => log::info!("Worktree cleaned up for session {session_id}"),
-                    Err(ref e) => log::warn!("Failed to remove worktree for {session_id}: {e}"),
-                }
-            }
+            Message::WorktreeRemoved { session_id, result } => match result {
+                Ok(()) => log::info!("Worktree cleaned up for session {session_id}"),
+                Err(ref e) => log::warn!("Failed to remove worktree for {session_id}: {e}"),
+            },
             Message::WorktreeCloseCancelled => {
                 self.worktree_close_pending = None;
             }
@@ -4216,9 +4315,7 @@ impl GodlyApp {
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| {
-                        format!("Workspace {}", self.next_workspace_num)
-                    });
+                    .unwrap_or_else(|| format!("Workspace {}", self.next_workspace_num));
                 let folder = path.display().to_string();
                 return self.create_new_workspace_with_folder(name, folder);
             }
@@ -4280,7 +4377,8 @@ impl GodlyApp {
                         self.select_all();
                     }
                     TermCtxAction::Clear => {
-                        if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client) {
+                        if let (Some(tid), Some(client)) = (self.target_terminal_id(), &self.client)
+                        {
                             let _ = commands::write_to_terminal(client, tid, b"clear\r");
                         }
                     }
@@ -4300,7 +4398,8 @@ impl GodlyApp {
                 self.search.close();
             }
             Message::SearchQueryChanged(query) => {
-                let grid = self.target_terminal_id()
+                let grid = self
+                    .target_terminal_id()
                     .and_then(|tid| self.terminals.get(tid))
                     .and_then(|term| term.grid.as_ref());
                 self.search.set_query(query, grid);
@@ -4312,7 +4411,8 @@ impl GodlyApp {
                 self.search.prev_match();
             }
             Message::SearchToggleRegex => {
-                let grid = self.target_terminal_id()
+                let grid = self
+                    .target_terminal_id()
                     .and_then(|tid| self.terminals.get(tid))
                     .and_then(|term| term.grid.as_ref());
                 self.search.toggle_regex(grid);
@@ -4339,10 +4439,15 @@ impl GodlyApp {
                             };
                             let _ = tx.send((result, p));
                         });
-                        rx.await.unwrap_or_else(|_| (Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "Background thread panicked",
-                        )), path))
+                        rx.await.unwrap_or_else(|_| {
+                            (
+                                Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "Background thread panicked",
+                                )),
+                                path,
+                            )
+                        })
                     },
                     |(result, path)| match result {
                         Ok(content) => Message::ClaudeMdLoaded { content, path },
@@ -4351,8 +4456,9 @@ impl GodlyApp {
                 );
             }
             Message::ClaudeMdLoaded { content, path } => {
-                self.claude_md_editor =
-                    Some(crate::claude_md_editor::ClaudeMdEditorState::new(&content, path));
+                self.claude_md_editor = Some(crate::claude_md_editor::ClaudeMdEditorState::new(
+                    &content, path,
+                ));
             }
             Message::ClaudeMdLoadFailed(err) => {
                 self.enqueue_toast("CLAUDE.md Error".into(), err);
@@ -4371,29 +4477,28 @@ impl GodlyApp {
                         async move {
                             let (tx, rx) = futures_channel::oneshot::channel();
                             std::thread::spawn(move || {
-                                let result = std::fs::write(&path, &text)
-                                    .map_err(|e| e.to_string());
+                                let result =
+                                    std::fs::write(&path, &text).map_err(|e| e.to_string());
                                 let _ = tx.send(result);
                             });
-                            rx.await.unwrap_or_else(|_| Err("Background thread panicked".into()))
+                            rx.await
+                                .unwrap_or_else(|_| Err("Background thread panicked".into()))
                         },
                         Message::ClaudeMdSaved,
                     );
                 }
             }
-            Message::ClaudeMdSaved(result) => {
-                match result {
-                    Ok(()) => {
-                        if let Some(ref mut state) = self.claude_md_editor {
-                            state.dirty = false;
-                        }
-                        self.enqueue_toast("Saved".into(), "CLAUDE.md saved successfully".into());
+            Message::ClaudeMdSaved(result) => match result {
+                Ok(()) => {
+                    if let Some(ref mut state) = self.claude_md_editor {
+                        state.dirty = false;
                     }
-                    Err(e) => {
-                        self.enqueue_toast("Save Failed".into(), e);
-                    }
+                    self.enqueue_toast("Saved".into(), "CLAUDE.md saved successfully".into());
                 }
-            }
+                Err(e) => {
+                    self.enqueue_toast("Save Failed".into(), e);
+                }
+            },
             Message::ClaudeMdClose => {
                 self.claude_md_editor = None;
             }
@@ -4449,7 +4554,11 @@ impl GodlyApp {
                             if let (Some(client), Some(session_id)) =
                                 (&self.client, self.active_focused().map(str::to_string))
                             {
-                                let _ = commands::write_to_terminal(client, &session_id, text.as_bytes());
+                                let _ = commands::write_to_terminal(
+                                    client,
+                                    &session_id,
+                                    text.as_bytes(),
+                                );
                             }
                             let secs = duration_ms / 1000;
                             self.enqueue_toast(
@@ -4477,7 +4586,10 @@ impl GodlyApp {
                     return Task::perform(
                         async move {
                             let mut guard = slot.lock();
-                            guard.as_mut().map(|svc| svc.get_level().unwrap_or(0.0)).unwrap_or(0.0)
+                            guard
+                                .as_mut()
+                                .map(|svc| svc.get_level().unwrap_or(0.0))
+                                .unwrap_or(0.0)
                         },
                         Message::WhisperLevelUpdate,
                     );
@@ -4605,7 +4717,11 @@ impl GodlyApp {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        diag::log(&format!("VIEW: focused={} terminals={}", self.window_focused, self.terminals.count()));
+        diag::log(&format!(
+            "VIEW: focused={} terminals={}",
+            self.window_focused,
+            self.terminals.count()
+        ));
         if let Some(ref err) = self.init_error {
             return center(text(format!("Initialization error: {}", err)).size(18)).into();
         }
@@ -4673,19 +4789,17 @@ impl GodlyApp {
                 &|terminal_id: &str| {
                     self.render_terminal_leaf_with_drop_overlay(terminal_id, focused_id)
                 },
-                &|content: &PaneContent| {
-                    match content {
-                        PaneContent::FileViewer { file_path, .. } => {
-                            container(text(format!("File: {}", file_path)))
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .into()
-                        }
-                        _ => container(text(""))
+                &|content: &PaneContent| match content {
+                    PaneContent::FileViewer { file_path, .. } => {
+                        container(text(format!("File: {}", file_path)))
                             .width(Length::Fill)
                             .height(Length::Fill)
-                            .into(),
+                            .into()
                     }
+                    _ => container(text(""))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into(),
                 },
             )
         } else {
@@ -4868,48 +4982,50 @@ impl GodlyApp {
             with_tab_rename
         };
 
-        let with_worktree_close: Element<'_, Message> = if let Some(ref pending_id) = self.worktree_close_pending {
-            let worktree_path = self
-                .terminals
-                .get(pending_id)
-                .and_then(|t| t.worktree_path.as_deref())
-                .unwrap_or("unknown");
-            let is_clone = self
-                .terminals
-                .get(pending_id)
-                .map(|t| t.is_clone)
-                .unwrap_or(false);
-            let pid1 = pending_id.clone();
-            let pid2 = pending_id.clone();
-            stack![
-                with_quit,
-                crate::confirm_dialog::view_worktree_close_confirm(
-                    worktree_path,
-                    is_clone,
-                    Message::WorktreeCloseConfirmed { session_id: pid1 },
-                    Message::WorktreeCloseKeep { session_id: pid2 },
-                    Message::WorktreeCloseCancelled,
-                )
-            ]
-            .into()
-        } else {
-            with_quit
-        };
+        let with_worktree_close: Element<'_, Message> =
+            if let Some(ref pending_id) = self.worktree_close_pending {
+                let worktree_path = self
+                    .terminals
+                    .get(pending_id)
+                    .and_then(|t| t.worktree_path.as_deref())
+                    .unwrap_or("unknown");
+                let is_clone = self
+                    .terminals
+                    .get(pending_id)
+                    .map(|t| t.is_clone)
+                    .unwrap_or(false);
+                let pid1 = pending_id.clone();
+                let pid2 = pending_id.clone();
+                stack![
+                    with_quit,
+                    crate::confirm_dialog::view_worktree_close_confirm(
+                        worktree_path,
+                        is_clone,
+                        Message::WorktreeCloseConfirmed { session_id: pid1 },
+                        Message::WorktreeCloseKeep { session_id: pid2 },
+                        Message::WorktreeCloseCancelled,
+                    )
+                ]
+                .into()
+            } else {
+                with_quit
+            };
 
-        let with_copy_preview: Element<'_, Message> = if let Some(ref preview_text) = self.copy_preview_text {
-            stack![
-                with_worktree_close,
-                crate::confirm_dialog::view_copy_preview(
-                    preview_text,
-                    preview_text.len(),
-                    Message::CopyPreviewConfirmed,
-                    Message::CopyPreviewDismissed,
-                )
-            ]
-            .into()
-        } else {
-            with_worktree_close
-        };
+        let with_copy_preview: Element<'_, Message> =
+            if let Some(ref preview_text) = self.copy_preview_text {
+                stack![
+                    with_worktree_close,
+                    crate::confirm_dialog::view_copy_preview(
+                        preview_text,
+                        preview_text.len(),
+                        Message::CopyPreviewConfirmed,
+                        Message::CopyPreviewDismissed,
+                    )
+                ]
+                .into()
+            } else {
+                with_worktree_close
+            };
 
         // Shell picker overlay (H1-H6)
         let with_shell_picker: Element<'_, Message> = if self.shell_picker.visible {
@@ -4928,63 +5044,66 @@ impl GodlyApp {
         };
 
         // --- Quick Claude Dialog overlay ---
-        let with_quick_claude: Element<'_, Message> = if let Some(ref dlg_state) = self.quick_claude_dialog {
-            let qc_overlay = crate::quick_claude_dialog::view_quick_claude_dialog(
-                dlg_state,
-                Message::QuickClaudeDialogWorkspaceSelected,
-                Message::QuickClaudeDialogWorkspaceDropdownToggle,
-                Message::QuickClaudeDialogAiToolSelected,
-                Message::QuickClaudeDialogAiToolDropdownToggle,
-                Message::QuickClaudeDialogPromptAction,
-                Message::QuickClaudeDialogBranchChanged,
-                Message::QuickClaudeDialogMainBranchToggled,
-                Message::QuickClaudeDialogAutoSuggestToggled,
-                Message::QuickClaudeDialogBatchCloneToggled,
-                Message::QuickClaudeDialogModelSelected,
-                Message::QuickClaudeDialogModelDropdownToggle,
-                Message::QuickClaudeDialogModeSelected,
-                Message::QuickClaudeDialogModeDropdownToggle,
-                Message::QuickClaudeDialogLaunch,
-                Message::QuickClaudeDialogVoice,
-                Message::QuickClaudeDialogClose,
-                Message::QuickClaudeDialogSkillSelected,
-                Message::QuickClaudeDialogSkillAutocompleteNavigate,
-                Message::QuickClaudeDialogSkillAutocompleteDismiss,
-                |tab| Message::QuickClaudeDialogTabSelected(tab),
-                Message::QuickClaudeDialogSessionSelected,
-                Message::QuickClaudeDialogResume,
-                Message::QuickClaudeDialogImageRemoved,
-            );
-            stack![with_shell_picker, qc_overlay].into()
-        } else {
-            with_shell_picker
-        };
+        let with_quick_claude: Element<'_, Message> =
+            if let Some(ref dlg_state) = self.quick_claude_dialog {
+                let qc_overlay = crate::quick_claude_dialog::view_quick_claude_dialog(
+                    dlg_state,
+                    Message::QuickClaudeDialogWorkspaceSelected,
+                    Message::QuickClaudeDialogWorkspaceDropdownToggle,
+                    Message::QuickClaudeDialogAiToolSelected,
+                    Message::QuickClaudeDialogAiToolDropdownToggle,
+                    Message::QuickClaudeDialogPromptAction,
+                    Message::QuickClaudeDialogBranchChanged,
+                    Message::QuickClaudeDialogMainBranchToggled,
+                    Message::QuickClaudeDialogAutoSuggestToggled,
+                    Message::QuickClaudeDialogBatchCloneToggled,
+                    Message::QuickClaudeDialogModelSelected,
+                    Message::QuickClaudeDialogModelDropdownToggle,
+                    Message::QuickClaudeDialogModeSelected,
+                    Message::QuickClaudeDialogModeDropdownToggle,
+                    Message::QuickClaudeDialogLaunch,
+                    Message::QuickClaudeDialogVoice,
+                    Message::QuickClaudeDialogClose,
+                    Message::QuickClaudeDialogSkillSelected,
+                    Message::QuickClaudeDialogSkillAutocompleteNavigate,
+                    Message::QuickClaudeDialogSkillAutocompleteDismiss,
+                    |tab| Message::QuickClaudeDialogTabSelected(tab),
+                    Message::QuickClaudeDialogSessionSelected,
+                    Message::QuickClaudeDialogResume,
+                    Message::QuickClaudeDialogImageRemoved,
+                );
+                stack![with_shell_picker, qc_overlay].into()
+            } else {
+                with_shell_picker
+            };
 
         // --- K1: CLAUDE.md Editor overlay ---
-        let with_claude_md: Element<'_, Message> = if let Some(ref editor_state) = self.claude_md_editor {
-            let editor_overlay = crate::claude_md_editor::view_claude_md_editor(
-                editor_state,
-                Message::ClaudeMdEditorAction,
-                Message::ClaudeMdSave,
-                Message::ClaudeMdClose,
-            );
-            stack![with_quick_claude, editor_overlay].into()
-        } else {
-            with_quick_claude
-        };
+        let with_claude_md: Element<'_, Message> =
+            if let Some(ref editor_state) = self.claude_md_editor {
+                let editor_overlay = crate::claude_md_editor::view_claude_md_editor(
+                    editor_state,
+                    Message::ClaudeMdEditorAction,
+                    Message::ClaudeMdSave,
+                    Message::ClaudeMdClose,
+                );
+                stack![with_quick_claude, editor_overlay].into()
+            } else {
+                with_quick_claude
+            };
 
         // --- G1/G2: Terminal Context Menu overlay ---
-        let with_ctx_menu: Element<'_, Message> = if let Some((x, y)) = self.terminal_context_menu_pos {
-            let ctx_menu = terminal_context_menu::view_terminal_context_menu(
-                x,
-                y,
-                |action| Message::TerminalContextAction(action),
-                Message::TerminalContextClose,
-            );
-            stack![with_claude_md, ctx_menu].into()
-        } else {
-            with_claude_md
-        };
+        let with_ctx_menu: Element<'_, Message> =
+            if let Some((x, y)) = self.terminal_context_menu_pos {
+                let ctx_menu = terminal_context_menu::view_terminal_context_menu(
+                    x,
+                    y,
+                    |action| Message::TerminalContextAction(action),
+                    Message::TerminalContextClose,
+                );
+                stack![with_claude_md, ctx_menu].into()
+            } else {
+                with_claude_md
+            };
 
         // --- G4: Search bar overlay (top-right, non-blocking) ---
         let with_search: Element<'_, Message> = if self.search.active {
@@ -5011,7 +5130,11 @@ impl GodlyApp {
                 self.perf_stats.fps(),
                 self.perf_stats.frame_ms(),
                 self.perf_stats.render_ms(),
-                if self.use_pixel_renderer { "Pixel" } else { "Canvas" },
+                if self.use_pixel_renderer {
+                    "Pixel"
+                } else {
+                    "Canvas"
+                },
                 self.terminals.count(),
                 self.perf_stats.dropped_frames(),
                 self.perf_stats.render_phase_ms(),
@@ -5324,63 +5447,67 @@ impl GodlyApp {
                     style: iced::font::Style::Normal,
                 };
 
-                let label = text(font_name.as_str())
-                    .size(13)
-                    .font(preview_font)
-                    .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
+                let label =
+                    text(font_name.as_str())
+                        .size(13)
+                        .font(preview_font)
+                        .color(if is_active {
+                            TEXT_ACTIVE()
+                        } else {
+                            TEXT_PRIMARY()
+                        });
 
                 let font_label_row: Element<'_, Message> = if is_active {
-                    row![
-                        text("\u{2713}").size(13).color(ACCENT()),
-                        label,
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center)
-                    .into()
+                    row![text("\u{2713}").size(13).color(ACCENT()), label,]
+                        .spacing(6)
+                        .align_y(iced::Alignment::Center)
+                        .into()
                 } else {
                     label.into()
                 };
 
                 let border_color = if is_active { ACCENT() } else { BORDER() };
-                let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+                let bg_color = if is_active {
+                    BG_TERTIARY()
+                } else {
+                    BG_SECONDARY()
+                };
 
-                let font_btn = button(
-                    container(font_label_row).padding(Padding::from([6, 10])),
-                )
-                .on_press(Message::FontFamilyChanged(name_clone))
-                .padding(0)
-                .width(Length::Fill)
-                .style(move |_t: &Theme, _s| button::Style {
-                    background: Some(iced::Background::Color(bg_color)),
-                    border: iced::Border {
-                        color: border_color,
-                        width: if is_active { 2.0 } else { 1.0 },
-                        radius: RADIUS_MD.into(),
-                    },
-                    text_color: TEXT_PRIMARY(),
-                    ..Default::default()
-                });
+                let font_btn = button(container(font_label_row).padding(Padding::from([6, 10])))
+                    .on_press(Message::FontFamilyChanged(name_clone))
+                    .padding(0)
+                    .width(Length::Fill)
+                    .style(move |_t: &Theme, _s| button::Style {
+                        background: Some(iced::Background::Color(bg_color)),
+                        border: iced::Border {
+                            color: border_color,
+                            width: if is_active { 2.0 } else { 1.0 },
+                            radius: RADIUS_MD.into(),
+                        },
+                        text_color: TEXT_PRIMARY(),
+                        ..Default::default()
+                    });
 
                 font_list_col = font_list_col.push(font_btn);
             }
         } else {
-            font_list_col = font_list_col.push(
-                text("Loading fonts...").size(13).color(TEXT_SECONDARY()),
-            );
+            font_list_col =
+                font_list_col.push(text("Loading fonts...").size(13).color(TEXT_SECONDARY()));
         }
 
-        let font_list_scrollable = scrollable(font_list_col)
-            .height(Length::Fixed(200.0));
+        let font_list_scrollable = scrollable(font_list_col).height(Length::Fixed(200.0));
 
         // Font preview area — shows sample text in the selected font & size
         let preview_font = self.terminal_font;
         let preview_size = self.font_metrics.font_size;
 
         // Separator between font and theme sections
-        let separator = container(Space::new().width(Length::Fill).height(1))
-            .style(move |_t: &Theme| container::Style {
-                background: Some(iced::Background::Color(BORDER())),
-                ..Default::default()
+        let separator =
+            container(Space::new().width(Length::Fill).height(1)).style(move |_t: &Theme| {
+                container::Style {
+                    background: Some(iced::Background::Color(BORDER())),
+                    ..Default::default()
+                }
             });
 
         let has_custom_active = self.active_custom_theme_id.is_some();
@@ -5395,27 +5522,32 @@ impl GodlyApp {
             let mut swatches = row![].spacing(2);
             for c in &colors {
                 let color_val = *c;
-                swatches = swatches.push(
-                    container(Space::new().width(16).height(16))
-                        .style(move |_t: &Theme| container::Style {
-                            background: Some(iced::Background::Color(color_val)),
-                            border: iced::Border {
-                                radius: 2.0.into(),
-                                ..Default::default()
-                            },
+                swatches = swatches.push(container(Space::new().width(16).height(16)).style(
+                    move |_t: &Theme| container::Style {
+                        background: Some(iced::Background::Color(color_val)),
+                        border: iced::Border {
+                            radius: 2.0.into(),
                             ..Default::default()
-                        }),
-                );
+                        },
+                        ..Default::default()
+                    },
+                ));
             }
 
-            let label = text(theme_id.label())
-                .size(13)
-                .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
+            let label = text(theme_id.label()).size(13).color(if is_active {
+                TEXT_ACTIVE()
+            } else {
+                TEXT_PRIMARY()
+            });
 
             let btn_content = column![label, swatches].spacing(4).padding(8);
 
             let border_color = if is_active { ACCENT() } else { BORDER() };
-            let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+            let bg_color = if is_active {
+                BG_TERTIARY()
+            } else {
+                BG_SECONDARY()
+            };
 
             let theme_button = button(btn_content)
                 .on_press(Message::ThemeChanged(theme_id))
@@ -5453,18 +5585,35 @@ impl GodlyApp {
             text("Preview").size(13).color(TEXT_SECONDARY()),
             container(
                 column![
-                    text("$ echo \"Hello, World!\"").font(preview_font).size(preview_size).color(TEXT_PRIMARY()),
-                    text("Hello, World!").font(preview_font).size(preview_size).color(ACCENT()),
-                    text("$ git status").font(preview_font).size(preview_size).color(TEXT_PRIMARY()),
-                    text("On branch main").font(preview_font).size(preview_size).color(TEXT_SECONDARY()),
-                    text("ABCDEFGHIJKLM 0123456789 {}[]()").font(preview_font).size(preview_size).color(TEXT_PRIMARY()),
+                    text("$ echo \"Hello, World!\"")
+                        .font(preview_font)
+                        .size(preview_size)
+                        .color(TEXT_PRIMARY()),
+                    text("Hello, World!")
+                        .font(preview_font)
+                        .size(preview_size)
+                        .color(ACCENT()),
+                    text("$ git status")
+                        .font(preview_font)
+                        .size(preview_size)
+                        .color(TEXT_PRIMARY()),
+                    text("On branch main")
+                        .font(preview_font)
+                        .size(preview_size)
+                        .color(TEXT_SECONDARY()),
+                    text("ABCDEFGHIJKLM 0123456789 {}[]()")
+                        .font(preview_font)
+                        .size(preview_size)
+                        .color(TEXT_PRIMARY()),
                 ]
                 .spacing(2)
             )
             .width(Length::Fill)
             .padding(Padding::from([12, 16]))
             .style(move |_t: &Theme| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.85))),
+                background: Some(iced::Background::Color(Color::from_rgba(
+                    0.0, 0.0, 0.0, 0.85
+                ))),
                 border: iced::Border {
                     color: BORDER(),
                     width: 1.0,
@@ -5503,22 +5652,23 @@ impl GodlyApp {
                 let mut swatches = row![].spacing(2);
                 for c in &colors {
                     let cv = *c;
-                    swatches = swatches.push(
-                        container(Space::new().width(16).height(16))
-                            .style(move |_t: &Theme| container::Style {
-                                background: Some(iced::Background::Color(cv)),
-                                border: iced::Border {
-                                    radius: 2.0.into(),
-                                    ..Default::default()
-                                },
+                    swatches = swatches.push(container(Space::new().width(16).height(16)).style(
+                        move |_t: &Theme| container::Style {
+                            background: Some(iced::Background::Color(cv)),
+                            border: iced::Border {
+                                radius: 2.0.into(),
                                 ..Default::default()
-                            }),
-                    );
+                            },
+                            ..Default::default()
+                        },
+                    ));
                 }
 
-                let label = text(ct.name.as_str())
-                    .size(13)
-                    .color(if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() });
+                let label = text(ct.name.as_str()).size(13).color(if is_active {
+                    TEXT_ACTIVE()
+                } else {
+                    TEXT_PRIMARY()
+                });
 
                 let action_btns = row![
                     button(text("Export").size(11))
@@ -5550,7 +5700,11 @@ impl GodlyApp {
 
                 let btn_content = column![label, swatches, action_btns].spacing(4).padding(8);
                 let border_color = if is_active { ACCENT() } else { BORDER() };
-                let bg_color = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
+                let bg_color = if is_active {
+                    BG_TERTIARY()
+                } else {
+                    BG_SECONDARY()
+                };
 
                 let theme_button = button(btn_content)
                     .on_press(Message::ThemeSelectCustom(ct_id))
@@ -5585,21 +5739,19 @@ impl GodlyApp {
 
         // --- Import button ---
         col = col.push(Space::new().height(12));
-        let import_btn = button(
-            text("Import Theme...").size(13).color(TEXT_PRIMARY()),
-        )
-        .on_press(Message::ThemeImportRequested)
-        .padding(Padding::from([8, 16]))
-        .style(move |_t: &Theme, _s| button::Style {
-            background: Some(iced::Background::Color(BG_TERTIARY())),
-            border: iced::Border {
-                color: BORDER(),
-                width: 1.0,
-                radius: RADIUS_MD.into(),
-            },
-            text_color: TEXT_PRIMARY(),
-            ..Default::default()
-        });
+        let import_btn = button(text("Import Theme...").size(13).color(TEXT_PRIMARY()))
+            .on_press(Message::ThemeImportRequested)
+            .padding(Padding::from([8, 16]))
+            .style(move |_t: &Theme, _s| button::Style {
+                background: Some(iced::Background::Color(BG_TERTIARY())),
+                border: iced::Border {
+                    color: BORDER(),
+                    width: 1.0,
+                    radius: RADIUS_MD.into(),
+                },
+                text_color: TEXT_PRIMARY(),
+                ..Default::default()
+            });
         col = col.push(import_btn);
 
         scrollable(col).height(Length::Fill).into()
@@ -5611,7 +5763,10 @@ impl GodlyApp {
             let toast_id = toast.id;
             let has_source = toast.source_workspace_id.is_some();
             let close_btn = button(
-                text("\u{2715}").size(11).font(UI_FONT).color(TEXT_SECONDARY()),
+                text("\u{2715}")
+                    .size(11)
+                    .font(UI_FONT)
+                    .color(TEXT_SECONDARY()),
             )
             .on_press(Message::DismissToast(toast_id))
             .padding(Padding::from([3, 6]))
@@ -5629,14 +5784,20 @@ impl GodlyApp {
                 ..button::Style::default()
             });
             let header = row![
-                text(&toast.title).size(13).font(UI_FONT_BOLD).color(TEXT_ACTIVE()),
+                text(&toast.title)
+                    .size(13)
+                    .font(UI_FONT_BOLD)
+                    .color(TEXT_ACTIVE()),
                 Space::new().width(Length::Fill),
                 close_btn,
             ]
             .align_y(iced::Alignment::Center);
             let card_content = column![
                 header,
-                text(&toast.message).size(12).font(UI_FONT).color(TEXT_SECONDARY()),
+                text(&toast.message)
+                    .size(12)
+                    .font(UI_FONT)
+                    .color(TEXT_SECONDARY()),
             ]
             .spacing(4);
             let card = container(card_content)
@@ -5686,8 +5847,16 @@ impl GodlyApp {
         let mut preset_row = row![].spacing(8);
         for preset in NotificationSoundPreset::all() {
             let is_active = self.notification_sound_preset == preset;
-            let bg = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
-            let fg = if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() };
+            let bg = if is_active {
+                BG_TERTIARY()
+            } else {
+                BG_SECONDARY()
+            };
+            let fg = if is_active {
+                TEXT_ACTIVE()
+            } else {
+                TEXT_PRIMARY()
+            };
 
             let btn = button(text(preset.label()).size(12).color(fg))
                 .on_press(Message::NotificationSoundPresetSelected(preset))
@@ -5766,7 +5935,9 @@ impl GodlyApp {
                 button(text("Play Test Sound").size(12).color(TEXT_PRIMARY()))
                     .on_press(Message::NotificationSoundTest)
                     .padding(Padding::from([4, 9])),
-                text("Workspace mute patterns").size(14).color(TEXT_ACTIVE()),
+                text("Workspace mute patterns")
+                    .size(14)
+                    .color(TEXT_ACTIVE()),
                 text("Use * wildcard. Matches workspace id or name.")
                     .size(12)
                     .color(TEXT_PRIMARY()),
@@ -5790,8 +5961,16 @@ impl GodlyApp {
         let mut layout_row = row![].spacing(8).align_y(iced::Alignment::Center);
         for layout in QuickClaudeLayout::all() {
             let is_active = self.quick_claude_layout == layout;
-            let bg = if is_active { BG_TERTIARY() } else { BG_SECONDARY() };
-            let fg = if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() };
+            let bg = if is_active {
+                BG_TERTIARY()
+            } else {
+                BG_SECONDARY()
+            };
+            let fg = if is_active {
+                TEXT_ACTIVE()
+            } else {
+                TEXT_PRIMARY()
+            };
             let layout_button = button(text(layout.label()).size(12).color(fg))
                 .on_press(Message::QuickClaudeLayoutSelected(layout))
                 .padding(Padding::from([4, 9]))
@@ -5895,33 +6074,49 @@ impl GodlyApp {
                 .spacing(8),
                 text("Saved Presets").size(12).color(TEXT_SECONDARY()),
                 {
-                    let launch_status: Element<'_, Message> = if self.quick_claude_launches.is_empty() {
-                        Space::new().height(0).into()
-                    } else {
-                        let mut status_col = column![].spacing(4);
-                        for launch in &self.quick_claude_launches {
-                            let ws_id = launch.workspace_id.clone();
-                            let step = launch.current_step;
-                            let total = launch.total_steps();
-                            if let Some(ref err) = launch.error {
-                                status_col = status_col.push(column![
-                                    text(format!("Launch failed: {}", err)).size(11).color(iced::Color::from_rgb(0.9, 0.3, 0.3)),
-                                    button(text("Dismiss").size(11).color(TEXT_PRIMARY()))
-                                        .on_press(Message::QuickClaudeLaunchCancel(ws_id))
-                                        .padding(Padding::from([2, 7])),
-                                ].spacing(4));
-                            } else {
-                                status_col = status_col.push(row![
-                                    text(format!("Launching {}... step {}/{}", launch.preset_name, step + 1, total))
-                                        .size(11).color(ACCENT()),
-                                    button(text("Cancel").size(11).color(TEXT_PRIMARY()))
-                                        .on_press(Message::QuickClaudeLaunchCancel(ws_id))
-                                        .padding(Padding::from([2, 7])),
-                                ].spacing(8).align_y(iced::Alignment::Center));
+                    let launch_status: Element<'_, Message> =
+                        if self.quick_claude_launches.is_empty() {
+                            Space::new().height(0).into()
+                        } else {
+                            let mut status_col = column![].spacing(4);
+                            for launch in &self.quick_claude_launches {
+                                let ws_id = launch.workspace_id.clone();
+                                let step = launch.current_step;
+                                let total = launch.total_steps();
+                                if let Some(ref err) = launch.error {
+                                    status_col = status_col.push(
+                                        column![
+                                            text(format!("Launch failed: {}", err))
+                                                .size(11)
+                                                .color(iced::Color::from_rgb(0.9, 0.3, 0.3)),
+                                            button(text("Dismiss").size(11).color(TEXT_PRIMARY()))
+                                                .on_press(Message::QuickClaudeLaunchCancel(ws_id))
+                                                .padding(Padding::from([2, 7])),
+                                        ]
+                                        .spacing(4),
+                                    );
+                                } else {
+                                    status_col = status_col.push(
+                                        row![
+                                            text(format!(
+                                                "Launching {}... step {}/{}",
+                                                launch.preset_name,
+                                                step + 1,
+                                                total
+                                            ))
+                                            .size(11)
+                                            .color(ACCENT()),
+                                            button(text("Cancel").size(11).color(TEXT_PRIMARY()))
+                                                .on_press(Message::QuickClaudeLaunchCancel(ws_id))
+                                                .padding(Padding::from([2, 7])),
+                                        ]
+                                        .spacing(8)
+                                        .align_y(iced::Alignment::Center),
+                                    );
+                                }
                             }
-                        }
-                        status_col.into()
-                    };
+                            status_col.into()
+                        };
                     launch_status
                 },
                 presets_list,
@@ -6130,8 +6325,11 @@ impl GodlyApp {
 
         let mut flows_list = column![].spacing(8).width(Length::Fill);
         if self.flows.is_empty() {
-            flows_list =
-                flows_list.push(text("No flows configured.").size(11).color(TEXT_SECONDARY()));
+            flows_list = flows_list.push(
+                text("No flows configured.")
+                    .size(11)
+                    .color(TEXT_SECONDARY()),
+            );
         } else {
             for (index, entry) in self.flows.iter().enumerate() {
                 let is_editing = self.flow_edit_index == Some(index);
@@ -6276,12 +6474,10 @@ impl GodlyApp {
             .padding(Padding::from([6, 14]))
             .style(move |_theme, status| {
                 let bg = match status {
-                    button::Status::Hovered | button::Status::Pressed => {
-                        iced::Color {
-                            a: 0.9,
-                            ..toggle_bg
-                        }
-                    }
+                    button::Status::Hovered | button::Status::Pressed => iced::Color {
+                        a: 0.9,
+                        ..toggle_bg
+                    },
                     _ => toggle_bg,
                 };
                 button::Style {
@@ -6345,12 +6541,17 @@ impl GodlyApp {
                 .on_input(Message::PhoneRemotePortInputChanged)
                 .padding(Padding::from([4, 8]))
                 .size(12),
-            text("Password (for browser login)").size(12).color(TEXT_SECONDARY()),
-            text_input("Optional password for phone browser login", &self.phone_remote_password_input)
-                .on_input(Message::PhoneRemotePasswordInputChanged)
-                .padding(Padding::from([4, 8]))
+            text("Password (for browser login)")
                 .size(12)
-                .secure(true),
+                .color(TEXT_SECONDARY()),
+            text_input(
+                "Optional password for phone browser login",
+                &self.phone_remote_password_input
+            )
+            .on_input(Message::PhoneRemotePasswordInputChanged)
+            .padding(Padding::from([4, 8]))
+            .size(12)
+            .secure(true),
             text("API Key").size(12).color(TEXT_SECONDARY()),
             api_key_row,
             auto_start_btn,
@@ -6415,11 +6616,7 @@ impl GodlyApp {
                 }),
         );
 
-        content = content.push(
-            text("Cloudflare Tunnel")
-                .size(14)
-                .color(TEXT_ACTIVE()),
-        );
+        content = content.push(text("Cloudflare Tunnel").size(14).color(TEXT_ACTIVE()));
         content = content.push(
             text("Expose your remote server securely over the internet via Cloudflare Tunnel.")
                 .size(12)
@@ -6438,11 +6635,9 @@ impl GodlyApp {
         } else {
             iced::Color::from_rgb(0.9, 0.3, 0.3)
         };
-        let mut cf_detect_row = row![
-            text(cf_status_text).size(12).color(cf_status_color),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
+        let mut cf_detect_row = row![text(cf_status_text).size(12).color(cf_status_color),]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
 
         if !cf_found {
             cf_detect_row = cf_detect_row.push(
@@ -6509,18 +6704,14 @@ impl GodlyApp {
                 );
             } else {
                 // Named tunnel fields
-                content = content.push(
-                    text("Tunnel Name").size(12).color(TEXT_SECONDARY()),
-                );
+                content = content.push(text("Tunnel Name").size(12).color(TEXT_SECONDARY()));
                 content = content.push(
                     text_input("e.g. my-godly-tunnel", &self.cf_tunnel_name_input)
                         .on_input(Message::CfTunnelNameChanged)
                         .padding(Padding::from([4, 8]))
                         .size(12),
                 );
-                content = content.push(
-                    text("Hostname").size(12).color(TEXT_SECONDARY()),
-                );
+                content = content.push(text("Hostname").size(12).color(TEXT_SECONDARY()));
                 content = content.push(
                     text_input("e.g. phone.example.com", &self.cf_hostname_input)
                         .on_input(Message::CfHostnameChanged)
@@ -6559,15 +6750,9 @@ impl GodlyApp {
             // Tunnel status
             let (cf_status_text, cf_status_color) = match &self.cf_tunnel_status {
                 CfTunnelStatus::Stopped => ("Stopped", TEXT_SECONDARY()),
-                CfTunnelStatus::Starting => {
-                    ("Starting...", iced::Color::from_rgb(0.9, 0.8, 0.2))
-                }
-                CfTunnelStatus::Running => {
-                    ("Running", iced::Color::from_rgb(0.3, 0.85, 0.4))
-                }
-                CfTunnelStatus::Failed(_) => {
-                    ("Failed", iced::Color::from_rgb(0.9, 0.3, 0.3))
-                }
+                CfTunnelStatus::Starting => ("Starting...", iced::Color::from_rgb(0.9, 0.8, 0.2)),
+                CfTunnelStatus::Running => ("Running", iced::Color::from_rgb(0.3, 0.85, 0.4)),
+                CfTunnelStatus::Failed(_) => ("Failed", iced::Color::from_rgb(0.9, 0.3, 0.3)),
             };
             let mut tunnel_status_row = row![
                 text("Tunnel: ").size(12).color(TEXT_SECONDARY()),
@@ -6576,9 +6761,8 @@ impl GodlyApp {
             .spacing(4)
             .align_y(iced::Alignment::Center);
             if let CfTunnelStatus::Failed(msg) = &self.cf_tunnel_status {
-                tunnel_status_row = tunnel_status_row.push(
-                    text(format!(" — {msg}")).size(11).color(TEXT_SECONDARY()),
-                );
+                tunnel_status_row = tunnel_status_row
+                    .push(text(format!(" — {msg}")).size(11).color(TEXT_SECONDARY()));
             }
             content = content.push(tunnel_status_row);
 
@@ -6623,9 +6807,7 @@ impl GodlyApp {
             );
 
             // Show tunnel URL when running
-            if self.cf_tunnel_status == CfTunnelStatus::Running
-                && !self.cf_tunnel_url.is_empty()
-            {
+            if self.cf_tunnel_status == CfTunnelStatus::Running && !self.cf_tunnel_url.is_empty() {
                 content = content.push(
                     container(
                         row![
@@ -6662,11 +6844,7 @@ impl GodlyApp {
                             ..container::Style::default()
                         }),
                 );
-                content = content.push(
-                    text("Access Protection")
-                        .size(13)
-                        .color(TEXT_ACTIVE()),
-                );
+                content = content.push(text("Access Protection").size(13).color(TEXT_ACTIVE()));
                 content = content.push(
                     text("Restrict access with email verification — Cloudflare sends a one-time code to your email.")
                         .size(11)
@@ -6691,10 +6869,13 @@ impl GodlyApp {
                         .color(TEXT_SECONDARY()),
                 );
                 content = content.push(
-                    text_input("Account ID from Cloudflare dashboard", &self.cf_account_id_input)
-                        .on_input(Message::CfAccountIdChanged)
-                        .padding(Padding::from([4, 8]))
-                        .size(12),
+                    text_input(
+                        "Account ID from Cloudflare dashboard",
+                        &self.cf_account_id_input,
+                    )
+                    .on_input(Message::CfAccountIdChanged)
+                    .padding(Padding::from([4, 8]))
+                    .size(12),
                 );
 
                 content = content.push(
@@ -6775,7 +6956,8 @@ impl GodlyApp {
             // Daemon events via channel.
             daemon_events(Arc::clone(&self.event_receiver)).map(Message::DaemonEvent),
             // MCP pipe events via channel.
-            crate::subscription::mcp_events(Arc::clone(&self.mcp_event_receiver)).map(Message::McpEvent),
+            crate::subscription::mcp_events(Arc::clone(&self.mcp_event_receiver))
+                .map(Message::McpEvent),
             // Window + mouse events.
             event::listen_with(|ev, status, window_id| match ev {
                 event::Event::Window(window::Event::Opened { .. }) => {
@@ -6800,9 +6982,7 @@ impl GodlyApp {
                 }
                 // RedrawRequested fires from WM_TIMER when minimized/unfocused.
                 // Route it through update() so the Win32 focus check can run.
-                event::Event::Window(window::Event::RedrawRequested(_)) => {
-                    Some(Message::Heartbeat)
-                }
+                event::Event::Window(window::Event::RedrawRequested(_)) => Some(Message::Heartbeat),
                 event::Event::Window(window::Event::FileDropped(path)) => {
                     Some(Message::FileDropped(path))
                 }
@@ -6872,23 +7052,23 @@ impl GodlyApp {
 
         // Autosave session state periodically so workspace layout survives crashes.
         subscriptions.push(
-            iced::time::every(Duration::from_secs(session_persistence::AUTOSAVE_INTERVAL_SECS))
-                .map(|_| Message::AutosaveTick),
+            iced::time::every(Duration::from_secs(
+                session_persistence::AUTOSAVE_INTERVAL_SECS,
+            ))
+            .map(|_| Message::AutosaveTick),
         );
 
         // Whisper recording timer (I4/I5)
         if self.whisper_state.as_ref().is_some_and(|s| s.recording) {
             subscriptions.push(
-                iced::time::every(Duration::from_millis(100))
-                    .map(|_| Message::WhisperTimerTick),
+                iced::time::every(Duration::from_millis(100)).map(|_| Message::WhisperTimerTick),
             );
         }
 
         // File pane watch: poll for file modifications every 500ms.
         if !self.file_panes.is_empty() {
             subscriptions.push(
-                iced::time::every(Duration::from_millis(500))
-                    .map(|_| Message::FilePaneWatchTick),
+                iced::time::every(Duration::from_millis(500)).map(|_| Message::FilePaneWatchTick),
             );
         }
 
@@ -7013,7 +7193,8 @@ impl GodlyApp {
                 self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward)
             }
             AppAction::ZoomIn => {
-                self.font_metrics = measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
+                self.font_metrics =
+                    measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
                 self.resize_all_terminals()
             }
             AppAction::ZoomOut => {
@@ -7349,10 +7530,14 @@ impl GodlyApp {
 
     pub(crate) fn delete_workspace(&mut self, workspace_id: &str) -> Task<Message> {
         // Cancel any in-flight Quick Claude launch targeting this workspace
-        let had_launch = self.quick_claude_launches.iter().any(|l| l.workspace_id == workspace_id);
+        let had_launch = self
+            .quick_claude_launches
+            .iter()
+            .any(|l| l.workspace_id == workspace_id);
         if had_launch {
             log::warn!("Cancelling Quick Claude launch: target workspace is being deleted");
-            self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
+            self.quick_claude_launches
+                .retain(|l| l.workspace_id != workspace_id);
         }
 
         let terminal_ids: Vec<String> = self
@@ -7566,12 +7751,8 @@ impl GodlyApp {
         let rows = self.calculate_rows();
         let cols = self.calculate_cols();
 
-        self.terminals.add_to_workspace(
-            session_id.clone(),
-            rows,
-            cols,
-            workspace_id.clone(),
-        );
+        self.terminals
+            .add_to_workspace(session_id.clone(), rows, cols, workspace_id.clone());
         self.workspaces.add_with_details(
             workspace_id.clone(),
             name,
@@ -7624,7 +7805,8 @@ impl GodlyApp {
                     self.sidebar_visible = merged.sidebar_visible;
                     self.settings_open = merged.settings_open;
                     self.settings_tab = merged.settings_tab.clone();
-                    self.font_metrics = measured_font_metrics(merged.font_size, &merged.font_family);
+                    self.font_metrics =
+                        measured_font_metrics(merged.font_size, &merged.font_family);
                     self.font_family = merged.font_family.clone();
                     let interned = font_enumerator::intern_font_name(&merged.font_family);
                     self.terminal_font = iced::Font {
@@ -7665,8 +7847,7 @@ impl GodlyApp {
                                     cols,
                                     workspace.id.clone(),
                                 );
-                                if let Some(offset) =
-                                    restored_scrollback_offsets.get(&terminal_id)
+                                if let Some(offset) = restored_scrollback_offsets.get(&terminal_id)
                                 {
                                     if let Some(term) = self.terminals.get_mut(&terminal_id) {
                                         term.scrollback_offset = *offset;
@@ -7704,9 +7885,7 @@ impl GodlyApp {
                                     cols,
                                     ws_id.clone(),
                                 );
-                                if let Some(offset) =
-                                    restored_scrollback_offsets.get(terminal_id)
-                                {
+                                if let Some(offset) = restored_scrollback_offsets.get(terminal_id) {
                                     if let Some(term) = self.terminals.get_mut(terminal_id) {
                                         term.scrollback_offset = *offset;
                                     }
@@ -7746,8 +7925,7 @@ impl GodlyApp {
                                     cols,
                                     workspace.id.clone(),
                                 );
-                                if let Some(offset) =
-                                    restored_scrollback_offsets.get(&terminal_id)
+                                if let Some(offset) = restored_scrollback_offsets.get(&terminal_id)
                                 {
                                     if let Some(term) = self.terminals.get_mut(&terminal_id) {
                                         term.scrollback_offset = *offset;
@@ -7868,8 +8046,11 @@ impl GodlyApp {
                         }
                     }
 
-                    let first_workspace_id =
-                        self.workspaces.iter().next().map(|workspace| workspace.id.clone());
+                    let first_workspace_id = self
+                        .workspaces
+                        .iter()
+                        .next()
+                        .map(|workspace| workspace.id.clone());
 
                     if let Some(active_workspace_id) = merged.active_workspace_id {
                         self.workspaces.set_active(&active_workspace_id);
@@ -7883,7 +8064,8 @@ impl GodlyApp {
                         self.terminals.set_active(&active_terminal_id);
                         self.last_test_terminal_id = Some(active_terminal_id);
                     } else if let Some(active_workspace) = self.workspaces.active() {
-                        self.terminals.set_active(&active_workspace.focused_terminal);
+                        self.terminals
+                            .set_active(&active_workspace.focused_terminal);
                     }
 
                     // Apply persisted worktree paths to restored terminals.
@@ -8034,6 +8216,7 @@ impl GodlyApp {
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = 0;
         }
+        self.scroll_accumulator = 0.0;
         self.persist_scrollback_offsets();
 
         // Adjust selection for scroll. Bug #755.
@@ -8069,6 +8252,7 @@ impl GodlyApp {
                 Ok(grid) => Message::GridFetched {
                     session_id: sid_ok,
                     grid,
+                    is_scroll_fetch: true,
                 },
                 Err(e) => Message::GridFetchFailed {
                     session_id: sid_err,
@@ -8115,6 +8299,7 @@ impl GodlyApp {
                 Ok(grid) => Message::GridFetched {
                     session_id: sid_ok,
                     grid,
+                    is_scroll_fetch: false,
                 },
                 Err(e) => Message::GridFetchFailed {
                     session_id: sid_err,
@@ -8188,7 +8373,7 @@ impl GodlyApp {
     ) -> Task<Message> {
         let Some(client) = &self.client else {
             return Task::done(Message::TerminalCreated(Err(
-                "No daemon connection".to_string(),
+                "No daemon connection".to_string()
             )));
         };
         let client = Arc::clone(client);
@@ -8282,12 +8467,8 @@ impl GodlyApp {
             cols,
         )?;
 
-        self.terminals.add_to_workspace(
-            session_id.clone(),
-            rows,
-            cols,
-            workspace_id.clone(),
-        );
+        self.terminals
+            .add_to_workspace(session_id.clone(), rows, cols, workspace_id.clone());
         self.workspaces.add_with_details(
             workspace_id.clone(),
             name,
@@ -8337,12 +8518,8 @@ impl GodlyApp {
             cols,
         )?;
 
-        self.terminals.add_to_workspace(
-            session_id.clone(),
-            rows,
-            cols,
-            workspace_id.to_string(),
-        );
+        self.terminals
+            .add_to_workspace(session_id.clone(), rows, cols, workspace_id.to_string());
         if let Some(custom_name) = name {
             self.terminals.rename(&session_id, Some(custom_name));
         }
@@ -8371,7 +8548,11 @@ impl GodlyApp {
             .filter(|session| session.running)
         {
             if let Err(error) = commands::close_terminal(&client, &session.id) {
-                log::warn!("Failed to close session {} during reset: {}", session.id, error);
+                log::warn!(
+                    "Failed to close session {} during reset: {}",
+                    session.id,
+                    error
+                );
             }
         }
 
@@ -8398,11 +8579,8 @@ impl GodlyApp {
         let session_ids: Vec<String> = self.terminals.iter().map(|term| term.id.clone()).collect();
         commands::detach_all_sessions(&client, &session_ids)?;
 
-        let result = collect_init_result_sync(
-            &client,
-            self.calculate_rows(),
-            self.calculate_cols(),
-        )?;
+        let result =
+            collect_init_result_sync(&client, self.calculate_rows(), self.calculate_cols())?;
         Ok(self.apply_init_result(result))
     }
 
@@ -8684,7 +8862,11 @@ impl GodlyApp {
     // -----------------------------------------------------------------------
 
     fn execute_next_launch_step(&mut self, workspace_id: &str) -> Task<Message> {
-        let launch = match self.quick_claude_launches.iter().find(|l| l.workspace_id == workspace_id) {
+        let launch = match self
+            .quick_claude_launches
+            .iter()
+            .find(|l| l.workspace_id == workspace_id)
+        {
             Some(l) if !l.completed && l.error.is_none() => l,
             _ => return Task::none(),
         };
@@ -8715,12 +8897,12 @@ impl GodlyApp {
             async move {
                 let (tx, rx) = futures_channel::oneshot::channel();
                 std::thread::spawn(move || {
-                    let result = crate::quick_claude::execute_step(
-                        client, step, agent_ids, rows, cols,
-                    );
+                    let result =
+                        crate::quick_claude::execute_step(client, step, agent_ids, rows, cols);
                     let _ = tx.send(result);
                 });
-                rx.await.unwrap_or_else(|_| Err("Launch step thread panicked".into()))
+                rx.await
+                    .unwrap_or_else(|_| Err("Launch step thread panicked".into()))
             },
             move |result| Message::QuickClaudeLaunchStepComplete(ws_id_for_msg, result),
         )
@@ -8731,17 +8913,28 @@ impl GodlyApp {
         workspace_id: String,
         result: Result<crate::quick_claude::StepResult, String>,
     ) -> Task<Message> {
-        if !self.quick_claude_launches.iter().any(|l| l.workspace_id == workspace_id) {
+        if !self
+            .quick_claude_launches
+            .iter()
+            .any(|l| l.workspace_id == workspace_id)
+        {
             return Task::none();
         }
 
         match result {
             Ok(step_result) => {
                 let (agent_index_opt, placeholder_opt) = {
-                    let launch = self.quick_claude_launches.iter().find(|l| l.workspace_id == workspace_id).unwrap();
+                    let launch = self
+                        .quick_claude_launches
+                        .iter()
+                        .find(|l| l.workspace_id == workspace_id)
+                        .unwrap();
                     let si = launch.current_step;
                     let ai = launch.steps.get(si).and_then(|step| {
-                        if let crate::quick_claude::LaunchStep::CreateTerminal { agent_index, .. } = step {
+                        if let crate::quick_claude::LaunchStep::CreateTerminal {
+                            agent_index, ..
+                        } = step
+                        {
                             Some(*agent_index)
                         } else {
                             None
@@ -8757,17 +8950,23 @@ impl GodlyApp {
 
                 // Handle WorktreeCreated: override the CWD of the next
                 // CreateTerminal step for this agent.
-                if let crate::quick_claude::StepResult::WorktreeCreated { ref worktree_path } = step_result {
-                    if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
+                if let crate::quick_claude::StepResult::WorktreeCreated { ref worktree_path } =
+                    step_result
+                {
+                    if let Some(launch) = self
+                        .quick_claude_launches
+                        .iter_mut()
+                        .find(|l| l.workspace_id == workspace_id)
+                    {
                         let si = launch.current_step;
-                        let agent_idx = launch.steps.get(si).and_then(|step| {
-                            match step {
-                                crate::quick_claude::LaunchStep::CreateWorktree { agent_index, .. }
-                                | crate::quick_claude::LaunchStep::CreateClone { agent_index, .. } => {
-                                    Some(*agent_index)
-                                }
-                                _ => None,
+                        let agent_idx = launch.steps.get(si).and_then(|step| match step {
+                            crate::quick_claude::LaunchStep::CreateWorktree {
+                                agent_index, ..
                             }
+                            | crate::quick_claude::LaunchStep::CreateClone {
+                                agent_index, ..
+                            } => Some(*agent_index),
+                            _ => None,
                         });
                         if let Some(_ai) = agent_idx {
                             launch.pending_worktree_path = Some(worktree_path.clone());
@@ -8785,7 +8984,9 @@ impl GodlyApp {
                     }
                 }
 
-                if let crate::quick_claude::StepResult::TerminalCreated(ref session_id) = step_result {
+                if let crate::quick_claude::StepResult::TerminalCreated(ref session_id) =
+                    step_result
+                {
                     if let Some(agent_index) = agent_index_opt {
                         if agent_index == 0 {
                             if let Some(placeholder) = placeholder_opt {
@@ -8807,7 +9008,11 @@ impl GodlyApp {
                             }
                         }
 
-                        if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
+                        if let Some(launch) = self
+                            .quick_claude_launches
+                            .iter_mut()
+                            .find(|l| l.workspace_id == workspace_id)
+                        {
                             launch.agent_terminal_ids[agent_index] = Some(session_id.clone());
                             // Update session record terminal_id
                             if let Some(ref record_id) = launch.session_record_id {
@@ -8833,7 +9038,11 @@ impl GodlyApp {
                             .insert(session_id.clone(), Self::now_ms());
 
                         // Apply pending worktree path so terminal cleanup works on close
-                        if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
+                        if let Some(launch) = self
+                            .quick_claude_launches
+                            .iter_mut()
+                            .find(|l| l.workspace_id == workspace_id)
+                        {
                             if let Some(wt_path) = launch.pending_worktree_path.take() {
                                 self.terminals.set_worktree_path(session_id, wt_path);
                             }
@@ -8844,25 +9053,31 @@ impl GodlyApp {
                     }
                 }
 
-                if let Some(launch) = self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
+                if let Some(launch) = self
+                    .quick_claude_launches
+                    .iter_mut()
+                    .find(|l| l.workspace_id == workspace_id)
+                {
                     launch.current_step += 1;
                 }
                 self.execute_next_launch_step(&workspace_id)
             }
             Err(e) => {
                 log::error!("Quick Claude launch step failed: {}", e);
-                self.enqueue_toast(
-                    "Quick Claude Failed".to_string(),
-                    e,
-                );
-                self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
+                self.enqueue_toast("Quick Claude Failed".to_string(), e);
+                self.quick_claude_launches
+                    .retain(|l| l.workspace_id != workspace_id);
                 Task::none()
             }
         }
     }
 
     fn finalize_launch(&mut self, workspace_id: &str) -> Task<Message> {
-        let launch = match self.quick_claude_launches.iter_mut().find(|l| l.workspace_id == workspace_id) {
+        let launch = match self
+            .quick_claude_launches
+            .iter_mut()
+            .find(|l| l.workspace_id == workspace_id)
+        {
             Some(l) => l,
             None => return Task::none(),
         };
@@ -8875,7 +9090,8 @@ impl GodlyApp {
             .collect();
 
         if terminal_ids.is_empty() {
-            self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
+            self.quick_claude_launches
+                .retain(|l| l.workspace_id != workspace_id);
             return Task::none();
         }
 
@@ -8955,7 +9171,8 @@ impl GodlyApp {
             }
         }
 
-        self.quick_claude_launches.retain(|l| l.workspace_id != workspace_id);
+        self.quick_claude_launches
+            .retain(|l| l.workspace_id != workspace_id);
         self.enqueue_toast(
             "Quick Claude Ready".into(),
             format!("{} is ready", launch_name),
@@ -9091,7 +9308,10 @@ impl GodlyApp {
 
         let image_exts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
         if !image_exts.contains(&ext.as_str()) {
-            log::warn!("Quick Claude: dropped non-image file ignored: {}", path.display());
+            log::warn!(
+                "Quick Claude: dropped non-image file ignored: {}",
+                path.display()
+            );
             return Task::none();
         }
 
@@ -9114,11 +9334,12 @@ impl GodlyApp {
 
         let handle = iced::widget::image::Handle::from_path(&path);
 
-        dlg.attached_images.push(crate::quick_claude_dialog::ImageAttachment {
-            file_path: clean_path,
-            thumbnail_handle: handle,
-            display_name,
-        });
+        dlg.attached_images
+            .push(crate::quick_claude_dialog::ImageAttachment {
+                file_path: clean_path,
+                thumbnail_handle: handle,
+                display_name,
+            });
 
         Task::none()
     }
@@ -9185,7 +9406,8 @@ impl GodlyApp {
             }
         }
 
-        self.perf_stats.record_render_stats(self.pixel_renderer.last_stats());
+        self.perf_stats
+            .record_render_stats(self.pixel_renderer.last_stats());
     }
 
     // -----------------------------------------------------------------------
@@ -9235,15 +9457,19 @@ impl GodlyApp {
         let remaining_width = bar_width - filled_width;
 
         let progress_bar = row![
-            container(Space::new().width(Length::Fixed(filled_width)).height(Length::Fixed(3.0)))
-                .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(ACCENT())),
-                    border: iced::Border {
-                        radius: 1.5.into(),
-                        ..Default::default()
-                    },
+            container(
+                Space::new()
+                    .width(Length::Fixed(filled_width))
+                    .height(Length::Fixed(3.0))
+            )
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(ACCENT())),
+                border: iced::Border {
+                    radius: 1.5.into(),
                     ..Default::default()
-                }),
+                },
+                ..Default::default()
+            }),
             container(
                 Space::new()
                     .width(Length::Fixed(remaining_width))
@@ -9284,12 +9510,7 @@ impl GodlyApp {
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(EMPTY_STATE_BG())),
             border: iced::Border {
-                color: Color::from_rgba(
-                    PANE_BORDER().r,
-                    PANE_BORDER().g,
-                    PANE_BORDER().b,
-                    0.5,
-                ),
+                color: Color::from_rgba(PANE_BORDER().r, PANE_BORDER().g, PANE_BORDER().b, 0.5),
                 width: 0.5,
                 radius: 10.0.into(),
             },
@@ -9301,9 +9522,11 @@ impl GodlyApp {
         } else {
             Color::TRANSPARENT
         };
-        let accent_bar = container(Space::new().width(Length::Fill).height(Length::Fixed(
-            if is_focused { 1.0 } else { 0.0 },
-        )))
+        let accent_bar = container(
+            Space::new()
+                .width(Length::Fill)
+                .height(Length::Fixed(if is_focused { 1.0 } else { 0.0 })),
+        )
         .width(Length::Fill)
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(accent_color)),
@@ -9411,9 +9634,11 @@ impl GodlyApp {
             Color::TRANSPARENT
         };
 
-        let accent_bar = container(Space::new().width(Length::Fill).height(Length::Fixed(
-            if is_focused { 1.0 } else { 0.0 },
-        )))
+        let accent_bar = container(
+            Space::new()
+                .width(Length::Fill)
+                .height(Length::Fixed(if is_focused { 1.0 } else { 0.0 })),
+        )
         .width(Length::Fill)
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(accent_color)),
@@ -9472,8 +9697,7 @@ impl GodlyApp {
         // Phase B: Real terminal with launch in progress — overlay status at bottom
         if let Some(ref info) = launch_info {
             let status_overlay = self.render_launch_status_bar(info);
-            let pane_with_overlay: Element<'_, Message> =
-                stack![pane, status_overlay].into();
+            let pane_with_overlay: Element<'_, Message> = stack![pane, status_overlay].into();
             let tid = terminal_id.to_string();
             return mouse_area(pane_with_overlay)
                 .on_press(Message::PaneClicked(tid))
@@ -9481,9 +9705,7 @@ impl GodlyApp {
         }
 
         let tid = terminal_id.to_string();
-        mouse_area(pane)
-            .on_press(Message::PaneClicked(tid))
-            .into()
+        mouse_area(pane).on_press(Message::PaneClicked(tid)).into()
     }
 
     fn view_terminal_empty_state(&self) -> Element<'_, Message> {
@@ -9568,7 +9790,10 @@ impl GodlyApp {
                     .height(Length::Fill)
                     .style(move |_theme| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgba(
-                            ACCENT().r, ACCENT().g, ACCENT().b, alpha,
+                            ACCENT().r,
+                            ACCENT().g,
+                            ACCENT().b,
+                            alpha,
                         ))),
                         ..container::Style::default()
                     }),
@@ -9813,15 +10038,17 @@ pub(crate) fn detect_file_type(path: &str) -> &'static str {
 }
 
 /// Convert an iced text_editor cursor Position (line, column) to a byte offset in the full text.
-fn text_editor_cursor_byte_offset(
-    text: &str,
-    pos: &iced::widget::text_editor::Position,
-) -> usize {
+fn text_editor_cursor_byte_offset(text: &str, pos: &iced::widget::text_editor::Position) -> usize {
     let mut offset = 0;
     for (i, line) in text.split_inclusive('\n').enumerate() {
         if i == pos.line {
             // Column is a character offset within this line
-            return offset + line.chars().take(pos.column).map(|c| c.len_utf8()).sum::<usize>();
+            return offset
+                + line
+                    .chars()
+                    .take(pos.column)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
         }
         offset += line.len();
     }
@@ -9829,7 +10056,12 @@ fn text_editor_cursor_byte_offset(
     // (which has no trailing '\n' and wasn't yielded by split_inclusive with a newline).
     // `offset` now points to the start of that final segment.
     let remaining = &text[offset..];
-    offset + remaining.chars().take(pos.column).map(|c| c.len_utf8()).sum::<usize>()
+    offset
+        + remaining
+            .chars()
+            .take(pos.column)
+            .map(|c| c.len_utf8())
+            .sum::<usize>()
 }
 
 /// Convert a byte offset back to an iced text_editor Position (line, column).
@@ -9848,7 +10080,9 @@ fn byte_offset_to_editor_position(
             line_start = i + 1;
         }
     }
-    let column = text[line_start..byte_offset.min(text.len())].chars().count();
+    let column = text[line_start..byte_offset.min(text.len())]
+        .chars()
+        .count();
     iced::widget::text_editor::Position { line, column }
 }
 
@@ -9944,7 +10178,6 @@ fn toggle_flow_enabled(flows: &mut [FlowEntry], index: usize) -> bool {
     entry.enabled = !entry.enabled;
     true
 }
-
 
 fn wildcard_matches(pattern: &str, candidate: &str) -> bool {
     if pattern == "*" {
@@ -10293,11 +10526,12 @@ fn collect_recovered_init_result(
         }
     }
 
-    let restored_scrollback_offsets =
-        scrollback_restore::restored_offsets_for_recovered_sessions(&pruned_offsets, &recovered_ids);
-    let merged_session_state = session_persistence::load_from_default_path().map(|persisted| {
-        session_persistence::merge_with_live_sessions(&persisted, &recovered_ids)
-    });
+    let restored_scrollback_offsets = scrollback_restore::restored_offsets_for_recovered_sessions(
+        &pruned_offsets,
+        &recovered_ids,
+    );
+    let merged_session_state = session_persistence::load_from_default_path()
+        .map(|persisted| session_persistence::merge_with_live_sessions(&persisted, &recovered_ids));
 
     Ok(Some(InitResult::Recovered {
         session_ids: recovered_ids,
@@ -10427,24 +10661,22 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 #[cfg(test)]
 mod helper_tests {
     use super::tab_reducer::TabMruCycleDirection;
-    use super::{looks_like_path,
+    use super::{
         begin_sidebar_animation, enqueue_toast_entry, grid_dimensions_for_viewport,
-        inset_terminal_pane_rect, mru_cycle_direction_from_shortcut_key,
+        inset_terminal_pane_rect, looks_like_path, mru_cycle_direction_from_shortcut_key,
         next_mru_switcher_selection, next_tab_id_from_mru, normalize_ai_tool_field,
         normalize_flow_field, normalize_mute_pattern, normalize_plugin_field,
-        normalize_quick_claude_text,
-        pane_rect_for_terminal, parse_flow_steps, pointer_to_grid, prune_expired_toasts,
-        quote_dropped_path, resolve_terminal_empty_state, resolved_sidebar_width,
-        should_commit_mru_switcher_on_key_release, should_commit_mru_switcher_on_modifiers_changed,
-        sidebar_animation_finished, terminal_content_rect, toggle_flow_enabled,
-        toggle_plugin_enabled, wildcard_matches,
-        workspace_matches_mute_patterns, FlowEntry, PaneRect, PluginEntry,
-        TerminalEmptyState, ToastNotification, MAX_ACTIVE_TOASTS,
-        SIDEBAR_ANIMATION_DURATION_MS, TOAST_TTL_MS,
+        normalize_quick_claude_text, pane_rect_for_terminal, parse_flow_steps, pointer_to_grid,
+        prune_expired_toasts, quote_dropped_path, resolve_terminal_empty_state,
+        resolved_sidebar_width, should_commit_mru_switcher_on_key_release,
+        should_commit_mru_switcher_on_modifiers_changed, sidebar_animation_finished,
+        terminal_content_rect, toggle_flow_enabled, toggle_plugin_enabled, wildcard_matches,
+        workspace_matches_mute_patterns, FlowEntry, PaneRect, PluginEntry, TerminalEmptyState,
+        ToastNotification, MAX_ACTIVE_TOASTS, SIDEBAR_ANIMATION_DURATION_MS, TOAST_TTL_MS,
     };
     use super::{GridPos, LayoutNode, SplitDirection, TAB_BAR_HEIGHT};
-    use crate::terminal_state::TerminalCollection;
     use crate::status_bar;
+    use crate::terminal_state::TerminalCollection;
     use crate::title_bar;
     use godly_terminal_surface::FontMetrics;
     use iced::keyboard::{key::Named, Key, Modifiers};
@@ -10550,7 +10782,6 @@ mod helper_tests {
         assert!(!flows[0].enabled);
         assert!(!toggle_flow_enabled(flows.as_mut_slice(), 10));
     }
-
 
     #[test]
     fn enqueue_toast_entry_assigns_ids_and_limits_queue() {
@@ -10813,10 +11044,7 @@ mod helper_tests {
         let bottom = status_bar::STATUS_BAR_HEIGHT;
         let content_rect = terminal_content_rect(1_200.0, 800.0, 220.0);
         let expected_h = 800.0 - top - bottom;
-        assert_eq!(
-            content_rect,
-            PaneRect::new(220.0, top, 980.0, expected_h)
-        );
+        assert_eq!(content_rect, PaneRect::new(220.0, top, 980.0, expected_h));
 
         let layout = LayoutNode::Split {
             direction: SplitDirection::Horizontal,
@@ -10841,10 +11069,7 @@ mod helper_tests {
 
         let top_right = pane_rect_for_terminal(&layout, "top-right", content_rect)
             .expect("top-right pane should resolve");
-        assert_eq!(
-            top_right,
-            PaneRect::new(710.0, top, 490.0, quarter_h)
-        );
+        assert_eq!(top_right, PaneRect::new(710.0, top, 490.0, quarter_h));
 
         let bottom_right = pane_rect_for_terminal(&layout, "bottom-right", content_rect)
             .expect("bottom-right pane should resolve");
@@ -10910,9 +11135,7 @@ mod helper_tests {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod keyboard_routing_tests {
-    use super::{
-        resolve_key_event, CaptureState, KeyRoutingResult, ShortcutResolver,
-    };
+    use super::{resolve_key_event, CaptureState, KeyRoutingResult, ShortcutResolver};
     use godly_app_adapter::shortcuts::AppAction;
     use iced::keyboard::{key, key::Named, Key, Modifiers};
     use std::collections::HashMap;
@@ -10981,7 +11204,15 @@ mod keyboard_routing_tests {
 
         // Rebind SplitRight from Ctrl+\ to Ctrl+Shift+/.
         cap.capturing_index = Some(5);
-        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false);
+        resolve_key_event(
+            &char_key("/"),
+            ctrl_shift(),
+            &PHYS_UNIDENT,
+            &mut cap,
+            false,
+            false,
+            false,
+        );
 
         // Original Ctrl+\ should no longer trigger SplitRight.
         let result = resolve_key_event(
@@ -11059,25 +11290,65 @@ mod keyboard_routing_tests {
 
         // Rebind SplitRight (5) to Ctrl+Shift+/
         cap.capturing_index = Some(5);
-        resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false);
+        resolve_key_event(
+            &char_key("/"),
+            ctrl_shift(),
+            &PHYS_UNIDENT,
+            &mut cap,
+            false,
+            false,
+            false,
+        );
 
         // Rebind SplitDown (6) to Ctrl+Shift+.
         cap.capturing_index = Some(6);
-        resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false);
+        resolve_key_event(
+            &char_key("."),
+            ctrl_shift(),
+            &PHYS_UNIDENT,
+            &mut cap,
+            false,
+            false,
+            false,
+        );
 
         // Both custom bindings fire.
         assert_eq!(
-            resolve_key_event(&char_key("/"), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false),
+            resolve_key_event(
+                &char_key("/"),
+                ctrl_shift(),
+                &PHYS_UNIDENT,
+                &mut cap,
+                false,
+                false,
+                false
+            ),
             KeyRoutingResult::Action(AppAction::SplitRight)
         );
         assert_eq!(
-            resolve_key_event(&char_key("."), ctrl_shift(), &PHYS_UNIDENT, &mut cap, false, false, false),
+            resolve_key_event(
+                &char_key("."),
+                ctrl_shift(),
+                &PHYS_UNIDENT,
+                &mut cap,
+                false,
+                false,
+                false
+            ),
             KeyRoutingResult::Action(AppAction::SplitDown)
         );
 
         // Both original defaults are disabled.
         assert_eq!(
-            resolve_key_event(&char_key("\\"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false, false),
+            resolve_key_event(
+                &char_key("\\"),
+                Modifiers::CTRL,
+                &PHYS_UNIDENT,
+                &mut cap,
+                false,
+                false,
+                false
+            ),
             KeyRoutingResult::ForwardToPty
         );
         assert_eq!(
@@ -11095,7 +11366,15 @@ mod keyboard_routing_tests {
 
         // Unrelated defaults still work.
         assert_eq!(
-            resolve_key_event(&char_key("t"), Modifiers::CTRL, &PHYS_UNIDENT, &mut cap, false, false, false),
+            resolve_key_event(
+                &char_key("t"),
+                Modifiers::CTRL,
+                &PHYS_UNIDENT,
+                &mut cap,
+                false,
+                false,
+                false
+            ),
             KeyRoutingResult::Action(AppAction::NewTab)
         );
     }

@@ -2,7 +2,7 @@ use iced::widget::{column, container, row};
 use iced::{Element, Length};
 
 #[allow(unused_imports)]
-pub use godly_layout_core::{LayoutNode, PaneContent, FileViewerType, SplitDirection};
+pub use godly_layout_core::{FileViewerType, LayoutNode, PaneContent, SplitDirection};
 
 /// Converts a float ratio (0.0..1.0) to integer fill portions for two children.
 ///

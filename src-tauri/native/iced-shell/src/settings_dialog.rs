@@ -2,7 +2,7 @@ use iced::widget::{button, center, column, container, row, scrollable, text, Spa
 use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
-    BACKDROP, BORDER_FOCUSED, BORDER_VARIANT, BG_PRIMARY, BG_SECONDARY, GHOST_HOVER,
+    BACKDROP, BG_PRIMARY, BG_SECONDARY, BORDER_FOCUSED, BORDER_VARIANT, GHOST_HOVER,
     GHOST_SELECTED, RADIUS_LG, RADIUS_MD, RADIUS_SM, SURFACE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 

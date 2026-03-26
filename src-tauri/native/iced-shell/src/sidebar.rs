@@ -1,6 +1,4 @@
-use iced::widget::{
-    button, column, container, mouse_area, row, rule, scrollable, text, Space,
-};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::theme::{
@@ -219,7 +217,11 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         } else {
             GHOST_SELECTED()
         };
-        let badge_text_color = if is_active { ACCENT_HOVER() } else { TEXT_SECONDARY() };
+        let badge_text_color = if is_active {
+            ACCENT_HOVER()
+        } else {
+            TEXT_SECONDARY()
+        };
 
         let badge = container(
             text(format!("{}", terminal_count))
@@ -241,7 +243,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let worktree_indicator_bg = if ws.worktree_mode {
             ACCENT_HOVER()
         } else {
-            Color::from_rgba(TEXT_SECONDARY().r, TEXT_SECONDARY().g, TEXT_SECONDARY().b, 0.15)
+            Color::from_rgba(
+                TEXT_SECONDARY().r,
+                TEXT_SECONDARY().g,
+                TEXT_SECONDARY().b,
+                0.15,
+            )
         };
         let worktree_indicator = container(
             Space::new()
@@ -276,7 +283,11 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         });
 
         // Left accent bar: visible on active workspace.
-        let accent_bar_color = if is_active { ACCENT() } else { Color::TRANSPARENT };
+        let accent_bar_color = if is_active {
+            ACCENT()
+        } else {
+            Color::TRANSPARENT
+        };
         let accent_bar = container(
             Space::new()
                 .width(Length::Fixed(3.0))
@@ -313,7 +324,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let folder_color = if ws.worktree_mode {
             ACCENT_HOVER()
         } else {
-            Color::from_rgba(TEXT_SECONDARY().r, TEXT_SECONDARY().g, TEXT_SECONDARY().b, 0.7)
+            Color::from_rgba(
+                TEXT_SECONDARY().r,
+                TEXT_SECONDARY().g,
+                TEXT_SECONDARY().b,
+                0.7,
+            )
         };
         let folder_label = text(folder_display).size(10).color(folder_color).font(font);
         let bottom_row = row![worktree_indicator, folder_label]
@@ -372,49 +388,87 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             let move_down_id = ws.id.clone();
             let delete_id = ws.id.clone();
 
-            let rename_btn = button(text("Rename").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
-                .on_press(on_action(SidebarAction::RenameWorkspace(rename_id)))
-                .padding(Padding::from([5, 8]))
-                .width(Length::Fill)
-                .style(|_theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
-                        _ => Color::TRANSPARENT,
-                    };
-                    button::Style {
-                        background: Some(iced::Background::Color(bg)),
-                        text_color: TEXT_PRIMARY(),
-                        border: Border::default(),
-                        ..button::Style::default()
-                    }
-                });
+            let rename_btn = button(
+                text("Rename")
+                    .size(12)
+                    .color(TEXT_PRIMARY())
+                    .font(SIDEBAR_FONT),
+            )
+            .on_press(on_action(SidebarAction::RenameWorkspace(rename_id)))
+            .padding(Padding::from([5, 8]))
+            .width(Length::Fill)
+            .style(|_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: TEXT_PRIMARY(),
+                    border: Border::default(),
+                    ..button::Style::default()
+                }
+            });
 
-            let open_btn = button(text("Open in Explorer").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
-                .on_press(on_action(SidebarAction::OpenWorkspaceInExplorer(open_id)))
-                .padding(Padding::from([5, 8]))
-                .width(Length::Fill)
-                .style(|_theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
-                        _ => Color::TRANSPARENT,
-                    };
-                    button::Style {
-                        background: Some(iced::Background::Color(bg)),
-                        text_color: TEXT_PRIMARY(),
-                        border: Border::default(),
-                        ..button::Style::default()
-                    }
-                });
+            let open_btn = button(
+                text("Open in Explorer")
+                    .size(12)
+                    .color(TEXT_PRIMARY())
+                    .font(SIDEBAR_FONT),
+            )
+            .on_press(on_action(SidebarAction::OpenWorkspaceInExplorer(open_id)))
+            .padding(Padding::from([5, 8]))
+            .width(Length::Fill)
+            .style(|_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: TEXT_PRIMARY(),
+                    border: Border::default(),
+                    ..button::Style::default()
+                }
+            });
 
             let worktree_label = if ws.worktree_mode {
                 "Disable Worktree Mode"
             } else {
                 "Enable Worktree Mode"
             };
-            let worktree_btn = button(text(worktree_label).size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
-                .on_press(on_action(SidebarAction::ToggleWorkspaceWorktreeMode(
-                    worktree_id,
-                )))
+            let worktree_btn = button(
+                text(worktree_label)
+                    .size(12)
+                    .color(TEXT_PRIMARY())
+                    .font(SIDEBAR_FONT),
+            )
+            .on_press(on_action(SidebarAction::ToggleWorkspaceWorktreeMode(
+                worktree_id,
+            )))
+            .padding(Padding::from([5, 8]))
+            .width(Length::Fill)
+            .style(|_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
+                    _ => Color::TRANSPARENT,
+                };
+                button::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    text_color: TEXT_PRIMARY(),
+                    border: Border::default(),
+                    ..button::Style::default()
+                }
+            });
+
+            let move_up_btn = if idx > 0 {
+                button(
+                    text("Move Up")
+                        .size(12)
+                        .color(TEXT_PRIMARY())
+                        .font(SIDEBAR_FONT),
+                )
+                .on_press(on_action(SidebarAction::MoveWorkspaceUp(move_up_id)))
                 .padding(Padding::from([5, 8]))
                 .width(Length::Fill)
                 .style(|_theme, status| {
@@ -428,54 +482,51 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                         border: Border::default(),
                         ..button::Style::default()
                     }
-                });
-
-            let move_up_btn = if idx > 0 {
-                button(text("Move Up").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
-                    .on_press(on_action(SidebarAction::MoveWorkspaceUp(move_up_id)))
-                    .padding(Padding::from([5, 8]))
-                    .width(Length::Fill)
-                    .style(|_theme, status| {
-                        let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
-                            _ => Color::TRANSPARENT,
-                        };
-                        button::Style {
-                            background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_PRIMARY(),
-                            border: Border::default(),
-                            ..button::Style::default()
-                        }
-                    })
+                })
             } else {
-                button(text("Move Up").size(12).color(TEXT_SECONDARY()).font(SIDEBAR_FONT))
-                    .padding(Padding::from([5, 8]))
-                    .width(Length::Fill)
-                    .style(|_theme, _status| button::Style::default())
+                button(
+                    text("Move Up")
+                        .size(12)
+                        .color(TEXT_SECONDARY())
+                        .font(SIDEBAR_FONT),
+                )
+                .padding(Padding::from([5, 8]))
+                .width(Length::Fill)
+                .style(|_theme, _status| button::Style::default())
             };
 
             let move_down_btn = if idx + 1 < workspaces.len() {
-                button(text("Move Down").size(12).color(TEXT_PRIMARY()).font(SIDEBAR_FONT))
-                    .on_press(on_action(SidebarAction::MoveWorkspaceDown(move_down_id)))
-                    .padding(Padding::from([5, 8]))
-                    .width(Length::Fill)
-                    .style(|_theme, status| {
-                        let bg = match status {
-                            button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
-                            _ => Color::TRANSPARENT,
-                        };
-                        button::Style {
-                            background: Some(iced::Background::Color(bg)),
-                            text_color: TEXT_PRIMARY(),
-                            border: Border::default(),
-                            ..button::Style::default()
-                        }
-                    })
+                button(
+                    text("Move Down")
+                        .size(12)
+                        .color(TEXT_PRIMARY())
+                        .font(SIDEBAR_FONT),
+                )
+                .on_press(on_action(SidebarAction::MoveWorkspaceDown(move_down_id)))
+                .padding(Padding::from([5, 8]))
+                .width(Length::Fill)
+                .style(|_theme, status| {
+                    let bg = match status {
+                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
+                        _ => Color::TRANSPARENT,
+                    };
+                    button::Style {
+                        background: Some(iced::Background::Color(bg)),
+                        text_color: TEXT_PRIMARY(),
+                        border: Border::default(),
+                        ..button::Style::default()
+                    }
+                })
             } else {
-                button(text("Move Down").size(12).color(TEXT_SECONDARY()).font(SIDEBAR_FONT))
-                    .padding(Padding::from([5, 8]))
-                    .width(Length::Fill)
-                    .style(|_theme, _status| button::Style::default())
+                button(
+                    text("Move Down")
+                        .size(12)
+                        .color(TEXT_SECONDARY())
+                        .font(SIDEBAR_FONT),
+                )
+                .padding(Padding::from([5, 8]))
+                .width(Length::Fill)
+                .style(|_theme, _status| button::Style::default())
             };
 
             let delete_btn = button(text("Delete").size(12).color(DANGER()).font(SIDEBAR_FONT))
@@ -563,7 +614,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let scrollable_list = scrollable(
         container(items)
-            .padding(Padding { top: 8.0, right: 8.0, bottom: 16.0, left: 8.0 })
+            .padding(Padding {
+                top: 8.0,
+                right: 8.0,
+                bottom: 16.0,
+                left: 8.0,
+            })
             .width(Length::Fill),
     )
     .width(Length::Fill)
@@ -615,24 +671,27 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .padding(Padding::from([4, 8]))
     .width(Length::Fill);
 
-    let header_divider = container(
-        rule::horizontal(1).style(|_theme| rule::Style {
-            color: BORDER(),
-            radius: 0.0.into(),
-            fill_mode: rule::FillMode::Full,
-            snap: true,
-        }),
-    )
+    let header_divider = container(rule::horizontal(1).style(|_theme| rule::Style {
+        color: BORDER(),
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    }))
     .padding(Padding::from([0, 10]));
 
-    let sidebar_content = container(column![header, header_divider, scrollable_list, claude_md_footer])
-        .width(Length::Fixed(sidebar_content_width))
-        .height(Length::Fill)
-        .clip(true)
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(SURFACE_BG())),
-            ..container::Style::default()
-        });
+    let sidebar_content = container(column![
+        header,
+        header_divider,
+        scrollable_list,
+        claude_md_footer
+    ])
+    .width(Length::Fixed(sidebar_content_width))
+    .height(Length::Fill)
+    .clip(true)
+    .style(|_theme| container::Style {
+        background: Some(iced::Background::Color(SURFACE_BG())),
+        ..container::Style::default()
+    });
 
     let divider = rule::vertical(1).style(move |_theme| rule::Style {
         color: Color::TRANSPARENT,

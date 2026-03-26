@@ -34,7 +34,11 @@ pub fn view_overlay<'a, Message: 'a>(
 
     for entry in entries.into_iter().take(MAX_VISIBLE_ENTRIES) {
         let is_selected = Some(entry.terminal_id.as_str()) == selected_terminal_id;
-        let row_bg = if is_selected { BG_ACTIVE() } else { BG_SECONDARY() };
+        let row_bg = if is_selected {
+            BG_ACTIVE()
+        } else {
+            BG_SECONDARY()
+        };
         let label_color = if is_selected {
             TEXT_ACTIVE()
         } else {

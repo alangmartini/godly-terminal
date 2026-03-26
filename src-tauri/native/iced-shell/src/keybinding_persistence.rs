@@ -69,10 +69,7 @@ mod tests {
 
     #[test]
     fn round_trip_save_load() {
-        let dir = std::env::temp_dir().join(format!(
-            "godly-keybind-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("godly-keybind-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join(KEYBINDINGS_FILE);
 
@@ -89,10 +86,8 @@ mod tests {
         std::fs::write(&path, &json).unwrap();
 
         // Load back.
-        let loaded: HashMap<String, String> = serde_json::from_str(
-            &std::fs::read_to_string(&path).unwrap(),
-        )
-        .unwrap();
+        let loaded: HashMap<String, String> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let result: HashMap<usize, String> = loaded
             .into_iter()
             .filter_map(|(k, v)| k.parse::<usize>().ok().map(|idx| (idx, v)))
@@ -114,10 +109,8 @@ mod tests {
 
     #[test]
     fn load_corrupt_json_returns_empty() {
-        let dir = std::env::temp_dir().join(format!(
-            "godly-keybind-corrupt-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("godly-keybind-corrupt-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("corrupt.json");
 

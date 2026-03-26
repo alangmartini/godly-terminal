@@ -46,11 +46,13 @@ impl SkillScope {
                 let home = std::env::var("USERPROFILE")
                     .or_else(|_| std::env::var("HOME"))
                     .unwrap_or_else(|_| ".".to_string());
-                std::path::PathBuf::from(home).join(".claude").join("skills")
+                std::path::PathBuf::from(home)
+                    .join(".claude")
+                    .join("skills")
             }
-            SkillScope::Project { folder_path, .. } => {
-                std::path::PathBuf::from(folder_path).join(".claude").join("skills")
-            }
+            SkillScope::Project { folder_path, .. } => std::path::PathBuf::from(folder_path)
+                .join(".claude")
+                .join("skills"),
         }
     }
 }
@@ -289,7 +291,10 @@ pub fn analyze_skill(content: &str) -> Vec<SkillDiagnostic> {
         diags.push(SkillDiagnostic {
             severity: DiagnosticSeverity::Warning,
             message: "Skill has no body content after frontmatter.".to_string(),
-            suggestion: Some("Add instructions that tell the agent what to do when this skill is invoked.".to_string()),
+            suggestion: Some(
+                "Add instructions that tell the agent what to do when this skill is invoked."
+                    .to_string(),
+            ),
         });
     } else {
         for line in body.lines() {
@@ -300,10 +305,31 @@ pub fn analyze_skill(content: &str) -> Vec<SkillDiagnostic> {
                 if words.len() <= 3 {
                     let first = words.first().map(|w| w.to_lowercase()).unwrap_or_default();
                     let action_starters = [
-                        "run", "create", "build", "fix", "analyze", "check", "deploy",
-                        "test", "generate", "implement", "design", "write", "update",
-                        "scan", "audit", "review", "debug", "profile", "monitor",
-                        "diagnose", "validate", "verify", "configure", "setup", "install",
+                        "run",
+                        "create",
+                        "build",
+                        "fix",
+                        "analyze",
+                        "check",
+                        "deploy",
+                        "test",
+                        "generate",
+                        "implement",
+                        "design",
+                        "write",
+                        "update",
+                        "scan",
+                        "audit",
+                        "review",
+                        "debug",
+                        "profile",
+                        "monitor",
+                        "diagnose",
+                        "validate",
+                        "verify",
+                        "configure",
+                        "setup",
+                        "install",
                     ];
                     if !action_starters.iter().any(|v| first == *v) {
                         diags.push(SkillDiagnostic {
@@ -407,11 +433,9 @@ pub fn view_claude_code_manager<'a, M: Clone + 'a>(
     on_new_skill_name: impl Fn(String) -> M + 'a,
     on_create_skill: M,
 ) -> Element<'a, M> {
-    let mut scope_col = column![
-        text("Scope").size(11).color(TEXT_SECONDARY()),
-    ]
-    .spacing(4)
-    .width(Length::Fixed(160.0));
+    let mut scope_col = column![text("Scope").size(11).color(TEXT_SECONDARY()),]
+        .spacing(4)
+        .width(Length::Fixed(160.0));
 
     for (i, scope) in state.scopes.iter().enumerate() {
         let is_active = i == state.active_scope;
@@ -421,32 +445,34 @@ pub fn view_claude_code_manager<'a, M: Clone + 'a>(
             SkillScope::Project { .. } => "\u{1F4C1} ",
         };
 
-        let btn = button(
-            text(format!("{}{}", icon, label)).size(12)
-        )
-        .on_press(on_scope_click(i))
-        .width(Length::Fill)
-        .padding(Padding::from([6, 10]))
-        .style(move |_theme, status| {
-            let (bg, border_color) = if is_active {
-                (GHOST_SELECTED(), BORDER_FOCUSED())
-            } else {
-                match status {
-                    button::Status::Hovered => (GHOST_HOVER(), Color::TRANSPARENT),
-                    _ => (Color::TRANSPARENT, Color::TRANSPARENT),
+        let btn = button(text(format!("{}{}", icon, label)).size(12))
+            .on_press(on_scope_click(i))
+            .width(Length::Fill)
+            .padding(Padding::from([6, 10]))
+            .style(move |_theme, status| {
+                let (bg, border_color) = if is_active {
+                    (GHOST_SELECTED(), BORDER_FOCUSED())
+                } else {
+                    match status {
+                        button::Status::Hovered => (GHOST_HOVER(), Color::TRANSPARENT),
+                        _ => (Color::TRANSPARENT, Color::TRANSPARENT),
+                    }
+                };
+                button::Style {
+                    background: Some(Background::Color(bg)),
+                    text_color: if is_active {
+                        TEXT_ACTIVE()
+                    } else {
+                        TEXT_PRIMARY()
+                    },
+                    border: Border {
+                        color: border_color,
+                        width: if is_active { 1.0 } else { 0.0 },
+                        radius: RADIUS_SM.into(),
+                    },
+                    ..button::Style::default()
                 }
-            };
-            button::Style {
-                background: Some(Background::Color(bg)),
-                text_color: if is_active { TEXT_ACTIVE() } else { TEXT_PRIMARY() },
-                border: Border {
-                    color: border_color,
-                    width: if is_active { 1.0 } else { 0.0 },
-                    radius: RADIUS_SM.into(),
-                },
-                ..button::Style::default()
-            }
-        });
+            });
         scope_col = scope_col.push(btn);
     }
 
@@ -650,11 +676,9 @@ fn view_skill_editor<'a, M: Clone + 'a>(
             ..container::Style::default()
         });
 
-    let mut diag_items = column![
-        text("Skill Analysis").size(12).color(TEXT_SECONDARY()),
-    ]
-    .spacing(4)
-    .width(Length::Fill);
+    let mut diag_items = column![text("Skill Analysis").size(12).color(TEXT_SECONDARY()),]
+        .spacing(4)
+        .width(Length::Fill);
 
     for diag in &state.diagnostics {
         let (icon, color) = match diag.severity {
@@ -663,9 +687,9 @@ fn view_skill_editor<'a, M: Clone + 'a>(
             DiagnosticSeverity::Tip => ("\u{2139}", Color::from_rgb(0.3, 0.7, 0.9)),
         };
 
-        let mut card_content = column![
-            text(format!("{} {}", icon, diag.message)).size(12).color(color),
-        ]
+        let mut card_content = column![text(format!("{} {}", icon, diag.message))
+            .size(12)
+            .color(color),]
         .spacing(2);
 
         if let Some(ref suggestion) = diag.suggestion {
@@ -781,61 +805,75 @@ mod tests {
     #[test]
     fn test_analyze_missing_frontmatter() {
         let diags = analyze_skill("# Just a heading\nNo frontmatter.");
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Error
-            && d.message.contains("frontmatter")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("frontmatter")));
     }
 
     #[test]
     fn test_analyze_missing_name() {
         let diags = analyze_skill("---\ndescription: foo\n---\n# Body");
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Error
-            && d.message.contains("name")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("name")));
     }
 
     #[test]
     fn test_analyze_missing_description() {
         let diags = analyze_skill("---\nname: my-skill\n---\n# Body");
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Error
-            && d.message.contains("description")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("description")));
     }
 
     #[test]
     fn test_analyze_short_description() {
         let diags = analyze_skill("---\nname: x\ndescription: Short\n---\n");
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
-            && d.message.contains("Description") && d.message.contains("short")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Warning
+                && d.message.contains("Description")
+                && d.message.contains("short")));
     }
 
     #[test]
     fn test_analyze_bad_heading() {
         let content = "---\nname: helper\ndescription: Helps with things quickly for the project\n---\n\n# My Helper\n";
         let diags = analyze_skill(content);
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Tip
-            && d.message.contains("heading")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Tip && d.message.contains("heading")));
     }
 
     #[test]
     fn test_analyze_good_skill() {
         let content = "---\nname: my-skill\ndescription: Use this skill when you need to do something important and complex that requires careful analysis\n---\n\n# Run analysis and produce a detailed report\n\nInstructions here.";
         let diags = analyze_skill(content);
-        assert!(!diags.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+        assert!(!diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error));
     }
 
     #[test]
     fn test_analyze_no_body() {
         let content = "---\nname: empty\ndescription: Has a reasonable description for this\n---\n";
         let diags = analyze_skill(content);
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
-            && d.message.contains("body")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Warning && d.message.contains("body")));
     }
 
     #[test]
     fn test_analyze_long_description() {
         let long_desc = "word ".repeat(200);
-        let content = format!("---\nname: verbose\ndescription: {}\n---\n# Do stuff\nBody.", long_desc);
+        let content = format!(
+            "---\nname: verbose\ndescription: {}\n---\n# Do stuff\nBody.",
+            long_desc
+        );
         let diags = analyze_skill(&content);
-        assert!(diags.iter().any(|d| d.severity == DiagnosticSeverity::Warning
-            && d.message.contains("long")));
+        assert!(diags
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Warning && d.message.contains("long")));
     }
 
     #[test]

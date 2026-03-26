@@ -78,7 +78,11 @@ pub fn view_confirm_dialog<'a, M: Clone + 'a>(
         footer,
     ];
 
-    let shadow_color = if danger { SHADOW_DANGER() } else { SHADOW_ACCENT() };
+    let shadow_color = if danger {
+        SHADOW_DANGER()
+    } else {
+        SHADOW_ACCENT()
+    };
     let border_color = if danger {
         Color::from_rgba(DANGER().r, DANGER().g, DANGER().b, 0.25)
     } else {
@@ -158,8 +162,7 @@ pub fn view_copy_preview<'a, M: Clone + 'a>(
             .color(TEXT_SECONDARY()),
         Space::new().height(8.0),
         container(
-            scrollable(text(truncated).size(12).color(TEXT_PRIMARY()))
-                .height(Length::Fixed(200.0))
+            scrollable(text(truncated).size(12).color(TEXT_PRIMARY())).height(Length::Fixed(200.0))
         )
         .padding(Padding::from([8, 10]))
         .width(Length::Fill)
@@ -195,35 +198,49 @@ pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
     on_keep: M,
     on_cancel: M,
 ) -> Element<'a, M> {
-    let desc_str = if is_clone { "This terminal uses a git clone at:" } else { "This terminal uses a git worktree at:" };
-    let prompt_str = if is_clone { "Remove the clone from disk, or keep it for later?" } else { "Remove the worktree from disk, or keep it for later?" };
-    let title_str = if is_clone { "Close Clone Terminal?" } else { "Close Worktree Terminal?" };
-    let keep_str = if is_clone { "Keep Clone" } else { "Keep Worktree" };
-    let remove_str = if is_clone { "Remove Clone" } else { "Remove Worktree" };
+    let desc_str = if is_clone {
+        "This terminal uses a git clone at:"
+    } else {
+        "This terminal uses a git worktree at:"
+    };
+    let prompt_str = if is_clone {
+        "Remove the clone from disk, or keep it for later?"
+    } else {
+        "Remove the worktree from disk, or keep it for later?"
+    };
+    let title_str = if is_clone {
+        "Close Clone Terminal?"
+    } else {
+        "Close Worktree Terminal?"
+    };
+    let keep_str = if is_clone {
+        "Keep Clone"
+    } else {
+        "Keep Worktree"
+    };
+    let remove_str = if is_clone {
+        "Remove Clone"
+    } else {
+        "Remove Worktree"
+    };
 
     let body_text = column![
-        text(desc_str)
-            .size(13)
-            .color(TEXT_PRIMARY()),
+        text(desc_str).size(13).color(TEXT_PRIMARY()),
         Space::new().height(6.0),
-        container(
-            text(worktree_path).size(12).color(TEXT_SECONDARY())
-        )
-        .padding(Padding::from([6, 10]))
-        .width(Length::Fill)
-        .style(|_theme| container::Style {
-            background: Some(Background::Color(BG_TERTIARY())),
-            border: Border {
-                color: BORDER(),
-                width: 1.0,
-                radius: RADIUS_SM.into(),
-            },
-            ..container::Style::default()
-        }),
+        container(text(worktree_path).size(12).color(TEXT_SECONDARY()))
+            .padding(Padding::from([6, 10]))
+            .width(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(Background::Color(BG_TERTIARY())),
+                border: Border {
+                    color: BORDER(),
+                    width: 1.0,
+                    radius: RADIUS_SM.into(),
+                },
+                ..container::Style::default()
+            }),
         Space::new().height(10.0),
-        text(prompt_str)
-            .size(13)
-            .color(TEXT_PRIMARY()),
+        text(prompt_str).size(13).color(TEXT_PRIMARY()),
     ];
 
     let title_text = text(title_str).size(16).color(TEXT_ACTIVE());

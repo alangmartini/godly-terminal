@@ -1,7 +1,7 @@
+use crate::theme::{BG_SECONDARY, BG_TERTIARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY};
+use godly_layout_core::{FileViewerType, PaneContent};
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Background, Border, Element, Length, Padding};
-use godly_layout_core::{PaneContent, FileViewerType};
-use crate::theme::{BG_SECONDARY, BG_TERTIARY, BORDER, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY};
 
 /// Main render function for a file pane.
 ///
@@ -47,25 +47,20 @@ pub fn render_file_pane<'a, M: Clone + 'a>(
 }
 
 /// Renders the header bar with filename and close button.
-fn render_header<'a, M: Clone + 'a>(
-    filename: &str,
-    on_close: M,
-) -> Element<'a, M> {
+fn render_header<'a, M: Clone + 'a>(filename: &str, on_close: M) -> Element<'a, M> {
     let name_label = text(filename.to_string())
         .size(13)
         .font(iced::Font::MONOSPACE)
         .color(TEXT_PRIMARY());
 
-    let close_btn = button(
-        text("X").size(12).color(TEXT_SECONDARY()),
-    )
-    .on_press(on_close)
-    .padding(Padding::from([2, 6]))
-    .style(|_theme, _status| button::Style {
-        background: None,
-        text_color: TEXT_SECONDARY(),
-        ..button::Style::default()
-    });
+    let close_btn = button(text("X").size(12).color(TEXT_SECONDARY()))
+        .on_press(on_close)
+        .padding(Padding::from([2, 6]))
+        .style(|_theme, _status| button::Style {
+            background: None,
+            text_color: TEXT_SECONDARY(),
+            ..button::Style::default()
+        });
 
     container(
         row![name_label, Space::new().width(Length::Fill), close_btn]
@@ -191,10 +186,7 @@ fn render_markdown_pane<'a, M: Clone + 'a>(content: &str) -> Element<'a, M> {
 }
 
 /// Helper: if `buf` is non-empty, push a paragraph element and clear the buffer.
-fn flush_paragraph<'a, M: Clone + 'a>(
-    buf: &mut String,
-    elements: &mut Vec<Element<'a, M>>,
-) {
+fn flush_paragraph<'a, M: Clone + 'a>(buf: &mut String, elements: &mut Vec<Element<'a, M>>) {
     if !buf.is_empty() {
         elements.push(
             text(std::mem::take(buf))
@@ -209,12 +201,10 @@ fn flush_paragraph<'a, M: Clone + 'a>(
 fn render_image_pane<'a, M: Clone + 'a>(file_path: &str) -> Element<'a, M> {
     use iced::widget::image::{Handle, Image};
 
-    container(
-        Image::new(Handle::from_path(file_path)).content_fit(iced::ContentFit::Contain),
-    )
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    container(Image::new(Handle::from_path(file_path)).content_fit(iced::ContentFit::Contain))
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
