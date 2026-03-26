@@ -8,6 +8,9 @@ on:
       - "src-tauri/godly-vt/**"
       - "src-tauri/protocol/**"
 
+permissions:
+  pull-requests: write
+
 env:
   CARGO_TERM_COLOR: always
 
