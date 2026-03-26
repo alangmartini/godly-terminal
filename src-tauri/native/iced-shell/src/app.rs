@@ -3826,7 +3826,7 @@ impl GodlyApp {
                                         }
                                         self.cf_tunnel_process = Some(child);
                                         self.cf_tunnel_status = CfTunnelStatus::Starting;
-                                        let hostname = self.cf_tunnel_prefs.hostname.clone();
+                                        let _hostname = self.cf_tunnel_prefs.hostname.clone();
                                         // Health-check: wait then verify the process is alive
                                         return Task::perform(
                                             async move {

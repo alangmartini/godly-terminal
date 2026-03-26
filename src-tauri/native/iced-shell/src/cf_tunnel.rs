@@ -205,16 +205,17 @@ pub fn read_quick_tunnel_url(
     let (tx, rx) = futures_channel::oneshot::channel();
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        let mut url_sent = false;
+        let mut tx = Some(tx);
         for line in reader.lines() {
             match line {
                 Ok(l) => {
                     log::debug!("cloudflared: {l}");
                     push_log_line(&log_buffer, l.clone());
-                    if !url_sent {
+                    if tx.is_some() {
                         if let Some(url) = parse_quick_tunnel_url(&l) {
-                            let _ = tx.send(url);
-                            url_sent = true;
+                            if let Some(sender) = tx.take() {
+                                let _ = sender.send(url);
+                            }
                         }
                     }
                 }
@@ -259,7 +260,8 @@ fn push_log_line(buf: &Arc<Mutex<Vec<String>>>, line: String) {
     if let Ok(mut b) = buf.lock() {
         b.push(line);
         if b.len() > MAX_LOG_LINES {
-            b.drain(..b.len() - MAX_LOG_LINES);
+            let excess = b.len() - MAX_LOG_LINES;
+            b.drain(..excess);
         }
     }
 }
