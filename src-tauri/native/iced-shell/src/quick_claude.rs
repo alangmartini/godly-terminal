@@ -626,7 +626,7 @@ fn handle_trust_prompt_if_needed(
 
         log::debug!(
             "Quick Claude: grid text (first 200 chars): {:?}",
-            &text[..text.len().min(200)]
+            text.chars().take(200).collect::<String>()
         );
 
         // Trust prompt detected — accept it
