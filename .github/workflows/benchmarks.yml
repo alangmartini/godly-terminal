@@ -55,7 +55,9 @@ jobs:
           cargo bench -p godly-vt --bench throughput -- --save-baseline base 2>/dev/null || true
 
       - name: Compare benchmarks
-        run: critcmp base pr --threshold 15 | tee /tmp/bench-comparison.txt
+        run: |
+          cd src-tauri
+          critcmp base pr --threshold 15 | tee /tmp/bench-comparison.txt
 
       - name: Post benchmark results as PR comment
         if: always()

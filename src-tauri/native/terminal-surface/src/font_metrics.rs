@@ -1,8 +1,9 @@
 /// Font metrics for monospace terminal rendering.
 ///
-/// Provides cell dimensions derived from font size using heuristic ratios.
-/// These are reasonable defaults for monospace fonts and can be replaced
-/// with measured values once actual font shaping is available.
+/// Cell dimensions are measured from actual font tables (hhea/OS/2 ascent,
+/// descent, line gap, and the advance width of a reference glyph). Heuristic
+/// ratios are only used as a last-resort fallback when font data cannot be
+/// parsed.
 ///
 /// All pixel dimensions (`cell_width`, `cell_height`, `baseline_offset`,
 /// `font_size`) are in **logical** pixels. Call [`scaled_for_render`] to
@@ -24,19 +25,33 @@ pub struct FontMetrics {
 }
 
 impl FontMetrics {
-    /// Width-to-font-size ratio for monospace fonts.
+    /// Width-to-font-size ratio for monospace fonts (last-resort heuristic).
     const WIDTH_RATIO: f32 = 0.6;
-    /// Height-to-font-size ratio for monospace fonts.
+    /// Height-to-font-size ratio for monospace fonts (last-resort heuristic).
     const HEIGHT_RATIO: f32 = 1.3;
-    /// Baseline position as fraction of cell height.
+    /// Baseline position as fraction of cell height (last-resort heuristic).
     const BASELINE_FRACTION: f32 = 0.75;
 
     /// Create font metrics from a font size using heuristic ratios.
+    ///
+    /// **This is a last-resort fallback.** Prefer [`from_font_bytes`] or
+    /// [`from_system_font`] which read actual font tables.
     ///
     /// - `cell_width = font_size * 0.6`
     /// - `cell_height = font_size * 1.3`
     /// - `baseline_offset = cell_height * 0.75`
     pub fn from_font_size(font_size: f32) -> Self {
+        log::warn!(
+            "FontMetrics: using heuristic fallback for font_size={:.1}px \
+             — metrics will be approximate",
+            font_size,
+        );
+        Self::from_font_size_quiet(font_size)
+    }
+
+    /// Heuristic fallback without the warning (used internally after an
+    /// explicit warning has already been emitted, and in `Default`).
+    fn from_font_size_quiet(font_size: f32) -> Self {
         let cell_width = font_size * Self::WIDTH_RATIO;
         let cell_height = font_size * Self::HEIGHT_RATIO;
         let baseline_offset = cell_height * Self::BASELINE_FRACTION;
@@ -52,19 +67,32 @@ impl FontMetrics {
     /// Create font metrics by measuring the actual font file via swash.
     ///
     /// Reads ascent, descent, and leading from the font's OS/2 and hhea tables,
-    /// and measures the advance width of the '0' glyph for the cell width.
-    /// Falls back to [`from_font_size`](Self::from_font_size) if the font
-    /// data cannot be parsed.
+    /// and measures the advance width of a reference glyph ('0', 'M', or space)
+    /// for the cell width. Falls back to heuristic ratios (with a warning) if
+    /// the font data cannot be parsed.
     pub fn from_font_bytes(font_size: f32, font_data: &[u8]) -> Self {
         let font = match swash::FontRef::from_index(font_data, 0) {
             Some(f) => f,
-            None => return Self::from_font_size(font_size),
+            None => {
+                log::warn!(
+                    "FontMetrics: failed to parse font data ({} bytes) \
+                     — falling back to heuristics for font_size={:.1}px",
+                    font_data.len(),
+                    font_size,
+                );
+                return Self::from_font_size_quiet(font_size);
+            }
         };
 
         let metrics = font.metrics(&[]);
         let upem = metrics.units_per_em as f32;
         if upem == 0.0 {
-            return Self::from_font_size(font_size);
+            log::warn!(
+                "FontMetrics: font reports units_per_em=0 \
+                 — falling back to heuristics for font_size={:.1}px",
+                font_size,
+            );
+            return Self::from_font_size_quiet(font_size);
         }
 
         let scale = font_size / upem;
@@ -75,15 +103,39 @@ impl FontMetrics {
         let cell_height = ascent + descent + leading;
         let baseline_offset = ascent;
 
-        // Measure advance width of '0' for cell width
+        // Measure advance width of a reference glyph for cell width.
+        // Try '0' first (standard monospace reference), then 'M', then space.
         let charmap = font.charmap();
-        let glyph_id = charmap.map('0');
         let glyph_metrics = font.glyph_metrics(&[]).scale(font_size);
-        let cell_width = glyph_metrics.advance_width(glyph_id);
+
+        let cell_width = {
+            let candidates = ['0', 'M', ' '];
+            let mut width = 0.0f32;
+            for &ch in &candidates {
+                let gid = charmap.map(ch);
+                if gid != 0 {
+                    let w = glyph_metrics.advance_width(gid);
+                    if w > 0.0 {
+                        width = w;
+                        break;
+                    }
+                }
+            }
+            width
+        };
 
         // Sanity check: if measurements look unreasonable, fall back
         if cell_width <= 0.0 || cell_height <= 0.0 || baseline_offset <= 0.0 {
-            return Self::from_font_size(font_size);
+            log::warn!(
+                "FontMetrics: measured values out of range \
+                 (cell_width={:.2}, cell_height={:.2}, baseline={:.2}) \
+                 — falling back to heuristics for font_size={:.1}px",
+                cell_width,
+                cell_height,
+                baseline_offset,
+                font_size,
+            );
+            return Self::from_font_size_quiet(font_size);
         }
 
         Self {
@@ -92,6 +144,28 @@ impl FontMetrics {
             font_size,
             baseline_offset,
             scale_factor: 1.0,
+        }
+    }
+
+    /// Create font metrics by loading a system font by family name.
+    ///
+    /// Uses [`FontLoader`](crate::font_loader::FontLoader) to locate the font
+    /// on disk, then delegates to [`from_font_bytes`](Self::from_font_bytes)
+    /// for actual measurement. Falls back to heuristic ratios (with a warning)
+    /// if the font cannot be found.
+    pub fn from_system_font(font_size: f32, family: &str) -> Self {
+        let loader = crate::font_loader::FontLoader::new();
+        match loader.load_font(family, false, false) {
+            Some(data) => Self::from_font_bytes(font_size, &data),
+            None => {
+                log::warn!(
+                    "FontMetrics: could not load system font '{}' \
+                     — falling back to heuristics for font_size={:.1}px",
+                    family,
+                    font_size,
+                );
+                Self::from_font_size_quiet(font_size)
+            }
         }
     }
 
@@ -120,7 +194,7 @@ impl FontMetrics {
 
 impl Default for FontMetrics {
     fn default() -> Self {
-        Self::from_font_size(14.0)
+        Self::from_font_size_quiet(14.0)
     }
 }
 
@@ -128,9 +202,15 @@ impl Default for FontMetrics {
 mod tests {
     use super::*;
 
+    /// Helper that builds heuristic metrics without triggering the log::warn
+    /// (mirrors the internal `from_font_size_quiet`).
+    fn heuristic(font_size: f32) -> FontMetrics {
+        FontMetrics::from_font_size_quiet(font_size)
+    }
+
     #[test]
-    fn from_font_size_14() {
-        let m = FontMetrics::from_font_size(14.0);
+    fn heuristic_14() {
+        let m = heuristic(14.0);
         assert!((m.cell_width - 8.4).abs() < 0.01);
         assert!((m.cell_height - 18.2).abs() < 0.01);
         assert!((m.font_size - 14.0).abs() < 0.01);
@@ -139,8 +219,8 @@ mod tests {
     }
 
     #[test]
-    fn from_font_size_16() {
-        let m = FontMetrics::from_font_size(16.0);
+    fn heuristic_16() {
+        let m = heuristic(16.0);
         assert!((m.cell_width - 9.6).abs() < 0.01);
         assert!((m.cell_height - 20.8).abs() < 0.01);
         assert!((m.font_size - 16.0).abs() < 0.01);
@@ -148,8 +228,8 @@ mod tests {
     }
 
     #[test]
-    fn from_font_size_zero() {
-        let m = FontMetrics::from_font_size(0.0);
+    fn heuristic_zero() {
+        let m = heuristic(0.0);
         assert!((m.cell_width).abs() < 0.01);
         assert!((m.cell_height).abs() < 0.01);
         assert!((m.baseline_offset).abs() < 0.01);
@@ -158,7 +238,7 @@ mod tests {
     #[test]
     fn default_uses_14() {
         let m = FontMetrics::default();
-        let expected = FontMetrics::from_font_size(14.0);
+        let expected = heuristic(14.0);
         assert_eq!(m, expected);
     }
 
@@ -166,7 +246,7 @@ mod tests {
     fn width_height_ratio_relationship() {
         // For any font size, width should be narrower than height (monospace convention)
         for size in [8.0, 12.0, 14.0, 16.0, 20.0, 24.0] {
-            let m = FontMetrics::from_font_size(size);
+            let m = heuristic(size);
             assert!(
                 m.cell_width < m.cell_height,
                 "cell_width ({}) should be less than cell_height ({}) for font_size {}",
@@ -181,7 +261,7 @@ mod tests {
     fn baseline_within_cell() {
         // Baseline must be within cell bounds for readable text
         for size in [8.0, 12.0, 14.0, 16.0, 20.0, 24.0] {
-            let m = FontMetrics::from_font_size(size);
+            let m = heuristic(size);
             assert!(
                 m.baseline_offset > 0.0 && m.baseline_offset < m.cell_height,
                 "baseline_offset ({}) should be within (0, {}) for font_size {}",
@@ -233,7 +313,7 @@ mod tests {
     #[test]
     fn from_font_bytes_invalid_data_falls_back() {
         let m = FontMetrics::from_font_bytes(14.0, b"not a font");
-        let fallback = FontMetrics::from_font_size(14.0);
+        let fallback = heuristic(14.0);
         assert_eq!(
             m, fallback,
             "invalid font data should fall back to heuristic"
@@ -243,7 +323,7 @@ mod tests {
     #[test]
     fn from_font_bytes_empty_data_falls_back() {
         let m = FontMetrics::from_font_bytes(14.0, &[]);
-        let fallback = FontMetrics::from_font_size(14.0);
+        let fallback = heuristic(14.0);
         assert_eq!(m, fallback, "empty font data should fall back to heuristic");
     }
 
@@ -263,5 +343,30 @@ mod tests {
         assert_eq!(m.cell_height, s.cell_height);
         assert_eq!(m.font_size, s.font_size);
         assert_eq!(m.baseline_offset, s.baseline_offset);
+    }
+
+    #[test]
+    fn from_font_bytes_produces_different_metrics_than_heuristic() {
+        // Real font measurements should differ from the rough heuristic ratios
+        let measured = FontMetrics::from_font_bytes(14.0, GEIST_MONO);
+        let fallback = heuristic(14.0);
+        assert_ne!(
+            measured, fallback,
+            "measured metrics from a real font should differ from heuristic"
+        );
+    }
+
+    #[test]
+    fn from_font_bytes_baseline_equals_ascent() {
+        // baseline_offset should be the font's ascent, not a heuristic fraction
+        let m = FontMetrics::from_font_bytes(14.0, GEIST_MONO);
+        // For Geist Mono, ascent-based baseline should be roughly 70-80% of
+        // cell height, not exactly 75% (the heuristic). Verify reasonable range.
+        let ratio = m.baseline_offset / m.cell_height;
+        assert!(
+            (0.5..0.95).contains(&ratio),
+            "baseline/height ratio ({:.3}) should be in 0.5..0.95 for a real font",
+            ratio,
+        );
     }
 }
