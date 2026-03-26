@@ -7,7 +7,7 @@ use godly_protocol::types::{
 use godly_terminal_surface::font_metrics::FontMetrics;
 use godly_terminal_surface::glyph_cache::{CachedGlyph, GlyphCache, GlyphKey};
 use godly_terminal_surface::glyph_rasterizer::{
-    GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph,
+    GlyphFormat, GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph,
 };
 use godly_terminal_surface::pixel_renderer::PixelRenderer;
 use godly_terminal_surface::GridPos;
@@ -28,7 +28,8 @@ impl GlyphRasterizer for StubRasterizer {
         _italic: bool,
     ) -> Option<RasterizedGlyph> {
         Some(RasterizedGlyph {
-            alpha: vec![128; 4],
+            data: vec![128; 4],
+            format: GlyphFormat::Alpha,
             width: 2,
             height: 2,
             bearing_x: 0,
@@ -159,7 +160,8 @@ fn make_sparse_grid(rows: u16, cols: u16) -> RichGridData {
 
 fn stub_glyph() -> CachedGlyph {
     CachedGlyph {
-        alpha: vec![128; 4],
+        data: vec![128; 4],
+        format: GlyphFormat::Alpha,
         width: 2,
         height: 2,
         bearing_x: 0,
