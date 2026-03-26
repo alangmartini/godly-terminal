@@ -2699,7 +2699,9 @@ impl GodlyApp {
                 self.desktop_notify_prefs.remembered = self.desktop_notify_prompt_remember;
                 self.desktop_notify_prompt_pending = false;
                 self.desktop_notify_prompted_this_session = true;
-                godly_iced_shell::desktop_notify_prefs::save_preferences(&self.desktop_notify_prefs);
+                godly_iced_shell::desktop_notify_prefs::save_preferences(
+                    &self.desktop_notify_prefs,
+                );
                 if let Some((title, body)) = self.desktop_notify_pending_payload.take() {
                     godly_app_adapter::desktop_notify::send_desktop_notification(&title, &body);
                 }
@@ -2709,7 +2711,9 @@ impl GodlyApp {
                 self.desktop_notify_prefs.remembered = self.desktop_notify_prompt_remember;
                 self.desktop_notify_prompt_pending = false;
                 self.desktop_notify_prompted_this_session = true;
-                godly_iced_shell::desktop_notify_prefs::save_preferences(&self.desktop_notify_prefs);
+                godly_iced_shell::desktop_notify_prefs::save_preferences(
+                    &self.desktop_notify_prefs,
+                );
                 self.desktop_notify_pending_payload = None;
             }
             Message::DesktopNotifyPromptRememberToggle => {
@@ -2718,7 +2722,9 @@ impl GodlyApp {
             Message::DesktopNotifyToggled => {
                 self.desktop_notify_prefs.enabled = !self.desktop_notify_prefs.enabled;
                 self.desktop_notify_prefs.remembered = true;
-                godly_iced_shell::desktop_notify_prefs::save_preferences(&self.desktop_notify_prefs);
+                godly_iced_shell::desktop_notify_prefs::save_preferences(
+                    &self.desktop_notify_prefs,
+                );
             }
             Message::WorkspaceMutePatternInputChanged(value) => {
                 self.workspace_mute_pattern_input = value;
