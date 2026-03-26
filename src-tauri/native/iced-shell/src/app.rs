@@ -59,7 +59,8 @@ pub mod diag {
 use futures_channel::mpsc;
 use iced::keyboard;
 use iced::widget::{
-    button, canvas, center, column, container, mouse_area, row, stack, text, text_input, Space,
+    button, canvas, center, column, container, mouse_area, row, scrollable, stack, text,
+    text_input, Space,
 };
 use iced::{
     event, window, Color, Element, Font, Length, Padding, Point, Shadow, Subscription, Task, Vector,
@@ -5341,7 +5342,7 @@ impl GodlyApp {
     /// Render the Appearance tab (theme selection grid with preview swatches).
     fn view_appearance_tab(&self) -> Element<'_, Message> {
         use crate::theme::{ThemeId, RADIUS_MD};
-        use iced::widget::{button, row, scrollable, text, text_input, Space};
+        use iced::widget::{button, row, text, text_input, Space};
         use iced::Theme;
 
         // -- Font section --
@@ -6905,7 +6906,7 @@ impl GodlyApp {
             );
         }
 
-        container(content).width(Length::Fill).into()
+        scrollable(content).height(Length::Fill).into()
     }
 
     fn view_claude_code_tab(&self) -> Element<'_, Message> {
