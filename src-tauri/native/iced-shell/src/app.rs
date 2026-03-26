@@ -551,6 +551,8 @@ pub struct GodlyApp {
     use_pixel_renderer: bool,
     /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
     pub(crate) file_panes: HashMap<String, FilePaneState>,
+    /// Fractional mouse-wheel accumulator for sub-line trackpad deltas.
+    scroll_accumulator: f64,
 }
 
 impl Default for GodlyApp {
@@ -702,6 +704,7 @@ impl Default for GodlyApp {
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
             use_pixel_renderer: false,
             file_panes: HashMap::new(),
+            scroll_accumulator: 0.0,
         }
     }
 }
@@ -715,6 +718,9 @@ pub enum Message {
     GridFetched {
         session_id: String,
         grid: RichGridData,
+        /// True when this grid was fetched in response to a scroll action
+        /// (scroll_fetch), false for regular grid fetches (fetch_grid).
+        is_scroll_fetch: bool,
     },
     /// Grid fetch failed for a specific session.
     GridFetchFailed {
@@ -1786,10 +1792,15 @@ impl GodlyApp {
                     &session_id[..8.min(session_id.len())]
                 ));
             }
-            Message::GridFetched { session_id, .. } => {
+            Message::GridFetched {
+                session_id,
+                is_scroll_fetch,
+                ..
+            } => {
                 diag::log(&format!(
-                    "UPDATE: GridFetched({})",
-                    &session_id[..8.min(session_id.len())]
+                    "UPDATE: GridFetched({}, scroll={})",
+                    &session_id[..8.min(session_id.len())],
+                    is_scroll_fetch
                 ));
             }
             Message::GridFetchFailed {
@@ -1941,7 +1952,21 @@ impl GodlyApp {
             }
 
             // --- Grid fetch results ---
-            Message::GridFetched { session_id, grid } => {
+            Message::GridFetched {
+                session_id,
+                grid,
+                is_scroll_fetch,
+            } => {
+                // Discard stale scroll responses — the user has already scrolled
+                // past this offset, so applying it would cause a visible rollback.
+                if is_scroll_fetch {
+                    if let Some(term) = self.terminals.get(&session_id) {
+                        if grid.scrollback_offset != term.scrollback_offset {
+                            return Task::none();
+                        }
+                    }
+                }
+
                 let mut should_persist_clamp = false;
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     if grid.scrollback_offset < term.scrollback_offset {
@@ -2257,8 +2282,12 @@ impl GodlyApp {
 
             // --- Mouse wheel scrollback ---
             Message::MouseWheel { delta_y } => {
-                let lines = -(delta_y * 3.0) as isize;
-                return self.scroll_active(lines);
+                self.scroll_accumulator += -(delta_y as f64) * 3.0;
+                let lines = self.scroll_accumulator as isize;
+                if lines != 0 {
+                    self.scroll_accumulator -= lines as f64;
+                    return self.scroll_active(lines);
+                }
             }
 
             // --- Tab bar horizontal scroll (no-op: Iced scrollable handles it) ---
@@ -7213,6 +7242,7 @@ impl GodlyApp {
             .mark_read(&decision.mark_terminal_read_id);
         self.tab_context_menu_id = None;
         self.mru_switcher = None;
+        self.scroll_accumulator = 0.0;
 
         if layout_changed {
             // Fetch the grid for the newly focused terminal so the canvas
@@ -8292,6 +8322,7 @@ impl GodlyApp {
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = max;
         }
+        self.scroll_accumulator = 0.0;
         self.persist_scrollback_offsets();
 
         // Adjust selection for scroll. Bug #755.
@@ -8317,6 +8348,7 @@ impl GodlyApp {
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = 0;
         }
+        self.scroll_accumulator = 0.0;
         self.persist_scrollback_offsets();
 
         // Adjust selection for scroll. Bug #755.
@@ -8352,6 +8384,7 @@ impl GodlyApp {
                 Ok(grid) => Message::GridFetched {
                     session_id: sid_ok,
                     grid,
+                    is_scroll_fetch: true,
                 },
                 Err(e) => Message::GridFetchFailed {
                     session_id: sid_err,
@@ -8398,6 +8431,7 @@ impl GodlyApp {
                 Ok(grid) => Message::GridFetched {
                     session_id: sid_ok,
                     grid,
+                    is_scroll_fetch: false,
                 },
                 Err(e) => Message::GridFetchFailed {
                     session_id: sid_err,
