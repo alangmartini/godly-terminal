@@ -392,6 +392,18 @@ pub struct GodlyApp {
     pub(crate) workspace_mute_patterns: Vec<String>,
     /// Current input value for adding a workspace mute pattern.
     workspace_mute_pattern_input: String,
+    /// Desktop notification preferences (OS toasts when unfocused).
+    desktop_notify_prefs: crate::desktop_notify_prefs::DesktopNotifyPreferences,
+    /// Whether the "Enable desktop notifications?" prompt is currently shown.
+    desktop_notify_prompt_pending: bool,
+    /// Whether the "remember" checkbox in the prompt is checked.
+    desktop_notify_prompt_remember: bool,
+    /// Pending notification payload to send if user enables from prompt.
+    /// Only the most recent payload is kept — earlier ones are intentionally
+    /// dropped to avoid a burst of OS toasts after the user clicks Enable.
+    desktop_notify_pending_payload: Option<(String, String)>,
+    /// Whether the prompt has been shown this session (avoid repeating).
+    desktop_notify_prompted_this_session: bool,
     /// Quick Claude preset editor input: preset name.
     quick_claude_name_input: String,
     /// Quick Claude preset editor input: prompt template.
@@ -600,6 +612,11 @@ impl Default for GodlyApp {
             bell_burst_suppressed: HashMap::new(),
             workspace_mute_patterns: Vec::new(),
             workspace_mute_pattern_input: String::new(),
+            desktop_notify_prefs: crate::desktop_notify_prefs::load_preferences(),
+            desktop_notify_prompt_pending: false,
+            desktop_notify_prompt_remember: false,
+            desktop_notify_pending_payload: None,
+            desktop_notify_prompted_this_session: false,
             quick_claude_name_input: String::new(),
             quick_claude_prompt_input: String::new(),
             quick_claude_layout: QuickClaudeLayout::Single,
@@ -828,6 +845,14 @@ pub enum Message {
     NotificationSoundPresetSelected(NotificationSoundPreset),
     /// Play test notification sound.
     NotificationSoundTest,
+    /// User enabled desktop notifications from the prompt.
+    DesktopNotifyPromptEnable,
+    /// User declined desktop notifications from the prompt.
+    DesktopNotifyPromptDisable,
+    /// User toggled the "Remember my choice" checkbox in the prompt.
+    DesktopNotifyPromptRememberToggle,
+    /// User toggled desktop notifications in the settings UI.
+    DesktopNotifyToggled,
     /// Input changed for workspace mute pattern editor.
     WorkspaceMutePatternInputChanged(String),
     /// Add a workspace mute pattern from the current input.
@@ -1489,6 +1514,30 @@ impl GodlyApp {
         self.last_global_sound_ms = Some(now_ms);
     }
 
+    pub(crate) fn send_desktop_notification_if_allowed(&mut self, title: &str, body: &str) {
+        if self.window_focused {
+            return;
+        }
+
+        if self.desktop_notify_prefs.remembered {
+            if self.desktop_notify_prefs.enabled {
+                godly_app_adapter::desktop_notify::send_desktop_notification(title, body);
+            }
+            return;
+        }
+
+        if self.desktop_notify_prompted_this_session {
+            if self.desktop_notify_prefs.enabled {
+                godly_app_adapter::desktop_notify::send_desktop_notification(title, body);
+            }
+            return;
+        }
+
+        // First time this session: show the prompt, stash the payload.
+        self.desktop_notify_prompt_pending = true;
+        self.desktop_notify_pending_payload = Some((title.to_string(), body.to_string()));
+    }
+
     fn request_window_attention_if_allowed(&mut self) -> Task<Message> {
         let now_ms = Self::now_ms();
         let decision = notifications::decide_window_attention_request(
@@ -1553,7 +1602,12 @@ impl GodlyApp {
                 } else {
                     format!("Terminal {} ({} bells suppressed)", terminal_id, count)
                 };
-                self.enqueue_toast_for_terminal(title, message, &terminal_id);
+                self.enqueue_toast_for_terminal(
+                    title.clone(),
+                    message.clone(),
+                    &terminal_id,
+                );
+                self.send_desktop_notification_if_allowed(&title, &message);
             }
 
             self.play_notification_sound_if_allowed(&terminal_id);
@@ -1611,6 +1665,8 @@ impl GodlyApp {
         self.worktree_close_pending = None;
         self.quit_confirm_pending = false;
         self.copy_preview_text = None;
+        self.desktop_notify_prompt_pending = false;
+        self.desktop_notify_pending_payload = None;
         self.terminal_context_menu_pos = None;
         self.terminal_context_menu_terminal_id = None;
         self.hovered_url = None;
@@ -1835,6 +1891,15 @@ impl GodlyApp {
                         self.enqueue_bell_toast(&session_id);
                     }
                     self.play_notification_sound_if_allowed(&session_id);
+                    let bell_label = self
+                        .terminals
+                        .get(&session_id)
+                        .map(|t| t.tab_label().to_string())
+                        .unwrap_or_else(|| session_id.clone());
+                    self.send_desktop_notification_if_allowed(
+                        "Terminal Bell",
+                        &format!("Bell from {}", bell_label),
+                    );
                     log::debug!("Bell from session {}", session_id);
                     return self.request_window_attention_if_allowed();
                 }
@@ -2004,6 +2069,7 @@ impl GodlyApp {
                     self.mru_switcher.is_some(),
                     self.claude_md_editor.is_some(),
                     self.quick_claude_dialog.is_some(),
+                    self.desktop_notify_prompt_pending,
                 );
 
                 // Write capture mutations back.
@@ -2128,11 +2194,16 @@ impl GodlyApp {
                             // All other keys are forwarded to the dialog's text_editor
                             return Task::none();
                         }
+                        if self.desktop_notify_prompt_pending {
+                            if is_escape_key(&key) {
+                                self.desktop_notify_prompt_pending = false;
+                                self.desktop_notify_pending_payload = None;
+                            }
+                            return Task::none();
+                        }
                         return Task::none();
                     }
-                    KeyRoutingResult::ForwardToPty => {
-                        // fall through to PTY forwarding below
-                    }
+                    KeyRoutingResult::ForwardToPty => {}
                 }
 
                 // Forward to PTY — send to focused terminal, not just active tab.
@@ -2597,6 +2668,32 @@ impl GodlyApp {
                         log::warn!("Failed to play notification test sound: {}", e);
                     }
                 }
+            }
+            Message::DesktopNotifyPromptEnable => {
+                self.desktop_notify_prefs.enabled = true;
+                self.desktop_notify_prefs.remembered = self.desktop_notify_prompt_remember;
+                self.desktop_notify_prompt_pending = false;
+                self.desktop_notify_prompted_this_session = true;
+                crate::desktop_notify_prefs::save_preferences(&self.desktop_notify_prefs);
+                if let Some((title, body)) = self.desktop_notify_pending_payload.take() {
+                    godly_app_adapter::desktop_notify::send_desktop_notification(&title, &body);
+                }
+            }
+            Message::DesktopNotifyPromptDisable => {
+                self.desktop_notify_prefs.enabled = false;
+                self.desktop_notify_prefs.remembered = self.desktop_notify_prompt_remember;
+                self.desktop_notify_prompt_pending = false;
+                self.desktop_notify_prompted_this_session = true;
+                crate::desktop_notify_prefs::save_preferences(&self.desktop_notify_prefs);
+                self.desktop_notify_pending_payload = None;
+            }
+            Message::DesktopNotifyPromptRememberToggle => {
+                self.desktop_notify_prompt_remember = !self.desktop_notify_prompt_remember;
+            }
+            Message::DesktopNotifyToggled => {
+                self.desktop_notify_prefs.enabled = !self.desktop_notify_prefs.enabled;
+                self.desktop_notify_prefs.remembered = true;
+                crate::desktop_notify_prefs::save_preferences(&self.desktop_notify_prefs);
             }
             Message::WorkspaceMutePatternInputChanged(value) => {
                 self.workspace_mute_pattern_input = value;
@@ -5000,6 +5097,23 @@ impl GodlyApp {
                 with_worktree_close
             };
 
+        // Desktop notification opt-in prompt overlay
+        let with_desktop_prompt: Element<'_, Message> =
+            if self.desktop_notify_prompt_pending {
+                stack![
+                    with_copy_preview,
+                    crate::confirm_dialog::view_desktop_notify_prompt(
+                        self.desktop_notify_prompt_remember,
+                        Message::DesktopNotifyPromptEnable,
+                        Message::DesktopNotifyPromptDisable,
+                        Message::DesktopNotifyPromptRememberToggle,
+                    )
+                ]
+                .into()
+            } else {
+                with_copy_preview
+            };
+
         // Shell picker overlay (H1-H6)
         let with_shell_picker: Element<'_, Message> = if self.shell_picker.visible {
             let picker = shell_picker::view_shell_picker(
@@ -5011,9 +5125,9 @@ impl GodlyApp {
                 Message::ShellPickerConfirmed,
                 Message::ShellPickerCancelled,
             );
-            stack![with_copy_preview, picker].into()
+            stack![with_desktop_prompt, picker].into()
         } else {
-            with_copy_preview
+            with_desktop_prompt
         };
 
         // --- Quick Claude Dialog overlay ---
@@ -5895,8 +6009,22 @@ impl GodlyApp {
             }
         }
 
+        let desktop_toggle_label = if self.desktop_notify_prefs.enabled {
+            "Disable Desktop Notifications"
+        } else {
+            "Enable Desktop Notifications"
+        };
+
         container(
             column![
+                text("Desktop Notifications").size(14).color(TEXT_ACTIVE()),
+                text("Show OS toast notifications when the window is unfocused.")
+                    .size(12)
+                    .color(TEXT_PRIMARY()),
+                button(text(desktop_toggle_label).size(12).color(TEXT_PRIMARY()))
+                    .on_press(Message::DesktopNotifyToggled)
+                    .padding(Padding::from([4, 9])),
+                Space::new().height(6.0),
                 text("Notification Sounds").size(14).color(TEXT_ACTIVE()),
                 text("Choose a sound preset for bell events.")
                     .size(12)
@@ -10243,6 +10371,7 @@ fn resolve_key_event(
     mru_switcher_open: bool,
     claude_md_editor_open: bool,
     quick_claude_dialog_open: bool,
+    desktop_notify_prompt_pending: bool,
 ) -> KeyRoutingResult {
     // 1. Capture mode
     if let Some(cap_index) = capture.capturing_index {
@@ -10285,6 +10414,11 @@ fn resolve_key_event(
 
     // 3b. Quick Claude dialog intercepts all keys
     if quick_claude_dialog_open {
+        return KeyRoutingResult::Intercepted;
+    }
+
+    // 3c. Desktop notification prompt intercepts all keys
+    if desktop_notify_prompt_pending {
         return KeyRoutingResult::Intercepted;
     }
 
@@ -11143,6 +11277,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Override was recorded.
@@ -11156,6 +11291,7 @@ mod keyboard_routing_tests {
             ctrl_shift(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11178,6 +11314,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
 
         // Original Ctrl+\ should no longer trigger SplitRight.
@@ -11186,6 +11323,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11206,6 +11344,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
@@ -11220,6 +11359,7 @@ mod keyboard_routing_tests {
             Modifiers::empty(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11240,6 +11380,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11264,6 +11405,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
 
         // Rebind SplitDown (6) to Ctrl+Shift+.
@@ -11273,6 +11415,7 @@ mod keyboard_routing_tests {
             ctrl_shift(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11287,6 +11430,7 @@ mod keyboard_routing_tests {
                 &mut cap,
                 false,
                 false,
+                false,
                 false
             ),
             KeyRoutingResult::Action(AppAction::SplitRight)
@@ -11297,6 +11441,7 @@ mod keyboard_routing_tests {
                 ctrl_shift(),
                 &PHYS_UNIDENT,
                 &mut cap,
+                false,
                 false,
                 false,
                 false
@@ -11313,6 +11458,7 @@ mod keyboard_routing_tests {
                 &mut cap,
                 false,
                 false,
+                false,
                 false
             ),
             KeyRoutingResult::ForwardToPty
@@ -11323,6 +11469,7 @@ mod keyboard_routing_tests {
                 Modifiers::CTRL.union(Modifiers::ALT),
                 &PHYS_UNIDENT,
                 &mut cap,
+                false,
                 false,
                 false,
                 false,
@@ -11337,6 +11484,7 @@ mod keyboard_routing_tests {
                 Modifiers::CTRL,
                 &PHYS_UNIDENT,
                 &mut cap,
+                false,
                 false,
                 false,
                 false
@@ -11361,6 +11509,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::Action(AppAction::SplitRight));
     }
@@ -11378,6 +11527,7 @@ mod keyboard_routing_tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(result, KeyRoutingResult::CapturedBinding);
         // Should normalize 0x1C to "\" in the stored chord.
@@ -11389,6 +11539,7 @@ mod keyboard_routing_tests {
             Modifiers::CTRL,
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,
@@ -11407,6 +11558,7 @@ mod keyboard_routing_tests {
             Modifiers::empty(),
             &PHYS_UNIDENT,
             &mut cap,
+            false,
             false,
             false,
             false,

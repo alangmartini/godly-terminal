@@ -1,6 +1,7 @@
 pub mod clipboard;
 pub mod commands;
 pub mod daemon_client;
+pub mod desktop_notify;
 pub mod event_loop;
 pub mod keys;
 pub mod ports;
