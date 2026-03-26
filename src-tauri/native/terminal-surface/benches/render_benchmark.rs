@@ -1,5 +1,5 @@
 use criterion::{
-    criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
+    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
 };
 use godly_protocol::types::{
     CursorShape, CursorState, GridDimensions, RichGridCell, RichGridData, RichGridRow,
@@ -348,14 +348,14 @@ fn bench_cache_operations(c: &mut Criterion) {
         let key = GlyphKey::new('A', 14.0, false, false);
         cache.insert(key, stub_glyph());
 
-        b.iter(|| cache.get(&key));
+        b.iter(|| black_box(cache.get(&key).is_some()));
     });
 
     group.bench_function("cache_get_miss", |b| {
-        let cache = GlyphCache::new();
+        let mut cache = GlyphCache::new();
         let key = GlyphKey::new('Z', 14.0, false, false);
 
-        b.iter(|| cache.get(&key));
+        b.iter(|| black_box(cache.get(&key).is_none()));
     });
 
     group.finish();
