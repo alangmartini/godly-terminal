@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 const SESSIONS_FILE_NAME: &str = "quick-claude-sessions.json";
 
@@ -20,7 +20,7 @@ pub struct QuickClaudeSessionRecord {
     pub model: String,
     pub mode: String,
     pub status: SessionStatus,
-    pub launched_at: String,     // ISO 8601 format
+    pub launched_at: String, // ISO 8601 format
     pub claude_session_id: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
@@ -53,10 +53,14 @@ pub fn save_sessions(sessions: &[QuickClaudeSessionRecord]) -> Result<(), String
     save_sessions_to_path(&sessions_path(), sessions)
 }
 
-pub fn save_sessions_to_path(path: &Path, sessions: &[QuickClaudeSessionRecord]) -> Result<(), String> {
+pub fn save_sessions_to_path(
+    path: &Path,
+    sessions: &[QuickClaudeSessionRecord],
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to create directory {}: {}", parent.display(), error))?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!("Failed to create directory {}: {}", parent.display(), error)
+        })?;
     }
     let json = serde_json::to_string_pretty(sessions)
         .map_err(|error| format!("Failed to serialize sessions: {}", error))?;
@@ -72,7 +76,9 @@ pub fn add_session(record: QuickClaudeSessionRecord) -> Result<(), String> {
 }
 
 /// Remove sessions whose terminal_id is not in the set of live terminal IDs.
-pub fn cleanup_stale_sessions(live_terminal_ids: &[String]) -> Result<Vec<QuickClaudeSessionRecord>, String> {
+pub fn cleanup_stale_sessions(
+    live_terminal_ids: &[String],
+) -> Result<Vec<QuickClaudeSessionRecord>, String> {
     let mut sessions = load_sessions();
     for session in sessions.iter_mut() {
         if session.status == SessionStatus::Running
@@ -105,7 +111,10 @@ pub fn now_iso8601() -> String {
 
     // Calculate year/month/day from days since epoch (1970-01-01)
     let (year, month, day) = days_to_ymd(days);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hours, minutes, seconds)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hours, minutes, seconds
+    )
 }
 
 fn days_to_ymd(days_since_epoch: u64) -> (u64, u64, u64) {
@@ -223,9 +232,7 @@ mod tests {
         let mut sessions = load_sessions_from_path(&path);
         let live = vec!["t-1".to_string()];
         for session in sessions.iter_mut() {
-            if session.status == SessionStatus::Running
-                && !live.contains(&session.terminal_id)
-            {
+            if session.status == SessionStatus::Running && !live.contains(&session.terminal_id) {
                 session.status = SessionStatus::Completed;
             }
         }
@@ -233,9 +240,9 @@ mod tests {
 
         let loaded = load_sessions_from_path(&path);
         assert_eq!(loaded.len(), 3);
-        assert_eq!(loaded[0].status, SessionStatus::Running);   // t-1 still live
-        assert_eq!(loaded[1].status, SessionStatus::Completed);  // t-2 was stale
-        assert_eq!(loaded[2].status, SessionStatus::Completed);  // t-3 already completed
+        assert_eq!(loaded[0].status, SessionStatus::Running); // t-1 still live
+        assert_eq!(loaded[1].status, SessionStatus::Completed); // t-2 was stale
+        assert_eq!(loaded[2].status, SessionStatus::Completed); // t-3 already completed
 
         let _ = std::fs::remove_file(&path);
     }
@@ -245,7 +252,13 @@ mod tests {
         let path = temp_sessions_path();
         // Create 60 sessions
         let records: Vec<QuickClaudeSessionRecord> = (0..60)
-            .map(|i| make_record(&format!("s-{}", i), &format!("t-{}", i), SessionStatus::Completed))
+            .map(|i| {
+                make_record(
+                    &format!("s-{}", i),
+                    &format!("t-{}", i),
+                    SessionStatus::Completed,
+                )
+            })
             .collect();
         save_sessions_to_path(&path, &records).expect("save should succeed");
 
@@ -268,13 +281,47 @@ mod tests {
     fn test_now_iso8601_format() {
         let timestamp = now_iso8601();
         // Should match YYYY-MM-DDTHH:MM:SSZ pattern
-        assert_eq!(timestamp.len(), 20, "ISO 8601 timestamp should be 20 chars: {}", timestamp);
-        assert!(timestamp.ends_with('Z'), "timestamp should end with Z: {}", timestamp);
-        assert_eq!(&timestamp[4..5], "-", "char 4 should be dash: {}", timestamp);
-        assert_eq!(&timestamp[7..8], "-", "char 7 should be dash: {}", timestamp);
-        assert_eq!(&timestamp[10..11], "T", "char 10 should be T: {}", timestamp);
-        assert_eq!(&timestamp[13..14], ":", "char 13 should be colon: {}", timestamp);
-        assert_eq!(&timestamp[16..17], ":", "char 16 should be colon: {}", timestamp);
+        assert_eq!(
+            timestamp.len(),
+            20,
+            "ISO 8601 timestamp should be 20 chars: {}",
+            timestamp
+        );
+        assert!(
+            timestamp.ends_with('Z'),
+            "timestamp should end with Z: {}",
+            timestamp
+        );
+        assert_eq!(
+            &timestamp[4..5],
+            "-",
+            "char 4 should be dash: {}",
+            timestamp
+        );
+        assert_eq!(
+            &timestamp[7..8],
+            "-",
+            "char 7 should be dash: {}",
+            timestamp
+        );
+        assert_eq!(
+            &timestamp[10..11],
+            "T",
+            "char 10 should be T: {}",
+            timestamp
+        );
+        assert_eq!(
+            &timestamp[13..14],
+            ":",
+            "char 13 should be colon: {}",
+            timestamp
+        );
+        assert_eq!(
+            &timestamp[16..17],
+            ":",
+            "char 16 should be colon: {}",
+            timestamp
+        );
     }
 
     #[test]
@@ -289,14 +336,16 @@ mod tests {
     #[test]
     fn test_old_records_without_cwd_deserialize() {
         let json = r#"{"id":"s-1","prompt":"test","terminal_id":"t-1","workspace_id":"ws-1","branch":"main","model":"opus","mode":"code","status":"Running","launched_at":"2026-03-20T12:00:00Z","claude_session_id":null}"#;
-        let decoded: QuickClaudeSessionRecord = serde_json::from_str(json).expect("old records should deserialize");
+        let decoded: QuickClaudeSessionRecord =
+            serde_json::from_str(json).expect("old records should deserialize");
         assert_eq!(decoded.cwd, None);
     }
 
     #[test]
     fn test_old_records_without_is_clone_deserialize() {
         let json = r#"{"id":"s-1","prompt":"test","terminal_id":"t-1","workspace_id":"ws-1","branch":"main","model":"opus","mode":"code","status":"Running","launched_at":"2026-03-20T12:00:00Z","claude_session_id":null}"#;
-        let decoded: QuickClaudeSessionRecord = serde_json::from_str(json).expect("old records should deserialize");
+        let decoded: QuickClaudeSessionRecord =
+            serde_json::from_str(json).expect("old records should deserialize");
         assert!(!decoded.is_clone);
     }
 
@@ -312,9 +361,13 @@ mod tests {
     #[test]
     fn test_sessions_path_not_empty() {
         let path = sessions_path();
-        assert!(!path.as_os_str().is_empty(), "sessions path should not be empty");
         assert!(
-            path.to_string_lossy().contains("quick-claude-sessions.json"),
+            !path.as_os_str().is_empty(),
+            "sessions path should not be empty"
+        );
+        assert!(
+            path.to_string_lossy()
+                .contains("quick-claude-sessions.json"),
             "path should contain the sessions file name: {:?}",
             path
         );

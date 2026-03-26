@@ -155,7 +155,11 @@ mod tests {
         // Simulate a fast frame (< 16.67ms) — no drop
         std::thread::sleep(std::time::Duration::from_millis(5));
         stats.frame_tick();
-        assert_eq!(stats.dropped_frames(), 0, "Fast frame should not be dropped");
+        assert_eq!(
+            stats.dropped_frames(),
+            0,
+            "Fast frame should not be dropped"
+        );
 
         // Simulate a slow frame (> 16.67ms) — dropped
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -180,9 +184,17 @@ mod tests {
 
         let h = stats.histogram();
         // The 5ms frame should land in bucket 0 (<8ms)
-        assert!(h[0] >= 1, "Expected at least 1 frame in <8ms bucket, got {}", h[0]);
+        assert!(
+            h[0] >= 1,
+            "Expected at least 1 frame in <8ms bucket, got {}",
+            h[0]
+        );
         // The 20ms frame should land in bucket 2 (16-33ms)
-        assert!(h[2] >= 1, "Expected at least 1 frame in 16-33ms bucket, got {}", h[2]);
+        assert!(
+            h[2] >= 1,
+            "Expected at least 1 frame in 16-33ms bucket, got {}",
+            h[2]
+        );
         assert_eq!(stats.total_frames, 2, "Should have counted 2 total frames");
     }
 

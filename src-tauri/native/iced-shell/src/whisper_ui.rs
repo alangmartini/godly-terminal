@@ -53,14 +53,15 @@ pub fn view_whisper_overlay<'a, M: Clone + 'a>(
         "Recording..."
     };
 
-    let dot = container(Space::new().width(10.0).height(10.0)).style(move |_theme| container::Style {
-        background: Some(iced::Background::Color(RECORDING_DOT_COLOR)),
-        border: Border {
-            radius: 5.0.into(),
-            ..Border::default()
-        },
-        ..container::Style::default()
-    });
+    let dot =
+        container(Space::new().width(10.0).height(10.0)).style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(RECORDING_DOT_COLOR)),
+            border: Border {
+                radius: 5.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        });
 
     let title_row = row![
         dot,
@@ -71,16 +72,17 @@ pub fn view_whisper_overlay<'a, M: Clone + 'a>(
 
     // Level meter bar
     let fill_width = (LEVEL_BAR_WIDTH * state.level).max(0.0);
-    let level_fill = container(Space::new().width(fill_width).height(LEVEL_BAR_HEIGHT)).style(
-        move |_theme| container::Style {
-            background: Some(iced::Background::Color(LEVEL_BAR_FILL)),
-            border: Border {
-                radius: 4.0.into(),
-                ..Border::default()
-            },
-            ..container::Style::default()
-        },
-    );
+    let level_fill =
+        container(Space::new().width(fill_width).height(LEVEL_BAR_HEIGHT)).style(move |_theme| {
+            container::Style {
+                background: Some(iced::Background::Color(LEVEL_BAR_FILL)),
+                border: Border {
+                    radius: 4.0.into(),
+                    ..Border::default()
+                },
+                ..container::Style::default()
+            }
+        });
     let level_bar = container(level_fill)
         .width(Length::Fixed(LEVEL_BAR_WIDTH))
         .height(Length::Fixed(LEVEL_BAR_HEIGHT))
@@ -153,8 +155,8 @@ pub fn view_whisper_overlay<'a, M: Clone + 'a>(
         }
     });
 
-    let btn_row = row![stop_btn, Space::new().width(12.0), cancel_btn]
-        .align_y(iced::Alignment::Center);
+    let btn_row =
+        row![stop_btn, Space::new().width(12.0), cancel_btn].align_y(iced::Alignment::Center);
 
     let card_content = column![
         title_row,

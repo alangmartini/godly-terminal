@@ -22,10 +22,7 @@ pub fn init() {
     START_TIME.get_or_init(Instant::now);
 
     let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    let dir_name = format!(
-        "com.godly.terminal{}",
-        godly_protocol::instance_suffix()
-    );
+    let dir_name = format!("com.godly.terminal{}", godly_protocol::instance_suffix());
     let dir = PathBuf::from(app_data).join(&dir_name);
     fs::create_dir_all(&dir).ok();
 
@@ -41,10 +38,7 @@ pub fn init() {
 
     let initial_size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path);
+    let file = OpenOptions::new().create(true).append(true).open(&path);
 
     match file {
         Ok(f) => {
@@ -92,10 +86,7 @@ pub fn log(msg: &str) {
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default();
-            let elapsed = START_TIME
-                .get()
-                .map(|s| s.elapsed())
-                .unwrap_or_default();
+            let elapsed = START_TIME.get().map(|s| s.elapsed()).unwrap_or_default();
             let line = format!(
                 "[{}.{:03}] [{:>8.3}s] {}\n",
                 ts.as_secs(),

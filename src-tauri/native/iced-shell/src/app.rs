@@ -1608,11 +1608,7 @@ impl GodlyApp {
                 } else {
                     format!("Terminal {} ({} bells suppressed)", terminal_id, count)
                 };
-                self.enqueue_toast_for_terminal(
-                    title.clone(),
-                    message.clone(),
-                    &terminal_id,
-                );
+                self.enqueue_toast_for_terminal(title.clone(), message.clone(), &terminal_id);
                 self.send_desktop_notification_if_allowed(&title, &message);
             }
 
@@ -5127,21 +5123,20 @@ impl GodlyApp {
             };
 
         // Desktop notification opt-in prompt overlay
-        let with_desktop_prompt: Element<'_, Message> =
-            if self.desktop_notify_prompt_pending {
-                stack![
-                    with_copy_preview,
-                    crate::confirm_dialog::view_desktop_notify_prompt(
-                        self.desktop_notify_prompt_remember,
-                        Message::DesktopNotifyPromptEnable,
-                        Message::DesktopNotifyPromptDisable,
-                        Message::DesktopNotifyPromptRememberToggle,
-                    )
-                ]
-                .into()
-            } else {
-                with_copy_preview
-            };
+        let with_desktop_prompt: Element<'_, Message> = if self.desktop_notify_prompt_pending {
+            stack![
+                with_copy_preview,
+                crate::confirm_dialog::view_desktop_notify_prompt(
+                    self.desktop_notify_prompt_remember,
+                    Message::DesktopNotifyPromptEnable,
+                    Message::DesktopNotifyPromptDisable,
+                    Message::DesktopNotifyPromptRememberToggle,
+                )
+            ]
+            .into()
+        } else {
+            with_copy_preview
+        };
 
         // Shell picker overlay (H1-H6)
         let with_shell_picker: Element<'_, Message> = if self.shell_picker.visible {

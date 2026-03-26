@@ -78,11 +78,8 @@ impl canvas::Program<()> for ScrollbarCanvas {
         let y = self.metrics.thumb_y;
         let r = w / 2.0;
 
-        let thumb = canvas::Path::rounded_rectangle(
-            Point::new(TRACK_MARGIN, y),
-            Size::new(w, h),
-            r.into(),
-        );
+        let thumb =
+            canvas::Path::rounded_rectangle(Point::new(TRACK_MARGIN, y), Size::new(w, h), r.into());
         frame.fill(&thumb, thumb_color);
 
         vec![frame.into_geometry()]

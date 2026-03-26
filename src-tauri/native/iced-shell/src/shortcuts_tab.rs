@@ -255,7 +255,11 @@ pub fn view_shortcuts_tab<'a, M: Clone + 'a>(
                 default_keys
             };
             let is_overridden = override_text.is_some();
-            let badge_color = if is_capturing { TEXT_PRIMARY() } else { ACCENT() };
+            let badge_color = if is_capturing {
+                TEXT_PRIMARY()
+            } else {
+                ACCENT()
+            };
             let badge_border_color = if is_capturing {
                 ACCENT()
             } else if is_overridden {
@@ -265,18 +269,17 @@ pub fn view_shortcuts_tab<'a, M: Clone + 'a>(
             };
             let badge_bg_alpha = if is_capturing { 0.15 } else { 0.7 };
 
-            let badge_label =
-                container(text(badge_text).size(12).color(badge_color))
-                    .padding(Padding::from([3, 8]))
-                    .style(move |_theme| container::Style {
-                        background: Some(Background::Color(tint(BG_PRIMARY(), badge_bg_alpha))),
-                        border: Border {
-                            color: badge_border_color,
-                            width: 1.0,
-                            radius: KEY_BADGE_RADIUS.into(),
-                        },
-                        ..container::Style::default()
-                    });
+            let badge_label = container(text(badge_text).size(12).color(badge_color))
+                .padding(Padding::from([3, 8]))
+                .style(move |_theme| container::Style {
+                    background: Some(Background::Color(tint(BG_PRIMARY(), badge_bg_alpha))),
+                    border: Border {
+                        color: badge_border_color,
+                        width: 1.0,
+                        radius: KEY_BADGE_RADIUS.into(),
+                    },
+                    ..container::Style::default()
+                });
 
             let msg = on_badge_click(flat_index);
             let key_badge: Element<'_, M> = button(badge_label)

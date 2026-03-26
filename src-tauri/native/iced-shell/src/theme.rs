@@ -146,22 +146,54 @@ pub struct ThemePalette {
 fn default_success() -> Color {
     Color::from_rgb(0.40, 0.78, 0.45)
 }
-fn default_text_placeholder() -> Color { Color::from_rgb(0.45, 0.45, 0.50) }
-fn default_ghost_hover() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.06) }
-fn default_ghost_active() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.10) }
-fn default_ghost_selected() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.08) }
-fn default_element_bg() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.05) }
-fn default_element_hover() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.08) }
-fn default_element_active() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.12) }
-fn default_surface_bg() -> Color { Color::from_rgb(0.12, 0.12, 0.14) }
-fn default_tab_active_bg() -> Color { Color::from_rgb(0.08, 0.08, 0.10) }
-fn default_tab_inactive_bg() -> Color { Color::from_rgb(0.12, 0.12, 0.14) }
-fn default_title_bar_bg() -> Color { Color::from_rgb(0.10, 0.10, 0.12) }
-fn default_status_bar_bg() -> Color { Color::from_rgb(0.10, 0.10, 0.12) }
-fn default_border_variant() -> Color { Color::from_rgba(1.0, 1.0, 1.0, 0.06) }
-fn default_border_focused() -> Color { Color::from_rgb(0.38, 0.60, 0.90) }
-fn default_info() -> Color { Color::from_rgb(0.38, 0.69, 0.94) }
-fn default_warning() -> Color { Color::from_rgb(0.90, 0.75, 0.48) }
+fn default_text_placeholder() -> Color {
+    Color::from_rgb(0.45, 0.45, 0.50)
+}
+fn default_ghost_hover() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.06)
+}
+fn default_ghost_active() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+}
+fn default_ghost_selected() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+}
+fn default_element_bg() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.05)
+}
+fn default_element_hover() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.08)
+}
+fn default_element_active() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.12)
+}
+fn default_surface_bg() -> Color {
+    Color::from_rgb(0.12, 0.12, 0.14)
+}
+fn default_tab_active_bg() -> Color {
+    Color::from_rgb(0.08, 0.08, 0.10)
+}
+fn default_tab_inactive_bg() -> Color {
+    Color::from_rgb(0.12, 0.12, 0.14)
+}
+fn default_title_bar_bg() -> Color {
+    Color::from_rgb(0.10, 0.10, 0.12)
+}
+fn default_status_bar_bg() -> Color {
+    Color::from_rgb(0.10, 0.10, 0.12)
+}
+fn default_border_variant() -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, 0.06)
+}
+fn default_border_focused() -> Color {
+    Color::from_rgb(0.38, 0.60, 0.90)
+}
+fn default_info() -> Color {
+    Color::from_rgb(0.38, 0.69, 0.94)
+}
+fn default_warning() -> Color {
+    Color::from_rgb(0.90, 0.75, 0.48)
+}
 
 // ---------------------------------------------------------------------------
 // Theme identifiers.
@@ -351,8 +383,7 @@ pub fn export_theme_to_file(theme: &CustomTheme, dir: &Path) -> Result<PathBuf, 
     let path = dir.join(filename);
     let json =
         serde_json::to_string_pretty(theme).map_err(|e| format!("Serialization failed: {e}"))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -431,31 +462,57 @@ pub fn SUCCESS() -> Color {
     active().success
 }
 #[allow(non_snake_case)]
-pub fn TEXT_PLACEHOLDER() -> Color { active().text_placeholder }
+pub fn TEXT_PLACEHOLDER() -> Color {
+    active().text_placeholder
+}
 #[allow(non_snake_case)]
-pub fn GHOST_HOVER() -> Color { active().ghost_hover }
+pub fn GHOST_HOVER() -> Color {
+    active().ghost_hover
+}
 #[allow(non_snake_case)]
-pub fn GHOST_ACTIVE() -> Color { active().ghost_active }
+pub fn GHOST_ACTIVE() -> Color {
+    active().ghost_active
+}
 #[allow(non_snake_case)]
-pub fn GHOST_SELECTED() -> Color { active().ghost_selected }
+pub fn GHOST_SELECTED() -> Color {
+    active().ghost_selected
+}
 #[allow(non_snake_case)]
-pub fn SURFACE_BG() -> Color { active().surface_bg }
+pub fn SURFACE_BG() -> Color {
+    active().surface_bg
+}
 #[allow(non_snake_case)]
-pub fn TAB_ACTIVE_BG() -> Color { active().tab_active_bg }
+pub fn TAB_ACTIVE_BG() -> Color {
+    active().tab_active_bg
+}
 #[allow(non_snake_case)]
-pub fn TAB_INACTIVE_BG() -> Color { active().tab_inactive_bg }
+pub fn TAB_INACTIVE_BG() -> Color {
+    active().tab_inactive_bg
+}
 #[allow(non_snake_case)]
-pub fn TITLE_BAR_BG() -> Color { active().title_bar_bg }
+pub fn TITLE_BAR_BG() -> Color {
+    active().title_bar_bg
+}
 #[allow(non_snake_case)]
-pub fn STATUS_BAR_BG() -> Color { active().status_bar_bg }
+pub fn STATUS_BAR_BG() -> Color {
+    active().status_bar_bg
+}
 #[allow(non_snake_case)]
-pub fn BORDER_VARIANT() -> Color { active().border_variant }
+pub fn BORDER_VARIANT() -> Color {
+    active().border_variant
+}
 #[allow(non_snake_case)]
-pub fn BORDER_FOCUSED() -> Color { active().border_focused }
+pub fn BORDER_FOCUSED() -> Color {
+    active().border_focused
+}
 #[allow(non_snake_case)]
-pub fn INFO() -> Color { active().info }
+pub fn INFO() -> Color {
+    active().info
+}
 #[allow(non_snake_case)]
-pub fn WARNING() -> Color { active().warning }
+pub fn WARNING() -> Color {
+    active().warning
+}
 
 // ---------------------------------------------------------------------------
 // Design system tokens (theme-independent, stay as pub const).
@@ -522,17 +579,14 @@ pub fn palette(id: ThemeId) -> ThemePalette {
 /// Derives the new semantic fields from a palette's existing base colors.
 fn fill_derived_fields(p: &mut ThemePalette) {
     p.text_placeholder = Color::from_rgba(
-        p.text_secondary.r, p.text_secondary.g, p.text_secondary.b, 0.60,
+        p.text_secondary.r,
+        p.text_secondary.g,
+        p.text_secondary.b,
+        0.60,
     );
-    p.ghost_hover = Color::from_rgba(
-        p.bg_tertiary.r, p.bg_tertiary.g, p.bg_tertiary.b, 0.70,
-    );
-    p.ghost_active = Color::from_rgba(
-        p.bg_active.r, p.bg_active.g, p.bg_active.b, 0.70,
-    );
-    p.ghost_selected = Color::from_rgba(
-        p.bg_tertiary.r, p.bg_tertiary.g, p.bg_tertiary.b, 0.70,
-    );
+    p.ghost_hover = Color::from_rgba(p.bg_tertiary.r, p.bg_tertiary.g, p.bg_tertiary.b, 0.70);
+    p.ghost_active = Color::from_rgba(p.bg_active.r, p.bg_active.g, p.bg_active.b, 0.70);
+    p.ghost_selected = Color::from_rgba(p.bg_tertiary.r, p.bg_tertiary.g, p.bg_tertiary.b, 0.70);
     p.element_bg = p.bg_tertiary;
     p.element_hover = p.bg_active;
     p.element_active = Color::from_rgba(p.accent.r, p.accent.g, p.accent.b, 0.20);
@@ -627,11 +681,21 @@ fn dusk() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb(0.71, 0.74, 0.41),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x1d, 0x1f, 0x21),
@@ -680,11 +744,21 @@ fn tokyo_night() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0x9e, 0xce, 0x6a),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x15, 0x16, 0x1e),
@@ -733,11 +807,21 @@ fn dracula() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0x50, 0xfa, 0x7b),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x21, 0x22, 0x2c),
@@ -786,11 +870,21 @@ fn nord() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0xa3, 0xbe, 0x8c),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x3b, 0x42, 0x52),
@@ -839,11 +933,21 @@ fn gruvbox_dark() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0xb8, 0xbb, 0x26),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x28, 0x28, 0x28),
@@ -892,11 +996,21 @@ fn one_dark() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0x98, 0xc3, 0x79),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x28, 0x2c, 0x34),
@@ -945,11 +1059,21 @@ fn catppuccin() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0xa6, 0xe3, 0xa1),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x45, 0x47, 0x5a),
@@ -998,11 +1122,21 @@ fn solarized_dark() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0x85, 0x99, 0x00),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x07, 0x36, 0x42),
@@ -1051,11 +1185,21 @@ fn monokai() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0xa6, 0xe2, 0x2e),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x27, 0x28, 0x22),
@@ -1104,11 +1248,21 @@ fn ayu_dark() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0x91, 0xb3, 0x62),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x01, 0x06, 0x0e),
@@ -1157,11 +1311,21 @@ fn rose_pine() -> ThemePalette {
         backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.58),
         success: Color::from_rgb8(0x31, 0x74, 0x8f),
         // Placeholder values - overwritten by fill_derived_fields below
-        text_placeholder: Color::BLACK, ghost_hover: Color::BLACK, ghost_active: Color::BLACK,
-        ghost_selected: Color::BLACK, element_bg: Color::BLACK, element_hover: Color::BLACK,
-        element_active: Color::BLACK, surface_bg: Color::BLACK, tab_active_bg: Color::BLACK,
-        tab_inactive_bg: Color::BLACK, title_bar_bg: Color::BLACK, status_bar_bg: Color::BLACK,
-        border_variant: Color::BLACK, border_focused: Color::BLACK, info: Color::BLACK,
+        text_placeholder: Color::BLACK,
+        ghost_hover: Color::BLACK,
+        ghost_active: Color::BLACK,
+        ghost_selected: Color::BLACK,
+        element_bg: Color::BLACK,
+        element_hover: Color::BLACK,
+        element_active: Color::BLACK,
+        surface_bg: Color::BLACK,
+        tab_active_bg: Color::BLACK,
+        tab_inactive_bg: Color::BLACK,
+        title_bar_bg: Color::BLACK,
+        status_bar_bg: Color::BLACK,
+        border_variant: Color::BLACK,
+        border_focused: Color::BLACK,
+        info: Color::BLACK,
         warning: Color::BLACK,
         terminal: TerminalPalette {
             black: Color::from_rgb8(0x26, 0x23, 0x3a),

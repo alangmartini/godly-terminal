@@ -48,8 +48,8 @@ pub fn generate_worktree_dir_name() -> String {
 /// outside the source repository, avoiding the git-inside-git problem that
 /// causes Claude agents to navigate back to the parent repo.
 fn worktrees_base_dir() -> Result<std::path::PathBuf, String> {
-    let appdata = std::env::var("APPDATA")
-        .map_err(|_| "APPDATA environment variable not set".to_string())?;
+    let appdata =
+        std::env::var("APPDATA").map_err(|_| "APPDATA environment variable not set".to_string())?;
     Ok(Path::new(&appdata)
         .join("com.godly.terminal")
         .join("worktrees"))
@@ -209,7 +209,14 @@ pub fn remove_clone(clone_path: &str) -> Result<(), String> {
 pub fn remove_worktree(repo_root: &str, worktree_path: &str) -> Result<(), String> {
     // Try git worktree remove --force first.
     let output = Command::new("git")
-        .args(["-C", repo_root, "worktree", "remove", "--force", worktree_path])
+        .args([
+            "-C",
+            repo_root,
+            "worktree",
+            "remove",
+            "--force",
+            worktree_path,
+        ])
         .output()
         .map_err(|e| format!("Failed to run git worktree remove: {e}"))?;
 
@@ -230,7 +237,6 @@ pub fn remove_worktree(repo_root: &str, worktree_path: &str) -> Result<(), Strin
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

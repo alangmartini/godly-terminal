@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use iced::widget::{button, column, container, row, scrollable, stack, text, text_input, text_editor, Space};
+use iced::widget::{
+    button, column, container, row, scrollable, stack, text, text_editor, text_input, Space,
+};
 use iced::{Background, Border, Color, ContentFit, Element, Length, Padding, Shadow, Vector};
 use serde::{Deserialize, Serialize};
 
@@ -272,22 +274,33 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
     let subtitle = text("Tab or Ctrl+Enter to launch \u{00B7} Escape to cancel")
         .size(11)
         .color(text_secondary);
-    let step_indicator = text("\u{2460} Workspace \u{2192} \u{2461} Prompt \u{2192} \u{2462} Launch")
-        .size(12)
-        .color(text_secondary);
+    let step_indicator =
+        text("\u{2460} Workspace \u{2192} \u{2461} Prompt \u{2192} \u{2462} Launch")
+            .size(12)
+            .color(text_secondary);
 
     // ── Tab bar ───────────────────────────────────────────────────────────
     let new_prompt_tab = {
         let is_active = state.active_tab == QuickClaudeTab::NewPrompt;
-        button(
-            text("New Prompt").size(12).color(if is_active { text_active } else { text_secondary })
-        )
+        button(text("New Prompt").size(12).color(if is_active {
+            text_active
+        } else {
+            text_secondary
+        }))
         .on_press(on_tab_selected(QuickClaudeTab::NewPrompt))
         .padding(Padding::from([6, 16]))
         .style(move |_theme, _status| button::Style {
-            background: Some(Background::Color(if is_active { tint(accent, 0.15) } else { Color::TRANSPARENT })),
+            background: Some(Background::Color(if is_active {
+                tint(accent, 0.15)
+            } else {
+                Color::TRANSPARENT
+            })),
             border: Border {
-                color: if is_active { accent } else { Color::TRANSPARENT },
+                color: if is_active {
+                    accent
+                } else {
+                    Color::TRANSPARENT
+                },
                 width: 0.0,
                 radius: 4.0.into(),
             },
@@ -303,15 +316,25 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
         } else {
             "Resume".to_string()
         };
-        button(
-            text(label).size(12).color(if is_active { text_active } else { text_secondary })
-        )
+        button(text(label).size(12).color(if is_active {
+            text_active
+        } else {
+            text_secondary
+        }))
         .on_press(on_tab_selected(QuickClaudeTab::ResumeSession))
         .padding(Padding::from([6, 16]))
         .style(move |_theme, _status| button::Style {
-            background: Some(Background::Color(if is_active { tint(accent, 0.15) } else { Color::TRANSPARENT })),
+            background: Some(Background::Color(if is_active {
+                tint(accent, 0.15)
+            } else {
+                Color::TRANSPARENT
+            })),
             border: Border {
-                color: if is_active { accent } else { Color::TRANSPARENT },
+                color: if is_active {
+                    accent
+                } else {
+                    Color::TRANSPARENT
+                },
                 width: 0.0,
                 radius: 4.0.into(),
             },
@@ -319,18 +342,16 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
         })
     };
 
-    let tab_bar = container(
-        row![new_prompt_tab, resume_tab].spacing(4)
-    )
-    .width(Length::Fill)
-    .style(move |_theme| container::Style {
-        border: Border {
-            color: border_color,
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..container::Style::default()
-    });
+    let tab_bar = container(row![new_prompt_tab, resume_tab].spacing(4))
+        .width(Length::Fill)
+        .style(move |_theme| container::Style {
+            border: Border {
+                color: border_color,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            ..container::Style::default()
+        });
 
     // ── Footer buttons ───────────────────────────────────────────────────
     let cancel_btn = button(text("Cancel").size(13))
@@ -349,7 +370,8 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 .selected_workspace_id
                 .as_ref()
                 .and_then(|id| {
-                    state.workspaces
+                    state
+                        .workspaces
                         .iter()
                         .find(|(ws_id, _)| ws_id == id)
                         .map(|(_, name)| name.as_str())
@@ -361,9 +383,13 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 row![
                     text(current_ws_name).size(13).color(text_primary),
                     Space::new().width(Length::Fill),
-                    text(if state.workspace_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
-                        .size(10)
-                        .color(text_secondary),
+                    text(if state.workspace_dropdown_open {
+                        "\u{25B2}"
+                    } else {
+                        "\u{25BC}"
+                    })
+                    .size(10)
+                    .color(text_secondary),
                 ]
                 .align_y(iced::Alignment::Center),
             )
@@ -386,14 +412,15 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
             if state.workspace_dropdown_open {
                 let mut ws_list = column![].spacing(2);
                 for (ws_id, ws_name) in &state.workspaces {
-                    let is_selected = state.selected_workspace_id.as_deref() == Some(ws_id.as_str());
+                    let is_selected =
+                        state.selected_workspace_id.as_deref() == Some(ws_id.as_str());
                     let id_clone = ws_id.clone();
                     let ws_name_ref = ws_name.as_str();
-                    let ws_item = button(
-                        text(ws_name_ref)
-                            .size(13)
-                            .color(if is_selected { text_active } else { text_primary }),
-                    )
+                    let ws_item = button(text(ws_name_ref).size(13).color(if is_selected {
+                        text_active
+                    } else {
+                        text_primary
+                    }))
                     .on_press(on_workspace_selected(id_clone))
                     .padding(Padding::from([5, 10]))
                     .width(Length::Fill)
@@ -431,11 +458,17 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
             let ai_toggle = on_ai_tool_dropdown_toggle.clone();
             let ai_button = button(
                 row![
-                    text(state.selected_ai_tool.as_str()).size(13).color(text_primary),
+                    text(state.selected_ai_tool.as_str())
+                        .size(13)
+                        .color(text_primary),
                     Space::new().width(Length::Fill),
-                    text(if state.ai_tool_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
-                        .size(10)
-                        .color(text_secondary),
+                    text(if state.ai_tool_dropdown_open {
+                        "\u{25B2}"
+                    } else {
+                        "\u{25BC}"
+                    })
+                    .size(10)
+                    .color(text_secondary),
                 ]
                 .align_y(iced::Alignment::Center),
             )
@@ -453,22 +486,19 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 ..button::Style::default()
             });
 
-            let mut ai_tool_section = column![
-                text("AI Tool").size(11).color(text_secondary),
-                ai_button,
-            ]
-            .spacing(4);
+            let mut ai_tool_section =
+                column![text("AI Tool").size(11).color(text_secondary), ai_button,].spacing(4);
 
             if state.ai_tool_dropdown_open {
                 let mut ai_list = column![].spacing(2);
                 for tool_name in ai_tools {
                     let is_selected = state.selected_ai_tool == tool_name;
                     let tool_str = tool_name.to_string();
-                    let ai_item = button(
-                        text(tool_name)
-                            .size(13)
-                            .color(if is_selected { text_active } else { text_primary }),
-                    )
+                    let ai_item = button(text(tool_name).size(13).color(if is_selected {
+                        text_active
+                    } else {
+                        text_primary
+                    }))
                     .on_press(on_ai_tool_selected(tool_str))
                     .padding(Padding::from([5, 10]))
                     .width(Length::Fill)
@@ -484,10 +514,9 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     });
                     ai_list = ai_list.push(ai_item);
                 }
-                ai_tool_section = ai_tool_section.push(
-                    container(ai_list)
-                        .width(Length::Fill)
-                        .style(move |_theme| container::Style {
+                ai_tool_section =
+                    ai_tool_section.push(container(ai_list).width(Length::Fill).style(
+                        move |_theme| container::Style {
                             background: Some(Background::Color(bg_primary)),
                             border: Border {
                                 color: border_color,
@@ -495,12 +524,14 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                                 radius: 4.0.into(),
                             },
                             ..container::Style::default()
-                        }),
-                );
+                        },
+                    ));
             }
 
             // ── Model & Mode dropdowns (Claude Code only) ───────────────
-            let model_mode_section: Option<Element<'a, M>> = if state.selected_ai_tool == "Claude Code" {
+            let model_mode_section: Option<Element<'a, M>> = if state.selected_ai_tool
+                == "Claude Code"
+            {
                 let modes = [("Default", "default"), ("Plan", "plan"), ("Auto", "auto")];
 
                 let model_display = state
@@ -515,9 +546,13 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     row![
                         text(model_display).size(13).color(text_primary),
                         Space::new().width(Length::Fill),
-                        text(if state.model_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
-                            .size(10)
-                            .color(text_secondary),
+                        text(if state.model_dropdown_open {
+                            "\u{25B2}"
+                        } else {
+                            "\u{25BC}"
+                        })
+                        .size(10)
+                        .color(text_secondary),
                     ]
                     .align_y(iced::Alignment::Center),
                 )
@@ -535,11 +570,8 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     ..button::Style::default()
                 });
 
-                let mut model_col = column![
-                    text("Model").size(11).color(text_secondary),
-                    model_button,
-                ]
-                .spacing(4);
+                let mut model_col =
+                    column![text("Model").size(11).color(text_secondary), model_button,].spacing(4);
 
                 if state.model_dropdown_open {
                     let mut model_list = column![].spacing(2);
@@ -547,11 +579,11 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                         let is_selected = state.selected_model == *value;
                         let val = value.clone();
                         let display_ref = display.as_str();
-                        let item = button(
-                            text(display_ref)
-                                .size(13)
-                                .color(if is_selected { text_active } else { text_primary }),
-                        )
+                        let item = button(text(display_ref).size(13).color(if is_selected {
+                            text_active
+                        } else {
+                            text_primary
+                        }))
                         .on_press(on_model_selected(val))
                         .padding(Padding::from([5, 10]))
                         .width(Length::Fill)
@@ -567,19 +599,17 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                         });
                         model_list = model_list.push(item);
                     }
-                    model_col = model_col.push(
-                        container(model_list)
-                            .width(Length::Fill)
-                            .style(move |_theme| container::Style {
-                                background: Some(Background::Color(bg_primary)),
-                                border: Border {
-                                    color: border_color,
-                                    width: 1.0,
-                                    radius: 4.0.into(),
-                                },
-                                ..container::Style::default()
-                            }),
-                    );
+                    model_col = model_col.push(container(model_list).width(Length::Fill).style(
+                        move |_theme| container::Style {
+                            background: Some(Background::Color(bg_primary)),
+                            border: Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..container::Style::default()
+                        },
+                    ));
                 }
 
                 let mode_display = modes
@@ -593,9 +623,13 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     row![
                         text(mode_display).size(13).color(text_primary),
                         Space::new().width(Length::Fill),
-                        text(if state.mode_dropdown_open { "\u{25B2}" } else { "\u{25BC}" })
-                            .size(10)
-                            .color(text_secondary),
+                        text(if state.mode_dropdown_open {
+                            "\u{25B2}"
+                        } else {
+                            "\u{25BC}"
+                        })
+                        .size(10)
+                        .color(text_secondary),
                     ]
                     .align_y(iced::Alignment::Center),
                 )
@@ -624,11 +658,11 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     for (display, value) in modes {
                         let is_selected = state.selected_mode == value;
                         let val = value.to_string();
-                        let item = button(
-                            text(display)
-                                .size(13)
-                                .color(if is_selected { text_active } else { text_primary }),
-                        )
+                        let item = button(text(display).size(13).color(if is_selected {
+                            text_active
+                        } else {
+                            text_primary
+                        }))
                         .on_press(on_mode_selected(val))
                         .padding(Padding::from([5, 10]))
                         .width(Length::Fill)
@@ -644,19 +678,17 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                         });
                         mode_list = mode_list.push(item);
                     }
-                    mode_col = mode_col.push(
-                        container(mode_list)
-                            .width(Length::Fill)
-                            .style(move |_theme| container::Style {
-                                background: Some(Background::Color(bg_primary)),
-                                border: Border {
-                                    color: border_color,
-                                    width: 1.0,
-                                    radius: 4.0.into(),
-                                },
-                                ..container::Style::default()
-                            }),
-                    );
+                    mode_col = mode_col.push(container(mode_list).width(Length::Fill).style(
+                        move |_theme| container::Style {
+                            background: Some(Background::Color(bg_primary)),
+                            border: Border {
+                                color: border_color,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..container::Style::default()
+                        },
+                    ));
                 }
 
                 let model_mode_row = row![
@@ -677,17 +709,18 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 .padding(12)
                 .height(Length::Fixed(140.0));
 
-            let editor_container = container(editor)
-                .width(Length::Fill)
-                .style(move |_theme| container::Style {
-                    background: Some(Background::Color(bg_primary)),
-                    border: Border {
-                        color: border_color,
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..container::Style::default()
-                });
+            let editor_container =
+                container(editor)
+                    .width(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(bg_primary)),
+                        border: Border {
+                            color: border_color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    });
 
             let mut prompt_section = column![
                 text("Prompt").size(11).color(text_secondary),
@@ -710,7 +743,13 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                         };
                         let skill_item = button(
                             row![
-                                text(format!("/{}", skill.name)).size(12).color(if is_selected { text_active } else { text_primary }),
+                                text(format!("/{}", skill.name))
+                                    .size(12)
+                                    .color(if is_selected {
+                                        text_active
+                                    } else {
+                                        text_primary
+                                    }),
                                 Space::new().width(Length::Fill),
                                 text(scope_label).size(10).color(text_secondary),
                             ]
@@ -768,39 +807,34 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 let mut image_row = row![].spacing(8).align_y(iced::Alignment::End);
 
                 for (i, attachment) in state.attached_images.iter().enumerate() {
-                    let thumb = iced::widget::image::Image::new(attachment.thumbnail_handle.clone())
-                        .width(Length::Fixed(48.0))
-                        .height(Length::Fixed(48.0))
-                        .content_fit(ContentFit::Cover);
+                    let thumb =
+                        iced::widget::image::Image::new(attachment.thumbnail_handle.clone())
+                            .width(Length::Fixed(48.0))
+                            .height(Length::Fixed(48.0))
+                            .content_fit(ContentFit::Cover);
 
-                    let remove_btn = button(
-                        text("\u{2715}").size(9).color(Color::WHITE),
-                    )
-                    .on_press(on_image_removed(i))
-                    .padding(Padding::from([1, 3]))
-                    .style(move |_theme, _status| button::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.6))),
-                        text_color: Color::WHITE,
-                        border: Border {
-                            radius: 3.0.into(),
-                            ..Border::default()
-                        },
-                        ..button::Style::default()
-                    });
+                    let remove_btn = button(text("\u{2715}").size(9).color(Color::WHITE))
+                        .on_press(on_image_removed(i))
+                        .padding(Padding::from([1, 3]))
+                        .style(move |_theme, _status| button::Style {
+                            background: Some(Background::Color(Color::from_rgba(
+                                0.0, 0.0, 0.0, 0.6,
+                            ))),
+                            text_color: Color::WHITE,
+                            border: Border {
+                                radius: 3.0.into(),
+                                ..Border::default()
+                            },
+                            ..button::Style::default()
+                        });
 
-                    let name_label = text(&attachment.display_name)
-                        .size(9)
-                        .color(text_secondary);
+                    let name_label = text(&attachment.display_name).size(9).color(text_secondary);
 
                     let thumb_with_remove = column![
-                        container(
-                            stack![
-                                thumb,
-                                container(remove_btn)
-                                    .align_right(Length::Fill)
-                                    .padding(2),
-                            ]
-                        )
+                        container(stack![
+                            thumb,
+                            container(remove_btn).align_right(Length::Fill).padding(2),
+                        ])
                         .width(Length::Fixed(48.0))
                         .height(Length::Fixed(48.0))
                         .style(move |_theme| container::Style {
@@ -819,16 +853,20 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     image_row = image_row.push(thumb_with_remove);
                 }
 
-                let attachment_label = text(
-                    format!("{} image{} attached", state.attached_images.len(),
-                        if state.attached_images.len() == 1 { "" } else { "s" }),
-                )
+                let attachment_label = text(format!(
+                    "{} image{} attached",
+                    state.attached_images.len(),
+                    if state.attached_images.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ))
                 .size(10)
                 .color(text_secondary);
 
-                prompt_section = prompt_section.push(
-                    column![attachment_label, image_row].spacing(4),
-                );
+                prompt_section =
+                    prompt_section.push(column![attachment_label, image_row].spacing(4));
             }
 
             // ── Branch name input ────────────────────────────────────────
@@ -840,25 +878,34 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
             .size(13)
             .padding(Padding::from([6, 10]));
 
-            let branch_section = column![
-                text("Branch").size(11).color(text_secondary),
-                branch_input,
-            ]
-            .spacing(4);
+            let branch_section =
+                column![text("Branch").size(11).color(text_secondary), branch_input,].spacing(4);
 
             // ── Checkbox row ─────────────────────────────────────────────
-            let main_branch_indicator = if state.main_branch_mode { "\u{2611}" } else { "\u{2610}" };
+            let main_branch_indicator = if state.main_branch_mode {
+                "\u{2611}"
+            } else {
+                "\u{2610}"
+            };
             let main_branch_btn = button(
                 row![
                     text(main_branch_indicator).size(14).color(accent),
-                    text("Open in main branch (no worktree)")
-                        .size(12)
-                        .color(if state.batch_clone_mode { text_secondary } else { text_primary })
+                    text("Open in main branch (no worktree)").size(12).color(
+                        if state.batch_clone_mode {
+                            text_secondary
+                        } else {
+                            text_primary
+                        }
+                    )
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press_maybe(if state.batch_clone_mode { None } else { Some(on_main_branch_toggled(!state.main_branch_mode)) })
+            .on_press_maybe(if state.batch_clone_mode {
+                None
+            } else {
+                Some(on_main_branch_toggled(!state.main_branch_mode))
+            })
             .padding(Padding::from([4, 8]))
             .style(move |_theme, _status| button::Style {
                 background: None,
@@ -866,18 +913,30 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 ..button::Style::default()
             });
 
-            let auto_suggest_indicator = if state.auto_suggest_branch { "\u{2611}" } else { "\u{2610}" };
+            let auto_suggest_indicator = if state.auto_suggest_branch {
+                "\u{2611}"
+            } else {
+                "\u{2610}"
+            };
             let auto_suggest_btn = button(
                 row![
                     text(auto_suggest_indicator).size(14).color(accent),
                     text("Auto-suggest branch name")
                         .size(12)
-                        .color(if state.batch_clone_mode { text_secondary } else { text_primary })
+                        .color(if state.batch_clone_mode {
+                            text_secondary
+                        } else {
+                            text_primary
+                        })
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press_maybe(if state.batch_clone_mode { None } else { Some(on_auto_suggest_toggled(!state.auto_suggest_branch)) })
+            .on_press_maybe(if state.batch_clone_mode {
+                None
+            } else {
+                Some(on_auto_suggest_toggled(!state.auto_suggest_branch))
+            })
             .padding(Padding::from([4, 8]))
             .style(move |_theme, _status| button::Style {
                 background: None,
@@ -885,18 +944,30 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 ..button::Style::default()
             });
 
-            let batch_clone_indicator = if state.batch_clone_mode { "\u{2611}" } else { "\u{2610}" };
+            let batch_clone_indicator = if state.batch_clone_mode {
+                "\u{2611}"
+            } else {
+                "\u{2610}"
+            };
             let batch_clone_btn = button(
                 row![
                     text(batch_clone_indicator).size(14).color(accent),
                     text("Full clone (batch-friendly)")
                         .size(12)
-                        .color(if state.main_branch_mode { text_secondary } else { text_primary })
+                        .color(if state.main_branch_mode {
+                            text_secondary
+                        } else {
+                            text_primary
+                        })
                 ]
                 .spacing(6)
                 .align_y(iced::Alignment::Center),
             )
-            .on_press_maybe(if state.main_branch_mode { None } else { Some(on_batch_clone_toggled(!state.batch_clone_mode)) })
+            .on_press_maybe(if state.main_branch_mode {
+                None
+            } else {
+                Some(on_batch_clone_toggled(!state.batch_clone_mode))
+            })
             .padding(Padding::from([4, 8]))
             .style(move |_theme, _status| button::Style {
                 background: None,
@@ -954,11 +1025,13 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
             if state.sessions.is_empty() {
                 session_list = session_list.push(
                     container(
-                        text("No recent Claude sessions found").size(13).color(text_secondary)
+                        text("No recent Claude sessions found")
+                            .size(13)
+                            .color(text_secondary),
                     )
                     .padding(20)
                     .width(Length::Fill)
-                    .center_x(Length::Fill)
+                    .center_x(Length::Fill),
                 );
             } else {
                 for (i, session) in state.sessions.iter().enumerate() {
@@ -982,16 +1055,23 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     let session_item = button(
                         column![
                             row![
-                                text(msg_preview).size(12).color(if is_selected { text_active } else { text_primary }),
+                                text(msg_preview).size(12).color(if is_selected {
+                                    text_active
+                                } else {
+                                    text_primary
+                                }),
                                 Space::new().width(Length::Fill),
                                 text(timestamp_display).size(10).color(text_secondary),
-                            ].align_y(iced::Alignment::Center),
+                            ]
+                            .align_y(iced::Alignment::Center),
                             row![
                                 text(model_display).size(10).color(text_secondary),
                                 Space::new().width(8),
                                 text(session_id_display).size(10).color(text_secondary),
-                            ].spacing(8),
-                        ].spacing(2)
+                            ]
+                            .spacing(8),
+                        ]
+                        .spacing(2),
                     )
                     .on_press(on_session_selected(idx))
                     .padding(Padding::from([8, 12]))
@@ -1014,10 +1094,8 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                 }
             }
 
-            let resume_content = column![
-                scrollable(session_list).height(Length::Fixed(300.0)),
-            ]
-            .spacing(8);
+            let resume_content =
+                column![scrollable(session_list).height(Length::Fixed(300.0)),].spacing(8);
 
             let action_btn = if state.selected_session.is_some() {
                 button(text("Resume").size(13).color(text_active))
@@ -1046,21 +1124,9 @@ pub fn view_quick_claude_dialog<'a, M: Clone + 'a>(
                     })
             };
 
-            let footer = row![
-                cancel_btn,
-                Space::new().width(Length::Fill),
-                action_btn,
-            ]
-            .spacing(8);
+            let footer = row![cancel_btn, Space::new().width(Length::Fill), action_btn,].spacing(8);
 
-            column![
-                title,
-                subtitle,
-                tab_bar,
-                resume_content,
-                footer,
-            ]
-            .spacing(12)
+            column![title, subtitle, tab_bar, resume_content, footer,].spacing(12)
         }
     };
 
@@ -1104,7 +1170,9 @@ pub fn discover_skills(workspace_folder: Option<&str>) -> Vec<SkillEntry> {
         }
 
         // Also scan .claude/commands/ — Claude Code's project-level commands directory.
-        let project_commands_dir = std::path::Path::new(folder).join(".claude").join("commands");
+        let project_commands_dir = std::path::Path::new(folder)
+            .join(".claude")
+            .join("commands");
         if project_commands_dir.exists() {
             collect_skills_from_dir(&project_commands_dir, SkillScope::Project, &mut skills);
         }
@@ -1191,11 +1259,7 @@ fn collect_plugin_skills(json_path: &std::path::Path, skills: &mut Vec<SkillEntr
     }
 }
 
-fn collect_skills_from_dir(
-    dir: &std::path::Path,
-    scope: SkillScope,
-    skills: &mut Vec<SkillEntry>,
-) {
+fn collect_skills_from_dir(dir: &std::path::Path, scope: SkillScope, skills: &mut Vec<SkillEntry>) {
     let Ok(entries) = walkdir_recursive(dir) else {
         return;
     };
@@ -1340,20 +1404,23 @@ fn format_elapsed_secs(secs: u64) -> String {
 }
 
 fn format_relative_time_from_iso(iso: &str) -> String {
-    if iso.len() < 19 { return iso.to_string(); }
+    if iso.len() < 19 {
+        return iso.to_string();
+    }
     let year: u64 = iso[0..4].parse().unwrap_or(0);
     let month: u64 = iso[5..7].parse().unwrap_or(0);
     let day: u64 = iso[8..10].parse().unwrap_or(0);
     let hour: u64 = iso[11..13].parse().unwrap_or(0);
     let min: u64 = iso[14..16].parse().unwrap_or(0);
     let sec: u64 = iso[17..19].parse().unwrap_or(0);
-    if year == 0 || month == 0 || day == 0 { return iso.to_string(); }
+    if year == 0 || month == 0 || day == 0 {
+        return iso.to_string();
+    }
 
     let a = if month <= 2 { 1u64 } else { 0 };
     let y = year - a;
     let m = month + 12 * a - 3;
-    let days = y * 365 + y / 4 - y / 100 + y / 400
-        + (153 * m + 2) / 5 + day - 1 - 719468;
+    let days = y * 365 + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + day - 1 - 719468;
     let total_secs = days * 86400 + hour * 3600 + min * 60 + sec;
 
     let now_secs = std::time::SystemTime::now()
@@ -1466,7 +1533,11 @@ mod tests {
 
     #[test]
     fn state_new_defaults() {
-        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &QuickClaudePreferences::default());
+        let state = QuickClaudeDialogState::new(
+            Some("ws-1".into()),
+            sample_workspaces(),
+            &QuickClaudePreferences::default(),
+        );
         assert_eq!(state.selected_workspace_id, Some("ws-1".into()));
         assert_eq!(state.selected_ai_tool, "Claude Code");
         assert!(!state.workspace_dropdown_open);
@@ -1504,7 +1575,11 @@ mod tests {
 
     #[test]
     fn view_does_not_panic() {
-        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &QuickClaudePreferences::default());
+        let state = QuickClaudeDialogState::new(
+            Some("ws-1".into()),
+            sample_workspaces(),
+            &QuickClaudePreferences::default(),
+        );
         #[derive(Debug, Clone)]
         enum Msg {
             WsSelected(String),
@@ -1561,20 +1636,22 @@ mod tests {
 
     #[test]
     fn view_resume_tab_does_not_panic() {
-        let mut state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &QuickClaudePreferences::default());
+        let mut state = QuickClaudeDialogState::new(
+            Some("ws-1".into()),
+            sample_workspaces(),
+            &QuickClaudePreferences::default(),
+        );
         state.active_tab = QuickClaudeTab::ResumeSession;
-        state.sessions = vec![
-            ClaudeSession {
-                session_id: "abc12345def67890".to_string(),
-                first_message: "Help me fix a bug in the terminal".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-                timestamp: "3h ago".to_string(),
-                branch: String::new(),
-                file_path: "/tmp/test.jsonl".to_string(),
-                cwd: None,
-                workspace_id: String::new(),
-            },
-        ];
+        state.sessions = vec![ClaudeSession {
+            session_id: "abc12345def67890".to_string(),
+            first_message: "Help me fix a bug in the terminal".to_string(),
+            model: "claude-sonnet-4-20250514".to_string(),
+            timestamp: "3h ago".to_string(),
+            branch: String::new(),
+            file_path: "/tmp/test.jsonl".to_string(),
+            cwd: None,
+            workspace_id: String::new(),
+        }];
         #[derive(Debug, Clone)]
         enum Msg {
             WsSelected(String),
@@ -1631,7 +1708,8 @@ mod tests {
 
     #[test]
     fn filtered_skills_empty_filter() {
-        let mut state = QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
+        let mut state =
+            QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.skills = vec![
             SkillEntry {
                 name: "commit".to_string(),
@@ -1651,7 +1729,8 @@ mod tests {
 
     #[test]
     fn filtered_skills_with_filter() {
-        let mut state = QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
+        let mut state =
+            QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.skills = vec![
             SkillEntry {
                 name: "commit".to_string(),
@@ -1741,11 +1820,7 @@ mod tests {
             main_branch_mode: true,
             batch_clone_mode: false,
         };
-        let state = QuickClaudeDialogState::new(
-            Some("ws-1".into()),
-            sample_workspaces(),
-            &prefs,
-        );
+        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &prefs);
         assert_eq!(state.selected_model, "opus");
         assert_eq!(state.selected_mode, "plan");
         assert_eq!(state.selected_ai_tool, "Codex");
@@ -1766,11 +1841,7 @@ mod tests {
             main_branch_mode: false,
             batch_clone_mode: false,
         };
-        let state = QuickClaudeDialogState::new(
-            Some("ws-1".into()),
-            sample_workspaces(),
-            &prefs,
-        );
+        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &prefs);
         // ws-gone not in workspaces, falls back to active workspace
         assert_eq!(state.selected_workspace_id, Some("ws-1".to_string()));
     }
@@ -1786,11 +1857,7 @@ mod tests {
             main_branch_mode: true,
             batch_clone_mode: false,
         };
-        let state = QuickClaudeDialogState::new(
-            Some("ws-1".into()),
-            sample_workspaces(),
-            &prefs,
-        );
+        let state = QuickClaudeDialogState::new(Some("ws-1".into()), sample_workspaces(), &prefs);
         let roundtripped = state.to_preferences();
         assert_eq!(roundtripped.selected_model, "opus");
         assert_eq!(roundtripped.selected_mode, "plan");
@@ -1924,7 +1991,9 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
-            format!("---\nname: {skill_name}\ndescription: {description}\n---\n\n# {description}\n"),
+            format!(
+                "---\nname: {skill_name}\ndescription: {description}\n---\n\n# {description}\n"
+            ),
         )
         .unwrap();
     }
@@ -1932,7 +2001,8 @@ mod tests {
     #[test]
     fn collect_plugin_skills_finds_root_level_skills() {
         // Baseline: plugins with skills/ at the install root ARE discovered.
-        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-root-{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("godly-plugin-test-root-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
         let plugin_dir = tmp.join("my-plugin").join("1.0.0");
@@ -1964,12 +2034,17 @@ mod tests {
     #[test]
     fn collect_plugin_skills_finds_dot_claude_nested_skills() {
         // Bug #769: plugins with skills at <installPath>/.claude/skills/ must also be discovered.
-        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-nested-{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("godly-plugin-test-nested-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
         let plugin_dir = tmp.join("ui-ux-pro-max").join("2.5.0");
         let nested_skills_dir = plugin_dir.join(".claude").join("skills");
-        write_skill_md(&nested_skills_dir, "ui-ux-pro-max", "UI/UX design intelligence");
+        write_skill_md(
+            &nested_skills_dir,
+            "ui-ux-pro-max",
+            "UI/UX design intelligence",
+        );
 
         let json_path = tmp.join("installed_plugins.json");
         let json = serde_json::json!({
@@ -1996,7 +2071,10 @@ mod tests {
     #[test]
     fn collect_plugin_skills_finds_dot_claude_nested_commands() {
         // Bug #769: also test .claude/commands/ path for plugins.
-        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-nested-cmd-{}", uuid::Uuid::new_v4()));
+        let tmp = std::env::temp_dir().join(format!(
+            "godly-plugin-test-nested-cmd-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&tmp).unwrap();
 
         let plugin_dir = tmp.join("some-plugin").join("1.0.0");
@@ -2033,7 +2111,8 @@ mod tests {
     #[test]
     fn collect_plugin_skills_finds_both_root_and_nested() {
         // A plugin with skills at BOTH root and .claude/ should discover all of them.
-        let tmp = std::env::temp_dir().join(format!("godly-plugin-test-both-{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("godly-plugin-test-both-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
 
         let plugin_dir = tmp.join("hybrid-plugin").join("1.0.0");
@@ -2057,8 +2136,14 @@ mod tests {
         collect_plugin_skills(&json_path, &mut skills);
 
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"root-skill"), "root-level skill missing, got: {names:?}");
-        assert!(names.contains(&"nested-skill"), "nested .claude/skills/ skill missing, got: {names:?}");
+        assert!(
+            names.contains(&"root-skill"),
+            "root-level skill missing, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"nested-skill"),
+            "nested .claude/skills/ skill missing, got: {names:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -2097,11 +2182,8 @@ mod tests {
     /// handler in app.rs — only resetting selection when the filter changes.
     #[test]
     fn autocomplete_selection_preserved_when_filter_unchanged() {
-        let mut state = QuickClaudeDialogState::new(
-            None,
-            vec![],
-            &QuickClaudePreferences::default(),
-        );
+        let mut state =
+            QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.selected_ai_tool = "Claude Code".to_string();
         state.skills = make_test_skills();
 
@@ -2118,7 +2200,10 @@ mod tests {
         assert!(count >= 3, "precondition: at least 3 skills available");
         let next = (0i32 + 1).rem_euclid(count as i32);
         state.skill_autocomplete_selected = next as usize;
-        assert_eq!(state.skill_autocomplete_selected, 1, "precondition: navigated to index 1");
+        assert_eq!(
+            state.skill_autocomplete_selected, 1,
+            "precondition: navigated to index 1"
+        );
 
         // Simulate autocomplete re-evaluation (mirrors fixed app.rs logic):
         // only reset selection when filter actually changes.
@@ -2176,11 +2261,8 @@ mod tests {
     /// because the keyboard subscription can't see arrow keys.
     #[test]
     fn autocomplete_navigate_wraps_correctly() {
-        let mut state = QuickClaudeDialogState::new(
-            None,
-            vec![],
-            &QuickClaudePreferences::default(),
-        );
+        let mut state =
+            QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.skills = make_test_skills();
         state.skill_autocomplete_open = true;
         state.skill_autocomplete_filter = String::new();
@@ -2214,11 +2296,8 @@ mod tests {
     /// should preserve the selection.
     #[test]
     fn autocomplete_selection_preserved_with_active_filter() {
-        let mut state = QuickClaudeDialogState::new(
-            None,
-            vec![],
-            &QuickClaudePreferences::default(),
-        );
+        let mut state =
+            QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.selected_ai_tool = "Claude Code".to_string();
         state.skills = vec![
             SkillEntry {
@@ -2314,11 +2393,8 @@ mod tests {
     /// the selection should reset to 0.
     #[test]
     fn autocomplete_selection_resets_when_filter_changes() {
-        let mut state = QuickClaudeDialogState::new(
-            None,
-            vec![],
-            &QuickClaudePreferences::default(),
-        );
+        let mut state =
+            QuickClaudeDialogState::new(None, vec![], &QuickClaudePreferences::default());
         state.selected_ai_tool = "Claude Code".to_string();
         state.skills = make_test_skills();
 
@@ -2376,8 +2452,10 @@ mod tests {
         }
 
         // Filter changed from "f" to "fi" — selection should reset to 0.
-        assert_eq!(state.skill_autocomplete_selected, 0,
-            "selection should reset to 0 when the filter text changes");
+        assert_eq!(
+            state.skill_autocomplete_selected, 0,
+            "selection should reset to 0 when the filter text changes"
+        );
         assert_eq!(state.skill_autocomplete_filter, "fi");
     }
 }
