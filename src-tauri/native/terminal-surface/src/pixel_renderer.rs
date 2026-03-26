@@ -538,6 +538,7 @@ fn blit_alpha(
             }
 
             if alpha == 255 {
+                // Fully opaque: no blending needed, just write fg colour.
                 buf[idx] = fg_r;
                 buf[idx + 1] = fg_g;
                 buf[idx + 2] = fg_b;
@@ -809,14 +810,90 @@ mod tests {
 
         blit_alpha(&mut buf, w, h, &glyph, 1, 1, 255, 0, 0);
 
+        // Gamma-correct blending: red (255,0,0) at ~50% alpha over white.
+        // In linear space: G/B = 0.0 * 0.502 + 1.0 * 0.498 = 0.498
+        // Back to sRGB: ~188  (brighter than naive 127 because sRGB is non-linear)
         let idx = ((1 * w + 1) * 4) as usize;
-        assert_eq!(buf[idx], 255); // R
-                                   // With gamma-correct blending, G/B values will differ from naive 127
-                                   // but should still be significantly below white
-        assert!(buf[idx + 1] < 255); // G should be blended
-        assert!(buf[idx + 2] < 255); // B should be blended
+        assert_eq!(buf[idx], 255); // R stays 255
+        assert!(
+            (buf[idx + 1] as i32 - 188).abs() <= 2,
+            "G expected ~188, got {}",
+            buf[idx + 1]
+        );
+        assert!(
+            (buf[idx + 2] as i32 - 188).abs() <= 2,
+            "B expected ~188, got {}",
+            buf[idx + 2]
+        );
         assert_eq!(buf[idx + 3], 255); // A
 
+        // Untouched pixel remains white
+        assert_eq!(buf[0], 255);
+        assert_eq!(buf[1], 255);
+        assert_eq!(buf[2], 255);
+    }
+
+    #[test]
+    fn blit_alpha_fully_opaque_writes_fg_directly() {
+        let w = 4u32;
+        let h = 4u32;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+
+        // Start with a grey background
+        fill_solid(&mut buf, 128, 128, 128, 255);
+
+        let glyph = CachedGlyph {
+            alpha: vec![255; 4], // 2x2, fully opaque
+            width: 2,
+            height: 2,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance: 8.0,
+        };
+
+        blit_alpha(&mut buf, w, h, &glyph, 1, 1, 0, 200, 50);
+
+        let idx = ((1 * w + 1) * 4) as usize;
+        assert_eq!(buf[idx], 0);
+        assert_eq!(buf[idx + 1], 200);
+        assert_eq!(buf[idx + 2], 50);
+        assert_eq!(buf[idx + 3], 255);
+    }
+
+    #[test]
+    fn blend_rect_gamma_correct() {
+        let w = 4u32;
+        let h = 4u32;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+
+        // White background
+        fill_solid(&mut buf, 255, 255, 255, 255);
+
+        // Blend a 50% opaque black rectangle at (1,1) size 2x2
+        blend_rect(&mut buf, w, h, 1, 1, 2, 2, 0, 0, 0, 128);
+
+        // Gamma-correct: black (0,0,0) at ~50% over white
+        // linear: 0.0 * 0.502 + 1.0 * 0.498 = 0.498
+        // sRGB(0.498) ~= 188
+        let idx = ((1 * w + 1) * 4) as usize;
+        assert!(
+            (buf[idx] as i32 - 188).abs() <= 2,
+            "R expected ~188, got {}",
+            buf[idx]
+        );
+        assert!(
+            (buf[idx + 1] as i32 - 188).abs() <= 2,
+            "G expected ~188, got {}",
+            buf[idx + 1]
+        );
+        assert!(
+            (buf[idx + 2] as i32 - 188).abs() <= 2,
+            "B expected ~188, got {}",
+            buf[idx + 2]
+        );
+        assert_eq!(buf[idx + 3], 255);
+
+        // Untouched corner remains white
         assert_eq!(buf[0], 255);
         assert_eq!(buf[1], 255);
         assert_eq!(buf[2], 255);

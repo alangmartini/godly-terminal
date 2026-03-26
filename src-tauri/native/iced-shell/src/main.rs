@@ -51,6 +51,7 @@ mod cf_tunnel;
 mod claude_code_manager;
 mod confirm_dialog;
 mod crash_handler;
+mod desktop_notify_prefs;
 mod font_enumerator;
 mod git_worktree;
 mod gpu_watchdog;

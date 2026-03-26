@@ -1,0 +1,2 @@
+### Fixed
+- **Precise font metrics for all fonts** — cell dimensions are now always measured from actual font tables (ascent, descent, line gap, advance width) instead of using rough heuristic ratios. Non-default fonts (Consolas, Cascadia Code, etc.) now load via the system font database for accurate measurements. Heuristic fallback only triggers when font data genuinely cannot be parsed, and emits a warning when it does.

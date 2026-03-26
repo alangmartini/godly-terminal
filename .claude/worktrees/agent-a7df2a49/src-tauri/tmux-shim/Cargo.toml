@@ -1,0 +1,16 @@
+[package]
+name = "godly-tmux-shim"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tmux"
+path = "src/main.rs"
+
+[dependencies]
+godly-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true

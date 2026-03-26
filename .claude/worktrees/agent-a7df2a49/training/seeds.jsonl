@@ -1,0 +1,201 @@
+{"input": "Fix crash when terminal has zero-width columns", "output": "fix-zero-width-crash"}
+{"input": "Add dark mode toggle to settings", "output": "feat-dark-mode-toggle"}
+{"input": "Refactor database connection pooling", "output": "refactor-db-connection-pool"}
+{"input": "Update README with installation instructions", "output": "docs-installation-instructions"}
+{"input": "Bump dependencies to latest versions", "output": "chore-bump-dependencies"}
+{"input": "Add unit tests for authentication middleware", "output": "test-auth-middleware"}
+{"input": "Fix inconsistent button spacing in sidebar", "output": "style-sidebar-button-spacing"}
+{"input": "Implement WebSocket reconnection with exponential backoff", "output": "feat-websocket-reconnect"}
+{"input": "Fix memory leak in event listener cleanup", "output": "fix-event-listener-memory-leak"}
+{"input": "Extract shared validation logic into utils module", "output": "refactor-extract-validation-utils"}
+{"input": "Add API documentation for user endpoints", "output": "docs-user-api-endpoints"}
+{"input": "Remove deprecated lodash dependency", "output": "chore-remove-lodash"}
+{"input": "Add integration tests for payment processing", "output": "test-payment-integration"}
+{"input": "Normalize heading sizes across pages", "output": "style-normalize-headings"}
+{"input": "Add search functionality to file explorer", "output": "feat-file-explorer-search"}
+{"input": "Fix race condition in concurrent file writes", "output": "fix-concurrent-write-race"}
+{"input": "Split monolithic service into microservices", "output": "refactor-split-microservices"}
+{"input": "Document environment variable configuration", "output": "docs-env-var-config"}
+{"input": "Update CI pipeline to use Node 20", "output": "chore-ci-node-20"}
+{"input": "Add snapshot tests for UI components", "output": "test-ui-component-snapshots"}
+{"input": "Implement drag and drop file upload", "output": "feat-drag-drop-upload"}
+{"input": "Fix off-by-one error in pagination", "output": "fix-pagination-off-by-one"}
+{"input": "Consolidate duplicate error handling code", "output": "refactor-consolidate-error-handling"}
+{"input": "Add changelog for version 2.0 release", "output": "docs-changelog-v2"}
+{"input": "Configure ESLint strict mode", "output": "chore-eslint-strict-mode"}
+{"input": "Add load tests for API rate limiting", "output": "test-api-rate-limiting"}
+{"input": "Fix color contrast ratio for accessibility", "output": "style-color-contrast-a11y"}
+{"input": "Add keyboard shortcuts for common actions", "output": "feat-keyboard-shortcuts"}
+{"input": "Fix broken image paths in production build", "output": "fix-production-image-paths"}
+{"input": "Rename ambiguous variable names in parser", "output": "refactor-parser-variable-names"}
+{"input": "Add architecture decision records", "output": "docs-architecture-decisions"}
+{"input": "Migrate from Webpack to Vite", "output": "chore-migrate-to-vite"}
+{"input": "Add end-to-end tests for checkout flow", "output": "test-checkout-e2e"}
+{"input": "Standardize icon sizes and padding", "output": "style-standardize-icons"}
+{"input": "Implement real-time notifications via SSE", "output": "feat-sse-notifications"}
+{"input": "Fix timezone handling in date picker", "output": "fix-datepicker-timezone"}
+{"input": "Move business logic out of controllers", "output": "refactor-controllers-to-services"}
+{"input": "Write troubleshooting guide for common errors", "output": "docs-troubleshooting-guide"}
+{"input": "Set up Dependabot for automated updates", "output": "chore-setup-dependabot"}
+{"input": "Add property-based tests for serialization", "output": "test-property-serialization"}
+{"input": "Implement multi-select dropdown component", "output": "feat-multi-select-dropdown"}
+{"input": "Fix scroll position reset on navigation", "output": "fix-scroll-position-nav"}
+{"input": "Decouple rendering from state management", "output": "refactor-decouple-render-state"}
+{"input": "Document deployment process for staging", "output": "docs-staging-deployment"}
+{"input": "Add pre-commit hooks for linting", "output": "chore-pre-commit-hooks"}
+{"input": "Add regression tests for CSV export", "output": "test-csv-export-regression"}
+{"input": "Fix table alignment on mobile screens", "output": "style-mobile-table-alignment"}
+{"input": "Build plugin system for custom extensions", "output": "feat-plugin-system"}
+{"input": "Fix SSL certificate validation bypass", "output": "fix-ssl-cert-validation"}
+{"input": "Replace string concatenation with template literals", "output": "refactor-template-literals"}
+{"input": "Add inline code documentation for core module", "output": "docs-core-module-inline"}
+{"input": "Upgrade Rust toolchain to 1.75", "output": "chore-upgrade-rust-1-75"}
+{"input": "Add fuzz tests for input parsing", "output": "test-fuzz-input-parsing"}
+{"input": "Implement virtual scrolling for large lists", "output": "feat-virtual-scrolling"}
+{"input": "Fix deadlock in thread pool shutdown", "output": "fix-thread-pool-deadlock"}
+{"input": "Flatten deeply nested callback chains", "output": "refactor-flatten-callbacks"}
+{"input": "Create onboarding tutorial for new users", "output": "docs-onboarding-tutorial"}
+{"input": "Add Docker Compose for local development", "output": "chore-docker-compose-dev"}
+{"input": "Add stress tests for WebSocket connections", "output": "test-websocket-stress"}
+{"input": "Fix font rendering on high-DPI displays", "output": "style-hidpi-font-rendering"}
+{"input": "Add clipboard copy support for code blocks", "output": "feat-clipboard-code-blocks"}
+{"input": "Fix null pointer exception in user profile", "output": "fix-user-profile-null-ptr"}
+{"input": "Convert class components to functional hooks", "output": "refactor-class-to-hooks"}
+{"input": "Document GraphQL schema and resolvers", "output": "docs-graphql-schema"}
+{"input": "Clean up unused feature flags", "output": "chore-cleanup-feature-flags"}
+{"input": "Add performance benchmarks for rendering", "output": "test-rendering-benchmarks"}
+{"input": "Add collapsible sidebar navigation", "output": "feat-collapsible-sidebar"}
+{"input": "Fix CORS headers for preflight requests", "output": "fix-cors-preflight"}
+{"input": "Simplify complex conditional expressions", "output": "refactor-simplify-conditionals"}
+{"input": "Add data migration guide for v3 upgrade", "output": "docs-v3-migration-guide"}
+{"input": "Pin transitive dependency versions", "output": "chore-pin-dependencies"}
+{"input": "Add contract tests for API consumers", "output": "test-api-contract"}
+{"input": "Align form labels and input fields", "output": "style-form-label-alignment"}
+{"input": "Implement undo/redo for text editor", "output": "feat-undo-redo-editor"}
+{"input": "Fix file descriptor leak in pipe handler", "output": "fix-pipe-fd-leak"}
+{"input": "Extract reusable hooks from components", "output": "refactor-extract-hooks"}
+{"input": "Write security audit documentation", "output": "docs-security-audit"}
+{"input": "Automate release notes generation", "output": "chore-automate-release-notes"}
+{"input": "Add mutation tests for critical paths", "output": "test-mutation-critical-paths"}
+{"input": "Build responsive grid layout system", "output": "feat-responsive-grid"}
+{"input": "Fix buffer overflow in binary parser", "output": "fix-binary-parser-overflow"}
+{"input": "Replace magic numbers with named constants", "output": "refactor-named-constants"}
+{"input": "Document WebSocket protocol specification", "output": "docs-websocket-protocol"}
+{"input": "Configure code coverage reporting", "output": "chore-code-coverage"}
+{"input": "Add accessibility tests for screen readers", "output": "test-screen-reader-a11y"}
+{"input": "Standardize margin and padding spacing scale", "output": "style-spacing-scale"}
+{"input": "Add multi-language support with i18n", "output": "feat-i18n-multi-language"}
+{"input": "Fix infinite loop in retry logic", "output": "fix-retry-infinite-loop"}
+{"input": "Introduce repository pattern for data access", "output": "refactor-repository-pattern"}
+{"input": "Add contributing guidelines for open source", "output": "docs-contributing-guidelines"}
+{"input": "Set up GitHub Actions for CI/CD", "output": "chore-github-actions-ci"}
+{"input": "Add visual regression tests with screenshots", "output": "test-visual-regression"}
+{"input": "Implement auto-complete for search input", "output": "feat-search-autocomplete"}
+{"input": "Fix session token not refreshing on expiry", "output": "fix-session-token-refresh"}
+{"input": "Break circular dependencies between modules", "output": "refactor-circular-deps"}
+{"input": "Add API versioning documentation", "output": "docs-api-versioning"}
+{"input": "Migrate database from MySQL to PostgreSQL", "output": "chore-mysql-to-postgres"}
+{"input": "Add smoke tests for deployment verification", "output": "test-deployment-smoke"}
+{"input": "Fix inconsistent border radius values", "output": "style-border-radius"}
+{"input": "Implement OAuth2 login with Google", "output": "feat-oauth2-google-login"}
+{"input": "Fix connection timeout not being respected", "output": "fix-connection-timeout"}
+{"input": "Eliminate redundant API calls on mount", "output": "refactor-eliminate-redundant-api"}
+{"input": "Document error codes and their meanings", "output": "docs-error-codes"}
+{"input": "Update Terraform modules to latest version", "output": "chore-update-terraform"}
+{"input": "Add concurrency tests for database operations", "output": "test-db-concurrency"}
+{"input": "Build toast notification component", "output": "feat-toast-notifications"}
+{"input": "Fix XSS vulnerability in comment rendering", "output": "fix-xss-comment-render"}
+{"input": "Consolidate configuration into single source", "output": "refactor-consolidate-config"}
+{"input": "Add runbook for incident response", "output": "docs-incident-runbook"}
+{"input": "Set up Sentry for error tracking", "output": "chore-setup-sentry"}
+{"input": "Add chaos tests for distributed system", "output": "test-chaos-distributed"}
+{"input": "Fix dark mode colors for code syntax", "output": "style-dark-mode-syntax"}
+{"input": "Add two-factor authentication support", "output": "feat-two-factor-auth"}
+{"input": "Fix process zombie after abnormal exit", "output": "fix-zombie-process"}
+{"input": "Replace any types with proper TypeScript types", "output": "refactor-remove-any-types"}
+{"input": "Create FAQ page for common questions", "output": "docs-faq-page"}
+{"input": "Add git hooks for commit message validation", "output": "chore-commit-msg-hooks"}
+{"input": "Add boundary tests for numeric inputs", "output": "test-numeric-boundaries"}
+{"input": "Implement infinite scroll for feed", "output": "feat-infinite-scroll-feed"}
+{"input": "Fix data loss on unexpected app termination", "output": "fix-data-loss-termination"}
+{"input": "Normalize error response format across APIs", "output": "refactor-normalize-error-format"}
+{"input": "Update license headers in source files", "output": "chore-license-headers"}
+{"input": "Add table sorting and filtering", "output": "feat-table-sort-filter"}
+{"input": "Fix integer overflow in large file size calculation", "output": "fix-filesize-overflow"}
+{"input": "Abstract storage backend behind interface", "output": "refactor-abstract-storage"}
+{"input": "Document release branching strategy", "output": "docs-release-branching"}
+{"input": "Enable strict TypeScript compiler checks", "output": "chore-strict-typescript"}
+{"input": "Add tests for concurrent session handling", "output": "test-concurrent-sessions"}
+{"input": "Fix tooltip overlap with dropdown menus", "output": "style-tooltip-dropdown-overlap"}
+{"input": "Implement CSV and JSON export for reports", "output": "feat-export-csv-json"}
+{"input": "Fix wrong encoding in file path handling", "output": "fix-filepath-encoding"}
+{"input": "Split large utility file into focused modules", "output": "refactor-split-utils"}
+{"input": "Add privacy policy and terms of service pages", "output": "docs-privacy-terms"}
+{"input": "Set up automated dependency scanning", "output": "chore-dependency-scanning"}
+{"input": "Add tests for email template rendering", "output": "test-email-templates"}
+{"input": "Implement breadcrumb navigation", "output": "feat-breadcrumb-nav"}
+{"input": "Fix double-submit on slow network connections", "output": "fix-double-submit"}
+{"input": "Migrate from REST to GraphQL for user queries", "output": "refactor-rest-to-graphql"}
+{"input": "Write database schema documentation", "output": "docs-database-schema"}
+{"input": "Remove dead code flagged by linter", "output": "chore-remove-dead-code"}
+{"input": "Add tests for rate limiter edge cases", "output": "test-rate-limiter-edges"}
+{"input": "Fix animation jank during page transitions", "output": "style-page-transition-jank"}
+{"input": "Add batch processing for bulk operations", "output": "feat-batch-processing"}
+{"input": "Fix stack overflow in recursive tree traversal", "output": "fix-recursive-stack-overflow"}
+{"input": "Convert synchronous I/O to async", "output": "refactor-sync-to-async"}
+{"input": "Add OpenAPI specification for all endpoints", "output": "docs-openapi-spec"}
+{"input": "Rotate and compress log files automatically", "output": "chore-log-rotation"}
+{"input": "Add tests for WebSocket message ordering", "output": "test-ws-message-ordering"}
+{"input": "Implement column resizing for data tables", "output": "feat-column-resize"}
+{"input": "Fix incorrect cache invalidation on update", "output": "fix-cache-invalidation"}
+{"input": "Replace global state with context providers", "output": "refactor-global-to-context"}
+{"input": "Add developer setup guide to wiki", "output": "docs-developer-setup"}
+{"input": "Add Prettier for consistent code formatting", "output": "chore-add-prettier"}
+{"input": "Add compatibility tests for older browsers", "output": "test-browser-compat"}
+{"input": "Fix line height inconsistency in lists", "output": "style-list-line-height"}
+{"input": "Build custom theming engine for white-label", "output": "feat-theming-engine"}
+{"input": "Fix incorrect permissions check for admin role", "output": "fix-admin-permissions"}
+{"input": "Replace imperative DOM manipulation with declarative", "output": "refactor-declarative-dom"}
+{"input": "Document internal messaging protocol", "output": "docs-messaging-protocol"}
+{"input": "Increase connection pool maximum to 50", "output": "chore-increase-pool-max"}
+{"input": "Add tests for UTF-8 special character handling", "output": "test-utf8-special-chars"}
+{"input": "Implement progressive image loading", "output": "feat-progressive-image-load"}
+{"input": "Fix cursor position after paste in editor", "output": "fix-cursor-after-paste"}
+{"input": "Convert switch statements to strategy pattern", "output": "refactor-strategy-pattern"}
+{"input": "Add monitoring dashboard documentation", "output": "docs-monitoring-dashboard"}
+{"input": "Archive old migration scripts", "output": "chore-archive-old-migrations"}
+{"input": "Add snapshot tests for serialized output", "output": "test-serialization-snapshots"}
+{"input": "Implement split pane view for diff comparison", "output": "feat-split-pane-diff"}
+{"input": "Fix memory allocation spike during bulk import", "output": "fix-bulk-import-memory"}
+{"input": "Lazy load heavy components on demand", "output": "refactor-lazy-load-components"}
+{"input": "Add network troubleshooting section to docs", "output": "docs-network-troubleshoot"}
+{"input": "Update Node.js to LTS version 22", "output": "chore-node-lts-22"}
+{"input": "Add tests for graceful shutdown sequence", "output": "test-graceful-shutdown"}
+{"input": "Fix text truncation in narrow containers", "output": "style-text-truncation"}
+{"input": "Implement audit log for admin actions", "output": "feat-audit-log-admin"}
+{"input": "Fix DNS resolution failure causing crash", "output": "fix-dns-resolution-crash"}
+{"input": "Reduce cyclomatic complexity in validators", "output": "refactor-reduce-complexity"}
+{"input": "Add FAQ about self-hosting deployment", "output": "docs-self-hosting-faq"}
+{"input": "Enable branch protection rules", "output": "chore-branch-protection"}
+{"input": "Add tests for file upload size limits", "output": "test-upload-size-limits"}
+{"input": "Fix focus ring missing on interactive elements", "output": "style-focus-ring-missing"}
+{"input": "Build workspace template system", "output": "feat-workspace-templates"}
+{"input": "Fix panic on empty input in command parser", "output": "fix-empty-input-panic"}
+{"input": "Inline small utility functions used once", "output": "refactor-inline-one-use-utils"}
+{"input": "Document backup and restore procedures", "output": "docs-backup-restore"}
+{"input": "Add .editorconfig for cross-IDE consistency", "output": "chore-editorconfig"}
+{"input": "Add tests for custom keybinding conflicts", "output": "test-keybinding-conflicts"}
+{"input": "Implement command palette with fuzzy search", "output": "feat-command-palette"}
+{"input": "Fix pipe reader hanging after child exit", "output": "fix-pipe-reader-hang"}
+{"input": "Decompose god class into focused services", "output": "refactor-decompose-god-class"}
+{"input": "Create architecture overview diagram", "output": "docs-architecture-overview"}
+{"input": "Migrate CI from Jenkins to GitHub Actions", "output": "chore-jenkins-to-gha"}
+{"input": "Add tests for reconnection after network drop", "output": "test-reconnection-network"}
+{"input": "Implement tab completion in terminal input", "output": "feat-tab-completion"}
+{"input": "Fix window resize causing layout corruption", "output": "fix-resize-layout-corrupt"}
+{"input": "Use builder pattern for complex constructors", "output": "refactor-builder-pattern"}
+{"input": "Add performance tuning guide", "output": "docs-performance-tuning"}
+{"input": "Configure automated backups for production DB", "output": "chore-automated-backups"}
+{"input": "Add tests for theme switching persistence", "output": "test-theme-persistence"}
+{"input": "Implement image annotation and markup tools", "output": "feat-image-annotation"}
+{"input": "Fix signal handler not cleaning up temp files", "output": "fix-signal-cleanup-tempfiles"}

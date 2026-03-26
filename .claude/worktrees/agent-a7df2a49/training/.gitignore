@@ -1,0 +1,22 @@
+# Generated data (re-creatable via generate_data.py)
+data/
+
+# Trained models (large binary files)
+models/
+
+# llama.cpp clone (for GGUF conversion)
+llama.cpp/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/

@@ -1,0 +1,23 @@
+name: "Smoke test — app ready and responsive"
+tags: [smoke, lifecycle]
+---
+- resetApp
+- waitForReady
+
+- getAppInfo:
+  store: app
+
+- assertNotEmpty:
+    var: app
+
+- listWorkspaces:
+  store: workspaces
+
+- assertWorkspaceCount:
+    min: 1
+
+- listTerminals:
+  store: terminals
+
+- assertTerminalCount:
+    min: 1

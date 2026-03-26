@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Lightweight diagnostic logger for freeze debugging.
@@ -133,13 +133,17 @@ const DEFAULT_FONT_FAMILY: &str = "Geist Mono";
 /// Same file as the `fonts::REGULAR` constant in `main.rs`.
 const GEIST_MONO_REGULAR: &[u8] = include_bytes!("../fonts/GeistMono-Regular.ttf");
 
-/// Create font metrics using the bundled Geist Mono font file for accurate
-/// measurements. Falls back to heuristic ratios for non-default font families.
+/// Create font metrics by measuring actual font tables.
+///
+/// For the bundled Geist Mono, uses the embedded font bytes directly.
+/// For any other font family, loads the system font via `FontLoader` and
+/// reads its metrics from the OS/2 and hhea tables. Only falls back to
+/// heuristic ratios when the font genuinely cannot be located or parsed.
 fn measured_font_metrics(font_size: f32, font_family: &str) -> FontMetrics {
     if font_family == DEFAULT_FONT_FAMILY {
         FontMetrics::from_font_bytes(font_size, GEIST_MONO_REGULAR)
     } else {
-        FontMetrics::from_font_size(font_size)
+        FontMetrics::from_system_font(font_size, font_family)
     }
 }
 
@@ -464,6 +468,10 @@ pub struct GodlyApp {
     cf_tunnel_process: Option<std::process::Child>,
     /// Public URL of the running tunnel.
     cf_tunnel_url: String,
+    /// Shared log buffer written to by the background cloudflared reader thread.
+    cf_tunnel_log_buffer: Arc<Mutex<Vec<String>>>,
+    /// Log lines displayed in the UI (flushed from `cf_tunnel_log_buffer`).
+    cf_tunnel_log_lines: Vec<String>,
     /// Detected path to cloudflared binary (None = not found).
     cf_cloudflared_path: Option<std::path::PathBuf>,
     /// Whether cloudflared login check has been done / result.
@@ -649,6 +657,8 @@ impl Default for GodlyApp {
             cf_tunnel_status: CfTunnelStatus::Stopped,
             cf_tunnel_process: None,
             cf_tunnel_url: String::new(),
+            cf_tunnel_log_buffer: Arc::new(Mutex::new(Vec::new())),
+            cf_tunnel_log_lines: Vec::new(),
             cf_cloudflared_path,
             cf_logged_in: None,
             cf_tunnel_name_input,
@@ -1050,6 +1060,8 @@ pub enum Message {
     CfSaveSettings,
     /// Copy tunnel URL to clipboard.
     CfCopyTunnelUrl,
+    /// Periodic tick to flush cloudflared log lines from the shared buffer.
+    CfTunnelLogTick,
     /// Periodic tick used for toast auto-dismiss.
     ToastTick,
     /// Periodic autosave of session state so workspace layout survives crashes.
@@ -3747,17 +3759,31 @@ impl GodlyApp {
                         self.cf_tunnel_prefs.hostname = self.cf_hostname_input.trim().to_string();
                         crate::cf_tunnel::save_preferences(&self.cf_tunnel_prefs);
 
+                        // Clear previous log lines
+                        self.cf_tunnel_log_lines.clear();
+                        if let Ok(mut buf) = self.cf_tunnel_log_buffer.lock() {
+                            buf.clear();
+                        }
+
                         let port = self.phone_remote_prefs.port;
                         match self.cf_tunnel_prefs.mode {
                             CfTunnelMode::Quick => {
+                                // Log the command being run
+                                self.cf_tunnel_log_lines.push(format!(
+                                    "$ {} tunnel --url http://localhost:{}",
+                                    cf_path.display(),
+                                    port,
+                                ));
                                 match crate::cf_tunnel::spawn_quick_tunnel(&cf_path, port) {
                                     Ok(mut child) => {
                                         let stderr = child.stderr.take();
                                         self.cf_tunnel_process = Some(child);
                                         self.cf_tunnel_status = CfTunnelStatus::Starting;
                                         if let Some(stderr) = stderr {
-                                            let rx =
-                                                crate::cf_tunnel::read_quick_tunnel_url(stderr);
+                                            let log_buf = Arc::clone(&self.cf_tunnel_log_buffer);
+                                            let rx = crate::cf_tunnel::read_quick_tunnel_url(
+                                                stderr, log_buf,
+                                            );
                                             return Task::perform(
                                                 async move {
                                                     match rx.await {
@@ -3787,11 +3813,24 @@ impl GodlyApp {
                                         CfTunnelStatus::Failed("Tunnel name is required".into());
                                     return Task::none();
                                 }
+                                // Log the command being run
+                                self.cf_tunnel_log_lines.push(format!(
+                                    "$ {} tunnel run {}",
+                                    cf_path.display(),
+                                    name,
+                                ));
                                 match crate::cf_tunnel::spawn_named_tunnel(&cf_path, &name) {
-                                    Ok(child) => {
+                                    Ok(mut child) => {
+                                        // Start reading stderr logs
+                                        if let Some(stderr) = child.stderr.take() {
+                                            crate::cf_tunnel::read_tunnel_logs(
+                                                stderr,
+                                                Arc::clone(&self.cf_tunnel_log_buffer),
+                                            );
+                                        }
                                         self.cf_tunnel_process = Some(child);
                                         self.cf_tunnel_status = CfTunnelStatus::Starting;
-                                        let hostname = self.cf_tunnel_prefs.hostname.clone();
+                                        let _hostname = self.cf_tunnel_prefs.hostname.clone();
                                         // Health-check: wait then verify the process is alive
                                         return Task::perform(
                                             async move {
@@ -4040,6 +4079,17 @@ impl GodlyApp {
             Message::CfCopyTunnelUrl => {
                 if !self.cf_tunnel_url.is_empty() {
                     return iced::clipboard::write(self.cf_tunnel_url.clone());
+                }
+            }
+            Message::CfTunnelLogTick => {
+                if let Ok(mut buf) = self.cf_tunnel_log_buffer.lock() {
+                    if !buf.is_empty() {
+                        self.cf_tunnel_log_lines.append(&mut *buf);
+                        if self.cf_tunnel_log_lines.len() > 200 {
+                            let excess = self.cf_tunnel_log_lines.len() - 200;
+                            self.cf_tunnel_log_lines.drain(..excess);
+                        }
+                    }
                 }
             }
             Message::ToastTick => {
@@ -6959,6 +7009,36 @@ impl GodlyApp {
                 );
             }
 
+            // ── cloudflared output log ────────────────────────────
+            if !self.cf_tunnel_log_lines.is_empty() {
+                let log_text = self.cf_tunnel_log_lines.join("\n");
+                content = content.push(text("cloudflared output").size(11).color(TEXT_SECONDARY()));
+                content = content.push(
+                    container(
+                        scrollable(
+                            text(log_text)
+                                .size(10)
+                                .color(TEXT_SECONDARY())
+                                .font(iced::Font::MONOSPACE),
+                        )
+                        .height(120),
+                    )
+                    .padding(Padding::from([6, 8]))
+                    .width(Length::Fill)
+                    .style(|_theme| container::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(
+                            0.08, 0.08, 0.1,
+                        ))),
+                        border: iced::Border {
+                            color: BORDER(),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..container::Style::default()
+                    }),
+                );
+            }
+
             // ── Access Protection section (Named tunnel only) ────────
             if named_active {
                 content = content.push(
@@ -7190,10 +7270,27 @@ impl GodlyApp {
             );
         }
 
+        // Cloudflare tunnel log polling.
+        if matches!(
+            self.cf_tunnel_status,
+            CfTunnelStatus::Starting | CfTunnelStatus::Running
+        ) {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(500)).map(|_| Message::CfTunnelLogTick),
+            );
+        }
+
         // File pane watch: poll for file modifications every 500ms.
         if !self.file_panes.is_empty() {
             subscriptions.push(
                 iced::time::every(Duration::from_millis(500)).map(|_| Message::FilePaneWatchTick),
+            );
+        }
+
+        // Perf overlay: force periodic redraws so the overlay stays live when idle.
+        if self.perf_overlay_visible {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat),
             );
         }
 

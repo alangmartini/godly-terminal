@@ -68,7 +68,7 @@ const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234
 
 fn make_cell(row: usize, col: usize) -> RichGridCell {
     RichGridCell {
-        content: String::from((CHARS[(row * 7 + col) % CHARS.len()] as char)),
+        content: String::from(CHARS[(row * 7 + col) % CHARS.len()] as char),
         fg: PALETTE[(row + col) % PALETTE.len()].to_string(),
         bg: if (row + col) % 5 == 0 {
             "#1e1e2e".to_string()
@@ -348,14 +348,18 @@ fn bench_cache_operations(c: &mut Criterion) {
         let key = GlyphKey::new('A', 14.0, false, false);
         cache.insert(key, stub_glyph());
 
-        b.iter(|| black_box(cache.get(&key).is_some()));
+        b.iter(|| {
+            let _ = black_box(cache.get(&key));
+        });
     });
 
     group.bench_function("cache_get_miss", |b| {
         let mut cache = GlyphCache::new();
         let key = GlyphKey::new('Z', 14.0, false, false);
 
-        b.iter(|| black_box(cache.get(&key).is_none()));
+        b.iter(|| {
+            let _ = black_box(cache.get(&key));
+        });
     });
 
     group.finish();
