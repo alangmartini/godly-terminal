@@ -57,6 +57,120 @@ impl TmuxState {
         self.sessions.remove(session_name);
         self.panes.retain(|_, v| v.session != session_name);
     }
+
+    /// Resolve a target string to a terminal_id.
+    ///
+    /// Supports `%N` pane IDs, session names (returns first pane in session),
+    /// and falls back to `$TMUX_PANE` env var if target is None/empty.
+    pub fn resolve_target(&self, target: Option<&str>) -> Result<String, String> {
+        let t = self.effective_target(target)?;
+        Ok(self.lookup_pane(&t)?.terminal_id.clone())
+    }
+
+    /// Get the session name for a pane target.
+    pub fn resolve_session(&self, target: Option<&str>) -> Result<String, String> {
+        let t = self.effective_target(target)?;
+        if t.starts_with('%') {
+            return self
+                .panes
+                .get(&t)
+                .map(|p| p.session.clone())
+                .ok_or_else(|| format!("pane not found: {}", t));
+        }
+        if self.sessions.contains_key(&t) {
+            return Ok(t);
+        }
+        Err(format!("session not found: {}", t))
+    }
+
+    /// Get the workspace_id for a session name.
+    pub fn workspace_for_session(&self, session: &str) -> Result<String, String> {
+        self.sessions
+            .get(session)
+            .map(|s| s.workspace_id.clone())
+            .ok_or_else(|| format!("session not found: {}", session))
+    }
+
+    /// Resolve a target to a pane ID string (e.g. `%0`).
+    /// Falls back to `$TMUX_PANE` then `%0` when target is None.
+    pub fn resolve_pane_id(&self, target: Option<&str>) -> String {
+        match target {
+            Some(t) if t.starts_with('%') => t.to_string(),
+            Some(session_name) => self
+                .panes
+                .iter()
+                .find(|(_, p)| p.session == session_name)
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| std::env::var("TMUX_PANE").unwrap_or_else(|_| "%0".to_string())),
+            None => std::env::var("TMUX_PANE").unwrap_or_else(|_| "%0".to_string()),
+        }
+    }
+
+    /// Look up the session name for a pane.
+    pub fn pane_session(&self, pane_id: &str) -> Option<&str> {
+        self.panes.get(pane_id).map(|p| p.session.as_str())
+    }
+
+    /// Get the index of a pane within its session (0-based, sorted by pane ID).
+    pub fn pane_index(&self, pane_id: &str) -> usize {
+        let session = match self.panes.get(pane_id) {
+            Some(p) => &p.session,
+            None => return 0,
+        };
+        let mut session_panes: Vec<&str> = self
+            .panes
+            .iter()
+            .filter(|(_, p)| p.session == *session)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        session_panes.sort();
+        session_panes
+            .iter()
+            .position(|&id| id == pane_id)
+            .unwrap_or(0)
+    }
+
+    /// Resolve the raw target: explicit value → `$TMUX_PANE` → last allocated pane.
+    fn effective_target(&self, target: Option<&str>) -> Result<String, String> {
+        match target {
+            Some(t) if !t.is_empty() => Ok(t.to_string()),
+            _ => {
+                let env = std::env::var("TMUX_PANE").unwrap_or_default();
+                if !env.is_empty() {
+                    return Ok(env);
+                }
+                self.last_pane_key()
+            }
+        }
+    }
+
+    /// Look up a pane entry by a resolved target string (`%N` or session name).
+    fn lookup_pane(&self, target: &str) -> Result<&PaneMapping, String> {
+        if target.starts_with('%') {
+            return self
+                .panes
+                .get(target)
+                .ok_or_else(|| format!("pane not found: {}", target));
+        }
+        self.panes
+            .values()
+            .find(|e| e.session == target)
+            .ok_or_else(|| format!("target not found: {}", target))
+    }
+
+    /// Find the key of the most recently allocated pane (highest ID that still exists).
+    fn last_pane_key(&self) -> Result<String, String> {
+        if self.next_pane_id == 0 || self.panes.is_empty() {
+            return Err("no panes exist".to_string());
+        }
+        for i in (0..self.next_pane_id).rev() {
+            let key = format!("%{}", i);
+            if self.panes.contains_key(&key) {
+                return Ok(key);
+            }
+        }
+        Err("no panes exist".to_string())
+    }
 }
 
 /// Get the path to the tmux state file.
@@ -262,5 +376,83 @@ mod tests {
         // This test relies on a non-existent path; we just verify the default state behavior
         let state = TmuxState::default();
         assert!(state.sessions.is_empty());
+    }
+
+    fn make_state_with_panes() -> TmuxState {
+        let mut state = TmuxState::default();
+        state.sessions.insert(
+            "main".to_string(),
+            SessionMapping {
+                workspace_id: "ws-abc".to_string(),
+            },
+        );
+        state.allocate_pane_id("term-111".to_string(), "main".to_string());
+        state.allocate_pane_id("term-222".to_string(), "main".to_string());
+        state
+    }
+
+    #[test]
+    fn resolve_target_by_pane_id() {
+        let state = make_state_with_panes();
+        assert_eq!(state.resolve_target(Some("%0")).unwrap(), "term-111");
+        assert_eq!(state.resolve_target(Some("%1")).unwrap(), "term-222");
+    }
+
+    #[test]
+    fn resolve_target_pane_not_found() {
+        let state = make_state_with_panes();
+        assert!(state.resolve_target(Some("%99")).is_err());
+    }
+
+    #[test]
+    fn resolve_target_by_session_name() {
+        let state = make_state_with_panes();
+        let tid = state.resolve_target(Some("main")).unwrap();
+        assert!(tid == "term-111" || tid == "term-222");
+    }
+
+    #[test]
+    fn resolve_target_fallback_last_pane() {
+        std::env::remove_var("TMUX_PANE");
+        let state = make_state_with_panes();
+        assert_eq!(state.resolve_target(None).unwrap(), "term-222");
+    }
+
+    #[test]
+    fn resolve_session_from_pane() {
+        let state = make_state_with_panes();
+        assert_eq!(state.resolve_session(Some("%0")).unwrap(), "main");
+    }
+
+    #[test]
+    fn workspace_for_session_found() {
+        let state = make_state_with_panes();
+        assert_eq!(state.workspace_for_session("main").unwrap(), "ws-abc");
+    }
+
+    #[test]
+    fn workspace_for_session_not_found() {
+        let state = make_state_with_panes();
+        assert!(state.workspace_for_session("nonexistent").is_err());
+    }
+
+    #[test]
+    fn pane_index_returns_sorted_position() {
+        let state = make_state_with_panes();
+        assert_eq!(state.pane_index("%0"), 0);
+        assert_eq!(state.pane_index("%1"), 1);
+    }
+
+    #[test]
+    fn pane_session_lookup() {
+        let state = make_state_with_panes();
+        assert_eq!(state.pane_session("%0"), Some("main"));
+        assert_eq!(state.pane_session("%99"), None);
+    }
+
+    #[test]
+    fn resolve_pane_id_direct() {
+        let state = make_state_with_panes();
+        assert_eq!(state.resolve_pane_id(Some("%1")), "%1");
     }
 }
