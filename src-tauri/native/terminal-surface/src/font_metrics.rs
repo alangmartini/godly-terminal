@@ -3,6 +3,10 @@
 /// Provides cell dimensions derived from font size using heuristic ratios.
 /// These are reasonable defaults for monospace fonts and can be replaced
 /// with measured values once actual font shaping is available.
+///
+/// All pixel dimensions (`cell_width`, `cell_height`, `baseline_offset`,
+/// `font_size`) are in **logical** pixels. Call [`scaled_for_render`] to
+/// obtain physical-pixel metrics for the pixel renderer path.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FontMetrics {
     /// Width of a single cell in pixels.
@@ -13,6 +17,10 @@ pub struct FontMetrics {
     pub font_size: f32,
     /// Vertical offset from cell top to text baseline in pixels.
     pub baseline_offset: f32,
+    /// DPI scale factor from the OS (e.g. 1.0, 1.25, 1.5, 2.0).
+    /// Defaults to 1.0. Used by the pixel renderer to rasterize glyphs
+    /// at the correct physical resolution.
+    pub scale_factor: f32,
 }
 
 impl FontMetrics {
@@ -37,6 +45,7 @@ impl FontMetrics {
             cell_height,
             font_size,
             baseline_offset,
+            scale_factor: 1.0,
         }
     }
 
@@ -82,7 +91,30 @@ impl FontMetrics {
             cell_height,
             font_size,
             baseline_offset,
+            scale_factor: 1.0,
         }
+    }
+
+    /// Return a copy with all pixel dimensions multiplied by `scale_factor`.
+    ///
+    /// The pixel renderer uses this to rasterize glyphs and lay out cells at
+    /// the physical-pixel resolution required by the OS DPI setting.
+    /// When `scale_factor == 1.0` the returned metrics are identical.
+    pub fn scaled_for_render(&self) -> Self {
+        let s = self.scale_factor;
+        Self {
+            cell_width: self.cell_width * s,
+            cell_height: self.cell_height * s,
+            font_size: self.font_size * s,
+            baseline_offset: self.baseline_offset * s,
+            scale_factor: s,
+        }
+    }
+
+    /// Set the DPI scale factor. Returns `self` for chaining.
+    pub fn with_scale_factor(mut self, scale_factor: f32) -> Self {
+        self.scale_factor = scale_factor;
+        self
     }
 }
 
@@ -103,6 +135,7 @@ mod tests {
         assert!((m.cell_height - 18.2).abs() < 0.01);
         assert!((m.font_size - 14.0).abs() < 0.01);
         assert!((m.baseline_offset - 13.65).abs() < 0.01);
+        assert!((m.scale_factor - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -201,7 +234,10 @@ mod tests {
     fn from_font_bytes_invalid_data_falls_back() {
         let m = FontMetrics::from_font_bytes(14.0, b"not a font");
         let fallback = FontMetrics::from_font_size(14.0);
-        assert_eq!(m, fallback, "invalid font data should fall back to heuristic");
+        assert_eq!(
+            m, fallback,
+            "invalid font data should fall back to heuristic"
+        );
     }
 
     #[test]
@@ -209,5 +245,23 @@ mod tests {
         let m = FontMetrics::from_font_bytes(14.0, &[]);
         let fallback = FontMetrics::from_font_size(14.0);
         assert_eq!(m, fallback, "empty font data should fall back to heuristic");
+    }
+
+    #[test]
+    fn scaled_for_render_multiplies_dimensions() {
+        let m = FontMetrics::from_font_size(14.0).with_scale_factor(1.5);
+        let s = m.scaled_for_render();
+        assert!((s.cell_width - 14.0 * 0.6 * 1.5).abs() < 0.01);
+        assert!((s.font_size - 14.0 * 1.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn scaled_for_render_at_1x_is_identity() {
+        let m = FontMetrics::from_font_size(14.0);
+        let s = m.scaled_for_render();
+        assert_eq!(m.cell_width, s.cell_width);
+        assert_eq!(m.cell_height, s.cell_height);
+        assert_eq!(m.font_size, s.font_size);
+        assert_eq!(m.baseline_offset, s.baseline_offset);
     }
 }

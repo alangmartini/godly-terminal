@@ -44,6 +44,10 @@ impl PixelRenderer {
     ///
     /// Returns `(pixels, width, height)`. The pixel buffer is RGBA with 4 bytes
     /// per pixel, row-major, and fully opaque.
+    ///
+    /// When `metrics.scale_factor > 1.0`, the output buffer is in physical
+    /// pixels (logical size * scale_factor) so that glyphs are rasterized at
+    /// the native DPI and appear crisp on HiDPI displays.
     pub fn render(
         &mut self,
         grid: &RichGridData,
@@ -56,10 +60,13 @@ impl PixelRenderer {
     ) -> (&[u8], u32, u32) {
         let t_start = Instant::now();
 
+        // Scale all pixel dimensions to physical resolution for HiDPI.
+        let phys = metrics.scaled_for_render();
+
         let cols = grid.dimensions.cols as u32;
         let rows = grid.dimensions.rows as u32;
-        let cell_w = metrics.cell_width;
-        let cell_h = metrics.cell_height;
+        let cell_w = phys.cell_width;
+        let cell_h = phys.cell_height;
 
         if cols == 0 || rows == 0 || cell_w <= 0.0 || cell_h <= 0.0 {
             self.buffer.clear();
@@ -156,15 +163,12 @@ impl PixelRenderer {
                         None => continue,
                     };
 
-                    let key = GlyphKey::new(ch, metrics.font_size, cell.bold, cell.italic);
+                    let key = GlyphKey::new(ch, phys.font_size, cell.bold, cell.italic);
 
                     if cache.get(&key).is_none() {
-                        if let Some(rg) = rasterizer.rasterize(
-                            ch,
-                            metrics.font_size,
-                            cell.bold,
-                            cell.italic,
-                        ) {
+                        if let Some(rg) =
+                            rasterizer.rasterize(ch, phys.font_size, cell.bold, cell.italic)
+                        {
                             cache.insert(
                                 key,
                                 CachedGlyph {
@@ -183,8 +187,7 @@ impl PixelRenderer {
                     let glyph_ref = cache.get(&key).unwrap();
 
                     let glyph_x = cell_x + glyph_ref.bearing_x;
-                    let glyph_y =
-                        cell_y + (metrics.baseline_offset as i32 - glyph_ref.bearing_y);
+                    let glyph_y = cell_y + (phys.baseline_offset as i32 - glyph_ref.bearing_y);
 
                     blit_alpha(
                         &mut self.buffer,
@@ -243,8 +246,17 @@ impl PixelRenderer {
                 let x_end = ((col_end + 1) as f32 * cell_w).round() as i32;
                 let rw = (x_end - x) as u32;
                 blend_rect(
-                    &mut self.buffer, w, h, x, y, rw, rh,
-                    sel_r, sel_g, sel_b, sel_a,
+                    &mut self.buffer,
+                    w,
+                    h,
+                    x,
+                    y,
+                    rw,
+                    rh,
+                    sel_r,
+                    sel_g,
+                    sel_b,
+                    sel_a,
                 );
             }
         }
@@ -266,26 +278,50 @@ impl PixelRenderer {
             match grid.cursor.cursor_style {
                 CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
                     blend_rect(
-                        &mut self.buffer, w, h,
-                        cursor_x, cursor_y, cw, ch,
-                        cur_r, cur_g, cur_b, cur_a,
+                        &mut self.buffer,
+                        w,
+                        h,
+                        cursor_x,
+                        cursor_y,
+                        cw,
+                        ch,
+                        cur_r,
+                        cur_g,
+                        cur_b,
+                        cur_a,
                     );
                 }
                 CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
                     let underline_h = 2u32;
                     let uy = next_cy - underline_h as i32;
                     blend_rect(
-                        &mut self.buffer, w, h,
-                        cursor_x, uy, cw, underline_h,
-                        cur_r, cur_g, cur_b, cur_a,
+                        &mut self.buffer,
+                        w,
+                        h,
+                        cursor_x,
+                        uy,
+                        cw,
+                        underline_h,
+                        cur_r,
+                        cur_g,
+                        cur_b,
+                        cur_a,
                     );
                 }
                 CursorShape::BlinkBar | CursorShape::SteadyBar => {
                     let bar_w = 2u32;
                     blend_rect(
-                        &mut self.buffer, w, h,
-                        cursor_x, cursor_y, bar_w, ch,
-                        cur_r, cur_g, cur_b, cur_a,
+                        &mut self.buffer,
+                        w,
+                        h,
+                        cursor_x,
+                        cursor_y,
+                        bar_w,
+                        ch,
+                        cur_r,
+                        cur_g,
+                        cur_b,
+                        cur_a,
                     );
                 }
             }
@@ -632,18 +668,24 @@ mod tests {
     #[test]
     fn fractional_positioning_matches_grid_extent() {
         // Verify buffer width = ceil(cols * cell_w), not cols * ceil(cell_w)
-        let grid = make_grid(2, 10, vec![
-            vec![make_cell(" "); 10],
-            vec![make_cell(" "); 10],
-        ]);
+        let grid = make_grid(
+            2,
+            10,
+            vec![vec![make_cell(" "); 10], vec![make_cell(" "); 10]],
+        );
         let metrics = FontMetrics::from_font_size(14.0); // cell_w=8.4
         let mut cache = GlyphCache::new();
         let mut rast = StubRasterizer;
         let mut renderer = PixelRenderer::new();
 
         let (_, w, _) = renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         // ceil(10 * 8.4) = ceil(84.0) = 84, NOT 10 * ceil(8.4) = 10 * 9 = 90
@@ -653,18 +695,27 @@ mod tests {
 
     #[test]
     fn render_populates_last_stats() {
-        let grid = make_grid(2, 3, vec![
-            vec![make_cell("A"), make_cell("B"), make_cell("C")],
-            vec![make_cell("D"), make_cell(" "), make_cell("F")],
-        ]);
+        let grid = make_grid(
+            2,
+            3,
+            vec![
+                vec![make_cell("A"), make_cell("B"), make_cell("C")],
+                vec![make_cell("D"), make_cell(" "), make_cell("F")],
+            ],
+        );
         let metrics = FontMetrics::from_font_size(14.0);
         let mut cache = GlyphCache::new();
         let mut rast = StubRasterizer;
         let mut renderer = PixelRenderer::new();
 
         renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         let stats = renderer.last_stats();
@@ -682,8 +733,13 @@ mod tests {
         let mut renderer = PixelRenderer::new();
 
         renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         let stats = renderer.last_stats();

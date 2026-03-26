@@ -195,7 +195,10 @@ impl<Message: Clone> canvas::Program<Message> for TerminalCanvas<'_, Message> {
                 }
 
                 // Draw background (only if non-default to avoid overdraw)
-                if bg.r != self.default_bg.r || bg.g != self.default_bg.g || bg.b != self.default_bg.b {
+                if bg.r != self.default_bg.r
+                    || bg.g != self.default_bg.g
+                    || bg.b != self.default_bg.b
+                {
                     frame.fill_rectangle(
                         Point::new(x, y),
                         Size::new(cell_w * char_width, cell_h),

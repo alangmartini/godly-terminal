@@ -1,6 +1,4 @@
-use criterion::{
-    criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use godly_protocol::types::{
     CursorShape, CursorState, GridDimensions, RichGridCell, RichGridData, RichGridRow,
 };
@@ -178,8 +176,13 @@ fn warm_render_state(
     let mut cache = GlyphCache::new();
     let mut rast = StubRasterizer;
     renderer.render(
-        grid, metrics, &mut cache, &mut rast,
-        Color::WHITE, Color::BLACK, selection,
+        grid,
+        metrics,
+        &mut cache,
+        &mut rast,
+        Color::WHITE,
+        Color::BLACK,
+        selection,
     );
     (renderer, cache, rast)
 }
@@ -204,8 +207,13 @@ fn bench_grid_sizes(c: &mut Criterion) {
 
             b.iter(|| {
                 let (_, w, h) = renderer.render(
-                    grid, &metrics, &mut cache, &mut rast,
-                    Color::WHITE, Color::BLACK, None,
+                    grid,
+                    &metrics,
+                    &mut cache,
+                    &mut rast,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
                 (w, h)
             });
@@ -230,8 +238,13 @@ fn bench_cold_vs_warm(c: &mut Criterion) {
         b.iter(|| {
             cache.invalidate();
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
@@ -242,8 +255,13 @@ fn bench_cold_vs_warm(c: &mut Criterion) {
 
         b.iter(|| {
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
@@ -255,10 +273,7 @@ fn bench_cold_vs_warm(c: &mut Criterion) {
 fn bench_with_selection(c: &mut Criterion) {
     let metrics = FontMetrics::from_font_size(14.0);
     let grid = make_grid(24, 80);
-    let full_selection = Some((
-        GridPos { row: 0, col: 0 },
-        GridPos { row: 23, col: 79 },
-    ));
+    let full_selection = Some((GridPos { row: 0, col: 0 }, GridPos { row: 23, col: 79 }));
 
     let mut group = c.benchmark_group("pixel_render_with_selection");
     group.throughput(Throughput::Elements(24 * 80));
@@ -268,8 +283,13 @@ fn bench_with_selection(c: &mut Criterion) {
 
         b.iter(|| {
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
@@ -281,8 +301,13 @@ fn bench_with_selection(c: &mut Criterion) {
 
         b.iter(|| {
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, full_selection,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                full_selection,
             );
             (w, h)
         });
@@ -304,8 +329,13 @@ fn bench_dense_vs_sparse(c: &mut Criterion) {
 
         b.iter(|| {
             let (_, w, h) = renderer.render(
-                &dense_grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &dense_grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
@@ -316,8 +346,13 @@ fn bench_dense_vs_sparse(c: &mut Criterion) {
 
         b.iter(|| {
             let (_, w, h) = renderer.render(
-                &sparse_grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &sparse_grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });

@@ -4,7 +4,9 @@ use godly_protocol::types::{
 };
 use godly_terminal_surface::font_metrics::FontMetrics;
 use godly_terminal_surface::glyph_cache::GlyphCache;
-use godly_terminal_surface::glyph_rasterizer::{GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph};
+use godly_terminal_surface::glyph_rasterizer::{
+    GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph,
+};
 use godly_terminal_surface::pixel_renderer::PixelRenderer;
 use iced::Color;
 
@@ -160,8 +162,13 @@ fn bench_sustained(c: &mut Criterion) {
     let mut cache = GlyphCache::new();
     let mut rasterizer = StubRasterizer;
     renderer.render(
-        &grid, &metrics, &mut cache, &mut rasterizer,
-        Color::WHITE, Color::BLACK, None,
+        &grid,
+        &metrics,
+        &mut cache,
+        &mut rasterizer,
+        Color::WHITE,
+        Color::BLACK,
+        None,
     );
 
     group.throughput(Throughput::Elements(100));
@@ -169,8 +176,13 @@ fn bench_sustained(c: &mut Criterion) {
         b.iter(|| {
             for _ in 0..100 {
                 renderer.render(
-                    &grid, &metrics, &mut cache, &mut rasterizer,
-                    Color::WHITE, Color::BLACK, None,
+                    &grid,
+                    &metrics,
+                    &mut cache,
+                    &mut rasterizer,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
             }
         });
@@ -185,15 +197,22 @@ fn bench_varying_grids(c: &mut Criterion) {
     let metrics = FontMetrics::from_font_size(14.0);
 
     for &(rows, cols, label) in &[(24u16, 80u16, "80x24"), (40, 120, "120x40")] {
-        let grids: Vec<RichGridData> = (0..100).map(|i| make_grid_with_seed(rows, cols, i)).collect();
+        let grids: Vec<RichGridData> = (0..100)
+            .map(|i| make_grid_with_seed(rows, cols, i))
+            .collect();
 
         let mut renderer = PixelRenderer::new();
         let mut cache = GlyphCache::new();
         let mut rasterizer = StubRasterizer;
         // Pre-warm
         renderer.render(
-            &grids[0], &metrics, &mut cache, &mut rasterizer,
-            Color::WHITE, Color::BLACK, None,
+            &grids[0],
+            &metrics,
+            &mut cache,
+            &mut rasterizer,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         group.throughput(Throughput::Elements(100));
@@ -204,8 +223,13 @@ fn bench_varying_grids(c: &mut Criterion) {
                 b.iter(|| {
                     for grid in grids {
                         renderer.render(
-                            grid, &metrics, &mut cache, &mut rasterizer,
-                            Color::WHITE, Color::BLACK, None,
+                            grid,
+                            &metrics,
+                            &mut cache,
+                            &mut rasterizer,
+                            Color::WHITE,
+                            Color::BLACK,
+                            None,
                         );
                     }
                 });
@@ -232,19 +256,34 @@ fn bench_buffer_reuse(c: &mut Criterion) {
         let mut cache = GlyphCache::new();
         let mut rasterizer = StubRasterizer;
         renderer.render(
-            &grid_a, &metrics, &mut cache, &mut rasterizer,
-            Color::WHITE, Color::BLACK, None,
+            &grid_a,
+            &metrics,
+            &mut cache,
+            &mut rasterizer,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         group.bench_function("same_size", |b| {
             b.iter(|| {
                 renderer.render(
-                    &grid_a, &metrics, &mut cache, &mut rasterizer,
-                    Color::WHITE, Color::BLACK, None,
+                    &grid_a,
+                    &metrics,
+                    &mut cache,
+                    &mut rasterizer,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
                 renderer.render(
-                    &grid_b, &metrics, &mut cache, &mut rasterizer,
-                    Color::WHITE, Color::BLACK, None,
+                    &grid_b,
+                    &metrics,
+                    &mut cache,
+                    &mut rasterizer,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
             });
         });
@@ -256,19 +295,34 @@ fn bench_buffer_reuse(c: &mut Criterion) {
         let mut cache = GlyphCache::new();
         let mut rasterizer = StubRasterizer;
         renderer.render(
-            &grid_a, &metrics, &mut cache, &mut rasterizer,
-            Color::WHITE, Color::BLACK, None,
+            &grid_a,
+            &metrics,
+            &mut cache,
+            &mut rasterizer,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         group.bench_function("different_size", |b| {
             b.iter(|| {
                 renderer.render(
-                    &grid_a, &metrics, &mut cache, &mut rasterizer,
-                    Color::WHITE, Color::BLACK, None,
+                    &grid_a,
+                    &metrics,
+                    &mut cache,
+                    &mut rasterizer,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
                 renderer.render(
-                    &grid_large, &metrics, &mut cache, &mut rasterizer,
-                    Color::WHITE, Color::BLACK, None,
+                    &grid_large,
+                    &metrics,
+                    &mut cache,
+                    &mut rasterizer,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
             });
         });
@@ -291,15 +345,25 @@ fn bench_dirty_rows(c: &mut Criterion) {
         let mut rasterizer = StubRasterizer;
         // Pre-warm
         renderer.render(
-            &grid, &metrics, &mut cache, &mut rasterizer,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rasterizer,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         group.bench_with_input(BenchmarkId::new("80x24", label), &grid, |b, grid| {
             b.iter(|| {
                 renderer.render(
-                    grid, &metrics, &mut cache, &mut rasterizer,
-                    Color::WHITE, Color::BLACK, None,
+                    grid,
+                    &metrics,
+                    &mut cache,
+                    &mut rasterizer,
+                    Color::WHITE,
+                    Color::BLACK,
+                    None,
                 );
             });
         });

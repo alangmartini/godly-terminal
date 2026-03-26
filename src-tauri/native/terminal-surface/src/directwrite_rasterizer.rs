@@ -46,10 +46,17 @@ pub struct DirectWriteRasterizer {
     /// Stored for future ClearType subpixel blending (`GetAlphaBlendParams`).
     #[allow(dead_code)]
     rendering_params: IDWriteRenderingParams,
+    /// DPI scale factor (pixels per DIP). At 100% scaling this is 1.0;
+    /// at 150% it is 1.5, etc. Passed to `CreateGlyphRunAnalysis` so that
+    /// DirectWrite rasterizes glyphs at the physical pixel resolution.
+    scale_factor: f32,
 }
 
 impl DirectWriteRasterizer {
     /// Create a new rasterizer, initializing the DirectWrite factory.
+    ///
+    /// The DPI scale factor defaults to 1.0. Call [`set_scale_factor`] to
+    /// update it when the window's DPI changes.
     pub fn new() -> windows::core::Result<Self> {
         unsafe {
             let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
@@ -58,8 +65,19 @@ impl DirectWriteRasterizer {
                 factory,
                 font_face: None,
                 rendering_params,
+                scale_factor: 1.0,
             })
         }
+    }
+
+    /// Update the DPI scale factor (pixels per DIP).
+    ///
+    /// This should be called whenever the window moves to a display with a
+    /// different DPI. After changing the scale factor the caller should
+    /// invalidate the glyph cache, since cached bitmaps were rasterized at
+    /// the old DPI.
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
     }
 
     /// Load a system font by family name (e.g. "Consolas", "Cascadia Code").
@@ -75,8 +93,10 @@ impl DirectWriteRasterizer {
 
             let mut index = 0u32;
             let mut exists = BOOL::default();
-            let family_wide: Vec<u16> =
-                family_name.encode_utf16().chain(std::iter::once(0)).collect();
+            let family_wide: Vec<u16> = family_name
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
             let family_pcwstr = PCWSTR(family_wide.as_ptr());
             collection.FindFamilyName(family_pcwstr, &mut index, &mut exists)?;
 
@@ -117,11 +137,7 @@ impl DirectWriteRasterizer {
         unsafe {
             let codepoints = [ch as u32];
             let mut glyph_indices = [0u16; 1];
-            font_face.GetGlyphIndices(
-                codepoints.as_ptr(),
-                1,
-                glyph_indices.as_mut_ptr(),
-            )?;
+            font_face.GetGlyphIndices(codepoints.as_ptr(), 1, glyph_indices.as_mut_ptr())?;
 
             if glyph_indices[0] == 0 {
                 return Ok(None);
@@ -150,7 +166,7 @@ impl DirectWriteRasterizer {
 
             let analysis = self.factory.CreateGlyphRunAnalysis(
                 &glyph_run,
-                1.0, // pixels per DIP
+                self.scale_factor, // pixels per DIP — actual OS scale factor
                 None,
                 DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
                 DWRITE_MEASURING_MODE_NATURAL,
@@ -158,8 +174,7 @@ impl DirectWriteRasterizer {
                 0.0, // baseline origin
             )?;
 
-            let bounds =
-                analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1)?;
+            let bounds = analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1)?;
 
             let width = (bounds.right - bounds.left) as u32;
             let height = (bounds.bottom - bounds.top) as u32;
@@ -176,11 +191,7 @@ impl DirectWriteRasterizer {
             }
 
             let mut rgb = vec![0u8; (width * height * 3) as usize];
-            analysis.CreateAlphaTexture(
-                DWRITE_TEXTURE_CLEARTYPE_3x1,
-                &bounds,
-                &mut rgb,
-            )?;
+            analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut rgb)?;
 
             let alpha: Vec<u8> = rgb
                 .chunks_exact(3)
@@ -294,7 +305,10 @@ mod tests {
     fn rasterize_without_font_fails() {
         let rasterizer = DirectWriteRasterizer::new().unwrap();
         let result = rasterizer.rasterize_glyph('A', 14.0);
-        assert!(result.is_err(), "rasterizing without a loaded font should fail");
+        assert!(
+            result.is_err(),
+            "rasterizing without a loaded font should fail"
+        );
     }
 
     #[test]
