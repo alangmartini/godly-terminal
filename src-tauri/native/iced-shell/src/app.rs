@@ -133,13 +133,17 @@ const DEFAULT_FONT_FAMILY: &str = "Geist Mono";
 /// Same file as the `fonts::REGULAR` constant in `main.rs`.
 const GEIST_MONO_REGULAR: &[u8] = include_bytes!("../fonts/GeistMono-Regular.ttf");
 
-/// Create font metrics using the bundled Geist Mono font file for accurate
-/// measurements. Falls back to heuristic ratios for non-default font families.
+/// Create font metrics by measuring actual font tables.
+///
+/// For the bundled Geist Mono, uses the embedded font bytes directly.
+/// For any other font family, loads the system font via `FontLoader` and
+/// reads its metrics from the OS/2 and hhea tables. Only falls back to
+/// heuristic ratios when the font genuinely cannot be located or parsed.
 fn measured_font_metrics(font_size: f32, font_family: &str) -> FontMetrics {
     if font_family == DEFAULT_FONT_FAMILY {
         FontMetrics::from_font_bytes(font_size, GEIST_MONO_REGULAR)
     } else {
-        FontMetrics::from_font_size(font_size)
+        FontMetrics::from_system_font(font_size, font_family)
     }
 }
 
