@@ -21,6 +21,7 @@ pub mod title_bar;
 pub mod theme;
 pub mod workspace_state;
 pub mod confirm_dialog;
+pub mod desktop_notify_prefs;
 pub mod shell_picker;
 pub mod search;
 pub mod scrollbar;

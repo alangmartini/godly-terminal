@@ -340,6 +340,61 @@ pub fn view_worktree_close_confirm<'a, M: Clone + 'a>(
         .into()
 }
 
+/// Render a desktop-notification opt-in prompt with a "Remember my choice" checkbox.
+pub fn view_desktop_notify_prompt<'a, M: Clone + 'a>(
+    remember_checked: bool,
+    on_enable: M,
+    on_disable: M,
+    on_remember_toggle: M,
+) -> Element<'a, M> {
+    let check_label = if remember_checked {
+        "\u{2611} Remember my choice"
+    } else {
+        "\u{2610} Remember my choice"
+    };
+    let checkbox_btn = button(text(check_label).size(12).color(TEXT_PRIMARY()))
+        .on_press(on_remember_toggle)
+        .padding(Padding::from([4, 8]))
+        .style(|_theme, status| {
+            let bg = match status {
+                button::Status::Hovered => BG_TERTIARY(),
+                _ => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: TEXT_PRIMARY(),
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: RADIUS_SM.into(),
+                },
+                ..button::Style::default()
+            }
+        });
+
+    let body = column![
+        text("A background terminal needs your attention.")
+            .size(13)
+            .color(TEXT_PRIMARY()),
+        text("Would you like to enable desktop notifications?")
+            .size(13)
+            .color(TEXT_PRIMARY()),
+        Space::new().height(8.0),
+        checkbox_btn,
+    ]
+    .into();
+
+    view_confirm_dialog(
+        "Enable Desktop Notifications?",
+        body,
+        "Enable",
+        "Not Now",
+        on_enable,
+        on_disable,
+        false,
+    )
+}
+
 /// Threshold in characters above which a copy preview is shown.
 pub const COPY_PREVIEW_THRESHOLD: usize = 500;
 
@@ -351,6 +406,7 @@ mod tests {
     enum TestMsg {
         Confirm,
         Cancel,
+        Toggle,
     }
 
     #[test]
@@ -410,6 +466,26 @@ mod tests {
             TestMsg::Confirm,
             TestMsg::Cancel,
             true,
+        );
+    }
+
+    #[test]
+    fn desktop_notify_prompt_renders_unchecked() {
+        let _el: Element<'_, TestMsg> = view_desktop_notify_prompt(
+            false,
+            TestMsg::Confirm,
+            TestMsg::Cancel,
+            TestMsg::Toggle,
+        );
+    }
+
+    #[test]
+    fn desktop_notify_prompt_renders_checked() {
+        let _el: Element<'_, TestMsg> = view_desktop_notify_prompt(
+            true,
+            TestMsg::Confirm,
+            TestMsg::Cancel,
+            TestMsg::Toggle,
         );
     }
 }

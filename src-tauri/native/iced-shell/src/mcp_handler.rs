@@ -139,9 +139,10 @@ impl GodlyApp {
                 } else {
                     terminal_id.clone()
                 };
-                self.enqueue_toast_for_terminal(title, msg.clone(), &terminal_id);
+                self.enqueue_toast_for_terminal(title.clone(), msg.clone(), &terminal_id);
                 self.play_notification_sound_if_allowed(&terminal_id);
                 self.notifications.record_mcp_notify(&terminal_id, &msg);
+                self.send_desktop_notification_if_allowed(&title, &msg);
                 iced::Task::none()
             }
 
