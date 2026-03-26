@@ -370,4 +370,3 @@ criterion_group!(
     bench_cache_operations,
 );
 criterion_main!(benches);
-
