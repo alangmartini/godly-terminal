@@ -8191,6 +8191,7 @@ impl GodlyApp {
         if let Some(term) = self.terminals.get_mut(&active_id) {
             term.scrollback_offset = max;
         }
+        self.scroll_accumulator = 0.0;
         self.persist_scrollback_offsets();
 
         // Adjust selection for scroll. Bug #755.
