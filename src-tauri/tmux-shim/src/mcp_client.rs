@@ -78,4 +78,116 @@ impl McpPipeClient {
             )),
         }
     }
+
+    /// Helper: send request and map IO errors to String.
+    fn request(&self, req: &McpRequest) -> Result<McpResponse, String> {
+        self.send_request(req)
+            .map_err(|e| format!("MCP error: {}", e))
+    }
+
+    /// Create a terminal in a workspace, returning the new terminal ID.
+    pub fn create_terminal(
+        &self,
+        workspace_id: &str,
+        cwd: Option<String>,
+    ) -> Result<String, String> {
+        match self.request(&McpRequest::CreateTerminal {
+            workspace_id: workspace_id.to_string(),
+            shell_type: None,
+            cwd,
+            worktree_name: None,
+            worktree: None,
+            command: None,
+            focus: Some(false),
+        })? {
+            McpResponse::Created { id, .. } => Ok(id),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Split a terminal, placing new_terminal_id beside target_terminal_id.
+    pub fn split_terminal(
+        &self,
+        workspace_id: &str,
+        target_terminal_id: &str,
+        new_terminal_id: &str,
+        direction: &str,
+        ratio: f64,
+    ) -> Result<(), String> {
+        match self.request(&McpRequest::SplitTerminal {
+            workspace_id: workspace_id.to_string(),
+            target_terminal_id: target_terminal_id.to_string(),
+            new_terminal_id: new_terminal_id.to_string(),
+            direction: direction.to_string(),
+            ratio,
+        })? {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Focus a terminal.
+    pub fn focus_terminal(&self, terminal_id: &str) -> Result<(), String> {
+        match self.request(&McpRequest::FocusTerminal {
+            terminal_id: terminal_id.to_string(),
+        })? {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Close a terminal.
+    pub fn close_terminal(&self, terminal_id: &str) -> Result<(), String> {
+        match self.request(&McpRequest::CloseTerminal {
+            terminal_id: terminal_id.to_string(),
+        })? {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Write data to a terminal.
+    pub fn write_to_terminal(&self, terminal_id: &str, data: &str) -> Result<(), String> {
+        match self.request(&McpRequest::WriteToTerminal {
+            terminal_id: terminal_id.to_string(),
+            data: data.to_string(),
+            focus: None,
+        })? {
+            McpResponse::Ok => Ok(()),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Get the active workspace.
+    pub fn get_active_workspace(&self) -> Result<godly_protocol::McpWorkspaceInfo, String> {
+        match self.request(&McpRequest::GetActiveWorkspace)? {
+            McpResponse::ActiveWorkspace {
+                workspace: Some(ws),
+            } => Ok(ws),
+            McpResponse::ActiveWorkspace { workspace: None } => {
+                Err("no active workspace".to_string())
+            }
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
+
+    /// Read terminal content (capture-pane).
+    pub fn read_terminal(&self, terminal_id: &str) -> Result<String, String> {
+        match self.request(&McpRequest::ReadTerminal {
+            terminal_id: terminal_id.to_string(),
+            mode: None,
+            lines: None,
+            strip_ansi: Some(true),
+        })? {
+            McpResponse::TerminalOutput { content } => Ok(content),
+            McpResponse::Error { message } => Err(message),
+            other => Err(format!("unexpected response: {:?}", other)),
+        }
+    }
 }

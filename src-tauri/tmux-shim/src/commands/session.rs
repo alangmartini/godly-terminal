@@ -1,7 +1,5 @@
-use godly_protocol::{McpRequest, McpResponse};
-
 use crate::cli::TmuxArgs;
-use crate::format::{self, FormatVars};
+use crate::format;
 use crate::mcp_client::McpPipeClient;
 use crate::state;
 
@@ -38,78 +36,26 @@ fn new_session(args: &[String]) -> i32 {
     let print_info = parsed.has_flag('P');
     let format_str = parsed.get_option('F').unwrap_or("#{session_name}:");
 
-    // Connect to Godly Terminal MCP pipe
-    let client = match McpPipeClient::connect() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
-
-    // Get the active workspace
-    let workspace = match client.send_request(&McpRequest::GetActiveWorkspace) {
-        Ok(McpResponse::ActiveWorkspace {
-            workspace: Some(ws),
-        }) => ws,
-        Ok(McpResponse::ActiveWorkspace { workspace: None }) => {
-            eprintln!("tmux: no active workspace");
-            return 1;
-        }
-        Ok(McpResponse::Error { message }) => {
-            eprintln!("tmux: {}", message);
-            return 1;
-        }
-        Ok(other) => {
-            eprintln!("tmux: unexpected response: {:?}", other);
-            return 1;
-        }
-        Err(e) => {
-            eprintln!("tmux: MCP error: {}", e);
-            return 1;
-        }
-    };
+    let client = tmux_try!(McpPipeClient::connect());
+    let workspace = tmux_try!(client.get_active_workspace());
 
     // Look up GODLY_SESSION_ID for the initial pane mapping
     let godly_session_id = std::env::var("GODLY_SESSION_ID").ok();
 
-    // If a cwd was specified but we don't have a session ID, create a new terminal
     let terminal_id = if let Some(session_id) = godly_session_id {
-        // Use the existing terminal session that spawned us
         session_id
     } else if cwd.is_some() {
-        // Create a new terminal in the workspace
-        match client.send_request(&McpRequest::CreateTerminal {
-            workspace_id: workspace.id.clone(),
-            shell_type: None,
-            cwd: cwd.clone(),
-            worktree_name: None,
-            worktree: None,
-            command: None,
-            focus: Some(false),
-        }) {
-            Ok(McpResponse::Created { id, .. }) => id,
-            Ok(McpResponse::Error { message }) => {
-                eprintln!("tmux: failed to create terminal: {}", message);
-                return 1;
-            }
-            Ok(other) => {
-                eprintln!("tmux: unexpected response creating terminal: {:?}", other);
-                return 1;
-            }
-            Err(e) => {
-                eprintln!("tmux: MCP error creating terminal: {}", e);
-                return 1;
-            }
-        }
+        tmux_try!(
+            client.create_terminal(&workspace.id, cwd.clone()),
+            "failed to create terminal"
+        )
     } else {
         // No session ID and no cwd — use a placeholder; the caller will create panes
         String::new()
     };
 
     // Store the session mapping in state
-    let pane_id = match state::with_state(|state| {
-        // Check if session already exists
+    let pane_id = tmux_try!(state::with_state(|state| {
         if state.sessions.contains_key(&session_name) {
             return Err(format!("duplicate session: {}", session_name));
         }
@@ -121,7 +67,6 @@ fn new_session(args: &[String]) -> i32 {
             },
         );
 
-        // Map the initial terminal as %N
         let pane_id = if !terminal_id.is_empty() {
             state.allocate_pane_id(terminal_id.clone(), session_name.clone())
         } else {
@@ -129,24 +74,11 @@ fn new_session(args: &[String]) -> i32 {
         };
 
         Ok(pane_id)
-    }) {
-        Ok(id) => id,
-        Err(e) => {
-            eprintln!("tmux: {}", e);
-            return 1;
-        }
-    };
+    }));
 
-    // Print info if -P was specified
     if print_info && !pane_id.is_empty() {
-        let vars = FormatVars {
-            pane_id,
-            session_name: session_name.clone(),
-            pane_width: 80,
-            pane_height: 24,
-            window_index: 0,
-        };
-        println!("{}", format::expand(format_str, &vars));
+        let vars = format::session_format_vars(&pane_id, &session_name);
+        println!("{}", format::expand_format(format_str, &vars));
     }
 
     0
@@ -195,7 +127,6 @@ fn kill_session(args: &[String]) -> i32 {
         }
     };
 
-    // Load state to get all terminal IDs for this session
     let pane_terminal_ids: Vec<String> = match state::load() {
         Ok(state) => {
             if !state.sessions.contains_key(&target) {
@@ -214,42 +145,22 @@ fn kill_session(args: &[String]) -> i32 {
         }
     };
 
-    // Close each terminal via MCP
     if !pane_terminal_ids.is_empty() {
-        let client = match McpPipeClient::connect() {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("tmux: {}", e);
-                return 1;
-            }
-        };
+        let client = tmux_try!(McpPipeClient::connect());
 
         for terminal_id in &pane_terminal_ids {
             if terminal_id.is_empty() {
                 continue;
             }
-            match client.send_request(&McpRequest::CloseTerminal {
-                terminal_id: terminal_id.clone(),
-            }) {
-                Ok(McpResponse::Ok) => {}
-                Ok(McpResponse::Error { message }) => {
-                    eprintln!(
-                        "tmux: warning: failed to close terminal {}: {}",
-                        terminal_id, message
-                    );
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!(
-                        "tmux: warning: MCP error closing terminal {}: {}",
-                        terminal_id, e
-                    );
-                }
+            if let Err(e) = client.close_terminal(terminal_id) {
+                eprintln!(
+                    "tmux: warning: failed to close terminal {}: {}",
+                    terminal_id, e
+                );
             }
         }
     }
 
-    // Remove session from state
     match state::with_state(|state| {
         state.remove_session(&target);
         Ok(())
@@ -266,13 +177,7 @@ fn kill_session(args: &[String]) -> i32 {
 ///
 /// Print sessions in tmux format: `session_name: N windows (created ...)`
 fn list_sessions(_args: &[String]) -> i32 {
-    let state = match state::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("tmux: failed to read state: {}", e);
-            return 1;
-        }
-    };
+    let state = tmux_try!(state::load(), "failed to read state");
 
     if state.sessions.is_empty() {
         // tmux exits 1 with "no server running" when there are no sessions

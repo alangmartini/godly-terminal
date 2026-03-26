@@ -1,5 +1,28 @@
 use std::collections::HashMap;
 
+/// Early-return on `Err`, printing the error to stderr and returning exit code 1.
+/// Use in functions that return `i32` (exit codes).
+macro_rules! tmux_try {
+    ($expr:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("tmux: {}", e);
+                return 1;
+            }
+        }
+    };
+    ($expr:expr, $msg:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("tmux: {}: {}", $msg, e);
+                return 1;
+            }
+        }
+    };
+}
+
 /// Parsed tmux CLI arguments.
 ///
 /// tmux uses single-dash single-letter flags:
