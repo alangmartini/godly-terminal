@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::glyph_rasterizer::GlyphFormat;
+
 /// Snapshot of cache hit/miss counters.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheStats {
@@ -43,9 +45,14 @@ impl GlyphKey {
     }
 }
 
-/// A cached rasterized glyph (alpha mask + metrics).
+/// A cached rasterized glyph (bitmap data + metrics).
 pub struct CachedGlyph {
-    pub alpha: Vec<u8>,
+    /// Glyph bitmap data. Layout depends on `format`:
+    /// - `Alpha`: 1 byte per pixel (8-bit coverage).
+    /// - `SubpixelRgb`: 3 bytes per pixel (R, G, B coverage values).
+    pub data: Vec<u8>,
+    /// Format of the data stored in `data`.
+    pub format: GlyphFormat,
     pub width: u32,
     pub height: u32,
     pub bearing_x: i32,
@@ -132,9 +139,10 @@ impl GlyphCache {
 mod tests {
     use super::*;
 
-    fn make_glyph(alpha_val: u8) -> CachedGlyph {
+    fn make_glyph(data_val: u8) -> CachedGlyph {
         CachedGlyph {
-            alpha: vec![alpha_val; 4],
+            data: vec![data_val; 4],
+            format: GlyphFormat::Alpha,
             width: 2,
             height: 2,
             bearing_x: 0,
@@ -152,7 +160,7 @@ mod tests {
         let g = cache.get(&key).unwrap();
         assert_eq!(g.width, 2);
         assert_eq!(g.height, 2);
-        assert_eq!(g.alpha, vec![200; 4]);
+        assert_eq!(g.data, vec![200; 4]);
     }
 
     #[test]
@@ -190,10 +198,10 @@ mod tests {
         cache.insert(diff_size, make_glyph(130));
 
         assert_eq!(cache.len(), 4);
-        assert_eq!(cache.get(&normal).unwrap().alpha[0], 100);
-        assert_eq!(cache.get(&bold).unwrap().alpha[0], 150);
-        assert_eq!(cache.get(&italic).unwrap().alpha[0], 120);
-        assert_eq!(cache.get(&diff_size).unwrap().alpha[0], 130);
+        assert_eq!(cache.get(&normal).unwrap().data[0], 100);
+        assert_eq!(cache.get(&bold).unwrap().data[0], 150);
+        assert_eq!(cache.get(&italic).unwrap().data[0], 120);
+        assert_eq!(cache.get(&diff_size).unwrap().data[0], 130);
     }
 
     #[test]
@@ -205,8 +213,8 @@ mod tests {
         cache.insert(k1, make_glyph(50));
         cache.insert(k2, make_glyph(200));
 
-        assert_eq!(cache.get(&k1).unwrap().alpha[0], 50);
-        assert_eq!(cache.get(&k2).unwrap().alpha[0], 200);
+        assert_eq!(cache.get(&k1).unwrap().data[0], 50);
+        assert_eq!(cache.get(&k2).unwrap().data[0], 200);
     }
 
     #[test]
@@ -284,7 +292,10 @@ mod tests {
         let s = CacheStats { hits: 1, misses: 1 };
         assert!((s.hit_rate() - 0.5).abs() < f64::EPSILON);
 
-        let s = CacheStats { hits: 10, misses: 0 };
+        let s = CacheStats {
+            hits: 10,
+            misses: 0,
+        };
         assert!((s.hit_rate() - 1.0).abs() < f64::EPSILON);
     }
 }

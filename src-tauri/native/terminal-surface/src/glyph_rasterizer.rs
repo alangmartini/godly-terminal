@@ -1,7 +1,20 @@
+/// Distinguishes between grayscale and subpixel (ClearType) glyph data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlyphFormat {
+    /// Single-channel grayscale alpha (1 byte per pixel).
+    Alpha,
+    /// Three-channel ClearType subpixel data (3 bytes per pixel: R, G, B).
+    SubpixelRgb,
+}
+
 /// Result of rasterizing a single glyph.
 pub struct RasterizedGlyph {
-    /// Alpha mask pixels (one byte per pixel, 8-bit coverage).
-    pub alpha: Vec<u8>,
+    /// Glyph bitmap data. Layout depends on `format`:
+    /// - `Alpha`: 1 byte per pixel (8-bit coverage).
+    /// - `SubpixelRgb`: 3 bytes per pixel (R, G, B coverage values).
+    pub data: Vec<u8>,
+    /// Format of the data in `data`.
+    pub format: GlyphFormat,
     pub width: u32,
     pub height: u32,
     /// Horizontal offset from glyph origin to left edge of bitmap.

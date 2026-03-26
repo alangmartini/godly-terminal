@@ -2,7 +2,7 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
 use swash::FontRef;
 
-use crate::glyph_rasterizer::{GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph};
+use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph};
 
 /// Swash-based cross-platform glyph rasterizer.
 ///
@@ -92,11 +92,14 @@ impl GlyphRasterizer for SwashRasterizer {
 
         let advance = {
             let font = FontRef::from_index(&self.font_data, self.font_index as usize)?;
-            font.glyph_metrics(&[]).scale(font_size_px).advance_width(glyph_id)
+            font.glyph_metrics(&[])
+                .scale(font_size_px)
+                .advance_width(glyph_id)
         };
 
         Some(RasterizedGlyph {
-            alpha: image_data,
+            data: image_data,
+            format: GlyphFormat::Alpha,
             width: placement.width,
             height: placement.height,
             bearing_x: placement.left,
@@ -164,8 +167,7 @@ impl GlyphRasterizer for SwashRasterizer {
 mod tests {
     use super::*;
 
-    const TEST_FONT: &[u8] =
-        include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
+    const TEST_FONT: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
 
     #[test]
     fn load_valid_font() {
@@ -186,8 +188,9 @@ mod tests {
         let glyph = rast.rasterize('A', 14.0, false, false).unwrap();
         assert!(glyph.width > 0);
         assert!(glyph.height > 0);
-        assert!(!glyph.alpha.is_empty());
-        assert_eq!(glyph.alpha.len(), (glyph.width * glyph.height) as usize);
+        assert!(!glyph.data.is_empty());
+        assert_eq!(glyph.format, GlyphFormat::Alpha);
+        assert_eq!(glyph.data.len(), (glyph.width * glyph.height) as usize);
     }
 
     #[test]
@@ -200,9 +203,12 @@ mod tests {
         assert!(bold.width > 0);
         assert!(bold.height > 0);
         // At least some pixel values should differ
-        let normal_sum: u64 = normal.alpha.iter().map(|&b| b as u64).sum();
-        let bold_sum: u64 = bold.alpha.iter().map(|&b| b as u64).sum();
-        assert_ne!(normal_sum, bold_sum, "bold should have different alpha coverage");
+        let normal_sum: u64 = normal.data.iter().map(|&b| b as u64).sum();
+        let bold_sum: u64 = bold.data.iter().map(|&b| b as u64).sum();
+        assert_ne!(
+            normal_sum, bold_sum,
+            "bold should have different alpha coverage"
+        );
     }
 
     #[test]

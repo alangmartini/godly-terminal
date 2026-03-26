@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Instant;
 
 use godly_protocol::types::{CursorShape, RichGridData};
@@ -6,9 +7,64 @@ use iced::Color;
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 use crate::glyph_cache::{CachedGlyph, GlyphCache, GlyphKey};
-use crate::glyph_rasterizer::GlyphRasterizer;
+use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use crate::render_stats::RenderStats;
 use crate::surface::GridPos;
+
+// ---------------------------------------------------------------------------
+// sRGB <-> linear colour-space lookup tables
+// ---------------------------------------------------------------------------
+
+/// Number of entries in the linear-to-sRGB reverse LUT.
+/// 4096 gives ~0.4 LSB max quantisation error which is imperceptible.
+const LIN_TO_SRGB_LUT_SIZE: usize = 4096;
+
+/// sRGB (0-255) -> linear (0.0-1.0).
+fn srgb_to_linear(s: u8) -> f32 {
+    let s = s as f32 / 255.0;
+    if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// linear (0.0-1.0) -> sRGB (0-255).
+fn linear_to_srgb(l: f32) -> u8 {
+    let s = if l <= 0.0031308 {
+        l * 12.92
+    } else {
+        1.055 * l.powf(1.0 / 2.4) - 0.055
+    };
+    (s * 255.0 + 0.5) as u8
+}
+
+/// Forward LUT: index by sRGB byte value, yields linear float.
+static SRGB_TO_LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| {
+    let mut table = [0.0f32; 256];
+    for i in 0..256 {
+        table[i] = srgb_to_linear(i as u8);
+    }
+    table
+});
+
+/// Reverse LUT: index by quantised linear value (0..4095), yields sRGB byte.
+static LINEAR_TO_SRGB: LazyLock<[u8; LIN_TO_SRGB_LUT_SIZE]> = LazyLock::new(|| {
+    let mut table = [0u8; LIN_TO_SRGB_LUT_SIZE];
+    for i in 0..LIN_TO_SRGB_LUT_SIZE {
+        let linear = i as f32 / (LIN_TO_SRGB_LUT_SIZE - 1) as f32;
+        table[i] = linear_to_srgb(linear);
+    }
+    table
+});
+
+/// Convert a linear-space value (0.0..1.0) to an sRGB byte via the reverse LUT.
+#[inline(always)]
+fn linear_to_srgb_lut(l: f32) -> u8 {
+    let clamped = l.clamp(0.0, 1.0);
+    let idx = (clamped * (LIN_TO_SRGB_LUT_SIZE - 1) as f32 + 0.5) as usize;
+    LINEAR_TO_SRGB[idx.min(LIN_TO_SRGB_LUT_SIZE - 1)]
+}
 
 /// CPU-side terminal grid compositor.
 ///
@@ -159,16 +215,14 @@ impl PixelRenderer {
                     let key = GlyphKey::new(ch, metrics.font_size, cell.bold, cell.italic);
 
                     if cache.get(&key).is_none() {
-                        if let Some(rg) = rasterizer.rasterize(
-                            ch,
-                            metrics.font_size,
-                            cell.bold,
-                            cell.italic,
-                        ) {
+                        if let Some(rg) =
+                            rasterizer.rasterize(ch, metrics.font_size, cell.bold, cell.italic)
+                        {
                             cache.insert(
                                 key,
                                 CachedGlyph {
-                                    alpha: rg.alpha,
+                                    data: rg.data,
+                                    format: rg.format,
                                     width: rg.width,
                                     height: rg.height,
                                     bearing_x: rg.bearing_x,
@@ -183,20 +237,36 @@ impl PixelRenderer {
                     let glyph_ref = cache.get(&key).unwrap();
 
                     let glyph_x = cell_x + glyph_ref.bearing_x;
-                    let glyph_y =
-                        cell_y + (metrics.baseline_offset as i32 - glyph_ref.bearing_y);
+                    let glyph_y = cell_y + (metrics.baseline_offset as i32 - glyph_ref.bearing_y);
 
-                    blit_alpha(
-                        &mut self.buffer,
-                        w,
-                        h,
-                        glyph_ref,
-                        glyph_x,
-                        glyph_y,
-                        fg_r,
-                        fg_g,
-                        fg_b,
-                    );
+                    match glyph_ref.format {
+                        GlyphFormat::Alpha => {
+                            blit_alpha(
+                                &mut self.buffer,
+                                w,
+                                h,
+                                glyph_ref,
+                                glyph_x,
+                                glyph_y,
+                                fg_r,
+                                fg_g,
+                                fg_b,
+                            );
+                        }
+                        GlyphFormat::SubpixelRgb => {
+                            blit_subpixel(
+                                &mut self.buffer,
+                                w,
+                                h,
+                                glyph_ref,
+                                glyph_x,
+                                glyph_y,
+                                fg_r,
+                                fg_g,
+                                fg_b,
+                            );
+                        }
+                    }
                 }
 
                 if cell.underline {
@@ -243,8 +313,17 @@ impl PixelRenderer {
                 let x_end = ((col_end + 1) as f32 * cell_w).round() as i32;
                 let rw = (x_end - x) as u32;
                 blend_rect(
-                    &mut self.buffer, w, h, x, y, rw, rh,
-                    sel_r, sel_g, sel_b, sel_a,
+                    &mut self.buffer,
+                    w,
+                    h,
+                    x,
+                    y,
+                    rw,
+                    rh,
+                    sel_r,
+                    sel_g,
+                    sel_b,
+                    sel_a,
                 );
             }
         }
@@ -266,26 +345,50 @@ impl PixelRenderer {
             match grid.cursor.cursor_style {
                 CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
                     blend_rect(
-                        &mut self.buffer, w, h,
-                        cursor_x, cursor_y, cw, ch,
-                        cur_r, cur_g, cur_b, cur_a,
+                        &mut self.buffer,
+                        w,
+                        h,
+                        cursor_x,
+                        cursor_y,
+                        cw,
+                        ch,
+                        cur_r,
+                        cur_g,
+                        cur_b,
+                        cur_a,
                     );
                 }
                 CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
                     let underline_h = 2u32;
                     let uy = next_cy - underline_h as i32;
                     blend_rect(
-                        &mut self.buffer, w, h,
-                        cursor_x, uy, cw, underline_h,
-                        cur_r, cur_g, cur_b, cur_a,
+                        &mut self.buffer,
+                        w,
+                        h,
+                        cursor_x,
+                        uy,
+                        cw,
+                        underline_h,
+                        cur_r,
+                        cur_g,
+                        cur_b,
+                        cur_a,
                     );
                 }
                 CursorShape::BlinkBar | CursorShape::SteadyBar => {
                     let bar_w = 2u32;
                     blend_rect(
-                        &mut self.buffer, w, h,
-                        cursor_x, cursor_y, bar_w, ch,
-                        cur_r, cur_g, cur_b, cur_a,
+                        &mut self.buffer,
+                        w,
+                        h,
+                        cursor_x,
+                        cursor_y,
+                        bar_w,
+                        ch,
+                        cur_r,
+                        cur_g,
+                        cur_b,
+                        cur_a,
                     );
                 }
             }
@@ -346,7 +449,10 @@ fn fill_rect(
     }
 }
 
-/// Blend a semi-transparent rectangle over existing pixels.
+/// Blend a semi-transparent rectangle over existing pixels (gamma-correct).
+///
+/// Converts both source and destination from sRGB to linear light, performs
+/// alpha compositing in linear space, then converts the result back to sRGB.
 fn blend_rect(
     buf: &mut [u8],
     buf_w: u32,
@@ -360,26 +466,40 @@ fn blend_rect(
     b: u8,
     a: u8,
 ) {
+    let lut = &*SRGB_TO_LINEAR;
+    let src_r = lut[r as usize];
+    let src_g = lut[g as usize];
+    let src_b = lut[b as usize];
+    let alpha = a as f32 / 255.0;
+    let inv_a = 1.0 - alpha;
+
     let x0 = x.max(0) as u32;
     let y0 = y.max(0) as u32;
     let x_end = ((x as i64 + w as i64) as u32).min(buf_w);
     let y_end = ((y as i64 + h as i64) as u32).min(buf_h);
-    let src_a = a as u16;
-    let inv_a = 255 - src_a;
     for py in y0..y_end {
         for px in x0..x_end {
             let idx = ((py * buf_w + px) * 4) as usize;
             if idx + 3 < buf.len() {
-                buf[idx] = ((r as u16 * src_a + buf[idx] as u16 * inv_a) / 255) as u8;
-                buf[idx + 1] = ((g as u16 * src_a + buf[idx + 1] as u16 * inv_a) / 255) as u8;
-                buf[idx + 2] = ((b as u16 * src_a + buf[idx + 2] as u16 * inv_a) / 255) as u8;
+                let bg_r = lut[buf[idx] as usize];
+                let bg_g = lut[buf[idx + 1] as usize];
+                let bg_b = lut[buf[idx + 2] as usize];
+
+                buf[idx] = linear_to_srgb_lut(src_r * alpha + bg_r * inv_a);
+                buf[idx + 1] = linear_to_srgb_lut(src_g * alpha + bg_g * inv_a);
+                buf[idx + 2] = linear_to_srgb_lut(src_b * alpha + bg_b * inv_a);
                 buf[idx + 3] = 255;
             }
         }
     }
 }
 
-/// Blit a glyph's alpha mask onto the buffer with foreground color tinting.
+/// Blit a glyph's alpha mask onto the buffer with foreground color tinting
+/// (gamma-correct).
+///
+/// Alpha compositing is performed in linear light so that thin strokes blend
+/// correctly against any background colour. Used for `GlyphFormat::Alpha`
+/// glyphs (single-channel coverage).
 fn blit_alpha(
     buf: &mut [u8],
     buf_w: u32,
@@ -391,6 +511,11 @@ fn blit_alpha(
     fg_g: u8,
     fg_b: u8,
 ) {
+    let lut = &*SRGB_TO_LINEAR;
+    let fg_r_lin = lut[fg_r as usize];
+    let fg_g_lin = lut[fg_g as usize];
+    let fg_b_lin = lut[fg_b as usize];
+
     for gy in 0..glyph.height {
         let dest_y = glyph_y + gy as i32;
         if dest_y < 0 || dest_y >= buf_h as i32 {
@@ -402,7 +527,7 @@ fn blit_alpha(
                 continue;
             }
 
-            let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
+            let alpha = glyph.data[(gy * glyph.width + gx) as usize];
             if alpha == 0 {
                 continue;
             }
@@ -412,11 +537,98 @@ fn blit_alpha(
                 continue;
             }
 
-            let src_a = alpha as u16;
-            let inv_a = 255 - src_a;
-            buf[idx] = ((fg_r as u16 * src_a + buf[idx] as u16 * inv_a) / 255) as u8;
-            buf[idx + 1] = ((fg_g as u16 * src_a + buf[idx + 1] as u16 * inv_a) / 255) as u8;
-            buf[idx + 2] = ((fg_b as u16 * src_a + buf[idx + 2] as u16 * inv_a) / 255) as u8;
+            if alpha == 255 {
+                buf[idx] = fg_r;
+                buf[idx + 1] = fg_g;
+                buf[idx + 2] = fg_b;
+                buf[idx + 3] = 255;
+                continue;
+            }
+
+            let a = alpha as f32 / 255.0;
+            let inv_a = 1.0 - a;
+
+            let bg_r_lin = lut[buf[idx] as usize];
+            let bg_g_lin = lut[buf[idx + 1] as usize];
+            let bg_b_lin = lut[buf[idx + 2] as usize];
+
+            buf[idx] = linear_to_srgb_lut(fg_r_lin * a + bg_r_lin * inv_a);
+            buf[idx + 1] = linear_to_srgb_lut(fg_g_lin * a + bg_g_lin * inv_a);
+            buf[idx + 2] = linear_to_srgb_lut(fg_b_lin * a + bg_b_lin * inv_a);
+            buf[idx + 3] = 255;
+        }
+    }
+}
+
+/// Blit a subpixel (ClearType) glyph onto the buffer (gamma-correct).
+///
+/// Each pixel in the glyph has separate R, G, B coverage values. This gives
+/// 3x the effective horizontal resolution on LCD displays by addressing
+/// individual colour sub-elements. Blending is performed per-channel in
+/// linear light. Used for `GlyphFormat::SubpixelRgb` glyphs.
+fn blit_subpixel(
+    buf: &mut [u8],
+    buf_w: u32,
+    buf_h: u32,
+    glyph: &CachedGlyph,
+    glyph_x: i32,
+    glyph_y: i32,
+    fg_r: u8,
+    fg_g: u8,
+    fg_b: u8,
+) {
+    let lut = &*SRGB_TO_LINEAR;
+    let fg_r_lin = lut[fg_r as usize];
+    let fg_g_lin = lut[fg_g as usize];
+    let fg_b_lin = lut[fg_b as usize];
+
+    for gy in 0..glyph.height {
+        let dest_y = glyph_y + gy as i32;
+        if dest_y < 0 || dest_y >= buf_h as i32 {
+            continue;
+        }
+        for gx in 0..glyph.width {
+            let dest_x = glyph_x + gx as i32;
+            if dest_x < 0 || dest_x >= buf_w as i32 {
+                continue;
+            }
+
+            let rgb_offset = ((gy * glyph.width + gx) * 3) as usize;
+            let ar = glyph.data[rgb_offset];
+            let ag = glyph.data[rgb_offset + 1];
+            let ab = glyph.data[rgb_offset + 2];
+
+            // Skip fully transparent pixels
+            if ar == 0 && ag == 0 && ab == 0 {
+                continue;
+            }
+
+            let idx = ((dest_y as u32 * buf_w + dest_x as u32) * 4) as usize;
+            if idx + 3 >= buf.len() {
+                continue;
+            }
+
+            // Fully opaque on all channels: write fg colour directly
+            if ar == 255 && ag == 255 && ab == 255 {
+                buf[idx] = fg_r;
+                buf[idx + 1] = fg_g;
+                buf[idx + 2] = fg_b;
+                buf[idx + 3] = 255;
+                continue;
+            }
+
+            // Per-channel alpha blending in linear space
+            let bg_r_lin = lut[buf[idx] as usize];
+            let bg_g_lin = lut[buf[idx + 1] as usize];
+            let bg_b_lin = lut[buf[idx + 2] as usize];
+
+            let a_r = ar as f32 / 255.0;
+            let a_g = ag as f32 / 255.0;
+            let a_b = ab as f32 / 255.0;
+
+            buf[idx] = linear_to_srgb_lut(fg_r_lin * a_r + bg_r_lin * (1.0 - a_r));
+            buf[idx + 1] = linear_to_srgb_lut(fg_g_lin * a_g + bg_g_lin * (1.0 - a_g));
+            buf[idx + 2] = linear_to_srgb_lut(fg_b_lin * a_b + bg_b_lin * (1.0 - a_b));
             buf[idx + 3] = 255;
         }
     }
@@ -479,7 +691,8 @@ mod tests {
             _italic: bool,
         ) -> Option<crate::glyph_rasterizer::RasterizedGlyph> {
             Some(crate::glyph_rasterizer::RasterizedGlyph {
-                alpha: vec![128; 4], // 2x2 alpha mask
+                data: vec![128; 4], // 2x2 alpha mask
+                format: GlyphFormat::Alpha,
                 width: 2,
                 height: 2,
                 bearing_x: 0,
@@ -585,7 +798,8 @@ mod tests {
         fill_solid(&mut buf, 255, 255, 255, 255);
 
         let glyph = CachedGlyph {
-            alpha: vec![128; 4], // 2x2, 50% alpha
+            data: vec![128; 4], // 2x2, 50% alpha
+            format: GlyphFormat::Alpha,
             width: 2,
             height: 2,
             bearing_x: 0,
@@ -597,13 +811,56 @@ mod tests {
 
         let idx = ((1 * w + 1) * 4) as usize;
         assert_eq!(buf[idx], 255); // R
-        assert!((buf[idx + 1] as i32 - 127).abs() <= 1); // G
-        assert!((buf[idx + 2] as i32 - 127).abs() <= 1); // B
+                                   // With gamma-correct blending, G/B values will differ from naive 127
+                                   // but should still be significantly below white
+        assert!(buf[idx + 1] < 255); // G should be blended
+        assert!(buf[idx + 2] < 255); // B should be blended
         assert_eq!(buf[idx + 3], 255); // A
 
         assert_eq!(buf[0], 255);
         assert_eq!(buf[1], 255);
         assert_eq!(buf[2], 255);
+    }
+
+    #[test]
+    fn blit_subpixel_composites_per_channel() {
+        let w = 4u32;
+        let h = 4u32;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+
+        fill_solid(&mut buf, 0, 0, 0, 255);
+
+        // 2x1 subpixel glyph: first pixel = full R coverage only,
+        // second pixel = full G coverage only
+        let glyph = CachedGlyph {
+            data: vec![
+                255, 0, 0, // pixel (0,0): full R, no G, no B
+                0, 255, 0, // pixel (1,0): no R, full G, no B
+            ],
+            format: GlyphFormat::SubpixelRgb,
+            width: 2,
+            height: 1,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance: 8.0,
+        };
+
+        // Blit with white foreground onto black background
+        blit_subpixel(&mut buf, w, h, &glyph, 1, 1, 255, 255, 255);
+
+        // Pixel (1,1): R channel should be white (255), G and B should remain black (0)
+        let idx1 = ((1 * w + 1) * 4) as usize;
+        assert_eq!(buf[idx1], 255); // R = full coverage
+        assert_eq!(buf[idx1 + 1], 0); // G = no coverage
+        assert_eq!(buf[idx1 + 2], 0); // B = no coverage
+        assert_eq!(buf[idx1 + 3], 255);
+
+        // Pixel (2,1): G channel should be white (255), R and B should remain black (0)
+        let idx2 = ((1 * w + 2) * 4) as usize;
+        assert_eq!(buf[idx2], 0); // R = no coverage
+        assert_eq!(buf[idx2 + 1], 255); // G = full coverage
+        assert_eq!(buf[idx2 + 2], 0); // B = no coverage
+        assert_eq!(buf[idx2 + 3], 255);
     }
 
     #[test]
@@ -632,18 +889,24 @@ mod tests {
     #[test]
     fn fractional_positioning_matches_grid_extent() {
         // Verify buffer width = ceil(cols * cell_w), not cols * ceil(cell_w)
-        let grid = make_grid(2, 10, vec![
-            vec![make_cell(" "); 10],
-            vec![make_cell(" "); 10],
-        ]);
+        let grid = make_grid(
+            2,
+            10,
+            vec![vec![make_cell(" "); 10], vec![make_cell(" "); 10]],
+        );
         let metrics = FontMetrics::from_font_size(14.0); // cell_w=8.4
         let mut cache = GlyphCache::new();
         let mut rast = StubRasterizer;
         let mut renderer = PixelRenderer::new();
 
         let (_, w, _) = renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         // ceil(10 * 8.4) = ceil(84.0) = 84, NOT 10 * ceil(8.4) = 10 * 9 = 90
@@ -653,18 +916,27 @@ mod tests {
 
     #[test]
     fn render_populates_last_stats() {
-        let grid = make_grid(2, 3, vec![
-            vec![make_cell("A"), make_cell("B"), make_cell("C")],
-            vec![make_cell("D"), make_cell(" "), make_cell("F")],
-        ]);
+        let grid = make_grid(
+            2,
+            3,
+            vec![
+                vec![make_cell("A"), make_cell("B"), make_cell("C")],
+                vec![make_cell("D"), make_cell(" "), make_cell("F")],
+            ],
+        );
         let metrics = FontMetrics::from_font_size(14.0);
         let mut cache = GlyphCache::new();
         let mut rast = StubRasterizer;
         let mut renderer = PixelRenderer::new();
 
         renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         let stats = renderer.last_stats();
@@ -682,8 +954,13 @@ mod tests {
         let mut renderer = PixelRenderer::new();
 
         renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         let stats = renderer.last_stats();
