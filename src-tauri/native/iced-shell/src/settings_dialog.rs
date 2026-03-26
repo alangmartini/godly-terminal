@@ -1,8 +1,8 @@
-use iced::widget::{button, center, column, container, row, scrollable, text, Space};
+use iced::widget::{button, center, column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
 use crate::theme::{
-    BACKDROP, BORDER_FOCUSED, BORDER_VARIANT, BG_PRIMARY, BG_SECONDARY, GHOST_HOVER,
+    BACKDROP, BG_PRIMARY, BG_SECONDARY, BORDER_FOCUSED, BORDER_VARIANT, GHOST_HOVER,
     GHOST_SELECTED, RADIUS_LG, RADIUS_MD, RADIUS_SM, SURFACE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 
@@ -102,8 +102,12 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
     }
 
     // Header: "Settings" title + close button
+    // Generate a no-op message for absorbing clicks on non-interactive dialog areas.
+    // Re-selecting the current tab is harmless and prevents event propagation.
+    let noop = on_tab_click(active_tab.to_string());
+
     let close_btn = button(text("\u{2715}").size(15))
-        .on_press(on_close)
+        .on_press(on_close.clone())
         .padding(Padding::from([4, 8]))
         .style(|_theme, status| {
             let (bg, text_color) = match status {
@@ -213,15 +217,21 @@ pub fn view_settings_dialog<'a, M: Clone + 'a>(
             ..container::Style::default()
         });
 
-    // Backdrop + centered dialog
-    container(center(dialog))
+    // Inner mouse_area absorbs clicks on non-interactive parts of the dialog
+    // (text labels, gaps) so they don't leak through the stack to main content.
+    let dialog = mouse_area(dialog).on_press(noop);
+
+    // Outer mouse_area captures backdrop clicks (outside the dialog) to dismiss,
+    // and prevents ALL mouse events from propagating through the stack.
+    let backdrop = container(center(dialog))
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_theme| container::Style {
             background: Some(Background::Color(tint(BACKDROP(), 0.35))),
             ..container::Style::default()
-        })
-        .into()
+        });
+
+    mouse_area(backdrop).on_press(on_close).into()
 }
 
 #[cfg(test)]
