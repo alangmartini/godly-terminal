@@ -7197,6 +7197,13 @@ impl GodlyApp {
             );
         }
 
+        // Perf overlay: force periodic redraws so the overlay stays live when idle.
+        if self.perf_overlay_visible {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat),
+            );
+        }
+
         Subscription::batch(subscriptions)
     }
 
