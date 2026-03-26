@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // Persisted preferences
@@ -195,30 +196,72 @@ pub fn parse_quick_tunnel_url(line: &str) -> Option<String> {
 
 /// Read stderr of a quick tunnel process in a background thread.
 /// Returns the public URL when found via the channel.
+/// Continues reading after the URL is found, pushing all lines to the
+/// shared `log_buffer` so the UI can display cloudflared output.
 pub fn read_quick_tunnel_url(
     stderr: std::process::ChildStderr,
+    log_buffer: Arc<Mutex<Vec<String>>>,
 ) -> futures_channel::oneshot::Receiver<String> {
     let (tx, rx) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        let mut url_sent = false;
+        for line in reader.lines() {
+            match line {
+                Ok(l) => {
+                    log::debug!("cloudflared: {l}");
+                    push_log_line(&log_buffer, l.clone());
+                    if !url_sent {
+                        if let Some(url) = parse_quick_tunnel_url(&l) {
+                            let _ = tx.send(url);
+                            url_sent = true;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("cloudflared stderr read error: {e}");
+                    push_log_line(&log_buffer, format!("[error reading stderr: {e}]"));
+                    break;
+                }
+            }
+        }
+        push_log_line(&log_buffer, "[cloudflared process ended]".to_string());
+    });
+    rx
+}
+
+/// Read stderr from a tunnel process in a background thread.
+/// All lines are pushed to the shared log buffer for UI display.
+pub fn read_tunnel_logs(stderr: std::process::ChildStderr, log_buffer: Arc<Mutex<Vec<String>>>) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             match line {
                 Ok(l) => {
                     log::debug!("cloudflared: {l}");
-                    if let Some(url) = parse_quick_tunnel_url(&l) {
-                        let _ = tx.send(url);
-                        return;
-                    }
+                    push_log_line(&log_buffer, l);
                 }
                 Err(e) => {
                     log::warn!("cloudflared stderr read error: {e}");
+                    push_log_line(&log_buffer, format!("[error reading stderr: {e}]"));
                     break;
                 }
             }
         }
-        // If we never found a URL, the channel just drops
+        push_log_line(&log_buffer, "[cloudflared process ended]".to_string());
     });
-    rx
+}
+
+/// Maximum number of log lines retained in the shared buffer.
+const MAX_LOG_LINES: usize = 200;
+
+fn push_log_line(buf: &Arc<Mutex<Vec<String>>>, line: String) {
+    if let Ok(mut b) = buf.lock() {
+        b.push(line);
+        if b.len() > MAX_LOG_LINES {
+            b.drain(..b.len() - MAX_LOG_LINES);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +273,7 @@ pub fn spawn_named_tunnel(cloudflared: &PathBuf, tunnel_name: &str) -> Result<Ch
     let mut cmd = Command::new(cloudflared);
     cmd.args(["tunnel", "run", tunnel_name])
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
     #[cfg(windows)]
     {
