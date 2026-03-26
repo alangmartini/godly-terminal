@@ -11,6 +11,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  pull-requests: write
+
 jobs:
   benchmark-regression:
     runs-on: ubuntu-latest
