@@ -850,7 +850,8 @@ mod tests {
         fill_solid(&mut buf, 128, 128, 128, 255);
 
         let glyph = CachedGlyph {
-            alpha: vec![255; 4], // 2x2, fully opaque
+            data: vec![255; 4], // 2x2, fully opaque
+            format: crate::glyph_rasterizer::GlyphFormat::Alpha,
             width: 2,
             height: 2,
             bearing_x: 0,

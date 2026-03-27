@@ -556,8 +556,10 @@ pub struct GodlyApp {
     // --- Pixel Renderer (glyph atlas pipeline) ---
     /// Glyph cache for the pixel rendering pipeline.
     glyph_cache: godly_terminal_surface::glyph_cache::GlyphCache,
-    /// Primary font rasterizer (swash-based).
-    glyph_rasterizer: godly_terminal_surface::swash_rasterizer::SwashRasterizer,
+    /// Primary font rasterizer.
+    /// On Windows: DirectWrite (ClearType subpixel RGB).
+    /// On other platforms: swash (grayscale alpha).
+    glyph_rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
     /// Reusable pixel renderer (keeps buffer between frames to avoid reallocation).
     pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer,
     /// Whether to use the new image-based renderer instead of the canvas.
@@ -716,12 +718,45 @@ impl Default for GodlyApp {
             glyph_cache: godly_terminal_surface::glyph_cache::GlyphCache::new(),
             glyph_rasterizer: {
                 use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer as _;
-                let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
-                r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
-                r
+                #[cfg(windows)]
+                {
+                    match godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer::new(
+                    ) {
+                        Ok(mut dw) => {
+                            if dw.load_system_font(DEFAULT_FONT_FAMILY).is_ok() {
+                                log::info!("[FONT] Using DirectWrite ClearType rasterizer");
+                                Box::new(dw)
+                            } else {
+                                log::warn!(
+                                    "[FONT] DirectWrite: font '{}' not found, falling back to swash",
+                                    DEFAULT_FONT_FAMILY
+                                );
+                                let mut r =
+                                    godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
+                                r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
+                                Box::new(r)
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[FONT] DirectWrite init failed ({e}), falling back to swash"
+                            );
+                            let mut r =
+                                godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
+                            r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
+                            Box::new(r)
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
+                    r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
+                    Box::new(r)
+                }
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
-            use_pixel_renderer: false,
+            use_pixel_renderer: true,
             file_panes: HashMap::new(),
             scroll_accumulator: 0.0,
             window_scale_factor: 1.0,
@@ -2532,6 +2567,8 @@ impl GodlyApp {
                         measured_font_metrics(self.font_metrics.font_size, &self.font_family, sf);
                     // Glyph cache entries were rasterized at the old DPI -- flush them.
                     self.glyph_cache.invalidate();
+                    self.glyph_rasterizer.set_scale_factor(sf);
+                    self.rerender_all_terminal_images();
                     return self.resize_all_terminals();
                 }
             }
@@ -4277,6 +4314,20 @@ impl GodlyApp {
                     stretch: iced::font::Stretch::Normal,
                     style: iced::font::Style::Normal,
                 };
+                // Reload the rasterizer for the new font family.
+                #[cfg(windows)]
+                {
+                    if let Ok(mut dw) =
+                        godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer::new()
+                    {
+                        if dw.load_system_font(&name).is_ok() {
+                            dw.set_scale_factor(self.window_scale_factor);
+                            self.glyph_rasterizer = Box::new(dw);
+                        }
+                    }
+                }
+                self.glyph_cache.invalidate();
+                self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
             Message::FontsEnumerated(fonts) => {
@@ -4296,6 +4347,8 @@ impl GodlyApp {
                     &self.font_family,
                     self.window_scale_factor,
                 );
+                self.glyph_cache.invalidate();
+                self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
             Message::FontSizeDecrement => {
@@ -4307,6 +4360,8 @@ impl GodlyApp {
                 );
                 self.font_metrics =
                     measured_font_metrics(new_size, &self.font_family, self.window_scale_factor);
+                self.glyph_cache.invalidate();
+                self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
             Message::ShortcutBadgeClicked(index) => {
@@ -7328,9 +7383,8 @@ impl GodlyApp {
 
         // Perf overlay: force periodic redraws so the overlay stays live when idle.
         if self.perf_overlay_visible {
-            subscriptions.push(
-                iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat),
-            );
+            subscriptions
+                .push(iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat));
         }
 
         Subscription::batch(subscriptions)
@@ -9642,6 +9696,18 @@ impl GodlyApp {
     // Pixel renderer helpers
     // -----------------------------------------------------------------------
 
+    /// Re-render pixel-buffer images for all terminals that have grid data.
+    /// Called after font metrics or glyph cache changes (font size, DPI, family).
+    fn rerender_all_terminal_images(&mut self) {
+        if !self.use_pixel_renderer {
+            return;
+        }
+        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+        for id in ids {
+            self.render_terminal_image(&id);
+        }
+    }
+
     /// Pre-render a terminal's grid into an RGBA pixel buffer and cache the
     /// resulting `Handle` on the `TerminalInfo`. Called from `update()` after
     /// grid data changes (GridFetched, selection changes, etc.).
@@ -9660,7 +9726,7 @@ impl GodlyApp {
             &grid_clone,
             &metrics,
             &mut self.glyph_cache,
-            &mut self.glyph_rasterizer,
+            &mut *self.glyph_rasterizer,
             default_fg,
             default_bg,
             None, // selection handled separately in view for now

@@ -46,4 +46,7 @@ pub trait GlyphRasterizer {
     fn measure(&mut self, font_size_px: f32) -> MeasuredFontMetrics;
     fn has_glyph(&self, ch: char) -> bool;
     fn load_font(&mut self, data: &[u8], index: u32) -> bool;
+    /// Update the DPI scale factor. Default is a no-op for backends that
+    /// don't need it (e.g. Swash which works in pixel units directly).
+    fn set_scale_factor(&mut self, _scale: f32) {}
 }

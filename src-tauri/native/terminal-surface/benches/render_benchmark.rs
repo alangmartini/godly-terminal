@@ -1,6 +1,4 @@
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use godly_protocol::types::{
     CursorShape, CursorState, GridDimensions, RichGridCell, RichGridData, RichGridRow,
 };
