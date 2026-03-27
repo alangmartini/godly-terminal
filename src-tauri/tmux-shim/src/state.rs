@@ -64,7 +64,10 @@ impl TmuxState {
     /// and falls back to `$TMUX_PANE` env var if target is None/empty.
     pub fn resolve_target(&self, target: Option<&str>) -> Result<String, String> {
         let t = self.effective_target(target)?;
-        Ok(self.lookup_pane(&t)?.terminal_id.clone())
+        trace!("resolve_target: input={:?} effective={}", target, t);
+        let result = self.lookup_pane(&t).map(|p| p.terminal_id.clone());
+        trace!("resolve_target: result={:?}", result);
+        result
     }
 
     /// Get the session name for a pane target.
@@ -72,6 +75,7 @@ impl TmuxState {
     /// Handles tmux target formats: `session`, `session:window`, `session:window.pane`.
     pub fn resolve_session(&self, target: Option<&str>) -> Result<String, String> {
         let t = self.effective_target(target)?;
+        trace!("resolve_session: input={:?} effective={}", target, t);
         if t.starts_with('%') {
             return self
                 .panes

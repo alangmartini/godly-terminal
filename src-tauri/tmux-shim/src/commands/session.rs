@@ -32,6 +32,14 @@ fn new_session(args: &[String]) -> i32 {
         }
     };
 
+    trace!(
+        "new-session: name={} print={} format={:?} cwd={:?}",
+        session_name,
+        parsed.has_flag('P'),
+        parsed.get_option('F'),
+        parsed.get_option('c'),
+    );
+
     let cwd = parsed.get_option('c').map(|s| s.to_string());
     let print_info = parsed.has_flag('P');
     let format_str = parsed.get_option('F').unwrap_or("#{session_name}:");
