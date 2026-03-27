@@ -1,8 +1,8 @@
 //! DirectWrite-based glyph rasterizer for ClearType-quality text on Windows.
 //!
 //! Uses Windows' native DirectWrite API to rasterize individual glyphs from
-//! system fonts. Produces grayscale alpha bitmaps suitable for GPU texture
-//! atlas upload.
+//! system fonts. Produces ClearType subpixel RGB bitmaps (3 bytes per pixel)
+//! for sharp LCD text rendering.
 
 use windows::core::*;
 use windows::Win32::Foundation::{BOOL, E_FAIL};
@@ -10,8 +10,8 @@ use windows::Win32::Graphics::DirectWrite::*;
 
 /// A rasterized glyph bitmap with positioning metadata.
 pub struct RasterizedGlyphDW {
-    /// Grayscale alpha bitmap (1 byte per pixel, row-major).
-    pub alpha: Vec<u8>,
+    /// ClearType subpixel bitmap (3 bytes per pixel: R, G, B coverage, row-major).
+    pub rgb: Vec<u8>,
     /// Bitmap width in pixels.
     pub width: u32,
     /// Bitmap height in pixels.
@@ -39,7 +39,7 @@ pub struct DWriteFontMetrics {
 /// DirectWrite-based glyph rasterizer.
 ///
 /// Loads system fonts by family name and rasterizes individual glyphs
-/// to grayscale alpha bitmaps using Windows' native text rendering.
+/// to ClearType subpixel RGB bitmaps using Windows' native text rendering.
 pub struct DirectWriteRasterizer {
     factory: IDWriteFactory,
     font_face: Option<IDWriteFontFace>,
@@ -121,9 +121,9 @@ impl DirectWriteRasterizer {
     /// requested character (glyph index 0 / .notdef).
     ///
     /// Uses `DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC` with
-    /// `DWRITE_TEXTURE_CLEARTYPE_3x1` for ClearType-quality rendering,
-    /// then averages the RGB subpixel channels into a single grayscale
-    /// alpha value per pixel.
+    /// `DWRITE_TEXTURE_CLEARTYPE_3x1` for ClearType subpixel rendering.
+    /// The returned bitmap contains 3 bytes per pixel (R, G, B coverage)
+    /// preserving the full subpixel information for LCD displays.
     pub fn rasterize_glyph(
         &self,
         ch: char,
@@ -181,7 +181,7 @@ impl DirectWriteRasterizer {
 
             if width == 0 || height == 0 {
                 return Ok(Some(RasterizedGlyphDW {
-                    alpha: vec![],
+                    rgb: vec![],
                     width: 0,
                     height: 0,
                     bearing_x: 0,
@@ -193,18 +193,10 @@ impl DirectWriteRasterizer {
             let mut rgb = vec![0u8; (width * height * 3) as usize];
             analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut rgb)?;
 
-            let alpha: Vec<u8> = rgb
-                .chunks_exact(3)
-                .map(|rgb| {
-                    let sum = rgb[0] as u16 + rgb[1] as u16 + rgb[2] as u16;
-                    (sum / 3) as u8
-                })
-                .collect();
-
             let advance = metrics[0].advanceWidth as f32 * scale;
 
             Ok(Some(RasterizedGlyphDW {
-                alpha,
+                rgb,
                 width,
                 height,
                 bearing_x: bounds.left,
@@ -295,10 +287,10 @@ mod tests {
             .expect("'A' should exist in Consolas");
         assert!(glyph.width > 0);
         assert!(glyph.height > 0);
-        assert!(!glyph.alpha.is_empty());
+        assert!(!glyph.rgb.is_empty());
         assert!(glyph.advance > 0.0);
-        // Alpha buffer size must match dimensions
-        assert_eq!(glyph.alpha.len(), (glyph.width * glyph.height) as usize);
+        // RGB buffer size must match dimensions (3 bytes per pixel)
+        assert_eq!(glyph.rgb.len(), (glyph.width * glyph.height * 3) as usize);
     }
 
     #[test]

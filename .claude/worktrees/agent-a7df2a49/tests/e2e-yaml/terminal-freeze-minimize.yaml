@@ -1,0 +1,85 @@
+name: "Terminal freeze after minimize — write survives 60s minimize"
+tags: [freeze, minimize, regression]
+---
+- resetApp
+- waitForReady
+
+# Get active workspace
+- getActiveWorkspace:
+  store: ws
+
+# Create a test terminal
+- createTerminal:
+    workspace_id: $ws.workspace_id
+    focus: true
+  store: term
+
+- waitForIdle:
+    terminal_id: $term.terminal_id
+    idle_ms: 1000
+
+# Write something BEFORE minimize
+- executeCommand:
+    terminal_id: $term.terminal_id
+    command: "echo BEFORE_MINIMIZE_OK"
+    idle_ms: 2000
+
+- assertTextContains:
+    terminal_id: $term.terminal_id
+    text: "BEFORE_MINIMIZE_OK"
+
+# Create a helper terminal to run PowerShell minimize/restore commands
+- createTerminal:
+    workspace_id: $ws.workspace_id
+    command: "powershell"
+  store: helper
+
+- waitForIdle:
+    terminal_id: $helper.terminal_id
+    idle_ms: 2000
+
+# Minimize the Godly Terminal window via PowerShell Win32 API
+- executeCommand:
+    terminal_id: $helper.terminal_id
+    command: "Add-Type -Name W -Namespace N -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);'; (Get-Process godly-iced-shell -ErrorAction SilentlyContinue | ForEach-Object { [N.W]::ShowWindow($_.MainWindowHandle, 6) })"
+    idle_ms: 3000
+    timeout_ms: 10000
+
+# Wait 60 seconds while minimized
+- sleep:
+    ms: 60000
+  timeout: 90000
+
+# Restore the window via PowerShell
+- executeCommand:
+    terminal_id: $helper.terminal_id
+    command: "(Get-Process godly-iced-shell -ErrorAction SilentlyContinue | ForEach-Object { [N.W]::ShowWindow($_.MainWindowHandle, 9) })"
+    idle_ms: 3000
+    timeout_ms: 10000
+
+# Give the app a moment to fully restore
+- sleep:
+    ms: 3000
+
+# NOW the critical test: write something AFTER restore
+- executeCommand:
+    terminal_id: $term.terminal_id
+    command: "echo AFTER_RESTORE_OK"
+    idle_ms: 3000
+    timeout_ms: 15000
+
+# Verify the post-restore write actually appeared
+- assertTextContains:
+    terminal_id: $term.terminal_id
+    text: "AFTER_RESTORE_OK"
+
+# Also verify the pre-minimize text is still there
+- assertTextContains:
+    terminal_id: $term.terminal_id
+    text: "BEFORE_MINIMIZE_OK"
+
+# Clean up
+- closeTerminal:
+    terminal_id: $helper.terminal_id
+- closeTerminal:
+    terminal_id: $term.terminal_id

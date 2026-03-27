@@ -7,7 +7,7 @@ use iced::Color;
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 use crate::glyph_cache::{CachedGlyph, GlyphCache, GlyphKey};
-use crate::glyph_rasterizer::GlyphRasterizer;
+use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use crate::render_stats::RenderStats;
 use crate::surface::GridPos;
 
@@ -228,7 +228,8 @@ impl PixelRenderer {
                             cache.insert(
                                 key,
                                 CachedGlyph {
-                                    alpha: rg.alpha,
+                                    data: rg.data,
+                                    format: rg.format,
                                     width: rg.width,
                                     height: rg.height,
                                     bearing_x: rg.bearing_x,
@@ -245,17 +246,34 @@ impl PixelRenderer {
                     let glyph_x = cell_x + glyph_ref.bearing_x;
                     let glyph_y = cell_y + (phys.baseline_offset as i32 - glyph_ref.bearing_y);
 
-                    blit_alpha(
-                        &mut self.buffer,
-                        w,
-                        h,
-                        glyph_ref,
-                        glyph_x,
-                        glyph_y,
-                        fg_r,
-                        fg_g,
-                        fg_b,
-                    );
+                    match glyph_ref.format {
+                        GlyphFormat::Alpha => {
+                            blit_alpha(
+                                &mut self.buffer,
+                                w,
+                                h,
+                                glyph_ref,
+                                glyph_x,
+                                glyph_y,
+                                fg_r,
+                                fg_g,
+                                fg_b,
+                            );
+                        }
+                        GlyphFormat::SubpixelRgb => {
+                            blit_subpixel(
+                                &mut self.buffer,
+                                w,
+                                h,
+                                glyph_ref,
+                                glyph_x,
+                                glyph_y,
+                                fg_r,
+                                fg_g,
+                                fg_b,
+                            );
+                        }
+                    }
                 }
 
                 if cell.underline {
@@ -487,7 +505,8 @@ fn blend_rect(
 /// (gamma-correct).
 ///
 /// Alpha compositing is performed in linear light so that thin strokes blend
-/// correctly against any background colour.
+/// correctly against any background colour. Used for `GlyphFormat::Alpha`
+/// glyphs (single-channel coverage).
 fn blit_alpha(
     buf: &mut [u8],
     buf_w: u32,
@@ -515,7 +534,7 @@ fn blit_alpha(
                 continue;
             }
 
-            let alpha = glyph.alpha[(gy * glyph.width + gx) as usize];
+            let alpha = glyph.data[(gy * glyph.width + gx) as usize];
             if alpha == 0 {
                 continue;
             }
@@ -544,6 +563,80 @@ fn blit_alpha(
             buf[idx] = linear_to_srgb_lut(fg_r_lin * a + bg_r_lin * inv_a);
             buf[idx + 1] = linear_to_srgb_lut(fg_g_lin * a + bg_g_lin * inv_a);
             buf[idx + 2] = linear_to_srgb_lut(fg_b_lin * a + bg_b_lin * inv_a);
+            buf[idx + 3] = 255;
+        }
+    }
+}
+
+/// Blit a subpixel (ClearType) glyph onto the buffer (gamma-correct).
+///
+/// Each pixel in the glyph has separate R, G, B coverage values. This gives
+/// 3x the effective horizontal resolution on LCD displays by addressing
+/// individual colour sub-elements. Blending is performed per-channel in
+/// linear light. Used for `GlyphFormat::SubpixelRgb` glyphs.
+fn blit_subpixel(
+    buf: &mut [u8],
+    buf_w: u32,
+    buf_h: u32,
+    glyph: &CachedGlyph,
+    glyph_x: i32,
+    glyph_y: i32,
+    fg_r: u8,
+    fg_g: u8,
+    fg_b: u8,
+) {
+    let lut = &*SRGB_TO_LINEAR;
+    let fg_r_lin = lut[fg_r as usize];
+    let fg_g_lin = lut[fg_g as usize];
+    let fg_b_lin = lut[fg_b as usize];
+
+    for gy in 0..glyph.height {
+        let dest_y = glyph_y + gy as i32;
+        if dest_y < 0 || dest_y >= buf_h as i32 {
+            continue;
+        }
+        for gx in 0..glyph.width {
+            let dest_x = glyph_x + gx as i32;
+            if dest_x < 0 || dest_x >= buf_w as i32 {
+                continue;
+            }
+
+            let rgb_offset = ((gy * glyph.width + gx) * 3) as usize;
+            let ar = glyph.data[rgb_offset];
+            let ag = glyph.data[rgb_offset + 1];
+            let ab = glyph.data[rgb_offset + 2];
+
+            // Skip fully transparent pixels
+            if ar == 0 && ag == 0 && ab == 0 {
+                continue;
+            }
+
+            let idx = ((dest_y as u32 * buf_w + dest_x as u32) * 4) as usize;
+            if idx + 3 >= buf.len() {
+                continue;
+            }
+
+            // Fully opaque on all channels: write fg colour directly
+            if ar == 255 && ag == 255 && ab == 255 {
+                buf[idx] = fg_r;
+                buf[idx + 1] = fg_g;
+                buf[idx + 2] = fg_b;
+                buf[idx + 3] = 255;
+                continue;
+            }
+
+            // Per-channel alpha blending in linear space
+            let bg_r_lin = lut[buf[idx] as usize];
+            let bg_g_lin = lut[buf[idx + 1] as usize];
+            let bg_b_lin = lut[buf[idx + 2] as usize];
+
+            let a_r = ar as f32 / 255.0;
+            let a_g = ag as f32 / 255.0;
+            let a_b = ab as f32 / 255.0;
+
+            buf[idx] = linear_to_srgb_lut(fg_r_lin * a_r + bg_r_lin * (1.0 - a_r));
+            buf[idx + 1] = linear_to_srgb_lut(fg_g_lin * a_g + bg_g_lin * (1.0 - a_g));
+            buf[idx + 2] = linear_to_srgb_lut(fg_b_lin * a_b + bg_b_lin * (1.0 - a_b));
             buf[idx + 3] = 255;
         }
     }
@@ -606,7 +699,8 @@ mod tests {
             _italic: bool,
         ) -> Option<crate::glyph_rasterizer::RasterizedGlyph> {
             Some(crate::glyph_rasterizer::RasterizedGlyph {
-                alpha: vec![128; 4], // 2x2 alpha mask
+                data: vec![128; 4], // 2x2 alpha mask
+                format: GlyphFormat::Alpha,
                 width: 2,
                 height: 2,
                 bearing_x: 0,
@@ -712,7 +806,8 @@ mod tests {
         fill_solid(&mut buf, 255, 255, 255, 255);
 
         let glyph = CachedGlyph {
-            alpha: vec![128; 4], // 2x2, 50% alpha
+            data: vec![128; 4], // 2x2, 50% alpha
+            format: GlyphFormat::Alpha,
             width: 2,
             height: 2,
             bearing_x: 0,
@@ -809,6 +904,47 @@ mod tests {
         assert_eq!(buf[0], 255);
         assert_eq!(buf[1], 255);
         assert_eq!(buf[2], 255);
+    }
+
+    #[test]
+    fn blit_subpixel_composites_per_channel() {
+        let w = 4u32;
+        let h = 4u32;
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+
+        fill_solid(&mut buf, 0, 0, 0, 255);
+
+        // 2x1 subpixel glyph: first pixel = full R coverage only,
+        // second pixel = full G coverage only
+        let glyph = CachedGlyph {
+            data: vec![
+                255, 0, 0, // pixel (0,0): full R, no G, no B
+                0, 255, 0, // pixel (1,0): no R, full G, no B
+            ],
+            format: GlyphFormat::SubpixelRgb,
+            width: 2,
+            height: 1,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance: 8.0,
+        };
+
+        // Blit with white foreground onto black background
+        blit_subpixel(&mut buf, w, h, &glyph, 1, 1, 255, 255, 255);
+
+        // Pixel (1,1): R channel should be white (255), G and B should remain black (0)
+        let idx1 = ((1 * w + 1) * 4) as usize;
+        assert_eq!(buf[idx1], 255); // R = full coverage
+        assert_eq!(buf[idx1 + 1], 0); // G = no coverage
+        assert_eq!(buf[idx1 + 2], 0); // B = no coverage
+        assert_eq!(buf[idx1 + 3], 255);
+
+        // Pixel (2,1): G channel should be white (255), R and B should remain black (0)
+        let idx2 = ((1 * w + 2) * 4) as usize;
+        assert_eq!(buf[idx2], 0); // R = no coverage
+        assert_eq!(buf[idx2 + 1], 255); // G = full coverage
+        assert_eq!(buf[idx2 + 2], 0); // B = no coverage
+        assert_eq!(buf[idx2 + 3], 255);
     }
 
     #[test]

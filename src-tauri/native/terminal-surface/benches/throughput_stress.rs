@@ -5,7 +5,7 @@ use godly_protocol::types::{
 use godly_terminal_surface::font_metrics::FontMetrics;
 use godly_terminal_surface::glyph_cache::GlyphCache;
 use godly_terminal_surface::glyph_rasterizer::{
-    GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph,
+    GlyphFormat, GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph,
 };
 use godly_terminal_surface::pixel_renderer::PixelRenderer;
 use iced::Color;
@@ -25,7 +25,8 @@ impl GlyphRasterizer for StubRasterizer {
         _italic: bool,
     ) -> Option<RasterizedGlyph> {
         Some(RasterizedGlyph {
-            alpha: vec![128; 4], // 2x2 alpha mask
+            data: vec![128; 4], // 2x2 alpha mask
+            format: GlyphFormat::Alpha,
             width: 2,
             height: 2,
             bearing_x: 0,

@@ -1,0 +1,182 @@
+name: "Bug #764: Closing split partner must resize remaining terminal PTY"
+tags: [split, resize, close, bug-764]
+---
+# Bug #764: After splitting a terminal and closing the newly created terminal
+# via closeTerminal (tab close), the remaining terminal's PTY dimensions stay
+# at half-size because close_terminal_immediate() does not call
+# resize_all_terminals().
+#
+# This test verifies both horizontal and vertical splits.
+
+- resetApp
+- waitForReady
+
+# ===================================================================
+# Part 1: Horizontal split (left/right) — columns must restore
+# ===================================================================
+
+# Get active workspace and terminal
+- getActiveWorkspace:
+  store: ws
+
+- getActiveTerminal:
+  store: term1
+
+# Wait for terminal to be idle and ready
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Capture the initial column count at full size
+- executeCommand:
+    terminal_id: $term1.id
+    command: "COLS_FULL=$(stty size | awk '{print $2}'); echo COLS_FULL=$COLS_FULL"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "COLS_FULL="
+
+# Create a second terminal for the horizontal split
+- createTerminal:
+    workspace_id: $ws.id
+  store: term2
+
+- waitForIdle:
+    terminal_id: $term2.id
+    idle_ms: 2000
+
+# Split horizontally (left/right) — term1 on left, term2 on right
+- splitTerminal:
+    workspace_id: $ws.id
+    target_terminal_id: $term1.id
+    new_terminal_id: $term2.id
+    direction: horizontal
+
+# Wait for layout and resize to propagate
+- sleep:
+    ms: 3000
+
+# Focus back on the original terminal
+- focusTerminal:
+    terminal_id: $term1.id
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Verify the split reduced the column count
+- executeCommand:
+    terminal_id: $term1.id
+    command: "COLS_SPLIT=$(stty size | awk '{print $2}'); echo COLS_SPLIT=$COLS_SPLIT; if [ \"$COLS_SPLIT\" -lt \"$COLS_FULL\" ]; then echo HSPLIT_SHRINK_OK; else echo HSPLIT_SHRINK_FAILED; fi"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "HSPLIT_SHRINK_OK"
+
+# === THE BUG TRIGGER: Close the split partner via tab close ===
+- closeTerminal:
+    terminal_id: $term2.id
+
+# Wait for the close + potential resize to propagate
+- sleep:
+    ms: 3000
+
+- focusTerminal:
+    terminal_id: $term1.id
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Check: columns must return to the original full-size value.
+# Bug #764: This FAILS because close_terminal_immediate() does not call
+# resize_all_terminals(), so the PTY grid stays at half-size columns.
+- executeCommand:
+    terminal_id: $term1.id
+    command: "COLS_AFTER=$(stty size | awk '{print $2}'); echo COLS_AFTER=$COLS_AFTER; if [ \"$COLS_AFTER\" -eq \"$COLS_FULL\" ]; then echo HCLOSE_RESIZE_OK; else echo HCLOSE_RESIZE_FAILED_full=${COLS_FULL}_split=${COLS_SPLIT}_after=${COLS_AFTER}; fi"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "HCLOSE_RESIZE_OK"
+
+# ===================================================================
+# Part 2: Vertical split (top/bottom) — rows must restore
+# ===================================================================
+
+# Capture the initial row count at full size (should be restored from Part 1)
+- executeCommand:
+    terminal_id: $term1.id
+    command: "ROWS_FULL=$(stty size | awk '{print $1}'); echo ROWS_FULL=$ROWS_FULL"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "ROWS_FULL="
+
+# Create a third terminal for the vertical split
+- createTerminal:
+    workspace_id: $ws.id
+  store: term3
+
+- waitForIdle:
+    terminal_id: $term3.id
+    idle_ms: 2000
+
+# Split vertically (top/bottom) — term1 on top, term3 on bottom
+- splitTerminal:
+    workspace_id: $ws.id
+    target_terminal_id: $term1.id
+    new_terminal_id: $term3.id
+    direction: vertical
+
+# Wait for layout and resize to propagate
+- sleep:
+    ms: 3000
+
+# Focus back on the original terminal
+- focusTerminal:
+    terminal_id: $term1.id
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Verify the split reduced the row count
+- executeCommand:
+    terminal_id: $term1.id
+    command: "ROWS_SPLIT=$(stty size | awk '{print $1}'); echo ROWS_SPLIT=$ROWS_SPLIT; if [ \"$ROWS_SPLIT\" -lt \"$ROWS_FULL\" ]; then echo VSPLIT_SHRINK_OK; else echo VSPLIT_SHRINK_FAILED; fi"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "VSPLIT_SHRINK_OK"
+
+# === THE BUG TRIGGER: Close the split partner via tab close ===
+- closeTerminal:
+    terminal_id: $term3.id
+
+# Wait for the close + potential resize to propagate
+- sleep:
+    ms: 3000
+
+- focusTerminal:
+    terminal_id: $term1.id
+
+- waitForIdle:
+    terminal_id: $term1.id
+    idle_ms: 2000
+
+# Check: rows must return to the original full-size value.
+# Bug #764: This FAILS because close_terminal_immediate() does not call
+# resize_all_terminals(), so the PTY grid stays at half-size rows.
+- executeCommand:
+    terminal_id: $term1.id
+    command: "ROWS_AFTER=$(stty size | awk '{print $1}'); echo ROWS_AFTER=$ROWS_AFTER; if [ \"$ROWS_AFTER\" -eq \"$ROWS_FULL\" ]; then echo VCLOSE_RESIZE_OK; else echo VCLOSE_RESIZE_FAILED_full=${ROWS_FULL}_split=${ROWS_SPLIT}_after=${ROWS_AFTER}; fi"
+    idle_ms: 3000
+
+- assertTextContains:
+    terminal_id: $term1.id
+    text: "VCLOSE_RESIZE_OK"
