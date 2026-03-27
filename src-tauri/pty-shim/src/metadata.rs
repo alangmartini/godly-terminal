@@ -45,8 +45,7 @@ pub fn write_metadata(meta: &ShimMetadata) -> std::io::Result<()> {
 pub fn read_metadata(session_id: &str) -> std::io::Result<ShimMetadata> {
     let path = shim_metadata_dir().join(format!("{}.json", session_id));
     let json = fs::read_to_string(path)?;
-    serde_json::from_str(&json)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    serde_json::from_str(&json).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// Remove the metadata file for a session.

@@ -89,6 +89,28 @@ pub fn open_pty(
         }
     };
 
+    // portable_pty on Windows reads PATH from the Windows registry (HKLM + HKCU),
+    // overwriting the inherited process PATH. The daemon prepends our binary directory
+    // to PATH so the tmux shim is reachable, but portable_pty discards that modification.
+    // Re-apply it here on the CommandBuilder so the shell always has the tmux shim in PATH.
+    #[cfg(windows)]
+    {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                if dir.join("tmux.exe").exists() {
+                    if let Some(current_path) = cmd.get_env("PATH") {
+                        let mut new_path = dir.as_os_str().to_os_string();
+                        new_path.push(";");
+                        new_path.push(current_path);
+                        cmd.env("PATH", new_path);
+                    } else {
+                        cmd.env("PATH", dir.as_os_str());
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(dir) = cwd {
         cmd.cwd(dir);
     }

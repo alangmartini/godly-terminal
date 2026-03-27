@@ -84,10 +84,7 @@ pub enum ShimFrame {
 /// Binary frames have a non-`{` first byte; JSON control messages start with `{` (0x7B).
 pub fn parse_incoming_frame(buf: &[u8]) -> io::Result<ShimFrame> {
     if buf.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Empty frame",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty frame"));
     }
     if buf[0] == 0x7B {
         // '{' — JSON control message
@@ -286,9 +283,7 @@ mod tests {
 
     #[test]
     fn test_json_response_shell_exited_with_code() {
-        let resp = ShimControlResponse::ShellExited {
-            exit_code: Some(0),
-        };
+        let resp = ShimControlResponse::ShellExited { exit_code: Some(0) };
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: ShimControlResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, resp);
@@ -419,9 +414,7 @@ mod tests {
 
     #[test]
     fn test_shell_exited_wire_format() {
-        let resp = ShimControlResponse::ShellExited {
-            exit_code: Some(1),
-        };
+        let resp = ShimControlResponse::ShellExited { exit_code: Some(1) };
         let json = serde_json::to_string(&resp).unwrap();
         assert_eq!(json, r#"{"type":"shell_exited","exit_code":1}"#);
     }

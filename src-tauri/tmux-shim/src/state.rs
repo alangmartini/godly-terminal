@@ -179,21 +179,28 @@ pub fn load() -> Result<TmuxState, io::Error> {
 /// create the state file. This function seeds it on first use by reading
 /// `GODLY_SESSION_ID` (the terminal ID) and querying the active workspace via MCP.
 ///
-/// This is a no-op if state already has panes, or if the required env vars are missing.
+/// Also handles **stale state**: if `tmux-state.json` persists across app restarts,
+/// it may contain pane mappings from a previous session. We detect this by checking
+/// whether `TMUX_PANE` maps to the current `GODLY_SESSION_ID`. If it doesn't, the
+/// state is stale and we re-initialize.
 pub fn ensure_initialized(
     get_workspace_id: impl FnOnce() -> Result<String, String>,
 ) -> Result<(), String> {
-    // Quick check outside the lock — avoid MCP call if state is already populated
-    let state = load().map_err(|e| format!("{}", e))?;
-    if !state.panes.is_empty() {
-        return Ok(());
-    }
-
-    // We need GODLY_SESSION_ID to map pane %0 → terminal
+    // We need GODLY_SESSION_ID to map pane → terminal
     let session_id = match std::env::var("GODLY_SESSION_ID") {
         Ok(s) if !s.is_empty() => s,
         _ => return Ok(()), // No session ID, can't map — not an error
     };
+
+    let pane_id = std::env::var("TMUX_PANE").unwrap_or_else(|_| "%0".to_string());
+
+    // Quick check outside the lock — skip if our pane already maps to this terminal
+    let state = load().map_err(|e| format!("{}", e))?;
+    if let Some(mapping) = state.panes.get(&pane_id) {
+        if mapping.terminal_id == session_id {
+            return Ok(());
+        }
+    }
 
     // Get workspace ID (involves MCP call, so we do it before locking)
     let workspace_id = get_workspace_id()?;
@@ -201,9 +208,16 @@ pub fn ensure_initialized(
     // Atomic read-modify-write with file lock
     with_state(|st| {
         // Re-check inside lock — another process may have initialized
-        if !st.panes.is_empty() {
-            return Ok(());
+        if let Some(mapping) = st.panes.get(&pane_id) {
+            if mapping.terminal_id == session_id {
+                return Ok(());
+            }
         }
+
+        // State is empty or stale — re-initialize
+        st.sessions.clear();
+        st.panes.clear();
+        st.next_pane_id = 0;
 
         let session_name = "godly".to_string();
         st.sessions
@@ -554,10 +568,11 @@ mod tests {
     }
 
     #[test]
-    fn ensure_initialized_noop_when_state_exists() {
-        // Pre-seed state, then verify ensure_initialized doesn't overwrite
+    fn ensure_initialized_replaces_stale_state() {
+        // Pre-seed state with data from a "previous session", then verify
+        // ensure_initialized clears it and re-initializes for the new terminal.
         let tmp = std::env::temp_dir().join(format!(
-            "tmux-state-test-exist-{}",
+            "tmux-state-test-stale-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -569,21 +584,81 @@ mod tests {
         std::env::set_var("APPDATA", &tmp);
         let old_session_id = std::env::var("GODLY_SESSION_ID").ok();
         std::env::set_var("GODLY_SESSION_ID", "term-new");
+        let old_tmux_pane = std::env::var("TMUX_PANE").ok();
+        std::env::set_var("TMUX_PANE", "%0");
 
-        // Pre-seed state with existing data
+        // Pre-seed state with stale data (%0 maps to a different terminal)
         let mut existing = TmuxState::default();
         existing.sessions.insert(
-            "existing".to_string(),
+            "godly".to_string(),
             SessionMapping {
                 workspace_id: "ws-old".to_string(),
             },
         );
-        existing.allocate_pane_id("term-old".to_string(), "existing".to_string());
+        existing.allocate_pane_id("term-old".to_string(), "godly".to_string());
         save(&existing).unwrap();
 
-        // ensure_initialized should see non-empty state and skip
+        // ensure_initialized should detect stale state and re-initialize
+        let result = ensure_initialized(|| Ok("ws-new".to_string()));
+
+        let st = load().unwrap();
+
+        // Restore
+        match old_appdata {
+            Some(v) => std::env::set_var("APPDATA", v),
+            None => std::env::remove_var("APPDATA"),
+        }
+        match old_session_id {
+            Some(v) => std::env::set_var("GODLY_SESSION_ID", v),
+            None => std::env::remove_var("GODLY_SESSION_ID"),
+        }
+        match old_tmux_pane {
+            Some(v) => std::env::set_var("TMUX_PANE", v),
+            None => std::env::remove_var("TMUX_PANE"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(result.is_ok());
+        assert_eq!(st.panes.len(), 1, "stale panes should be cleared");
+        assert_eq!(st.panes["%0"].terminal_id, "term-new");
+        assert_eq!(st.panes["%0"].session, "godly");
+        assert_eq!(st.sessions["godly"].workspace_id, "ws-new");
+    }
+
+    #[test]
+    fn ensure_initialized_noop_when_pane_matches() {
+        // Pre-seed state where %0 already maps to the current terminal.
+        // ensure_initialized should be a no-op.
+        let tmp = std::env::temp_dir().join(format!(
+            "tmux-state-test-match-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join("com.godly.terminal")).unwrap();
+
+        let old_appdata = std::env::var("APPDATA").ok();
+        std::env::set_var("APPDATA", &tmp);
+        let old_session_id = std::env::var("GODLY_SESSION_ID").ok();
+        std::env::set_var("GODLY_SESSION_ID", "term-current");
+        let old_tmux_pane = std::env::var("TMUX_PANE").ok();
+        std::env::set_var("TMUX_PANE", "%0");
+
+        // Pre-seed state where %0 already maps to the current terminal
+        let mut existing = TmuxState::default();
+        existing.sessions.insert(
+            "godly".to_string(),
+            SessionMapping {
+                workspace_id: "ws-123".to_string(),
+            },
+        );
+        existing.allocate_pane_id("term-current".to_string(), "godly".to_string());
+        save(&existing).unwrap();
+
+        // ensure_initialized should skip because %0 already maps to term-current
         let result = ensure_initialized(|| {
-            panic!("workspace callback should not be called when state exists");
+            panic!("workspace callback should not be called when pane matches");
         });
 
         let st = load().unwrap();
@@ -597,11 +672,14 @@ mod tests {
             Some(v) => std::env::set_var("GODLY_SESSION_ID", v),
             None => std::env::remove_var("GODLY_SESSION_ID"),
         }
+        match old_tmux_pane {
+            Some(v) => std::env::set_var("TMUX_PANE", v),
+            None => std::env::remove_var("TMUX_PANE"),
+        }
         let _ = std::fs::remove_dir_all(&tmp);
 
         assert!(result.is_ok());
         assert_eq!(st.panes.len(), 1);
-        assert_eq!(st.panes["%0"].terminal_id, "term-old");
-        assert_eq!(st.panes["%0"].session, "existing");
+        assert_eq!(st.panes["%0"].terminal_id, "term-current");
     }
 }
