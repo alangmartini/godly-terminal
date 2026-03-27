@@ -6,6 +6,8 @@
 
 #[macro_use]
 mod cli;
+#[macro_use]
+mod trace;
 mod commands;
 #[allow(dead_code)]
 mod daemon_client;
@@ -14,7 +16,17 @@ mod mcp_client;
 mod state;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+
+    trace!(">>> args={:?}", args);
+
+    // Strip `-L <socket>` — the shim is a single-instance emulator, not a real
+    // tmux server, so all socket names map to the same state. Claude Code uses
+    // `-L claude-swarm-<pid>` for agent team sessions.
+    if args.len() > 2 && args[1] == "-L" {
+        trace!("stripped -L {}", args[2]);
+        args.drain(1..3);
+    }
 
     // Seed tmux-state.json on first use. The daemon sets TMUX/TMUX_PANE env
     // vars but doesn't create the state file, so the shim initializes it here
@@ -24,6 +36,7 @@ fn main() {
         let ws = client.get_active_workspace()?;
         Ok(ws.id)
     }) {
+        trace!("ensure_initialized failed: {}", e);
         eprintln!("tmux: warning: failed to initialize state: {}", e);
         // Continue — some commands (like -V) don't need state
     }
@@ -68,11 +81,13 @@ fn main() {
             "show-options" | "show" => 0,
 
             unknown => {
+                trace!("unknown command: {}", unknown);
                 eprintln!("tmux: unknown command: {}", unknown);
                 1
             }
         }
     };
 
+    trace!("<<< exit={}", exit_code);
     std::process::exit(exit_code);
 }

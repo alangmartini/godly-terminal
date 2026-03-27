@@ -64,12 +64,18 @@ impl TmuxState {
     /// and falls back to `$TMUX_PANE` env var if target is None/empty.
     pub fn resolve_target(&self, target: Option<&str>) -> Result<String, String> {
         let t = self.effective_target(target)?;
-        Ok(self.lookup_pane(&t)?.terminal_id.clone())
+        trace!("resolve_target: input={:?} effective={}", target, t);
+        let result = self.lookup_pane(&t).map(|p| p.terminal_id.clone());
+        trace!("resolve_target: result={:?}", result);
+        result
     }
 
     /// Get the session name for a pane target.
+    ///
+    /// Handles tmux target formats: `session`, `session:window`, `session:window.pane`.
     pub fn resolve_session(&self, target: Option<&str>) -> Result<String, String> {
         let t = self.effective_target(target)?;
+        trace!("resolve_session: input={:?} effective={}", target, t);
         if t.starts_with('%') {
             return self
                 .panes
@@ -77,8 +83,10 @@ impl TmuxState {
                 .map(|p| p.session.clone())
                 .ok_or_else(|| format!("pane not found: {}", t));
         }
-        if self.sessions.contains_key(&t) {
-            return Ok(t);
+        // Strip :window and .pane suffixes — e.g. "godly:0" → "godly"
+        let session_name = strip_target_suffix(&t);
+        if self.sessions.contains_key(session_name) {
+            return Ok(session_name.to_string());
         }
         Err(format!("session not found: {}", t))
     }
@@ -126,6 +134,8 @@ impl TmuxState {
     }
 
     /// Look up a pane entry by a resolved target string (`%N` or session name).
+    ///
+    /// Handles tmux target formats: `session`, `session:window`, `session:window.pane`.
     fn lookup_pane(&self, target: &str) -> Result<&PaneMapping, String> {
         if target.starts_with('%') {
             return self
@@ -133,9 +143,11 @@ impl TmuxState {
                 .get(target)
                 .ok_or_else(|| format!("pane not found: {}", target));
         }
+        // Strip :window and .pane suffixes — e.g. "godly:0.%1" → "godly"
+        let session_name = strip_target_suffix(target);
         self.panes
             .values()
-            .find(|e| e.session == target)
+            .find(|e| e.session == session_name)
             .ok_or_else(|| format!("target not found: {}", target))
     }
 
@@ -152,6 +164,14 @@ impl TmuxState {
         }
         Err("no panes exist".to_string())
     }
+}
+
+/// Strip tmux target suffixes to extract the session name.
+///
+/// tmux targets can be `session`, `session:window`, or `session:window.pane`.
+/// This returns just the session name portion.
+pub fn strip_target_suffix(target: &str) -> &str {
+    target.split(':').next().unwrap_or(target)
 }
 
 /// Get the path to the tmux state file.
@@ -447,6 +467,20 @@ mod tests {
     }
 
     #[test]
+    fn resolve_target_by_session_colon_window() {
+        let state = make_state_with_panes();
+        let tid = state.resolve_target(Some("main:0")).unwrap();
+        assert!(tid == "term-111" || tid == "term-222");
+    }
+
+    #[test]
+    fn resolve_target_by_session_colon_window_dot_pane() {
+        let state = make_state_with_panes();
+        let tid = state.resolve_target(Some("main:0.%0")).unwrap();
+        assert!(tid == "term-111" || tid == "term-222");
+    }
+
+    #[test]
     fn resolve_target_fallback_last_pane() {
         std::env::remove_var("TMUX_PANE");
         let state = make_state_with_panes();
@@ -457,6 +491,34 @@ mod tests {
     fn resolve_session_from_pane() {
         let state = make_state_with_panes();
         assert_eq!(state.resolve_session(Some("%0")).unwrap(), "main");
+    }
+
+    #[test]
+    fn resolve_session_with_window_suffix() {
+        let state = make_state_with_panes();
+        assert_eq!(state.resolve_session(Some("main:0")).unwrap(), "main");
+    }
+
+    // ── strip_target_suffix tests ──
+
+    #[test]
+    fn strip_target_suffix_plain_session() {
+        assert_eq!(strip_target_suffix("godly"), "godly");
+    }
+
+    #[test]
+    fn strip_target_suffix_session_window() {
+        assert_eq!(strip_target_suffix("godly:0"), "godly");
+    }
+
+    #[test]
+    fn strip_target_suffix_session_window_pane() {
+        assert_eq!(strip_target_suffix("godly:0.%1"), "godly");
+    }
+
+    #[test]
+    fn strip_target_suffix_empty_string() {
+        assert_eq!(strip_target_suffix(""), "");
     }
 
     #[test]

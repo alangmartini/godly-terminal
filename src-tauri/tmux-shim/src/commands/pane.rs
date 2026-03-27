@@ -43,6 +43,13 @@ fn split_window(args: &[String]) -> i32 {
     let cwd = parsed.get_option('c').map(|s| s.to_string());
     let direction = direction_from_flags(&parsed);
 
+    trace!(
+        "split-window: target={:?} direction={} cwd={:?}",
+        target,
+        direction,
+        cwd
+    );
+
     let current_state = tmux_try!(state::load(), "failed to read state");
     let target_terminal_id = tmux_try!(current_state.resolve_target(target));
     let session_name = tmux_try!(current_state.resolve_session(target));
@@ -107,10 +114,18 @@ fn select_pane(args: &[String]) -> i32 {
 /// `list-panes [-t <session>] [-F <format>]`
 ///
 /// List panes, optionally filtered by session.
+/// Handles tmux target formats: `session`, `session:window`.
 fn list_panes(args: &[String]) -> i32 {
     let parsed = TmuxArgs::parse(args);
-    let session_filter = parsed.get_option('t');
+    let raw_filter = parsed.get_option('t');
+    let session_filter = raw_filter.map(state::strip_target_suffix);
     let format_str = parsed.get_option('F');
+
+    trace!(
+        "list-panes: raw_target={:?} session_filter={:?}",
+        raw_filter,
+        session_filter
+    );
 
     let state = tmux_try!(state::load(), "failed to read state");
 
@@ -120,6 +135,12 @@ fn list_panes(args: &[String]) -> i32 {
         .filter(|(_id, entry)| session_filter.map(|s| entry.session == s).unwrap_or(true))
         .map(|(id, entry)| (id.clone(), entry))
         .collect();
+
+    trace!(
+        "list-panes: matched {} panes (state has {} total)",
+        panes.len(),
+        state.panes.len()
+    );
 
     panes.sort_by(|a, b| {
         let a_num: u32 = a.0.trim_start_matches('%').parse().unwrap_or(0);

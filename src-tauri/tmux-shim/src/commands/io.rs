@@ -128,12 +128,20 @@ fn display_message(args: &[String]) -> i32 {
         "#{session_name}".to_string()
     };
 
+    trace!(
+        "display-message: target={:?} message_template={}",
+        target,
+        message
+    );
+
     let st = tmux_try!(state::load(), "failed to read state");
     let pane_id = st.resolve_pane_id(target);
     let session_name = st.pane_session(&pane_id).unwrap_or("default").to_string();
 
     let vars = format::session_format_vars(&pane_id, &session_name);
-    println!("{}", format::expand_format(&message, &vars));
+    let output = format::expand_format(&message, &vars);
+    trace!("display-message: output={}", output);
+    println!("{}", output);
 
     0
 }
