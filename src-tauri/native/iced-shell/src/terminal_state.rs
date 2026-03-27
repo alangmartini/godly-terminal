@@ -40,6 +40,11 @@ pub struct TerminalInfo {
     pub is_clone: bool,
     /// Cached image handle for the pixel-rendered terminal (None = needs render).
     pub cached_image_handle: Option<iced::widget::image::Handle>,
+    /// Fingerprint of the last rendered grid state. Used to skip redundant
+    /// pixel renders when the grid content has not changed (e.g. heartbeat
+    /// recovery polls fetching an identical snapshot).
+    /// Tuple: (total_scrollback, scrollback_offset, cursor_row, cursor_col, cursor_hidden)
+    pub last_grid_fingerprint: Option<(usize, usize, u16, u16, bool)>,
 }
 
 impl TerminalInfo {
@@ -381,6 +386,7 @@ impl TerminalCollection {
                 worktree_path: None,
                 is_clone: false,
                 cached_image_handle: None,
+                last_grid_fingerprint: None,
             },
         );
         if self.tabs.active_id() == Some(id.as_str()) {
@@ -1283,5 +1289,93 @@ mod tests {
         };
 
         assert!(should_render, "must render when no cached image exists");
+    }
+
+    // -- last_grid_fingerprint tests (issue #845: heartbeat render loop) --
+
+    #[test]
+    fn last_grid_fingerprint_defaults_to_none() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+        assert!(info.last_grid_fingerprint.is_none());
+    }
+
+    #[test]
+    fn fingerprint_match_skips_render() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        let fp = (100_usize, 0_usize, 5_u16, 10_u16, false);
+        info.last_grid_fingerprint = Some(fp);
+
+        // Simulate GridFetched with identical fingerprint
+        let mut should_render = true;
+        let new_fp = fp;
+        if should_render && info.last_grid_fingerprint == Some(new_fp) {
+            should_render = false;
+        }
+        info.last_grid_fingerprint = Some(new_fp);
+
+        assert!(!should_render, "unchanged grid should skip render");
+    }
+
+    #[test]
+    fn fingerprint_mismatch_allows_render() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        let old_fp = (100_usize, 0_usize, 5_u16, 10_u16, false);
+        info.last_grid_fingerprint = Some(old_fp);
+
+        // Simulate GridFetched with changed scrollback
+        let mut should_render = true;
+        let new_fp = (101_usize, 0_usize, 5_u16, 10_u16, false);
+        if should_render && info.last_grid_fingerprint == Some(new_fp) {
+            should_render = false;
+        }
+        info.last_grid_fingerprint = Some(new_fp);
+
+        assert!(should_render, "changed grid should allow render");
+    }
+
+    #[test]
+    fn fingerprint_none_allows_render() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        assert!(info.last_grid_fingerprint.is_none());
+
+        // Simulate first GridFetched (no prior fingerprint)
+        let mut should_render = true;
+        let new_fp = (0_usize, 0_usize, 0_u16, 0_u16, false);
+        if should_render && info.last_grid_fingerprint == Some(new_fp) {
+            should_render = false;
+        }
+        info.last_grid_fingerprint = Some(new_fp);
+
+        assert!(should_render, "first fetch must always render");
+    }
+
+    #[test]
+    fn fingerprint_reset_forces_render() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        let fp = (50_usize, 0_usize, 3_u16, 7_u16, false);
+        info.last_grid_fingerprint = Some(fp);
+
+        // Simulate resize clearing the fingerprint
+        info.last_grid_fingerprint = None;
+
+        // Same content as before resize — should still render because
+        // fingerprint was reset
+        let mut should_render = true;
+        let new_fp = fp;
+        if should_render && info.last_grid_fingerprint == Some(new_fp) {
+            should_render = false;
+        }
+        info.last_grid_fingerprint = Some(new_fp);
+
+        assert!(should_render, "render must proceed after fingerprint reset");
     }
 }

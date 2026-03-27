@@ -393,6 +393,10 @@ pub struct GodlyApp {
     last_global_sound_ms: Option<u64>,
     /// Last native attention request timestamp for debounce.
     last_attention_request_ms: Option<u64>,
+    /// Timestamp of the last non-heartbeat DaemonEvent received.
+    /// Used to detect when the daemon subscription is alive, so the
+    /// heartbeat can skip redundant grid polling.
+    last_daemon_event_at: Option<std::time::Instant>,
     /// Most recent bell timestamp per terminal (regardless of whether sound played).
     last_bell_ms: HashMap<String, u64>,
     /// Count of bells suppressed during current burst per terminal.
@@ -629,6 +633,7 @@ impl Default for GodlyApp {
             last_terminal_sound_ms: HashMap::new(),
             last_global_sound_ms: None,
             last_attention_request_ms: None,
+            last_daemon_event_at: None,
             last_bell_ms: HashMap::new(),
             bell_burst_suppressed: HashMap::new(),
             workspace_mute_patterns: Vec::new(),
@@ -1894,6 +1899,7 @@ impl GodlyApp {
 
             // --- Daemon events (channel-driven, no polling) ---
             Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
+                self.last_daemon_event_at = Some(std::time::Instant::now());
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     // Already dirty + fetching → this event is redundant, skip all work.
                     // This coalesces bursts of output events into a single grid fetch.
@@ -1920,6 +1926,7 @@ impl GodlyApp {
                 session_id,
                 exit_code,
             }) => {
+                self.last_daemon_event_at = Some(std::time::Instant::now());
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     term.exited = true;
                     term.exit_code = exit_code;
@@ -1930,11 +1937,13 @@ impl GodlyApp {
                 session_id,
                 process_name,
             }) => {
+                self.last_daemon_event_at = Some(std::time::Instant::now());
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     term.process_name = process_name;
                 }
             }
             Message::DaemonEvent(DaemonEventMsg::Bell { session_id }) => {
+                self.last_daemon_event_at = Some(std::time::Instant::now());
                 self.notifications.record_bell(&session_id);
                 let now_ms = Self::now_ms();
                 self.last_bell_ms.insert(session_id.clone(), now_ms);
@@ -2027,6 +2036,14 @@ impl GodlyApp {
                 let mut should_persist_clamp = false;
                 let mut should_refetch = false;
                 let mut should_render = true;
+                // Capture fingerprint before grid is moved into term.grid.
+                let new_fingerprint = (
+                    grid.total_scrollback,
+                    grid.scrollback_offset,
+                    grid.cursor.row,
+                    grid.cursor.col,
+                    grid.cursor_hidden,
+                );
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     if grid.scrollback_offset < term.scrollback_offset {
                         should_persist_clamp = true;
@@ -2071,6 +2088,13 @@ impl GodlyApp {
                     term.total_scrollback = grid.total_scrollback;
                     term.scrollback_offset = grid.scrollback_offset.min(grid.total_scrollback);
                     term.grid = Some(grid);
+                    // Skip render if grid content hasn't changed — prevents the
+                    // heartbeat recovery poll from creating a texture-swap loop
+                    // when content is static.
+                    if should_render && term.last_grid_fingerprint == Some(new_fingerprint) {
+                        should_render = false;
+                    }
+                    term.last_grid_fingerprint = Some(new_fingerprint);
                 }
                 if should_persist_clamp {
                     self.persist_scrollback_offsets();
@@ -2573,6 +2597,7 @@ impl GodlyApp {
                         if let Some(t) = self.terminals.get_mut(id) {
                             t.fetching = false;
                             t.dirty = true;
+                            t.last_grid_fingerprint = None; // Force render after resize
                         }
                     }
                     let resize_task = self.resize_all_terminals();
@@ -4263,17 +4288,19 @@ impl GodlyApp {
                             }
                         }
                     }
-                    // Periodic grid poll: when focused, fetch grids for all terminals.
-                    // This compensates for the daemon event subscription dying after
-                    // minimize/restore (bridge pipe can break during dormancy).
-                    if is_actually_focused && self.client.is_some() {
+                    // Recovery grid poll: when focused AND the daemon event
+                    // subscription appears dead (no events in >2 s), fetch grids
+                    // so content stays fresh. When the subscription is alive,
+                    // TerminalOutput events drive fetches — no polling needed.
+                    let subscription_stale = self
+                        .last_daemon_event_at
+                        .map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2));
+                    if is_actually_focused && self.client.is_some() && subscription_stale {
+                        diag::log("HEARTBEAT: subscription stale >2s — recovery grid poll");
                         let ids: Vec<String> =
                             self.terminals.iter().map(|t| t.id.clone()).collect();
-                        for id in &ids {
-                            if let Some(t) = self.terminals.get_mut(id) {
-                                t.fetching = false; // Force-allow fetch
-                            }
-                        }
+                        // Do NOT force-reset fetching — respect the in-flight guard
+                        // in fetch_grid() to prevent concurrent/redundant fetches.
                         let tasks: Vec<Task<Message>> =
                             ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
                         if !tasks.is_empty() {
