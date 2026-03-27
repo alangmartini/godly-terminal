@@ -2026,6 +2026,7 @@ impl GodlyApp {
 
                 let mut should_persist_clamp = false;
                 let mut should_refetch = false;
+                let mut should_render = true;
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     if grid.scrollback_offset < term.scrollback_offset {
                         should_persist_clamp = true;
@@ -2039,6 +2040,21 @@ impl GodlyApp {
                     if term.needs_refetch {
                         term.needs_refetch = false;
                         should_refetch = true;
+
+                        // The grid we just received is stale — a refetch is
+                        // coming. Skip the pixel render to avoid showing an
+                        // intermediate frame that causes micro-blinking.
+                        // To prevent the screen from freezing during continuous
+                        // output, alternate: skip one stale render, then force
+                        // the next, giving ~30 fps during sustained output.
+                        if term.cached_image_handle.is_some() && !term.skipped_stale_render {
+                            term.skipped_stale_render = true;
+                            should_render = false;
+                        } else {
+                            term.skipped_stale_render = false;
+                        }
+                    } else {
+                        term.skipped_stale_render = false;
                     }
                     // Only overwrite a meaningful (non-path) title with another
                     // meaningful title.  Shells frequently reset the OSC title
@@ -2059,7 +2075,7 @@ impl GodlyApp {
                 if should_persist_clamp {
                     self.persist_scrollback_offsets();
                 }
-                if self.use_pixel_renderer {
+                if self.use_pixel_renderer && should_render {
                     self.render_terminal_image(&session_id);
                 }
                 if should_refetch {
