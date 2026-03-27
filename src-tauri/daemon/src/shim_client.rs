@@ -49,16 +49,19 @@ pub fn spawn_shim(
         cmd.env("GODLY_INSTANCE", &instance);
     }
 
-    // TMUX compat: set env vars so tools like Claude Code detect a tmux-like environment.
-    // Format matches tmux's $TMUX: <socket_path>,<server_pid>,<session_index>
-    cmd.env("TMUX", format!("/tmp/godly-tmux,{},0", std::process::id()));
-    cmd.env("TMUX_PANE", "%0");
-
-    // Prepend the directory containing our tmux shim to PATH so that `tmux`
-    // resolves to our shim binary instead of a system-installed tmux.
+    // TMUX compat: set env vars so tools like Claude Code detect a tmux-like environment,
+    // but ONLY if our tmux shim binary is available. Setting TMUX without a working
+    // `tmux` command causes Claude Code to fail with "Could not determine current
+    // tmux pane/window" because it tries to run tmux commands that don't exist.
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
             if exe_dir.join("tmux.exe").exists() {
+                // Format matches tmux's $TMUX: <socket_path>,<server_pid>,<session_index>
+                cmd.env("TMUX", format!("/tmp/godly-tmux,{},0", std::process::id()));
+                cmd.env("TMUX_PANE", "%0");
+
+                // Prepend the directory containing our tmux shim to PATH so that
+                // `tmux` resolves to our shim binary instead of a system-installed tmux.
                 if let Some(current_path) = std::env::var_os("PATH") {
                     let mut new_path = exe_dir.as_os_str().to_os_string();
                     new_path.push(";");
