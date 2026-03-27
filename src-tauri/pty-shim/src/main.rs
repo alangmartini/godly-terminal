@@ -7,8 +7,8 @@ mod ring_buffer;
 use diag::shim_log;
 use metadata::ShimMetadata;
 use protocol::{
-    parse_incoming_frame, write_binary_frame, write_json, ShimControlRequest,
-    ShimControlResponse, ShimFrame, TAG_BUFFER_DATA, TAG_OUTPUT, TAG_WRITE,
+    parse_incoming_frame, write_binary_frame, write_json, ShimControlRequest, ShimControlResponse,
+    ShimFrame, TAG_BUFFER_DATA, TAG_OUTPUT, TAG_WRITE,
 };
 use ring_buffer::RingBuffer;
 use std::io::{Read, Write};
@@ -134,8 +134,13 @@ fn run() -> Result<(), String> {
         .unwrap_or_else(|| format!(r"\\.\pipe\godly-shim-{}", args.session_id));
 
     // Open PTY — returns separately-owned parts for different threads
-    let pty_parts =
-        pty::open_pty(&args.shell_type, args.cwd.as_deref(), args.rows, args.cols, None)?;
+    let pty_parts = pty::open_pty(
+        &args.shell_type,
+        args.cwd.as_deref(),
+        args.rows,
+        args.cols,
+        None,
+    )?;
     let shell_pid = pty_parts.shell_pid;
 
     shim_log!(
@@ -448,7 +453,11 @@ fn main_loop(
                     match parse_incoming_frame(&frame_data) {
                         Ok(ShimFrame::Binary { tag, data }) if tag == TAG_WRITE => {
                             if idle_was > 5 {
-                                shim_log!("DAEMON FRAME tag=WRITE len={} (idle was {}s)", data.len(), idle_was);
+                                shim_log!(
+                                    "DAEMON FRAME tag=WRITE len={} (idle was {}s)",
+                                    data.len(),
+                                    idle_was
+                                );
                             }
                             let _ = input_tx.send(data);
                         }
