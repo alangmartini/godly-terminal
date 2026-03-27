@@ -6084,9 +6084,14 @@ impl GodlyApp {
         container(toasts_column)
             .width(Length::Fill)
             .height(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Top)
-            .padding(Padding::from([20, 0]))
+            .align_x(iced::alignment::Horizontal::Right)
+            .align_y(iced::alignment::Vertical::Bottom)
+            .padding(Padding {
+                top: 0.0,
+                right: 16.0,
+                bottom: status_bar::STATUS_BAR_HEIGHT + 12.0,
+                left: 0.0,
+            })
             .into()
     }
 
