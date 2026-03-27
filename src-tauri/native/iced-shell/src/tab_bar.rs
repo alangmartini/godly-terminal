@@ -433,6 +433,7 @@ mod tests {
             worktree_path: None,
             is_clone: false,
             cached_image_handle: None,
+            last_grid_fingerprint: None,
         }
     }
 

@@ -1,0 +1,2 @@
+### Fixed
+- **Eliminate heartbeat-driven render loop causing micro-blinking on high-refresh displays** — the periodic grid poll was unconditionally fetching all terminal grids on every RedrawRequested event, creating a texture-swap loop at display refresh rate; now only polls when the daemon event subscription appears dead (>2 s with no events), respects the concurrent-fetch guard, and skips pixel renders when the grid content is unchanged (#845)
