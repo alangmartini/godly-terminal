@@ -16,6 +16,18 @@ mod state;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    // Seed tmux-state.json on first use. The daemon sets TMUX/TMUX_PANE env
+    // vars but doesn't create the state file, so the shim initializes it here
+    // by querying the active workspace via MCP. This is a no-op once state exists.
+    if let Err(e) = state::ensure_initialized(|| {
+        let client = mcp_client::McpPipeClient::connect()?;
+        let ws = client.get_active_workspace()?;
+        Ok(ws.id)
+    }) {
+        eprintln!("tmux: warning: failed to initialize state: {}", e);
+        // Continue — some commands (like -V) don't need state
+    }
+
     let exit_code = if args.len() <= 1 {
         // Bare `tmux` = `new-session`
         commands::session::handle("new-session", &args[1..])
