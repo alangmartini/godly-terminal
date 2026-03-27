@@ -2568,6 +2568,7 @@ impl GodlyApp {
                     // Glyph cache entries were rasterized at the old DPI -- flush them.
                     self.glyph_cache.invalidate();
                     self.glyph_rasterizer.set_scale_factor(sf);
+                    self.rerender_all_terminal_images();
                     return self.resize_all_terminals();
                 }
             }
@@ -4326,6 +4327,7 @@ impl GodlyApp {
                     }
                 }
                 self.glyph_cache.invalidate();
+                self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
             Message::FontsEnumerated(fonts) => {
@@ -4345,6 +4347,8 @@ impl GodlyApp {
                     &self.font_family,
                     self.window_scale_factor,
                 );
+                self.glyph_cache.invalidate();
+                self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
             Message::FontSizeDecrement => {
@@ -4356,6 +4360,8 @@ impl GodlyApp {
                 );
                 self.font_metrics =
                     measured_font_metrics(new_size, &self.font_family, self.window_scale_factor);
+                self.glyph_cache.invalidate();
+                self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
             Message::ShortcutBadgeClicked(index) => {
@@ -9689,6 +9695,18 @@ impl GodlyApp {
     // -----------------------------------------------------------------------
     // Pixel renderer helpers
     // -----------------------------------------------------------------------
+
+    /// Re-render pixel-buffer images for all terminals that have grid data.
+    /// Called after font metrics or glyph cache changes (font size, DPI, family).
+    fn rerender_all_terminal_images(&mut self) {
+        if !self.use_pixel_renderer {
+            return;
+        }
+        let ids: Vec<String> = self.terminals.iter().map(|t| t.id.clone()).collect();
+        for id in ids {
+            self.render_terminal_image(&id);
+        }
+    }
 
     /// Pre-render a terminal's grid into an RGBA pixel buffer and cache the
     /// resulting `Handle` on the `TerminalInfo`. Called from `update()` after
