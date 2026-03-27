@@ -732,7 +732,8 @@ impl Default for GodlyApp {
                                     DEFAULT_FONT_FAMILY
                                 );
                                 let mut r =
-                                    godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
+                                    godly_terminal_surface::swash_rasterizer::SwashRasterizer::new(
+                                    );
                                 r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
                                 Box::new(r)
                             }
@@ -9984,7 +9985,7 @@ impl GodlyApp {
                 let img = iced::widget::image::Image::new(handle.clone())
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .content_fit(iced::ContentFit::None)
+                    .content_fit(iced::ContentFit::Fill)
                     .filter_method(iced::widget::image::FilterMethod::Nearest);
                 column![accent_bar, img]
             } else {
