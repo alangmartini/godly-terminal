@@ -107,9 +107,10 @@ fn select_pane(args: &[String]) -> i32 {
 /// `list-panes [-t <session>] [-F <format>]`
 ///
 /// List panes, optionally filtered by session.
+/// Handles tmux target formats: `session`, `session:window`.
 fn list_panes(args: &[String]) -> i32 {
     let parsed = TmuxArgs::parse(args);
-    let session_filter = parsed.get_option('t');
+    let session_filter = parsed.get_option('t').map(state::strip_target_suffix);
     let format_str = parsed.get_option('F');
 
     let state = tmux_try!(state::load(), "failed to read state");

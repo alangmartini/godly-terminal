@@ -14,7 +14,14 @@ mod mcp_client;
 mod state;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+
+    // Strip `-L <socket>` — the shim is a single-instance emulator, not a real
+    // tmux server, so all socket names map to the same state. Claude Code uses
+    // `-L claude-swarm-<pid>` for agent team sessions.
+    if args.len() > 2 && args[1] == "-L" {
+        args.drain(1..3);
+    }
 
     // Seed tmux-state.json on first use. The daemon sets TMUX/TMUX_PANE env
     // vars but doesn't create the state file, so the shim initializes it here
