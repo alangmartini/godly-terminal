@@ -1898,6 +1898,7 @@ impl GodlyApp {
                     // Already dirty + fetching → this event is redundant, skip all work.
                     // This coalesces bursts of output events into a single grid fetch.
                     if term.dirty && term.fetching {
+                        term.needs_refetch = true;
                         return Task::none();
                     }
                     term.dirty = true;
@@ -2024,12 +2025,21 @@ impl GodlyApp {
                 }
 
                 let mut should_persist_clamp = false;
+                let mut should_refetch = false;
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     if grid.scrollback_offset < term.scrollback_offset {
                         should_persist_clamp = true;
                     }
                     term.fetching = false;
                     term.dirty = false;
+                    // If output events arrived while this fetch was in-flight,
+                    // the snapshot we just received is stale — schedule a
+                    // follow-up fetch so the latest content is displayed
+                    // without a visible gap (micro-blink).
+                    if term.needs_refetch {
+                        term.needs_refetch = false;
+                        should_refetch = true;
+                    }
                     // Only overwrite a meaningful (non-path) title with another
                     // meaningful title.  Shells frequently reset the OSC title
                     // to the CWD which would erase a user-set tab name.
@@ -2051,6 +2061,9 @@ impl GodlyApp {
                 }
                 if self.use_pixel_renderer {
                     self.render_terminal_image(&session_id);
+                }
+                if should_refetch {
+                    return self.fetch_grid(&session_id);
                 }
             }
             Message::GridFetchFailed { session_id, error } => {
