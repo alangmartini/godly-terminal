@@ -717,6 +717,7 @@ impl Default for GodlyApp {
             font_filter_query: String::new(),
             glyph_cache: godly_terminal_surface::glyph_cache::GlyphCache::new(),
             glyph_rasterizer: {
+                use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer as _;
                 #[cfg(windows)]
                 {
                     match godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer::new(
@@ -731,8 +732,7 @@ impl Default for GodlyApp {
                                     DEFAULT_FONT_FAMILY
                                 );
                                 let mut r =
-                                    godly_terminal_surface::swash_rasterizer::SwashRasterizer::new(
-                                    );
+                                    godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
                                 r.load_font(include_bytes!("../fonts/GeistMono-Regular.ttf"), 0);
                                 Box::new(r)
                             }
