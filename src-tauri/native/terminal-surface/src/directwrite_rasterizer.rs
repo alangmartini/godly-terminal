@@ -8,6 +8,8 @@ use windows::core::*;
 use windows::Win32::Foundation::{BOOL, E_FAIL};
 use windows::Win32::Graphics::DirectWrite::*;
 
+use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer, MeasuredFontMetrics, RasterizedGlyph};
+
 /// A rasterized glyph bitmap with positioning metadata.
 pub struct RasterizedGlyphDW {
     /// ClearType subpixel bitmap (3 bytes per pixel: R, G, B coverage, row-major).
@@ -43,6 +45,10 @@ pub struct DWriteFontMetrics {
 pub struct DirectWriteRasterizer {
     factory: IDWriteFactory,
     font_face: Option<IDWriteFontFace>,
+    bold_face: Option<IDWriteFontFace>,
+    italic_face: Option<IDWriteFontFace>,
+    bold_italic_face: Option<IDWriteFontFace>,
+    font_family_name: String,
     /// Stored for future ClearType subpixel blending (`GetAlphaBlendParams`).
     #[allow(dead_code)]
     rendering_params: IDWriteRenderingParams,
@@ -64,6 +70,10 @@ impl DirectWriteRasterizer {
             Ok(Self {
                 factory,
                 font_face: None,
+                bold_face: None,
+                italic_face: None,
+                bold_italic_face: None,
+                font_family_name: String::new(),
                 rendering_params,
                 scale_factor: 1.0,
             })
@@ -78,6 +88,22 @@ impl DirectWriteRasterizer {
     /// the old DPI.
     pub fn set_scale_factor(&mut self, scale_factor: f32) {
         self.scale_factor = scale_factor;
+    }
+
+    /// Select the appropriate font face for the given bold/italic combination.
+    ///
+    /// Falls back to the regular face if the requested variant is unavailable.
+    fn face_for(&self, bold: bool, italic: bool) -> Option<&IDWriteFontFace> {
+        match (bold, italic) {
+            (true, true) => self
+                .bold_italic_face
+                .as_ref()
+                .or(self.bold_face.as_ref())
+                .or(self.font_face.as_ref()),
+            (true, false) => self.bold_face.as_ref().or(self.font_face.as_ref()),
+            (false, true) => self.italic_face.as_ref().or(self.font_face.as_ref()),
+            (false, false) => self.font_face.as_ref(),
+        }
     }
 
     /// Load a system font by family name (e.g. "Consolas", "Cascadia Code").
@@ -111,6 +137,38 @@ impl DirectWriteRasterizer {
                 DWRITE_FONT_STYLE_NORMAL,
             )?;
             self.font_face = Some(font.CreateFontFace()?);
+            self.font_family_name = family_name.to_string();
+
+            // Load bold variant (optional — fall back to regular if unavailable)
+            self.bold_face = font_family
+                .GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_BOLD,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )
+                .ok()
+                .and_then(|f| f.CreateFontFace().ok());
+
+            // Load italic variant
+            self.italic_face = font_family
+                .GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_REGULAR,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_ITALIC,
+                )
+                .ok()
+                .and_then(|f| f.CreateFontFace().ok());
+
+            // Load bold-italic variant
+            self.bold_italic_face = font_family
+                .GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_BOLD,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_ITALIC,
+                )
+                .ok()
+                .and_then(|f| f.CreateFontFace().ok());
+
             Ok(())
         }
     }
@@ -133,7 +191,16 @@ impl DirectWriteRasterizer {
             .font_face
             .as_ref()
             .ok_or(windows::core::Error::from(E_FAIL))?;
+        self.rasterize_with_face(font_face, ch, font_size_px)
+    }
 
+    /// Core rasterization logic using a specific font face.
+    fn rasterize_with_face(
+        &self,
+        font_face: &IDWriteFontFace,
+        ch: char,
+        font_size_px: f32,
+    ) -> windows::core::Result<Option<RasterizedGlyphDW>> {
         unsafe {
             let codepoints = [ch as u32];
             let mut glyph_indices = [0u16; 1];
@@ -253,6 +320,74 @@ impl DirectWriteRasterizer {
     }
 }
 
+impl GlyphRasterizer for DirectWriteRasterizer {
+    fn load_font(&mut self, _data: &[u8], _index: u32) -> bool {
+        // DirectWrite loads fonts by family name via load_system_font(),
+        // not from raw bytes. Report whether a font is already loaded.
+        self.font_face.is_some()
+    }
+
+    fn rasterize(
+        &mut self,
+        ch: char,
+        font_size_px: f32,
+        bold: bool,
+        italic: bool,
+    ) -> Option<RasterizedGlyph> {
+        let face = self.face_for(bold, italic)?.clone();
+        let glyph = self.rasterize_with_face(&face, ch, font_size_px).ok()??;
+        Some(RasterizedGlyph {
+            data: glyph.rgb,
+            format: GlyphFormat::SubpixelRgb,
+            width: glyph.width,
+            height: glyph.height,
+            bearing_x: glyph.bearing_x,
+            bearing_y: glyph.bearing_y,
+            advance: glyph.advance,
+        })
+    }
+
+    fn measure(&mut self, font_size_px: f32) -> MeasuredFontMetrics {
+        match self.measure_font(font_size_px) {
+            Some(m) => MeasuredFontMetrics {
+                ascent: m.ascent,
+                descent: m.descent,
+                leading: m.leading,
+                average_advance: m.average_advance,
+                is_monospace: true,
+            },
+            None => MeasuredFontMetrics {
+                ascent: font_size_px * 0.8,
+                descent: font_size_px * 0.2,
+                leading: 0.0,
+                average_advance: font_size_px * 0.6,
+                is_monospace: true,
+            },
+        }
+    }
+
+    fn has_glyph(&self, ch: char) -> bool {
+        let Some(font_face) = self.font_face.as_ref() else {
+            return false;
+        };
+        unsafe {
+            let codepoints = [ch as u32];
+            let mut glyph_indices = [0u16; 1];
+            if font_face
+                .GetGlyphIndices(codepoints.as_ptr(), 1, glyph_indices.as_mut_ptr())
+                .is_err()
+            {
+                return false;
+            }
+            glyph_indices[0] != 0
+        }
+    }
+
+    fn set_scale_factor(&mut self, scale: f32) {
+        self.scale_factor = scale;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,5 +498,65 @@ mod tests {
             large.advance > small.advance,
             "larger font size should have greater advance"
         );
+    }
+
+    // --- GlyphRasterizer trait tests ---
+
+    #[test]
+    fn trait_rasterize_produces_subpixel_rgb() {
+        let mut rast = DirectWriteRasterizer::new().unwrap();
+        rast.load_system_font("Consolas").unwrap();
+        let glyph = rast
+            .rasterize('A', 14.0, false, false)
+            .expect("'A' should rasterize via trait");
+        assert_eq!(glyph.format, GlyphFormat::SubpixelRgb);
+        assert!(glyph.width > 0);
+        assert!(glyph.height > 0);
+        // SubpixelRgb: 3 bytes per pixel
+        assert_eq!(
+            glyph.data.len(),
+            (glyph.width * glyph.height * 3) as usize,
+            "data length must be width * height * 3 for SubpixelRgb"
+        );
+    }
+
+    #[test]
+    fn trait_rasterize_bold() {
+        let mut rast = DirectWriteRasterizer::new().unwrap();
+        rast.load_system_font("Consolas").unwrap();
+        let normal = rast
+            .rasterize('A', 14.0, false, false)
+            .expect("normal 'A' should rasterize");
+        let bold = rast
+            .rasterize('A', 14.0, true, false)
+            .expect("bold 'A' should rasterize");
+        assert!(normal.width > 0);
+        assert!(bold.width > 0);
+        assert_eq!(normal.format, GlyphFormat::SubpixelRgb);
+        assert_eq!(bold.format, GlyphFormat::SubpixelRgb);
+    }
+
+    #[test]
+    fn trait_has_glyph() {
+        let mut rast = DirectWriteRasterizer::new().unwrap();
+        rast.load_system_font("Consolas").unwrap();
+        assert!(rast.has_glyph('A'), "ASCII 'A' should be present");
+        assert!(rast.has_glyph('z'), "ASCII 'z' should be present");
+        assert!(rast.has_glyph('0'), "ASCII '0' should be present");
+        assert!(
+            !rast.has_glyph('\u{F0000}'),
+            "private-use character should be absent"
+        );
+    }
+
+    #[test]
+    fn trait_measure() {
+        let mut rast = DirectWriteRasterizer::new().unwrap();
+        rast.load_system_font("Consolas").unwrap();
+        let m = rast.measure(14.0);
+        assert!(m.ascent > 0.0, "ascent should be positive");
+        assert!(m.descent > 0.0, "descent should be positive");
+        assert!(m.average_advance > 0.0, "advance should be positive");
+        assert!(m.is_monospace, "Consolas should report as monospace");
     }
 }
