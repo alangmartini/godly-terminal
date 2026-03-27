@@ -33,10 +33,9 @@ impl FontLoader {
 
         let face_id = self.db.query(&query)?;
         let mut result = None;
-        self.db
-            .with_face_data(face_id, |data, _index| {
-                result = Some(data.to_vec());
-            })?;
+        self.db.with_face_data(face_id, |data, _index| {
+            result = Some(data.to_vec());
+        })?;
         result
     }
 }

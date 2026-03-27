@@ -46,10 +46,17 @@ pub struct DirectWriteRasterizer {
     /// Stored for future ClearType subpixel blending (`GetAlphaBlendParams`).
     #[allow(dead_code)]
     rendering_params: IDWriteRenderingParams,
+    /// DPI scale factor (pixels per DIP). At 100% scaling this is 1.0;
+    /// at 150% it is 1.5, etc. Passed to `CreateGlyphRunAnalysis` so that
+    /// DirectWrite rasterizes glyphs at the physical pixel resolution.
+    scale_factor: f32,
 }
 
 impl DirectWriteRasterizer {
     /// Create a new rasterizer, initializing the DirectWrite factory.
+    ///
+    /// The DPI scale factor defaults to 1.0. Call [`set_scale_factor`] to
+    /// update it when the window's DPI changes.
     pub fn new() -> windows::core::Result<Self> {
         unsafe {
             let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
@@ -58,8 +65,19 @@ impl DirectWriteRasterizer {
                 factory,
                 font_face: None,
                 rendering_params,
+                scale_factor: 1.0,
             })
         }
+    }
+
+    /// Update the DPI scale factor (pixels per DIP).
+    ///
+    /// This should be called whenever the window moves to a display with a
+    /// different DPI. After changing the scale factor the caller should
+    /// invalidate the glyph cache, since cached bitmaps were rasterized at
+    /// the old DPI.
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
     }
 
     /// Load a system font by family name (e.g. "Consolas", "Cascadia Code").
@@ -148,7 +166,7 @@ impl DirectWriteRasterizer {
 
             let analysis = self.factory.CreateGlyphRunAnalysis(
                 &glyph_run,
-                1.0, // pixels per DIP
+                self.scale_factor, // pixels per DIP — actual OS scale factor
                 None,
                 DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
                 DWRITE_MEASURING_MODE_NATURAL,
