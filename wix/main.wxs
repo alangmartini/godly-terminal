@@ -110,6 +110,13 @@
                     KeyPath='yes' />
             </Component>
 
+            <Component Id='TmuxShimBinary' Guid='A1B2C3D4-1111-2222-3333-44445555FF22'>
+                <File Id='TmuxShimEXE'
+                    Name='tmux.exe'
+                    Source='src-tauri\target\release\tmux.exe'
+                    KeyPath='yes' />
+            </Component>
+
             <Component Id='IconFile' Guid='A1B2C3D4-1111-2222-3333-44445555CCCC'>
                 <File Id='AppIcon'
                     Name='icon.ico'
@@ -210,6 +217,7 @@
             <ComponentRef Id='NotifyBinary' />
             <ComponentRef Id='PtyShimBinary' />
             <ComponentRef Id='RemoteBinary' />
+            <ComponentRef Id='TmuxShimBinary' />
             <ComponentRef Id='IconFile' />
             <ComponentRef Id='SoundFiles' />
             <ComponentRef Id='DefaultSoundpack' />

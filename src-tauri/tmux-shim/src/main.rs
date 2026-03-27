@@ -43,6 +43,18 @@ fn main() {
             "display-message" | "display" => commands::io::handle("display-message", &args[2..]),
             "capture-pane" | "capturep" => commands::io::handle("capture-pane", &args[2..]),
 
+            // No-op commands: these are used by Claude Code's TmuxBackend for
+            // cosmetic/layout purposes. We accept them silently to avoid error
+            // exit codes that could abort the agent team workflow.
+            "set-option" | "set" => 0,
+            "select-layout" | "selectl" => 0,
+            "resize-pane" | "resizep" => 0,
+            "new-window" | "neww" => 0,
+            "break-pane" | "breakp" => 0,
+            "join-pane" | "joinp" => 0,
+            "switch-client" | "switchc" => 0,
+            "show-options" | "show" => 0,
+
             unknown => {
                 eprintln!("tmux: unknown command: {}", unknown);
                 1

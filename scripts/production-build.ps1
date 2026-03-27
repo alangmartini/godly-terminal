@@ -38,7 +38,8 @@ $crates = @(
     "godly-mcp",
     "godly-notify",
     "godly-remote",
-    "godly-iced-shell"
+    "godly-iced-shell",
+    "godly-tmux-shim"
 )
 
 foreach ($crate in $crates) {

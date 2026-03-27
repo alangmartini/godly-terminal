@@ -40,7 +40,7 @@ pub struct TmuxArgs {
 
 impl TmuxArgs {
     /// Flags that take a value argument.
-    const VALUE_FLAGS: &[char] = &['s', 't', 'F', 'c', 'x', 'y', 'f', 'n', 'e'];
+    const VALUE_FLAGS: &[char] = &['s', 't', 'F', 'c', 'x', 'y', 'f', 'n', 'e', 'l', 'T'];
 
     /// Parse tmux-style arguments from a slice of strings.
     pub fn parse(args: &[String]) -> Self {
