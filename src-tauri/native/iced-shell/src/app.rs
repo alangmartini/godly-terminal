@@ -4288,15 +4288,14 @@ impl GodlyApp {
                             }
                         }
                     }
-                    // Recovery grid poll: when focused AND the daemon event
-                    // subscription appears dead (no events in >2 s), fetch grids
-                    // so content stays fresh. When the subscription is alive,
-                    // TerminalOutput events drive fetches — no polling needed.
-                    let subscription_stale = self
-                        .last_daemon_event_at
-                        .map_or(true, |t| t.elapsed() > std::time::Duration::from_secs(2));
-                    if is_actually_focused && self.client.is_some() && subscription_stale {
-                        diag::log("HEARTBEAT: subscription stale >2s — recovery grid poll");
+                    // Recovery grid poll: when focused, periodically fetch grids
+                    // as a safety net. The grid fingerprint check in GridFetched
+                    // prevents unnecessary renders (and the old texture-swap
+                    // render loop), while the fetching guard prevents concurrent
+                    // fetches. This keeps the terminal responsive even when the
+                    // daemon event subscription is flaky or delayed.
+                    if is_actually_focused && self.client.is_some() {
+                        diag::log("HEARTBEAT: recovery grid poll");
                         let ids: Vec<String> =
                             self.terminals.iter().map(|t| t.id.clone()).collect();
                         // Do NOT force-reset fetching — respect the in-flight guard
@@ -7443,11 +7442,10 @@ impl GodlyApp {
             );
         }
 
-        // Perf overlay: force periodic redraws so the overlay stays live when idle.
-        if self.perf_overlay_visible {
-            subscriptions
-                .push(iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat));
-        }
+        // Periodic heartbeat: ensures recovery grid polling runs even when no
+        // other events trigger redraws. Also keeps the perf overlay live.
+        subscriptions
+            .push(iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat));
 
         Subscription::batch(subscriptions)
     }
