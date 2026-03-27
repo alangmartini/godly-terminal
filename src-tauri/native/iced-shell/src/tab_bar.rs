@@ -420,6 +420,7 @@ mod tests {
             grid: None,
             dirty: false,
             fetching: false,
+            needs_refetch: false,
             rows: 24,
             cols: 80,
             exited: false,

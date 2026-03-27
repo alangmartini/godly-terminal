@@ -12,6 +12,10 @@ pub struct TerminalInfo {
     pub grid: Option<RichGridData>,
     pub dirty: bool,
     pub fetching: bool,
+    /// Set when a `TerminalOutput` event arrives while a grid fetch is already
+    /// in-flight. After `GridFetched` completes, this flag triggers a follow-up
+    /// fetch so the coalesced output is not lost (prevents micro-blinking).
+    pub needs_refetch: bool,
     pub rows: u16,
     pub cols: u16,
     pub exited: bool,
@@ -358,6 +362,7 @@ impl TerminalCollection {
                 grid: None,
                 dirty: false,
                 fetching: false,
+                needs_refetch: false,
                 rows,
                 cols,
                 exited: false,
@@ -1037,5 +1042,61 @@ mod tests {
 
         info.title = String::new();
         assert_eq!(info.extract_cwd(), None);
+    }
+
+    // -- needs_refetch flag tests (issue #845: micro-blinking) --
+
+    #[test]
+    fn needs_refetch_defaults_to_false() {
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+        assert!(!info.needs_refetch);
+    }
+
+    #[test]
+    fn needs_refetch_set_during_coalesced_output() {
+        // Simulates the race: output arrives while a fetch is in-flight.
+        // The TerminalOutput handler sets needs_refetch = true so that
+        // GridFetched triggers a follow-up fetch instead of dropping the event.
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        // Simulate fetch_grid() starting
+        info.dirty = true;
+        info.fetching = true;
+
+        // Simulate coalesced TerminalOutput: dirty && fetching → set needs_refetch
+        assert!(info.dirty && info.fetching);
+        info.needs_refetch = true;
+
+        // Simulate GridFetched arriving
+        info.fetching = false;
+        info.dirty = false;
+        let should_refetch = info.needs_refetch;
+        info.needs_refetch = false;
+
+        assert!(
+            should_refetch,
+            "needs_refetch must trigger a follow-up fetch"
+        );
+    }
+
+    #[test]
+    fn needs_refetch_not_set_without_coalescing() {
+        // When no output events arrive during a fetch, needs_refetch stays false.
+        let mut col = TerminalCollection::new();
+        let info = col.add("t1".into(), 24, 80);
+
+        info.dirty = true;
+        info.fetching = true;
+
+        // GridFetched arrives with no coalesced events
+        info.fetching = false;
+        info.dirty = false;
+
+        assert!(
+            !info.needs_refetch,
+            "no coalesced events → no refetch needed"
+        );
     }
 }
