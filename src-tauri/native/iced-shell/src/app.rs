@@ -139,12 +139,17 @@ const GEIST_MONO_REGULAR: &[u8] = include_bytes!("../fonts/GeistMono-Regular.ttf
 /// For any other font family, loads the system font via `FontLoader` and
 /// reads its metrics from the OS/2 and hhea tables. Only falls back to
 /// heuristic ratios when the font genuinely cannot be located or parsed.
-fn measured_font_metrics(font_size: f32, font_family: &str) -> FontMetrics {
-    if font_family == DEFAULT_FONT_FAMILY {
+///
+/// `scale_factor` is the OS DPI scale (e.g. 1.5 for 150%). It is stored on
+/// the returned `FontMetrics` so that the pixel renderer can produce a
+/// physical-pixel buffer at the correct resolution.
+fn measured_font_metrics(font_size: f32, font_family: &str, scale_factor: f32) -> FontMetrics {
+    let base = if font_family == DEFAULT_FONT_FAMILY {
         FontMetrics::from_font_bytes(font_size, GEIST_MONO_REGULAR)
     } else {
         FontMetrics::from_system_font(font_size, font_family)
-    }
+    };
+    base.with_scale_factor(scale_factor)
 }
 
 #[path = "mru_switcher.rs"]
@@ -561,6 +566,10 @@ pub struct GodlyApp {
     pub(crate) file_panes: HashMap<String, FilePaneState>,
     /// Fractional mouse-wheel accumulator for sub-line trackpad deltas.
     scroll_accumulator: f64,
+    /// DPI scale factor reported by the OS (e.g. 1.0, 1.25, 1.5, 2.0).
+    /// Updated on `Rescaled` window events. Used to render pixel-buffer
+    /// glyphs at the physical resolution.
+    window_scale_factor: f32,
 }
 
 impl Default for GodlyApp {
@@ -589,7 +598,7 @@ impl Default for GodlyApp {
             window_height: 800.0,
             window_id: None,
             window_focused: true,
-            font_metrics: measured_font_metrics(14.0, DEFAULT_FONT_FAMILY),
+            font_metrics: measured_font_metrics(14.0, DEFAULT_FONT_FAMILY, 1.0),
             selection: SelectionState::default(),
             sidebar_visible: true,
             sidebar_width: SIDEBAR_WIDTH,
@@ -715,6 +724,7 @@ impl Default for GodlyApp {
             use_pixel_renderer: false,
             file_panes: HashMap::new(),
             scroll_accumulator: 0.0,
+            window_scale_factor: 1.0,
         }
     }
 }
@@ -788,6 +798,8 @@ pub enum Message {
         window_id: window::Id,
         focused: bool,
     },
+    /// Display DPI scale factor changed (e.g. window moved between monitors).
+    ScaleFactorChanged(f64),
     /// Start dragging the window from the custom title bar.
     TitleBarDragStart,
     /// Minimize the window via the title bar button.
@@ -2425,6 +2437,9 @@ impl GodlyApp {
 
             Message::WindowOpened(window_id) => {
                 self.window_id = Some(window_id);
+                // Query the initial DPI scale factor for HiDPI rendering.
+                return window::scale_factor(window_id)
+                    .map(|sf| Message::ScaleFactorChanged(sf as f64));
             }
 
             // --- Title bar actions ---
@@ -2501,6 +2516,23 @@ impl GodlyApp {
                     let mut tasks = vec![resize_task];
                     tasks.extend(fetch_tasks);
                     return Task::batch(tasks);
+                }
+            }
+            Message::ScaleFactorChanged(new_scale) => {
+                let sf = new_scale as f32;
+                if (sf - self.window_scale_factor).abs() > f32::EPSILON {
+                    log::info!(
+                        "[DPI] scale factor changed: {} -> {}",
+                        self.window_scale_factor,
+                        sf
+                    );
+                    self.window_scale_factor = sf;
+                    // Recompute font metrics with the new scale factor.
+                    self.font_metrics =
+                        measured_font_metrics(self.font_metrics.font_size, &self.font_family, sf);
+                    // Glyph cache entries were rasterized at the old DPI -- flush them.
+                    self.glyph_cache.invalidate();
+                    return self.resize_all_terminals();
                 }
             }
             Message::WindowFocusChanged { window_id, focused } => {
@@ -4259,8 +4291,11 @@ impl GodlyApp {
                     self.font_metrics.font_size,
                     self.font_metrics.font_size + 1.0
                 );
-                self.font_metrics =
-                    measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
+                self.font_metrics = measured_font_metrics(
+                    self.font_metrics.font_size + 1.0,
+                    &self.font_family,
+                    self.window_scale_factor,
+                );
                 return self.resize_all_terminals();
             }
             Message::FontSizeDecrement => {
@@ -4270,7 +4305,8 @@ impl GodlyApp {
                     self.font_metrics.font_size,
                     new_size
                 );
-                self.font_metrics = measured_font_metrics(new_size, &self.font_family);
+                self.font_metrics =
+                    measured_font_metrics(new_size, &self.font_family, self.window_scale_factor);
                 return self.resize_all_terminals();
             }
             Message::ShortcutBadgeClicked(index) => {
@@ -7185,6 +7221,9 @@ impl GodlyApp {
                         focused: false,
                     })
                 }
+                event::Event::Window(window::Event::Rescaled(scale)) => {
+                    Some(Message::ScaleFactorChanged(scale as f64))
+                }
                 // RedrawRequested fires from WM_TIMER when minimized/unfocused.
                 // Route it through update() so the Win32 focus check can run.
                 event::Event::Window(window::Event::RedrawRequested(_)) => Some(Message::Heartbeat),
@@ -7416,17 +7455,22 @@ impl GodlyApp {
                 self.cycle_tabs_by_mru(tab_reducer::TabMruCycleDirection::Backward)
             }
             AppAction::ZoomIn => {
-                self.font_metrics =
-                    measured_font_metrics(self.font_metrics.font_size + 1.0, &self.font_family);
+                self.font_metrics = measured_font_metrics(
+                    self.font_metrics.font_size + 1.0,
+                    &self.font_family,
+                    self.window_scale_factor,
+                );
                 self.resize_all_terminals()
             }
             AppAction::ZoomOut => {
                 let new_size = (self.font_metrics.font_size - 1.0).max(8.0);
-                self.font_metrics = measured_font_metrics(new_size, &self.font_family);
+                self.font_metrics =
+                    measured_font_metrics(new_size, &self.font_family, self.window_scale_factor);
                 self.resize_all_terminals()
             }
             AppAction::ZoomReset => {
-                self.font_metrics = measured_font_metrics(14.0, &self.font_family);
+                self.font_metrics =
+                    measured_font_metrics(14.0, &self.font_family, self.window_scale_factor);
                 self.resize_all_terminals()
             }
             AppAction::ScrollPageUp => {
@@ -8028,8 +8072,11 @@ impl GodlyApp {
                     self.sidebar_visible = merged.sidebar_visible;
                     self.settings_open = merged.settings_open;
                     self.settings_tab = merged.settings_tab.clone();
-                    self.font_metrics =
-                        measured_font_metrics(merged.font_size, &merged.font_family);
+                    self.font_metrics = measured_font_metrics(
+                        merged.font_size,
+                        &merged.font_family,
+                        self.window_scale_factor,
+                    );
                     self.font_family = merged.font_family.clone();
                     let interned = font_enumerator::intern_font_name(&merged.font_family);
                     self.terminal_font = iced::Font {

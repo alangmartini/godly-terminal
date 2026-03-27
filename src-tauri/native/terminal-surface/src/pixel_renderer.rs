@@ -100,6 +100,10 @@ impl PixelRenderer {
     ///
     /// Returns `(pixels, width, height)`. The pixel buffer is RGBA with 4 bytes
     /// per pixel, row-major, and fully opaque.
+    ///
+    /// When `metrics.scale_factor > 1.0`, the output buffer is in physical
+    /// pixels (logical size * scale_factor) so that glyphs are rasterized at
+    /// the native DPI and appear crisp on HiDPI displays.
     pub fn render(
         &mut self,
         grid: &RichGridData,
@@ -112,10 +116,13 @@ impl PixelRenderer {
     ) -> (&[u8], u32, u32) {
         let t_start = Instant::now();
 
+        // Scale all pixel dimensions to physical resolution for HiDPI.
+        let phys = metrics.scaled_for_render();
+
         let cols = grid.dimensions.cols as u32;
         let rows = grid.dimensions.rows as u32;
-        let cell_w = metrics.cell_width;
-        let cell_h = metrics.cell_height;
+        let cell_w = phys.cell_width;
+        let cell_h = phys.cell_height;
 
         if cols == 0 || rows == 0 || cell_w <= 0.0 || cell_h <= 0.0 {
             self.buffer.clear();
@@ -212,11 +219,11 @@ impl PixelRenderer {
                         None => continue,
                     };
 
-                    let key = GlyphKey::new(ch, metrics.font_size, cell.bold, cell.italic);
+                    let key = GlyphKey::new(ch, phys.font_size, cell.bold, cell.italic);
 
                     if cache.get(&key).is_none() {
                         if let Some(rg) =
-                            rasterizer.rasterize(ch, metrics.font_size, cell.bold, cell.italic)
+                            rasterizer.rasterize(ch, phys.font_size, cell.bold, cell.italic)
                         {
                             cache.insert(
                                 key,
@@ -236,7 +243,7 @@ impl PixelRenderer {
                     let glyph_ref = cache.get(&key).unwrap();
 
                     let glyph_x = cell_x + glyph_ref.bearing_x;
-                    let glyph_y = cell_y + (metrics.baseline_offset as i32 - glyph_ref.bearing_y);
+                    let glyph_y = cell_y + (phys.baseline_offset as i32 - glyph_ref.bearing_y);
 
                     blit_alpha(
                         &mut self.buffer,

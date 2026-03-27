@@ -284,7 +284,10 @@ mod tests {
         let s = CacheStats { hits: 1, misses: 1 };
         assert!((s.hit_rate() - 0.5).abs() < f64::EPSILON);
 
-        let s = CacheStats { hits: 10, misses: 0 };
+        let s = CacheStats {
+            hits: 10,
+            misses: 0,
+        };
         assert!((s.hit_rate() - 1.0).abs() < f64::EPSILON);
     }
 }

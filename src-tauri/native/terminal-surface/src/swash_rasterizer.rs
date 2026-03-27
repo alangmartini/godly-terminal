@@ -92,7 +92,9 @@ impl GlyphRasterizer for SwashRasterizer {
 
         let advance = {
             let font = FontRef::from_index(&self.font_data, self.font_index as usize)?;
-            font.glyph_metrics(&[]).scale(font_size_px).advance_width(glyph_id)
+            font.glyph_metrics(&[])
+                .scale(font_size_px)
+                .advance_width(glyph_id)
         };
 
         Some(RasterizedGlyph {
@@ -164,8 +166,7 @@ impl GlyphRasterizer for SwashRasterizer {
 mod tests {
     use super::*;
 
-    const TEST_FONT: &[u8] =
-        include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
+    const TEST_FONT: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
 
     #[test]
     fn load_valid_font() {
@@ -202,7 +203,10 @@ mod tests {
         // At least some pixel values should differ
         let normal_sum: u64 = normal.alpha.iter().map(|&b| b as u64).sum();
         let bold_sum: u64 = bold.alpha.iter().map(|&b| b as u64).sum();
-        assert_ne!(normal_sum, bold_sum, "bold should have different alpha coverage");
+        assert_ne!(
+            normal_sum, bold_sum,
+            "bold should have different alpha coverage"
+        );
     }
 
     #[test]

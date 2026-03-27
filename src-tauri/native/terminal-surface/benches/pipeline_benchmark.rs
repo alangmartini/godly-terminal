@@ -241,8 +241,13 @@ fn bench_pipeline_80x24(c: &mut Criterion) {
             let mut cache = GlyphCache::new();
             let mut rast = StubRasterizer;
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
@@ -271,8 +276,13 @@ fn bench_pipeline_120x40(c: &mut Criterion) {
             let mut cache = GlyphCache::new();
             let mut rast = StubRasterizer;
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
@@ -304,16 +314,26 @@ fn bench_pipeline_incremental(c: &mut Criterion) {
         // Warm the glyph cache so incremental iterations measure steady-state
         let grid = vt_to_rich_grid(parser.screen());
         let _ = renderer.render(
-            &grid, &metrics, &mut cache, &mut rast,
-            Color::WHITE, Color::BLACK, None,
+            &grid,
+            &metrics,
+            &mut cache,
+            &mut rast,
+            Color::WHITE,
+            Color::BLACK,
+            None,
         );
 
         b.iter(|| {
             parser.process(&update_data);
             let grid = vt_to_rich_grid(parser.screen());
             let (_, w, h) = renderer.render(
-                &grid, &metrics, &mut cache, &mut rast,
-                Color::WHITE, Color::BLACK, None,
+                &grid,
+                &metrics,
+                &mut cache,
+                &mut rast,
+                Color::WHITE,
+                Color::BLACK,
+                None,
             );
             (w, h)
         });
