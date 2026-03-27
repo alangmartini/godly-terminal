@@ -7442,10 +7442,22 @@ impl GodlyApp {
             );
         }
 
-        // Periodic heartbeat: ensures recovery grid polling runs even when no
-        // other events trigger redraws. Also keeps the perf overlay live.
-        subscriptions
-            .push(iced::time::every(Duration::from_millis(100)).map(|_| Message::Heartbeat));
+        // Adaptive heartbeat: 16ms (~60fps) during active terminal output for
+        // responsive rendering, 100ms when idle to conserve CPU. The fingerprint
+        // guard in GridFetched prevents unnecessary renders, and the fetching
+        // guard prevents concurrent RPC calls, so the fast-poll overhead is
+        // minimal (just a Win32 GetForegroundWindow check + fetch_grid guard).
+        let heartbeat_ms = if self
+            .last_daemon_event_at
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(500))
+        {
+            16
+        } else {
+            100
+        };
+        subscriptions.push(
+            iced::time::every(Duration::from_millis(heartbeat_ms)).map(|_| Message::Heartbeat),
+        );
 
         Subscription::batch(subscriptions)
     }

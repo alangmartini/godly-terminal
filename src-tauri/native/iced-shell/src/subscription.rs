@@ -4,6 +4,56 @@ use futures_channel::mpsc;
 
 use godly_app_adapter::daemon_client::FrontendEventSink;
 
+// ---------------------------------------------------------------------------
+// Win32 event-loop waker
+// ---------------------------------------------------------------------------
+// Iced's subscription waker doesn't reliably wake winit's event loop on
+// Windows when events arrive from the bridge I/O thread. We store the main
+// thread ID and post WM_APP after every channel send so winit picks up the
+// event immediately instead of waiting for the next timer tick.
+
+#[cfg(windows)]
+static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Store the main thread ID so bridge threads can wake the iced event loop.
+/// Must be called from the main thread before `iced::application().run()`.
+#[cfg(windows)]
+pub fn init_waker() {
+    let tid = unsafe {
+        extern "system" {
+            fn GetCurrentThreadId() -> u32;
+        }
+        GetCurrentThreadId()
+    };
+    MAIN_THREAD_ID.store(tid, std::sync::atomic::Ordering::Release);
+}
+
+#[cfg(not(windows))]
+pub fn init_waker() {}
+
+/// Post a WM_APP message to the main thread to wake winit's event loop.
+/// Called from the bridge I/O thread when daemon events arrive.
+#[cfg(windows)]
+fn wake_event_loop() {
+    let tid = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Acquire);
+    if tid != 0 {
+        unsafe {
+            extern "system" {
+                fn PostThreadMessageW(
+                    thread_id: u32,
+                    msg: u32,
+                    wparam: usize,
+                    lparam: isize,
+                ) -> i32;
+            }
+            // WM_APP = 0x8000. Thread messages with no HWND are picked up by
+            // winit's PeekMessageW(NULL, ...) — same mechanism used by the
+            // SetTimer(NULL, ...) keepalive in main.rs.
+            PostThreadMessageW(tid, 0x8000, 0, 0);
+        }
+    }
+}
+
 /// Events forwarded from the daemon bridge I/O thread to the Iced app.
 #[derive(Debug, Clone)]
 pub enum DaemonEventMsg {
@@ -61,6 +111,8 @@ impl FrontendEventSink for ChannelEventSink {
         let _ = self.sender.unbounded_send(DaemonEventMsg::TerminalOutput {
             session_id: session_id.to_string(),
         });
+        #[cfg(windows)]
+        wake_event_loop();
     }
 
     fn on_session_closed(&self, session_id: &str, exit_code: Option<i64>) {
@@ -68,6 +120,8 @@ impl FrontendEventSink for ChannelEventSink {
             session_id: session_id.to_string(),
             exit_code,
         });
+        #[cfg(windows)]
+        wake_event_loop();
     }
 
     fn on_process_changed(&self, session_id: &str, process_name: &str) {
@@ -75,6 +129,8 @@ impl FrontendEventSink for ChannelEventSink {
             session_id: session_id.to_string(),
             process_name: process_name.to_string(),
         });
+        #[cfg(windows)]
+        wake_event_loop();
     }
 
     fn on_grid_diff(&self, session_id: &str, _diff_bytes: &[u8]) {
@@ -82,12 +138,16 @@ impl FrontendEventSink for ChannelEventSink {
         let _ = self.sender.unbounded_send(DaemonEventMsg::TerminalOutput {
             session_id: session_id.to_string(),
         });
+        #[cfg(windows)]
+        wake_event_loop();
     }
 
     fn on_bell(&self, session_id: &str) {
         let _ = self.sender.unbounded_send(DaemonEventMsg::Bell {
             session_id: session_id.to_string(),
         });
+        #[cfg(windows)]
+        wake_event_loop();
     }
 }
 

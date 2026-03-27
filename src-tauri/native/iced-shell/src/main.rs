@@ -29,6 +29,7 @@ pub mod fonts {
 
 mod app;
 mod claude_md_editor;
+mod desktop_notify_prefs;
 mod file_pane;
 mod mcp_handler;
 mod notification_state;
@@ -51,7 +52,6 @@ mod cf_tunnel;
 mod claude_code_manager;
 mod confirm_dialog;
 mod crash_handler;
-mod desktop_notify_prefs;
 mod font_enumerator;
 mod git_worktree;
 mod gpu_watchdog;
@@ -85,6 +85,9 @@ fn main() -> iced::Result {
         "Starting Godly Terminal (Native) — v{}",
         env!("GODLY_APP_VERSION"),
     );
+
+    // Store main thread ID so bridge threads can wake the event loop.
+    subscription::init_waker();
 
     // Install a Win32 timer on the main thread that fires every second.
     // This generates WM_TIMER messages in the thread's message queue, which
