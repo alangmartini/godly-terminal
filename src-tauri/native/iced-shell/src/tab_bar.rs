@@ -421,6 +421,7 @@ mod tests {
             dirty: false,
             fetching: false,
             needs_refetch: false,
+            last_render_at: None,
             rows: 24,
             cols: 80,
             exited: false,

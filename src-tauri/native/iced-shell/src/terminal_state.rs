@@ -16,6 +16,10 @@ pub struct TerminalInfo {
     /// in-flight. After `GridFetched` completes, this flag triggers a follow-up
     /// fetch so the coalesced output is not lost (prevents micro-blinking).
     pub needs_refetch: bool,
+    /// Timestamp of the last pixel render. Used to throttle renders to ~33fps
+    /// during continuous output, preventing micro-blinking from rapid texture swaps
+    /// while keeping the terminal responsive.
+    pub last_render_at: Option<std::time::Instant>,
     pub rows: u16,
     pub cols: u16,
     pub exited: bool,
@@ -369,6 +373,7 @@ impl TerminalCollection {
                 dirty: false,
                 fetching: false,
                 needs_refetch: false,
+                last_render_at: None,
                 rows,
                 cols,
                 exited: false,

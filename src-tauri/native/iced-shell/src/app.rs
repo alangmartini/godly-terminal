@@ -2153,7 +2153,22 @@ impl GodlyApp {
                     self.persist_scrollback_offsets();
                 }
                 if self.use_pixel_renderer && should_render {
-                    self.render_terminal_image(&session_id);
+                    // During continuous output (should_refetch), throttle renders
+                    // to ~33fps to prevent micro-blinking from rapid texture swaps.
+                    // When output stops (should_refetch = false), always render so
+                    // the final frame is displayed immediately.
+                    let throttled = should_refetch
+                        && self
+                            .terminals
+                            .get(&session_id)
+                            .and_then(|t| t.last_render_at)
+                            .map_or(false, |t| t.elapsed().as_millis() < 30);
+                    if !throttled {
+                        self.render_terminal_image(&session_id);
+                        if let Some(term) = self.terminals.get_mut(&session_id) {
+                            term.last_render_at = Some(std::time::Instant::now());
+                        }
+                    }
                 }
                 if should_refetch {
                     return self.fetch_grid(&session_id);
