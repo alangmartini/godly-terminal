@@ -43,8 +43,9 @@ pub struct TerminalInfo {
     /// Fingerprint of the last rendered grid state. Used to skip redundant
     /// pixel renders when the grid content has not changed (e.g. heartbeat
     /// recovery polls fetching an identical snapshot).
-    /// Tuple: (total_scrollback, scrollback_offset, cursor_row, cursor_col, cursor_hidden)
-    pub last_grid_fingerprint: Option<(usize, usize, u16, u16, bool)>,
+    /// Tuple: (total_scrollback, scrollback_offset, cursor_row, cursor_col,
+    ///         cursor_hidden, num_rows, cursor_row_cells, alternate_screen)
+    pub last_grid_fingerprint: Option<(usize, usize, u16, u16, bool, usize, usize, bool)>,
 }
 
 impl TerminalInfo {
@@ -1305,7 +1306,7 @@ mod tests {
         let mut col = TerminalCollection::new();
         let info = col.add("t1".into(), 24, 80);
 
-        let fp = (100_usize, 0_usize, 5_u16, 10_u16, false);
+        let fp = (100_usize, 0_usize, 5_u16, 10_u16, false, 24_usize, 80_usize, false);
         info.last_grid_fingerprint = Some(fp);
 
         // Simulate GridFetched with identical fingerprint
@@ -1324,12 +1325,12 @@ mod tests {
         let mut col = TerminalCollection::new();
         let info = col.add("t1".into(), 24, 80);
 
-        let old_fp = (100_usize, 0_usize, 5_u16, 10_u16, false);
+        let old_fp = (100_usize, 0_usize, 5_u16, 10_u16, false, 24_usize, 80_usize, false);
         info.last_grid_fingerprint = Some(old_fp);
 
         // Simulate GridFetched with changed scrollback
         let mut should_render = true;
-        let new_fp = (101_usize, 0_usize, 5_u16, 10_u16, false);
+        let new_fp = (101_usize, 0_usize, 5_u16, 10_u16, false, 24_usize, 80_usize, false);
         if should_render && info.last_grid_fingerprint == Some(new_fp) {
             should_render = false;
         }
@@ -1347,7 +1348,7 @@ mod tests {
 
         // Simulate first GridFetched (no prior fingerprint)
         let mut should_render = true;
-        let new_fp = (0_usize, 0_usize, 0_u16, 0_u16, false);
+        let new_fp = (0_usize, 0_usize, 0_u16, 0_u16, false, 24_usize, 0_usize, false);
         if should_render && info.last_grid_fingerprint == Some(new_fp) {
             should_render = false;
         }
@@ -1361,7 +1362,7 @@ mod tests {
         let mut col = TerminalCollection::new();
         let info = col.add("t1".into(), 24, 80);
 
-        let fp = (50_usize, 0_usize, 3_u16, 7_u16, false);
+        let fp = (50_usize, 0_usize, 3_u16, 7_u16, false, 24_usize, 80_usize, false);
         info.last_grid_fingerprint = Some(fp);
 
         // Simulate resize clearing the fingerprint
