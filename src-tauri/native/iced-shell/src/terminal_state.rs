@@ -16,12 +16,6 @@ pub struct TerminalInfo {
     /// in-flight. After `GridFetched` completes, this flag triggers a follow-up
     /// fetch so the coalesced output is not lost (prevents micro-blinking).
     pub needs_refetch: bool,
-    /// When true, the next stale `GridFetched` (one that triggers a refetch)
-    /// will be rendered despite being stale. Alternates false→true→false so
-    /// that during continuous output we still render every other fetch (~30 fps)
-    /// instead of freezing, while during typing bursts we skip the intermediate
-    /// stale frame that causes micro-blinking.
-    pub skipped_stale_render: bool,
     pub rows: u16,
     pub cols: u16,
     pub exited: bool,
@@ -375,7 +369,6 @@ impl TerminalCollection {
                 dirty: false,
                 fetching: false,
                 needs_refetch: false,
-                skipped_stale_render: false,
                 rows,
                 cols,
                 exited: false,
@@ -1112,184 +1105,6 @@ mod tests {
             !info.needs_refetch,
             "no coalesced events → no refetch needed"
         );
-    }
-
-    // -- skipped_stale_render tests (issue #845: micro-blinking, phase 2) --
-
-    #[test]
-    fn skipped_stale_render_defaults_to_false() {
-        let mut col = TerminalCollection::new();
-        let info = col.add("t1".into(), 24, 80);
-        assert!(!info.skipped_stale_render);
-    }
-
-    #[test]
-    fn stale_render_skipped_when_cached_image_exists() {
-        // When a refetch is needed and a cached image already exists,
-        // the first stale render is skipped to avoid micro-blinking.
-        let mut col = TerminalCollection::new();
-        let info = col.add("t1".into(), 24, 80);
-
-        // Simulate having a cached image (pixel renderer already ran once)
-        info.cached_image_handle = Some(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]));
-
-        // Simulate GridFetched with needs_refetch (stale data)
-        info.needs_refetch = true;
-        info.fetching = false;
-        info.dirty = false;
-
-        let should_refetch = info.needs_refetch;
-        info.needs_refetch = false;
-
-        // Determine render decision (mirrors app.rs logic)
-        let should_render = if should_refetch {
-            if info.cached_image_handle.is_some() && !info.skipped_stale_render {
-                info.skipped_stale_render = true;
-                false
-            } else {
-                info.skipped_stale_render = false;
-                true
-            }
-        } else {
-            info.skipped_stale_render = false;
-            true
-        };
-
-        assert!(!should_render, "first stale render should be skipped");
-        assert!(info.skipped_stale_render, "flag should be set after skip");
-    }
-
-    #[test]
-    fn stale_render_forced_after_one_skip() {
-        // After skipping one stale render, the next one must render to
-        // prevent the screen from freezing during continuous output.
-        let mut col = TerminalCollection::new();
-        let info = col.add("t1".into(), 24, 80);
-
-        info.cached_image_handle = Some(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]));
-        info.skipped_stale_render = true; // already skipped once
-
-        info.needs_refetch = true;
-        info.fetching = false;
-        info.dirty = false;
-
-        let should_refetch = info.needs_refetch;
-        info.needs_refetch = false;
-
-        let should_render = if should_refetch {
-            if info.cached_image_handle.is_some() && !info.skipped_stale_render {
-                info.skipped_stale_render = true;
-                false
-            } else {
-                info.skipped_stale_render = false;
-                true
-            }
-        } else {
-            info.skipped_stale_render = false;
-            true
-        };
-
-        assert!(should_render, "must render after one skip to avoid freeze");
-        assert!(!info.skipped_stale_render, "flag reset after forced render");
-    }
-
-    #[test]
-    fn stale_render_alternates_skip_render_skip() {
-        // During continuous output: skip → render → skip → render
-        let mut col = TerminalCollection::new();
-        let info = col.add("t1".into(), 24, 80);
-
-        info.cached_image_handle = Some(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]));
-
-        let mut renders = Vec::new();
-        for _ in 0..6 {
-            info.needs_refetch = true;
-            let should_refetch = info.needs_refetch;
-            info.needs_refetch = false;
-
-            let should_render = if should_refetch {
-                if info.cached_image_handle.is_some() && !info.skipped_stale_render {
-                    info.skipped_stale_render = true;
-                    false
-                } else {
-                    info.skipped_stale_render = false;
-                    true
-                }
-            } else {
-                info.skipped_stale_render = false;
-                true
-            };
-            renders.push(should_render);
-        }
-
-        // skip, render, skip, render, skip, render
-        assert_eq!(
-            renders,
-            vec![false, true, false, true, false, true],
-            "should alternate skip/render for ~30fps during continuous output"
-        );
-    }
-
-    #[test]
-    fn fresh_fetch_always_renders_and_resets_skip_flag() {
-        // When no refetch is needed (fresh data), always render and reset the flag.
-        let mut col = TerminalCollection::new();
-        let info = col.add("t1".into(), 24, 80);
-
-        info.cached_image_handle = Some(iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]));
-        info.skipped_stale_render = true; // leftover from a previous stale cycle
-
-        // Fresh GridFetched (no coalesced events)
-        info.needs_refetch = false;
-
-        let should_refetch = info.needs_refetch;
-        let should_render = if should_refetch {
-            if info.cached_image_handle.is_some() && !info.skipped_stale_render {
-                info.skipped_stale_render = true;
-                false
-            } else {
-                info.skipped_stale_render = false;
-                true
-            }
-        } else {
-            info.skipped_stale_render = false;
-            true
-        };
-
-        assert!(should_render, "fresh data must always render");
-        assert!(
-            !info.skipped_stale_render,
-            "flag must be reset on fresh fetch"
-        );
-    }
-
-    #[test]
-    fn no_cached_image_always_renders_even_when_stale() {
-        // Before the first pixel render (no cached handle), always render
-        // even if the data is stale — the user needs something on screen.
-        let mut col = TerminalCollection::new();
-        let info = col.add("t1".into(), 24, 80);
-
-        assert!(info.cached_image_handle.is_none());
-
-        info.needs_refetch = true;
-        let should_refetch = info.needs_refetch;
-        info.needs_refetch = false;
-
-        let should_render = if should_refetch {
-            if info.cached_image_handle.is_some() && !info.skipped_stale_render {
-                info.skipped_stale_render = true;
-                false
-            } else {
-                info.skipped_stale_render = false;
-                true
-            }
-        } else {
-            info.skipped_stale_render = false;
-            true
-        };
-
-        assert!(should_render, "must render when no cached image exists");
     }
 
     // -- last_grid_fingerprint tests (issue #845: heartbeat render loop) --
