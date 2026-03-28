@@ -151,6 +151,20 @@ pub enum DaemonEventMsg {
     /// Sent by a dedicated background thread, not by Iced subscriptions (which
     /// stop being polled when the window is invisible).
     Heartbeat,
+    // ------------------------------------------------------------------
+    // Channel-routed Task results (bypass iced's broken Task::perform waker)
+    // ------------------------------------------------------------------
+    /// Grid snapshot fetched successfully (replaces Message::GridFetched).
+    GridReady {
+        session_id: String,
+        grid: godly_protocol::types::RichGridData,
+        is_scroll_fetch: bool,
+    },
+    /// Grid fetch failed (replaces Message::GridFetchFailed).
+    GridFetchFailed {
+        session_id: String,
+        error: String,
+    },
 }
 
 /// Spawn a background thread that sends `DaemonEventMsg::Heartbeat` every second

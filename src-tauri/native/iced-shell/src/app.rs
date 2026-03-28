@@ -324,6 +324,10 @@ pub struct GodlyApp {
     init_error: Option<String>,
     /// Event receiver for the daemon subscription (taken once by the subscription).
     event_receiver: Arc<parking_lot::Mutex<Option<mpsc::UnboundedReceiver<DaemonEventMsg>>>>,
+    /// Event sender — used by background threads to route results through the
+    /// subscription channel instead of Task::perform (bypasses iced's broken
+    /// tokio→winit waker on Windows).
+    event_sender: Option<mpsc::UnboundedSender<DaemonEventMsg>>,
     /// Event receiver for MCP pipe events (taken once by the subscription).
     mcp_event_receiver: Arc<
         parking_lot::Mutex<Option<mpsc::UnboundedReceiver<godly_app_adapter::mcp_pipe::McpEvent>>>,
@@ -599,6 +603,7 @@ impl Default for GodlyApp {
             workspaces: WorkspaceCollection::new(),
             init_error: None,
             event_receiver: Arc::new(parking_lot::Mutex::new(None)),
+            event_sender: None,
             mcp_event_receiver: Arc::new(parking_lot::Mutex::new(None)),
             window_width: 1200.0,
             window_height: 800.0,
@@ -2015,6 +2020,32 @@ impl GodlyApp {
                         }
                     }
                 }
+            }
+            // Channel-routed grid results (bypass iced's broken Task waker).
+            // These are handled identically to Message::GridFetched / GridFetchFailed
+            // but arrive through the subscription channel instead of Task::perform.
+            Message::DaemonEvent(DaemonEventMsg::GridReady {
+                session_id,
+                grid,
+                is_scroll_fetch,
+            }) => {
+                // Delegate to the same handler as Message::GridFetched.
+                let msg = Message::GridFetched {
+                    session_id,
+                    grid,
+                    is_scroll_fetch,
+                };
+                return self.update(msg);
+            }
+            Message::DaemonEvent(DaemonEventMsg::GridFetchFailed {
+                session_id,
+                error,
+            }) => {
+                let msg = Message::GridFetchFailed {
+                    session_id,
+                    error,
+                };
+                return self.update(msg);
             }
 
             // --- Grid fetch results ---
@@ -8645,36 +8676,34 @@ impl GodlyApp {
         let Some(client) = &self.client else {
             return Task::none();
         };
+        let Some(sender) = &self.event_sender else {
+            return Task::none();
+        };
 
         let client = Arc::clone(client);
+        let sender = sender.clone();
         let sid = session_id.to_string();
-        let sid_ok = sid.clone();
-        let sid_err = sid.clone();
 
-        Task::perform(
-            async move {
-                let (tx, rx) = futures_channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let result = commands::scroll_and_get_snapshot(&client, &sid, offset);
-                    let _ = tx.send(result);
-                    #[cfg(windows)]
-                    crate::subscription::wake_event_loop();
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
-            },
-            move |result| match result {
-                Ok(grid) => Message::GridFetched {
-                    session_id: sid_ok,
-                    grid,
-                    is_scroll_fetch: true,
-                },
-                Err(e) => Message::GridFetchFailed {
-                    session_id: sid_err,
-                    error: e,
-                },
-            },
-        )
+        std::thread::spawn(move || {
+            match commands::scroll_and_get_snapshot(&client, &sid, offset) {
+                Ok(grid) => {
+                    let _ = sender.unbounded_send(DaemonEventMsg::GridReady {
+                        session_id: sid,
+                        grid,
+                        is_scroll_fetch: true,
+                    });
+                }
+                Err(error) => {
+                    let _ = sender.unbounded_send(DaemonEventMsg::GridFetchFailed {
+                        session_id: sid,
+                        error,
+                    });
+                }
+            }
+            #[cfg(windows)]
+            crate::subscription::wake_event_loop();
+        });
+        Task::none()
     }
 
     // -----------------------------------------------------------------------
@@ -8683,6 +8712,9 @@ impl GodlyApp {
 
     fn fetch_grid(&mut self, session_id: &str) -> Task<Message> {
         let Some(client) = &self.client else {
+            return Task::none();
+        };
+        let Some(sender) = &self.event_sender else {
             return Task::none();
         };
 
@@ -8696,38 +8728,34 @@ impl GodlyApp {
         }
 
         let client = Arc::clone(client);
+        let sender = sender.clone();
         let sid = session_id.to_string();
-        let sid_ok = sid.clone();
-        let sid_err = sid.clone();
 
-        Task::perform(
-            async move {
-                let (tx, rx) = futures_channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let result = commands::get_grid_snapshot(&client, &sid);
-                    let _ = tx.send(result);
-                    // Wake the iced event loop so GridFetched is processed
-                    // immediately. Iced's internal Task waker doesn't reliably
-                    // post Win32 messages, so without this the result sits in
-                    // the queue until the next WM_TIMER (up to 1 second).
-                    #[cfg(windows)]
-                    crate::subscription::wake_event_loop();
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
-            },
-            move |result| match result {
-                Ok(grid) => Message::GridFetched {
-                    session_id: sid_ok,
-                    grid,
-                    is_scroll_fetch: false,
-                },
-                Err(e) => Message::GridFetchFailed {
-                    session_id: sid_err,
-                    error: e,
-                },
-            },
-        )
+        // Route results through the daemon event channel instead of
+        // Task::perform. Iced's tokio→winit waker is broken on Windows,
+        // so Task results aren't delivered until the next recognized event.
+        // The subscription channel IS polled on every event cycle (including
+        // WM_TIMER), so results are delivered promptly.
+        std::thread::spawn(move || {
+            match commands::get_grid_snapshot(&client, &sid) {
+                Ok(grid) => {
+                    let _ = sender.unbounded_send(DaemonEventMsg::GridReady {
+                        session_id: sid,
+                        grid,
+                        is_scroll_fetch: false,
+                    });
+                }
+                Err(error) => {
+                    let _ = sender.unbounded_send(DaemonEventMsg::GridFetchFailed {
+                        session_id: sid,
+                        error,
+                    });
+                }
+            }
+            #[cfg(windows)]
+            crate::subscription::wake_event_loop();
+        });
+        Task::none()
     }
 
     fn create_new_terminal(&self) -> Task<Message> {
@@ -11012,6 +11040,7 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
 
     let (tx, rx) = mpsc::unbounded();
     *app.event_receiver.lock() = Some(rx);
+    app.event_sender = Some(tx.clone());
 
     // Spawn heartbeat thread that keeps the event loop alive via the same
     // channel. Iced subscriptions stop being polled when the window is
