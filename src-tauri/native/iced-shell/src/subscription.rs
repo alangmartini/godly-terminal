@@ -212,6 +212,13 @@ pub enum DaemonEventMsg {
         session_id: String,
         error: String,
     },
+    /// Terminal created successfully (channel-routed, bypasses Task::perform).
+    TerminalReady {
+        session_id: String,
+        worktree_path: Option<String>,
+    },
+    /// Terminal creation failed (channel-routed).
+    TerminalFailed { error: String },
 }
 
 /// Spawn a background thread that sends `DaemonEventMsg::Heartbeat` every second

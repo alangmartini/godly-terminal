@@ -1920,6 +1920,11 @@ impl GodlyApp {
                         return Task::none();
                     }
                     term.dirty = true;
+                } else {
+                    diag::log(&format!(
+                        "UPDATE: TerminalOutput({}) — dropped, terminal not in collection",
+                        &session_id[..8.min(session_id.len())]
+                    ));
                 }
                 // Track notifications for terminals outside the active workspace.
                 // All terminals visible in the active workspace are considered "seen"
@@ -2054,6 +2059,16 @@ impl GodlyApp {
                 };
                 return self.update(msg);
             }
+            Message::DaemonEvent(DaemonEventMsg::TerminalReady { session_id, worktree_path }) => {
+                if let Some(wp) = worktree_path {
+                    // WorktreeCreated path
+                    return self.update(Message::WorktreeCreated { session_id, worktree_path: wp });
+                }
+                return self.update(Message::TerminalCreated(Ok(session_id)));
+            }
+            Message::DaemonEvent(DaemonEventMsg::TerminalFailed { error }) => {
+                return self.update(Message::TerminalCreated(Err(error)));
+            }
 
             // --- Grid fetch results ---
             Message::GridFetched {
@@ -2105,21 +2120,6 @@ impl GodlyApp {
                     if term.needs_refetch {
                         term.needs_refetch = false;
                         should_refetch = true;
-
-                        // The grid we just received is stale — a refetch is
-                        // coming. Skip the pixel render to avoid showing an
-                        // intermediate frame that causes micro-blinking.
-                        // To prevent the screen from freezing during continuous
-                        // output, alternate: skip one stale render, then force
-                        // the next, giving ~30 fps during sustained output.
-                        if term.cached_image_handle.is_some() && !term.skipped_stale_render {
-                            term.skipped_stale_render = true;
-                            should_render = false;
-                        } else {
-                            term.skipped_stale_render = false;
-                        }
-                    } else {
-                        term.skipped_stale_render = false;
                     }
                     // Only overwrite a meaningful (non-path) title with another
                     // meaningful title.  Shells frequently reset the OSC title
@@ -2143,6 +2143,11 @@ impl GodlyApp {
                         should_render = false;
                     }
                     term.last_grid_fingerprint = Some(new_fingerprint);
+                    diag::log(&format!(
+                        "GRID_RESULT({}): render={} refetch={} scroll={}",
+                        &session_id[..8.min(session_id.len())],
+                        should_render, should_refetch, is_scroll_fetch,
+                    ));
                 }
                 if should_persist_clamp {
                     self.persist_scrollback_offsets();
@@ -8419,11 +8424,37 @@ impl GodlyApp {
                                 } else {
                                     Some(folder_path)
                                 };
-                                new_terminal_tasks.push(Task::perform(
-                                    async move {
-                                        let (tx, rx) = futures_channel::oneshot::channel();
-                                        std::thread::spawn(move || {
-                                            let result = commands::create_terminal(
+                                if let Some(sender) = &self.event_sender {
+                                    let sender = sender.clone();
+                                    std::thread::spawn(move || {
+                                        let result = commands::create_terminal(
+                                            &client,
+                                            &terminal_id,
+                                            godly_protocol::ShellType::Windows,
+                                            cwd.as_deref(),
+                                            rows,
+                                            cols,
+                                        );
+                                        match result {
+                                            Ok(_) => {
+                                                let _ = sender.unbounded_send(DaemonEventMsg::TerminalReady {
+                                                    session_id: terminal_id,
+                                                    worktree_path: None,
+                                                });
+                                            }
+                                            Err(e) => {
+                                                let _ = sender.unbounded_send(DaemonEventMsg::TerminalFailed {
+                                                    error: e,
+                                                });
+                                            }
+                                        }
+                                        #[cfg(windows)]
+                                        crate::subscription::wake_event_loop();
+                                    });
+                                } else {
+                                    new_terminal_tasks.push(Task::perform(
+                                        run_blocking_with_wake(move || {
+                                            commands::create_terminal(
                                                 &client,
                                                 &terminal_id,
                                                 godly_protocol::ShellType::Windows,
@@ -8431,17 +8462,11 @@ impl GodlyApp {
                                                 rows,
                                                 cols,
                                             )
-                                            .map(|_| terminal_id);
-                                            let _ = tx.send(result);
-                                            #[cfg(windows)]
-                                            crate::subscription::wake_event_loop();
-                                        });
-                                        rx.await.unwrap_or_else(|_| {
-                                            Err("Background thread panicked".into())
-                                        })
-                                    },
-                                    Message::TerminalCreated,
-                                ));
+                                            .map(|_| terminal_id)
+                                        }),
+                                        Message::TerminalCreated,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -8683,34 +8708,52 @@ impl GodlyApp {
         let Some(client) = &self.client else {
             return Task::none();
         };
-        let Some(sender) = &self.event_sender else {
-            return Task::none();
-        };
 
         let client = Arc::clone(client);
-        let sender = sender.clone();
         let sid = session_id.to_string();
 
-        std::thread::spawn(move || {
-            match commands::scroll_and_get_snapshot(&client, &sid, offset) {
-                Ok(grid) => {
-                    let _ = sender.unbounded_send(DaemonEventMsg::GridReady {
-                        session_id: sid,
+        if let Some(sender) = &self.event_sender {
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                match commands::scroll_and_get_snapshot(&client, &sid, offset) {
+                    Ok(grid) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::GridReady {
+                            session_id: sid,
+                            grid,
+                            is_scroll_fetch: true,
+                        });
+                    }
+                    Err(error) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::GridFetchFailed {
+                            session_id: sid,
+                            error,
+                        });
+                    }
+                }
+                #[cfg(windows)]
+                crate::subscription::wake_event_loop();
+            });
+            Task::none()
+        } else {
+            diag::log("scroll_fetch: event_sender is None, falling back to Task::perform");
+            Task::perform(
+                run_blocking_with_wake(move || {
+                    commands::scroll_and_get_snapshot(&client, &sid, offset)
+                        .map(|grid| (sid, grid))
+                }),
+                |result| match result {
+                    Ok((session_id, grid)) => Message::GridFetched {
+                        session_id,
                         grid,
                         is_scroll_fetch: true,
-                    });
-                }
-                Err(error) => {
-                    let _ = sender.unbounded_send(DaemonEventMsg::GridFetchFailed {
-                        session_id: sid,
-                        error,
-                    });
-                }
-            }
-            #[cfg(windows)]
-            crate::subscription::wake_event_loop();
-        });
-        Task::none()
+                    },
+                    Err(e) => Message::GridFetchFailed {
+                        session_id: String::new(),
+                        error: e,
+                    },
+                },
+            )
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -8719,9 +8762,6 @@ impl GodlyApp {
 
     fn fetch_grid(&mut self, session_id: &str) -> Task<Message> {
         let Some(client) = &self.client else {
-            return Task::none();
-        };
-        let Some(sender) = &self.event_sender else {
             return Task::none();
         };
 
@@ -8735,34 +8775,55 @@ impl GodlyApp {
         }
 
         let client = Arc::clone(client);
-        let sender = sender.clone();
         let sid = session_id.to_string();
 
-        // Route results through the daemon event channel instead of
-        // Task::perform. Iced's tokio→winit waker is broken on Windows,
-        // so Task results aren't delivered until the next recognized event.
-        // The subscription channel IS polled on every event cycle (including
-        // WM_TIMER), so results are delivered promptly.
-        std::thread::spawn(move || {
-            match commands::get_grid_snapshot(&client, &sid) {
-                Ok(grid) => {
-                    let _ = sender.unbounded_send(DaemonEventMsg::GridReady {
-                        session_id: sid,
+        if let Some(sender) = &self.event_sender {
+            let sender = sender.clone();
+            // Route results through the daemon event channel instead of
+            // Task::perform. Iced's tokio→winit waker is broken on Windows,
+            // so Task results aren't delivered until the next recognized event.
+            // The subscription channel IS polled on every event cycle (including
+            // WM_TIMER), so results are delivered promptly.
+            std::thread::spawn(move || {
+                match commands::get_grid_snapshot(&client, &sid) {
+                    Ok(grid) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::GridReady {
+                            session_id: sid,
+                            grid,
+                            is_scroll_fetch: false,
+                        });
+                    }
+                    Err(error) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::GridFetchFailed {
+                            session_id: sid,
+                            error,
+                        });
+                    }
+                }
+                #[cfg(windows)]
+                crate::subscription::wake_event_loop();
+            });
+            Task::none()
+        } else {
+            diag::log("fetch_grid: event_sender is None, falling back to Task::perform");
+            Task::perform(
+                run_blocking_with_wake(move || {
+                    commands::get_grid_snapshot(&client, &sid)
+                        .map(|grid| (sid, grid))
+                }),
+                |result| match result {
+                    Ok((session_id, grid)) => Message::GridFetched {
+                        session_id,
                         grid,
                         is_scroll_fetch: false,
-                    });
-                }
-                Err(error) => {
-                    let _ = sender.unbounded_send(DaemonEventMsg::GridFetchFailed {
-                        session_id: sid,
-                        error,
-                    });
-                }
-            }
-            #[cfg(windows)]
-            crate::subscription::wake_event_loop();
-        });
-        Task::none()
+                    },
+                    Err(e) => Message::GridFetchFailed {
+                        session_id: String::new(),
+                        error: e,
+                    },
+                },
+            )
+        }
     }
 
     fn create_new_terminal(&self) -> Task<Message> {
@@ -8800,20 +8861,51 @@ impl GodlyApp {
         let client = Arc::clone(client);
         let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
 
-        Task::perform(
-            run_blocking_with_wake(move || {
-                commands::create_terminal(
+        if let Some(sender) = &self.event_sender {
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                let result = commands::create_terminal(
                     &client,
                     &session_id,
                     godly_protocol::ShellType::Windows,
                     cwd.as_deref(),
                     rows,
                     cols,
-                )
-                .map(|_| session_id)
-            }),
-            Message::TerminalCreated,
-        )
+                );
+                match result {
+                    Ok(_) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::TerminalReady {
+                            session_id,
+                            worktree_path: None,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::TerminalFailed {
+                            error: e,
+                        });
+                    }
+                }
+                #[cfg(windows)]
+                crate::subscription::wake_event_loop();
+            });
+            Task::none()
+        } else {
+            // Fallback: no channel yet (startup race), use Task::perform
+            Task::perform(
+                run_blocking_with_wake(move || {
+                    commands::create_terminal(
+                        &client,
+                        &session_id,
+                        godly_protocol::ShellType::Windows,
+                        cwd.as_deref(),
+                        rows,
+                        cols,
+                    )
+                    .map(|_| session_id)
+                }),
+                Message::TerminalCreated,
+            )
+        }
     }
 
     fn create_terminal_task_with_worktree(
@@ -8829,12 +8921,38 @@ impl GodlyApp {
         let client = Arc::clone(client);
         let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
 
-        Task::perform(
-            run_blocking_with_wake(move || {
-                // Check if it's a git repo.
-                if !crate::git_worktree::is_git_repo(&repo_folder) {
-                    log::warn!("Worktree mode enabled but not a git repo: {repo_folder}");
-                    return commands::create_terminal(
+        // Helper closure that performs the worktree + create_terminal work.
+        // Returns (session_id, Option<worktree_path>) on success.
+        let do_work = move || -> Result<(String, Option<String>), String> {
+            // Check if it's a git repo.
+            if !crate::git_worktree::is_git_repo(&repo_folder) {
+                log::warn!("Worktree mode enabled but not a git repo: {repo_folder}");
+                return commands::create_terminal(
+                    &client,
+                    &session_id,
+                    godly_protocol::ShellType::Windows,
+                    Some(&repo_folder),
+                    rows,
+                    cols,
+                )
+                .map(|_| (session_id, None));
+            }
+
+            // Create worktree in detached HEAD.
+            let dir_name = crate::git_worktree::generate_worktree_dir_name();
+            match crate::git_worktree::create_worktree(&repo_folder, &dir_name) {
+                Ok(worktree_path) => commands::create_terminal(
+                    &client,
+                    &session_id,
+                    godly_protocol::ShellType::Windows,
+                    Some(&worktree_path),
+                    rows,
+                    cols,
+                )
+                .map(|_| (session_id, Some(worktree_path))),
+                Err(e) => {
+                    log::warn!("Worktree creation failed, falling back: {e}");
+                    commands::create_terminal(
                         &client,
                         &session_id,
                         godly_protocol::ShellType::Windows,
@@ -8842,44 +8960,45 @@ impl GodlyApp {
                         rows,
                         cols,
                     )
-                    .map(|_| (session_id, None::<String>));
+                    .map(|_| (session_id, None))
                 }
+            }
+        };
 
-                // Create worktree in detached HEAD.
-                let dir_name = crate::git_worktree::generate_worktree_dir_name();
-                match crate::git_worktree::create_worktree(&repo_folder, &dir_name) {
-                    Ok(worktree_path) => commands::create_terminal(
-                        &client,
-                        &session_id,
-                        godly_protocol::ShellType::Windows,
-                        Some(&worktree_path),
-                        rows,
-                        cols,
-                    )
-                    .map(|_| (session_id, Some(worktree_path))),
+        if let Some(sender) = &self.event_sender {
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                match do_work() {
+                    Ok((sid, worktree_path)) => {
+                        let _ = sender.unbounded_send(DaemonEventMsg::TerminalReady {
+                            session_id: sid,
+                            worktree_path,
+                        });
+                    }
                     Err(e) => {
-                        log::warn!("Worktree creation failed, falling back: {e}");
-                        commands::create_terminal(
-                            &client,
-                            &session_id,
-                            godly_protocol::ShellType::Windows,
-                            Some(&repo_folder),
-                            rows,
-                            cols,
-                        )
-                        .map(|_| (session_id, None::<String>))
+                        let _ = sender.unbounded_send(DaemonEventMsg::TerminalFailed {
+                            error: e,
+                        });
                     }
                 }
-            }),
-            |result| match result {
-                Ok((session_id, Some(worktree_path))) => Message::WorktreeCreated {
-                    session_id,
-                    worktree_path,
+                #[cfg(windows)]
+                crate::subscription::wake_event_loop();
+            });
+            Task::none()
+        } else {
+            // Fallback: no channel yet, use Task::perform
+            Task::perform(
+                run_blocking_with_wake(do_work),
+                |result| match result {
+                    Ok((session_id, Some(worktree_path))) => Message::WorktreeCreated {
+                        session_id,
+                        worktree_path,
+                    },
+                    Ok((session_id, None)) => Message::TerminalCreated(Ok(session_id)),
+                    Err(e) => Message::TerminalCreated(Err(e)),
                 },
-                Ok((session_id, None)) => Message::TerminalCreated(Ok(session_id)),
-                Err(e) => Message::TerminalCreated(Err(e)),
-            },
-        )
+            )
+        }
     }
 
     pub(crate) fn create_workspace_for_testing(
