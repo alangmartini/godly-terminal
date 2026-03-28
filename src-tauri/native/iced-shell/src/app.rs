@@ -4259,6 +4259,10 @@ impl GodlyApp {
             }
             Message::Heartbeat => {
                 self.perf_stats.frame_tick();
+                // Capture the main window HWND on the first heartbeat so
+                // wake_event_loop() can use PostMessageW instead of the
+                // ineffective PostThreadMessageW.
+                crate::subscription::capture_hwnd();
                 // Detect actual focus via Win32 API — Iced's Focused/Unfocused
                 // events are unreliable on Windows (missed on minimize, stolen
                 // on restore). This runs from RedrawRequested + WM_TIMER.

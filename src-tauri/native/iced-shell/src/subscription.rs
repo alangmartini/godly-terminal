@@ -7,16 +7,19 @@ use godly_app_adapter::daemon_client::FrontendEventSink;
 // ---------------------------------------------------------------------------
 // Win32 event-loop waker
 // ---------------------------------------------------------------------------
-// Iced's subscription waker doesn't reliably wake winit's event loop on
-// Windows when events arrive from the bridge I/O thread. We store the main
-// thread ID and post WM_APP after every channel send so winit picks up the
-// event immediately instead of waiting for the next timer tick.
+// Iced's internal waker (tokio → winit) doesn't reliably wake the Win32
+// event loop. PostThreadMessageW doesn't work either because winit uses
+// PeekMessageW(hwnd, ...) which only retrieves *window* messages, not
+// thread messages. The fix: capture the actual HWND and use PostMessageW.
 
 #[cfg(windows)]
 static MAIN_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-/// Store the main thread ID so bridge threads can wake the iced event loop.
-/// Must be called from the main thread before `iced::application().run()`.
+#[cfg(windows)]
+static MAIN_WINDOW_HWND: std::sync::atomic::AtomicPtr<std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+/// Store the main thread ID. Called before `iced::application().run()`.
 #[cfg(windows)]
 pub fn init_waker() {
     let tid = unsafe {
@@ -31,12 +34,87 @@ pub fn init_waker() {
 #[cfg(not(windows))]
 pub fn init_waker() {}
 
-/// Post a WM_APP message to the main thread to wake winit's event loop.
-/// Called from bridge I/O and grid-fetch threads so iced processes results
-/// immediately instead of waiting for the next WM_TIMER (up to 1 second).
+/// Capture the main window HWND via EnumThreadWindows.
+/// Must be called from the main thread AFTER iced creates the window
+/// (e.g., on the first Heartbeat).
+#[cfg(windows)]
+pub fn capture_hwnd() {
+    use std::sync::atomic::Ordering;
+
+    // Already captured.
+    if !MAIN_WINDOW_HWND.load(Ordering::Acquire).is_null() {
+        return;
+    }
+
+    let tid = MAIN_THREAD_ID.load(Ordering::Acquire);
+    if tid == 0 {
+        return;
+    }
+
+    unsafe {
+        extern "system" {
+            fn EnumThreadWindows(
+                thread_id: u32,
+                callback: unsafe extern "system" fn(
+                    hwnd: *mut std::ffi::c_void,
+                    lparam: isize,
+                ) -> i32,
+                lparam: isize,
+            ) -> i32;
+            fn IsWindowVisible(hwnd: *mut std::ffi::c_void) -> i32;
+        }
+
+        unsafe extern "system" fn find_visible(
+            hwnd: *mut std::ffi::c_void,
+            lparam: isize,
+        ) -> i32 {
+            if IsWindowVisible(hwnd) != 0 {
+                let out = lparam as *mut *mut std::ffi::c_void;
+                *out = hwnd;
+                return 0; // stop enumeration
+            }
+            1 // continue
+        }
+
+        let mut found: *mut std::ffi::c_void = std::ptr::null_mut();
+        EnumThreadWindows(tid, find_visible, &mut found as *mut _ as isize);
+        if !found.is_null() {
+            log::info!("Captured main HWND for event-loop waker: {:?}", found);
+            MAIN_WINDOW_HWND.store(found, Ordering::Release);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn capture_hwnd() {}
+
+/// Wake winit's event loop by posting WM_APP to the main window.
+/// Uses PostMessageW(hwnd, ...) — NOT PostThreadMessageW — because winit
+/// dispatches via PeekMessageW(hwnd, ...) which ignores thread messages.
 #[cfg(windows)]
 pub fn wake_event_loop() {
-    let tid = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Acquire);
+    use std::sync::atomic::Ordering;
+
+    let hwnd = MAIN_WINDOW_HWND.load(Ordering::Acquire);
+    if !hwnd.is_null() {
+        unsafe {
+            extern "system" {
+                fn PostMessageW(
+                    hwnd: *mut std::ffi::c_void,
+                    msg: u32,
+                    wparam: usize,
+                    lparam: isize,
+                ) -> i32;
+            }
+            // WM_APP = 0x8000. Posted to the window, so winit's
+            // PeekMessageW(hwnd, ...) picks it up immediately.
+            PostMessageW(hwnd, 0x8000, 0, 0);
+        }
+        return;
+    }
+
+    // Fallback before HWND is captured (during startup).
+    let tid = MAIN_THREAD_ID.load(Ordering::Acquire);
     if tid != 0 {
         unsafe {
             extern "system" {
@@ -47,9 +125,6 @@ pub fn wake_event_loop() {
                     lparam: isize,
                 ) -> i32;
             }
-            // WM_APP = 0x8000. Thread messages with no HWND are picked up by
-            // winit's PeekMessageW(NULL, ...) — same mechanism used by the
-            // SetTimer(NULL, ...) keepalive in main.rs.
             PostThreadMessageW(tid, 0x8000, 0, 0);
         }
     }
