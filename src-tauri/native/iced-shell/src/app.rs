@@ -2153,16 +2153,17 @@ impl GodlyApp {
                     self.persist_scrollback_offsets();
                 }
                 if self.use_pixel_renderer && should_render {
-                    // During continuous output (should_refetch), throttle renders
-                    // to ~33fps to prevent micro-blinking from rapid texture swaps.
-                    // When output stops (should_refetch = false), always render so
-                    // the final frame is displayed immediately.
-                    let throttled = should_refetch
-                        && self
-                            .terminals
-                            .get(&session_id)
-                            .and_then(|t| t.last_render_at)
-                            .map_or(false, |t| t.elapsed().as_millis() < 30);
+                    // Throttle ALL pixel renders to ~20fps to prevent
+                    // micro-blinking from rapid texture swaps.  The previous
+                    // throttle only applied when should_refetch=true, which
+                    // left heartbeat-driven renders (every 16ms) completely
+                    // unthrottled — any minor fingerprint change (cursor
+                    // blink, etc.) caused 60fps texture churn.
+                    let throttled = self
+                        .terminals
+                        .get(&session_id)
+                        .and_then(|t| t.last_render_at)
+                        .map_or(false, |t| t.elapsed().as_millis() < 50);
                     if !throttled {
                         self.render_terminal_image(&session_id);
                         if let Some(term) = self.terminals.get_mut(&session_id) {
@@ -4360,22 +4361,33 @@ impl GodlyApp {
                             }
                         }
                     }
-                    // Recovery grid poll: when focused, periodically fetch grids
-                    // as a safety net. The grid fingerprint check in GridFetched
-                    // prevents unnecessary renders (and the old texture-swap
-                    // render loop), while the fetching guard prevents concurrent
-                    // fetches. This keeps the terminal responsive even when the
-                    // daemon event subscription is flaky or delayed.
+                    // Recovery grid poll: safety net for when the daemon event
+                    // subscription is flaky or delayed.  Only poll terminals
+                    // that haven't been fetched recently (>200ms) to avoid
+                    // adding extra grid fetches during continuous output,
+                    // which bypass the render throttle and cause blinking.
                     if is_actually_focused && self.client.is_some() {
-                        diag::log("HEARTBEAT: recovery grid poll");
-                        let ids: Vec<String> =
-                            self.terminals.iter().map(|t| t.id.clone()).collect();
-                        // Do NOT force-reset fetching — respect the in-flight guard
-                        // in fetch_grid() to prevent concurrent/redundant fetches.
-                        let tasks: Vec<Task<Message>> =
-                            ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
-                        if !tasks.is_empty() {
-                            return Task::batch(tasks);
+                        let now = std::time::Instant::now();
+                        let ids: Vec<String> = self
+                            .terminals
+                            .iter()
+                            .filter(|t| {
+                                !t.fetching
+                                    && t.last_render_at
+                                        .map_or(true, |lr| now.duration_since(lr).as_millis() > 200)
+                            })
+                            .map(|t| t.id.clone())
+                            .collect();
+                        if !ids.is_empty() {
+                            diag::log(&format!(
+                                "HEARTBEAT: recovery grid poll ({} idle terminals)",
+                                ids.len()
+                            ));
+                            let tasks: Vec<Task<Message>> =
+                                ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
+                            if !tasks.is_empty() {
+                                return Task::batch(tasks);
+                            }
                         }
                     }
                 }
