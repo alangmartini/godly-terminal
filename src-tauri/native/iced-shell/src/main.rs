@@ -1,5 +1,8 @@
 use iced::window;
 
+#[cfg(windows)]
+const WIN32_EVENT_LOOP_KEEPALIVE_MS: u32 = 100;
+
 /// Geist Mono font family — bundled under SIL Open Font License.
 pub mod fonts {
     use iced::Font;
@@ -89,7 +92,7 @@ fn main() -> iced::Result {
     // Store main thread ID so bridge threads can wake the event loop.
     subscription::init_waker();
 
-    // Install a Win32 timer on the main thread that fires every second.
+    // Install a Win32 timer on the main thread that fires every 100ms.
     // This generates WM_TIMER messages in the thread's message queue, which
     // keeps winit's event loop alive even when the window is minimized.
     // Without this, Iced stops polling all subscriptions and streams,
@@ -104,7 +107,12 @@ fn main() -> iced::Result {
                 callback: *const std::ffi::c_void,
             ) -> usize;
         }
-        SetTimer(std::ptr::null_mut(), 0, 1000, std::ptr::null());
+        SetTimer(
+            std::ptr::null_mut(),
+            0,
+            WIN32_EVENT_LOOP_KEEPALIVE_MS,
+            std::ptr::null(),
+        );
     }
 
     let result = iced::application(boot, GodlyApp::update, GodlyApp::view)

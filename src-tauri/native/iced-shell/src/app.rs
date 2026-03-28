@@ -112,7 +112,9 @@ use crate::shortcuts_tab;
 use crate::sidebar::{self, SidebarAction, SIDEBAR_WIDTH};
 use crate::split_pane::{view_layout, LayoutNode, PaneContent, SplitDirection};
 use crate::status_bar;
-use crate::subscription::{daemon_events, ChannelEventSink, DaemonEventMsg};
+use crate::subscription::{
+    daemon_events, run_blocking_with_wake, ChannelEventSink, DaemonEventMsg,
+};
 use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::terminal_context_menu::{self, TermCtxAction};
 use crate::terminal_state::TerminalCollection;
@@ -8636,15 +8638,9 @@ impl GodlyApp {
         let sid_err = sid.clone();
 
         Task::perform(
-            async move {
-                let (tx, rx) = futures_channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let result = commands::scroll_and_get_snapshot(&client, &sid, offset);
-                    let _ = tx.send(result);
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
-            },
+            run_blocking_with_wake(move || {
+                commands::scroll_and_get_snapshot(&client, &sid, offset)
+            }),
             move |result| match result {
                 Ok(grid) => Message::GridFetched {
                     session_id: sid_ok,
@@ -8683,15 +8679,7 @@ impl GodlyApp {
         let sid_err = sid.clone();
 
         Task::perform(
-            async move {
-                let (tx, rx) = futures_channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let result = commands::get_grid_snapshot(&client, &sid);
-                    let _ = tx.send(result);
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
-            },
+            run_blocking_with_wake(move || commands::get_grid_snapshot(&client, &sid)),
             move |result| match result {
                 Ok(grid) => Message::GridFetched {
                     session_id: sid_ok,
@@ -8742,23 +8730,17 @@ impl GodlyApp {
         let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
 
         Task::perform(
-            async move {
-                let (tx, rx) = futures_channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let result = commands::create_terminal(
-                        &client,
-                        &session_id,
-                        godly_protocol::ShellType::Windows,
-                        cwd.as_deref(),
-                        rows,
-                        cols,
-                    )
-                    .map(|_| session_id);
-                    let _ = tx.send(result);
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
-            },
+            run_blocking_with_wake(move || {
+                commands::create_terminal(
+                    &client,
+                    &session_id,
+                    godly_protocol::ShellType::Windows,
+                    cwd.as_deref(),
+                    rows,
+                    cols,
+                )
+                .map(|_| session_id)
+            }),
             Message::TerminalCreated,
         )
     }
@@ -8777,14 +8759,36 @@ impl GodlyApp {
         let (rows, cols) = self.terminal_grid_size(Some(session_id.as_str()));
 
         Task::perform(
-            async move {
-                let (tx, rx) =
-                    futures_channel::oneshot::channel::<Result<(String, Option<String>), String>>();
-                std::thread::spawn(move || {
-                    // Check if it's a git repo.
-                    if !crate::git_worktree::is_git_repo(&repo_folder) {
-                        log::warn!("Worktree mode enabled but not a git repo: {repo_folder}");
-                        let result = commands::create_terminal(
+            run_blocking_with_wake(move || {
+                // Check if it's a git repo.
+                if !crate::git_worktree::is_git_repo(&repo_folder) {
+                    log::warn!("Worktree mode enabled but not a git repo: {repo_folder}");
+                    return commands::create_terminal(
+                        &client,
+                        &session_id,
+                        godly_protocol::ShellType::Windows,
+                        Some(&repo_folder),
+                        rows,
+                        cols,
+                    )
+                    .map(|_| (session_id, None::<String>));
+                }
+
+                // Create worktree in detached HEAD.
+                let dir_name = crate::git_worktree::generate_worktree_dir_name();
+                match crate::git_worktree::create_worktree(&repo_folder, &dir_name) {
+                    Ok(worktree_path) => commands::create_terminal(
+                        &client,
+                        &session_id,
+                        godly_protocol::ShellType::Windows,
+                        Some(&worktree_path),
+                        rows,
+                        cols,
+                    )
+                    .map(|_| (session_id, Some(worktree_path))),
+                    Err(e) => {
+                        log::warn!("Worktree creation failed, falling back: {e}");
+                        commands::create_terminal(
                             &client,
                             &session_id,
                             godly_protocol::ShellType::Windows,
@@ -8792,44 +8796,10 @@ impl GodlyApp {
                             rows,
                             cols,
                         )
-                        .map(|_| (session_id, None::<String>));
-                        let _ = tx.send(result);
-                        return;
+                        .map(|_| (session_id, None::<String>))
                     }
-
-                    // Create worktree in detached HEAD.
-                    let dir_name = crate::git_worktree::generate_worktree_dir_name();
-                    match crate::git_worktree::create_worktree(&repo_folder, &dir_name) {
-                        Ok(worktree_path) => {
-                            let result = commands::create_terminal(
-                                &client,
-                                &session_id,
-                                godly_protocol::ShellType::Windows,
-                                Some(&worktree_path),
-                                rows,
-                                cols,
-                            )
-                            .map(|_| (session_id, Some(worktree_path)));
-                            let _ = tx.send(result);
-                        }
-                        Err(e) => {
-                            log::warn!("Worktree creation failed, falling back: {e}");
-                            let result = commands::create_terminal(
-                                &client,
-                                &session_id,
-                                godly_protocol::ShellType::Windows,
-                                Some(&repo_folder),
-                                rows,
-                                cols,
-                            )
-                            .map(|_| (session_id, None::<String>));
-                            let _ = tx.send(result);
-                        }
-                    }
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("Background thread panicked".into()))
-            },
+                }
+            }),
             |result| match result {
                 Ok((session_id, Some(worktree_path))) => Message::WorktreeCreated {
                     session_id,
