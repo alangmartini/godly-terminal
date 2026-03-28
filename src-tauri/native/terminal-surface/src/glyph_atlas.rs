@@ -1,0 +1,275 @@
+//! GPU glyph atlas — packs rasterized glyphs into a persistent texture.
+//!
+//! Glyphs are rasterized on the CPU (via DirectWrite / swash) and packed
+//! row-by-row into an RGBA buffer.  The **red channel** stores grayscale
+//! alpha coverage; G, B, A are zero.  ClearType RGB data is averaged to
+//! grayscale on insertion because sub-pixel rendering doesn't survive
+//! GPU composition (sub-pixel patterns don't align with physical LCD
+//! sub-pixels after compositing).
+
+use std::collections::HashMap;
+
+use crate::glyph_cache::GlyphKey;
+use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
+
+/// Position of a glyph inside the atlas (normalised UV coordinates).
+#[derive(Debug, Clone, Copy)]
+pub struct AtlasEntry {
+    pub u0: f32,
+    pub v0: f32,
+    pub u1: f32,
+    pub v1: f32,
+}
+
+/// Data bundle for uploading the atlas to the GPU.
+#[derive(Debug, Clone)]
+pub struct AtlasUpdate {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub generation: u64,
+}
+
+/// CPU-side glyph atlas with row-by-row packing.
+pub struct GlyphAtlas {
+    entries: HashMap<GlyphKey, AtlasEntry>,
+    /// RGBA pixel data.  Only the **R** channel is used (grayscale alpha);
+    /// G = B = A = 0.  RGBA format is required because wgpu doesn't
+    /// universally support R8Unorm as a texture format on all backends.
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    /// Next free X position in the current row.
+    cursor_x: u32,
+    /// Y position of the current row.
+    cursor_y: u32,
+    /// Height of the tallest glyph in the current row.
+    row_height: u32,
+    /// Monotonically increasing; bumped on resize / invalidate.
+    generation: u64,
+    dirty: bool,
+    /// Cell dimensions in physical pixels (set once at init / font change).
+    cell_w: u32,
+    cell_h: u32,
+    /// Baseline offset within a cell (physical pixels).
+    baseline_offset: u32,
+}
+
+const INITIAL_SIZE: u32 = 1024;
+const PADDING: u32 = 1;
+
+impl GlyphAtlas {
+    /// Create a new atlas sized for the given cell metrics.
+    ///
+    /// Call `precache_ascii` after creation to warm the cache.
+    pub fn new(cell_w: f32, cell_h: f32, baseline_offset: f32) -> Self {
+        let cw = cell_w.ceil() as u32;
+        let ch = cell_h.ceil() as u32;
+        let w = INITIAL_SIZE;
+        let h = INITIAL_SIZE;
+        Self {
+            entries: HashMap::new(),
+            data: vec![0u8; (w * h * 4) as usize],
+            width: w,
+            height: h,
+            cursor_x: 0,
+            cursor_y: 0,
+            row_height: 0,
+            generation: 1,
+            dirty: true,
+            cell_w: cw,
+            cell_h: ch,
+            baseline_offset: baseline_offset.round() as u32,
+        }
+    }
+
+    /// Pre-cache printable ASCII (32–126) in normal + bold variants.
+    pub fn precache_ascii(
+        &mut self,
+        rasterizer: &mut dyn GlyphRasterizer,
+        font_size_px: f32,
+    ) {
+        for ch in ' '..='~' {
+            for bold in [false, true] {
+                let key = GlyphKey::new(ch, font_size_px, bold, false);
+                self.get_or_insert(key, rasterizer, font_size_px);
+            }
+        }
+    }
+
+    /// Look up a glyph, rasterizing and packing it on cache miss.
+    ///
+    /// Returns `None` only if the rasterizer fails (e.g. missing glyph).
+    /// For missing glyphs a blank cell-sized entry is returned so the
+    /// vertex builder always has valid UVs.
+    pub fn get_or_insert(
+        &mut self,
+        key: GlyphKey,
+        rasterizer: &mut dyn GlyphRasterizer,
+        font_size_px: f32,
+    ) -> AtlasEntry {
+        if let Some(e) = self.entries.get(&key) {
+            return *e;
+        }
+
+        // Rasterize the glyph.
+        let glyph = rasterizer.rasterize(key.codepoint, font_size_px, key.bold, key.italic);
+
+        // Convert to single-channel alpha and blit into a cell-sized region.
+        let alpha = glyph.as_ref().map(|g| to_grayscale_alpha(g));
+        let entry = self.pack_cell(alpha.as_ref(), glyph.as_ref());
+        self.entries.insert(key, entry);
+        entry
+    }
+
+    /// Pack a glyph bitmap (already converted to grayscale alpha) into the
+    /// next available cell-sized region in the atlas.
+    fn pack_cell(
+        &mut self,
+        alpha: Option<&Vec<u8>>,
+        glyph: Option<&crate::glyph_rasterizer::RasterizedGlyph>,
+    ) -> AtlasEntry {
+        let cw = self.cell_w;
+        let ch = self.cell_h;
+
+        // Wrap to next row if current row is full.
+        if self.cursor_x + cw > self.width {
+            self.cursor_y += self.row_height + PADDING;
+            self.cursor_x = 0;
+            self.row_height = 0;
+        }
+
+        // Grow atlas vertically if needed.
+        while self.cursor_y + ch > self.height {
+            self.grow();
+        }
+
+        let x0 = self.cursor_x;
+        let y0 = self.cursor_y;
+
+        // Blit the glyph bitmap at the correct bearing offset within the cell.
+        if let (Some(alpha_data), Some(g)) = (alpha, glyph) {
+            if g.width > 0 && g.height > 0 {
+                // Glyph origin within the cell:
+                let gx = g.bearing_x;
+                let gy = self.baseline_offset as i32 - g.bearing_y;
+                for row in 0..g.height {
+                    for col in 0..g.width {
+                        let dst_x = x0 as i32 + gx + col as i32;
+                        let dst_y = y0 as i32 + gy + row as i32;
+                        if dst_x >= 0
+                            && dst_y >= 0
+                            && (dst_x as u32) < self.width
+                            && (dst_y as u32) < self.height
+                        {
+                            let src_idx = (row * g.width + col) as usize;
+                            let dst_idx =
+                                ((dst_y as u32) * self.width + dst_x as u32) as usize * 4;
+                            if src_idx < alpha_data.len() && dst_idx + 3 < self.data.len() {
+                                self.data[dst_idx] = alpha_data[src_idx]; // R = alpha
+                                // G, B, A stay 0
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update packing cursor.
+        self.cursor_x += cw + PADDING;
+        if ch > self.row_height {
+            self.row_height = ch;
+        }
+        self.dirty = true;
+
+        // Compute normalised UV coordinates.
+        let u0 = x0 as f32 / self.width as f32;
+        let v0 = y0 as f32 / self.height as f32;
+        let u1 = (x0 + cw) as f32 / self.width as f32;
+        let v1 = (y0 + ch) as f32 / self.height as f32;
+
+        AtlasEntry { u0, v0, u1, v1 }
+    }
+
+    /// Double the atlas height, preserving existing data and rescaling UVs.
+    fn grow(&mut self) {
+        let old_h = self.height;
+        let new_h = old_h * 2;
+        let mut new_data = vec![0u8; (self.width * new_h * 4) as usize];
+        let row_bytes = (self.width * 4) as usize;
+        for y in 0..old_h {
+            let src = (y as usize) * row_bytes;
+            new_data[src..src + row_bytes].copy_from_slice(&self.data[src..src + row_bytes]);
+        }
+        self.data = new_data;
+        let scale = old_h as f32 / new_h as f32;
+        for entry in self.entries.values_mut() {
+            entry.v0 *= scale;
+            entry.v1 *= scale;
+        }
+        self.height = new_h;
+        self.generation += 1;
+        self.dirty = true;
+    }
+
+    /// Clear the atlas (e.g. on font change). Bumps generation.
+    pub fn invalidate(&mut self) {
+        self.entries.clear();
+        self.data.fill(0);
+        self.cursor_x = 0;
+        self.cursor_y = 0;
+        self.row_height = 0;
+        self.generation += 1;
+        self.dirty = true;
+    }
+
+    /// Update cell metrics (e.g. after font size change).
+    pub fn set_cell_metrics(&mut self, cell_w: f32, cell_h: f32, baseline_offset: f32) {
+        let cw = cell_w.ceil() as u32;
+        let ch = cell_h.ceil() as u32;
+        if cw != self.cell_w || ch != self.cell_h {
+            self.cell_w = cw;
+            self.cell_h = ch;
+            self.baseline_offset = baseline_offset.round() as u32;
+            self.invalidate();
+        }
+    }
+
+    /// Take dirty data for GPU upload.  Returns `None` if the atlas hasn't
+    /// changed since the last call.
+    pub fn take_dirty_data(&mut self) -> Option<AtlasUpdate> {
+        if !self.dirty {
+            return None;
+        }
+        self.dirty = false;
+        Some(AtlasUpdate {
+            data: self.data.clone(),
+            width: self.width,
+            height: self.height,
+            generation: self.generation,
+        })
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+/// Convert a rasterized glyph to single-channel grayscale alpha.
+fn to_grayscale_alpha(g: &crate::glyph_rasterizer::RasterizedGlyph) -> Vec<u8> {
+    match g.format {
+        GlyphFormat::Alpha => g.data.clone(),
+        GlyphFormat::SubpixelRgb => {
+            // Average R, G, B channels into a single alpha value.
+            let pixel_count = (g.width * g.height) as usize;
+            let mut alpha = Vec::with_capacity(pixel_count);
+            for i in 0..pixel_count {
+                let r = g.data[i * 3] as u16;
+                let g_ch = g.data[i * 3 + 1] as u16;
+                let b = g.data[i * 3 + 2] as u16;
+                alpha.push(((r + g_ch + b) / 3) as u8);
+            }
+            alpha
+        }
+    }
+}

@@ -431,7 +431,7 @@ mod tests {
             custom_name: None,
             worktree_path: None,
             is_clone: false,
-            cached_pixels: None,
+            cached_frame: None,
             last_grid_fingerprint: None,
         }
     }
