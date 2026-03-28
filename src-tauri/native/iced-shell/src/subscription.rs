@@ -130,6 +130,33 @@ pub fn wake_event_loop() {
     }
 }
 
+#[cfg(not(windows))]
+pub(crate) fn wake_event_loop() {}
+
+fn send_daemon_event(
+    sender: &mpsc::UnboundedSender<DaemonEventMsg>,
+    event: DaemonEventMsg,
+) -> Result<(), futures_channel::mpsc::TrySendError<DaemonEventMsg>> {
+    sender.unbounded_send(event)?;
+    wake_event_loop();
+    Ok(())
+}
+
+pub(crate) async fn run_blocking_with_wake<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let (tx, rx) = futures_channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = work();
+        let _ = tx.send(result);
+        wake_event_loop();
+    });
+    rx.await
+        .unwrap_or_else(|_| Err("Background thread panicked".into()))
+}
+
 /// Events forwarded from the daemon bridge I/O thread to the Iced app.
 #[derive(Debug, Clone)]
 pub enum DaemonEventMsg {
@@ -175,7 +202,7 @@ pub fn spawn_heartbeat_thread(sender: mpsc::UnboundedSender<DaemonEventMsg>) {
         .name("iced-heartbeat".into())
         .spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
-            if sender.unbounded_send(DaemonEventMsg::Heartbeat).is_err() {
+            if send_daemon_event(&sender, DaemonEventMsg::Heartbeat).is_err() {
                 break; // Channel closed, app shutting down
             }
         })
@@ -198,46 +225,51 @@ impl ChannelEventSink {
 
 impl FrontendEventSink for ChannelEventSink {
     fn on_terminal_output(&self, session_id: &str) {
-        let _ = self.sender.unbounded_send(DaemonEventMsg::TerminalOutput {
-            session_id: session_id.to_string(),
-        });
-        #[cfg(windows)]
-        wake_event_loop();
+        let _ = send_daemon_event(
+            &self.sender,
+            DaemonEventMsg::TerminalOutput {
+                session_id: session_id.to_string(),
+            },
+        );
     }
 
     fn on_session_closed(&self, session_id: &str, exit_code: Option<i64>) {
-        let _ = self.sender.unbounded_send(DaemonEventMsg::SessionClosed {
-            session_id: session_id.to_string(),
-            exit_code,
-        });
-        #[cfg(windows)]
-        wake_event_loop();
+        let _ = send_daemon_event(
+            &self.sender,
+            DaemonEventMsg::SessionClosed {
+                session_id: session_id.to_string(),
+                exit_code,
+            },
+        );
     }
 
     fn on_process_changed(&self, session_id: &str, process_name: &str) {
-        let _ = self.sender.unbounded_send(DaemonEventMsg::ProcessChanged {
-            session_id: session_id.to_string(),
-            process_name: process_name.to_string(),
-        });
-        #[cfg(windows)]
-        wake_event_loop();
+        let _ = send_daemon_event(
+            &self.sender,
+            DaemonEventMsg::ProcessChanged {
+                session_id: session_id.to_string(),
+                process_name: process_name.to_string(),
+            },
+        );
     }
 
     fn on_grid_diff(&self, session_id: &str, _diff_bytes: &[u8]) {
         // Grid diffs trigger a terminal output event so the app fetches a fresh snapshot.
-        let _ = self.sender.unbounded_send(DaemonEventMsg::TerminalOutput {
-            session_id: session_id.to_string(),
-        });
-        #[cfg(windows)]
-        wake_event_loop();
+        let _ = send_daemon_event(
+            &self.sender,
+            DaemonEventMsg::TerminalOutput {
+                session_id: session_id.to_string(),
+            },
+        );
     }
 
     fn on_bell(&self, session_id: &str) {
-        let _ = self.sender.unbounded_send(DaemonEventMsg::Bell {
-            session_id: session_id.to_string(),
-        });
-        #[cfg(windows)]
-        wake_event_loop();
+        let _ = send_daemon_event(
+            &self.sender,
+            DaemonEventMsg::Bell {
+                session_id: session_id.to_string(),
+            },
+        );
     }
 }
 
@@ -363,6 +395,7 @@ pub fn mcp_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn channel_event_sink_sends_output() {
@@ -445,5 +478,19 @@ mod tests {
             }
             other => panic!("Expected TerminalOutput from grid_diff, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn run_blocking_with_wake_returns_success_result() {
+        let result = block_on(run_blocking_with_wake(|| Ok::<_, String>(42)));
+
+        assert_eq!(result, Ok(42));
+    }
+
+    #[test]
+    fn run_blocking_with_wake_returns_error_result() {
+        let result = block_on(run_blocking_with_wake(|| Err::<(), _>("boom".to_string())));
+
+        assert_eq!(result, Err("boom".to_string()));
     }
 }
