@@ -2153,23 +2153,11 @@ impl GodlyApp {
                     self.persist_scrollback_offsets();
                 }
                 if self.use_pixel_renderer && should_render {
-                    // Throttle ALL pixel renders to ~20fps to prevent
-                    // micro-blinking from rapid texture swaps.  The previous
-                    // throttle only applied when should_refetch=true, which
-                    // left heartbeat-driven renders (every 16ms) completely
-                    // unthrottled — any minor fingerprint change (cursor
-                    // blink, etc.) caused 60fps texture churn.
-                    let throttled = self
-                        .terminals
-                        .get(&session_id)
-                        .and_then(|t| t.last_render_at)
-                        .map_or(false, |t| t.elapsed().as_millis() < 50);
-                    if !throttled {
-                        self.render_terminal_image(&session_id);
-                        if let Some(term) = self.terminals.get_mut(&session_id) {
-                            term.last_render_at = Some(std::time::Instant::now());
-                        }
-                    }
+                    // With the Shader widget, pixel renders update the GPU
+                    // texture in-place (queue.write_texture) — no Handle ID
+                    // churn, so no blink.  The fingerprint check above is
+                    // sufficient to avoid redundant CPU work.
+                    self.render_terminal_image(&session_id);
                 }
                 if should_refetch {
                     return self.fetch_grid(&session_id);
@@ -4362,32 +4350,18 @@ impl GodlyApp {
                         }
                     }
                     // Recovery grid poll: safety net for when the daemon event
-                    // subscription is flaky or delayed.  Only poll terminals
-                    // that haven't been fetched recently (>200ms) to avoid
-                    // adding extra grid fetches during continuous output,
-                    // which bypass the render throttle and cause blinking.
+                    // subscription is flaky or delayed.  The `fetching` guard
+                    // in fetch_grid() prevents concurrent fetches.  With the
+                    // Shader widget, extra grid fetches no longer cause
+                    // blinking (in-place texture update, no Handle churn).
                     if is_actually_focused && self.client.is_some() {
-                        let now = std::time::Instant::now();
-                        let ids: Vec<String> = self
-                            .terminals
-                            .iter()
-                            .filter(|t| {
-                                !t.fetching
-                                    && t.last_render_at
-                                        .map_or(true, |lr| now.duration_since(lr).as_millis() > 200)
-                            })
-                            .map(|t| t.id.clone())
-                            .collect();
-                        if !ids.is_empty() {
-                            diag::log(&format!(
-                                "HEARTBEAT: recovery grid poll ({} idle terminals)",
-                                ids.len()
-                            ));
-                            let tasks: Vec<Task<Message>> =
-                                ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
-                            if !tasks.is_empty() {
-                                return Task::batch(tasks);
-                            }
+                        diag::log("HEARTBEAT: recovery grid poll");
+                        let ids: Vec<String> =
+                            self.terminals.iter().map(|t| t.id.clone()).collect();
+                        let tasks: Vec<Task<Message>> =
+                            ids.into_iter().map(|id| self.fetch_grid(&id)).collect();
+                        if !tasks.is_empty() {
+                            return Task::batch(tasks);
                         }
                     }
                 }
@@ -9992,9 +9966,13 @@ impl GodlyApp {
         );
 
         if w > 0 && h > 0 {
-            let handle = iced::widget::image::Handle::from_rgba(w, h, pixels.to_vec());
             if let Some(term) = self.terminals.get_mut(session_id) {
-                term.cached_image_handle = Some(handle);
+                term.cached_pixels =
+                    Some(godly_terminal_surface::shader_surface::CachedPixelBuffer {
+                        pixels: pixels.to_vec(),
+                        width: w,
+                        height: h,
+                    });
             }
         }
 
@@ -10237,17 +10215,21 @@ impl GodlyApp {
             ..container::Style::default()
         });
 
-        // Choose between pixel-rendered Image and canvas-based rendering.
+        // Choose between shader-rendered pixel surface and canvas-based rendering.
         let inner = if self.use_pixel_renderer {
-            if let Some(handle) = &term.cached_image_handle {
-                let img = iced::widget::image::Image::new(handle.clone())
+            if let Some(buf) = &term.cached_pixels {
+                let shader_prog =
+                    godly_terminal_surface::shader_surface::TerminalShaderProgram {
+                        pixels: buf.pixels.clone(),
+                        width: buf.width,
+                        height: buf.height,
+                    };
+                let shader_widget = iced::widget::Shader::new(shader_prog)
                     .width(Length::Fill)
-                    .height(Length::Fill)
-                    .content_fit(iced::ContentFit::Fill)
-                    .filter_method(iced::widget::image::FilterMethod::Nearest);
-                column![accent_bar, img]
+                    .height(Length::Fill);
+                column![accent_bar, shader_widget]
             } else {
-                // No cached handle yet — fall back to canvas
+                // No cached pixels yet — fall back to canvas
                 column![
                     accent_bar,
                     canvas(tc).width(Length::Fill).height(Length::Fill),

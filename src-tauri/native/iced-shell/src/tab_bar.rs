@@ -421,7 +421,6 @@ mod tests {
             dirty: false,
             fetching: false,
             needs_refetch: false,
-            last_render_at: None,
             rows: 24,
             cols: 80,
             exited: false,
@@ -432,7 +431,7 @@ mod tests {
             custom_name: None,
             worktree_path: None,
             is_clone: false,
-            cached_image_handle: None,
+            cached_pixels: None,
             last_grid_fingerprint: None,
         }
     }
