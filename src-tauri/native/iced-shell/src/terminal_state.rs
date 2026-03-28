@@ -32,8 +32,8 @@ pub struct TerminalInfo {
     pub worktree_path: Option<String>,
     /// Whether this terminal's worktree_path points to a clone (true) or a git worktree (false).
     pub is_clone: bool,
-    /// Cached pixel buffer for the shader-rendered terminal (None = needs render).
-    pub cached_pixels: Option<godly_terminal_surface::shader_surface::CachedPixelBuffer>,
+    /// Cached atlas render frame (vertex data + optional atlas update).
+    pub cached_frame: Option<godly_terminal_surface::atlas_shader::CachedAtlasFrame>,
     /// Fingerprint of the last rendered grid state. Used to skip redundant
     /// pixel renders when the grid content has not changed (e.g. heartbeat
     /// recovery polls fetching an identical snapshot).
@@ -379,7 +379,7 @@ impl TerminalCollection {
                 custom_name: None,
                 worktree_path: None,
                 is_clone: false,
-                cached_pixels: None,
+                cached_frame: None,
                 last_grid_fingerprint: None,
             },
         );

@@ -572,6 +572,8 @@ pub struct GodlyApp {
     glyph_rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
     /// Reusable pixel renderer (keeps buffer between frames to avoid reallocation).
     pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer,
+    /// GPU glyph atlas — packs rasterized glyphs into a persistent GPU texture.
+    glyph_atlas: godly_terminal_surface::glyph_atlas::GlyphAtlas,
     /// Whether to use the new image-based renderer instead of the canvas.
     use_pixel_renderer: bool,
     /// File pane states keyed by pane_id (e.g. "fp-<uuid>").
@@ -769,6 +771,15 @@ impl Default for GodlyApp {
                 }
             },
             pixel_renderer: godly_terminal_surface::pixel_renderer::PixelRenderer::new(),
+            glyph_atlas: {
+                let fm = measured_font_metrics(14.0, DEFAULT_FONT_FAMILY, 1.0);
+                let phys = fm.scaled_for_render();
+                godly_terminal_surface::glyph_atlas::GlyphAtlas::new(
+                    phys.cell_width,
+                    phys.cell_height,
+                    phys.baseline_offset,
+                )
+            },
             use_pixel_renderer: true,
             file_panes: HashMap::new(),
             scroll_accumulator: 0.0,
@@ -2679,6 +2690,7 @@ impl GodlyApp {
                         measured_font_metrics(self.font_metrics.font_size, &self.font_family, sf);
                     // Glyph cache entries were rasterized at the old DPI -- flush them.
                     self.glyph_cache.invalidate();
+                    self.glyph_atlas.invalidate();
                     self.glyph_rasterizer.set_scale_factor(sf);
                     self.rerender_all_terminal_images();
                     return self.resize_all_terminals();
@@ -4441,6 +4453,7 @@ impl GodlyApp {
                     }
                 }
                 self.glyph_cache.invalidate();
+                    self.glyph_atlas.invalidate();
                 self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
@@ -4462,6 +4475,7 @@ impl GodlyApp {
                     self.window_scale_factor,
                 );
                 self.glyph_cache.invalidate();
+                    self.glyph_atlas.invalidate();
                 self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
@@ -4475,6 +4489,7 @@ impl GodlyApp {
                 self.font_metrics =
                     measured_font_metrics(new_size, &self.font_family, self.window_scale_factor);
                 self.glyph_cache.invalidate();
+                    self.glyph_atlas.invalidate();
                 self.rerender_all_terminal_images();
                 return self.resize_all_terminals();
             }
@@ -9954,30 +9969,44 @@ impl GodlyApp {
         let default_fg = palette.foreground;
         let default_bg = palette.background;
 
-        let _t0 = std::time::Instant::now();
-        let (pixels, w, h) = self.pixel_renderer.render(
+        let phys = metrics.scaled_for_render();
+        let cols = grid_clone.dimensions.cols as u32;
+        let rows = grid_clone.dimensions.rows as u32;
+        let vw = (cols as f32 * phys.cell_width).ceil() as u32;
+        let vh = (rows as f32 * phys.cell_height).ceil() as u32;
+
+        if vw == 0 || vh == 0 {
+            return;
+        }
+
+        // Update atlas cell metrics (no-op if unchanged).
+        self.glyph_atlas.set_cell_metrics(
+            phys.cell_width,
+            phys.cell_height,
+            phys.baseline_offset,
+        );
+
+        let vertices = godly_terminal_surface::atlas_vertex_builder::build_vertices(
             &grid_clone,
+            &mut self.glyph_atlas,
             &metrics,
-            &mut self.glyph_cache,
             &mut *self.glyph_rasterizer,
             default_fg,
             default_bg,
-            None, // selection handled separately in view for now
+            vw,
+            vh,
         );
 
-        if w > 0 && h > 0 {
-            if let Some(term) = self.terminals.get_mut(session_id) {
-                term.cached_pixels =
-                    Some(godly_terminal_surface::shader_surface::CachedPixelBuffer {
-                        pixels: pixels.to_vec(),
-                        width: w,
-                        height: h,
-                    });
-            }
-        }
+        let atlas_update = self.glyph_atlas.take_dirty_data();
 
-        self.perf_stats
-            .record_render_stats(self.pixel_renderer.last_stats());
+        if let Some(term) = self.terminals.get_mut(session_id) {
+            term.cached_frame =
+                Some(godly_terminal_surface::atlas_shader::CachedAtlasFrame {
+                    vertices,
+                    atlas_update,
+                    viewport_size: (vw, vh),
+                });
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -10215,21 +10244,20 @@ impl GodlyApp {
             ..container::Style::default()
         });
 
-        // Choose between shader-rendered pixel surface and canvas-based rendering.
+        // Choose between GPU glyph atlas and canvas-based rendering.
         let inner = if self.use_pixel_renderer {
-            if let Some(buf) = &term.cached_pixels {
-                let shader_prog =
-                    godly_terminal_surface::shader_surface::TerminalShaderProgram {
-                        pixels: buf.pixels.clone(),
-                        width: buf.width,
-                        height: buf.height,
-                    };
-                let shader_widget = iced::widget::Shader::new(shader_prog)
+            if let Some(frame) = &term.cached_frame {
+                let program = godly_terminal_surface::atlas_shader::AtlasShaderProgram {
+                    vertices: frame.vertices.clone(),
+                    atlas_update: frame.atlas_update.clone(),
+                    viewport_size: frame.viewport_size,
+                };
+                let shader_widget = iced::widget::Shader::new(program)
                     .width(Length::Fill)
                     .height(Length::Fill);
                 column![accent_bar, shader_widget]
             } else {
-                // No cached pixels yet — fall back to canvas
+                // No cached frame yet — fall back to canvas
                 column![
                     accent_bar,
                     canvas(tc).width(Length::Fill).height(Length::Fill),
