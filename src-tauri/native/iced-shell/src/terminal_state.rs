@@ -16,10 +16,6 @@ pub struct TerminalInfo {
     /// in-flight. After `GridFetched` completes, this flag triggers a follow-up
     /// fetch so the coalesced output is not lost (prevents micro-blinking).
     pub needs_refetch: bool,
-    /// Timestamp of the last pixel render. Used to throttle renders to ~33fps
-    /// during continuous output, preventing micro-blinking from rapid texture swaps
-    /// while keeping the terminal responsive.
-    pub last_render_at: Option<std::time::Instant>,
     pub rows: u16,
     pub cols: u16,
     pub exited: bool,
@@ -36,8 +32,8 @@ pub struct TerminalInfo {
     pub worktree_path: Option<String>,
     /// Whether this terminal's worktree_path points to a clone (true) or a git worktree (false).
     pub is_clone: bool,
-    /// Cached image handle for the pixel-rendered terminal (None = needs render).
-    pub cached_image_handle: Option<iced::widget::image::Handle>,
+    /// Cached pixel buffer for the shader-rendered terminal (None = needs render).
+    pub cached_pixels: Option<godly_terminal_surface::shader_surface::CachedPixelBuffer>,
     /// Fingerprint of the last rendered grid state. Used to skip redundant
     /// pixel renders when the grid content has not changed (e.g. heartbeat
     /// recovery polls fetching an identical snapshot).
@@ -373,7 +369,6 @@ impl TerminalCollection {
                 dirty: false,
                 fetching: false,
                 needs_refetch: false,
-                last_render_at: None,
                 rows,
                 cols,
                 exited: false,
@@ -384,7 +379,7 @@ impl TerminalCollection {
                 custom_name: None,
                 worktree_path: None,
                 is_clone: false,
-                cached_image_handle: None,
+                cached_pixels: None,
                 last_grid_fingerprint: None,
             },
         );
