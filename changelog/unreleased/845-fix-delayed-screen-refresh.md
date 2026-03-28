@@ -1,3 +1,3 @@
 ### Fixed
 
-- **Delayed screen refresh** — Terminal output now renders immediately instead of batching at 100ms intervals. Added Win32 wake-up signal from bridge thread and adaptive heartbeat polling (16ms during output, 100ms idle). (#845)
+- **Delayed screen refresh** — Terminal output now renders immediately instead of waiting up to 1 second. Wake the iced event loop via Win32 `PostThreadMessageW` from both bridge I/O and grid-fetch threads, bypassing iced's unreliable internal waker. Reduced Win32 timer interval to 100ms as safety net. (#845)

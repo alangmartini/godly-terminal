@@ -32,9 +32,10 @@ pub fn init_waker() {
 pub fn init_waker() {}
 
 /// Post a WM_APP message to the main thread to wake winit's event loop.
-/// Called from the bridge I/O thread when daemon events arrive.
+/// Called from bridge I/O and grid-fetch threads so iced processes results
+/// immediately instead of waiting for the next WM_TIMER (up to 1 second).
 #[cfg(windows)]
-fn wake_event_loop() {
+pub fn wake_event_loop() {
     let tid = MAIN_THREAD_ID.load(std::sync::atomic::Ordering::Acquire);
     if tid != 0 {
         unsafe {

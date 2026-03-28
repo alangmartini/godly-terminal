@@ -8688,6 +8688,12 @@ impl GodlyApp {
                 std::thread::spawn(move || {
                     let result = commands::get_grid_snapshot(&client, &sid);
                     let _ = tx.send(result);
+                    // Wake the iced event loop so GridFetched is processed
+                    // immediately. Iced's internal Task waker doesn't reliably
+                    // post Win32 messages, so without this the result sits in
+                    // the queue until the next WM_TIMER (up to 1 second).
+                    #[cfg(windows)]
+                    crate::subscription::wake_event_loop();
                 });
                 rx.await
                     .unwrap_or_else(|_| Err("Background thread panicked".into()))
