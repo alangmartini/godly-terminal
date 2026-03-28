@@ -2037,12 +2037,22 @@ impl GodlyApp {
                 let mut should_refetch = false;
                 let mut should_render = true;
                 // Capture fingerprint before grid is moved into term.grid.
+                // Includes cursor row content length to detect in-place updates
+                // (e.g., progress bars, shell prompts) where the cursor position
+                // and scrollback don't change but cell content does.
+                let cursor_row_cells = grid
+                    .rows
+                    .get(grid.cursor.row as usize)
+                    .map_or(0, |r| r.cells.len());
                 let new_fingerprint = (
                     grid.total_scrollback,
                     grid.scrollback_offset,
                     grid.cursor.row,
                     grid.cursor.col,
                     grid.cursor_hidden,
+                    grid.rows.len(),
+                    cursor_row_cells,
+                    grid.alternate_screen,
                 );
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     if grid.scrollback_offset < term.scrollback_offset {
@@ -8381,6 +8391,8 @@ impl GodlyApp {
                                             )
                                             .map(|_| terminal_id);
                                             let _ = tx.send(result);
+                                            #[cfg(windows)]
+                                            crate::subscription::wake_event_loop();
                                         });
                                         rx.await.unwrap_or_else(|_| {
                                             Err("Background thread panicked".into())
@@ -8641,6 +8653,8 @@ impl GodlyApp {
                 std::thread::spawn(move || {
                     let result = commands::scroll_and_get_snapshot(&client, &sid, offset);
                     let _ = tx.send(result);
+                    #[cfg(windows)]
+                    crate::subscription::wake_event_loop();
                 });
                 rx.await
                     .unwrap_or_else(|_| Err("Background thread panicked".into()))
@@ -8761,6 +8775,8 @@ impl GodlyApp {
                     )
                     .map(|_| session_id);
                     let _ = tx.send(result);
+                    #[cfg(windows)]
+                    crate::subscription::wake_event_loop();
                 });
                 rx.await
                     .unwrap_or_else(|_| Err("Background thread panicked".into()))
@@ -8800,6 +8816,8 @@ impl GodlyApp {
                         )
                         .map(|_| (session_id, None::<String>));
                         let _ = tx.send(result);
+                        #[cfg(windows)]
+                        crate::subscription::wake_event_loop();
                         return;
                     }
 
@@ -8832,6 +8850,8 @@ impl GodlyApp {
                             let _ = tx.send(result);
                         }
                     }
+                    #[cfg(windows)]
+                    crate::subscription::wake_event_loop();
                 });
                 rx.await
                     .unwrap_or_else(|_| Err("Background thread panicked".into()))
@@ -11062,6 +11082,8 @@ pub fn initialize(app: &mut GodlyApp) -> Task<Message> {
             std::thread::spawn(move || {
                 let result = collect_init_result_sync(&client, rows, cols);
                 let _ = tx.send(result);
+                #[cfg(windows)]
+                crate::subscription::wake_event_loop();
             });
             rx.await
                 .unwrap_or_else(|_| Err("Background thread panicked".into()))
