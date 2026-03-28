@@ -74,6 +74,7 @@ pub struct TerminalPipeline {
     render_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    tex_format: wgpu::TextureFormat,
     texture: wgpu::Texture,
     #[allow(dead_code)]
     texture_view: wgpu::TextureView,
@@ -82,12 +83,27 @@ pub struct TerminalPipeline {
 }
 
 impl TerminalPipeline {
+    /// Pick the RGBA texture format that matches Iced's compositor sRGB mode.
+    /// Iced uses `Rgba8UnormSrgb` when `GAMMA_CORRECTION` is true (no
+    /// `web-colors` feature) and `Rgba8Unorm` when false (`web-colors`
+    /// enabled, which is the default).  Using the wrong variant causes a
+    /// colour shift because the sRGB→linear conversion on texture read is
+    /// not compensated by a matching linear→sRGB on framebuffer write.
+    fn rgba_format(compositor_format: wgpu::TextureFormat) -> wgpu::TextureFormat {
+        if compositor_format.is_srgb() {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        }
+    }
+
     fn create_texture(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
         width: u32,
         height: u32,
+        tex_format: wgpu::TextureFormat,
     ) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
         let w = width.max(1);
         let h = height.max(1);
@@ -101,7 +117,7 @@ impl TerminalPipeline {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: tex_format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -207,14 +223,17 @@ impl shader::Pipeline for TerminalPipeline {
             ..Default::default()
         });
 
+        let tex_format = Self::rgba_format(format);
+
         // 1x1 placeholder — resized on first prepare().
         let (texture, texture_view, bind_group) =
-            Self::create_texture(device, &bind_group_layout, &sampler, 1, 1);
+            Self::create_texture(device, &bind_group_layout, &sampler, 1, 1, tex_format);
 
         Self {
             render_pipeline,
             bind_group_layout,
             sampler,
+            tex_format,
             texture,
             texture_view,
             bind_group,
@@ -246,6 +265,7 @@ impl shader::Primitive for TerminalPrimitive {
                 &pipeline.sampler,
                 self.width,
                 self.height,
+                pipeline.tex_format,
             );
             pipeline.texture = tex;
             pipeline.texture_view = view;
