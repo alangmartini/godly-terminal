@@ -1897,6 +1897,8 @@ impl GodlyApp {
         match message {
             // --- Initialization ---
             Message::Initialized(Ok(result)) => {
+                // Capture HWND + install window-targeted timer ASAP.
+                crate::subscription::capture_hwnd();
                 return self.apply_init_result(result);
             }
             Message::Initialized(Err(e)) => {
@@ -1906,6 +1908,9 @@ impl GodlyApp {
 
             // --- Daemon events (channel-driven, no polling) ---
             Message::DaemonEvent(DaemonEventMsg::TerminalOutput { session_id }) => {
+                // Ensure window-targeted timer is installed (first output
+                // event means the window exists and subscription is alive).
+                crate::subscription::capture_hwnd();
                 self.last_daemon_event_at = Some(std::time::Instant::now());
                 if let Some(term) = self.terminals.get_mut(&session_id) {
                     // Already dirty + fetching → this event is redundant, skip all work.

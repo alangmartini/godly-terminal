@@ -81,6 +81,26 @@ pub fn capture_hwnd() {
         if !found.is_null() {
             log::info!("Captured main HWND for event-loop waker: {:?}", found);
             MAIN_WINDOW_HWND.store(found, Ordering::Release);
+
+            // Install a WINDOW-TARGETED timer. This is critical:
+            // SetTimer(NULL, ...) creates thread-level WM_TIMER messages that
+            // winit ignores (same as PostThreadMessageW). SetTimer(hwnd, ...)
+            // creates window-level WM_TIMER messages that winit processes,
+            // triggering subscription polling on every tick.
+            extern "system" {
+                fn SetTimer(
+                    hwnd: *mut std::ffi::c_void,
+                    id: usize,
+                    elapse: u32,
+                    callback: *const std::ffi::c_void,
+                ) -> usize;
+            }
+            let result = SetTimer(found, 1, 50, std::ptr::null());
+            log::info!(
+                "Installed window-targeted timer (50ms) on HWND {:?}, result={}",
+                found,
+                result
+            );
         }
     }
 }
