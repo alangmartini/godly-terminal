@@ -1,7 +1,10 @@
+mod event_bus;
+
+use event_bus::{AsyncEvent, EventSender};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId},
 };
 use wgpu::SurfaceTargetUnsafe;
@@ -17,11 +20,13 @@ struct GpuState {
 struct App {
     window: Option<Arc<Window>>,
     gpu: Option<GpuState>,
+    proxy: EventLoopProxy<AsyncEvent>,
+    heartbeat_started: bool,
 }
 
 impl App {
-    fn new() -> Self {
-        Self { window: None, gpu: None }
+    fn new(proxy: EventLoopProxy<AsyncEvent>) -> Self {
+        Self { window: None, gpu: None, proxy, heartbeat_started: false }
     }
 
     fn init_gpu(&mut self, window: Arc<Window>) {
@@ -121,7 +126,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<AsyncEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() { return; }
         let attrs = WindowAttributes::default()
@@ -132,6 +137,27 @@ impl ApplicationHandler for App {
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.init_gpu(window);
+
+        // Spawn heartbeat thread to keep event loop alive during minimize
+        if !self.heartbeat_started {
+            self.heartbeat_started = true;
+            let sender = EventSender::new(self.proxy.clone());
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    sender.send(AsyncEvent::Heartbeat);
+                }
+            });
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AsyncEvent) {
+        match event {
+            AsyncEvent::Heartbeat => {
+                if let Some(w) = &self.window { w.request_redraw(); }
+            }
+            _ => { log::debug!("Async event: {event:?}"); }
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -159,8 +185,9 @@ impl ApplicationHandler for App {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::<AsyncEvent>::with_user_event().build().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-    let mut app = App::new();
+    let proxy = event_loop.create_proxy();
+    let mut app = App::new(proxy);
     event_loop.run_app(&mut app).unwrap();
 }
