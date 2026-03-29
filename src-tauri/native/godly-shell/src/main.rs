@@ -1,5 +1,6 @@
 mod daemon_bridge;
 mod event_bus;
+mod selection;
 mod terminal_renderer;
 
 use std::sync::Arc;
@@ -43,6 +44,9 @@ struct App {
     current_grid: Option<RichGridData>,
     modifiers: winit::event::Modifiers,
     sender: Option<EventSender>,
+    selection: selection::SelectionState,
+    scrollback_offset: usize,
+    mouse_position: Option<(f64, f64)>,
 }
 
 impl App {
@@ -58,6 +62,9 @@ impl App {
             current_grid: None,
             modifiers: winit::event::Modifiers::default(),
             sender: None,
+            selection: selection::SelectionState::default(),
+            scrollback_offset: 0,
+            mouse_position: None,
         }
     }
 
@@ -204,6 +211,57 @@ impl App {
                 }
             }
         });
+    }
+
+    fn pixel_to_grid(&self, x: f64, y: f64) -> godly_terminal_surface::GridPos {
+        if let Some(renderer) = &self.renderer {
+            let phys = renderer.font_metrics().scaled_for_render();
+            let col = (x as f32 / phys.cell_width).floor() as usize;
+            let row = (y as f32 / phys.cell_height).floor() as usize;
+            godly_terminal_surface::GridPos { row, col }
+        } else {
+            godly_terminal_surface::GridPos { row: 0, col: 0 }
+        }
+    }
+
+    fn scroll(&mut self, delta: isize) {
+        let new_offset = (self.scrollback_offset as isize + delta).max(0) as usize;
+        if new_offset == self.scrollback_offset { return; }
+        self.scrollback_offset = new_offset;
+
+        let Some(daemon) = &self.daemon else { return };
+        let Some(session_id) = &self.active_session else { return };
+        let Some(sender) = &self.sender else { return };
+
+        let daemon = Arc::clone(daemon);
+        let session_id = session_id.clone();
+        let sender = sender.clone();
+        let offset = self.scrollback_offset;
+
+        std::thread::spawn(move || {
+            match daemon.send_request(&Request::ScrollAndReadRichGrid {
+                session_id: session_id.clone(),
+                offset,
+            }) {
+                Ok(Response::RichGrid { grid }) => {
+                    sender.send(AsyncEvent::GridFetched {
+                        session_id,
+                        grid: Box::new(grid),
+                    });
+                }
+                _ => {}
+            }
+        });
+    }
+
+    fn copy_selection(&mut self) {
+        if !self.selection.has_selection() { return; }
+        let Some(grid) = &self.current_grid else { return };
+        let text = self.selection.selected_text(grid);
+        if text.is_empty() { return; }
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            let _ = clipboard.set_text(&text);
+        }
     }
 
     fn send_key_input(&self, bytes: Vec<u8>) {
@@ -381,6 +439,41 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             WindowEvent::ModifiersChanged(mods) => {
                 self.modifiers = mods;
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_position = Some((position.x, position.y));
+                if self.selection.active {
+                    let pos = self.pixel_to_grid(position.x, position.y);
+                    self.selection.update(pos);
+                    if let Some(w) = &self.window { w.request_redraw(); }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                use winit::event::MouseButton;
+                if button == MouseButton::Left {
+                    if let Some((x, y)) = self.mouse_position {
+                        let pos = self.pixel_to_grid(x, y);
+                        match state {
+                            ElementState::Pressed => {
+                                self.selection.start(pos);
+                                if let Some(w) = &self.window { w.request_redraw(); }
+                            }
+                            ElementState::Released => {
+                                self.selection.finish();
+                                self.copy_selection();
+                            }
+                        }
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => -y as isize * 3,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as isize,
+                };
+                if lines != 0 {
+                    self.scroll(lines);
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
