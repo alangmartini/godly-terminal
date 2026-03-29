@@ -4,7 +4,7 @@
 /// Users expect Shift+Home/End to navigate viewport like standard terminal emulators.
 /// After #181 unbound plain Home/End from scroll, no Shift-based alternative was added.
 use godly_app_adapter::shortcuts::{check_app_shortcut, AppAction};
-use iced::keyboard::{key::Named, Key, Modifiers};
+use godly_app_adapter::keyboard::{Key, Modifiers, Named};
 
 fn named_key(n: Named) -> Key {
     Key::Named(n)
