@@ -22,6 +22,7 @@ pub fn render_layout(
     match node {
         LayoutNode::Leaf { terminal_id } => {
             if let (Some(grid), Some(renderer)) = (grids.get(terminal_id), renderers.get_mut(terminal_id)) {
+                // TODO: need full viewport dimensions for proper split rendering
                 renderer.render(
                     device,
                     queue,
@@ -29,6 +30,8 @@ pub fn render_layout(
                     grid,
                     rect.width as u32,
                     rect.height as u32,
+                    rect.x,
+                    rect.y,
                 );
             }
         }

@@ -184,6 +184,9 @@ impl App {
                 }
 
                 self.daemon = Some(client);
+
+                // Initial grid fetch — the shell prompt may have been sent before the bridge was ready
+                self.fetch_grid();
             }
             Err(e) => {
                 log::error!("Failed to connect to daemon: {e}");
@@ -194,8 +197,11 @@ impl App {
     fn terminal_size(&self) -> (u16, u16) {
         if let (Some(gpu), Some(renderer)) = (&self.gpu, &self.renderer) {
             let metrics = renderer.font_metrics().scaled_for_render();
-            let cols = (gpu.config.width as f32 / metrics.cell_width).floor() as u16;
-            let rows = (gpu.config.height as f32 / metrics.cell_height).floor() as u16;
+            let vw = gpu.config.width as f32;
+            let vh = gpu.config.height as f32;
+            let layout = ui::layout::ShellLayout::compute(vw, vh);
+            let cols = (layout.terminal.width / metrics.cell_width).floor() as u16;
+            let rows = (layout.terminal.height / metrics.cell_height).floor() as u16;
             (rows.max(1), cols.max(1))
         } else {
             (24, 80)
@@ -310,16 +316,26 @@ impl App {
     }
 
     fn send_key_input(&self, bytes: Vec<u8>) {
-        let Some(daemon) = &self.daemon else { return };
-        let Some(session_id) = &self.active_session else { return };
+        let Some(daemon) = &self.daemon else {
+            log::warn!("send_key_input: no daemon");
+            return;
+        };
+        let Some(session_id) = &self.active_session else {
+            log::warn!("send_key_input: no active session");
+            return;
+        };
 
+        log::debug!("Sending {} bytes to PTY: {:?}", bytes.len(), String::from_utf8_lossy(&bytes));
         let daemon = Arc::clone(daemon);
         let session_id = session_id.clone();
         std::thread::spawn(move || {
-            let _ = daemon.send_request(&Request::Write {
+            match daemon.send_request(&Request::Write {
                 session_id,
                 data: bytes,
-            });
+            }) {
+                Ok(_) => {}
+                Err(e) => log::error!("Write to PTY failed: {e}"),
+            }
         });
     }
 
@@ -391,8 +407,10 @@ impl App {
                         &gpu.queue,
                         &mut pass,
                         grid,
-                        layout.terminal.width as u32,
-                        layout.terminal.height as u32,
+                        gpu.config.width,
+                        gpu.config.height,
+                        layout.terminal.x,
+                        layout.terminal.y,
                     );
                 }
             }
@@ -438,14 +456,30 @@ impl ApplicationHandler<AsyncEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AsyncEvent) {
         match event {
             AsyncEvent::Heartbeat => {
+                // Re-fetch grid periodically to catch output we missed
+                if self.active_session.is_some() {
+                    self.fetch_grid();
+                }
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
             }
             AsyncEvent::TerminalOutput { .. } => {
+                log::debug!("TerminalOutput event — fetching grid");
                 self.fetch_grid();
             }
             AsyncEvent::GridFetched { grid, .. } => {
+                // Log first row content for debugging
+                if let Some(row) = grid.rows.first() {
+                    let text: String = row.cells.iter().map(|c| c.content.as_str()).collect();
+                    let trimmed = text.trim_end();
+                    if !trimmed.is_empty() {
+                        log::info!("GridFetched: {}x{}, first row: {:?}",
+                            grid.dimensions.cols, grid.dimensions.rows, &trimmed[..trimmed.len().min(80)]);
+                    } else {
+                        log::info!("GridFetched: {}x{}, first row empty", grid.dimensions.cols, grid.dimensions.rows);
+                    }
+                }
                 self.current_grid = Some(*grid);
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -666,7 +700,7 @@ impl ApplicationHandler<AsyncEvent> for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Only redraw on demand (event-driven), not continuously
+        if let Some(w) = &self.window { w.request_redraw(); }
     }
 }
 

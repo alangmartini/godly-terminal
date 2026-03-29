@@ -57,6 +57,9 @@ impl CellVertex {
 }
 
 /// Build the vertex buffer for one terminal frame.
+///
+/// `viewport_w`/`viewport_h` are the full window dimensions (for clip-space mapping).
+/// `offset_x`/`offset_y` shift the terminal content within the window (in pixels).
 pub fn build_vertices(
     grid: &RichGridData,
     atlas: &mut GlyphAtlas,
@@ -66,6 +69,8 @@ pub fn build_vertices(
     default_bg: Color,
     viewport_w: u32,
     viewport_h: u32,
+    offset_x: f32,
+    offset_y: f32,
 ) -> Vec<CellVertex> {
     let phys = metrics.scaled_for_render();
     let cell_w = phys.cell_width;
@@ -99,9 +104,9 @@ pub fn build_vertices(
                 fg = brighten_color(fg);
             }
 
-            // --- pixel position (physical) ---
-            let px = (col_idx as f32 * cell_w).round();
-            let py = (row_idx as f32 * cell_h).round();
+            // --- pixel position (physical, offset by chrome) ---
+            let px = (col_idx as f32 * cell_w).round() + offset_x;
+            let py = (row_idx as f32 * cell_h).round() + offset_y;
             let pw = if cell.wide {
                 ((col_idx + 2) as f32 * cell_w).round() - px
             } else {
