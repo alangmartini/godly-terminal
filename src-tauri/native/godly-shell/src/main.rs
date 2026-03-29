@@ -57,6 +57,7 @@ struct App {
     quad_pipeline: Option<ui::quad_renderer::QuadPipeline>,
     title_bar: ui::title_bar::TitleBar,
     tab_bar: ui::tab_bar::TabBar,
+    sidebar: ui::sidebar::Sidebar,
     status_bar: ui::status_bar::StatusBar,
 }
 
@@ -79,6 +80,7 @@ impl App {
             quad_pipeline: None,
             title_bar: ui::title_bar::TitleBar::new(),
             tab_bar: ui::tab_bar::TabBar::new(),
+            sidebar: ui::sidebar::Sidebar::new(),
             status_bar: ui::status_bar::StatusBar::new(),
         }
     }
@@ -213,7 +215,7 @@ impl App {
             let metrics = renderer.font_metrics().scaled_for_render();
             let vw = gpu.config.width as f32;
             let vh = gpu.config.height as f32;
-            let layout = ui::layout::ShellLayout::compute(vw, vh);
+            let layout = ui::layout::ShellLayout::compute(vw, vh, true);
             let cols = (layout.terminal.width / metrics.cell_width).floor() as u16;
             let rows = (layout.terminal.height / metrics.cell_height).floor() as u16;
             (rows.max(1), cols.max(1))
@@ -379,7 +381,7 @@ impl App {
         // Prepare terminal data BEFORE starting the render pass
         let vw = gpu.config.width as f32;
         let vh = gpu.config.height as f32;
-        let layout = ui::layout::ShellLayout::compute(vw, vh);
+        let layout = ui::layout::ShellLayout::compute(vw, vh, true);
 
         if let Some(grid) = &self.current_grid {
             if let Some(renderer) = &mut self.renderer {
@@ -417,13 +419,16 @@ impl App {
                 occlusion_query_set: None,
             });
 
-            // Build UI chrome quads
-            let mut quads = Vec::new();
-            quads.extend_from_slice(&self.title_bar.build_quads(layout.title_bar, vw, vh));
-            quads.extend_from_slice(&self.tab_bar.build_quads(layout.tab_bar, vw, vh));
-            quads.extend_from_slice(&self.status_bar.build_quads(layout.status_bar, vw, vh));
+            // Build UI chrome via UiBuilder
+            let ui_text = ui::builder::UiTextRenderer::new(8.0, 16.0);
+            let mut ui = ui::builder::UiBuilder::new(vw, vh);
+            self.title_bar.build(&mut ui, layout.title_bar, &ui_text);
+            self.tab_bar.build(&mut ui, layout.tab_bar, &ui_text);
+            self.sidebar.build(&mut ui, layout.sidebar, &ui_text);
+            self.status_bar.build(&mut ui, layout.status_bar, &ui_text);
+            let (quads, _text_verts) = ui.finish();
 
-            // Draw chrome
+            // Draw chrome quads
             if let Some(quad_pipe) = &mut self.quad_pipeline {
                 quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &quads);
             }
@@ -464,7 +469,7 @@ impl ApplicationHandler<AsyncEvent> for App {
             self.heartbeat_started = true;
             let hb_sender = sender.clone();
             std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
+                std::thread::sleep(std::time::Duration::from_millis(50));
                 hb_sender.send(AsyncEvent::Heartbeat);
             });
         }
@@ -559,12 +564,13 @@ impl ApplicationHandler<AsyncEvent> for App {
                 let (px, py) = (position.x as f32, position.y as f32);
                 let gpu = self.gpu.as_ref();
                 let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                let layout = ui::layout::ShellLayout::compute(vw, vh);
+                let layout = ui::layout::ShellLayout::compute(vw, vh, true);
 
                 // Route mouse to UI chrome
                 let me = ui::widget::MouseEvent::Move { x: px, y: py };
                 self.title_bar.on_mouse(me, layout.title_bar);
                 self.tab_bar.on_mouse(me, layout.tab_bar);
+                self.sidebar.on_mouse(me, layout.sidebar);
 
                 // Selection drag in terminal area
                 if self.selection.active && layout.terminal.contains(px, py) {
@@ -583,7 +589,7 @@ impl ApplicationHandler<AsyncEvent> for App {
                         let (px, py) = (x as f32, y as f32);
                         let gpu = self.gpu.as_ref();
                         let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                        let layout = ui::layout::ShellLayout::compute(vw, vh);
+                        let layout = ui::layout::ShellLayout::compute(vw, vh, true);
 
                         if state == ElementState::Pressed {
                             // Check title bar first

@@ -1,9 +1,7 @@
 //! Status bar: process name, cwd, terminal dimensions.
 
-use super::quad_renderer::{quad_vertices, QuadVertex};
+use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::Rect;
-
-const BG_COLOR: [f32; 4] = [0.09, 0.09, 0.11, 1.0];
 
 pub struct StatusBar {
     pub process_name: String,
@@ -18,9 +16,36 @@ impl StatusBar {
         }
     }
 
-    pub fn build_quads(&self, bar: Rect, vw: f32, vh: f32) -> Vec<QuadVertex> {
-        let mut verts = Vec::new();
-        verts.extend_from_slice(&quad_vertices(bar.x, bar.y, bar.width, bar.height, vw, vh, BG_COLOR));
-        verts
+    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
+        // Background
+        ui.fill(bar, colors::BG_BASE);
+
+        // Top separator line
+        ui.hline(bar.x, bar.y, bar.width, 1.0, colors::BG_SURFACE);
+
+        // Process name (left-aligned)
+        if !self.process_name.is_empty() {
+            ui.text(
+                text,
+                &self.process_name,
+                bar.x + 8.0,
+                bar.y + 4.0,
+                colors::FG_MUTED,
+                colors::TRANSPARENT,
+            );
+        }
+
+        // Terminal dimensions (right-aligned)
+        let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
+        // Approximate right alignment: each char ~8px wide
+        let dims_width = dims.len() as f32 * 8.0;
+        ui.text(
+            text,
+            &dims,
+            bar.right() - dims_width - 8.0,
+            bar.y + 4.0,
+            colors::FG_MUTED,
+            colors::TRANSPARENT,
+        );
     }
 }

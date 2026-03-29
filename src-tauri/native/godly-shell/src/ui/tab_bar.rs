@@ -1,11 +1,8 @@
 //! Tab bar: horizontal row of tab buttons.
 
-use super::quad_renderer::{quad_vertices, QuadVertex};
+use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
-const BG_COLOR: [f32; 4] = [0.09, 0.09, 0.11, 1.0];
-const ACTIVE_TAB_COLOR: [f32; 4] = [0.16, 0.16, 0.19, 1.0];
-const HOVER_TAB_COLOR: [f32; 4] = [0.13, 0.13, 0.16, 1.0];
 const TAB_WIDTH: f32 = 160.0;
 const TAB_PADDING: f32 = 4.0;
 
@@ -34,26 +31,36 @@ impl TabBar {
         }
     }
 
-    pub fn build_quads(&self, bar: Rect, vw: f32, vh: f32) -> Vec<QuadVertex> {
-        let mut verts = Vec::new();
-
+    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
         // Background
-        verts.extend_from_slice(&quad_vertices(bar.x, bar.y, bar.width, bar.height, vw, vh, BG_COLOR));
+        ui.fill(bar, colors::BG_BASE);
 
-        // Tab backgrounds
+        // Tab backgrounds and labels
         for (i, tab) in self.tabs.iter().enumerate() {
             let rect = self.tab_rect(i, bar);
             let color = if tab.active {
-                ACTIVE_TAB_COLOR
+                colors::BG_ACTIVE
             } else if self.hovered_tab == Some(i) {
-                HOVER_TAB_COLOR
+                colors::BG_RAISED
             } else {
-                continue; // No background for inactive non-hovered tabs
+                colors::BG_BASE
             };
-            verts.extend_from_slice(&quad_vertices(rect.x, rect.y, rect.width, rect.height, vw, vh, color));
-        }
+            ui.fill(rect, color);
 
-        verts
+            // Active tab accent indicator (bottom edge)
+            if tab.active {
+                ui.hline(rect.x, rect.bottom() - 2.0, rect.width, 2.0, colors::ACCENT_BLUE);
+            }
+
+            // Tab title text (truncate to 20 chars with ellipsis)
+            let fg = if tab.active { colors::FG_PRIMARY } else { colors::FG_SECONDARY };
+            if tab.title.len() > 20 {
+                let truncated = format!("{}\u{2026}", &tab.title[..19]);
+                ui.text(text, &truncated, rect.x + 8.0, rect.y + 4.0, fg, colors::TRANSPARENT);
+            } else {
+                ui.text(text, &tab.title, rect.x + 8.0, rect.y + 4.0, fg, colors::TRANSPARENT);
+            }
+        }
     }
 
     pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect) -> Option<UiAction> {

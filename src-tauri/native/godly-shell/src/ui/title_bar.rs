@@ -1,12 +1,10 @@
 //! Title bar: drag-to-move, window title, min/max/close buttons.
 
-use super::quad_renderer::{quad_vertices, QuadVertex};
+use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
-const BG_COLOR: [f32; 4] = [0.12, 0.12, 0.14, 1.0];
-const CLOSE_HOVER: [f32; 4] = [0.9, 0.2, 0.2, 1.0];
-const BUTTON_HOVER: [f32; 4] = [0.25, 0.25, 0.28, 1.0];
 const BUTTON_WIDTH: f32 = 46.0;
+const ICON_LINE_T: f32 = 1.2;
 
 pub struct TitleBar {
     pub hovered_button: Option<TitleButton>,
@@ -50,21 +48,43 @@ impl TitleBar {
         ]
     }
 
-    pub fn build_quads(&self, bar: Rect, vw: f32, vh: f32) -> Vec<QuadVertex> {
-        let mut verts = Vec::new();
-
+    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
         // Title bar background
-        verts.extend_from_slice(&quad_vertices(bar.x, bar.y, bar.width, bar.height, vw, vh, BG_COLOR));
+        ui.fill(bar, colors::BG_RAISED);
 
-        // Button hover highlights
+        // Button hover highlights and icons
         for (rect, btn) in &self.button_rects(bar) {
-            if self.hovered_button == Some(*btn) {
-                let color = if *btn == TitleButton::Close { CLOSE_HOVER } else { BUTTON_HOVER };
-                verts.extend_from_slice(&quad_vertices(rect.x, rect.y, rect.width, rect.height, vw, vh, color));
+            let hovered = self.hovered_button == Some(*btn);
+            if hovered {
+                let color = if *btn == TitleButton::Close {
+                    colors::ACCENT_RED
+                } else {
+                    colors::BG_HOVER
+                };
+                ui.fill(*rect, color);
+            }
+
+            let icon_color = if hovered && *btn == TitleButton::Close {
+                colors::WHITE
+            } else {
+                colors::FG_SECONDARY
+            };
+            match btn {
+                TitleButton::Minimize => ui.icon_minimize(*rect, 10.0, ICON_LINE_T, icon_color),
+                TitleButton::Maximize => ui.icon_maximize(*rect, 9.0, ICON_LINE_T, icon_color),
+                TitleButton::Close => ui.icon_x(*rect, 9.0, ICON_LINE_T, icon_color),
             }
         }
 
-        verts
+        // Title text
+        ui.text(
+            text,
+            "Godly Terminal",
+            bar.x + 12.0,
+            bar.y + (bar.height - 14.0) / 2.0,
+            colors::FG_SECONDARY,
+            colors::TRANSPARENT,
+        );
     }
 
     pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect) -> Option<UiAction> {
