@@ -2,6 +2,7 @@ mod daemon_bridge;
 mod event_bus;
 mod selection;
 mod terminal_renderer;
+mod ui;
 
 use std::sync::Arc;
 
@@ -47,6 +48,10 @@ struct App {
     selection: selection::SelectionState,
     scrollback_offset: usize,
     mouse_position: Option<(f64, f64)>,
+    quad_pipeline: Option<ui::quad_renderer::QuadPipeline>,
+    title_bar: ui::title_bar::TitleBar,
+    tab_bar: ui::tab_bar::TabBar,
+    status_bar: ui::status_bar::StatusBar,
 }
 
 impl App {
@@ -65,6 +70,10 @@ impl App {
             selection: selection::SelectionState::default(),
             scrollback_offset: 0,
             mouse_position: None,
+            quad_pipeline: None,
+            title_bar: ui::title_bar::TitleBar::new(),
+            tab_bar: ui::tab_bar::TabBar::new(),
+            status_bar: ui::status_bar::StatusBar::new(),
         }
     }
 
@@ -125,6 +134,7 @@ impl App {
         let rasterizer = create_rasterizer();
         let renderer = TerminalRenderer::new(&device, &queue, format, font_metrics, rasterizer);
         self.renderer = Some(renderer);
+        self.quad_pipeline = Some(ui::quad_renderer::QuadPipeline::new(&device, format));
 
         self.gpu = Some(GpuState {
             surface,
@@ -264,6 +274,35 @@ impl App {
         }
     }
 
+    fn handle_ui_action(&self, action: ui::widget::UiAction) {
+        match action {
+            ui::widget::UiAction::CloseWindow => {
+                // Handled by the event loop
+            }
+            ui::widget::UiAction::MinimizeWindow => {
+                if let Some(w) = &self.window {
+                    w.set_minimized(true);
+                }
+            }
+            ui::widget::UiAction::MaximizeWindow => {
+                if let Some(w) = &self.window {
+                    w.set_maximized(!w.is_maximized());
+                }
+            }
+            ui::widget::UiAction::DragWindow => {
+                if let Some(w) = &self.window {
+                    let _ = w.drag_window();
+                }
+            }
+            ui::widget::UiAction::SwitchTab(id) => {
+                log::info!("Switch to tab: {id}");
+            }
+            ui::widget::UiAction::NewTab | ui::widget::UiAction::CloseTab(_) => {
+                // TODO: implement tab management
+            }
+        }
+    }
+
     fn send_key_input(&self, bytes: Vec<u8>) {
         let Some(daemon) = &self.daemon else { return };
         let Some(session_id) = &self.active_session else { return };
@@ -323,7 +362,22 @@ impl App {
                 occlusion_query_set: None,
             });
 
-            // Render terminal grid if available
+            let vw = gpu.config.width as f32;
+            let vh = gpu.config.height as f32;
+            let layout = ui::layout::ShellLayout::compute(vw, vh);
+
+            // Build UI chrome quads
+            let mut quads = Vec::new();
+            quads.extend_from_slice(&self.title_bar.build_quads(layout.title_bar, vw, vh));
+            quads.extend_from_slice(&self.tab_bar.build_quads(layout.tab_bar, vw, vh));
+            quads.extend_from_slice(&self.status_bar.build_quads(layout.status_bar, vw, vh));
+
+            // Draw chrome
+            if let Some(quad_pipe) = &mut self.quad_pipeline {
+                quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &quads);
+            }
+
+            // Render terminal grid in the terminal area
             if let Some(grid) = &self.current_grid {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.render(
@@ -331,8 +385,8 @@ impl App {
                         &gpu.queue,
                         &mut pass,
                         grid,
-                        gpu.config.width,
-                        gpu.config.height,
+                        layout.terminal.width as u32,
+                        layout.terminal.height as u32,
                     );
                 }
             }
@@ -442,25 +496,63 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Some((position.x, position.y));
-                if self.selection.active {
-                    let pos = self.pixel_to_grid(position.x, position.y);
+                let (px, py) = (position.x as f32, position.y as f32);
+                let gpu = self.gpu.as_ref();
+                let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
+                let layout = ui::layout::ShellLayout::compute(vw, vh);
+
+                // Route mouse to UI chrome
+                let me = ui::widget::MouseEvent::Move { x: px, y: py };
+                self.title_bar.on_mouse(me, layout.title_bar);
+                self.tab_bar.on_mouse(me, layout.tab_bar);
+
+                // Selection drag in terminal area
+                if self.selection.active && layout.terminal.contains(px, py) {
+                    let pos = self.pixel_to_grid(
+                        (px - layout.terminal.x) as f64,
+                        (py - layout.terminal.y) as f64,
+                    );
                     self.selection.update(pos);
-                    if let Some(w) = &self.window { w.request_redraw(); }
                 }
+                if let Some(w) = &self.window { w.request_redraw(); }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 use winit::event::MouseButton;
                 if button == MouseButton::Left {
                     if let Some((x, y)) = self.mouse_position {
-                        let pos = self.pixel_to_grid(x, y);
-                        match state {
-                            ElementState::Pressed => {
-                                self.selection.start(pos);
-                                if let Some(w) = &self.window { w.request_redraw(); }
+                        let (px, py) = (x as f32, y as f32);
+                        let gpu = self.gpu.as_ref();
+                        let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
+                        let layout = ui::layout::ShellLayout::compute(vw, vh);
+
+                        if state == ElementState::Pressed {
+                            // Check title bar first
+                            let me = ui::widget::MouseEvent::Press { x: px, y: py };
+                            if let Some(action) = self.title_bar.on_mouse(me, layout.title_bar) {
+                                self.handle_ui_action(action);
+                                return;
                             }
-                            ElementState::Released => {
-                                self.selection.finish();
-                                self.copy_selection();
+                            if let Some(action) = self.tab_bar.on_mouse(me, layout.tab_bar) {
+                                self.handle_ui_action(action);
+                                return;
+                            }
+                        }
+
+                        // Terminal area selection
+                        if layout.terminal.contains(px, py) {
+                            let pos = self.pixel_to_grid(
+                                (px - layout.terminal.x) as f64,
+                                (py - layout.terminal.y) as f64,
+                            );
+                            match state {
+                                ElementState::Pressed => {
+                                    self.selection.start(pos);
+                                    if let Some(w) = &self.window { w.request_redraw(); }
+                                }
+                                ElementState::Released => {
+                                    self.selection.finish();
+                                    self.copy_selection();
+                                }
                             }
                         }
                     }
