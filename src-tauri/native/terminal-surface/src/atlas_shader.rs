@@ -61,51 +61,37 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return out;
 }
 
-// sRGB ↔ linear conversion (matches CSS/GPU sRGB transfer function).
-fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 {
-        return c / 12.92;
-    }
-    return pow((c + 0.055) / 1.055, 2.4);
-}
+// ClearType-style gamma blending with enhanced contrast.
+//
+// Windows ClearType uses gamma 1.8 (not sRGB 2.2) and an "enhanced contrast"
+// parameter (default 0.5) that boosts mid-range coverage values to produce
+// heavier, more readable text — especially on dark backgrounds.  These are
+// the same parameters DirectWrite's IDWriteRenderingParams exposes.
+const GAMMA: f32 = 1.8;
+const INV_GAMMA: f32 = 0.5556; // 1.0 / 1.8
+const ENHANCED_CONTRAST: f32 = 1.0;
 
-fn linear_to_srgb(c: f32) -> f32 {
-    if c <= 0.0031308 {
-        return c * 12.92;
-    }
-    return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+// Boost coverage using DirectWrite's enhanced contrast formula.
+fn enhance(c: f32) -> f32 {
+    return clamp(c + ENHANCED_CONTRAST * c * (1.0 - c), 0.0, 1.0);
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let coverage = textureSample(atlas_tex, atlas_samp, input.uv);
+    let raw = textureSample(atlas_tex, atlas_samp, input.uv);
 
-    // Convert fg/bg from sRGB to linear for correct blending.
-    let fg_lin = vec3<f32>(
-        srgb_to_linear(input.fg_color.r),
-        srgb_to_linear(input.fg_color.g),
-        srgb_to_linear(input.fg_color.b),
-    );
-    let bg_lin = vec3<f32>(
-        srgb_to_linear(input.bg_color.r),
-        srgb_to_linear(input.bg_color.g),
-        srgb_to_linear(input.bg_color.b),
-    );
+    // Apply enhanced contrast to boost text weight.
+    let coverage = vec3<f32>(enhance(raw.r), enhance(raw.g), enhance(raw.b));
+
+    // Linearise fg/bg using ClearType gamma (1.8).
+    let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
+    let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
 
     // Per-channel subpixel blending in linear space.
-    let blended = vec3<f32>(
-        mix(bg_lin.r, fg_lin.r, coverage.r),
-        mix(bg_lin.g, fg_lin.g, coverage.g),
-        mix(bg_lin.b, fg_lin.b, coverage.b),
-    );
+    let blended = mix(bg_lin, fg_lin, coverage);
 
-    // Convert back to sRGB for the framebuffer.
-    return vec4<f32>(
-        linear_to_srgb(blended.r),
-        linear_to_srgb(blended.g),
-        linear_to_srgb(blended.b),
-        1.0,
-    );
+    // Back to gamma space.
+    return vec4<f32>(pow(blended, vec3<f32>(INV_GAMMA)), 1.0);
 }
 "#;
 
