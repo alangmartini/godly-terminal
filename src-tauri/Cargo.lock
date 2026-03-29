@@ -2102,11 +2102,17 @@ dependencies = [
 name = "godly-shell"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "env_logger",
+ "godly-app-adapter",
+ "godly-protocol",
+ "godly-terminal-surface",
  "log",
  "pollster",
  "raw-window-handle",
+ "uuid",
  "wgpu",
+ "windows 0.58.0",
  "winit",
 ]
 

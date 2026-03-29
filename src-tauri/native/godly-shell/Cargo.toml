@@ -14,3 +14,14 @@ pollster = "0.4"
 log = "0.4"
 env_logger = "0.11"
 raw-window-handle = "0.6"
+godly-terminal-surface = { path = "../terminal-surface" }
+godly-protocol = { path = "../../protocol" }
+godly-app-adapter = { path = "../app-adapter" }
+bytemuck = { version = "1", features = ["derive"] }
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Graphics_DirectWrite",
+    "Win32_Foundation",
+] }
