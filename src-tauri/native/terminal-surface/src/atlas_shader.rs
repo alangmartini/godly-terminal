@@ -1,11 +1,8 @@
-//! GPU glyph atlas shader pipeline for Iced's `Shader` widget.
+//! GPU glyph atlas shader pipeline.
 //!
 //! Renders terminal content as per-cell textured quads sampling from a
 //! persistent glyph atlas texture.  Each cell is 6 vertices (2 triangles)
 //! carrying clip-space position, atlas UV, foreground and background colour.
-
-use iced::widget::shader;
-use iced::{mouse, Rectangle};
 
 use crate::atlas_vertex_builder::CellVertex;
 use crate::glyph_atlas::AtlasUpdate;
@@ -22,7 +19,7 @@ pub struct CachedAtlasFrame {
     pub viewport_size: (u32, u32),
 }
 
-/// Shader widget program — pass to `iced::widget::Shader::new()`.
+/// Frame data carrier — call `build_primitive()` to produce an `AtlasPrimitive`.
 pub struct AtlasShaderProgram {
     pub vertices: Vec<CellVertex>,
     pub atlas_update: Option<AtlasUpdate>,
@@ -166,8 +163,8 @@ impl AtlasPipeline {
     }
 }
 
-impl shader::Pipeline for AtlasPipeline {
-    fn new(
+impl AtlasPipeline {
+    pub fn new(
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -291,16 +288,12 @@ pub struct AtlasPrimitive {
     atlas_update: Option<AtlasUpdate>,
 }
 
-impl shader::Primitive for AtlasPrimitive {
-    type Pipeline = AtlasPipeline;
-
-    fn prepare(
+impl AtlasPrimitive {
+    pub fn prepare(
         &self,
-        pipeline: &mut Self::Pipeline,
+        pipeline: &mut AtlasPipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _bounds: &Rectangle,
-        _viewport: &shader::Viewport,
     ) {
         // --- Atlas texture update ---
         if let Some(ref update) = self.atlas_update {
@@ -366,9 +359,9 @@ impl shader::Primitive for AtlasPrimitive {
         pipeline.vertex_count = self.vertices.len() as u32;
     }
 
-    fn draw(
+    pub fn draw(
         &self,
-        pipeline: &Self::Pipeline,
+        pipeline: &AtlasPipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> bool {
         if pipeline.vertex_count == 0 {
@@ -382,20 +375,8 @@ impl shader::Primitive for AtlasPrimitive {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Program (shader::Program for Iced Shader widget)
-// ---------------------------------------------------------------------------
-
-impl<Message> shader::Program<Message> for AtlasShaderProgram {
-    type State = ();
-    type Primitive = AtlasPrimitive;
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+impl AtlasShaderProgram {
+    pub fn build_primitive(&self) -> AtlasPrimitive {
         AtlasPrimitive {
             vertices: self.vertices.clone(),
             atlas_update: self.atlas_update.clone(),
