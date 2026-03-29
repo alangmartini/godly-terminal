@@ -60,6 +60,7 @@ impl CellVertex {
 ///
 /// `viewport_w`/`viewport_h` are the full window dimensions (for clip-space mapping).
 /// `offset_x`/`offset_y` shift the terminal content within the window (in pixels).
+/// `terminal_w`/`terminal_h` define the visible terminal area (cells outside are clipped).
 pub fn build_vertices(
     grid: &RichGridData,
     atlas: &mut GlyphAtlas,
@@ -71,6 +72,8 @@ pub fn build_vertices(
     viewport_h: u32,
     offset_x: f32,
     offset_y: f32,
+    terminal_w: f32,
+    terminal_h: f32,
 ) -> Vec<CellVertex> {
     let phys = metrics.scaled_for_render();
     let cell_w = phys.cell_width;
@@ -82,11 +85,21 @@ pub fn build_vertices(
     let cols = grid.dimensions.cols as usize;
     let rows = grid.dimensions.rows as usize;
 
+    let clip_right = offset_x + terminal_w;
+    let clip_bottom = offset_y + terminal_h;
+
     let mut verts = Vec::with_capacity(rows * cols * 6 + 64);
 
     for (row_idx, row) in grid.rows.iter().enumerate() {
         for (col_idx, cell) in row.cells.iter().enumerate() {
             if cell.wide_continuation {
+                continue;
+            }
+
+            // Clip: skip cells that extend outside the terminal area
+            let cell_px = col_idx as f32 * cell_w + offset_x;
+            let cell_py = row_idx as f32 * cell_h + offset_y;
+            if cell_px + cell_w > clip_right || cell_py + cell_h > clip_bottom {
                 continue;
             }
 
@@ -167,6 +180,11 @@ pub fn build_vertices(
         let cc = grid.cursor.col as usize;
         let cpx = (cc as f32 * cell_w).round() + offset_x;
         let cpy = (cr as f32 * cell_h).round() + offset_y;
+
+        // Clip cursor to terminal area
+        if cpx >= clip_right || cpy >= clip_bottom {
+            return verts;
+        }
 
         let cursor_color = [1.0f32, 1.0, 1.0, 0.8];
 
