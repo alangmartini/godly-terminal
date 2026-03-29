@@ -17,6 +17,9 @@ raw-window-handle = "0.6"
 godly-terminal-surface = { path = "../terminal-surface" }
 godly-protocol = { path = "../../protocol" }
 godly-app-adapter = { path = "../app-adapter" }
+godly-tabs-core = { path = "../tabs-core" }
+godly-layout-core = { path = "../layout-core" }
+godly-workspaces-core = { path = "../workspaces-core" }
 bytemuck = { version = "1", features = ["derive"] }
 uuid.workspace = true
 arboard = "3"

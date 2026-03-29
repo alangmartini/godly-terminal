@@ -1,3 +1,4 @@
+mod app_state;
 mod daemon_bridge;
 mod event_bus;
 mod selection;
@@ -573,9 +574,80 @@ impl ApplicationHandler<AsyncEvent> for App {
                     let adapter_mods = convert_modifiers(mods);
                     let adapter_key = convert_key(&event.logical_key);
 
+                    // Check app shortcuts first
+                    if let Some(action) = godly_app_adapter::shortcuts::check_app_shortcut(&adapter_key, adapter_mods) {
+                        use godly_app_adapter::shortcuts::AppAction;
+                        match action {
+                            AppAction::NewTab => {
+                                let (rows, cols) = self.terminal_size();
+                                if let Some(daemon) = &self.daemon {
+                                    let daemon = Arc::clone(daemon);
+                                    let sender = self.sender.clone();
+                                    let session_id = uuid::Uuid::new_v4().to_string();
+                                    let id = session_id.clone();
+                                    std::thread::spawn(move || {
+                                        let _ = daemon.send_request(&Request::CreateSession {
+                                            id,
+                                            shell_type: ShellType::Windows,
+                                            cwd: None,
+                                            rows,
+                                            cols,
+                                            env: None,
+                                        });
+                                    });
+                                    self.active_session = Some(session_id);
+                                }
+                            }
+                            AppAction::CloseTab => {
+                                if let Some(ref session_id) = self.active_session {
+                                    let daemon = self.daemon.as_ref().map(Arc::clone);
+                                    let id = session_id.clone();
+                                    if let Some(daemon) = daemon {
+                                        std::thread::spawn(move || {
+                                            let _ = daemon.send_request(&Request::CloseSession { session_id: id });
+                                        });
+                                    }
+                                }
+                            }
+                            AppAction::Copy => {
+                                self.copy_selection();
+                            }
+                            AppAction::Paste => {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    if let Ok(text) = clipboard.get_text() {
+                                        self.send_key_input(text.into_bytes());
+                                    }
+                                }
+                            }
+                            AppAction::ZoomIn | AppAction::ZoomOut | AppAction::ZoomReset => {
+                                // TODO: zoom
+                            }
+                            AppAction::ScrollPageUp => {
+                                self.scroll(24);
+                            }
+                            AppAction::ScrollPageDown => {
+                                self.scroll(-24);
+                            }
+                            AppAction::ScrollToTop => {
+                                self.scroll(10000);
+                            }
+                            AppAction::ScrollToBottom => {
+                                self.scrollback_offset = 0;
+                                self.fetch_grid();
+                            }
+                            _ => {}
+                        }
+                        return;
+                    }
+
+                    // Forward to PTY
                     if let Some(bytes) =
                         godly_app_adapter::keys::key_to_pty_bytes(&adapter_key, adapter_mods)
                     {
+                        // Reset scroll to live when typing
+                        if self.scrollback_offset > 0 {
+                            self.scrollback_offset = 0;
+                        }
                         self.send_key_input(bytes);
                     }
                 }
