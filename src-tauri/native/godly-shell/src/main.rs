@@ -1,7 +1,10 @@
 mod app_state;
 mod daemon_bridge;
 mod event_bus;
+mod mcp_bridge;
+mod notification_state;
 mod persistence;
+mod search;
 mod selection;
 mod split_renderer;
 mod terminal_renderer;
@@ -636,6 +639,10 @@ impl ApplicationHandler<AsyncEvent> for App {
                             AppAction::ScrollToBottom => {
                                 self.scrollback_offset = 0;
                                 self.fetch_grid();
+                            }
+                            AppAction::Find => {
+                                // Toggle search - will be connected to search UI
+                                log::info!("Find toggled");
                             }
                             _ => {}
                         }

@@ -26,6 +26,7 @@ arboard = "3"
 taffy = "0.7"
 serde.workspace = true
 serde_json.workspace = true
+futures-channel = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
