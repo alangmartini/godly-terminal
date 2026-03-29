@@ -9995,6 +9995,10 @@ impl GodlyApp {
             default_bg,
             vw,
             vh,
+            0.0,
+            0.0,
+            vw as f32,
+            vh as f32,
         );
 
         let atlas_update = self.glyph_atlas.take_dirty_data();
