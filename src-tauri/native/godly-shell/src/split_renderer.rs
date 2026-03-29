@@ -22,7 +22,7 @@ pub fn render_layout(
     match node {
         LayoutNode::Leaf { terminal_id } => {
             if let (Some(grid), Some(renderer)) = (grids.get(terminal_id), renderers.get_mut(terminal_id)) {
-                renderer.prepare(device, queue, grid, rect.width as u32, rect.height as u32, rect.x, rect.y);
+                renderer.prepare(device, queue, Some(grid), rect.width as u32, rect.height as u32, rect.x, rect.y, rect.width, rect.height, &[]);
                 renderer.draw(render_pass);
             }
         }

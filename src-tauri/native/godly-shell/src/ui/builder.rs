@@ -3,87 +3,76 @@
 //! `UiBuilder` collects quad and text vertices during the build phase,
 //! then returns them in `finish()` for the GPU render pass.
 
-use godly_terminal_surface::atlas_vertex_builder::CellVertex;
-
 use super::quad_renderer::{quad_vertices, QuadVertex};
 use super::widget::Rect;
 
-/// Palette of dark-theme colors used across all UI chrome.
+/// Catppuccin Mocha palette for all UI chrome.
 pub mod colors {
-    pub const BG_DARK: [f32; 4] = [0.08, 0.08, 0.10, 1.0];
-    pub const BG_BASE: [f32; 4] = [0.09, 0.09, 0.11, 1.0];
-    pub const BG_RAISED: [f32; 4] = [0.11, 0.11, 0.13, 1.0];
-    pub const BG_SURFACE: [f32; 4] = [0.14, 0.14, 0.17, 1.0];
-    pub const BG_HOVER: [f32; 4] = [0.22, 0.22, 0.26, 1.0];
-    pub const BG_ACTIVE: [f32; 4] = [0.16, 0.16, 0.19, 1.0];
-    pub const BG_ACTIVE_ACC: [f32; 4] = [0.18, 0.22, 0.30, 1.0];
-    pub const FG_PRIMARY: [f32; 4] = [0.85, 0.85, 0.88, 1.0];
-    pub const FG_SECONDARY: [f32; 4] = [0.75, 0.75, 0.78, 1.0];
-    pub const FG_MUTED: [f32; 4] = [0.50, 0.50, 0.55, 1.0];
-    pub const ACCENT_BLUE: [f32; 4] = [0.40, 0.60, 1.0, 1.0];
-    pub const ACCENT_RED: [f32; 4] = [0.85, 0.25, 0.25, 1.0];
-    pub const RED_HOVER: [f32; 4] = [0.95, 0.30, 0.30, 1.0];
+    // Catppuccin Mocha base colors
+    pub const BG_DARK: [f32; 4] = [0.071, 0.071, 0.106, 1.0];      // #11111b Crust
+    pub const BG_BASE: [f32; 4] = [0.118, 0.118, 0.180, 1.0];      // #1e1e2e Base
+    pub const BG_RAISED: [f32; 4] = [0.114, 0.114, 0.153, 1.0];    // #1c1c27 (between crust and mantle)
+    pub const BG_SURFACE: [f32; 4] = [0.180, 0.184, 0.239, 1.0];   // #2e2f3d Surface0
+    pub const BG_HOVER: [f32; 4] = [0.224, 0.227, 0.290, 1.0];     // #393b4a Surface1
+    pub const BG_ACTIVE: [f32; 4] = [0.149, 0.153, 0.208, 1.0];    // #262735 Mantle-ish
+    pub const BG_ACTIVE_ACC: [f32; 4] = [0.180, 0.204, 0.290, 1.0]; // blue-tinted surface
+    pub const FG_PRIMARY: [f32; 4] = [0.804, 0.839, 0.957, 1.0];   // #cdd6f4 Text
+    pub const FG_SECONDARY: [f32; 4] = [0.702, 0.729, 0.835, 1.0]; // #b3bad5 Subtext1
+    pub const FG_MUTED: [f32; 4] = [0.427, 0.443, 0.537, 1.0];     // #6d7189 Overlay0
+    pub const ACCENT_BLUE: [f32; 4] = [0.537, 0.706, 0.980, 1.0];  // #89b4fa Blue
+    pub const ACCENT_GREEN: [f32; 4] = [0.651, 0.890, 0.631, 1.0]; // #a6e3a1 Green
+    pub const ACCENT_PEACH: [f32; 4] = [0.980, 0.702, 0.529, 1.0]; // #fab387 Peach
+    pub const ACCENT_MAUVE: [f32; 4] = [0.796, 0.651, 0.969, 1.0]; // #cba6f7 Mauve
+    pub const ACCENT_RED: [f32; 4] = [0.953, 0.545, 0.659, 1.0];   // #f38ba8 Red
+    pub const RED_HOVER: [f32; 4] = [0.953, 0.545, 0.659, 0.8];
     pub const RED_SUBTLE: [f32; 4] = [0.15, 0.12, 0.12, 1.0];
     pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
     pub const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+    // Separator / border color
+    pub const BORDER: [f32; 4] = [0.220, 0.224, 0.280, 0.8];       // Surface0-ish, more visible
 }
 
-/// Placeholder for a future UI text renderer that rasterises glyphs
-/// through the same atlas pipeline used for terminal cells.
-///
-/// Currently a no-op: text vertices are collected but rendering
-/// requires atlas pipeline integration (tracked separately).
+/// A deferred text draw command. Characters are rasterized through the
+/// glyph atlas at render time so UI chrome gets the same ClearType quality
+/// as terminal content.
+#[derive(Debug, Clone)]
+pub struct TextCommand {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+    pub fg: [f32; 4],
+    pub bg: [f32; 4],
+}
+
+/// Thin handle passed to widget `build()` methods. Carries actual cell
+/// dimensions from the font metrics so widgets can position text correctly.
 pub struct UiTextRenderer {
-    cell_width: f32,
-    cell_height: f32,
+    pub cell_width: f32,
+    pub cell_height: f32,
+    pub scale: f32,
 }
 
 impl UiTextRenderer {
-    pub fn new(cell_width: f32, cell_height: f32) -> Self {
-        Self { cell_width, cell_height }
+    pub fn new(cell_width: f32, cell_height: f32, scale: f32) -> Self {
+        Self { cell_width, cell_height, scale }
     }
 
-    /// Produce cell vertices for a string at pixel position `(x, y)`.
-    ///
-    /// Each character occupies one cell-width horizontally.  The atlas
-    /// UV is set to zero (no glyph texture yet), so only the background
-    /// colour is visible until the atlas pipeline is wired up.
-    pub fn layout_text(
-        &self,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-        vw: f32,
-        vh: f32,
-    ) -> Vec<CellVertex> {
-        let mut verts = Vec::with_capacity(text.len() * 6);
-        let mut cx = x;
-        for _ch in text.chars() {
-            let x0 = cx / vw * 2.0 - 1.0;
-            let y0 = -(y / vh * 2.0 - 1.0);
-            let x1 = (cx + self.cell_width) / vw * 2.0 - 1.0;
-            let y1 = -((y + self.cell_height) / vh * 2.0 - 1.0);
+    /// Scale a logical pixel value to physical pixels.
+    pub fn s(&self, v: f32) -> f32 {
+        (v * self.scale).round()
+    }
 
-            // 6 vertices (2 triangles), UV = 0 (no glyph yet)
-            let tl = CellVertex { position: [x0, y0], uv: [0.0, 0.0], fg_color: fg, bg_color: bg };
-            let tr = CellVertex { position: [x1, y0], uv: [0.0, 0.0], fg_color: fg, bg_color: bg };
-            let bl = CellVertex { position: [x0, y1], uv: [0.0, 0.0], fg_color: fg, bg_color: bg };
-            let br = CellVertex { position: [x1, y1], uv: [0.0, 0.0], fg_color: fg, bg_color: bg };
-            verts.extend_from_slice(&[tl, tr, bl, bl, tr, br]);
-
-            cx += self.cell_width;
-        }
-        verts
+    /// Width in pixels of a string rendered in the terminal font.
+    pub fn text_width(&self, s: &str) -> f32 {
+        s.chars().count() as f32 * self.cell_width
     }
 }
 
-/// Collects quad and text vertices for UI chrome, then returns them
+/// Collects quad vertices and text commands for UI chrome, then returns them
 /// together via `finish()`.
 pub struct UiBuilder {
     quads: Vec<QuadVertex>,
-    text: Vec<CellVertex>,
+    text_commands: Vec<TextCommand>,
     vw: f32,
     vh: f32,
 }
@@ -92,7 +81,7 @@ impl UiBuilder {
     pub fn new(vw: f32, vh: f32) -> Self {
         Self {
             quads: Vec::new(),
-            text: Vec::new(),
+            text_commands: Vec::new(),
             vw,
             vh,
         }
@@ -133,18 +122,24 @@ impl UiBuilder {
         self.vline(rect.right() - t, rect.y, rect.height, t, color); // right
     }
 
-    /// Render a text string at `(x, y)` using the UI text renderer.
+    /// Record a text draw command. The actual glyph rasterization happens
+    /// later via the atlas pipeline.
     pub fn text(
         &mut self,
-        renderer: &UiTextRenderer,
+        _renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
         fg: [f32; 4],
         bg: [f32; 4],
     ) {
-        let verts = renderer.layout_text(text, x, y, fg, bg, self.vw, self.vh);
-        self.text.extend_from_slice(&verts);
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x,
+            y,
+            fg,
+            bg,
+        });
     }
 
     // -- Icon helpers ---------------------------------------------------------
@@ -203,9 +198,9 @@ impl UiBuilder {
         );
     }
 
-    /// Consume the builder and return collected vertices.
-    pub fn finish(self) -> (Vec<QuadVertex>, Vec<CellVertex>) {
-        (self.quads, self.text)
+    /// Consume the builder and return quad vertices + text commands.
+    pub fn finish(self) -> (Vec<QuadVertex>, Vec<TextCommand>) {
+        (self.quads, self.text_commands)
     }
 }
 
@@ -235,13 +230,13 @@ mod tests {
     }
 
     #[test]
-    fn builder_text_produces_cell_vertices() {
+    fn builder_text_produces_commands() {
         let mut ui = UiBuilder::new(800.0, 600.0);
-        let tr = UiTextRenderer::new(8.0, 16.0);
+        let tr = UiTextRenderer::new(8.0, 16.0, 1.0);
         ui.text(&tr, "Hi", 10.0, 10.0, colors::FG_PRIMARY, colors::BG_BASE);
-        let (_, text) = ui.finish();
-        // "Hi" = 2 characters * 6 vertices = 12
-        assert_eq!(text.len(), 12);
+        let (_, text_cmds) = ui.finish();
+        assert_eq!(text_cmds.len(), 1);
+        assert_eq!(text_cmds[0].text, "Hi");
     }
 
     #[test]

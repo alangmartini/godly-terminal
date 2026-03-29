@@ -1,12 +1,15 @@
 use godly_terminal_surface::{
     atlas_shader::{AtlasPipeline, AtlasShaderProgram},
-    atlas_vertex_builder,
+    atlas_vertex_builder::{self, CellVertex},
     glyph_atlas::GlyphAtlas,
+    glyph_cache::GlyphKey,
     glyph_rasterizer::GlyphRasterizer,
     font_metrics::FontMetrics,
     Color,
 };
 use godly_protocol::types::RichGridData;
+
+use crate::ui::builder::TextCommand;
 
 pub struct TerminalRenderer {
     pipeline: AtlasPipeline,
@@ -34,34 +37,94 @@ impl TerminalRenderer {
             glyph_atlas,
             rasterizer,
             font_metrics,
-            default_fg: Color::new(0.8, 0.8, 0.8, 1.0),
-            default_bg: Color::new(0.07, 0.07, 0.10, 1.0),
+            default_fg: Color::new(0.804, 0.839, 0.957, 1.0),  // Catppuccin Text
+            default_bg: Color::new(0.118, 0.118, 0.180, 1.0), // Catppuccin Base
         }
     }
 
     /// Prepare GPU resources (atlas texture upload, vertex buffer) BEFORE the render pass.
+    ///
+    /// Renders both terminal grid content and UI chrome text through the
+    /// same glyph atlas pipeline for consistent ClearType quality.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        grid: &RichGridData,
+        grid: Option<&RichGridData>,
         full_width: u32,
         full_height: u32,
         offset_x: f32,
         offset_y: f32,
+        terminal_w: f32,
+        terminal_h: f32,
+        ui_text: &[TextCommand],
     ) {
-        let vertices = atlas_vertex_builder::build_vertices(
-            grid,
-            &mut self.glyph_atlas,
-            &self.font_metrics,
-            &mut *self.rasterizer,
-            self.default_fg,
-            self.default_bg,
-            full_width,
-            full_height,
-            offset_x,
-            offset_y,
-        );
+        let mut vertices = if let Some(grid) = grid {
+            atlas_vertex_builder::build_vertices(
+                grid,
+                &mut self.glyph_atlas,
+                &self.font_metrics,
+                &mut *self.rasterizer,
+                self.default_fg,
+                self.default_bg,
+                full_width,
+                full_height,
+                offset_x,
+                offset_y,
+                terminal_w,
+                terminal_h,
+            )
+        } else {
+            Vec::new()
+        };
+
+        // Rasterize UI chrome text through the same atlas
+        let phys = self.font_metrics.scaled_for_render();
+        let vw = full_width as f32;
+        let vh = full_height as f32;
+
+        for cmd in ui_text {
+            let mut cx = cmd.x;
+            for ch in cmd.text.chars() {
+                let key = GlyphKey::new(ch, phys.font_size, false, false);
+                let entry = self.glyph_atlas.get_or_insert(key, &mut *self.rasterizer, phys.font_size);
+
+                let px = cx;
+                let py = cmd.y;
+                let pw = phys.cell_width;
+                let ph = phys.cell_height;
+
+                let x0 = px / vw * 2.0 - 1.0;
+                let y0 = 1.0 - py / vh * 2.0;
+                let x1 = (px + pw) / vw * 2.0 - 1.0;
+                let y1 = 1.0 - (py + ph) / vh * 2.0;
+
+                // 6 vertices (2 triangles)
+                let v = |pos: [f32; 2], uv: [f32; 2]| CellVertex {
+                    position: pos,
+                    uv,
+                    fg_color: cmd.fg,
+                    bg_color: cmd.bg,
+                };
+                let tl = [x0, y0];
+                let br = [x1, y1];
+                let tr = [br[0], tl[1]];
+                let bl = [tl[0], br[1]];
+                let uv_tl = [entry.u0, entry.v0];
+                let uv_br = [entry.u1, entry.v1];
+                let uv_tr = [uv_br[0], uv_tl[1]];
+                let uv_bl = [uv_tl[0], uv_br[1]];
+
+                vertices.push(v(tl, uv_tl));
+                vertices.push(v(tr, uv_tr));
+                vertices.push(v(bl, uv_bl));
+                vertices.push(v(tr, uv_tr));
+                vertices.push(v(bl, uv_bl));
+                vertices.push(v(br, uv_br));
+
+                cx += pw;
+            }
+        }
 
         if vertices.is_empty() { return; }
 

@@ -1,10 +1,26 @@
-//! Tab bar: horizontal row of tab buttons.
+//! Tab bar: horizontal row of tab buttons with numbered indicators.
+//! Also serves as the title bar (window drag + min/max/close buttons).
 
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
-const TAB_WIDTH: f32 = 160.0;
-const TAB_PADDING: f32 = 4.0;
+const TAB_MAX_WIDTH: f32 = 170.0;
+const TAB_MIN_WIDTH: f32 = 90.0;
+const TAB_GAP: f32 = 1.0;
+const TAB_MARGIN_LEFT: f32 = 6.0;
+const TAB_INSET_V: f32 = 5.0;
+const RIGHT_INDICATORS_WIDTH: f32 = 200.0;
+const BUTTON_WIDTH: f32 = 46.0;
+const ICON_LINE_T: f32 = 1.2;
+
+/// Accent colors for each tab position (cycles if more tabs).
+const TAB_ACCENTS: &[[f32; 4]] = &[
+    colors::ACCENT_BLUE,
+    colors::ACCENT_GREEN,
+    colors::ACCENT_PEACH,
+    colors::ACCENT_MAUVE,
+    colors::ACCENT_RED,
+];
 
 pub struct TabInfo {
     pub id: String,
@@ -12,73 +28,280 @@ pub struct TabInfo {
     pub active: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowButton {
+    Minimize,
+    Maximize,
+    Close,
+}
+
 pub struct TabBar {
     pub tabs: Vec<TabInfo>,
     pub hovered_tab: Option<usize>,
+    pub hovered_button: Option<WindowButton>,
+    pub sidebar_width: f32,
 }
 
 impl TabBar {
     pub fn new() -> Self {
-        Self { tabs: Vec::new(), hovered_tab: None }
+        Self { tabs: Vec::new(), hovered_tab: None, hovered_button: None, sidebar_width: 0.0 }
     }
 
-    fn tab_rect(&self, index: usize, bar: Rect) -> Rect {
+    /// The x-offset where tabs begin (after sidebar area).
+    fn tabs_origin_x(&self, bar: Rect, scale: f32) -> f32 {
+        let tab_margin = (TAB_MARGIN_LEFT * scale).round();
+        bar.x + self.sidebar_width + tab_margin
+    }
+
+    /// Compute the effective tab width that fits all tabs in the available space.
+    fn effective_tab_width(&self, bar: Rect, scale: f32) -> f32 {
+        let tab_gap = (TAB_GAP * scale).round();
+        let right_reserve = (RIGHT_INDICATORS_WIDTH * scale).round();
+        let btn_reserve = (BUTTON_WIDTH * scale).round() * 3.0;
+        let n = self.tabs.len().max(1) as f32;
+        let origin = self.tabs_origin_x(bar, scale);
+        let avail = bar.right() - origin - right_reserve - btn_reserve - (40.0 * scale).round();
+        let per_tab = ((avail - (n - 1.0) * tab_gap) / n).floor();
+        per_tab.clamp((TAB_MIN_WIDTH * scale).round(), (TAB_MAX_WIDTH * scale).round())
+    }
+
+    fn tab_rect(&self, index: usize, bar: Rect, scale: f32) -> Rect {
+        let tab_w = self.effective_tab_width(bar, scale);
+        let tab_gap = (TAB_GAP * scale).round();
+        let tab_inset = (TAB_INSET_V * scale).round();
+        let origin = self.tabs_origin_x(bar, scale);
         Rect {
-            x: bar.x + TAB_PADDING + index as f32 * (TAB_WIDTH + TAB_PADDING),
-            y: bar.y + TAB_PADDING,
-            width: TAB_WIDTH,
-            height: bar.height - TAB_PADDING * 2.0,
+            x: origin + index as f32 * (tab_w + tab_gap),
+            y: bar.y + tab_inset,
+            width: tab_w,
+            height: bar.height - tab_inset,
         }
+    }
+
+    fn window_button_rects(&self, bar: Rect, scale: f32) -> [(Rect, WindowButton); 3] {
+        let btn_w = (BUTTON_WIDTH * scale).round();
+        let close = Rect {
+            x: bar.right() - btn_w,
+            y: bar.y,
+            width: btn_w,
+            height: bar.height,
+        };
+        let maximize = Rect {
+            x: close.x - btn_w,
+            y: bar.y,
+            width: btn_w,
+            height: bar.height,
+        };
+        let minimize = Rect {
+            x: maximize.x - btn_w,
+            y: bar.y,
+            width: btn_w,
+            height: bar.height,
+        };
+        [
+            (minimize, WindowButton::Minimize),
+            (maximize, WindowButton::Maximize),
+            (close, WindowButton::Close),
+        ]
+    }
+
+    fn accent_for(&self, index: usize) -> [f32; 4] {
+        TAB_ACCENTS[index % TAB_ACCENTS.len()]
     }
 
     pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
+        let s = |v: f32| text.s(v);
+        let cw = text.cell_width;
+        let ch = text.cell_height;
+        let text_y = |area_h: f32, y: f32| y + (area_h - ch) / 2.0;
+
+        let tab_w = self.effective_tab_width(bar, text.scale);
+        let tab_gap = s(TAB_GAP);
+        let tab_inset = s(TAB_INSET_V);
+        let origin = self.tabs_origin_x(bar, text.scale);
+
         // Background
-        ui.fill(bar, colors::BG_BASE);
+        ui.fill(bar, colors::BG_DARK);
 
-        // Tab backgrounds and labels
+        // Bottom separator line
+        ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
+
+        // Sidebar section: "Godly Terminal" branding
+        if self.sidebar_width > 0.0 {
+            let brand_x = bar.x + s(12.0);
+            let brand_y = text_y(bar.height, bar.y);
+            ui.text(text, "Godly Terminal", brand_x, brand_y,
+                    colors::FG_SECONDARY, colors::BG_DARK);
+            // Right border for sidebar section
+            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
+        }
+
+        // Max chars for tab title (dynamic based on effective width)
+        let title_x_offset = cw * 2.0 + s(22.0);
+        let title_max_w = tab_w - title_x_offset - s(8.0);
+        let title_max_chars = (title_max_w / cw).floor().max(1.0) as usize;
+
         for (i, tab) in self.tabs.iter().enumerate() {
-            let rect = self.tab_rect(i, bar);
-            let color = if tab.active {
-                colors::BG_ACTIVE
-            } else if self.hovered_tab == Some(i) {
-                colors::BG_RAISED
-            } else {
-                colors::BG_BASE
+            let rect = Rect {
+                x: origin + i as f32 * (tab_w + tab_gap),
+                y: bar.y + tab_inset,
+                width: tab_w,
+                height: bar.height - tab_inset,
             };
-            ui.fill(rect, color);
+            let accent = self.accent_for(i);
 
-            // Active tab accent indicator (bottom edge)
+            // Tab background — active tabs match terminal bg, inactive are subtle
+            let bg = if tab.active {
+                colors::BG_BASE
+            } else if self.hovered_tab == Some(i) {
+                colors::BG_SURFACE
+            } else {
+                colors::BG_DARK
+            };
+            ui.fill(rect, bg);
+
+            // Active tab: colored top accent bar + side borders for "raised tab" look
             if tab.active {
-                ui.hline(rect.x, rect.bottom() - 2.0, rect.width, 2.0, colors::ACCENT_BLUE);
+                ui.hline(rect.x, rect.y, rect.width, s(2.5), accent);
+                ui.vline(rect.x, rect.y + s(2.5), rect.height - s(2.5), 1.0, colors::BORDER);
+                ui.vline(rect.right() - 1.0, rect.y + s(2.5), rect.height - s(2.5), 1.0, colors::BORDER);
+                // Remove bottom border for active tab (blend into terminal)
+                ui.hline(rect.x + 1.0, rect.bottom() - 1.0, rect.width - 2.0, 2.0, colors::BG_BASE);
             }
 
-            // Tab title text (truncate to 20 chars with ellipsis)
+            // Colored dot indicator (small square, 5px — appears round at small size)
+            let dot_x = rect.x + s(10.0);
+            let dot_sz = s(5.0);
+            let dot_y = rect.y + rect.height / 2.0 - dot_sz / 2.0;
+            ui.fill(Rect { x: dot_x, y: dot_y, width: dot_sz, height: dot_sz }, accent);
+
+            // Tab number (after dot with spacing)
+            let num_str = format!("{}", i + 1);
+            let num_x = dot_x + dot_sz + s(5.0);
+            ui.text(text, &num_str,
+                    num_x,
+                    text_y(rect.height, rect.y),
+                    accent, bg);
+
+            // Tab title (truncated to fit)
             let fg = if tab.active { colors::FG_PRIMARY } else { colors::FG_SECONDARY };
-            if tab.title.len() > 20 {
-                let truncated = format!("{}\u{2026}", &tab.title[..19]);
-                ui.text(text, &truncated, rect.x + 8.0, rect.y + 4.0, fg, colors::TRANSPARENT);
+            let title = if title_max_chars > 2 {
+                if tab.title.len() > title_max_chars {
+                    format!("{}\u{2026}", &tab.title[..title_max_chars.saturating_sub(1)])
+                } else {
+                    tab.title.clone()
+                }
             } else {
-                ui.text(text, &tab.title, rect.x + 8.0, rect.y + 4.0, fg, colors::TRANSPARENT);
+                String::new()
+            };
+            if !title.is_empty() {
+                let title_x = num_x + cw + s(4.0);
+                ui.text(text, &title,
+                        title_x,
+                        text_y(rect.height, rect.y),
+                        fg, bg);
+            }
+
+            // Right separator between tabs (skip for active and last tab)
+            if !tab.active && i + 1 < self.tabs.len() {
+                let next_active = self.tabs.get(i + 1).map_or(false, |t| t.active);
+                if !next_active {
+                    ui.vline(rect.right(), rect.y + s(6.0), rect.height - s(12.0), 1.0, colors::BORDER);
+                }
+            }
+        }
+
+        // "+ New tab" button after last tab
+        let new_x = origin + self.tabs.len() as f32 * (tab_w + tab_gap) + s(8.0);
+        let new_y = bar.y + tab_inset;
+        let new_rect = Rect { x: new_x, y: new_y, width: s(28.0), height: bar.height - tab_inset };
+        ui.text(text, "+", new_x + s(8.0), text_y(new_rect.height, new_y), colors::FG_MUTED, colors::BG_DARK);
+
+        // Right-aligned indicators (bun icon + session name) — positioned before window buttons
+        let btn_reserve = s(BUTTON_WIDTH) * 3.0 + s(8.0);
+        let right_label = "bun";
+        let right_label2 = "opensessions";
+        let rw2 = text.text_width(right_label2);
+        let rw1 = text.text_width(right_label);
+        let gap = cw * 2.0;
+        // Session name
+        ui.text(text, right_label2,
+                bar.right() - rw2 - btn_reserve,
+                text_y(bar.height, bar.y),
+                colors::FG_MUTED, colors::BG_DARK);
+        // Bun indicator with accent color
+        let bun_dot_x = bar.right() - rw2 - btn_reserve - gap - rw1 - s(10.0);
+        let dot_sz = s(5.0);
+        ui.fill(Rect { x: bun_dot_x, y: bar.y + bar.height / 2.0 - dot_sz / 2.0, width: dot_sz, height: dot_sz }, colors::ACCENT_PEACH);
+        ui.text(text, right_label,
+                bun_dot_x + s(10.0),
+                text_y(bar.height, bar.y),
+                colors::FG_SECONDARY, colors::BG_DARK);
+
+        // Window control buttons (minimize, maximize, close)
+        let icon_t = (ICON_LINE_T * text.scale).max(1.0);
+        let buttons = self.window_button_rects(bar, text.scale);
+        for (rect, btn) in &buttons {
+            let hovered = self.hovered_button == Some(*btn);
+            if hovered {
+                let color = if *btn == WindowButton::Close {
+                    colors::ACCENT_RED
+                } else {
+                    colors::BG_HOVER
+                };
+                ui.fill(*rect, color);
+            }
+
+            let icon_color = if hovered && *btn == WindowButton::Close {
+                colors::WHITE
+            } else {
+                colors::FG_MUTED
+            };
+            match btn {
+                WindowButton::Minimize => ui.icon_minimize(*rect, s(10.0), icon_t, icon_color),
+                WindowButton::Maximize => ui.icon_maximize(*rect, s(9.0), icon_t, icon_color),
+                WindowButton::Close => ui.icon_x(*rect, s(9.0), icon_t, icon_color),
             }
         }
     }
 
-    pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect) -> Option<UiAction> {
+    pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect, scale: f32) -> Option<UiAction> {
         match event {
             MouseEvent::Move { x, y } => {
                 self.hovered_tab = None;
+                self.hovered_button = None;
                 for (i, _) in self.tabs.iter().enumerate() {
-                    if self.tab_rect(i, bar).contains(x, y) {
+                    if self.tab_rect(i, bar, scale).contains(x, y) {
                         self.hovered_tab = Some(i);
+                    }
+                }
+                for (rect, btn) in &self.window_button_rects(bar, scale) {
+                    if rect.contains(x, y) {
+                        self.hovered_button = Some(*btn);
                     }
                 }
                 None
             }
             MouseEvent::Press { x, y } => {
+                // Check window buttons first
+                for (rect, btn) in &self.window_button_rects(bar, scale) {
+                    if rect.contains(x, y) {
+                        return match btn {
+                            WindowButton::Close => Some(UiAction::CloseWindow),
+                            WindowButton::Minimize => Some(UiAction::MinimizeWindow),
+                            WindowButton::Maximize => Some(UiAction::MaximizeWindow),
+                        };
+                    }
+                }
+                // Check tabs
                 for (i, tab) in self.tabs.iter().enumerate() {
-                    if self.tab_rect(i, bar).contains(x, y) {
+                    if self.tab_rect(i, bar, scale).contains(x, y) {
                         return Some(UiAction::SwitchTab(tab.id.clone()));
                     }
+                }
+                // Click on empty tab bar area = drag window
+                if bar.contains(x, y) {
+                    return Some(UiAction::DragWindow);
                 }
                 None
             }

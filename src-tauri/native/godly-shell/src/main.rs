@@ -59,6 +59,7 @@ struct App {
     tab_bar: ui::tab_bar::TabBar,
     sidebar: ui::sidebar::Sidebar,
     status_bar: ui::status_bar::StatusBar,
+    scale_factor: f32,
 }
 
 impl App {
@@ -79,9 +80,49 @@ impl App {
             mouse_position: None,
             quad_pipeline: None,
             title_bar: ui::title_bar::TitleBar::new(),
-            tab_bar: ui::tab_bar::TabBar::new(),
+            tab_bar: {
+                let mut tb = ui::tab_bar::TabBar::new();
+                // Pre-populate demo tabs to match the reference UI
+                tb.tabs = vec![
+                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "opensessions".into(), active: true },
+                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "work".into(), active: false },
+                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "opensessions".into(), active: false },
+                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "opensessions".into(), active: false },
+                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "opensessions".into(), active: false },
+                ];
+                tb
+            },
+            scale_factor: 1.0,
             sidebar: ui::sidebar::Sidebar::new(),
-            status_bar: ui::status_bar::StatusBar::new(),
+            status_bar: {
+                let mut sb = ui::status_bar::StatusBar::new();
+                sb.cwd = std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                sb.process_name = "pwsh".into();
+                // Detect git branch
+                if let Ok(output) = std::process::Command::new("git")
+                    .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                    .output()
+                {
+                    if output.status.success() {
+                        sb.git_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    }
+                }
+                // Detect git diff summary
+                if let Ok(output) = std::process::Command::new("git")
+                    .args(["diff", "--shortstat"])
+                    .output()
+                {
+                    if output.status.success() {
+                        let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if !stat.is_empty() {
+                            sb.git_diff_summary = stat;
+                        }
+                    }
+                }
+                sb
+            },
         }
     }
 
@@ -139,15 +180,10 @@ impl App {
 
         // Initialize terminal renderer with DPI-aware font metrics
         let scale_factor = window.scale_factor() as f32;
+        self.scale_factor = scale_factor;
         log::info!("DPI scale factor: {scale_factor}");
-        // Use Swash rasterizer with embedded font for consistent metrics
         let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
-        let mut rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer> = {
-            let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
-            use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer;
-            r.load_font(font_data, 0);
-            Box::new(r)
-        };
+        let mut rasterizer = create_rasterizer();
         let font_size = 14.0_f32;
         let font_metrics = FontMetrics::from_font_bytes(font_size, font_data)
             .with_scale_factor(scale_factor);
@@ -193,6 +229,10 @@ impl App {
                 }) {
                     Ok(Response::SessionCreated { session }) => {
                         log::info!("Session created: {}", session.id);
+                        // Update first demo tab to point to real session
+                        if let Some(first) = self.tab_bar.tabs.first_mut() {
+                            first.id = session.id.clone();
+                        }
                         self.active_session = Some(session.id);
                     }
                     Ok(other) => log::error!("Unexpected response: {other:?}"),
@@ -215,9 +255,9 @@ impl App {
             let metrics = renderer.font_metrics().scaled_for_render();
             let vw = gpu.config.width as f32;
             let vh = gpu.config.height as f32;
-            let layout = ui::layout::ShellLayout::compute(vw, vh, true);
-            let cols = (layout.terminal.width / metrics.cell_width).floor() as u16;
-            let rows = (layout.terminal.height / metrics.cell_height).floor() as u16;
+            let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
+            let cols = (layout.terminal_content.width / metrics.cell_width).floor() as u16;
+            let rows = (layout.terminal_content.height / metrics.cell_height).floor() as u16;
             (rows.max(1), cols.max(1))
         } else {
             (24, 80)
@@ -381,20 +421,60 @@ impl App {
         // Prepare terminal data BEFORE starting the render pass
         let vw = gpu.config.width as f32;
         let vh = gpu.config.height as f32;
-        let layout = ui::layout::ShellLayout::compute(vw, vh, true);
+        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
 
-        if let Some(grid) = &self.current_grid {
-            if let Some(renderer) = &mut self.renderer {
-                renderer.prepare(
-                    &gpu.device,
-                    &gpu.queue,
-                    grid,
-                    gpu.config.width,
-                    gpu.config.height,
-                    layout.terminal.x,
-                    layout.terminal.y,
-                );
-            }
+        // Update status bar with current terminal dimensions
+        self.status_bar.terminal_size = self.terminal_size();
+
+        // Build UI chrome (quads + text commands)
+        let phys_metrics = self.renderer.as_ref().map(|r| r.font_metrics().scaled_for_render());
+        let ui_text_handle = if let Some(m) = phys_metrics {
+            ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor)
+        } else {
+            ui::builder::UiTextRenderer::new(8.0, 16.0, self.scale_factor)
+        };
+        let mut ui_builder = ui::builder::UiBuilder::new(vw, vh);
+
+        // Terminal area background (BG_BASE) — must come before chrome overlays
+        ui_builder.fill(layout.terminal, ui::builder::colors::BG_BASE);
+
+        // Placeholder text when no terminal content is available
+        if self.current_grid.is_none() {
+            let placeholder = if self.daemon.is_none() {
+                "Connecting to terminal..."
+            } else if self.active_session.is_none() {
+                "Starting session..."
+            } else {
+                "Waiting for output..."
+            };
+            let ph_x = layout.terminal_content.x + ui_text_handle.s(16.0);
+            let ph_y = layout.terminal_content.y + ui_text_handle.s(16.0);
+            ui_builder.text(&ui_text_handle, placeholder, ph_x, ph_y,
+                           ui::builder::colors::FG_MUTED, ui::builder::colors::BG_BASE);
+        }
+
+        // Tab bar now serves as title bar (full width at top, includes window buttons)
+        self.tab_bar.sidebar_width = layout.sidebar.width;
+        self.tab_bar.build(&mut ui_builder, layout.tab_bar, &ui_text_handle);
+        self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
+        self.status_bar.sidebar_width = layout.sidebar.width;
+        self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle);
+        let (chrome_quads, text_commands) = ui_builder.finish();
+
+        // Prepare atlas pipeline with terminal grid + UI text
+        if let Some(renderer) = &mut self.renderer {
+            renderer.prepare(
+                &gpu.device,
+                &gpu.queue,
+                self.current_grid.as_ref(),
+                gpu.config.width,
+                gpu.config.height,
+                layout.terminal_content.x,
+                layout.terminal_content.y,
+                layout.terminal_content.width,
+                layout.terminal_content.height,
+                &text_commands,
+            );
         }
 
         {
@@ -404,10 +484,11 @@ impl App {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
+                        // Catppuccin Mocha Crust (#11111b) in linear space
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.071,
-                            g: 0.071,
-                            b: 0.082,
+                            r: 0.00338,
+                            g: 0.00338,
+                            b: 0.00815,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -419,25 +500,14 @@ impl App {
                 occlusion_query_set: None,
             });
 
-            // Build UI chrome via UiBuilder
-            let ui_text = ui::builder::UiTextRenderer::new(8.0, 16.0);
-            let mut ui = ui::builder::UiBuilder::new(vw, vh);
-            self.title_bar.build(&mut ui, layout.title_bar, &ui_text);
-            self.tab_bar.build(&mut ui, layout.tab_bar, &ui_text);
-            self.sidebar.build(&mut ui, layout.sidebar, &ui_text);
-            self.status_bar.build(&mut ui, layout.status_bar, &ui_text);
-            let (quads, _text_verts) = ui.finish();
-
-            // Draw chrome quads
+            // Draw chrome quads (backgrounds, borders)
             if let Some(quad_pipe) = &mut self.quad_pipeline {
-                quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &quads);
+                quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &chrome_quads);
             }
 
-            // Draw terminal (prepared before the render pass)
-            if self.current_grid.is_some() {
-                if let Some(renderer) = &self.renderer {
-                    renderer.draw(&mut pass);
-                }
+            // Draw terminal content + UI text (both through atlas pipeline)
+            if let Some(renderer) = &self.renderer {
+                renderer.draw(&mut pass);
             }
         }
 
@@ -453,9 +523,10 @@ impl ApplicationHandler<AsyncEvent> for App {
         }
         let attrs = WindowAttributes::default()
             .with_title("Godly Terminal")
-            .with_inner_size(winit::dpi::LogicalSize::new(1200.0, 800.0))
+            .with_inner_size(winit::dpi::LogicalSize::new(1100.0, 680.0))
             .with_min_inner_size(winit::dpi::LogicalSize::new(400.0, 300.0))
-            .with_decorations(false);
+            .with_decorations(false)
+            .with_maximized(true);
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.init_gpu(window);
@@ -564,13 +635,12 @@ impl ApplicationHandler<AsyncEvent> for App {
                 let (px, py) = (position.x as f32, position.y as f32);
                 let gpu = self.gpu.as_ref();
                 let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                let layout = ui::layout::ShellLayout::compute(vw, vh, true);
+                let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
 
                 // Route mouse to UI chrome
                 let me = ui::widget::MouseEvent::Move { x: px, y: py };
-                self.title_bar.on_mouse(me, layout.title_bar);
-                self.tab_bar.on_mouse(me, layout.tab_bar);
-                self.sidebar.on_mouse(me, layout.sidebar);
+                self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor);
+                self.sidebar.on_mouse(me, layout.sidebar, self.scale_factor);
 
                 // Selection drag in terminal area
                 if self.selection.active && layout.terminal.contains(px, py) {
@@ -589,16 +659,12 @@ impl ApplicationHandler<AsyncEvent> for App {
                         let (px, py) = (x as f32, y as f32);
                         let gpu = self.gpu.as_ref();
                         let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                        let layout = ui::layout::ShellLayout::compute(vw, vh, true);
+                        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
 
                         if state == ElementState::Pressed {
-                            // Check title bar first
+                            // Check tab bar (which includes window buttons + drag)
                             let me = ui::widget::MouseEvent::Press { x: px, y: py };
-                            if let Some(action) = self.title_bar.on_mouse(me, layout.title_bar) {
-                                self.handle_ui_action(action);
-                                return;
-                            }
-                            if let Some(action) = self.tab_bar.on_mouse(me, layout.tab_bar) {
+                            if let Some(action) = self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor) {
                                 self.handle_ui_action(action);
                                 return;
                             }

@@ -1,4 +1,5 @@
 //! Title bar: drag-to-move, window title, min/max/close buttons.
+//! Uses Catppuccin Mocha palette, blends with tab bar below.
 
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
@@ -8,6 +9,7 @@ const ICON_LINE_T: f32 = 1.2;
 
 pub struct TitleBar {
     pub hovered_button: Option<TitleButton>,
+    pub sidebar_width: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,26 +21,31 @@ pub enum TitleButton {
 
 impl TitleBar {
     pub fn new() -> Self {
-        Self { hovered_button: None }
+        Self { hovered_button: None, sidebar_width: 0.0 }
     }
 
     fn button_rects(&self, bar: Rect) -> [(Rect, TitleButton); 3] {
+        self.scaled_button_rects(bar, 1.0)
+    }
+
+    fn scaled_button_rects(&self, bar: Rect, scale: f32) -> [(Rect, TitleButton); 3] {
+        let btn_w = (BUTTON_WIDTH * scale).round();
         let close = Rect {
-            x: bar.x + bar.width - BUTTON_WIDTH,
+            x: bar.x + bar.width - btn_w,
             y: bar.y,
-            width: BUTTON_WIDTH,
+            width: btn_w,
             height: bar.height,
         };
         let maximize = Rect {
-            x: close.x - BUTTON_WIDTH,
+            x: close.x - btn_w,
             y: bar.y,
-            width: BUTTON_WIDTH,
+            width: btn_w,
             height: bar.height,
         };
         let minimize = Rect {
-            x: maximize.x - BUTTON_WIDTH,
+            x: maximize.x - btn_w,
             y: bar.y,
-            width: BUTTON_WIDTH,
+            width: btn_w,
             height: bar.height,
         };
         [
@@ -49,11 +56,30 @@ impl TitleBar {
     }
 
     pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
-        // Title bar background
-        ui.fill(bar, colors::BG_RAISED);
+        let s = |v: f32| text.s(v);
+        let ch = text.cell_height;
+
+        // Title bar background — blend with tab bar for seamless look
+        ui.fill(bar, colors::BG_DARK);
+
+        // Bottom separator
+        ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
+
+        // Sidebar section border (consistent with status bar)
+        if self.sidebar_width > 0.0 {
+            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
+        }
+
+        // App title text (left-aligned in sidebar section)
+        let title_str = "Godly Terminal";
+        let title_x = bar.x + s(12.0);
+        let title_y = bar.y + (bar.height - ch) / 2.0;
+        ui.text(text, title_str, title_x, title_y, colors::FG_SECONDARY, colors::BG_DARK);
 
         // Button hover highlights and icons
-        for (rect, btn) in &self.button_rects(bar) {
+        let icon_t = (ICON_LINE_T * text.scale).max(1.0);
+        let buttons = self.scaled_button_rects(bar, text.scale);
+        for (rect, btn) in &buttons {
             let hovered = self.hovered_button == Some(*btn);
             if hovered {
                 let color = if *btn == TitleButton::Close {
@@ -67,31 +93,21 @@ impl TitleBar {
             let icon_color = if hovered && *btn == TitleButton::Close {
                 colors::WHITE
             } else {
-                colors::FG_SECONDARY
+                colors::FG_MUTED
             };
             match btn {
-                TitleButton::Minimize => ui.icon_minimize(*rect, 10.0, ICON_LINE_T, icon_color),
-                TitleButton::Maximize => ui.icon_maximize(*rect, 9.0, ICON_LINE_T, icon_color),
-                TitleButton::Close => ui.icon_x(*rect, 9.0, ICON_LINE_T, icon_color),
+                TitleButton::Minimize => ui.icon_minimize(*rect, s(10.0), icon_t, icon_color),
+                TitleButton::Maximize => ui.icon_maximize(*rect, s(9.0), icon_t, icon_color),
+                TitleButton::Close => ui.icon_x(*rect, s(9.0), icon_t, icon_color),
             }
         }
-
-        // Title text
-        ui.text(
-            text,
-            "Godly Terminal",
-            bar.x + 12.0,
-            bar.y + (bar.height - 14.0) / 2.0,
-            colors::FG_SECONDARY,
-            colors::TRANSPARENT,
-        );
     }
 
-    pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect) -> Option<UiAction> {
+    pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect, scale: f32) -> Option<UiAction> {
         match event {
             MouseEvent::Move { x, y } => {
                 self.hovered_button = None;
-                for (rect, btn) in &self.button_rects(bar) {
+                for (rect, btn) in &self.scaled_button_rects(bar, scale) {
                     if rect.contains(x, y) {
                         self.hovered_button = Some(*btn);
                     }
@@ -99,7 +115,7 @@ impl TitleBar {
                 None
             }
             MouseEvent::Press { x, y } => {
-                for (rect, btn) in &self.button_rects(bar) {
+                for (rect, btn) in &self.scaled_button_rects(bar, scale) {
                     if rect.contains(x, y) {
                         return match btn {
                             TitleButton::Close => Some(UiAction::CloseWindow),

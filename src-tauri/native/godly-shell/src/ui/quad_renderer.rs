@@ -49,7 +49,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return input.color;
+    // Convert sRGB color values to linear for correct output on sRGB surface.
+    let c = input.color;
+    return vec4<f32>(pow(c.rgb, vec3<f32>(2.2)), c.a);
 }
 "#;
 
@@ -102,7 +104,7 @@ impl QuadPipeline {
             cache: None,
         });
 
-        let vertex_capacity = 4096;
+        let vertex_capacity = 65536; // Pre-allocate for plenty of UI quads
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("quad_vb"),
             size: vertex_capacity as u64,
