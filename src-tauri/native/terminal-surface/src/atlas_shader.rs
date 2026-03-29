@@ -80,15 +80,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Apply enhanced contrast to boost text weight.
     let coverage = vec3<f32>(enhance(raw.r), enhance(raw.g), enhance(raw.b));
 
-    // Linearise fg/bg using ClearType gamma (1.8).
+    // Linearise fg/bg using ClearType gamma (1.8) for perceptually correct blending.
     let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
     let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
 
-    // Per-channel subpixel blending in linear space.
+    // Per-channel subpixel blending in gamma-1.8 linear space.
     let blended = mix(bg_lin, fg_lin, coverage);
 
-    // Back to gamma space.
-    return vec4<f32>(pow(blended, vec3<f32>(INV_GAMMA)), 1.0);
+    // The sRGB render target applies pow(x, 1/2.2) encoding, but our blending
+    // was done in gamma-1.8 space.  Convert: to get correct sRGB output,
+    // output pow(blended, 2.2/1.8) so the surface encoding produces
+    // pow(blended, 2.2/1.8 * 1/2.2) = pow(blended, 1/1.8) = sRGB from gamma-1.8.
+    return vec4<f32>(pow(blended, vec3<f32>(2.2 / 1.8)), 1.0);
 }
 "#;
 
