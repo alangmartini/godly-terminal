@@ -1,11 +1,12 @@
 //! GPU glyph atlas — packs rasterized glyphs into a persistent texture.
 //!
 //! Glyphs are rasterized on the CPU (via DirectWrite / swash) and packed
-//! row-by-row into an RGBA buffer.  The **red channel** stores grayscale
-//! alpha coverage; G, B, A are zero.  ClearType RGB data is averaged to
-//! grayscale on insertion because sub-pixel rendering doesn't survive
-//! GPU composition (sub-pixel patterns don't align with physical LCD
-//! sub-pixels after compositing).
+//! row-by-row into an RGBA buffer.  For ClearType subpixel glyphs, the
+//! **R, G, B channels** store per-subpixel alpha coverage directly,
+//! enabling LCD-quality text rendering (3× horizontal effective resolution).
+//! For grayscale glyphs (e.g. from Swash), the same alpha value is
+//! replicated to all three channels.  The A channel is always 0xFF for
+//! occupied texels.
 
 use std::collections::HashMap;
 
@@ -33,9 +34,9 @@ pub struct AtlasUpdate {
 /// CPU-side glyph atlas with row-by-row packing.
 pub struct GlyphAtlas {
     entries: HashMap<GlyphKey, AtlasEntry>,
-    /// RGBA pixel data.  Only the **R** channel is used (grayscale alpha);
-    /// G = B = A = 0.  RGBA format is required because wgpu doesn't
-    /// universally support R8Unorm as a texture format on all backends.
+    /// RGBA pixel data.  R, G, B channels store per-subpixel coverage
+    /// (for ClearType) or identical alpha (for grayscale).  A = 0xFF for
+    /// occupied texels, 0x00 for empty.
     data: Vec<u8>,
     width: u32,
     height: u32,
@@ -115,18 +116,18 @@ impl GlyphAtlas {
         // Rasterize the glyph.
         let glyph = rasterizer.rasterize(key.codepoint, font_size_px, key.bold, key.italic);
 
-        // Convert to single-channel alpha and blit into a cell-sized region.
-        let alpha = glyph.as_ref().map(|g| to_grayscale_alpha(g));
-        let entry = self.pack_cell(alpha.as_ref(), glyph.as_ref());
+        // Convert to RGBA subpixel coverage and blit into a cell-sized region.
+        let rgba = glyph.as_ref().map(|g| to_rgba_coverage(g));
+        let entry = self.pack_cell(rgba.as_ref(), glyph.as_ref());
         self.entries.insert(key, entry);
         entry
     }
 
-    /// Pack a glyph bitmap (already converted to grayscale alpha) into the
-    /// next available cell-sized region in the atlas.
+    /// Pack a glyph bitmap (RGBA subpixel coverage) into the next available
+    /// cell-sized region in the atlas.
     fn pack_cell(
         &mut self,
-        alpha: Option<&Vec<u8>>,
+        rgba: Option<&Vec<u8>>,
         glyph: Option<&crate::glyph_rasterizer::RasterizedGlyph>,
     ) -> AtlasEntry {
         let cw = self.cell_w;
@@ -148,7 +149,7 @@ impl GlyphAtlas {
         let y0 = self.cursor_y;
 
         // Blit the glyph bitmap at the correct bearing offset within the cell.
-        if let (Some(alpha_data), Some(g)) = (alpha, glyph) {
+        if let (Some(rgba_data), Some(g)) = (rgba, glyph) {
             if g.width > 0 && g.height > 0 {
                 // Glyph origin within the cell:
                 let gx = g.bearing_x;
@@ -162,12 +163,14 @@ impl GlyphAtlas {
                             && (dst_x as u32) < self.width
                             && (dst_y as u32) < self.height
                         {
-                            let src_idx = (row * g.width + col) as usize;
+                            let src_idx = (row * g.width + col) as usize * 4;
                             let dst_idx =
                                 ((dst_y as u32) * self.width + dst_x as u32) as usize * 4;
-                            if src_idx < alpha_data.len() && dst_idx + 3 < self.data.len() {
-                                self.data[dst_idx] = alpha_data[src_idx]; // R = alpha
-                                // G, B, A stay 0
+                            if src_idx + 3 < rgba_data.len() && dst_idx + 3 < self.data.len() {
+                                self.data[dst_idx] = rgba_data[src_idx];         // R
+                                self.data[dst_idx + 1] = rgba_data[src_idx + 1]; // G
+                                self.data[dst_idx + 2] = rgba_data[src_idx + 2]; // B
+                                self.data[dst_idx + 3] = rgba_data[src_idx + 3]; // A
                             }
                         }
                     }
@@ -255,21 +258,36 @@ impl GlyphAtlas {
     }
 }
 
-/// Convert a rasterized glyph to single-channel grayscale alpha.
-fn to_grayscale_alpha(g: &crate::glyph_rasterizer::RasterizedGlyph) -> Vec<u8> {
+/// Convert a rasterized glyph to RGBA subpixel coverage.
+///
+/// For ClearType subpixel glyphs, R/G/B channels carry per-subpixel
+/// alpha and A = max(R,G,B) so background shows through uniformly.
+/// For grayscale glyphs, the alpha value is replicated to all channels.
+fn to_rgba_coverage(g: &crate::glyph_rasterizer::RasterizedGlyph) -> Vec<u8> {
+    let pixel_count = (g.width * g.height) as usize;
+    let mut rgba = Vec::with_capacity(pixel_count * 4);
     match g.format {
-        GlyphFormat::Alpha => g.data.clone(),
-        GlyphFormat::SubpixelRgb => {
-            // Average R, G, B channels into a single alpha value.
-            let pixel_count = (g.width * g.height) as usize;
-            let mut alpha = Vec::with_capacity(pixel_count);
+        GlyphFormat::Alpha => {
             for i in 0..pixel_count {
-                let r = g.data[i * 3] as u16;
-                let g_ch = g.data[i * 3 + 1] as u16;
-                let b = g.data[i * 3 + 2] as u16;
-                alpha.push(((r + g_ch + b) / 3) as u8);
+                let a = g.data[i];
+                rgba.push(a); // R
+                rgba.push(a); // G
+                rgba.push(a); // B
+                rgba.push(a); // A
             }
-            alpha
+        }
+        GlyphFormat::SubpixelRgb => {
+            for i in 0..pixel_count {
+                let r = g.data[i * 3];
+                let g_ch = g.data[i * 3 + 1];
+                let b = g.data[i * 3 + 2];
+                rgba.push(r);
+                rgba.push(g_ch);
+                rgba.push(b);
+                // A = max coverage so compositor knows this texel is occupied
+                rgba.push(r.max(g_ch).max(b));
+            }
         }
     }
+    rgba
 }

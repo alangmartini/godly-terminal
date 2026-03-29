@@ -61,10 +61,51 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return out;
 }
 
+// sRGB ↔ linear conversion (matches CSS/GPU sRGB transfer function).
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        return c / 12.92;
+    }
+    return pow((c + 0.055) / 1.055, 2.4);
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.0031308 {
+        return c * 12.92;
+    }
+    return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let alpha = textureSample(atlas_tex, atlas_samp, input.uv).r;
-    return mix(input.bg_color, input.fg_color, alpha);
+    let coverage = textureSample(atlas_tex, atlas_samp, input.uv);
+
+    // Convert fg/bg from sRGB to linear for correct blending.
+    let fg_lin = vec3<f32>(
+        srgb_to_linear(input.fg_color.r),
+        srgb_to_linear(input.fg_color.g),
+        srgb_to_linear(input.fg_color.b),
+    );
+    let bg_lin = vec3<f32>(
+        srgb_to_linear(input.bg_color.r),
+        srgb_to_linear(input.bg_color.g),
+        srgb_to_linear(input.bg_color.b),
+    );
+
+    // Per-channel subpixel blending in linear space.
+    let blended = vec3<f32>(
+        mix(bg_lin.r, fg_lin.r, coverage.r),
+        mix(bg_lin.g, fg_lin.g, coverage.g),
+        mix(bg_lin.b, fg_lin.b, coverage.b),
+    );
+
+    // Convert back to sRGB for the framebuffer.
+    return vec4<f32>(
+        linear_to_srgb(blended.r),
+        linear_to_srgb(blended.g),
+        linear_to_srgb(blended.b),
+        1.0,
+    );
 }
 "#;
 
@@ -89,12 +130,11 @@ pub struct AtlasPipeline {
 }
 
 impl AtlasPipeline {
-    fn rgba_format(compositor_format: wgpu::TextureFormat) -> wgpu::TextureFormat {
-        if compositor_format.is_srgb() {
-            wgpu::TextureFormat::Rgba8UnormSrgb
-        } else {
-            wgpu::TextureFormat::Rgba8Unorm
-        }
+    fn rgba_format(_compositor_format: wgpu::TextureFormat) -> wgpu::TextureFormat {
+        // Atlas stores coverage values (alpha), not colour data.
+        // Always use linear (Unorm) so the GPU does not apply sRGB decode
+        // which would distort coverage (making antialiasing too heavy).
+        wgpu::TextureFormat::Rgba8Unorm
     }
 
     fn create_atlas_texture(
