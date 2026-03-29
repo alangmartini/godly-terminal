@@ -1946,7 +1946,6 @@ dependencies = [
  "godly-ports",
  "godly-protocol",
  "godly-testkit",
- "iced",
  "log",
  "notify-rust",
  "parking_lot",
@@ -2100,6 +2099,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "godly-shell"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "pollster",
+ "raw-window-handle",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "godly-tabs-core"
 version = "0.1.0"
 
@@ -2107,13 +2118,14 @@ version = "0.1.0"
 name = "godly-terminal-surface"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "criterion",
  "fontdb",
  "godly-protocol",
  "godly-vt",
- "iced",
  "log",
  "swash",
+ "wgpu",
  "windows 0.58.0",
 ]
 
