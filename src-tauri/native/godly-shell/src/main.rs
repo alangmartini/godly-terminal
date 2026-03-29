@@ -1,7 +1,9 @@
 mod app_state;
 mod daemon_bridge;
 mod event_bus;
+mod persistence;
 mod selection;
+mod split_renderer;
 mod terminal_renderer;
 mod ui;
 
