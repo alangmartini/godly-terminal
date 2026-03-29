@@ -22,17 +22,8 @@ pub fn render_layout(
     match node {
         LayoutNode::Leaf { terminal_id } => {
             if let (Some(grid), Some(renderer)) = (grids.get(terminal_id), renderers.get_mut(terminal_id)) {
-                // TODO: need full viewport dimensions for proper split rendering
-                renderer.render(
-                    device,
-                    queue,
-                    render_pass,
-                    grid,
-                    rect.width as u32,
-                    rect.height as u32,
-                    rect.x,
-                    rect.y,
-                );
+                renderer.prepare(device, queue, grid, rect.width as u32, rect.height as u32, rect.x, rect.y);
+                renderer.draw(render_pass);
             }
         }
         LayoutNode::Split { direction, ratio, first, second } => {

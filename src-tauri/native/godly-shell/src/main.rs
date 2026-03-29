@@ -135,9 +135,23 @@ impl App {
         };
         surface.configure(&device, &config);
 
-        // Initialize terminal renderer
-        let font_metrics = FontMetrics::from_font_size(14.0);
-        let rasterizer = create_rasterizer();
+        // Initialize terminal renderer with DPI-aware font metrics
+        let scale_factor = window.scale_factor() as f32;
+        log::info!("DPI scale factor: {scale_factor}");
+        // Use Swash rasterizer with embedded font for consistent metrics
+        let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
+        let mut rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer> = {
+            let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
+            use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer;
+            r.load_font(font_data, 0);
+            Box::new(r)
+        };
+        let font_size = 14.0_f32;
+        let font_metrics = FontMetrics::from_font_bytes(font_size, font_data)
+            .with_scale_factor(scale_factor);
+        log::info!("Font metrics: cell={}x{}, font_size={}, baseline={}, scale={}",
+            font_metrics.cell_width, font_metrics.cell_height,
+            font_metrics.font_size, font_metrics.baseline_offset, font_metrics.scale_factor);
         let renderer = TerminalRenderer::new(&device, &queue, format, font_metrics, rasterizer);
         self.renderer = Some(renderer);
         self.quad_pipeline = Some(ui::quad_renderer::QuadPipeline::new(&device, format));
@@ -362,6 +376,25 @@ impl App {
                     label: Some("render"),
                 });
 
+        // Prepare terminal data BEFORE starting the render pass
+        let vw = gpu.config.width as f32;
+        let vh = gpu.config.height as f32;
+        let layout = ui::layout::ShellLayout::compute(vw, vh);
+
+        if let Some(grid) = &self.current_grid {
+            if let Some(renderer) = &mut self.renderer {
+                renderer.prepare(
+                    &gpu.device,
+                    &gpu.queue,
+                    grid,
+                    gpu.config.width,
+                    gpu.config.height,
+                    layout.terminal.x,
+                    layout.terminal.y,
+                );
+            }
+        }
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
@@ -384,10 +417,6 @@ impl App {
                 occlusion_query_set: None,
             });
 
-            let vw = gpu.config.width as f32;
-            let vh = gpu.config.height as f32;
-            let layout = ui::layout::ShellLayout::compute(vw, vh);
-
             // Build UI chrome quads
             let mut quads = Vec::new();
             quads.extend_from_slice(&self.title_bar.build_quads(layout.title_bar, vw, vh));
@@ -399,19 +428,10 @@ impl App {
                 quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &quads);
             }
 
-            // Render terminal grid in the terminal area
-            if let Some(grid) = &self.current_grid {
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.render(
-                        &gpu.device,
-                        &gpu.queue,
-                        &mut pass,
-                        grid,
-                        gpu.config.width,
-                        gpu.config.height,
-                        layout.terminal.x,
-                        layout.terminal.y,
-                    );
+            // Draw terminal (prepared before the render pass)
+            if self.current_grid.is_some() {
+                if let Some(renderer) = &self.renderer {
+                    renderer.draw(&mut pass);
                 }
             }
         }
@@ -609,6 +629,7 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
+                    log::info!("KEY: {:?} mods={:?}", event.logical_key, self.modifiers.state());
                     let mods = self.modifiers.state();
                     let adapter_mods = convert_modifiers(mods);
                     let adapter_key = convert_key(&event.logical_key);

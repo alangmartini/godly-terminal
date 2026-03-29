@@ -39,22 +39,17 @@ impl TerminalRenderer {
         }
     }
 
-    /// Render a terminal grid.
-    ///
-    /// `full_width`/`full_height` = total window size (for clip-space mapping).
-    /// `offset_x`/`offset_y` = pixel offset of the terminal area within the window.
-    /// `area_width`/`area_height` = size of the terminal area (for grid sizing).
-    pub fn render(
+    /// Prepare GPU resources (atlas texture upload, vertex buffer) BEFORE the render pass.
+    pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'_>,
         grid: &RichGridData,
         full_width: u32,
         full_height: u32,
         offset_x: f32,
         offset_y: f32,
-    ) -> usize {
+    ) {
         let vertices = atlas_vertex_builder::build_vertices(
             grid,
             &mut self.glyph_atlas,
@@ -68,12 +63,7 @@ impl TerminalRenderer {
             offset_y,
         );
 
-        if vertices.is_empty() {
-            log::debug!("build_vertices returned empty");
-            return 0;
-        }
-        log::debug!("Rendering {} vertices at offset ({}, {}), viewport {}x{}",
-            vertices.len(), offset_x, offset_y, full_width, full_height);
+        if vertices.is_empty() { return; }
 
         let atlas_update = self.glyph_atlas.take_dirty_data();
         let program = AtlasShaderProgram {
@@ -83,9 +73,18 @@ impl TerminalRenderer {
         };
         let primitive = program.build_primitive();
         primitive.prepare(&mut self.pipeline, device, queue);
-        primitive.draw(&self.pipeline, render_pass);
+    }
 
-        grid.dimensions.rows as usize * grid.dimensions.cols as usize
+    /// Draw the prepared terminal content into the render pass.
+    pub fn draw(&self, render_pass: &mut wgpu::RenderPass<'_>) {
+        // AtlasPipeline stores vertex_count from prepare; draw uses the stored pipeline state
+        // We need a dummy primitive to call draw - reuse the pipeline's stored vertex count
+        let primitive = godly_terminal_surface::atlas_shader::AtlasShaderProgram {
+            vertices: vec![],
+            atlas_update: None,
+            viewport_size: (0, 0),
+        }.build_primitive();
+        primitive.draw(&self.pipeline, render_pass);
     }
 
     pub fn font_metrics(&self) -> &FontMetrics {

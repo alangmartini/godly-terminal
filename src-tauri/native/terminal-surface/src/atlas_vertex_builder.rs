@@ -105,14 +105,16 @@ pub fn build_vertices(
             }
 
             // --- pixel position (physical, offset by chrome) ---
-            let px = (col_idx as f32 * cell_w).round() + offset_x;
-            let py = (row_idx as f32 * cell_h).round() + offset_y;
+            let base_x = (col_idx as f32 * cell_w).round();
+            let base_y = (row_idx as f32 * cell_h).round();
+            let px = base_x + offset_x;
+            let py = base_y + offset_y;
             let pw = if cell.wide {
-                ((col_idx + 2) as f32 * cell_w).round() - px
+                ((col_idx + 2) as f32 * cell_w).round() - base_x
             } else {
-                ((col_idx + 1) as f32 * cell_w).round() - px
+                ((col_idx + 1) as f32 * cell_w).round() - base_x
             };
-            let ph = ((row_idx + 1) as f32 * cell_h).round() - py;
+            let ph = ((row_idx + 1) as f32 * cell_h).round() - base_y;
 
             // --- clip-space position ---
             let x0 = px / vw * 2.0 - 1.0;
@@ -163,8 +165,8 @@ pub fn build_vertices(
     if !grid.cursor_hidden {
         let cr = grid.cursor.row as usize;
         let cc = grid.cursor.col as usize;
-        let cpx = (cc as f32 * cell_w).round();
-        let cpy = (cr as f32 * cell_h).round();
+        let cpx = (cc as f32 * cell_w).round() + offset_x;
+        let cpy = (cr as f32 * cell_h).round() + offset_y;
 
         let cursor_color = [1.0f32, 1.0, 1.0, 0.8];
 
