@@ -61,10 +61,37 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return out;
 }
 
+// ClearType-style gamma blending with enhanced contrast.
+//
+// Windows ClearType uses gamma 1.8 (not sRGB 2.2) and an "enhanced contrast"
+// parameter (default 0.5) that boosts mid-range coverage values to produce
+// heavier, more readable text — especially on dark backgrounds.  These are
+// the same parameters DirectWrite's IDWriteRenderingParams exposes.
+const GAMMA: f32 = 1.8;
+const INV_GAMMA: f32 = 0.5556; // 1.0 / 1.8
+const ENHANCED_CONTRAST: f32 = 1.0;
+
+// Boost coverage using DirectWrite's enhanced contrast formula.
+fn enhance(c: f32) -> f32 {
+    return clamp(c + ENHANCED_CONTRAST * c * (1.0 - c), 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let alpha = textureSample(atlas_tex, atlas_samp, input.uv).r;
-    return mix(input.bg_color, input.fg_color, alpha);
+    let raw = textureSample(atlas_tex, atlas_samp, input.uv);
+
+    // Apply enhanced contrast to boost text weight.
+    let coverage = vec3<f32>(enhance(raw.r), enhance(raw.g), enhance(raw.b));
+
+    // Linearise fg/bg using ClearType gamma (1.8).
+    let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
+    let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
+
+    // Per-channel subpixel blending in linear space.
+    let blended = mix(bg_lin, fg_lin, coverage);
+
+    // Back to gamma space.
+    return vec4<f32>(pow(blended, vec3<f32>(INV_GAMMA)), 1.0);
 }
 "#;
 
@@ -89,12 +116,11 @@ pub struct AtlasPipeline {
 }
 
 impl AtlasPipeline {
-    fn rgba_format(compositor_format: wgpu::TextureFormat) -> wgpu::TextureFormat {
-        if compositor_format.is_srgb() {
-            wgpu::TextureFormat::Rgba8UnormSrgb
-        } else {
-            wgpu::TextureFormat::Rgba8Unorm
-        }
+    fn rgba_format(_compositor_format: wgpu::TextureFormat) -> wgpu::TextureFormat {
+        // Atlas stores coverage values (alpha), not colour data.
+        // Always use linear (Unorm) so the GPU does not apply sRGB decode
+        // which would distort coverage (making antialiasing too heavy).
+        wgpu::TextureFormat::Rgba8Unorm
     }
 
     fn create_atlas_texture(
