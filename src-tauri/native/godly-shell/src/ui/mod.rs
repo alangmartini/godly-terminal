@@ -2,7 +2,6 @@ pub mod anim;
 pub mod builder;
 pub mod layout;
 pub mod widget;
-pub mod title_bar;
 pub mod tab_bar;
 pub mod sidebar;
 pub mod status_bar;

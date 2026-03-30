@@ -56,7 +56,6 @@ struct App {
     scrollback_offset: usize,
     mouse_position: Option<(f64, f64)>,
     quad_pipeline: Option<ui::quad_renderer::QuadPipeline>,
-    title_bar: ui::title_bar::TitleBar,
     tab_bar: ui::tab_bar::TabBar,
     sidebar: ui::sidebar::Sidebar,
     status_bar: ui::status_bar::StatusBar,
@@ -88,16 +87,15 @@ impl App {
             scrollback_offset: 0,
             mouse_position: None,
             quad_pipeline: None,
-            title_bar: ui::title_bar::TitleBar::new(),
             tab_bar: {
                 let mut tb = ui::tab_bar::TabBar::new();
                 // Pre-populate demo tabs to match the reference UI
                 tb.tabs = vec![
-                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "opensessions".into(), active: true },
-                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "work".into(), active: false },
-                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "opensessions".into(), active: false },
-                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "opensessions".into(), active: false },
-                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "opensessions".into(), active: false },
+                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "opensessions".into(), active: true, unread_count: 0 },
+                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "work".into(), active: false, unread_count: 3 },
+                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "opensessions".into(), active: false, unread_count: 0 },
+                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "opensessions".into(), active: false, unread_count: 12 },
+                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "opensessions".into(), active: false, unread_count: 0 },
                 ];
                 tb
             },
@@ -446,7 +444,6 @@ impl App {
         let mut animating = false;
         animating |= self.tab_bar.tick_animations(dt);
         animating |= self.sidebar.tick_animations(dt);
-        animating |= self.title_bar.tick_animations(dt);
         animating |= self.status_bar.tick_animations(dt);
         animating |= self.focus_dim_anim.tick(ui::anim::timing::SLOW, dt);
 

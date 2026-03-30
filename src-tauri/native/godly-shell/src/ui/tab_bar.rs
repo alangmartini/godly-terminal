@@ -27,6 +27,9 @@ pub struct TabInfo {
     pub id: String,
     pub title: String,
     pub active: bool,
+    /// Number of unread lines of output since this tab was last active.
+    /// Rendered as a small badge on inactive tabs.
+    pub unread_count: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -523,6 +526,54 @@ impl TabBar {
                 ui.icon_x(close_rect, s(7.0), icon_t, icon_color);
             }
 
+            // Activity badge — pill-shaped notification with count, shown on
+            // inactive tabs that have unread output.  Fades out when the tab
+            // becomes active or when the close button is being hovered (avoids overlap).
+            if tab.unread_count > 0 && active_t < 0.5 {
+                let close_hover = self.close_hover_anim.get(i);
+                let badge_fade = 1.0 - close_hover.max(active_t * 2.0);
+                if badge_fade > 0.01 {
+                    let count_str = if tab.unread_count > 99 { "99+".to_string() } else { tab.unread_count.to_string() };
+                    let text_w = text.text_width(&count_str);
+                    let badge_h = ch * 0.75;
+                    let badge_pad = s(3.0);
+                    // Pill width: at least a circle (for single digits), wider for multi-char
+                    let badge_w = (text_w + badge_pad * 2.0).max(badge_h);
+                    let badge_x = rect.right() - close_btn_pad - badge_w;
+                    let badge_y = rect.y + s(5.0);
+                    let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_w, height: badge_h };
+                    let badge_r = badge_h / 2.0;
+
+                    // Breathing glow (shared with active tab accent glow)
+                    let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                    let glow_rect = Rect {
+                        x: badge_x - s(3.0), y: badge_y - s(3.0),
+                        width: badge_w + s(6.0), height: badge_h + s(6.0),
+                    };
+                    ui.fill_shadow(
+                        glow_rect,
+                        [accent[0], accent[1], accent[2], 0.20 * breath * badge_fade],
+                        badge_r, s(5.0),
+                    );
+
+                    // Pill body: gradient top-to-bottom for 3D depth
+                    let badge_top = [
+                        accent[0] * 1.15, accent[1] * 1.15, accent[2] * 1.15,
+                        badge_fade,
+                    ];
+                    let badge_bot = [accent[0] * 0.9, accent[1] * 0.9, accent[2] * 0.9, badge_fade];
+                    let badge_border = [accent[0] * 0.6, accent[1] * 0.6, accent[2] * 0.6, 0.3 * badge_fade];
+                    ui.fill_rounded_gradient(badge_rect, badge_top, badge_bot, badge_r);
+                    ui.stroke_rounded(badge_rect, badge_r, 0.5, badge_border);
+
+                    // Count text (centered in pill) — dark text on accent background
+                    let text_x = badge_x + (badge_w - text_w) / 2.0;
+                    let text_y = badge_y + (badge_h - ch) / 2.0;
+                    let text_color = [0.05, 0.05, 0.07, badge_fade];
+                    ui.text(text, &count_str, text_x, text_y, text_color, accent);
+                }
+            }
+
             // Right separator between tabs (faded, skip for active and last tab)
             if !tab.active && i + 1 < self.tabs.len() {
                 let next_active = self.tabs.get(i + 1).map_or(false, |t| t.active);
@@ -617,6 +668,15 @@ impl TabBar {
 
         // Window control buttons (minimize, maximize, close) — animated hovers
         let buttons = self.window_button_rects(bar, text.scale);
+
+        // Subtle separator before window controls — visual boundary between
+        // tab content and window chrome buttons, fading at top/bottom for softness
+        {
+            let sep_x = buttons[0].0.x - s(4.0);
+            let sep_pad = s(8.0);
+            ui.vline_fade(sep_x, bar.y + sep_pad, bar.height - sep_pad * 2.0, 1.0,
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.3], s(6.0));
+        }
         for (rect, btn) in &buttons {
             let btn_t = match btn {
                 WindowButton::Minimize => self.btn_minimize_anim.value(),

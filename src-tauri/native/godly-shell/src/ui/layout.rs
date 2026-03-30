@@ -2,7 +2,6 @@
 
 use super::widget::Rect;
 
-pub const TITLE_BAR_HEIGHT: f32 = 0.0;
 pub const TAB_BAR_HEIGHT: f32 = 40.0;
 pub const STATUS_BAR_HEIGHT: f32 = 34.0;
 pub const SIDEBAR_WIDTH: f32 = 220.0;
@@ -12,7 +11,6 @@ pub const TERMINAL_PAD_TOP: f32 = 4.0;
 /// Computed layout rectangles for the shell regions.
 #[derive(Debug, Clone, Copy)]
 pub struct ShellLayout {
-    pub title_bar: Rect,
     pub sidebar: Rect,
     pub tab_bar: Rect,
     pub terminal: Rect,
@@ -25,7 +23,6 @@ impl ShellLayout {
     /// Compute layout regions. `scale` is the DPI scale factor (e.g. 1.5).
     /// Layout constants are defined in logical pixels and scaled up for physical rendering.
     pub fn compute(viewport_w: f32, viewport_h: f32, sidebar_visible: bool, scale: f32) -> Self {
-        let title_h = (TITLE_BAR_HEIGHT * scale).round();
         let tab_h = (TAB_BAR_HEIGHT * scale).round();
         let status_h = (STATUS_BAR_HEIGHT * scale).round();
         let sidebar_w = if sidebar_visible { (SIDEBAR_WIDTH * scale).round() } else { 0.0 };
@@ -38,19 +35,12 @@ impl ShellLayout {
             height: status_h,
         };
 
-        let title_bar = Rect {
-            x: 0.0,
-            y: 0.0,
-            width: viewport_w,
-            height: title_h,
-        };
-
         // Sidebar starts below the tab bar and stops above the status bar
         let sidebar = Rect {
             x: 0.0,
-            y: title_h + tab_h,
+            y: tab_h,
             width: sidebar_w,
-            height: (viewport_h - title_h - tab_h - status_h).max(0.0),
+            height: (viewport_h - tab_h - status_h).max(0.0),
         };
 
         let content_x = sidebar_w;
@@ -62,7 +52,7 @@ impl ShellLayout {
             width: viewport_w,
             height: tab_h,
         };
-        let terminal_y = title_h + tab_h;
+        let terminal_y = tab_h;
         let terminal_h = (viewport_h - terminal_y - status_h).max(0.0);
         let terminal = Rect {
             x: content_x,
@@ -80,6 +70,6 @@ impl ShellLayout {
             height: (terminal.height - pad_top).max(0.0),
         };
 
-        Self { title_bar, sidebar, tab_bar, terminal, terminal_content, status_bar }
+        Self { sidebar, tab_bar, terminal, terminal_content, status_bar }
     }
 }
