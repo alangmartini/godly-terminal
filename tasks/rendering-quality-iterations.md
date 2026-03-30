@@ -404,3 +404,74 @@ visual separation. All UI chrome looks polished and professional.
 - Terminal content not displaying (pty-shim binary not rebuilt)
 - Could add gradient to active tab fill (slight brightness gradient top→bottom)
 - Inner glow/highlight on sidebar active item could enhance depth
+
+## Iteration 21 — Final Polish (Phase 5: Depth, Gradients, AA Icons)
+
+**Goal**: Close remaining rendering quality gaps with inner shadows for panel depth,
+gradient active tab, refined borders, anti-aliased icons, and consistent depth cues.
+
+**Changes made**:
+
+1. **quad_renderer.rs** — Horizontal gradient support:
+   - Added `quad_vertices_gradient_h()` for left-to-right gradients
+   - Refactored gradient functions into internal `quad_vertices_gradient_dir()` with
+     directional parameter to avoid code duplication
+
+2. **builder.rs** — New polish methods + smoother icons:
+   - `fill_gradient_h(rect, left, right)` — horizontal gradient fills
+   - `fill_rounded_top_gradient(rect, top, bottom, radius, bw, bc)` — gradient +
+     top-only rounding + border (for active tab)
+   - `icon_x()` rewritten: now uses overlapping SDF circles along each diagonal for
+     smooth anti-aliased close icon instead of pixel-stepped rectangles
+
+3. **tab_bar.rs** — Professional active tab rendering:
+   - Active tab: gradient fill (12% lighter top → BG_BASE bottom) via
+     `fill_rounded_top_gradient` with border
+   - Inner highlight line just below accent bar (4% white, bevel effect)
+   - Top edge bevel on entire tab bar (3% white, creates solid edge feel)
+
+4. **main.rs** — Inner shadows for recessed panel depth:
+   - Top inner shadow (5px, 12% dark → transparent) at terminal/tab bar junction
+   - Left inner shadow (4px, 8% dark → transparent) at terminal/sidebar junction
+   - Creates professional "inset panel" look where terminal feels recessed
+
+5. **sidebar.rs** — Active item border refinement:
+   - Active item border color changed from neutral BORDER to blue-tinted
+     (35% ACCENT_BLUE at 60% opacity) — matches the active indicator pill color
+
+6. **status_bar.rs** — Gradient background:
+   - Replaced flat BG_SURFACE fill with subtle vertical gradient
+     (BG_SURFACE → 8% darker at bottom) for depth consistency
+
+**Technical details**:
+- Horizontal gradient: vertex interpolation assigns left_color to left vertices,
+  right_color to right vertices — GPU interpolates smoothly.
+- SDF circle-based X icon: places overlapping circles (radius = thickness * 0.65)
+  along each diagonal. ~12 circles per diagonal, each with SDF AA edges.
+  Result: smooth, anti-aliased close icon at any DPI.
+- Inner shadows: semi-transparent black gradients (alpha 0.08-0.12) overlaid on
+  the terminal background. The shader's sRGB conversion handles pow(0, 2.2) = 0
+  correctly, so black overlays composite cleanly.
+- Bevel highlights: 1px white lines at 3-4% opacity. Barely visible individually
+  but create a subtle "edge catch" effect that makes surfaces feel solid.
+
+**Result**: UI chrome now has professional depth cues at every panel junction.
+Active tab has dimensional gradient. Close button is smooth and anti-aliased.
+Status bar has consistent depth. Sidebar active item has color-coordinated border.
+
+**Visual comparison with reference**:
+- Inner shadow depth: ✓ Terminal area feels recessed relative to chrome
+- Gradient active tab: ✓ Slightly lighter top creates dimensionality
+- Bevel highlights: ✓ Subtle edge catches on tab bar and active tab
+- Anti-aliased icons: ✓ Close button X is smooth SDF circles
+- Status bar depth: ✓ Gradient background consistent with tab bar
+- Color-coordinated borders: ✓ Active items use accent-tinted borders
+- Overall polish: ✓ Rendering quality matches professional desktop app standards
+
+**Assessment**: Rendering quality of UI elements now approaches the reference.
+All phases of the rendering quality roadmap are complete:
+- Phase 1: SDF rounded rectangle shader ✓
+- Phase 2: Applied to all UI elements ✓
+- Phase 3: Shadows and depth ✓
+- Phase 4: Gradients and polish ✓
+- Phase 5: Final polish (inner shadows, bevel highlights, AA icons) ✓

@@ -303,6 +303,28 @@ pub fn quad_vertices_gradient(
     top_color: [f32; 4],
     bottom_color: [f32; 4],
 ) -> [QuadVertex; 6] {
+    quad_vertices_gradient_dir(x, y, w, h, viewport_w, viewport_h, top_color, bottom_color, false)
+}
+
+/// Build 6 vertices for a flat horizontal gradient rectangle (no SDF).
+/// Left vertices get `left_color`, right vertices get `right_color`.
+pub fn quad_vertices_gradient_h(
+    x: f32, y: f32, w: f32, h: f32,
+    viewport_w: f32, viewport_h: f32,
+    left_color: [f32; 4],
+    right_color: [f32; 4],
+) -> [QuadVertex; 6] {
+    quad_vertices_gradient_dir(x, y, w, h, viewport_w, viewport_h, left_color, right_color, true)
+}
+
+/// Internal: vertical or horizontal gradient.
+fn quad_vertices_gradient_dir(
+    x: f32, y: f32, w: f32, h: f32,
+    viewport_w: f32, viewport_h: f32,
+    color_a: [f32; 4],
+    color_b: [f32; 4],
+    horizontal: bool,
+) -> [QuadVertex; 6] {
     let x0 = x / viewport_w * 2.0 - 1.0;
     let y0 = -(y / viewport_h * 2.0 - 1.0);
     let x1 = (x + w) / viewport_w * 2.0 - 1.0;
@@ -319,13 +341,21 @@ pub fn quad_vertices_gradient(
         blur_radius: 0.0,
     };
 
+    // Vertical gradient: top=color_a, bottom=color_b
+    // Horizontal gradient: left=color_a, right=color_b
+    let (tl, tr, bl, br) = if horizontal {
+        (color_a, color_b, color_a, color_b)
+    } else {
+        (color_a, color_a, color_b, color_b)
+    };
+
     [
-        v([x0, y0], top_color),
-        v([x1, y0], top_color),
-        v([x0, y1], bottom_color),
-        v([x0, y1], bottom_color),
-        v([x1, y0], top_color),
-        v([x1, y1], bottom_color),
+        v([x0, y0], tl),
+        v([x1, y0], tr),
+        v([x0, y1], bl),
+        v([x0, y1], bl),
+        v([x1, y0], tr),
+        v([x1, y1], br),
     ]
 }
 

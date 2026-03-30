@@ -216,11 +216,17 @@ impl Sidebar {
                 ui.fill_rounded(inset_rect, colors::BG_HOVER, item_radius);
             }
 
-            // Active item background (rounded with subtle border)
+            // Active item background (rounded with subtle blue-tinted border)
             if item.active {
+                let active_border = [
+                    colors::ACCENT_BLUE[0] * 0.35,
+                    colors::ACCENT_BLUE[1] * 0.35,
+                    colors::ACCENT_BLUE[2] * 0.35,
+                    0.6,
+                ];
                 ui.fill_rounded_bordered(
                     inset_rect, colors::BG_ACTIVE, item_radius,
-                    0.5, colors::BORDER,
+                    0.5, active_border,
                 );
             }
 

@@ -3,7 +3,7 @@
 //! `UiBuilder` collects quad and text vertices during the build phase,
 //! then returns them in `finish()` for the GPU render pass.
 
-use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_sdf, quad_vertices_sdf_gradient, QuadVertex};
+use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf, quad_vertices_sdf_gradient, QuadVertex};
 use super::widget::Rect;
 
 /// Catppuccin Mocha palette for all UI chrome.
@@ -108,6 +108,14 @@ impl UiBuilder {
         ));
     }
 
+    /// Flat rectangle with horizontal gradient (no rounding).
+    pub fn fill_gradient_h(&mut self, rect: Rect, left_color: [f32; 4], right_color: [f32; 4]) {
+        self.quads.extend_from_slice(&quad_vertices_gradient_h(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, left_color, right_color,
+        ));
+    }
+
     // -- SDF rounded rectangle methods ----------------------------------------
 
     /// Core SDF method — all other rounded/shadow methods delegate here.
@@ -164,6 +172,23 @@ impl UiBuilder {
     /// Rounded rectangle with per-corner radii [TL, TR, BR, BL].
     pub fn fill_rounded_custom(&mut self, rect: Rect, color: [f32; 4], radii: [f32; 4]) {
         self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], 0.0);
+    }
+
+    /// SDF rounded rectangle with top-only rounding, gradient fill, and border.
+    pub fn fill_rounded_top_gradient(
+        &mut self,
+        rect: Rect,
+        top_color: [f32; 4],
+        bottom_color: [f32; 4],
+        radius: f32,
+        border_width: f32,
+        border_color: [f32; 4],
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, top_color, bottom_color,
+            [radius, radius, 0.0, 0.0], border_width, border_color,
+        ));
     }
 
     /// SDF rounded rectangle with vertical gradient fill.
@@ -243,18 +268,29 @@ impl UiBuilder {
         self.vline(cx - t / 2.0, cy - arm, arm * 2.0, t, color);
     }
 
-    /// X (close) icon centered in `rect`, drawn as two pixel-stepped diagonals.
+    /// X (close) icon centered in `rect`, drawn as overlapping SDF circles
+    /// along two diagonals for smooth anti-aliased rendering.
     pub fn icon_x(&mut self, rect: Rect, size: f32, t: f32, color: [f32; 4]) {
         let (cx, cy) = rect.center();
         let half = size / 2.0;
-        let steps = (half / t).ceil() as usize;
-        let step = half / steps as f32;
-        for i in 0..steps {
-            let off = i as f32 * step;
-            // top-left to bottom-right diagonal
-            self.fill(Rect { x: cx - half + off, y: cy - half + off, width: t, height: t }, color);
-            // top-right to bottom-left diagonal
-            self.fill(Rect { x: cx + half - off - t, y: cy - half + off, width: t, height: t }, color);
+        let dot_r = t * 0.65;
+        let d = dot_r * 2.0;
+        // Use enough steps for smooth coverage (overlap circles along diagonal)
+        let steps = (size / (t * 0.6)).ceil().max(4.0) as usize;
+        for i in 0..=steps {
+            let frac = i as f32 / steps as f32;
+            let dx = -half + frac * size;
+            let dy = -half + frac * size;
+            // Diagonal 1: top-left to bottom-right
+            self.fill_rounded(
+                Rect { x: cx + dx - dot_r, y: cy + dy - dot_r, width: d, height: d },
+                color, dot_r,
+            );
+            // Diagonal 2: top-right to bottom-left
+            self.fill_rounded(
+                Rect { x: cx - dx - dot_r, y: cy + dy - dot_r, width: d, height: d },
+                color, dot_r,
+            );
         }
     }
 

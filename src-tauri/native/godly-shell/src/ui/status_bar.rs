@@ -29,10 +29,16 @@ impl StatusBar {
         let cw = text.cell_width;
         let ch = text.cell_height;
 
-        // Background — slightly raised surface for visibility
+        // Background — subtle gradient for depth (raised → slightly darker at bottom)
         let sidebar_bg = colors::BG_DARK;
         let content_bg = colors::BG_SURFACE;
-        ui.fill(bar, content_bg);
+        let content_bg_bottom = [
+            content_bg[0] * 0.92,
+            content_bg[1] * 0.92,
+            content_bg[2] * 0.92,
+            1.0,
+        ];
+        ui.fill_gradient(bar, content_bg, content_bg_bottom);
 
         // Sidebar portion of status bar (darker background)
         if self.sidebar_width > 0.0 {

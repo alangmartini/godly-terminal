@@ -438,6 +438,36 @@ impl App {
         // Terminal area background (BG_BASE) — must come before chrome overlays
         ui_builder.fill(layout.terminal, ui::builder::colors::BG_BASE);
 
+        // Inner shadow at top of terminal area (creates recessed panel depth)
+        {
+            let shadow_h = ui_text_handle.s(5.0);
+            let shadow_rect = ui::widget::Rect {
+                x: layout.terminal.x,
+                y: layout.terminal.y,
+                width: layout.terminal.width,
+                height: shadow_h,
+            };
+            ui_builder.fill_gradient(shadow_rect,
+                [0.0, 0.0, 0.0, 0.12],  // semi-transparent dark at top
+                [0.0, 0.0, 0.0, 0.0],   // transparent at bottom
+            );
+
+            // Inner shadow at left edge (sidebar-terminal junction depth)
+            if layout.sidebar.width > 0.0 {
+                let shadow_w = ui_text_handle.s(4.0);
+                let side_shadow = ui::widget::Rect {
+                    x: layout.terminal.x,
+                    y: layout.terminal.y,
+                    width: shadow_w,
+                    height: layout.terminal.height,
+                };
+                ui_builder.fill_gradient_h(side_shadow,
+                    [0.0, 0.0, 0.0, 0.08],  // semi-transparent dark at left
+                    [0.0, 0.0, 0.0, 0.0],   // transparent at right
+                );
+            }
+        }
+
         // Placeholder text when no terminal content is available
         if self.current_grid.is_none() {
             let placeholder = if self.daemon.is_none() {

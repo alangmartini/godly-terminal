@@ -130,6 +130,8 @@ impl TabBar {
         ];
         ui.fill_gradient(bar, bar_top, bar_bottom);
 
+        // Top edge bevel highlight (very subtle, creates solid edge feel)
+        ui.hline(bar.x, bar.y, bar.width, 1.0, [1.0, 1.0, 1.0, 0.03]);
         // Bottom separator line
         ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
 
@@ -168,10 +170,20 @@ impl TabBar {
 
             let tab_radius = s(5.0);
             if tab.active {
-                // Active tab: top-only rounding (blends into content below)
-                ui.fill_rounded_top_bordered(rect, bg, tab_radius, 1.0, colors::BORDER);
+                // Active tab: top-only rounded gradient (slightly lighter top → BG_BASE bottom)
+                let tab_top = [
+                    bg[0] * 1.12,
+                    bg[1] * 1.12,
+                    bg[2] * 1.12,
+                    1.0,
+                ];
+                ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, 1.0, colors::BORDER);
                 // Top accent bar (inset from corners)
                 ui.hline(rect.x + tab_radius, rect.y + 1.0, rect.width - tab_radius * 2.0, s(2.0), accent);
+                // Subtle inner highlight just below border (bevel effect)
+                ui.hline(rect.x + tab_radius + 1.0, rect.y + s(2.0) + 1.0,
+                         rect.width - (tab_radius + 1.0) * 2.0, 1.0,
+                         [1.0, 1.0, 1.0, 0.04]);
             } else if self.hovered_tab == Some(i) {
                 // Hovered tab: top-only rounding, no border
                 ui.fill_rounded_top(rect, bg, s(4.0));
