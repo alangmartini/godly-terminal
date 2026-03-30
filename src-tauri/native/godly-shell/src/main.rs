@@ -566,6 +566,22 @@ impl App {
                     thumb_rect, thumb_color, bar_w / 2.0,
                     0.5, thumb_border,
                 );
+
+                // Scroll-away fog: subtle gradient at bottom edge when scrolled up
+                // from live position, hinting that there's newer content below.
+                if self.scrollback_offset > 0 {
+                    let fog_h = s(8.0);
+                    let fog_rect = ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y + layout.terminal.height - fog_h,
+                        width: layout.terminal.width,
+                        height: fog_h,
+                    };
+                    ui_builder.fill_gradient(fog_rect,
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.15],
+                    );
+                }
             }
         }
 
