@@ -160,9 +160,13 @@ fn dither_noise(pos: vec2<f32>) -> f32 {
 // "brushed matte" quality — the difference between a flat digital rectangle
 // and a real material surface.  Quantized to 2×2 pixel blocks for a fine
 // but visible texture at typical DPI, with no temporal flicker.
+//
+// Intensity 0.004 (~±1 LSB in sRGB) is barely perceptible on smooth
+// surfaces but prevents the uncanny "perfectly digital" flatness.
+// Higher values (e.g. 0.006) created visible speckle on dark backgrounds.
 fn material_grain(pos: vec2<f32>) -> f32 {
     let p = floor(pos * 0.5);
-    return (fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453) - 0.5) * 0.006;
+    return (fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453) - 0.5) * 0.004;
 }
 
 @fragment
@@ -173,19 +177,21 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Fast path: flat quads with no SDF (rect_half_ext.x <= 0 signals flat mode)
     if (he.x <= 0.0) {
-        let linear = pow(fill.rgb, vec3<f32>(2.2));
+        // Apply dither + grain in sRGB space BEFORE linearization.
+        // Previously these were added in linear space, which caused massive
+        // visible noise on dark backgrounds: BG_DARK (0.071 sRGB → 0.0034
+        // linear) + 0.003 grain = ~88% brightness swing.  In sRGB space the
+        // same grain is only ±4% — perceptually uniform and consistent with
+        // the SDF path which also adds grain before pow(2.2).
         let d = dither_noise(screen_pos);
-        // Material grain on flat quads too — gives backgrounds the same subtle
-        // "brushed matte" surface quality as SDF elements.  Without this, flat
-        // panel backgrounds are perfectly smooth digital rectangles while rounded
-        // UI elements have visible texture, creating a jarring inconsistency.
         let g = material_grain(screen_pos);
+        let srgb = fill.rgb + vec3<f32>(d + g);
+        let linear = pow(srgb, vec3<f32>(2.2));
         // Premultiplied alpha output: RGB * alpha before blending.
         // With PREMULTIPLIED_ALPHA_BLENDING, this produces correct compositing
         // of semi-transparent layers (shadows, glows, hover transitions) and
         // eliminates dark fringes at anti-aliased edges of colored elements.
-        let rgb = linear + vec3<f32>(d + g);
-        return vec4<f32>(rgb * fill.a, fill.a);
+        return vec4<f32>(linear * fill.a, fill.a);
     }
 
     // Rotate local_pos into shape space when rotation is non-zero
@@ -249,12 +255,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Borders use the same adaptive AA band for consistent edge quality
         let fill_mask = 1.0 - smoothstep(-crisp_aa, crisp_aa, inner_d);
 
-        // Border 3D rim lighting: subtle vertical gradient across the border
-        // band.  Top edge of the border catches more light (brighter), bottom
-        // edge recedes (darker).  This transforms flat 1px borders into thin
+        // Border 3D rim lighting: directional gradient across the border
+        // using a top-left light source (consistent with the panel cast
+        // shadows in the compositor).  Top and left edges catch more light,
+        // bottom and right recede.  Transforms flat 1px borders into thin
         // bevels that create real depth perception at panel boundaries.
-        let ny = p.y / max(he.y, 1.0);  // -1 top, +1 bottom
-        let border_highlight = 0.025 * saturate(-ny * 0.5 + 0.3);
+        let bny = p.y / max(he.y, 1.0);  // -1 top, +1 bottom
+        let bnx = p.x / max(he.x, 1.0);  // -1 left, +1 right
+        let border_highlight = 0.025 * saturate(-bny * 0.4 - bnx * 0.15 + 0.3);
         let border_rgb = input.border_color.rgb + vec3<f32>(border_highlight);
 
         color = vec4<f32>(
@@ -268,6 +276,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // occlusion to give UI elements a glass-like 3D quality reminiscent of
     // polished native app chrome (Zed, VS Code, macOS system UI).
     //
+    // All terms use a consistent top-left light direction, matching the
+    // directional panel cast shadows in the compositor (tab bar casts the
+    // strongest shadow downward, sidebar casts rightward).
+    //
     // Lighting extends smoothly to the fill edge (fading out near the border)
     // so there's no visible discontinuity where the lit fill meets unlit border.
     let edge_margin = select(1.5, input.border_width + 0.5, has_border);
@@ -276,13 +288,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let ny = p.y / he.y;  // -1 at top, +1 at bottom
         let nx = p.x / he.x;  // -1 at left, +1 at right
 
-        // Top-edge specular: bright near top, fades by ~middle
+        // Top-edge specular with horizontal falloff: bright near top-left,
+        // fades toward bottom-right.  The x-axis contribution is subtle
+        // (0.1 vs 0.2 offset) so the effect is primarily vertical but not
+        // perfectly symmetric — matching a top-left light vector.
         let spec_t = saturate((-ny - 0.2) * 1.5);
-        let spec = spec_t * spec_t * 0.04;  // quadratic falloff, very subtle
+        let spec_x = 1.0 - saturate(nx * 0.15);  // left side ~15% brighter
+        let spec = spec_t * spec_t * 0.04 * spec_x;
 
-        // Bottom-edge darkening: counterpart to specular, creates "volume"
+        // Bottom-right darkening: counterpart to specular, creates "volume".
+        // Slightly stronger at bottom-right (farthest from light source).
         let dark_t = saturate((ny - 0.3) * 1.2);
-        let dark = dark_t * dark_t * 0.02;
+        let dark_x = 1.0 + saturate(nx * 0.2) * 0.3;  // right side ~30% darker
+        let dark = dark_t * dark_t * 0.02 * dark_x;
 
         // Environmental reflection band: soft horizontal highlight at ~30%
         // from the top.  Simulates overhead ambient light reflecting off a
@@ -298,23 +316,30 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let edge_dist = -d - select(0.5, input.border_width, has_border);
         let rim_band = 2.5;  // width in pixels of the rim highlight zone
         let rim_raw = saturate(1.0 - edge_dist / rim_band);
-        let dir_bias = saturate((-ny * 0.6 + 0.4) * 0.8 + 0.2);
+        let dir_bias = saturate((-ny * 0.5 - nx * 0.25 + 0.4) * 0.8 + 0.2);
         let rim = rim_raw * rim_raw * dir_bias * 0.025;
 
-        // Corner ambient occlusion: subtle darkening where two edges converge
-        // in the rounded-corner region.  Mimics how ambient light is partially
-        // blocked in concave areas, adding perceived depth at the extremities
-        // of the shape.  Only visible on elements large enough to notice.
+        // Corner ambient occlusion: directionally weighted darkening where
+        // two edges converge.  Bottom-right corner is darkest (farthest from
+        // top-left light source), top-left is lightest.  This asymmetry
+        // reinforces the directional lighting model used by panel shadows.
         let corner_x = saturate((abs(nx) - 0.4) * 2.5);
         let corner_y = saturate((abs(ny) - 0.4) * 2.5);
-        let corner_ao = corner_x * corner_y * 0.012;
+        let corner_base = corner_x * corner_y;
+        // Directional weight: 1.0 at bottom-right, ~0.4 at top-left
+        let corner_dir = 0.7 + 0.3 * saturate((nx + ny) * 0.5 + 0.5);
+        let corner_ao = corner_base * corner_dir * 0.012;
 
         // Glass-edge highlight: concentrated bright line at the very top of
         // the element, mimicking the CSS `inset 0 1px 0 rgba(255,255,255,0.1)`
         // pattern.  Tighter than the specular term — a sharp Gaussian peak at
         // the topmost 2-3 pixels of the fill.  Creates the "wet edge" seen on
         // polished native controls (macOS buttons, Arc browser tabs).
-        let edge_peak = exp(-32.0 * (ny + 0.95) * (ny + 0.95)) * 0.035;
+        // A secondary, subtler peak at the left edge completes the top-left
+        // light illusion.
+        let top_edge = exp(-32.0 * (ny + 0.95) * (ny + 0.95)) * 0.035;
+        let left_edge = exp(-32.0 * (nx + 0.95) * (nx + 0.95)) * 0.012;
+        let edge_peak = top_edge + left_edge;
 
         let lighting = (spec + refl + rim + edge_peak - dark - corner_ao) * interior_t;
 
@@ -327,17 +352,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = vec4<f32>(color.rgb + vec3<f32>(lighting + grain), color.a);
     }
 
-    // Convert sRGB to linear + apply AA alpha + dither.
+    // Apply dither in sRGB space before linearization for perceptually
+    // uniform anti-banding.  Adding ±1/255 in sRGB corresponds to ±0.5 LSB
+    // in the quantized framebuffer — exactly the right magnitude regardless
+    // of brightness.  Previously dither was added in linear space, causing
+    // disproportionately large noise on dark SDF elements.
+    //
     // Premultiplied alpha: RGB is pre-scaled by final alpha so the blend
     // unit can use (One, OneMinusSrcAlpha) — the industry standard for UI
-    // compositing (Skia, Direct2D, CoreGraphics).  Eliminates dark fringes
-    // at anti-aliased edges of colored elements and produces physically
-    // correct compositing when multiple semi-transparent layers overlap
-    // (shadows, glows, hover transitions).
+    // compositing (Skia, Direct2D, CoreGraphics).
     let final_a = color.a * aa;
-    let linear = pow(color.rgb, vec3<f32>(2.2));
     let dith = dither_noise(screen_pos);
-    let rgb = (linear + vec3<f32>(dith)) * final_a;
+    let linear = pow(color.rgb + vec3<f32>(dith), vec3<f32>(2.2));
+    let rgb = linear * final_a;
     return vec4<f32>(rgb, final_a);
 }
 "#;
