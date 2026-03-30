@@ -496,6 +496,49 @@ impl App {
                            ui::builder::colors::FG_MUTED, ui::builder::colors::BG_BASE);
         }
 
+        // Scrollbar (rendered before chrome so it layers under borders)
+        if let Some(grid) = &self.current_grid {
+            let visible_rows = self.terminal_size().0 as usize;
+            let total = grid.total_scrollback + visible_rows;
+            if total > visible_rows && visible_rows > 0 {
+                let s = |v: f32| ui_text_handle.s(v);
+                let track_margin = s(2.0);
+                let bar_w = s(6.0);
+                let track_rect = ui::widget::Rect {
+                    x: layout.terminal.x + layout.terminal.width - bar_w - track_margin,
+                    y: layout.terminal.y + track_margin,
+                    width: bar_w,
+                    height: layout.terminal.height - track_margin * 2.0,
+                };
+
+                // Thumb size and position
+                let ratio = visible_rows as f32 / total as f32;
+                let thumb_h = (track_rect.height * ratio).max(s(20.0));
+                // scrollback_offset=0 means at bottom (live), higher = scrolled up
+                let scroll_frac = if grid.total_scrollback > 0 {
+                    1.0 - (self.scrollback_offset as f32 / grid.total_scrollback as f32)
+                } else {
+                    1.0
+                };
+                let thumb_y = track_rect.y + (track_rect.height - thumb_h) * scroll_frac;
+
+                let thumb_rect = ui::widget::Rect {
+                    x: track_rect.x,
+                    y: thumb_y,
+                    width: bar_w,
+                    height: thumb_h,
+                };
+
+                // Thumb: rounded, semi-transparent, with subtle border
+                let thumb_color = [1.0, 1.0, 1.0, 0.15];
+                let thumb_border = [1.0, 1.0, 1.0, 0.08];
+                ui_builder.fill_rounded_bordered(
+                    thumb_rect, thumb_color, bar_w / 2.0,
+                    0.5, thumb_border,
+                );
+            }
+        }
+
         // Tab bar now serves as title bar (full width at top, includes window buttons)
         self.tab_bar.sidebar_width = layout.sidebar.width;
         self.tab_bar.build(&mut ui_builder, layout.tab_bar, &ui_text_handle);

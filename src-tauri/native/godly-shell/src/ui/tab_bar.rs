@@ -38,13 +38,14 @@ pub enum WindowButton {
 pub struct TabBar {
     pub tabs: Vec<TabInfo>,
     pub hovered_tab: Option<usize>,
+    pub hovered_close_tab: Option<usize>,
     pub hovered_button: Option<WindowButton>,
     pub sidebar_width: f32,
 }
 
 impl TabBar {
     pub fn new() -> Self {
-        Self { tabs: Vec::new(), hovered_tab: None, hovered_button: None, sidebar_width: 0.0 }
+        Self { tabs: Vec::new(), hovered_tab: None, hovered_close_tab: None, hovered_button: None, sidebar_width: 0.0 }
     }
 
     /// The x-offset where tabs begin (after sidebar area).
@@ -260,7 +261,14 @@ impl TabBar {
                     width: close_btn_sz,
                     height: close_btn_sz,
                 };
-                let icon_color = if tab.active {
+                // Hover circle behind X icon (VS Code style)
+                let close_hovered = self.hovered_close_tab == Some(i);
+                if close_hovered {
+                    ui.fill_rounded(close_rect, colors::BG_HOVER, close_btn_sz / 2.0);
+                }
+                let icon_color = if close_hovered {
+                    colors::FG_PRIMARY
+                } else if tab.active {
                     colors::FG_SECONDARY
                 } else {
                     colors::FG_MUTED
@@ -339,10 +347,27 @@ impl TabBar {
         match event {
             MouseEvent::Move { x, y } => {
                 self.hovered_tab = None;
+                self.hovered_close_tab = None;
                 self.hovered_button = None;
-                for (i, _) in self.tabs.iter().enumerate() {
-                    if self.tab_rect(i, bar, scale).contains(x, y) {
+                let close_btn_sz = 16.0 * scale;
+                let close_btn_pad = 8.0 * scale;
+                for (i, tab) in self.tabs.iter().enumerate() {
+                    let rect = self.tab_rect(i, bar, scale);
+                    if rect.contains(x, y) {
                         self.hovered_tab = Some(i);
+                        // Check close button hover (visible on active + hovered tabs)
+                        let show_close = tab.active || true; // hovered_tab is already Some(i)
+                        if show_close {
+                            let close_rect = Rect {
+                                x: rect.right() - close_btn_sz - close_btn_pad,
+                                y: rect.y + (rect.height - close_btn_sz) / 2.0,
+                                width: close_btn_sz,
+                                height: close_btn_sz,
+                            };
+                            if close_rect.contains(x, y) {
+                                self.hovered_close_tab = Some(i);
+                            }
+                        }
                     }
                 }
                 for (rect, btn) in &self.window_button_rects(bar, scale) {
