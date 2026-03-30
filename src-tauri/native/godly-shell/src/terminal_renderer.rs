@@ -78,10 +78,14 @@ impl TerminalRenderer {
             Vec::new()
         };
 
-        // Rasterize UI chrome text through the same atlas
+        // Rasterize UI chrome text through the same atlas.
+        // UI text uses transparent bg (alpha=0) to trigger grayscale AA mode
+        // in the atlas shader, so text alpha-composites cleanly over gradient
+        // and SDF-rounded backgrounds drawn by the quad pipeline.
         let phys = self.font_metrics.scaled_for_render();
         let vw = full_width as f32;
         let vh = full_height as f32;
+        let transparent_bg = [0.0f32, 0.0, 0.0, 0.0];
 
         for cmd in ui_text {
             let mut cx = cmd.x;
@@ -104,7 +108,7 @@ impl TerminalRenderer {
                     position: pos,
                     uv,
                     fg_color: cmd.fg,
-                    bg_color: cmd.bg,
+                    bg_color: transparent_bg,
                 };
                 let tl = [x0, y0];
                 let br = [x1, y1];

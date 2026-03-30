@@ -466,6 +466,19 @@ impl App {
                     [0.0, 0.0, 0.0, 0.0],   // transparent at right
                 );
             }
+
+            // Bottom inner shadow (terminal-to-status-bar junction)
+            let bottom_shadow_h = ui_text_handle.s(3.0);
+            let bottom_shadow = ui::widget::Rect {
+                x: layout.terminal.x,
+                y: layout.terminal.y + layout.terminal.height - bottom_shadow_h,
+                width: layout.terminal.width,
+                height: bottom_shadow_h,
+            };
+            ui_builder.fill_gradient(bottom_shadow,
+                [0.0, 0.0, 0.0, 0.0],   // transparent at top
+                [0.0, 0.0, 0.0, 0.08],  // semi-transparent dark at bottom
+            );
         }
 
         // Placeholder text when no terminal content is available
@@ -489,6 +502,14 @@ impl App {
         self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
         self.status_bar.sidebar_width = layout.sidebar.width;
         self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle);
+        // Window outer border — SDF rounded for anti-aliased edges against the desktop
+        {
+            let border_color = ui::builder::colors::BORDER;
+            let r = ui_text_handle.s(3.0);
+            let full = ui::widget::Rect { x: 0.0, y: 0.0, width: vw, height: vh };
+            ui_builder.stroke_rounded(full, r, 1.0, border_color);
+        }
+
         let (chrome_quads, text_commands) = ui_builder.finish();
 
         // Prepare atlas pipeline with terminal grid + UI text
@@ -538,6 +559,66 @@ impl App {
             // Draw terminal content + UI text (both through atlas pipeline)
             if let Some(renderer) = &self.renderer {
                 renderer.draw(&mut pass);
+            }
+
+            // Draw cursor overlay via SDF quad pipeline (on top of terminal text)
+            // for rounded corners and subtle glow — professional look.
+            if let Some(quad_pipe) = &mut self.quad_pipeline {
+                if let Some(grid) = &self.current_grid {
+                    if !grid.cursor_hidden {
+                        if let Some(r) = &self.renderer {
+                            let m = r.font_metrics().scaled_for_render();
+                            let cw = m.cell_width;
+                            let ch = m.cell_height;
+                            let cpx = (grid.cursor.col as f32 * cw).round() + layout.terminal_content.x;
+                            let cpy = (grid.cursor.row as f32 * ch).round() + layout.terminal_content.y;
+
+                            // Clip cursor to terminal area
+                            let clip_r = layout.terminal_content.x + layout.terminal_content.width;
+                            let clip_b = layout.terminal_content.y + layout.terminal_content.height;
+                            if cpx < clip_r && cpy < clip_b {
+                                use godly_protocol::types::CursorShape;
+                                let cursor_color = [1.0f32, 1.0, 1.0, 0.85];
+                                let glow_color = [0.537, 0.706, 0.980, 0.12]; // subtle blue glow
+                                let radius = 2.0 * self.scale_factor;
+
+                                let (cx, cy, cwidth, cheight) = match grid.cursor.cursor_style {
+                                    CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
+                                        (cpx, cpy, cw, ch)
+                                    }
+                                    CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
+                                        let uh = (2.0 * self.scale_factor).max(2.0);
+                                        (cpx, cpy + ch - uh, cw, uh)
+                                    }
+                                    CursorShape::BlinkBar | CursorShape::SteadyBar => {
+                                        let bw = (2.0 * self.scale_factor).max(2.0);
+                                        (cpx, cpy, bw, ch)
+                                    }
+                                };
+
+                                let mut cursor_verts = Vec::new();
+                                // Glow behind cursor (expanded soft shadow)
+                                cursor_verts.extend_from_slice(
+                                    &ui::quad_renderer::quad_vertices_sdf(
+                                        cx, cy, cwidth, cheight,
+                                        vw, vh, glow_color,
+                                        [radius; 4], 0.0, [0.0; 4],
+                                        4.0 * self.scale_factor,
+                                    ),
+                                );
+                                // Cursor body (rounded rectangle)
+                                cursor_verts.extend_from_slice(
+                                    &ui::quad_renderer::quad_vertices_sdf(
+                                        cx, cy, cwidth, cheight,
+                                        vw, vh, cursor_color,
+                                        [radius; 4], 0.0, [0.0; 4], 0.0,
+                                    ),
+                                );
+                                quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &cursor_verts);
+                            }
+                        }
+                    }
+                }
             }
         }
 

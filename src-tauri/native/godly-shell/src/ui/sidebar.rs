@@ -146,8 +146,14 @@ impl Sidebar {
         let bottom_panel_h = s(BOTTOM_PANEL_HEIGHT);
         let text_y_off = |area_h: f32| (area_h - ch) / 2.0;
 
-        // Sidebar background
-        ui.fill(sidebar, colors::BG_DARK);
+        // Sidebar background — subtle vertical gradient (slightly darker at bottom)
+        let sidebar_bottom_color = [
+            colors::BG_DARK[0] * 0.9,
+            colors::BG_DARK[1] * 0.9,
+            colors::BG_DARK[2] * 0.9,
+            colors::BG_DARK[3],
+        ];
+        ui.fill_gradient(sidebar, colors::BG_DARK, sidebar_bottom_color);
 
         // Right border separator
         ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0, colors::BORDER);
@@ -213,11 +219,15 @@ impl Sidebar {
                 height: rect.height - s(4.0),
             };
             if self.hovered_index == Some(i) && !item.active {
-                ui.fill_rounded(inset_rect, colors::BG_HOVER, item_radius);
+                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.4];
+                ui.fill_rounded_bordered(inset_rect, colors::BG_HOVER, item_radius, 0.5, hover_border);
             }
 
             // Active item background (rounded with subtle blue-tinted border)
             if item.active {
+                // Inner shadow behind active item for depth
+                ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.15], item_radius, s(6.0));
+
                 let active_border = [
                     colors::ACCENT_BLUE[0] * 0.35,
                     colors::ACCENT_BLUE[1] * 0.35,
@@ -309,7 +319,7 @@ impl Sidebar {
         };
         let new_bg = if self.hovered_new { colors::BG_SURFACE } else { colors::BG_DARK };
         if self.hovered_new {
-            ui.fill_rounded(new_rect, colors::BG_SURFACE, s(4.0));
+            ui.fill_rounded_bordered(new_rect, colors::BG_SURFACE, s(4.0), 0.5, colors::BORDER);
         }
         ui.text(text, "+ New Session",
                 new_rect.x + s(8.0),
@@ -339,11 +349,22 @@ impl Sidebar {
             };
             ui.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.12], 0.0, s(4.0));
 
-            // Panel background (slightly raised)
-            ui.fill(panel, colors::BG_RAISED);
-
-            // Top separator
-            ui.hline(sidebar.x + pad_h, panel_y, sidebar.width - pad_h * 2.0, 1.0, colors::BORDER);
+            // Panel container — rounded rect with subtle border for depth
+            let panel_inset = Rect {
+                x: panel.x + s(6.0),
+                y: panel.y + s(2.0),
+                width: panel.width - s(12.0),
+                height: panel.height - s(4.0),
+            };
+            let panel_radius = s(6.0);
+            let panel_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
+            // Shadow behind the panel for lift
+            ui.fill_shadow(panel_inset, [0.0, 0.0, 0.0, 0.10], panel_radius, s(4.0));
+            ui.fill_rounded_bordered(panel_inset, colors::BG_RAISED, panel_radius, 0.5, panel_border);
+            // Top inner highlight (bevel)
+            ui.hline(panel_inset.x + panel_radius, panel_inset.y + 1.0,
+                     panel_inset.width - panel_radius * 2.0, 1.0,
+                     [1.0, 1.0, 1.0, 0.03]);
 
             // "Processes" header
             ui.text(text, "Processes",
@@ -369,8 +390,16 @@ impl Sidebar {
 
                 let panel_bg = colors::BG_RAISED;
 
-                // Status indicator icon
-                ui.text(text, agent.icon, sidebar.x + pad_h, line1_y, status_color, panel_bg);
+                // Status indicator: small SDF colored dot
+                let dot_r = s(2.5);
+                let dot_size = dot_r * 2.0;
+                let dot_rect = Rect {
+                    x: sidebar.x + pad_h + (cw - dot_size) / 2.0,
+                    y: line1_y + (ch - dot_size) / 2.0,
+                    width: dot_size,
+                    height: dot_size,
+                };
+                ui.fill_rounded(dot_rect, status_color, dot_r);
 
                 // Agent name
                 ui.text(text, &agent.name,

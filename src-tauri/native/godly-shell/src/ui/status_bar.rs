@@ -67,15 +67,32 @@ impl StatusBar {
             } else {
                 "Sessions"
             };
+            // Pill padding constants
+            let pad_h = s(4.0);
+            let pad_v = s(2.0);
             // Small green dot (circle via SDF) to indicate active process
             let dot_sz = s(4.0);
-            let dot_y = y_center + ch / 2.0 - dot_sz / 2.0;
+            let label_w = text.text_width(label);
+            // Pill covers: left-pad + dot + gap + label + right-pad
+            let pill_inner_w = dot_sz + s(6.0) + label_w;
+            let pill_w = pill_inner_w + pad_h * 2.0;
+            let pill_h = ch + pad_v * 2.0;
+            let pill_y = bar.y + (bar.height - pill_h) / 2.0;
+            let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
+            ui.fill_rounded_bordered(
+                Rect { x: sx, y: pill_y, width: pill_w, height: pill_h },
+                colors::BG_HOVER,
+                s(3.0),
+                0.5,
+                pill_border,
+            );
+            let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
             ui.fill_rounded(
-                Rect { x: sx, y: dot_y, width: dot_sz, height: dot_sz },
+                Rect { x: sx + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
                 colors::ACCENT_GREEN,
                 dot_sz / 2.0,
             );
-            ui.text(text, label, sx + dot_sz + s(6.0), y_center, colors::FG_MUTED, sidebar_bg);
+            ui.text(text, label, sx + pad_h + dot_sz + s(6.0), y_center, colors::FG_SECONDARY, colors::BG_HOVER);
         }
 
         // --- Content section: cwd + git branch + dimensions ---
@@ -84,10 +101,16 @@ impl StatusBar {
 
         // Working directory
         if !self.cwd.is_empty() {
-            // Reserve space for right-aligned items
+            // Reserve space for right-aligned pill items:
+            //   hints pill: text + 2*pad_h + outer margin
+            //   dims pill:  text + 2*pad_h + gap between pills
             let hints_label = "? for shortcuts";
             let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
-            let right_reserved = text.text_width(&dims) + text.text_width(hints_label) + s(48.0);
+            let right_reserved = text.text_width(&dims) + text.text_width(hints_label)
+                + s(4.0) * 4.0   // 2x pad_h per pill
+                + s(8.0)          // gap between the two pills
+                + s(10.0)         // outer right margin
+                + cw * 2.0;       // breathing room
             let avail_for_cwd = bar.right() - x - right_reserved - cw * 4.0;
             let max_chars = (avail_for_cwd / cw).floor().max(4.0) as usize;
 
@@ -100,11 +123,34 @@ impl StatusBar {
             x += text.text_width(&display_cwd) + cw * 2.0;
         }
 
-        // Git branch with branch icon
+        // Git branch with branch icon wrapped in a pill
         if !self.git_branch.is_empty() {
+            let pad_h = s(4.0);
+            let pad_v = s(2.0);
+            // Small dot before branch name
+            let dot_sz = s(4.0);
             let branch_text = format!(" {}", self.git_branch);
-            ui.text(text, &branch_text, x, y_center, colors::ACCENT_PEACH, content_bg);
-            x += text.text_width(&branch_text) + cw * 2.0;
+            let branch_w = text.text_width(&branch_text);
+            let pill_inner_w = dot_sz + s(4.0) + branch_w;
+            let pill_w = pill_inner_w + pad_h * 2.0;
+            let pill_h = ch + pad_v * 2.0;
+            let pill_y = bar.y + (bar.height - pill_h) / 2.0;
+            let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
+            ui.fill_rounded_bordered(
+                Rect { x, y: pill_y, width: pill_w, height: pill_h },
+                colors::BG_HOVER,
+                s(3.0),
+                0.5,
+                pill_border,
+            );
+            let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
+            ui.fill_rounded(
+                Rect { x: x + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
+                colors::ACCENT_PEACH,
+                dot_sz / 2.0,
+            );
+            ui.text(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, colors::ACCENT_PEACH, colors::BG_HOVER);
+            x += pill_w + cw * 2.0;
         }
 
         // Git diff summary (dynamic)
@@ -115,16 +161,37 @@ impl StatusBar {
             }
         }
 
-        // Right-aligned: keyboard hints
+        // Right-aligned: keyboard hints pill
+        let pad_h = s(4.0);
+        let pad_v = s(2.0);
+        let pill_h = ch + pad_v * 2.0;
+        let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
         let hints_label = "? for shortcuts";
-        let hints_w = text.text_width(hints_label);
-        let hints_x = bar.right() - hints_w - s(12.0);
-        ui.text(text, hints_label, hints_x, y_center, colors::FG_MUTED, content_bg);
+        let hints_text_w = text.text_width(hints_label);
+        let hints_pill_w = hints_text_w + pad_h * 2.0;
+        let hints_pill_x = bar.right() - hints_pill_w - s(10.0);
+        let pill_y = bar.y + (bar.height - pill_h) / 2.0;
+        ui.fill_rounded_bordered(
+            Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h },
+            colors::BG_HOVER,
+            s(3.0),
+            0.5,
+            pill_border,
+        );
+        ui.text(text, hints_label, hints_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
 
-        // Terminal dimensions (left of hints)
+        // Terminal dimensions pill (left of hints)
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
-        let dims_width = text.text_width(&dims);
-        let dims_x = hints_x - dims_width - s(16.0);
-        ui.text(text, &dims, dims_x, y_center, colors::FG_MUTED, content_bg);
+        let dims_text_w = text.text_width(&dims);
+        let dims_pill_w = dims_text_w + pad_h * 2.0;
+        let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
+        ui.fill_rounded_bordered(
+            Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h },
+            colors::BG_HOVER,
+            s(3.0),
+            0.5,
+            pill_border,
+        );
+        ui.text(text, &dims, dims_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
     }
 }

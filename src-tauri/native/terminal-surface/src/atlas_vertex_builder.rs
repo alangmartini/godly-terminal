@@ -1,6 +1,6 @@
 //! Builds per-cell vertex data for the GPU glyph atlas renderer.
 
-use godly_protocol::types::{CursorShape, RichGridData};
+use godly_protocol::types::RichGridData;
 use crate::Color;
 
 use crate::colors::{brighten_color, dim_color, parse_color};
@@ -174,69 +174,8 @@ pub fn build_vertices(
         }
     }
 
-    // --- cursor ---
-    if !grid.cursor_hidden {
-        let cr = grid.cursor.row as usize;
-        let cc = grid.cursor.col as usize;
-        let cpx = (cc as f32 * cell_w).round() + offset_x;
-        let cpy = (cr as f32 * cell_h).round() + offset_y;
-
-        // Clip cursor to terminal area
-        if cpx >= clip_right || cpy >= clip_bottom {
-            return verts;
-        }
-
-        let cursor_color = [1.0f32, 1.0, 1.0, 0.8];
-
-        match grid.cursor.cursor_style {
-            CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
-                let cx0 = cpx / vw * 2.0 - 1.0;
-                let cy0 = 1.0 - cpy / vh * 2.0;
-                let cx1 = (cpx + cell_w) / vw * 2.0 - 1.0;
-                let cy1 = 1.0 - (cpy + cell_h) / vh * 2.0;
-                push_quad(
-                    &mut verts,
-                    [cx0, cy0],
-                    [cx1, cy1],
-                    [0.0, 0.0],
-                    [0.0, 0.0],
-                    cursor_color,
-                    cursor_color,
-                );
-            }
-            CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
-                let uy = cpy + cell_h - 2.0;
-                let cx0 = cpx / vw * 2.0 - 1.0;
-                let cy0 = 1.0 - uy / vh * 2.0;
-                let cx1 = (cpx + cell_w) / vw * 2.0 - 1.0;
-                let cy1 = 1.0 - (uy + 2.0) / vh * 2.0;
-                push_quad(
-                    &mut verts,
-                    [cx0, cy0],
-                    [cx1, cy1],
-                    [0.0, 0.0],
-                    [0.0, 0.0],
-                    cursor_color,
-                    cursor_color,
-                );
-            }
-            CursorShape::BlinkBar | CursorShape::SteadyBar => {
-                let cx0 = cpx / vw * 2.0 - 1.0;
-                let cy0 = 1.0 - cpy / vh * 2.0;
-                let cx1 = (cpx + 2.0) / vw * 2.0 - 1.0;
-                let cy1 = 1.0 - (cpy + cell_h) / vh * 2.0;
-                push_quad(
-                    &mut verts,
-                    [cx0, cy0],
-                    [cx1, cy1],
-                    [0.0, 0.0],
-                    [0.0, 0.0],
-                    cursor_color,
-                    cursor_color,
-                );
-            }
-        }
-    }
+    // Cursor is rendered separately through the SDF quad pipeline for
+    // rounded corners and glow — see main.rs render().
 
     verts
 }

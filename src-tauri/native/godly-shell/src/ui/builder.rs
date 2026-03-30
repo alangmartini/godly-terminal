@@ -206,6 +206,29 @@ impl UiBuilder {
         ));
     }
 
+    /// SDF rounded rectangle outline (border only, transparent fill).
+    /// Produces smooth anti-aliased edges — use instead of stroke_rect for polish.
+    pub fn stroke_rounded(
+        &mut self,
+        rect: Rect,
+        radius: f32,
+        stroke_width: f32,
+        color: [f32; 4],
+    ) {
+        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], [radius; 4], stroke_width, color, 0.0);
+    }
+
+    /// SDF rounded rectangle outline with per-corner radii.
+    pub fn stroke_rounded_custom(
+        &mut self,
+        rect: Rect,
+        radii: [f32; 4],
+        stroke_width: f32,
+        color: [f32; 4],
+    ) {
+        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], radii, stroke_width, color, 0.0);
+    }
+
     /// Soft shadow/glow behind an element (SDF with wide blur).
     pub fn fill_shadow(
         &mut self,
@@ -300,7 +323,7 @@ impl UiBuilder {
         self.hline(cx - bar_w / 2.0, cy - t / 2.0, bar_w, t, color);
     }
 
-    /// Maximize icon: a small square outline centered in `rect`.
+    /// Maximize icon: a small rounded square outline centered in `rect` (SDF anti-aliased).
     pub fn icon_maximize(&mut self, rect: Rect, size: f32, t: f32, color: [f32; 4]) {
         let (cx, cy) = rect.center();
         let inner = Rect {
@@ -309,7 +332,7 @@ impl UiBuilder {
             width: size,
             height: size,
         };
-        self.stroke_rect(inner, t, color);
+        self.stroke_rounded(inner, t * 0.8, t, color);
     }
 
     /// Gear icon (approximated): filled outer circle minus filled inner circle.
@@ -405,14 +428,14 @@ mod tests {
     }
 
     #[test]
-    fn icon_maximize_produces_stroke() {
+    fn icon_maximize_produces_sdf_quad() {
         let mut ui = UiBuilder::new(100.0, 100.0);
         ui.icon_maximize(
             Rect { x: 0.0, y: 0.0, width: 46.0, height: 32.0 },
             10.0, 1.0, colors::FG_PRIMARY,
         );
         let (quads, _) = ui.finish();
-        // stroke_rect = 24 vertices
-        assert_eq!(quads.len(), 24);
+        // Single SDF rounded rect outline = 6 vertices
+        assert_eq!(quads.len(), 6);
     }
 }

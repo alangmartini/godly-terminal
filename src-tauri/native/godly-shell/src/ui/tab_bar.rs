@@ -132,8 +132,23 @@ impl TabBar {
 
         // Top edge bevel highlight (very subtle, creates solid edge feel)
         ui.hline(bar.x, bar.y, bar.width, 1.0, [1.0, 1.0, 1.0, 0.03]);
-        // Bottom separator line
-        ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
+
+        // Bottom separator line — break under the active tab for seamless join
+        let active_rect = self.tabs.iter().enumerate()
+            .find(|(_, t)| t.active)
+            .map(|(i, _)| self.tab_rect(i, bar, text.scale));
+        if let Some(ar) = active_rect {
+            // Left segment (bar start to active tab left edge)
+            if ar.x > bar.x {
+                ui.hline(bar.x, bar.bottom() - 1.0, ar.x - bar.x, 1.0, colors::BORDER);
+            }
+            // Right segment (active tab right edge to bar end)
+            if ar.right() < bar.right() {
+                ui.hline(ar.right(), bar.bottom() - 1.0, bar.right() - ar.right(), 1.0, colors::BORDER);
+            }
+        } else {
+            ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
+        }
 
         // Sidebar section: "Godly Terminal" branding
         if self.sidebar_width > 0.0 {
@@ -145,9 +160,16 @@ impl TabBar {
             ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
         }
 
-        // Max chars for tab title (dynamic based on effective width)
+        // Icon line thickness (used for close buttons in tabs and window controls)
+        let icon_t = (ICON_LINE_T * text.scale).max(1.0);
+
+        // Close button dimensions (reserved on right side of every tab)
+        let close_btn_sz = s(16.0);
+        let close_btn_pad = s(8.0);
+
+        // Max chars for tab title (dynamic based on effective width, reserves close button space)
         let title_x_offset = cw * 2.0 + s(22.0);
-        let title_max_w = tab_w - title_x_offset - s(8.0);
+        let title_max_w = tab_w - title_x_offset - close_btn_sz - close_btn_pad - s(4.0);
         let title_max_chars = (title_max_w / cw).floor().max(1.0) as usize;
 
         for (i, tab) in self.tabs.iter().enumerate() {
@@ -185,10 +207,11 @@ impl TabBar {
                          rect.width - (tab_radius + 1.0) * 2.0, 1.0,
                          [1.0, 1.0, 1.0, 0.04]);
             } else if self.hovered_tab == Some(i) {
-                // Hovered tab: top-only rounding, no border
-                ui.fill_rounded_top(rect, bg, s(4.0));
+                // Hovered tab: top-only rounding with subtle border
+                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.6];
+                ui.fill_rounded_top_bordered(rect, bg, s(4.0), 0.5, hover_border);
             } else {
-                ui.fill(rect, bg);
+                // Inactive tab: no background (blends with bar)
             }
 
             // Colored dot indicator (circle via SDF)
@@ -226,6 +249,24 @@ impl TabBar {
                         title_x,
                         text_y(rect.height, rect.y),
                         fg, bg);
+            }
+
+            // Close button — visible on active tab always, and on hovered tabs
+            let show_close = tab.active || self.hovered_tab == Some(i);
+            if show_close {
+                let close_rect = Rect {
+                    x: rect.right() - close_btn_sz - close_btn_pad,
+                    y: rect.y + (rect.height - close_btn_sz) / 2.0,
+                    width: close_btn_sz,
+                    height: close_btn_sz,
+                };
+                let icon_color = if tab.active {
+                    colors::FG_SECONDARY
+                } else {
+                    colors::FG_MUTED
+                };
+                let icon_sz = s(7.0);
+                ui.icon_x(close_rect, icon_sz, icon_t, icon_color);
             }
 
             // Right separator between tabs (skip for active and last tab)
@@ -269,7 +310,6 @@ impl TabBar {
                 colors::FG_SECONDARY, colors::BG_DARK);
 
         // Window control buttons (minimize, maximize, close)
-        let icon_t = (ICON_LINE_T * text.scale).max(1.0);
         let buttons = self.window_button_rects(bar, text.scale);
         for (rect, btn) in &buttons {
             let hovered = self.hovered_button == Some(*btn);
@@ -323,9 +363,22 @@ impl TabBar {
                         };
                     }
                 }
-                // Check tabs
+                // Check tabs — close button takes priority over tab switch
+                let close_btn_sz = 16.0 * scale;
+                let close_btn_pad = 8.0 * scale;
                 for (i, tab) in self.tabs.iter().enumerate() {
-                    if self.tab_rect(i, bar, scale).contains(x, y) {
+                    let rect = self.tab_rect(i, bar, scale);
+                    if rect.contains(x, y) {
+                        // Check if click landed on the close button area
+                        let close_rect = Rect {
+                            x: rect.right() - close_btn_sz - close_btn_pad,
+                            y: rect.y + (rect.height - close_btn_sz) / 2.0,
+                            width: close_btn_sz,
+                            height: close_btn_sz,
+                        };
+                        if close_rect.contains(x, y) {
+                            return Some(UiAction::CloseTab(tab.id.clone()));
+                        }
                         return Some(UiAction::SwitchTab(tab.id.clone()));
                     }
                 }

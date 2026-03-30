@@ -80,6 +80,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Apply enhanced contrast to boost text weight.
     let coverage = vec3<f32>(enhance(raw.r), enhance(raw.g), enhance(raw.b));
 
+    // --- Transparent-bg mode: grayscale AA with alpha compositing ---
+    // Used for UI chrome text that sits on gradient / SDF-rounded backgrounds
+    // drawn by the quad pipeline.  Subpixel (ClearType) AA requires knowing
+    // the exact background colour; when bg is transparent we fall back to
+    // grayscale coverage so the text alpha-composites cleanly over whatever
+    // is already in the framebuffer.
+    if (input.bg_color.a < 0.5) {
+        let gray = max(coverage.r, max(coverage.g, coverage.b));
+        let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
+        return vec4<f32>(pow(fg_lin, vec3<f32>(2.2 / 1.8)), gray);
+    }
+
+    // --- Opaque-bg mode: ClearType subpixel blending (terminal cells) ---
     // Linearise fg/bg using ClearType gamma (1.8) for perceptually correct blending.
     let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
     let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
@@ -233,7 +246,7 @@ impl AtlasPipeline {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: Some(wgpu::BlendState::REPLACE),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
