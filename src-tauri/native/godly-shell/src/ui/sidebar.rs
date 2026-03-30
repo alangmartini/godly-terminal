@@ -240,7 +240,7 @@ impl Sidebar {
                 );
             }
 
-            // Active indicator (left colored bar, pill shape via SDF)
+            // Active indicator (left colored bar, pill shape via SDF + glow)
             if item.active {
                 let indicator_rect = Rect {
                     x: rect.x + s(3.0),
@@ -248,6 +248,8 @@ impl Sidebar {
                     width: indicator_w,
                     height: rect.height - s(16.0),
                 };
+                // Soft glow behind the indicator
+                ui.fill_shadow(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.15], indicator_w, s(4.0));
                 ui.fill_rounded(indicator_rect, colors::ACCENT_BLUE, indicator_w / 2.0);
             }
 

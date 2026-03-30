@@ -201,6 +201,15 @@ impl TabBar {
                     1.0,
                 ];
                 ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, 1.0, colors::BORDER);
+                // Soft glow behind the accent bar (luminous highlight)
+                let glow_rect = super::widget::Rect {
+                    x: rect.x + tab_radius,
+                    y: rect.y,
+                    width: rect.width - tab_radius * 2.0,
+                    height: s(6.0),
+                };
+                let glow_color = [accent[0], accent[1], accent[2], 0.10];
+                ui.fill_rounded(glow_rect, glow_color, s(3.0));
                 // Top accent bar (inset from corners)
                 ui.hline(rect.x + tab_radius, rect.y + 1.0, rect.width - tab_radius * 2.0, s(2.0), accent);
                 // Subtle inner highlight just below border (bevel effect)
