@@ -61,10 +61,14 @@ impl StatusBar {
             } else {
                 "Sessions"
             };
-            // Small green dot to indicate active process
+            // Small green dot (circle via SDF) to indicate active process
             let dot_sz = s(4.0);
             let dot_y = y_center + ch / 2.0 - dot_sz / 2.0;
-            ui.fill(Rect { x: sx, y: dot_y, width: dot_sz, height: dot_sz }, colors::ACCENT_GREEN);
+            ui.fill_rounded(
+                Rect { x: sx, y: dot_y, width: dot_sz, height: dot_sz },
+                colors::ACCENT_GREEN,
+                dot_sz / 2.0,
+            );
             ui.text(text, label, sx + dot_sz + s(6.0), y_center, colors::FG_MUTED, sidebar_bg);
         }
 

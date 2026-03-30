@@ -158,22 +158,29 @@ impl TabBar {
             } else {
                 colors::BG_DARK
             };
-            ui.fill(rect, bg);
 
-            // Active tab: colored top accent bar + side borders for "raised tab" look
+            let tab_radius = s(5.0);
             if tab.active {
-                ui.hline(rect.x, rect.y, rect.width, s(2.5), accent);
-                ui.vline(rect.x, rect.y + s(2.5), rect.height - s(2.5), 1.0, colors::BORDER);
-                ui.vline(rect.right() - 1.0, rect.y + s(2.5), rect.height - s(2.5), 1.0, colors::BORDER);
-                // Remove bottom border for active tab (blend into terminal)
-                ui.hline(rect.x + 1.0, rect.bottom() - 1.0, rect.width - 2.0, 2.0, colors::BG_BASE);
+                // Active tab: rounded rect with subtle border
+                ui.fill_rounded_bordered(rect, bg, tab_radius, 1.0, colors::BORDER);
+                // Top accent bar (inset from corners)
+                ui.hline(rect.x + tab_radius, rect.y + 1.0, rect.width - tab_radius * 2.0, s(2.0), accent);
+            } else if self.hovered_tab == Some(i) {
+                // Hovered tab: rounded rect, no border
+                ui.fill_rounded(rect, bg, s(4.0));
+            } else {
+                ui.fill(rect, bg);
             }
 
-            // Colored dot indicator (small square, 5px — appears round at small size)
+            // Colored dot indicator (circle via SDF)
             let dot_x = rect.x + s(10.0);
             let dot_sz = s(5.0);
             let dot_y = rect.y + rect.height / 2.0 - dot_sz / 2.0;
-            ui.fill(Rect { x: dot_x, y: dot_y, width: dot_sz, height: dot_sz }, accent);
+            ui.fill_rounded(
+                Rect { x: dot_x, y: dot_y, width: dot_sz, height: dot_sz },
+                accent,
+                dot_sz / 2.0,
+            );
 
             // Tab number (after dot with spacing)
             let num_str = format!("{}", i + 1);
@@ -232,7 +239,11 @@ impl TabBar {
         // Bun indicator with accent color
         let bun_dot_x = bar.right() - rw2 - btn_reserve - gap - rw1 - s(10.0);
         let dot_sz = s(5.0);
-        ui.fill(Rect { x: bun_dot_x, y: bar.y + bar.height / 2.0 - dot_sz / 2.0, width: dot_sz, height: dot_sz }, colors::ACCENT_PEACH);
+        ui.fill_rounded(
+            Rect { x: bun_dot_x, y: bar.y + bar.height / 2.0 - dot_sz / 2.0, width: dot_sz, height: dot_sz },
+            colors::ACCENT_PEACH,
+            dot_sz / 2.0,
+        );
         ui.text(text, right_label,
                 bun_dot_x + s(10.0),
                 text_y(bar.height, bar.y),
@@ -249,7 +260,7 @@ impl TabBar {
                 } else {
                     colors::BG_HOVER
                 };
-                ui.fill(*rect, color);
+                ui.fill_rounded(*rect, color, s(3.0));
             }
 
             let icon_color = if hovered && *btn == WindowButton::Close {

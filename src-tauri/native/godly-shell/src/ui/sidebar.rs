@@ -204,27 +204,35 @@ impl Sidebar {
                 height: this_item_h,
             };
 
-            // Hover background
+            // Hover background (rounded)
+            let item_radius = s(4.0);
+            let inset_rect = Rect {
+                x: rect.x + s(6.0),
+                y: rect.y + s(2.0),
+                width: rect.width - s(12.0),
+                height: rect.height - s(4.0),
+            };
             if self.hovered_index == Some(i) && !item.active {
-                ui.fill(rect, colors::BG_HOVER);
+                ui.fill_rounded(inset_rect, colors::BG_HOVER, item_radius);
             }
 
-            // Active item background
+            // Active item background (rounded with subtle border)
             if item.active {
-                ui.fill(rect, colors::BG_ACTIVE);
-            }
-
-            // Active indicator (left colored bar, rounded appearance)
-            if item.active {
-                ui.fill(
-                    Rect {
-                        x: rect.x + s(1.0),
-                        y: rect.y + s(6.0),
-                        width: indicator_w,
-                        height: rect.height - s(12.0),
-                    },
-                    colors::ACCENT_BLUE,
+                ui.fill_rounded_bordered(
+                    inset_rect, colors::BG_ACTIVE, item_radius,
+                    0.5, colors::BORDER,
                 );
+            }
+
+            // Active indicator (left colored bar, pill shape via SDF)
+            if item.active {
+                let indicator_rect = Rect {
+                    x: rect.x + s(3.0),
+                    y: rect.y + s(8.0),
+                    width: indicator_w,
+                    height: rect.height - s(16.0),
+                };
+                ui.fill_rounded(indicator_rect, colors::ACCENT_BLUE, indicator_w / 2.0);
             }
 
             // Text y position: centered for compact, top-aligned for two-line
@@ -295,7 +303,7 @@ impl Sidebar {
         };
         let new_bg = if self.hovered_new { colors::BG_SURFACE } else { colors::BG_DARK };
         if self.hovered_new {
-            ui.fill(new_rect, colors::BG_SURFACE);
+            ui.fill_rounded(new_rect, colors::BG_SURFACE, s(4.0));
         }
         ui.text(text, "+ New Session",
                 new_rect.x + s(8.0),

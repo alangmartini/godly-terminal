@@ -3,7 +3,7 @@
 //! `UiBuilder` collects quad and text vertices during the build phase,
 //! then returns them in `finish()` for the GPU render pass.
 
-use super::quad_renderer::{quad_vertices, QuadVertex};
+use super::quad_renderer::{quad_vertices, quad_vertices_sdf, QuadVertex};
 use super::widget::Rect;
 
 /// Catppuccin Mocha palette for all UI chrome.
@@ -92,11 +92,36 @@ impl UiBuilder {
         (self.vw, self.vh)
     }
 
-    /// Solid filled rectangle.
+    /// Solid filled rectangle (flat, no rounding).
     pub fn fill(&mut self, rect: Rect, color: [f32; 4]) {
         self.quads.extend_from_slice(&quad_vertices(
             rect.x, rect.y, rect.width, rect.height,
             self.vw, self.vh, color,
+        ));
+    }
+
+    /// Filled rounded rectangle with anti-aliased edges.
+    pub fn fill_rounded(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, color,
+            radius, 0.0, [0.0, 0.0, 0.0, 0.0],
+        ));
+    }
+
+    /// Filled rounded rectangle with border.
+    pub fn fill_rounded_bordered(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        border_width: f32,
+        border_color: [f32; 4],
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, color,
+            radius, border_width, border_color,
         ));
     }
 

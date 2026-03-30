@@ -269,3 +269,68 @@ the reference image structure: tab bar → sidebar + terminal → status bar.
 - Split pane rendering (reference shows vertical split with text content on right)
 - Could add more terminal content to demonstrate rendering quality
 - Sidebar session items could show more detail (working directory, active process)
+
+## Iteration 19 — SDF Rounded Rectangle Shader (Phase 1+2)
+
+**Goal**: Replace flat colored rectangles with SDF-based rounded rectangles for
+professional rendering quality. Elements should have smooth anti-aliased edges,
+rounded corners, and crisp borders — matching the quality of apps like VS Code and Zed.
+
+**Changes made**:
+
+1. **quad_renderer.rs** — Complete rewrite of the rendering pipeline:
+   - New `QuadVertex` struct (64 bytes, up from 24) with SDF fields: `local_pos`,
+     `rect_half_ext`, `corner_radius`, `border_width`, `border_color`
+   - SDF WGSL shader with `sd_rounded_rect()` signed distance function
+   - Anti-aliased edges via `smoothstep(-0.75, 0.75, dist)` (~1.5px transition band)
+   - Inset border support via inner SDF evaluation
+   - Fast path: flat quads (rect_half_ext.x <= 0) bypass SDF entirely
+   - SDF quads get 1px geometry expansion for proper edge anti-aliasing
+   - sRGB-to-linear gamma correction preserved for both paths
+
+2. **builder.rs** — New SDF builder methods:
+   - `fill_rounded(rect, color, radius)` — rounded rect, no border
+   - `fill_rounded_bordered(rect, color, radius, border_width, border_color)` — with border
+   - Existing `fill()` unchanged (uses flat fast path)
+
+3. **tab_bar.rs** — SDF applied to tab elements:
+   - Active tab: rounded rect (5px radius) with 1px border + top accent bar
+   - Hovered tab: rounded rect (4px radius), no border
+   - Tab dot indicators: now circles via `fill_rounded` with radius = size/2
+   - "Bun" status dot: circle via SDF
+   - Window button hover backgrounds: rounded (3px radius)
+   - Removed manual side-border/bottom-erase hacks (SDF border replaces them)
+
+4. **sidebar.rs** — SDF applied to sidebar elements:
+   - Active/hovered item backgrounds: inset rounded rects (4px radius)
+   - Active item: rounded bordered rect (0.5px subtle border)
+   - Active indicator bar: pill shape via `fill_rounded` with radius = width/2
+   - "+ New Session" hover: rounded rect
+
+5. **status_bar.rs** — SDF applied to indicators:
+   - Green process indicator dot: now a circle via SDF
+
+**Technical details**:
+- SDF function: `sd_rounded_rect(p, half_size, radius)` computes signed distance
+  to a rounded rectangle. Negative inside, positive outside.
+- Corner radius is clamped to `min(radius, half_w, half_h)` to prevent degeneration.
+- A circle is a special case: square with radius = half_extent.
+- Geometry expansion (1px pad) ensures anti-aliasing has room to fade to transparent.
+- Flat quads (backgrounds, separators) use the fast path with zero overhead.
+
+**Result**: UI elements now have smooth anti-aliased rounded corners, crisp borders,
+and circular dot indicators. The active tab has a professional "raised tab" look with
+rounded corners and a subtle border. Sidebar items have rounded hover/active states
+with pill-shaped active indicators. All small dots are now proper circles.
+
+**Visual comparison with reference**:
+- Rounded corners: ✓ Smooth anti-aliased curves on tabs, sidebar items, indicators
+- Subtle borders: ✓ 1px borders on active tab and sidebar items
+- Depth/separation: ✓ Active items visually distinct via rounded bordered backgrounds
+- Circular dots: ✓ All indicator dots are now proper circles
+- Professional polish: ✓ Elements feel solid and well-defined, not flat rectangles
+
+**Remaining work for next iteration**:
+- Phase 3: Shadows and depth (box shadows for floating elements)
+- Phase 4: Gradient fills (subtle gradients on title bar / tab bar)
+- Could add per-corner radius support for tab-style top-only rounding
