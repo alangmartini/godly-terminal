@@ -334,3 +334,73 @@ with pill-shaped active indicators. All small dots are now proper circles.
 - Phase 3: Shadows and depth (box shadows for floating elements)
 - Phase 4: Gradient fills (subtle gradients on title bar / tab bar)
 - Could add per-corner radius support for tab-style top-only rounding
+
+## Iteration 20 — Per-Corner Radii, Gradients, and Shadows (Phase 3+4)
+
+**Goal**: Implement per-corner radius support for tab-style top-only rounding,
+add gradient fill and soft shadow capabilities, and apply them to UI elements
+for professional depth and polish matching the reference image.
+
+**Changes made**:
+
+1. **quad_renderer.rs** — Major vertex struct upgrade (64 → 80 bytes):
+   - `corner_radius: f32` → `corner_radii: [f32; 4]` (TL, TR, BR, BL)
+   - Added `blur_radius: f32` for variable AA width (soft shadows)
+   - WGSL shader: per-corner radius SDF via quadrant-based radius selection
+   - WGSL shader: `blur_radius` controls smoothstep range (0 = default 0.75px crisp)
+   - New `quad_vertices_gradient()` for flat vertical gradients
+   - New `quad_vertices_sdf_gradient()` for SDF + gradient fills
+   - Shader vertex attributes: 8 locations (0-7), stride 80 bytes
+
+2. **builder.rs** — New convenience methods:
+   - `fill_gradient(rect, top, bottom)` — flat vertical gradient
+   - `fill_rounded_top(rect, color, r)` — top-only corner rounding (for tabs)
+   - `fill_rounded_top_bordered(rect, color, r, bw, bc)` — top-only + border
+   - `fill_rounded_custom(rect, color, radii)` — per-corner [TL,TR,BR,BL]
+   - `fill_rounded_gradient(rect, top, bottom, r)` — SDF gradient fill
+   - `fill_shadow(rect, color, r, blur)` — soft shadow via wide blur
+   - Internal `fill_sdf()` core method all SDF methods delegate to
+
+3. **tab_bar.rs** — Professional tab rendering:
+   - Active tab: `fill_rounded_top_bordered` with 5px top-only radius
+   - Hovered tab: `fill_rounded_top` with 4px top-only radius
+   - Bottom corners are square, blending seamlessly into content area
+   - Tab bar background: subtle vertical gradient (BG_DARK → 8% darker)
+
+4. **title_bar.rs** — Depth improvements:
+   - Background: subtle vertical gradient (BG_DARK → 8% darker)
+   - Window button hover: rounded rects (3px radius) instead of flat
+
+5. **sidebar.rs** — Shadow depth:
+   - Processes panel: soft shadow above panel (12% opacity, 4px blur)
+
+6. **Build config**: Fixed cargo linker path (VS 2022 Community → VS 2026
+   Community at `C:/Program Files/Microsoft Visual Studio/18/Community/`)
+
+**Technical details**:
+- Per-corner SDF: shader selects radius per quadrant using `select()`:
+  - `r_top = select(TL, TR, p.x > 0)` then `r = select(r_top, r_bot, p.y > 0)`
+- Gradient fills work via GPU vertex interpolation — `fill_color` is NOT flat,
+  so top vertices get top_color, bottom vertices get bottom_color, and the
+  rasterizer interpolates smoothly. No shader changes needed for gradients.
+- Shadow padding: geometry expands by `blur_radius + 1px` instead of fixed 1px,
+  ensuring the wider smoothstep transition has room to fade to transparent.
+- Borders remain crisp (0.75px AA) even when blur_radius is set for shadows.
+
+**Result**: Tabs now have professional top-only rounding that blends into the
+content area below (like VS Code, Zed). The title bar and tab bar have subtle
+vertical gradients adding depth. The processes panel has a soft shadow for
+visual separation. All UI chrome looks polished and professional.
+
+**Visual comparison with reference**:
+- Per-corner tab rounding: ✓ Top corners rounded, bottom square
+- Subtle depth via gradients: ✓ Title/tab bar have gradient backgrounds
+- Box shadow support: ✓ Soft shadows with variable blur
+- Crisp borders: ✓ Unchanged from Phase 1+2
+- Anti-aliased edges: ✓ Smooth across all rounded elements
+- Professional polish: ✓ UI chrome approaches reference quality
+
+**Remaining gap vs reference**:
+- Terminal content not displaying (pty-shim binary not rebuilt)
+- Could add gradient to active tab fill (slight brightness gradient top→bottom)
+- Inner glow/highlight on sidebar active item could enhance depth

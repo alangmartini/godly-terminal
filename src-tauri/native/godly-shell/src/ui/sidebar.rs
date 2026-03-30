@@ -324,6 +324,15 @@ impl Sidebar {
                 height: agent_panel_h.min(bottom_panel_h),
             };
 
+            // Soft shadow above the panel for depth
+            let shadow_rect = Rect {
+                x: panel.x + pad_h,
+                y: panel_y - s(4.0),
+                width: panel.width - pad_h * 2.0,
+                height: s(6.0),
+            };
+            ui.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.12], 0.0, s(4.0));
+
             // Panel background (slightly raised)
             ui.fill(panel, colors::BG_RAISED);
 

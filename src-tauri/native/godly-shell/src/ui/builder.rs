@@ -3,7 +3,7 @@
 //! `UiBuilder` collects quad and text vertices during the build phase,
 //! then returns them in `finish()` for the GPU render pass.
 
-use super::quad_renderer::{quad_vertices, quad_vertices_sdf, QuadVertex};
+use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_sdf, quad_vertices_sdf_gradient, QuadVertex};
 use super::widget::Rect;
 
 /// Catppuccin Mocha palette for all UI chrome.
@@ -100,16 +100,39 @@ impl UiBuilder {
         ));
     }
 
-    /// Filled rounded rectangle with anti-aliased edges.
-    pub fn fill_rounded(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
-        self.quads.extend_from_slice(&quad_vertices_sdf(
+    /// Flat rectangle with vertical gradient (no rounding).
+    pub fn fill_gradient(&mut self, rect: Rect, top_color: [f32; 4], bottom_color: [f32; 4]) {
+        self.quads.extend_from_slice(&quad_vertices_gradient(
             rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, color,
-            radius, 0.0, [0.0, 0.0, 0.0, 0.0],
+            self.vw, self.vh, top_color, bottom_color,
         ));
     }
 
-    /// Filled rounded rectangle with border.
+    // -- SDF rounded rectangle methods ----------------------------------------
+
+    /// Core SDF method — all other rounded/shadow methods delegate here.
+    fn fill_sdf(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radii: [f32; 4],
+        border_width: f32,
+        border_color: [f32; 4],
+        blur_radius: f32,
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, color,
+            radii, border_width, border_color, blur_radius,
+        ));
+    }
+
+    /// Filled rounded rectangle with uniform corner radius.
+    pub fn fill_rounded(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], 0.0);
+    }
+
+    /// Filled rounded rectangle with border (uniform radius).
     pub fn fill_rounded_bordered(
         &mut self,
         rect: Rect,
@@ -118,11 +141,55 @@ impl UiBuilder {
         border_width: f32,
         border_color: [f32; 4],
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf(
+        self.fill_sdf(rect, color, [radius; 4], border_width, border_color, 0.0);
+    }
+
+    /// Rounded rectangle with only top corners rounded (for tabs).
+    pub fn fill_rounded_top(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
+        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], 0.0, [0.0; 4], 0.0);
+    }
+
+    /// Rounded rectangle with only top corners + border (for active tabs).
+    pub fn fill_rounded_top_bordered(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        border_width: f32,
+        border_color: [f32; 4],
+    ) {
+        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], border_width, border_color, 0.0);
+    }
+
+    /// Rounded rectangle with per-corner radii [TL, TR, BR, BL].
+    pub fn fill_rounded_custom(&mut self, rect: Rect, color: [f32; 4], radii: [f32; 4]) {
+        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], 0.0);
+    }
+
+    /// SDF rounded rectangle with vertical gradient fill.
+    pub fn fill_rounded_gradient(
+        &mut self,
+        rect: Rect,
+        top_color: [f32; 4],
+        bottom_color: [f32; 4],
+        radius: f32,
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
             rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, color,
-            radius, border_width, border_color,
+            self.vw, self.vh, top_color, bottom_color,
+            [radius; 4], 0.0, [0.0; 4],
         ));
+    }
+
+    /// Soft shadow/glow behind an element (SDF with wide blur).
+    pub fn fill_shadow(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        blur: f32,
+    ) {
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur);
     }
 
     /// Horizontal line of thickness `t`.

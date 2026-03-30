@@ -1,10 +1,14 @@
 //! Draws UI rectangles with SDF-based rounded corners, borders, and anti-aliasing.
 //!
 //! The shader uses a Signed Distance Field approach: each quad carries its rect
-//! bounds, corner radius, and optional border parameters.  The fragment shader
-//! evaluates the SDF to produce smooth anti-aliased edges and crisp borders.
+//! bounds, per-corner radii, and optional border/blur parameters.  The fragment
+//! shader evaluates the SDF to produce smooth anti-aliased edges and crisp borders.
 //!
-//! Flat quads (no radius/border) use a fast path that skips the SDF entirely.
+//! Features:
+//!   - Per-corner radius (vec4: TL, TR, BR, BL) for tab-style top-only rounding
+//!   - Variable blur radius for soft box shadows
+//!   - Vertical gradient via per-vertex fill_color interpolation
+//!   - Flat quads (no radius/border) use a fast path that skips the SDF entirely
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -13,10 +17,12 @@ pub struct QuadVertex {
     pub fill_color: [f32; 4],
     pub local_pos: [f32; 2],
     pub rect_half_ext: [f32; 2],
-    pub corner_radius: f32,
+    pub corner_radii: [f32; 4],   // TL, TR, BR, BL
     pub border_width: f32,
     pub border_color: [f32; 4],
+    pub blur_radius: f32,
 }
+// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 = 80 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -27,7 +33,7 @@ impl QuadVertex {
                 offset: 0,
                 shader_location: 0,
             },
-            // fill_color: sRGB RGBA
+            // fill_color: sRGB RGBA (interpolated for gradients)
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
                 offset: 8,
@@ -45,27 +51,33 @@ impl QuadVertex {
                 offset: 32,
                 shader_location: 3,
             },
-            // corner_radius: pixels
+            // corner_radii: TL, TR, BR, BL in pixels
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32,
+                format: wgpu::VertexFormat::Float32x4,
                 offset: 40,
                 shader_location: 4,
             },
             // border_width: pixels
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32,
-                offset: 44,
+                offset: 56,
                 shader_location: 5,
             },
             // border_color: sRGB RGBA
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
-                offset: 48,
+                offset: 60,
                 shader_location: 6,
+            },
+            // blur_radius: AA smoothstep width (0 = default 0.75px crisp)
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32,
+                offset: 76,
+                shader_location: 7,
             },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 64,
+            array_stride: 80,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -78,9 +90,10 @@ struct VertexInput {
     @location(1) fill_color: vec4<f32>,
     @location(2) local_pos: vec2<f32>,
     @location(3) rect_half_ext: vec2<f32>,
-    @location(4) corner_radius: f32,
+    @location(4) corner_radii: vec4<f32>,
     @location(5) border_width: f32,
     @location(6) border_color: vec4<f32>,
+    @location(7) blur_radius: f32,
 };
 
 struct VertexOutput {
@@ -88,9 +101,10 @@ struct VertexOutput {
     @location(0) fill_color: vec4<f32>,
     @location(1) local_pos: vec2<f32>,
     @location(2) @interpolate(flat) rect_half_ext: vec2<f32>,
-    @location(3) @interpolate(flat) corner_radius: f32,
+    @location(3) @interpolate(flat) corner_radii: vec4<f32>,
     @location(4) @interpolate(flat) border_width: f32,
     @location(5) @interpolate(flat) border_color: vec4<f32>,
+    @location(6) @interpolate(flat) blur_radius: f32,
 };
 
 @vertex
@@ -100,17 +114,23 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.fill_color = input.fill_color;
     out.local_pos = input.local_pos;
     out.rect_half_ext = input.rect_half_ext;
-    out.corner_radius = input.corner_radius;
+    out.corner_radii = input.corner_radii;
     out.border_width = input.border_width;
     out.border_color = input.border_color;
+    out.blur_radius = input.blur_radius;
     return out;
 }
 
-// Signed distance to a rounded rectangle centered at the origin.
+// Signed distance to a rounded rectangle with per-corner radii.
+// radii = (top_left, top_right, bottom_right, bottom_left)
 // Returns negative inside, positive outside.
-fn sd_rounded_rect(p: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
-    let q = abs(p) - half_size + vec2<f32>(radius);
-    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+fn sd_rounded_rect(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    // Select radius based on quadrant
+    let r_top = select(radii.x, radii.y, p.x > 0.0);
+    let r_bot = select(radii.w, radii.z, p.x > 0.0);
+    let r = select(r_top, r_bot, p.y > 0.0);
+    let q = abs(p) - half_size + vec2<f32>(r);
+    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
 @fragment
@@ -124,15 +144,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // SDF path: rounded rectangle with anti-aliased edges
-    let d = sd_rounded_rect(input.local_pos, he, input.corner_radius);
+    let d = sd_rounded_rect(input.local_pos, he, input.corner_radii);
 
-    // Anti-aliased alpha at the outer edge (~1.5px transition band)
-    let aa = 1.0 - smoothstep(-0.75, 0.75, d);
+    // AA band width: use blur_radius if set, otherwise 0.75px for crisp edges
+    let blur = select(0.75, input.blur_radius, input.blur_radius > 0.0);
+    let aa = 1.0 - smoothstep(-blur, blur, d);
 
     // Determine pixel color (fill or border)
     var color = fill;
     if (input.border_width > 0.0) {
         let inner_d = d + input.border_width;
+        // Borders are always crisp (0.75px AA) regardless of blur
         let fill_mask = 1.0 - smoothstep(-0.75, 0.75, inner_d);
         color = vec4<f32>(
             mix(input.border_color.rgb, fill.rgb, fill_mask),
@@ -261,9 +283,10 @@ pub fn quad_vertices(
         fill_color: color,
         local_pos: [0.0, 0.0],
         rect_half_ext: [0.0, 0.0], // signals flat path in shader
-        corner_radius: 0.0,
+        corner_radii: [0.0; 4],
         border_width: 0.0,
         border_color: [0.0, 0.0, 0.0, 0.0],
+        blur_radius: 0.0,
     };
 
     [
@@ -272,24 +295,66 @@ pub fn quad_vertices(
     ]
 }
 
-/// Build 6 vertices for an SDF rounded rectangle with optional border.
+/// Build 6 vertices for a flat gradient rectangle (no SDF).
+/// Top vertices get `top_color`, bottom vertices get `bottom_color`.
+pub fn quad_vertices_gradient(
+    x: f32, y: f32, w: f32, h: f32,
+    viewport_w: f32, viewport_h: f32,
+    top_color: [f32; 4],
+    bottom_color: [f32; 4],
+) -> [QuadVertex; 6] {
+    let x0 = x / viewport_w * 2.0 - 1.0;
+    let y0 = -(y / viewport_h * 2.0 - 1.0);
+    let x1 = (x + w) / viewport_w * 2.0 - 1.0;
+    let y1 = -((y + h) / viewport_h * 2.0 - 1.0);
+
+    let v = |pos: [f32; 2], color: [f32; 4]| QuadVertex {
+        position: pos,
+        fill_color: color,
+        local_pos: [0.0, 0.0],
+        rect_half_ext: [0.0, 0.0],
+        corner_radii: [0.0; 4],
+        border_width: 0.0,
+        border_color: [0.0, 0.0, 0.0, 0.0],
+        blur_radius: 0.0,
+    };
+
+    [
+        v([x0, y0], top_color),
+        v([x1, y0], top_color),
+        v([x0, y1], bottom_color),
+        v([x0, y1], bottom_color),
+        v([x1, y0], top_color),
+        v([x1, y1], bottom_color),
+    ]
+}
+
+/// Build 6 vertices for an SDF rounded rectangle with optional border and blur.
 ///
-/// The geometry is expanded by 1px on each side so the SDF anti-aliasing
-/// has room to fade to transparent at the edges.
+/// `corner_radii` = [TL, TR, BR, BL] in pixels.
+/// `blur_radius` controls the AA transition band (0 = default 0.75px crisp).
+/// The geometry is expanded to accommodate AA/blur at the edges.
 pub fn quad_vertices_sdf(
     x: f32, y: f32, w: f32, h: f32,
     viewport_w: f32, viewport_h: f32,
     fill_color: [f32; 4],
-    corner_radius: f32,
+    corner_radii: [f32; 4],
     border_width: f32,
     border_color: [f32; 4],
+    blur_radius: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
-    let r = corner_radius.min(half_w).min(half_h);
+    let max_r = half_w.min(half_h);
+    let radii = [
+        corner_radii[0].min(max_r),
+        corner_radii[1].min(max_r),
+        corner_radii[2].min(max_r),
+        corner_radii[3].min(max_r),
+    ];
 
-    // Expand geometry by 1px for AA
-    let pad = 1.0;
+    // Expand geometry for AA (more expansion for blur/shadow)
+    let pad = if blur_radius > 0.0 { blur_radius + 1.0 } else { 1.0 };
     let ex = x - pad;
     let ey = y - pad;
     let ew = w + pad * 2.0;
@@ -301,7 +366,7 @@ pub fn quad_vertices_sdf(
     let x1 = (ex + ew) / viewport_w * 2.0 - 1.0;
     let y1 = -((ey + eh) / viewport_h * 2.0 - 1.0);
 
-    // Local positions relative to rect center (including AA padding)
+    // Local positions relative to rect center (including padding)
     let lx0 = -(half_w + pad);
     let ly0 = -(half_h + pad);
     let lx1 = half_w + pad;
@@ -314,9 +379,10 @@ pub fn quad_vertices_sdf(
         fill_color,
         local_pos: lp,
         rect_half_ext: he,
-        corner_radius: r,
+        corner_radii: radii,
         border_width,
         border_color,
+        blur_radius,
     };
 
     [
@@ -326,5 +392,66 @@ pub fn quad_vertices_sdf(
         v([x0, y1], [lx0, ly1]),
         v([x1, y0], [lx1, ly0]),
         v([x1, y1], [lx1, ly1]),
+    ]
+}
+
+/// Build 6 vertices for an SDF rounded rectangle with a vertical gradient.
+/// Top vertices get `fill_color_top`, bottom get `fill_color_bottom`.
+/// The GPU interpolates the color smoothly across the shape.
+pub fn quad_vertices_sdf_gradient(
+    x: f32, y: f32, w: f32, h: f32,
+    viewport_w: f32, viewport_h: f32,
+    fill_color_top: [f32; 4],
+    fill_color_bottom: [f32; 4],
+    corner_radii: [f32; 4],
+    border_width: f32,
+    border_color: [f32; 4],
+) -> [QuadVertex; 6] {
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let max_r = half_w.min(half_h);
+    let radii = [
+        corner_radii[0].min(max_r),
+        corner_radii[1].min(max_r),
+        corner_radii[2].min(max_r),
+        corner_radii[3].min(max_r),
+    ];
+
+    let pad = 1.0;
+    let ex = x - pad;
+    let ey = y - pad;
+    let ew = w + pad * 2.0;
+    let eh = h + pad * 2.0;
+
+    let x0 = ex / viewport_w * 2.0 - 1.0;
+    let y0 = -(ey / viewport_h * 2.0 - 1.0);
+    let x1 = (ex + ew) / viewport_w * 2.0 - 1.0;
+    let y1 = -((ey + eh) / viewport_h * 2.0 - 1.0);
+
+    let lx0 = -(half_w + pad);
+    let ly0 = -(half_h + pad);
+    let lx1 = half_w + pad;
+    let ly1 = half_h + pad;
+
+    let he = [half_w, half_h];
+
+    let v = |pos: [f32; 2], lp: [f32; 2], color: [f32; 4]| QuadVertex {
+        position: pos,
+        fill_color: color,
+        local_pos: lp,
+        rect_half_ext: he,
+        corner_radii: radii,
+        border_width,
+        border_color,
+        blur_radius: 0.0,
+    };
+
+    [
+        v([x0, y0], [lx0, ly0], fill_color_top),
+        v([x1, y0], [lx1, ly0], fill_color_top),
+        v([x0, y1], [lx0, ly1], fill_color_bottom),
+        v([x0, y1], [lx0, ly1], fill_color_bottom),
+        v([x1, y0], [lx1, ly0], fill_color_top),
+        v([x1, y1], [lx1, ly1], fill_color_bottom),
     ]
 }

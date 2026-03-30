@@ -120,8 +120,15 @@ impl TabBar {
         let tab_inset = s(TAB_INSET_V);
         let origin = self.tabs_origin_x(bar, text.scale);
 
-        // Background
-        ui.fill(bar, colors::BG_DARK);
+        // Background — subtle top-to-bottom gradient for depth
+        let bar_top = colors::BG_DARK;
+        let bar_bottom = [
+            colors::BG_DARK[0] * 0.92,
+            colors::BG_DARK[1] * 0.92,
+            colors::BG_DARK[2] * 0.92,
+            1.0,
+        ];
+        ui.fill_gradient(bar, bar_top, bar_bottom);
 
         // Bottom separator line
         ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
@@ -161,13 +168,13 @@ impl TabBar {
 
             let tab_radius = s(5.0);
             if tab.active {
-                // Active tab: rounded rect with subtle border
-                ui.fill_rounded_bordered(rect, bg, tab_radius, 1.0, colors::BORDER);
+                // Active tab: top-only rounding (blends into content below)
+                ui.fill_rounded_top_bordered(rect, bg, tab_radius, 1.0, colors::BORDER);
                 // Top accent bar (inset from corners)
                 ui.hline(rect.x + tab_radius, rect.y + 1.0, rect.width - tab_radius * 2.0, s(2.0), accent);
             } else if self.hovered_tab == Some(i) {
-                // Hovered tab: rounded rect, no border
-                ui.fill_rounded(rect, bg, s(4.0));
+                // Hovered tab: top-only rounding, no border
+                ui.fill_rounded_top(rect, bg, s(4.0));
             } else {
                 ui.fill(rect, bg);
             }

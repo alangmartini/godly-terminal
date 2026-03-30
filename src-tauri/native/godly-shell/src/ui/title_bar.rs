@@ -59,8 +59,14 @@ impl TitleBar {
         let s = |v: f32| text.s(v);
         let ch = text.cell_height;
 
-        // Title bar background — blend with tab bar for seamless look
-        ui.fill(bar, colors::BG_DARK);
+        // Title bar background — subtle gradient for depth
+        let bar_bottom = [
+            colors::BG_DARK[0] * 0.92,
+            colors::BG_DARK[1] * 0.92,
+            colors::BG_DARK[2] * 0.92,
+            1.0,
+        ];
+        ui.fill_gradient(bar, colors::BG_DARK, bar_bottom);
 
         // Bottom separator
         ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
@@ -87,7 +93,7 @@ impl TitleBar {
                 } else {
                     colors::BG_HOVER
                 };
-                ui.fill(*rect, color);
+                ui.fill_rounded(*rect, color, s(3.0));
             }
 
             let icon_color = if hovered && *btn == TitleButton::Close {
