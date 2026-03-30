@@ -231,6 +231,10 @@ impl Sidebar {
                 ];
                 ui.fill_rounded_gradient(inset_rect, hover_top, colors::BG_HOVER, item_radius);
                 ui.stroke_rounded(inset_rect, item_radius, 0.5, hover_border);
+            } else if !item.active {
+                // Rest state: very subtle rounded rect to signal interactivity
+                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12];
+                ui.stroke_rounded(inset_rect, item_radius, 0.5, rest_border);
             }
 
             // Active item background (rounded with subtle blue-tinted border + ambient glow)
@@ -353,6 +357,10 @@ impl Sidebar {
             ];
             ui.fill_rounded_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0));
             ui.stroke_rounded(new_rect, s(4.0), 0.5, colors::BORDER);
+        } else {
+            // Rest state: dashed-feel border hint to signal "add" affordance
+            let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
+            ui.stroke_rounded(new_rect, s(4.0), 0.5, rest_border);
         }
         ui.text(text, "+ New Session",
                 new_rect.x + s(8.0),
@@ -431,7 +439,7 @@ impl Sidebar {
 
                 let panel_bg = colors::BG_RAISED;
 
-                // Status indicator: small SDF colored dot
+                // Status indicator: small SDF colored dot with glow for active states
                 let dot_r = s(2.5);
                 let dot_size = dot_r * 2.0;
                 let dot_rect = Rect {
@@ -440,6 +448,14 @@ impl Sidebar {
                     width: dot_size,
                     height: dot_size,
                 };
+                // Running agents get a luminous glow to convey active state
+                if matches!(agent.status, AgentStatus::Running) {
+                    let glow_rect = Rect {
+                        x: dot_rect.x - s(2.0), y: dot_rect.y - s(2.0),
+                        width: dot_size + s(4.0), height: dot_size + s(4.0),
+                    };
+                    ui.fill_shadow(glow_rect, [status_color[0], status_color[1], status_color[2], 0.20], dot_r + s(2.0), s(4.0));
+                }
                 ui.fill_rounded(dot_rect, status_color, dot_r);
 
                 // Agent name

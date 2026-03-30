@@ -40,7 +40,7 @@ impl StatusBar {
         ];
         ui.fill_gradient(bar, content_bg, content_bg_bottom);
 
-        // Sidebar portion of status bar (darker background)
+        // Sidebar portion of status bar (subtle gradient for depth)
         if self.sidebar_width > 0.0 {
             let sidebar_status = Rect {
                 x: bar.x,
@@ -48,9 +48,15 @@ impl StatusBar {
                 width: self.sidebar_width,
                 height: bar.height,
             };
-            ui.fill(sidebar_status, sidebar_bg);
-            // Right border on sidebar section
-            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
+            let sidebar_bg_bottom = [
+                sidebar_bg[0] * 0.92,
+                sidebar_bg[1] * 0.92,
+                sidebar_bg[2] * 0.92,
+                1.0,
+            ];
+            ui.fill_gradient(sidebar_status, sidebar_bg, sidebar_bg_bottom);
+            // Right border on sidebar section (faded for softer look)
+            ui.vline_fade(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER, s(6.0));
         }
 
         // Top separator line + inner bevel highlight (consistent with tab bar)
@@ -90,11 +96,21 @@ impl StatusBar {
             ui.fill_rounded_gradient(mode_pill_rect, mode_pill_top, colors::BG_HOVER, s(3.0));
             ui.stroke_rounded(mode_pill_rect, s(3.0), 0.5, pill_border);
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
+            // Glow behind green dot to convey "active"
+            let glow_rect = Rect {
+                x: sx + pad_h - s(2.0), y: dot_y - s(2.0),
+                width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+            };
+            ui.fill_shadow(glow_rect, [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.18], dot_sz, s(3.0));
             ui.fill_rounded(
                 Rect { x: sx + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
                 colors::ACCENT_GREEN,
                 dot_sz / 2.0,
             );
+            // Inner highlight on pill top edge (bevel)
+            ui.hline(mode_pill_rect.x + s(3.0), mode_pill_rect.y + 1.0,
+                     mode_pill_rect.width - s(6.0), 1.0,
+                     [1.0, 1.0, 1.0, 0.04]);
             ui.text(text, label, sx + pad_h + dot_sz + s(6.0), y_center, colors::FG_SECONDARY, colors::BG_HOVER);
         }
 
@@ -157,11 +173,22 @@ impl StatusBar {
                 s(3.0), 0.5, pill_border,
             );
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
+            // Glow behind peach dot
+            let glow_rect = Rect {
+                x: x + pad_h - s(2.0), y: dot_y - s(2.0),
+                width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+            };
+            ui.fill_shadow(glow_rect, [colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1], colors::ACCENT_PEACH[2], 0.15], dot_sz, s(3.0));
             ui.fill_rounded(
                 Rect { x: x + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
                 colors::ACCENT_PEACH,
                 dot_sz / 2.0,
             );
+            // Inner highlight on pill top edge (bevel)
+            let git_pill_rect = Rect { x, y: pill_y, width: pill_w, height: pill_h };
+            ui.hline(git_pill_rect.x + s(3.0), git_pill_rect.y + 1.0,
+                     git_pill_rect.width - s(6.0), 1.0,
+                     [1.0, 1.0, 1.0, 0.04]);
             ui.text(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, colors::ACCENT_PEACH, colors::BG_HOVER);
             x += pill_w + cw * 2.0;
         }
@@ -193,6 +220,9 @@ impl StatusBar {
         let hints_rect = Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h };
         ui.fill_rounded_gradient(hints_rect, pill_top, colors::BG_HOVER, s(3.0));
         ui.stroke_rounded(hints_rect, s(3.0), 0.5, pill_border);
+        ui.hline(hints_rect.x + s(3.0), hints_rect.y + 1.0,
+                 hints_rect.width - s(6.0), 1.0,
+                 [1.0, 1.0, 1.0, 0.04]);
         ui.text(text, hints_label, hints_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
 
         // Terminal dimensions pill (left of hints, gradient)
@@ -203,6 +233,9 @@ impl StatusBar {
         let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
         ui.fill_rounded_gradient(dims_rect, pill_top, colors::BG_HOVER, s(3.0));
         ui.stroke_rounded(dims_rect, s(3.0), 0.5, pill_border);
+        ui.hline(dims_rect.x + s(3.0), dims_rect.y + 1.0,
+                 dims_rect.width - s(6.0), 1.0,
+                 [1.0, 1.0, 1.0, 0.04]);
         ui.text(text, &dims, dims_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
     }
 }

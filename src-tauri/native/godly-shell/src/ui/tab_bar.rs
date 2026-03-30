@@ -196,8 +196,8 @@ impl TabBar {
             let brand_y = text_y(bar.height, bar.y);
             ui.text(text, "Godly Terminal", brand_x, brand_y,
                     colors::FG_SECONDARY, colors::BG_DARK);
-            // Right border for sidebar section
-            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
+            // Right border for sidebar section (faded for softer look)
+            ui.vline_fade(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER, s(8.0));
         }
 
         // Icon line thickness (used for close buttons in tabs and window controls)
@@ -266,17 +266,31 @@ impl TabBar {
                          rect.width - (tab_radius + 1.0) * 2.0, 1.0,
                          [1.0, 1.0, 1.0, 0.04]);
             } else if self.hovered_tab == Some(i) {
-                // Hovered tab: top-only rounding with subtle border
+                // Hovered tab: top-only rounding with gradient + border
                 let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.6];
-                ui.fill_rounded_top_bordered(rect, bg, s(4.0), 0.5, hover_border);
+                let hover_top = [bg[0] * 1.06, bg[1] * 1.06, bg[2] * 1.06, 1.0];
+                ui.fill_rounded_top_gradient(rect, hover_top, bg, s(4.0), 0.5, hover_border);
             } else {
-                // Inactive tab: no background (blends with bar)
+                // Inactive tab: very subtle background tint to show it's interactive
+                let inactive_bg = [
+                    colors::BG_DARK[0] * 1.04,
+                    colors::BG_DARK[1] * 1.04,
+                    colors::BG_DARK[2] * 1.04,
+                    0.5,
+                ];
+                ui.fill_rounded_top(rect, inactive_bg, s(3.0));
             }
 
-            // Colored dot indicator (circle via SDF)
+            // Colored dot indicator (circle via SDF + subtle glow)
             let dot_x = rect.x + s(10.0);
             let dot_sz = s(5.0);
             let dot_y = rect.y + rect.height / 2.0 - dot_sz / 2.0;
+            // Soft glow behind the dot for luminosity
+            let dot_glow_rect = Rect {
+                x: dot_x - s(2.0), y: dot_y - s(2.0),
+                width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+            };
+            ui.fill_shadow(dot_glow_rect, [accent[0], accent[1], accent[2], 0.15], dot_sz, s(4.0));
             ui.fill_rounded(
                 Rect { x: dot_x, y: dot_y, width: dot_sz, height: dot_sz },
                 accent,
@@ -319,10 +333,16 @@ impl TabBar {
                     width: close_btn_sz,
                     height: close_btn_sz,
                 };
-                // Hover circle behind X icon (VS Code style)
+                // Hover circle behind X icon (VS Code style, gradient for depth)
                 let close_hovered = self.hovered_close_tab == Some(i);
                 if close_hovered {
-                    ui.fill_rounded(close_rect, colors::BG_HOVER, close_btn_sz / 2.0);
+                    let hover_top = [
+                        colors::BG_HOVER[0] * 1.1,
+                        colors::BG_HOVER[1] * 1.1,
+                        colors::BG_HOVER[2] * 1.1,
+                        colors::BG_HOVER[3],
+                    ];
+                    ui.fill_rounded_gradient(close_rect, hover_top, colors::BG_HOVER, close_btn_sz / 2.0);
                 }
                 let icon_color = if close_hovered {
                     colors::FG_PRIMARY
@@ -335,11 +355,12 @@ impl TabBar {
                 ui.icon_x(close_rect, icon_sz, icon_t, icon_color);
             }
 
-            // Right separator between tabs (skip for active and last tab)
+            // Right separator between tabs (faded, skip for active and last tab)
             if !tab.active && i + 1 < self.tabs.len() {
                 let next_active = self.tabs.get(i + 1).map_or(false, |t| t.active);
                 if !next_active {
-                    ui.vline(rect.right(), rect.y + s(6.0), rect.height - s(12.0), 1.0, colors::BORDER);
+                    let sep_color = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
+                    ui.vline_fade(rect.right(), rect.y + s(6.0), rect.height - s(12.0), 1.0, sep_color, s(6.0));
                 }
             }
         }
@@ -355,9 +376,12 @@ impl TabBar {
                 colors::BG_SURFACE[2] * 1.08,
                 colors::BG_SURFACE[3],
             ];
-            ui.fill_rounded_top_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0), 0.0, [0.0; 4]);
+            ui.fill_rounded_top_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0), 0.5, colors::BORDER);
             colors::BG_SURFACE
         } else {
+            // Subtle rest-state hint: faint rounded rect to signal interactivity
+            let rest_bg = [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.4];
+            ui.fill_rounded_top(new_rect, rest_bg, s(3.0));
             colors::BG_DARK
         };
         let new_tab_fg = if self.hovered_new_tab { colors::FG_SECONDARY } else { colors::FG_MUTED };

@@ -68,12 +68,15 @@ impl TitleBar {
         ];
         ui.fill_gradient(bar, colors::BG_DARK, bar_bottom);
 
+        // Top edge bevel highlight (creates solid window edge feel)
+        ui.hline(bar.x, bar.y, bar.width, 1.0, [1.0, 1.0, 1.0, 0.04]);
+
         // Bottom separator
         ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
 
-        // Sidebar section border (consistent with status bar)
+        // Sidebar section border (faded for softer look)
         if self.sidebar_width > 0.0 {
-            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
+            ui.vline_fade(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER, s(8.0));
         }
 
         // App title text (left-aligned in sidebar section)
