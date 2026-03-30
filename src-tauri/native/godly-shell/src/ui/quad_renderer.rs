@@ -8,6 +8,7 @@
 //!   - Per-corner radius (vec4: TL, TR, BR, BL) for tab-style top-only rounding
 //!   - Variable blur radius for soft box shadows
 //!   - Vertical gradient via per-vertex fill_color interpolation
+//!   - Rotation support for angled SDF shapes (used by icon rendering)
 //!   - Flat quads (no radius/border) use a fast path that skips the SDF entirely
 
 #[repr(C)]
@@ -21,8 +22,9 @@ pub struct QuadVertex {
     pub border_width: f32,
     pub border_color: [f32; 4],
     pub blur_radius: f32,
+    pub rotation: f32,
 }
-// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 = 80 bytes
+// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 = 84 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -75,9 +77,15 @@ impl QuadVertex {
                 offset: 76,
                 shader_location: 7,
             },
+            // rotation: radians (0 = no rotation)
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32,
+                offset: 80,
+                shader_location: 8,
+            },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 80,
+            array_stride: 84,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -94,6 +102,7 @@ struct VertexInput {
     @location(5) border_width: f32,
     @location(6) border_color: vec4<f32>,
     @location(7) blur_radius: f32,
+    @location(8) rotation: f32,
 };
 
 struct VertexOutput {
@@ -105,6 +114,7 @@ struct VertexOutput {
     @location(4) @interpolate(flat) border_width: f32,
     @location(5) @interpolate(flat) border_color: vec4<f32>,
     @location(6) @interpolate(flat) blur_radius: f32,
+    @location(7) @interpolate(flat) rotation: f32,
 };
 
 @vertex
@@ -118,6 +128,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.border_width = input.border_width;
     out.border_color = input.border_color;
     out.blur_radius = input.blur_radius;
+    out.rotation = input.rotation;
     return out;
 }
 
@@ -143,8 +154,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(pow(fill.rgb, vec3<f32>(2.2)), fill.a);
     }
 
+    // Rotate local_pos into shape space when rotation is non-zero
+    var p = input.local_pos;
+    if (input.rotation != 0.0) {
+        let cos_r = cos(input.rotation);
+        let sin_r = sin(input.rotation);
+        p = vec2<f32>(
+            p.x * cos_r + p.y * sin_r,
+            -p.x * sin_r + p.y * cos_r,
+        );
+    }
+
     // SDF path: rounded rectangle with anti-aliased edges
-    let d = sd_rounded_rect(input.local_pos, he, input.corner_radii);
+    let d = sd_rounded_rect(p, he, input.corner_radii);
 
     // AA band width: use blur_radius if set, otherwise 0.75px for crisp edges
     let blur = select(0.75, input.blur_radius, input.blur_radius > 0.0);
@@ -287,6 +309,7 @@ pub fn quad_vertices(
         border_width: 0.0,
         border_color: [0.0, 0.0, 0.0, 0.0],
         blur_radius: 0.0,
+        rotation: 0.0,
     };
 
     [
@@ -339,6 +362,7 @@ fn quad_vertices_gradient_dir(
         border_width: 0.0,
         border_color: [0.0, 0.0, 0.0, 0.0],
         blur_radius: 0.0,
+        rotation: 0.0,
     };
 
     // Vertical gradient: top=color_a, bottom=color_b
@@ -413,6 +437,7 @@ pub fn quad_vertices_sdf(
         border_width,
         border_color,
         blur_radius,
+        rotation: 0.0,
     };
 
     [
@@ -474,6 +499,7 @@ pub fn quad_vertices_sdf_gradient(
         border_width,
         border_color,
         blur_radius: 0.0,
+        rotation: 0.0,
     };
 
     [
@@ -483,5 +509,78 @@ pub fn quad_vertices_sdf_gradient(
         v([x0, y1], [lx0, ly1], fill_color_bottom),
         v([x1, y0], [lx1, ly0], fill_color_top),
         v([x1, y1], [lx1, ly1], fill_color_bottom),
+    ]
+}
+
+/// Build 6 vertices for a rotated SDF rounded rectangle.
+///
+/// `cx`, `cy` = center position in pixels.
+/// `w`, `h` = unrotated rect dimensions in pixels.
+/// `rotation` = rotation angle in radians (positive = clockwise in screen coords).
+/// The geometry is expanded to the axis-aligned bounding box of the rotated shape.
+pub fn quad_vertices_sdf_rotated(
+    cx: f32, cy: f32, w: f32, h: f32,
+    rotation: f32,
+    viewport_w: f32, viewport_h: f32,
+    fill_color: [f32; 4],
+    corner_radii: [f32; 4],
+    border_width: f32,
+    border_color: [f32; 4],
+    blur_radius: f32,
+) -> [QuadVertex; 6] {
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let max_r = half_w.min(half_h);
+    let radii = [
+        corner_radii[0].min(max_r),
+        corner_radii[1].min(max_r),
+        corner_radii[2].min(max_r),
+        corner_radii[3].min(max_r),
+    ];
+
+    // AABB of rotated rect
+    let cos_r = rotation.cos().abs();
+    let sin_r = rotation.sin().abs();
+    let aabb_hx = half_w * cos_r + half_h * sin_r;
+    let aabb_hy = half_w * sin_r + half_h * cos_r;
+
+    // Expand for AA
+    let pad = if blur_radius > 0.0 { blur_radius + 1.0 } else { 1.0 };
+    let ex = cx - aabb_hx - pad;
+    let ey = cy - aabb_hy - pad;
+    let ew = (aabb_hx + pad) * 2.0;
+    let eh = (aabb_hy + pad) * 2.0;
+
+    let x0 = ex / viewport_w * 2.0 - 1.0;
+    let y0 = -(ey / viewport_h * 2.0 - 1.0);
+    let x1 = (ex + ew) / viewport_w * 2.0 - 1.0;
+    let y1 = -((ey + eh) / viewport_h * 2.0 - 1.0);
+
+    let lx0 = -(aabb_hx + pad);
+    let ly0 = -(aabb_hy + pad);
+    let lx1 = aabb_hx + pad;
+    let ly1 = aabb_hy + pad;
+
+    let he = [half_w, half_h]; // unrotated half-extents for SDF
+
+    let v = |pos: [f32; 2], lp: [f32; 2]| QuadVertex {
+        position: pos,
+        fill_color,
+        local_pos: lp,
+        rect_half_ext: he,
+        corner_radii: radii,
+        border_width,
+        border_color,
+        blur_radius,
+        rotation,
+    };
+
+    [
+        v([x0, y0], [lx0, ly0]),
+        v([x1, y0], [lx1, ly0]),
+        v([x0, y1], [lx0, ly1]),
+        v([x0, y1], [lx0, ly1]),
+        v([x1, y0], [lx1, ly0]),
+        v([x1, y1], [lx1, ly1]),
     ]
 }

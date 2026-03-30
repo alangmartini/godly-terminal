@@ -529,9 +529,14 @@ impl App {
                     height: thumb_h,
                 };
 
-                // Thumb: rounded, semi-transparent, with subtle border
-                let thumb_color = [1.0, 1.0, 1.0, 0.15];
-                let thumb_border = [1.0, 1.0, 1.0, 0.08];
+                // Subtle track background (visible when scrollback exists)
+                ui_builder.fill_rounded(track_rect, [1.0, 1.0, 1.0, 0.03], bar_w / 2.0);
+
+                // Thumb: more opaque when scrolled away from live position
+                let scroll_alpha = if self.scrollback_offset > 0 { 0.28 } else { 0.15 };
+                let thumb_color = [1.0, 1.0, 1.0, scroll_alpha];
+                let border_alpha = if self.scrollback_offset > 0 { 0.12 } else { 0.08 };
+                let thumb_border = [1.0, 1.0, 1.0, border_alpha];
                 ui_builder.fill_rounded_bordered(
                     thumb_rect, thumb_color, bar_w / 2.0,
                     0.5, thumb_border,
