@@ -1,6 +1,7 @@
 //! Tab bar: horizontal row of tab buttons with numbered indicators.
 //! Also serves as the title bar (window drag + min/max/close buttons).
 
+use super::anim::{self, Anim, AnimVec, lerp_color, lerp};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
@@ -42,11 +43,75 @@ pub struct TabBar {
     pub hovered_button: Option<WindowButton>,
     pub hovered_new_tab: bool,
     pub sidebar_width: f32,
+    // Smooth animation state
+    tab_hover_anim: AnimVec,
+    close_hover_anim: AnimVec,
+    new_tab_anim: Anim,
+    btn_minimize_anim: Anim,
+    btn_maximize_anim: Anim,
+    btn_close_anim: Anim,
+    /// Smooth transition when tabs switch between active/inactive states.
+    active_anim: AnimVec,
+    /// Continuous phase for ambient breathing glow on active tab accent.
+    glow_phase: f32,
 }
 
 impl TabBar {
     pub fn new() -> Self {
-        Self { tabs: Vec::new(), hovered_tab: None, hovered_close_tab: None, hovered_button: None, hovered_new_tab: false, sidebar_width: 0.0 }
+        Self {
+            tabs: Vec::new(),
+            hovered_tab: None,
+            hovered_close_tab: None,
+            hovered_button: None,
+            hovered_new_tab: false,
+            sidebar_width: 0.0,
+            tab_hover_anim: AnimVec::default(),
+            close_hover_anim: AnimVec::default(),
+            new_tab_anim: Anim::default(),
+            btn_minimize_anim: Anim::default(),
+            btn_maximize_anim: Anim::default(),
+            btn_close_anim: Anim::default(),
+            active_anim: AnimVec::default(),
+            glow_phase: 0.0,
+        }
+    }
+
+    /// Advance all hover animations. `dt` = seconds since last frame. Returns `true` if still animating.
+    pub fn tick_animations(&mut self, dt: f32) -> bool {
+        let hl = anim::timing::HOVER;
+        // Update targets from current hover state
+        self.tab_hover_anim.ensure_len(self.tabs.len());
+        self.close_hover_anim.ensure_len(self.tabs.len());
+        for i in 0..self.tabs.len() {
+            self.tab_hover_anim.set(i, if self.hovered_tab == Some(i) { 1.0 } else { 0.0 });
+            self.close_hover_anim.set(i, if self.hovered_close_tab == Some(i) { 1.0 } else { 0.0 });
+        }
+        self.active_anim.ensure_len(self.tabs.len());
+        for i in 0..self.tabs.len() {
+            self.active_anim.set(i, if self.tabs[i].active { 1.0 } else { 0.0 });
+        }
+        self.new_tab_anim.set(if self.hovered_new_tab { 1.0 } else { 0.0 });
+        self.btn_minimize_anim.set(if self.hovered_button == Some(WindowButton::Minimize) { 1.0 } else { 0.0 });
+        self.btn_maximize_anim.set(if self.hovered_button == Some(WindowButton::Maximize) { 1.0 } else { 0.0 });
+        self.btn_close_anim.set(if self.hovered_button == Some(WindowButton::Close) { 1.0 } else { 0.0 });
+
+        let mut animating = false;
+        animating |= self.tab_hover_anim.tick(hl, dt);
+        animating |= self.close_hover_anim.tick(hl, dt);
+        animating |= self.active_anim.tick(anim::timing::HOVER, dt);
+        animating |= self.new_tab_anim.tick(hl, dt);
+        animating |= self.btn_minimize_anim.tick(hl, dt);
+        animating |= self.btn_maximize_anim.tick(hl, dt);
+        animating |= self.btn_close_anim.tick(hl, dt);
+
+        // Breathing glow on active tab accent (~3.5s cycle, frame-rate independent)
+        if self.tabs.iter().any(|t| t.active) {
+            self.glow_phase += dt * std::f32::consts::TAU / 3.5;
+            if self.glow_phase > std::f32::consts::TAU { self.glow_phase -= std::f32::consts::TAU; }
+            animating = true;
+        }
+
+        animating
     }
 
     /// The x-offset where tabs begin (after sidebar area).
@@ -121,6 +186,9 @@ impl TabBar {
         }
     }
 
+    /// Current breathing glow phase (for sharing with other components).
+    pub fn glow_phase(&self) -> f32 { self.glow_phase }
+
     fn accent_for(&self, index: usize) -> [f32; 4] {
         TAB_ACCENTS[index % TAB_ACCENTS.len()]
     }
@@ -146,8 +214,28 @@ impl TabBar {
         ];
         ui.fill_gradient(bar, bar_top, bar_bottom);
 
-        // Top edge bevel highlight (very subtle, creates solid edge feel)
-        ui.hline(bar.x, bar.y, bar.width, 1.0, [1.0, 1.0, 1.0, 0.03]);
+        // Top edge bevel highlight (faded at corners for softer window integration)
+        ui.hline_fade(bar.x + s(4.0), bar.y, bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
+
+        // Glass sheen band: very subtle horizontal highlight at ~25% from top.
+        // Simulates reflective curvature on a polished chrome surface — the
+        // "brushed metal title bar" feel from macOS/Arc browser.
+        {
+            let sheen_y = bar.y + bar.height * 0.25;
+            let sheen_h = s(4.0);
+            let sheen_peak = [1.0, 1.0, 1.0, 0.025];
+            let sheen_edge = [1.0, 1.0, 1.0, 0.0];
+            // Top half: fade in
+            ui.fill_gradient(
+                Rect { x: bar.x, y: sheen_y, width: bar.width, height: sheen_h * 0.5 },
+                sheen_edge, sheen_peak,
+            );
+            // Bottom half: fade out
+            ui.fill_gradient(
+                Rect { x: bar.x, y: sheen_y + sheen_h * 0.5, width: bar.width, height: sheen_h * 0.5 },
+                sheen_peak, sheen_edge,
+            );
+        }
 
         // Bottom separator line — break under the active tab for seamless join
         let active_rect = self.tabs.iter().enumerate()
@@ -159,45 +247,93 @@ impl TabBar {
             if ar.x > bar.x {
                 let seg_end = ar.x - ear_r;
                 if seg_end > bar.x {
-                    ui.hline(bar.x, bar.bottom() - 1.0, seg_end - bar.x, 1.0, colors::BORDER);
+                    ui.hline_aa(bar.x, bar.bottom() - 1.0, seg_end - bar.x, 1.0, colors::BORDER);
                 }
-                // Left ear: small BG_BASE rounded corner that creates concave curve
+                // Left ear: small rounded corner that creates concave curve
                 // Only bottom-right corner is rounded to form the inverse curve
+                // Uses bar_bottom color (not BG_DARK) to match gradient at this y-position
                 let ear_rect = Rect {
                     x: ar.x - ear_r,
                     y: bar.bottom() - ear_r,
                     width: ear_r,
                     height: ear_r,
                 };
-                ui.fill_rounded_custom(ear_rect, colors::BG_DARK, [0.0, 0.0, ear_r, 0.0]);
+                ui.fill_rounded_custom(ear_rect, bar_bottom, [0.0, 0.0, ear_r, 0.0]);
             }
             // Right segment (active tab right edge to bar end, shortened for ear)
             if ar.right() < bar.right() {
                 let seg_start = ar.right() + ear_r;
                 if seg_start < bar.right() {
-                    ui.hline(seg_start, bar.bottom() - 1.0, bar.right() - seg_start, 1.0, colors::BORDER);
+                    ui.hline_aa(seg_start, bar.bottom() - 1.0, bar.right() - seg_start, 1.0, colors::BORDER);
                 }
                 // Right ear: concave curve on the other side
+                // Uses bar_bottom color to match gradient at this y-position
                 let ear_rect = Rect {
                     x: ar.right(),
                     y: bar.bottom() - ear_r,
                     width: ear_r,
                     height: ear_r,
                 };
-                ui.fill_rounded_custom(ear_rect, colors::BG_DARK, [0.0, 0.0, 0.0, ear_r]);
+                ui.fill_rounded_custom(ear_rect, bar_bottom, [0.0, 0.0, 0.0, ear_r]);
             }
+            // Accent glow bleed below active tab — breathing Gaussian emission
+            let active_accent = self.tabs.iter().enumerate()
+                .find(|(_, t)| t.active)
+                .map(|(i, _)| self.accent_for(i))
+                .unwrap_or(colors::ACCENT_BLUE);
+            let breath = 0.85 + 0.15 * self.glow_phase.sin();
+            let glow_rect = Rect {
+                x: ar.x + s(8.0),
+                y: bar.bottom() - s(2.0),
+                width: ar.width - s(16.0),
+                height: s(3.0),
+            };
+            ui.fill_shadow(glow_rect,
+                [active_accent[0], active_accent[1], active_accent[2], 0.08 * breath],
+                s(2.0), s(6.0),
+            );
         } else {
-            ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
+            ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
         }
 
-        // Sidebar section: "Godly Terminal" branding
+        // Sidebar section: "Godly Terminal" branding with subtle differentiation
         if self.sidebar_width > 0.0 {
+            // Slightly darker background for branding section (matches sidebar tone)
+            let brand_bg_top = [
+                colors::BG_DARK[0] * 1.02,
+                colors::BG_DARK[1] * 1.02,
+                colors::BG_DARK[2] * 1.02,
+                1.0,
+            ];
+            let brand_bg_bot = [
+                colors::BG_DARK[0] * 0.96,
+                colors::BG_DARK[1] * 0.96,
+                colors::BG_DARK[2] * 0.96,
+                1.0,
+            ];
+            let brand_section = Rect {
+                x: bar.x, y: bar.y,
+                width: self.sidebar_width, height: bar.height,
+            };
+            ui.fill_gradient(brand_section, brand_bg_top, brand_bg_bot);
             let brand_x = bar.x + s(12.0);
             let brand_y = text_y(bar.height, bar.y);
+            // Branding text with subtle accent tint from active tab color
+            let active_accent = self.tabs.iter().enumerate()
+                .find(|(_, t)| t.active)
+                .map(|(i, _)| self.accent_for(i))
+                .unwrap_or(colors::ACCENT_BLUE);
+            let brand_fg = [
+                colors::FG_SECONDARY[0] * 0.85 + active_accent[0] * 0.15,
+                colors::FG_SECONDARY[1] * 0.85 + active_accent[1] * 0.15,
+                colors::FG_SECONDARY[2] * 0.85 + active_accent[2] * 0.15,
+                colors::FG_SECONDARY[3],
+            ];
             ui.text(text, "Godly Terminal", brand_x, brand_y,
-                    colors::FG_SECONDARY, colors::BG_DARK);
-            // Right border for sidebar section (faded for softer look)
-            ui.vline_fade(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER, s(8.0));
+                    brand_fg, colors::BG_DARK);
+            // Right border for sidebar section — groove for embossed depth
+            ui.vgroove_fade(self.sidebar_width - 2.0, bar.y, bar.height,
+                [0.0, 0.0, 0.0, 0.15], [1.0, 1.0, 1.0, 0.04], s(8.0));
         }
 
         // Icon line thickness (used for close buttons in tabs and window controls)
@@ -220,93 +356,125 @@ impl TabBar {
                 height: bar.height - tab_inset,
             };
             let accent = self.accent_for(i);
+            let hover_t = self.tab_hover_anim.get(i); // 0.0 → 1.0 smooth
 
-            // Tab background — active tabs match terminal bg, inactive are subtle
-            let bg = if tab.active {
-                colors::BG_BASE
-            } else if self.hovered_tab == Some(i) {
-                colors::BG_SURFACE
-            } else {
-                colors::BG_DARK
-            };
+            // Tab background — smoothly blend between inactive and active states
+            let active_t = self.active_anim.get(i);
+            let inactive_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, hover_t);
+            let bg = lerp_color(inactive_bg, colors::BG_BASE, active_t);
 
             let tab_radius = s(5.0);
-            if tab.active {
-                // Active tab: top-only rounded gradient (slightly lighter top → BG_BASE bottom)
-                let tab_top = [
-                    bg[0] * 1.12,
-                    bg[1] * 1.12,
-                    bg[2] * 1.12,
-                    1.0,
-                ];
-                ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, 1.0, colors::BORDER);
-                // Full-tab ambient glow from accent color (subtle luminosity across entire tab)
+            // Always render the tab background, blending between inactive and active states
+            if active_t > 0.005 {
+                // Active state (or transitioning toward it)
+                let tab_top = [bg[0] * 1.12, bg[1] * 1.12, bg[2] * 1.12, 1.0];
+                let border_alpha = lerp(0.0, 1.0, active_t);
+                let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
+                ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, active_t, border);
+
+                // Ambient glow from accent color (fades in with active_t)
                 let ambient_rect = Rect {
-                    x: rect.x + 1.0,
-                    y: rect.y + 1.0,
-                    width: rect.width - 2.0,
-                    height: rect.height - 1.0,
+                    x: rect.x + 1.0, y: rect.y + 1.0,
+                    width: rect.width - 2.0, height: rect.height - 1.0,
                 };
-                let ambient_top = [accent[0], accent[1], accent[2], 0.06];
-                let ambient_bottom = [accent[0], accent[1], accent[2], 0.0];
-                ui.fill_gradient(ambient_rect, ambient_top, ambient_bottom);
-                // Soft glow behind the accent bar (luminous highlight)
+                let inner_r = (tab_radius - 1.0).max(0.0);
+                ui.fill_rounded_custom_gradient(ambient_rect,
+                    [accent[0], accent[1], accent[2], 0.06 * active_t],
+                    [accent[0], accent[1], accent[2], 0.0],
+                    [inner_r, inner_r, 0.0, 0.0]);
+
+                // Breathing glow (fades in with active_t)
+                let breath = 0.85 + 0.15 * self.glow_phase.sin();
                 let glow_rect = Rect {
-                    x: rect.x + tab_radius,
-                    y: rect.y,
-                    width: rect.width - tab_radius * 2.0,
-                    height: s(6.0),
+                    x: rect.x + tab_radius + s(4.0), y: rect.y - s(1.0),
+                    width: rect.width - (tab_radius + s(4.0)) * 2.0, height: s(4.0),
                 };
-                let glow_color = [accent[0], accent[1], accent[2], 0.12];
-                ui.fill_rounded(glow_rect, glow_color, s(3.0));
-                // Top accent bar (inset from corners)
-                ui.hline(rect.x + tab_radius, rect.y + 1.0, rect.width - tab_radius * 2.0, s(2.0), accent);
-                // Subtle inner highlight just below border (bevel effect)
-                ui.hline(rect.x + tab_radius + 1.0, rect.y + s(2.0) + 1.0,
-                         rect.width - (tab_radius + 1.0) * 2.0, 1.0,
-                         [1.0, 1.0, 1.0, 0.04]);
-            } else if self.hovered_tab == Some(i) {
-                // Hovered tab: top-only rounding with gradient + border
-                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.6];
-                let hover_top = [bg[0] * 1.06, bg[1] * 1.06, bg[2] * 1.06, 1.0];
-                ui.fill_rounded_top_gradient(rect, hover_top, bg, s(4.0), 0.5, hover_border);
-            } else {
-                // Inactive tab: very subtle background tint to show it's interactive
-                let inactive_bg = [
-                    colors::BG_DARK[0] * 1.04,
-                    colors::BG_DARK[1] * 1.04,
-                    colors::BG_DARK[2] * 1.04,
-                    0.5,
+                ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], 0.18 * breath * active_t], s(2.0), s(5.0));
+
+                // Top accent bar (fades in with active_t)
+                let accent_bar = Rect {
+                    x: rect.x + tab_radius,
+                    y: rect.y + 1.0,
+                    width: rect.width - tab_radius * 2.0,
+                    height: s(2.0),
+                };
+                let sweep_t = self.glow_phase.sin() * 0.5 + 0.5;
+                let left_boost = (1.0 - sweep_t).max(0.0).min(1.0);
+                let right_boost = sweep_t.max(0.0).min(1.0);
+                let shimmer_strength = 0.15;
+                let left_color = [
+                    accent[0] * (1.0 + shimmer_strength * left_boost),
+                    accent[1] * (1.0 + shimmer_strength * left_boost),
+                    accent[2] * (1.0 + shimmer_strength * left_boost),
+                    accent[3] * active_t,
                 ];
-                ui.fill_rounded_top(rect, inactive_bg, s(3.0));
+                let right_color = [
+                    accent[0] * (1.0 + shimmer_strength * right_boost),
+                    accent[1] * (1.0 + shimmer_strength * right_boost),
+                    accent[2] * (1.0 + shimmer_strength * right_boost),
+                    accent[3] * active_t,
+                ];
+                ui.fill_rounded_gradient_h(accent_bar, left_color, right_color, s(1.0));
+            }
+            if active_t < 0.995 && hover_t > 0.005 {
+                // Hover state for non-fully-active tabs
+                let inv_active = 1.0 - active_t;
+                let border_alpha = lerp(0.0, 0.6, hover_t) * inv_active;
+                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
+                let top_boost = lerp(1.0, 1.06, hover_t);
+                let hover_top = [bg[0] * top_boost, bg[1] * top_boost, bg[2] * top_boost, lerp(0.5, 1.0, hover_t) * inv_active];
+                let hover_bottom = [bg[0], bg[1], bg[2], lerp(0.5, 1.0, hover_t) * inv_active];
+                let radius = lerp(s(3.0), s(4.0), hover_t);
+                let border_w = lerp(0.0, 0.5, hover_t) * inv_active;
+                ui.fill_rounded_top_gradient(rect, hover_top, hover_bottom, radius, border_w, hover_border);
+            }
+            if active_t < 0.005 && hover_t < 0.005 {
+                // Inactive rest state: clearly tab-shaped but receding.
+                // Gradient (brighter top) gives subtle convex depth, and a
+                // faint border defines the shape without competing with active.
+                let rest_top = [
+                    colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06,
+                    colors::BG_DARK[2] * 1.06, 0.65,
+                ];
+                let rest_bot = [
+                    colors::BG_DARK[0] * 1.02, colors::BG_DARK[1] * 1.02,
+                    colors::BG_DARK[2] * 1.02, 0.65,
+                ];
+                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15];
+                ui.fill_rounded_top_gradient(rect, rest_top, rest_bot, s(3.0), 0.5, rest_border);
             }
 
-            // Colored dot indicator (circle via SDF + subtle glow)
+            // Colored dot indicator (circle via SDF + breathing glow on active tab)
             let dot_x = rect.x + s(10.0);
             let dot_sz = s(5.0);
             let dot_y = rect.y + rect.height / 2.0 - dot_sz / 2.0;
-            // Soft glow behind the dot for luminosity
             let dot_glow_rect = Rect {
-                x: dot_x - s(2.0), y: dot_y - s(2.0),
-                width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+                x: dot_x - s(3.0), y: dot_y - s(3.0),
+                width: dot_sz + s(6.0), height: dot_sz + s(6.0),
             };
-            ui.fill_shadow(dot_glow_rect, [accent[0], accent[1], accent[2], 0.15], dot_sz, s(4.0));
+            let dot_glow_alpha = if active_t > 0.005 {
+                let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                lerp(0.20, 0.20 * breath, active_t)
+            } else {
+                0.20
+            };
+            ui.fill_shadow(dot_glow_rect, [accent[0], accent[1], accent[2], dot_glow_alpha], dot_sz, s(6.0));
             ui.fill_rounded(
                 Rect { x: dot_x, y: dot_y, width: dot_sz, height: dot_sz },
-                accent,
-                dot_sz / 2.0,
+                accent, dot_sz / 2.0,
             );
 
-            // Tab number (after dot with spacing)
+            // Tab number
             let num_str = format!("{}", i + 1);
             let num_x = dot_x + dot_sz + s(5.0);
-            ui.text(text, &num_str,
-                    num_x,
-                    text_y(rect.height, rect.y),
-                    accent, bg);
+            ui.text(text, &num_str, num_x, text_y(rect.height, rect.y), accent, bg);
 
             // Tab title (truncated to fit)
-            let fg = if tab.active { colors::FG_PRIMARY } else { colors::FG_SECONDARY };
+            let fg = lerp_color(
+                lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.3),
+                colors::FG_PRIMARY,
+                active_t,
+            );
             let title = if title_max_chars > 2 {
                 if tab.title.len() > title_max_chars {
                     format!("{}\u{2026}", &tab.title[..title_max_chars.saturating_sub(1)])
@@ -318,117 +486,165 @@ impl TabBar {
             };
             if !title.is_empty() {
                 let title_x = num_x + cw + s(4.0);
-                ui.text(text, &title,
-                        title_x,
-                        text_y(rect.height, rect.y),
-                        fg, bg);
+                ui.text(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
             }
 
-            // Close button — visible on active tab always, and on hovered tabs
-            let show_close = tab.active || self.hovered_tab == Some(i);
-            if show_close {
+            // Close button — visible on active tab always, fades in on hover for inactive
+            let close_visible = active_t > 0.5 || hover_t > 0.005;
+            if close_visible {
+                let close_t = self.close_hover_anim.get(i);
                 let close_rect = Rect {
                     x: rect.right() - close_btn_sz - close_btn_pad,
                     y: rect.y + (rect.height - close_btn_sz) / 2.0,
                     width: close_btn_sz,
                     height: close_btn_sz,
                 };
-                // Hover circle behind X icon (VS Code style, gradient for depth)
-                let close_hovered = self.hovered_close_tab == Some(i);
-                if close_hovered {
+                // Animated hover circle behind X icon (subtle red tint for destructive hint)
+                if close_t > 0.005 {
+                    let base = lerp_color(colors::BG_HOVER, colors::RED_SUBTLE, close_t * 0.6);
                     let hover_top = [
-                        colors::BG_HOVER[0] * 1.1,
-                        colors::BG_HOVER[1] * 1.1,
-                        colors::BG_HOVER[2] * 1.1,
-                        colors::BG_HOVER[3],
+                        base[0] * 1.1, base[1] * 1.1,
+                        base[2] * 1.1, base[3] * close_t,
                     ];
-                    ui.fill_rounded_gradient(close_rect, hover_top, colors::BG_HOVER, close_btn_sz / 2.0);
+                    let hover_bot = [
+                        base[0], base[1],
+                        base[2], base[3] * close_t,
+                    ];
+                    ui.fill_rounded_gradient(close_rect, hover_top, hover_bot, close_btn_sz / 2.0);
+                    // Subtle border on close hover circle
+                    let close_border = [colors::ACCENT_RED[0], colors::ACCENT_RED[1], colors::ACCENT_RED[2], 0.15 * close_t];
+                    ui.stroke_rounded(close_rect, close_btn_sz / 2.0, 0.5, close_border);
                 }
-                let icon_color = if close_hovered {
-                    colors::FG_PRIMARY
-                } else if tab.active {
-                    colors::FG_SECONDARY
-                } else {
-                    colors::FG_MUTED
-                };
-                let icon_sz = s(7.0);
-                ui.icon_x(close_rect, icon_sz, icon_t, icon_color);
+                // Icon color: smoothly transition based on close hover + tab hover
+                let base_icon = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, active_t);
+                let icon_alpha = active_t.max(hover_t);
+                let icon_color_base = lerp_color(base_icon, colors::FG_PRIMARY, close_t);
+                let icon_color = [icon_color_base[0], icon_color_base[1], icon_color_base[2], icon_color_base[3] * icon_alpha];
+                ui.icon_x(close_rect, s(7.0), icon_t, icon_color);
             }
 
             // Right separator between tabs (faded, skip for active and last tab)
             if !tab.active && i + 1 < self.tabs.len() {
                 let next_active = self.tabs.get(i + 1).map_or(false, |t| t.active);
                 if !next_active {
-                    let sep_color = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
+                    // Fade separator out when either adjacent tab is hovered
+                    let next_hover = self.tab_hover_anim.get(i + 1);
+                    let sep_fade = 1.0 - (hover_t.max(next_hover));
+                    let sep_color = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5 * sep_fade];
                     ui.vline_fade(rect.right(), rect.y + s(6.0), rect.height - s(12.0), 1.0, sep_color, s(6.0));
                 }
             }
         }
 
-        // "+ New tab" button after last tab
+        // "+ New tab" button after last tab (animated)
+        let new_t = self.new_tab_anim.value();
         let new_x = origin + self.tabs.len() as f32 * (tab_w + tab_gap) + s(8.0);
         let new_y = bar.y + tab_inset;
         let new_rect = Rect { x: new_x, y: new_y, width: s(28.0), height: bar.height - tab_inset };
-        let new_tab_bg = if self.hovered_new_tab {
-            let new_top = [
-                colors::BG_SURFACE[0] * 1.08,
-                colors::BG_SURFACE[1] * 1.08,
-                colors::BG_SURFACE[2] * 1.08,
-                colors::BG_SURFACE[3],
-            ];
-            ui.fill_rounded_top_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0), 0.5, colors::BORDER);
-            colors::BG_SURFACE
+        if new_t > 0.005 {
+            let new_bg = lerp_color(
+                [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.4],
+                colors::BG_SURFACE,
+                new_t,
+            );
+            let new_top = [new_bg[0] * lerp(1.0, 1.08, new_t), new_bg[1] * lerp(1.0, 1.08, new_t), new_bg[2] * lerp(1.0, 1.08, new_t), new_bg[3]];
+            let border_alpha = lerp(0.0, 1.0, new_t);
+            let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], colors::BORDER[3] * border_alpha];
+            ui.fill_rounded_top_gradient(new_rect, new_top, new_bg, lerp(s(3.0), s(4.0), new_t), lerp(0.0, 0.5, new_t), border);
         } else {
-            // Subtle rest-state hint: faint rounded rect to signal interactivity
             let rest_bg = [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.4];
             ui.fill_rounded_top(new_rect, rest_bg, s(3.0));
-            colors::BG_DARK
-        };
-        let new_tab_fg = if self.hovered_new_tab { colors::FG_SECONDARY } else { colors::FG_MUTED };
-        ui.text(text, "+", new_x + s(8.0), text_y(new_rect.height, new_y), new_tab_fg, new_tab_bg);
+        }
+        let new_tab_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
+        ui.icon_plus(new_rect, icon_t, s(5.0), new_tab_fg);
 
         // Right-aligned indicators (bun icon + session name) — positioned before window buttons
+        // Styled as pills (consistent with status bar design language)
         let btn_reserve = s(BUTTON_WIDTH) * 3.0 + s(8.0);
         let right_label = "bun";
         let right_label2 = "opensessions";
         let rw2 = text.text_width(right_label2);
         let rw1 = text.text_width(right_label);
-        let gap = cw * 2.0;
-        // Session name
+        let pill_pad_h = s(4.0);
+        let pill_pad_v = s(2.0);
+        let pill_h = ch + pill_pad_v * 2.0;
+        let pill_y = bar.y + (bar.height - pill_h) / 2.0;
+        let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.4];
+        let pill_top = [
+            colors::BG_HOVER[0] * 1.08,
+            colors::BG_HOVER[1] * 1.08,
+            colors::BG_HOVER[2] * 1.08,
+            colors::BG_HOVER[3] * 0.7,
+        ];
+        let pill_bottom = [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * 0.7];
+
+        // Session name pill
+        let session_pill_w = rw2 + pill_pad_h * 2.0;
+        let session_pill_x = bar.right() - session_pill_w - btn_reserve;
+        let session_pill = Rect { x: session_pill_x, y: pill_y, width: session_pill_w, height: pill_h };
+        ui.fill_rounded_gradient(session_pill, pill_top, pill_bottom, s(3.0));
+        ui.stroke_rounded(session_pill, s(3.0), 0.5, pill_border);
         ui.text(text, right_label2,
-                bar.right() - rw2 - btn_reserve,
+                session_pill_x + pill_pad_h,
                 text_y(bar.height, bar.y),
-                colors::FG_MUTED, colors::BG_DARK);
-        // Bun indicator with accent color
-        let bun_dot_x = bar.right() - rw2 - btn_reserve - gap - rw1 - s(10.0);
+                colors::FG_MUTED, colors::BG_HOVER);
+
+        // Bun indicator pill (dot + label)
         let dot_sz = s(5.0);
+        let bun_pill_inner = dot_sz + s(6.0) + rw1;
+        let bun_pill_w = bun_pill_inner + pill_pad_h * 2.0;
+        let bun_pill_x = session_pill_x - bun_pill_w - s(6.0);
+        let bun_pill = Rect { x: bun_pill_x, y: pill_y, width: bun_pill_w, height: pill_h };
+        ui.fill_rounded_gradient(bun_pill, pill_top, pill_bottom, s(3.0));
+        ui.stroke_rounded(bun_pill, s(3.0), 0.5, pill_border);
+        // Bun dot with Gaussian glow (consistent with other indicator dots)
+        let bun_dot_x = bun_pill_x + pill_pad_h;
+        let dot_y = bar.y + bar.height / 2.0 - dot_sz / 2.0;
+        let glow_rect = Rect {
+            x: bun_dot_x - s(3.0), y: dot_y - s(3.0),
+            width: dot_sz + s(6.0), height: dot_sz + s(6.0),
+        };
+        ui.fill_shadow(glow_rect, [colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1], colors::ACCENT_PEACH[2], 0.20], dot_sz, s(5.0));
         ui.fill_rounded(
-            Rect { x: bun_dot_x, y: bar.y + bar.height / 2.0 - dot_sz / 2.0, width: dot_sz, height: dot_sz },
+            Rect { x: bun_dot_x, y: dot_y, width: dot_sz, height: dot_sz },
             colors::ACCENT_PEACH,
             dot_sz / 2.0,
         );
         ui.text(text, right_label,
-                bun_dot_x + s(10.0),
+                bun_dot_x + dot_sz + s(6.0),
                 text_y(bar.height, bar.y),
-                colors::FG_SECONDARY, colors::BG_DARK);
+                colors::FG_SECONDARY, colors::BG_HOVER);
 
-        // Window control buttons (minimize, maximize, close)
+        // Window control buttons (minimize, maximize, close) — animated hovers
         let buttons = self.window_button_rects(bar, text.scale);
         for (rect, btn) in &buttons {
-            let hovered = self.hovered_button == Some(*btn);
-            if hovered {
-                let color = if *btn == WindowButton::Close {
-                    colors::ACCENT_RED
+            let btn_t = match btn {
+                WindowButton::Minimize => self.btn_minimize_anim.value(),
+                WindowButton::Maximize => self.btn_maximize_anim.value(),
+                WindowButton::Close => self.btn_close_anim.value(),
+            };
+
+            if btn_t > 0.005 {
+                let (base_color, border_color) = if *btn == WindowButton::Close {
+                    (
+                        [colors::ACCENT_RED[0], colors::ACCENT_RED[1], colors::ACCENT_RED[2], colors::ACCENT_RED[3] * btn_t],
+                        [colors::ACCENT_RED[0] * 0.7, colors::ACCENT_RED[1] * 0.7, colors::ACCENT_RED[2] * 0.7, 0.6 * btn_t],
+                    )
                 } else {
-                    colors::BG_HOVER
+                    (
+                        [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * btn_t],
+                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.4 * btn_t],
+                    )
                 };
-                ui.fill_rounded(*rect, color, s(3.0));
+                let hover_top = [base_color[0] * 1.12, base_color[1] * 1.12, base_color[2] * 1.12, base_color[3]];
+                ui.fill_rounded_gradient(*rect, hover_top, base_color, s(3.0));
+                ui.stroke_rounded(*rect, s(3.0), 0.5, border_color);
             }
 
-            let icon_color = if hovered && *btn == WindowButton::Close {
-                colors::WHITE
+            let icon_color = if *btn == WindowButton::Close {
+                lerp_color(colors::FG_MUTED, colors::WHITE, btn_t)
             } else {
-                colors::FG_MUTED
+                lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, btn_t)
             };
             match btn {
                 WindowButton::Minimize => ui.icon_minimize(*rect, s(10.0), icon_t, icon_color),

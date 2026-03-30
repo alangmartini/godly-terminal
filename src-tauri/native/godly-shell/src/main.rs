@@ -11,6 +11,7 @@ mod terminal_renderer;
 mod ui;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use daemon_bridge::ShellEventSink;
 use event_bus::{AsyncEvent, EventSender};
@@ -61,6 +62,13 @@ struct App {
     status_bar: ui::status_bar::StatusBar,
     scale_factor: f32,
     window_focused: bool,
+    scrollbar_hover_anim: ui::anim::Anim,
+    focus_dim_anim: ui::anim::Anim,
+    cursor_blink_anim: ui::anim::Anim,
+    cursor_blink_phase: bool,
+    cursor_blink_timer: f32,
+    last_frame_time: Instant,
+    is_maximized: bool,
 }
 
 impl App {
@@ -95,6 +103,17 @@ impl App {
             },
             scale_factor: 1.0,
             window_focused: true,
+            scrollbar_hover_anim: ui::anim::Anim::default(),
+            focus_dim_anim: ui::anim::Anim::default(),
+            cursor_blink_anim: {
+                let mut a = ui::anim::Anim::default();
+                a.snap(1.0);
+                a
+            },
+            cursor_blink_phase: true,
+            cursor_blink_timer: 0.0,
+            last_frame_time: Instant::now(),
+            is_maximized: false,
             sidebar: ui::sidebar::Sidebar::new(),
             status_bar: {
                 let mut sb = ui::status_bar::StatusBar::new();
@@ -373,7 +392,12 @@ impl App {
         }
     }
 
-    fn send_key_input(&self, bytes: Vec<u8>) {
+    fn send_key_input(&mut self, bytes: Vec<u8>) {
+        // Reset cursor blink on keystroke — cursor should be visible right after typing
+        self.cursor_blink_anim.snap(1.0);
+        self.cursor_blink_phase = true;
+        self.cursor_blink_timer = 0.0;
+
         let Some(daemon) = &self.daemon else {
             log::warn!("send_key_input: no daemon");
             return;
@@ -397,7 +421,65 @@ impl App {
         });
     }
 
+    /// The accent color of the currently active tab (cycles through palette).
+    fn active_accent(&self) -> [f32; 4] {
+        const ACCENTS: &[[f32; 4]] = &[
+            ui::builder::colors::ACCENT_BLUE,
+            ui::builder::colors::ACCENT_GREEN,
+            ui::builder::colors::ACCENT_PEACH,
+            ui::builder::colors::ACCENT_MAUVE,
+            ui::builder::colors::ACCENT_RED,
+        ];
+        self.tab_bar.tabs.iter().enumerate()
+            .find(|(_, t)| t.active)
+            .map(|(i, _)| ACCENTS[i % ACCENTS.len()])
+            .unwrap_or(ui::builder::colors::ACCENT_BLUE)
+    }
+
     fn render(&mut self) {
+        // Frame-rate independent delta time (clamped to avoid spiral-of-death)
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame_time).as_secs_f32().min(0.1);
+        self.last_frame_time = now;
+
+        // Tick all hover animations and request another frame if any are active
+        let mut animating = false;
+        animating |= self.tab_bar.tick_animations(dt);
+        animating |= self.sidebar.tick_animations(dt);
+        animating |= self.title_bar.tick_animations(dt);
+        animating |= self.status_bar.tick_animations(dt);
+        animating |= self.focus_dim_anim.tick(ui::anim::timing::SLOW, dt);
+
+        // Cursor blink: smooth fade between visible/invisible every ~500ms.
+        // Only blinks for Blink* cursor styles; Steady* styles stay fully visible.
+        {
+            let is_blink_style = self.current_grid.as_ref().map_or(false, |g| {
+                use godly_protocol::types::CursorShape;
+                matches!(g.cursor.cursor_style,
+                    CursorShape::BlinkBlock | CursorShape::BlinkUnderline | CursorShape::BlinkBar)
+            });
+            if is_blink_style && self.window_focused {
+                self.cursor_blink_timer += dt;
+                if self.cursor_blink_timer >= 0.5 {
+                    self.cursor_blink_timer = 0.0;
+                    self.cursor_blink_phase = !self.cursor_blink_phase;
+                    self.cursor_blink_anim.set(if self.cursor_blink_phase { 1.0 } else { 0.0 });
+                }
+                animating |= self.cursor_blink_anim.tick(ui::anim::timing::BLINK, dt);
+            } else {
+                // Steady cursor or window unfocused: always visible
+                self.cursor_blink_anim.snap(1.0);
+                self.cursor_blink_phase = true;
+                self.cursor_blink_timer = 0.0;
+            }
+        }
+
+        if animating {
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+
         let Some(gpu) = &self.gpu else { return };
         let frame = match gpu.surface.get_current_texture() {
             Ok(f) => f,
@@ -440,71 +522,173 @@ impl App {
         // Terminal area background (BG_BASE) — must come before chrome overlays
         ui_builder.fill(layout.terminal, ui::builder::colors::BG_BASE);
 
-        // Inner shadow at top of terminal area (creates recessed panel depth)
+        // Directional panel cast shadows — each chrome panel casts a shadow
+        // onto the terminal content area proportional to its visual weight.
+        // Top-left lighting model: tab bar (top) casts the strongest shadow,
+        // sidebar (left) casts a medium shadow, status bar (bottom) and right
+        // edge cast lighter shadows.  This replaces a single omnidirectional
+        // inner shadow with more realistic directional depth.
         {
-            let shadow_h = ui_text_handle.s(5.0);
-            let shadow_rect = ui::widget::Rect {
-                x: layout.terminal.x,
-                y: layout.terminal.y,
-                width: layout.terminal.width,
-                height: shadow_h,
-            };
-            ui_builder.fill_gradient(shadow_rect,
-                [0.0, 0.0, 0.0, 0.12],  // semi-transparent dark at top
-                [0.0, 0.0, 0.0, 0.0],   // transparent at bottom
+            // Base inner shadow (reduced — directional shadows add the rest)
+            ui_builder.fill_inner_shadow(
+                layout.terminal,
+                [0.0, 0.0, 0.0, 0.08],
+                0.0,
+                ui_text_handle.s(4.0),
             );
 
-            // Inner shadow at left edge (sidebar-terminal junction depth)
-            if layout.sidebar.width > 0.0 {
-                let shadow_w = ui_text_handle.s(4.0);
-                let side_shadow = ui::widget::Rect {
-                    x: layout.terminal.x,
-                    y: layout.terminal.y,
-                    width: shadow_w,
-                    height: layout.terminal.height,
-                };
-                ui_builder.fill_gradient_h(side_shadow,
-                    [0.0, 0.0, 0.0, 0.08],  // semi-transparent dark at left
-                    [0.0, 0.0, 0.0, 0.0],   // transparent at right
+            // Tab bar cast shadow (strongest — topmost elevated panel)
+            {
+                let shadow_h = ui_text_handle.s(12.0);
+                ui_builder.fill_gradient(
+                    ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y,
+                        width: layout.terminal.width,
+                        height: shadow_h,
+                    },
+                    [0.0, 0.0, 0.0, 0.10],
+                    [0.0, 0.0, 0.0, 0.0],
                 );
             }
 
-            // Bottom inner shadow (terminal-to-status-bar junction)
-            let bottom_shadow_h = ui_text_handle.s(3.0);
-            let bottom_shadow = ui::widget::Rect {
-                x: layout.terminal.x,
-                y: layout.terminal.y + layout.terminal.height - bottom_shadow_h,
-                width: layout.terminal.width,
-                height: bottom_shadow_h,
-            };
-            ui_builder.fill_gradient(bottom_shadow,
-                [0.0, 0.0, 0.0, 0.0],   // transparent at top
-                [0.0, 0.0, 0.0, 0.08],  // semi-transparent dark at bottom
-            );
-
-            // Concave corner fill at sidebar-terminal junction (top-left of content area).
-            // A small rounded dark shape softens the hard 90° corner where sidebar
-            // meets tab bar, creating a smooth inset feel like professional editors.
+            // Sidebar cast shadow (medium — side panel casting rightward)
             if layout.sidebar.width > 0.0 {
-                let corner_r = ui_text_handle.s(6.0);
-                let corner_rect = ui::widget::Rect {
-                    x: layout.terminal.x,
-                    y: layout.terminal.y,
-                    width: corner_r,
-                    height: corner_r,
-                };
-                // Only round the top-left corner; the other three stay sharp to blend
-                // seamlessly with the sidebar border and tab bar bottom edge.
-                ui_builder.fill_rounded_custom(corner_rect, ui::builder::colors::BG_DARK, [corner_r, 0.0, 0.0, 0.0]);
+                let shadow_w = ui_text_handle.s(10.0);
+                ui_builder.fill_gradient_h(
+                    ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y,
+                        width: shadow_w,
+                        height: layout.terminal.height,
+                    },
+                    [0.0, 0.0, 0.0, 0.07],
+                    [0.0, 0.0, 0.0, 0.0],
+                );
+            }
 
-                // Matching corner at bottom-left of content area (sidebar-status junction)
-                let bottom_corner = ui::widget::Rect {
-                    x: layout.terminal.x,
-                    y: layout.terminal.y + layout.terminal.height - corner_r,
-                    width: corner_r,
-                    height: corner_r,
+            // Status bar cast shadow (subtle — bottom panel casting upward)
+            {
+                let shadow_h = ui_text_handle.s(8.0);
+                ui_builder.fill_gradient(
+                    ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y + layout.terminal.height - shadow_h,
+                        width: layout.terminal.width,
+                        height: shadow_h,
+                    },
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.05],
+                );
+            }
+
+            // Right edge shadow (lightest — no heavy panel, just window edge)
+            {
+                let shadow_w = ui_text_handle.s(5.0);
+                ui_builder.fill_gradient_h(
+                    ui::widget::Rect {
+                        x: layout.terminal.x + layout.terminal.width - shadow_w,
+                        y: layout.terminal.y,
+                        width: shadow_w,
+                        height: layout.terminal.height,
+                    },
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.03],
+                );
+            }
+
+            // Concave corner fills soften 90° corners where chrome panels meet the
+            // terminal content area, creating a smooth inset feel.
+            {
+                let corner_r = ui_text_handle.s(6.0);
+
+                // Left-side corners (sidebar-terminal junction)
+                if layout.sidebar.width > 0.0 {
+                    // Top-left corner
+                    let corner_rect = ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y,
+                        width: corner_r,
+                        height: corner_r,
+                    };
+                    ui_builder.fill_rounded_custom(corner_rect, ui::builder::colors::BG_DARK, [corner_r, 0.0, 0.0, 0.0]);
+
+                    // Bottom-left corner — uses sidebar's gradient bottom color
+                    // (BG_DARK * 0.9) instead of flat BG_DARK, so the corner blends
+                    // seamlessly with the sidebar's vertical gradient at this y.
+                    let sidebar_bottom_color = [
+                        ui::builder::colors::BG_DARK[0] * 0.9,
+                        ui::builder::colors::BG_DARK[1] * 0.9,
+                        ui::builder::colors::BG_DARK[2] * 0.9,
+                        1.0,
+                    ];
+                    let bottom_corner = ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y + layout.terminal.height - corner_r,
+                        width: corner_r,
+                        height: corner_r,
+                    };
+                    ui_builder.fill_rounded_custom(bottom_corner, sidebar_bottom_color, [0.0, 0.0, 0.0, corner_r]);
+                }
+
+                // Right-side corners (tab-bar/status-bar to window edge)
+                let right_corner_r = ui_text_handle.s(4.0);
+                // Top-right corner — uses tab bar's gradient bottom color
+                // (BG_DARK * 0.92) for seamless junction at the tab bar edge.
+                let tab_bar_bottom_color = [
+                    ui::builder::colors::BG_DARK[0] * 0.92,
+                    ui::builder::colors::BG_DARK[1] * 0.92,
+                    ui::builder::colors::BG_DARK[2] * 0.92,
+                    1.0,
+                ];
+                let tr_corner = ui::widget::Rect {
+                    x: layout.terminal.x + layout.terminal.width - right_corner_r,
+                    y: layout.terminal.y,
+                    width: right_corner_r,
+                    height: right_corner_r,
                 };
-                ui_builder.fill_rounded_custom(bottom_corner, ui::builder::colors::BG_DARK, [0.0, 0.0, 0.0, corner_r]);
+                ui_builder.fill_rounded_custom(tr_corner, tab_bar_bottom_color, [0.0, right_corner_r, 0.0, 0.0]);
+
+                // Bottom-right corner — uses status bar's top gradient color
+                // (BG_SURFACE) so the corner blends with the status bar at the
+                // terminal-to-status-bar junction instead of mismatching.
+                let br_corner = ui::widget::Rect {
+                    x: layout.terminal.x + layout.terminal.width - right_corner_r,
+                    y: layout.terminal.y + layout.terminal.height - right_corner_r,
+                    width: right_corner_r,
+                    height: right_corner_r,
+                };
+                ui_builder.fill_rounded_custom(br_corner, ui::builder::colors::BG_SURFACE, [0.0, 0.0, right_corner_r, 0.0]);
+            }
+
+            // Corner vignette: radial darkening at corners with intensity
+            // weighted by panel junction importance.  Top-left is strongest
+            // (tab bar + sidebar converge), other corners are lighter.
+            {
+                let vig_r = ui_text_handle.s(24.0);
+                let vig_blur = ui_text_handle.s(16.0);
+                // Top-left: strongest (two heavy panels converge)
+                let tl_alpha = if layout.sidebar.width > 0.0 { 0.10 } else { 0.06 };
+                ui_builder.fill_shadow(
+                    ui::widget::Rect { x: layout.terminal.x, y: layout.terminal.y, width: vig_r, height: vig_r },
+                    [0.0, 0.0, 0.0, tl_alpha], vig_r * 0.3, vig_blur,
+                );
+                // Top-right: medium (tab bar edge)
+                ui_builder.fill_shadow(
+                    ui::widget::Rect { x: layout.terminal.x + layout.terminal.width - vig_r, y: layout.terminal.y, width: vig_r, height: vig_r },
+                    [0.0, 0.0, 0.0, 0.06], vig_r * 0.3, vig_blur,
+                );
+                // Bottom-left: medium (sidebar + status bar converge)
+                let bl_alpha = if layout.sidebar.width > 0.0 { 0.08 } else { 0.04 };
+                ui_builder.fill_shadow(
+                    ui::widget::Rect { x: layout.terminal.x, y: layout.terminal.y + layout.terminal.height - vig_r, width: vig_r, height: vig_r },
+                    [0.0, 0.0, 0.0, bl_alpha], vig_r * 0.3, vig_blur,
+                );
+                // Bottom-right: lightest
+                ui_builder.fill_shadow(
+                    ui::widget::Rect { x: layout.terminal.x + layout.terminal.width - vig_r, y: layout.terminal.y + layout.terminal.height - vig_r, width: vig_r, height: vig_r },
+                    [0.0, 0.0, 0.0, 0.04], vig_r * 0.3, vig_blur,
+                );
             }
         }
 
@@ -533,13 +717,13 @@ impl App {
                 let track_margin = s(2.0);
 
                 // Mouse proximity calculation — how close is cursor to scrollbar edge?
+                // The Anim smoothly interpolates so width/opacity transitions are buttery.
                 let scrollbar_edge_x = layout.terminal.x + layout.terminal.width - track_margin;
                 let proximity_zone = s(40.0); // pixels within which scrollbar reacts
-                let hover_t = if let Some((mx, _my)) = self.mouse_position {
+                let raw_proximity = if let Some((mx, _my)) = self.mouse_position {
                     let mx = mx as f32;
                     let dist = (scrollbar_edge_x - mx).abs();
                     if dist < proximity_zone {
-                        // Smooth ease: closer = stronger (0.0 far → 1.0 touching)
                         let t = 1.0 - (dist / proximity_zone);
                         t * t // quadratic ease-in for snappier feel near the edge
                     } else {
@@ -548,6 +732,12 @@ impl App {
                 } else {
                     0.0
                 };
+                self.scrollbar_hover_anim.set(raw_proximity);
+                let sb_animating = self.scrollbar_hover_anim.tick(ui::anim::timing::MEDIUM, dt);
+                if sb_animating {
+                    if let Some(w) = &self.window { w.request_redraw(); }
+                }
+                let hover_t = self.scrollbar_hover_anim.value();
 
                 // Interpolate bar width: thin (6px) when far, wide (10px) when close
                 let bar_w_min = s(6.0);
@@ -589,35 +779,49 @@ impl App {
                     ui_builder.fill_shadow(thumb_rect, [0.0, 0.0, 0.0, shadow_alpha], bar_w / 2.0, s(3.0));
                 }
 
-                // Thumb: boost opacity on proximity and when scrolled
-                let base_alpha = if self.scrollback_offset > 0 { 0.28 } else { 0.15 };
+                // Thumb: SDF gradient for 3D cylinder feel (brighter top → darker bottom).
+                // When actively scrolled, the thumb picks up a subtle accent tint
+                // matching the active tab — visual coherence with cursor and selection.
+                let is_scrolled = self.scrollback_offset > 0;
+                let accent = self.active_accent();
+                let base_alpha = if is_scrolled { 0.28 } else { 0.15 };
                 let scroll_alpha = base_alpha + 0.20 * hover_t;
-                let thumb_color = [1.0, 1.0, 1.0, scroll_alpha];
-                let base_border = if self.scrollback_offset > 0 { 0.12 } else { 0.08 };
+                // Blend toward accent color when scrolled + hovering
+                let accent_blend = if is_scrolled { hover_t * 0.3 } else { 0.0 };
+                let thumb_r = 1.0 * (1.0 - accent_blend) + accent[0] * accent_blend;
+                let thumb_g = 1.0 * (1.0 - accent_blend) + accent[1] * accent_blend;
+                let thumb_b = 1.0 * (1.0 - accent_blend) + accent[2] * accent_blend;
+                let thumb_top = [thumb_r, thumb_g, thumb_b, scroll_alpha * (1.0 + 0.15 * hover_t)];
+                let thumb_bottom = [thumb_r, thumb_g, thumb_b, scroll_alpha * (1.0 - 0.1 * hover_t)];
+                let base_border = if is_scrolled { 0.12 } else { 0.08 };
                 let border_alpha = base_border + 0.10 * hover_t;
-                let thumb_border = [1.0, 1.0, 1.0, border_alpha];
-                ui_builder.fill_rounded_bordered(
-                    thumb_rect, thumb_color, bar_w / 2.0,
-                    0.5, thumb_border,
-                );
-                // Inner highlight on thumb for glossy feel (only on hover)
-                if hover_t > 0.2 {
-                    let hl_rect = ui::widget::Rect {
-                        x: thumb_rect.x + 1.0,
-                        y: thumb_rect.y + 1.0,
-                        width: thumb_rect.width - 2.0,
-                        height: thumb_rect.height * 0.4,
-                    };
-                    let hl_alpha = 0.06 * hover_t;
-                    ui_builder.fill_gradient(hl_rect,
-                        [1.0, 1.0, 1.0, hl_alpha],
-                        [1.0, 1.0, 1.0, 0.0],
-                    );
+                let thumb_border = [thumb_r, thumb_g, thumb_b, border_alpha];
+                ui_builder.fill_rounded_gradient(thumb_rect, thumb_top, thumb_bottom, bar_w / 2.0);
+                ui_builder.stroke_rounded(thumb_rect, bar_w / 2.0, 0.5, thumb_border);
+
+                // Grip marks: three small etched horizontal lines in the center
+                // of the thumb.  These provide visual affordance (signals "you can
+                // drag me") and appear only when the mouse is close enough.  Each
+                // line is a dark-light pair for a subtle inset/emboss effect.
+                if hover_t > 0.15 && thumb_h > s(28.0) {
+                    let grip_alpha = (hover_t - 0.15) / 0.85; // 0→1 over the hover range
+                    let grip_w = (bar_w * 0.45).round().max(2.0);
+                    let grip_x = thumb_rect.x + (bar_w - grip_w) / 2.0;
+                    let grip_cy = thumb_y + thumb_h / 2.0;
+                    let grip_spacing = s(3.0);
+                    let grip_dark = [0.0, 0.0, 0.0, 0.20 * grip_alpha];
+                    let grip_light = [1.0, 1.0, 1.0, 0.08 * grip_alpha];
+                    for gi in -1i32..=1 {
+                        let gy = grip_cy + gi as f32 * grip_spacing - 0.5;
+                        ui_builder.hline_aa(grip_x, gy, grip_w, 1.0, grip_dark);
+                        ui_builder.hline_aa(grip_x, gy + 1.0, grip_w, 1.0, grip_light);
+                    }
                 }
 
-                // Scroll-away fog: subtle gradient at bottom edge when scrolled up
-                // from live position, hinting that there's newer content below.
+                // Scroll-away fog: subtle gradients at edges when scrolled,
+                // hinting that there's content beyond the visible viewport.
                 if self.scrollback_offset > 0 {
+                    // Bottom fog — newer content below
                     let fog_h = s(8.0);
                     let fog_rect = ui::widget::Rect {
                         x: layout.terminal.x,
@@ -630,6 +834,21 @@ impl App {
                         [0.0, 0.0, 0.0, 0.15],
                     );
                 }
+                // Top fog — older scrollback content above (always present when
+                // there's scrollback history, regardless of current scroll position)
+                if grid.total_scrollback > 0 && self.scrollback_offset < grid.total_scrollback {
+                    let fog_h = s(6.0);
+                    let fog_rect = ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y,
+                        width: layout.terminal.width,
+                        height: fog_h,
+                    };
+                    ui_builder.fill_gradient(fog_rect,
+                        [0.0, 0.0, 0.0, 0.10],
+                        [0.0, 0.0, 0.0, 0.0],
+                    );
+                }
             }
         }
 
@@ -638,18 +857,46 @@ impl App {
         self.tab_bar.build(&mut ui_builder, layout.tab_bar, &ui_text_handle);
         self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
         self.status_bar.sidebar_width = layout.sidebar.width;
-        self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle);
-        // Window outer border — double-border for solid professional edge
+        self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle, self.tab_bar.glow_phase());
+        // Window outer border — multi-layer shadow + border for professional depth.
+        // When maximized, shadows are invisible (window fills screen) so skip them
+        // to save GPU work.  Borders and accent top edge still render for polish.
         {
-            let r = ui_text_handle.s(3.0);
+            let r = if self.is_maximized { 0.0 } else { ui_text_handle.s(3.0) };
             let full = ui::widget::Rect { x: 0.0, y: 0.0, width: vw, height: vh };
-            // Outer border: darker edge against desktop
-            let outer_border = [0.05, 0.05, 0.08, 0.9];
-            ui_builder.stroke_rounded(full, r, 1.0, outer_border);
-            // Inner highlight: subtle bright edge just inside for depth
-            let inner = ui::widget::Rect { x: 1.0, y: 1.0, width: vw - 2.0, height: vh - 2.0 };
-            let inner_highlight = [1.0, 1.0, 1.0, 0.04];
-            ui_builder.stroke_rounded(inner, r.max(1.0) - 1.0, 1.0, inner_highlight);
+
+            if !self.is_maximized {
+                // Two-layer shadow: far shadow (wide, faint) + near shadow (tight, darker).
+                let far_shadow = ui::widget::Rect { x: -2.0, y: 0.0, width: vw + 4.0, height: vh + 4.0 };
+                ui_builder.fill_shadow(far_shadow, [0.0, 0.0, 0.0, 0.12], r + 2.0, ui_text_handle.s(10.0));
+                ui_builder.fill_shadow(full, [0.0, 0.0, 0.0, 0.30], r, ui_text_handle.s(3.0));
+                // Outer border: darker edge against desktop
+                ui_builder.stroke_rounded(full, r, 1.0, [0.05, 0.05, 0.08, 0.9]);
+                // Inner highlight: subtle bright edge just inside for depth
+                let inner = ui::widget::Rect { x: 1.0, y: 1.0, width: vw - 2.0, height: vh - 2.0 };
+                ui_builder.stroke_rounded(inner, r.max(1.0) - 1.0, 1.0, [1.0, 1.0, 1.0, 0.04]);
+            }
+
+            // Accent-tinted top edge: picks up the active tab's accent color.
+            let active_accent = self.active_accent();
+            let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+            let accent_alpha = if self.window_focused { 0.15 * breath } else { 0.05 };
+            let accent_fade = ui_text_handle.s(40.0);
+            let accent_full = [active_accent[0], active_accent[1], active_accent[2], accent_alpha];
+            let accent_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
+            let top_w = vw - r * 2.0;
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect { x: r, y: 0.0, width: accent_fade, height: 1.0 },
+                accent_zero, accent_full,
+            );
+            ui_builder.fill(
+                ui::widget::Rect { x: r + accent_fade, y: 0.0, width: top_w - accent_fade * 2.0, height: 1.0 },
+                accent_full,
+            );
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect { x: vw - r - accent_fade, y: 0.0, width: accent_fade, height: 1.0 },
+                accent_full, accent_zero,
+            );
         }
 
         let (chrome_quads, text_commands) = ui_builder.finish();
@@ -669,6 +916,9 @@ impl App {
                 &text_commands,
             );
         }
+
+        // Pre-compute accent color before render pass (avoids borrow conflicts)
+        let active_accent = self.active_accent();
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -713,9 +963,10 @@ impl App {
                         let (sel_start, sel_end) = self.selection.normalized();
                         let cols = grid.dimensions.cols as usize;
                         let radius = 3.0 * self.scale_factor;
-                        // Accent blue at 22% opacity — visible but text stays legible
-                        let sel_color = [0.537, 0.706, 0.980, 0.22];
-                        let sel_border = [0.537, 0.706, 0.980, 0.10];
+                        // Selection accent matches active tab for visual coherence
+                        let accent = active_accent;
+                        let sel_color = [accent[0], accent[1], accent[2], 0.22];
+                        let sel_border = [accent[0], accent[1], accent[2], 0.10];
 
                         let mut sel_verts = Vec::new();
                         for row in sel_start.row..=sel_end.row {
@@ -789,8 +1040,11 @@ impl App {
                             let clip_b = layout.terminal_content.y + layout.terminal_content.height;
                             if cpx < clip_r && cpy < clip_b {
                                 use godly_protocol::types::CursorShape;
-                                let cursor_color = [1.0f32, 1.0, 1.0, 0.85];
-                                let glow_color = [0.537, 0.706, 0.980, 0.12]; // subtle blue glow
+                                let blink_t = self.cursor_blink_anim.value();
+                                let cursor_color = [1.0f32, 1.0, 1.0, 0.85 * blink_t];
+                                // Cursor glow matches active tab accent for visual coherence
+                                let accent = active_accent;
+                                let glow_color = [accent[0], accent[1], accent[2], 0.14 * blink_t];
                                 let radius = 2.0 * self.scale_factor;
 
                                 let (cx, cy, cwidth, cheight) = match grid.cursor.cursor_style {
@@ -832,15 +1086,45 @@ impl App {
                 }
             }
 
-            // Unfocused window dimming overlay — drawn last, on top of everything.
+            // Unfocused window dimming — drawn last, on top of everything.
             // Professional apps (VS Code, Zed) subtly desaturate/dim when inactive.
-            if !self.window_focused {
+            // Uses a vignette approach: edges dim more than center, creating a
+            // natural depth-of-field "faded" look rather than a flat overlay.
+            // Cold blue-black tint shifts color temperature cooler.
+            let dim_t = self.focus_dim_anim.value();
+            if dim_t > 0.005 {
                 if let Some(quad_pipe) = &mut self.quad_pipeline {
-                    let dim_overlay = ui::quad_renderer::quad_vertices(
+                    let dim_color = [0.02, 0.02, 0.06];
+                    let mut dim_verts = Vec::new();
+                    // Base uniform dim (lighter than before — vignette adds the rest)
+                    dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices(
                         0.0, 0.0, vw, vh, vw, vh,
-                        [0.0, 0.0, 0.0, 0.15], // subtle 15% dark overlay
-                    );
-                    quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &dim_overlay);
+                        [dim_color[0], dim_color[1], dim_color[2], 0.10 * dim_t],
+                    ));
+                    // Edge vignette: darker bands at all four edges that add to the
+                    // base dim.  Creates a natural tunnel-vision effect.
+                    let vig_w = vw * 0.18;
+                    let vig_h = vh * 0.15;
+                    let vig_alpha = 0.08 * dim_t;
+                    let vig_full = [dim_color[0], dim_color[1], dim_color[2], vig_alpha];
+                    let vig_zero = [dim_color[0], dim_color[1], dim_color[2], 0.0];
+                    // Left edge
+                    dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient_h(
+                        0.0, 0.0, vig_w, vh, vw, vh, vig_full, vig_zero,
+                    ));
+                    // Right edge
+                    dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient_h(
+                        vw - vig_w, 0.0, vig_w, vh, vw, vh, vig_zero, vig_full,
+                    ));
+                    // Top edge
+                    dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient(
+                        0.0, 0.0, vw, vig_h, vw, vh, vig_full, vig_zero,
+                    ));
+                    // Bottom edge
+                    dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient(
+                        0.0, vh - vig_h, vw, vig_h, vw, vh, vig_zero, vig_full,
+                    ));
+                    quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &dim_verts);
                 }
             }
         }
@@ -936,6 +1220,10 @@ impl ApplicationHandler<AsyncEvent> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
+                // Track maximized state to skip outer shadow rendering
+                if let Some(w) = &self.window {
+                    self.is_maximized = w.is_maximized();
+                }
                 if let Some(gpu) = &mut self.gpu {
                     gpu.config.width = size.width.max(1);
                     gpu.config.height = size.height.max(1);
@@ -960,6 +1248,7 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             WindowEvent::Focused(focused) => {
                 self.window_focused = focused;
+                self.focus_dim_anim.set(if focused { 0.0 } else { 1.0 });
                 if let Some(w) = &self.window { w.request_redraw(); }
             }
             WindowEvent::RedrawRequested => {
@@ -979,6 +1268,13 @@ impl ApplicationHandler<AsyncEvent> for App {
                 let me = ui::widget::MouseEvent::Move { x: px, y: py };
                 self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor);
                 self.sidebar.on_mouse(me, layout.sidebar, self.scale_factor);
+                // Status bar needs UiTextRenderer for pill hit-testing
+                if let Some(renderer) = &self.renderer {
+                    let m = renderer.font_metrics().scaled_for_render();
+                    let ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+                    self.status_bar.sidebar_width = layout.sidebar.width;
+                    self.status_bar.on_mouse(me, layout.status_bar, &ui_text);
+                }
 
                 // Selection drag in terminal area
                 if self.selection.active && layout.terminal.contains(px, py) {

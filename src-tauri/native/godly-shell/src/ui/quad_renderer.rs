@@ -9,6 +9,7 @@
 //!   - Variable blur radius for soft box shadows
 //!   - Vertical gradient via per-vertex fill_color interpolation
 //!   - Rotation support for angled SDF shapes (used by icon rendering)
+//!   - Premultiplied alpha blending for correct multi-layer compositing
 //!   - Flat quads (no radius/border) use a fast path that skips the SDF entirely
 
 #[repr(C)]
@@ -153,6 +154,17 @@ fn dither_noise(pos: vec2<f32>) -> f32 {
     return (n1 + n2 - 1.0) / 255.0;  // ±1 LSB triangle noise
 }
 
+// Spatially-coherent hash noise for material micro-texture.
+// Unlike dither_noise (which varies per-frame for banding), this produces
+// a stable, screen-position-keyed grain that gives surfaces a subtle
+// "brushed matte" quality — the difference between a flat digital rectangle
+// and a real material surface.  Quantized to 2×2 pixel blocks for a fine
+// but visible texture at typical DPI, with no temporal flicker.
+fn material_grain(pos: vec2<f32>) -> f32 {
+    let p = floor(pos * 0.5);
+    return (fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453) - 0.5) * 0.006;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let fill = input.fill_color;
@@ -163,7 +175,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if (he.x <= 0.0) {
         let linear = pow(fill.rgb, vec3<f32>(2.2));
         let d = dither_noise(screen_pos);
-        return vec4<f32>(linear + vec3<f32>(d), fill.a);
+        // Material grain on flat quads too — gives backgrounds the same subtle
+        // "brushed matte" surface quality as SDF elements.  Without this, flat
+        // panel backgrounds are perfectly smooth digital rectangles while rounded
+        // UI elements have visible texture, creating a jarring inconsistency.
+        let g = material_grain(screen_pos);
+        // Premultiplied alpha output: RGB * alpha before blending.
+        // With PREMULTIPLIED_ALPHA_BLENDING, this produces correct compositing
+        // of semi-transparent layers (shadows, glows, hover transitions) and
+        // eliminates dark fringes at anti-aliased edges of colored elements.
+        let rgb = linear + vec3<f32>(d + g);
+        return vec4<f32>(rgb * fill.a, fill.a);
     }
 
     // Rotate local_pos into shape space when rotation is non-zero
@@ -180,26 +202,143 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // SDF path: rounded rectangle with anti-aliased edges
     let d = sd_rounded_rect(p, he, input.corner_radii);
 
-    // AA band width: use blur_radius if set, otherwise 0.75px for crisp edges
-    let blur = select(0.75, input.blur_radius, input.blur_radius > 0.0);
-    let aa = 1.0 - smoothstep(-blur, blur, d);
+    // Screen-space adaptive AA: fwidth(d) gives the rate of change of the SDF
+    // distance across the pixel.  Using this instead of a fixed pixel width
+    // produces perfect anti-aliasing at any DPI / zoom level — thin crisp edges
+    // on 4K, smooth on 1080p, no manual tuning needed.
+    let fw = fwidth(d);
+    let crisp_aa = fw * 0.75;
+
+    // AA / shadow alpha
+    // Negative blur_radius signals INNER shadow mode: shadow falls inside the
+    // shape, fading inward from the edges.  Positive blur = outer shadow/glow.
+    let is_inner_shadow = input.blur_radius < -0.5;
+    let abs_blur = abs(input.blur_radius);
+    let blur = select(crisp_aa, abs_blur, abs_blur > 0.0);
+    var aa: f32;
+    if (is_inner_shadow) {
+        // Inner shadow: Gaussian falloff from the inner edge of the shape.
+        // Shadow is strongest near the edge (d ≈ 0) and fades toward the
+        // center (d << 0) — the inverse of outer shadow behavior.
+        let sigma = blur * 0.45;
+        let inner_d = max(-d, 0.0);  // 0 at edge, grows toward center
+        let gauss = exp(-0.5 * (inner_d * inner_d) / (sigma * sigma));
+        // Anti-aliased boundary: smooth transition at the shape edge so
+        // the inner shadow doesn't have a hard cut at d=0.
+        let edge_aa = smoothstep(crisp_aa, -crisp_aa, d);
+        aa = gauss * edge_aa;
+    } else if (blur > 2.0) {
+        // Gaussian falloff for soft shadows/glows — more natural than smoothstep.
+        // Produces a brighter core with gentle exponential fade at the edges,
+        // mimicking real light scattering from emissive surfaces.
+        let sigma = blur * 0.45;
+        let clamped_d = max(d, 0.0);
+        let gauss = exp(-0.5 * (clamped_d * clamped_d) / (sigma * sigma));
+        // Inside the shape is always fully opaque
+        aa = select(gauss, 1.0, d < 0.0);
+    } else {
+        // Crisp edges: smoothstep AA for sharp anti-aliased boundaries
+        aa = 1.0 - smoothstep(-blur, blur, d);
+    }
 
     // Determine pixel color (fill or border)
     var color = fill;
-    if (input.border_width > 0.0) {
+    let has_border = input.border_width > 0.0;
+    if (has_border) {
         let inner_d = d + input.border_width;
-        // Borders are always crisp (0.75px AA) regardless of blur
-        let fill_mask = 1.0 - smoothstep(-0.75, 0.75, inner_d);
+        // Borders use the same adaptive AA band for consistent edge quality
+        let fill_mask = 1.0 - smoothstep(-crisp_aa, crisp_aa, inner_d);
+
+        // Border 3D rim lighting: subtle vertical gradient across the border
+        // band.  Top edge of the border catches more light (brighter), bottom
+        // edge recedes (darker).  This transforms flat 1px borders into thin
+        // bevels that create real depth perception at panel boundaries.
+        let ny = p.y / max(he.y, 1.0);  // -1 top, +1 bottom
+        let border_highlight = 0.025 * saturate(-ny * 0.5 + 0.3);
+        let border_rgb = input.border_color.rgb + vec3<f32>(border_highlight);
+
         color = vec4<f32>(
-            mix(input.border_color.rgb, fill.rgb, fill_mask),
+            mix(border_rgb, fill.rgb, fill_mask),
             mix(input.border_color.a, fill.a, fill_mask),
         );
     }
 
-    // Convert sRGB to linear + apply AA alpha + dither
+    // Surface lighting model for filled SDF shapes.
+    // Combines specular, environmental reflection, rim light, and ambient
+    // occlusion to give UI elements a glass-like 3D quality reminiscent of
+    // polished native app chrome (Zed, VS Code, macOS system UI).
+    //
+    // Lighting extends smoothly to the fill edge (fading out near the border)
+    // so there's no visible discontinuity where the lit fill meets unlit border.
+    let edge_margin = select(1.5, input.border_width + 0.5, has_border);
+    let interior_t = saturate((-d - 0.5) / edge_margin);
+    if (interior_t > 0.0 && fill.a > 0.1 && blur <= 2.0 && !is_inner_shadow) {
+        let ny = p.y / he.y;  // -1 at top, +1 at bottom
+        let nx = p.x / he.x;  // -1 at left, +1 at right
+
+        // Top-edge specular: bright near top, fades by ~middle
+        let spec_t = saturate((-ny - 0.2) * 1.5);
+        let spec = spec_t * spec_t * 0.04;  // quadratic falloff, very subtle
+
+        // Bottom-edge darkening: counterpart to specular, creates "volume"
+        let dark_t = saturate((ny - 0.3) * 1.2);
+        let dark = dark_t * dark_t * 0.02;
+
+        // Environmental reflection band: soft horizontal highlight at ~30%
+        // from the top.  Simulates overhead ambient light reflecting off a
+        // slightly convex surface — the "gel capsule" sheen seen on polished
+        // native UI controls.  Gaussian profile for natural falloff.
+        let refl_center = -0.3;
+        let refl_dist = ny - refl_center;
+        let refl = exp(-8.0 * refl_dist * refl_dist) * 0.008;
+
+        // Edge-proximity rim light: Fresnel-like brightening near the SDF
+        // boundary.  Strongest at the top-left (light source direction) and
+        // fades toward the bottom-right for directional depth.
+        let edge_dist = -d - select(0.5, input.border_width, has_border);
+        let rim_band = 2.5;  // width in pixels of the rim highlight zone
+        let rim_raw = saturate(1.0 - edge_dist / rim_band);
+        let dir_bias = saturate((-ny * 0.6 + 0.4) * 0.8 + 0.2);
+        let rim = rim_raw * rim_raw * dir_bias * 0.025;
+
+        // Corner ambient occlusion: subtle darkening where two edges converge
+        // in the rounded-corner region.  Mimics how ambient light is partially
+        // blocked in concave areas, adding perceived depth at the extremities
+        // of the shape.  Only visible on elements large enough to notice.
+        let corner_x = saturate((abs(nx) - 0.4) * 2.5);
+        let corner_y = saturate((abs(ny) - 0.4) * 2.5);
+        let corner_ao = corner_x * corner_y * 0.012;
+
+        // Glass-edge highlight: concentrated bright line at the very top of
+        // the element, mimicking the CSS `inset 0 1px 0 rgba(255,255,255,0.1)`
+        // pattern.  Tighter than the specular term — a sharp Gaussian peak at
+        // the topmost 2-3 pixels of the fill.  Creates the "wet edge" seen on
+        // polished native controls (macOS buttons, Arc browser tabs).
+        let edge_peak = exp(-32.0 * (ny + 0.95) * (ny + 0.95)) * 0.035;
+
+        let lighting = (spec + refl + rim + edge_peak - dark - corner_ao) * interior_t;
+
+        // Material micro-texture: spatially-coherent noise that gives the
+        // surface a subtle "brushed matte" quality.  Without this, SDF shapes
+        // are perfectly smooth digital rectangles; with it, they feel like
+        // real material surfaces under ambient light.
+        let grain = material_grain(screen_pos) * interior_t;
+
+        color = vec4<f32>(color.rgb + vec3<f32>(lighting + grain), color.a);
+    }
+
+    // Convert sRGB to linear + apply AA alpha + dither.
+    // Premultiplied alpha: RGB is pre-scaled by final alpha so the blend
+    // unit can use (One, OneMinusSrcAlpha) — the industry standard for UI
+    // compositing (Skia, Direct2D, CoreGraphics).  Eliminates dark fringes
+    // at anti-aliased edges of colored elements and produces physically
+    // correct compositing when multiple semi-transparent layers overlap
+    // (shadows, glows, hover transitions).
+    let final_a = color.a * aa;
     let linear = pow(color.rgb, vec3<f32>(2.2));
-    let d = dither_noise(screen_pos);
-    return vec4<f32>(linear + vec3<f32>(d), color.a * aa);
+    let dith = dither_noise(screen_pos);
+    let rgb = (linear + vec3<f32>(dith)) * final_a;
+    return vec4<f32>(rgb, final_a);
 }
 "#;
 
@@ -243,7 +382,7 @@ impl QuadPipeline {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -421,7 +560,8 @@ pub fn quad_vertices_sdf(
         corner_radii[3].min(max_r),
     ];
 
-    // Expand geometry for AA (more expansion for blur/shadow)
+    // Expand geometry for AA (more expansion for outer blur/shadow).
+    // Inner shadows (negative blur_radius) don't need expansion — they render inside.
     let pad = if blur_radius > 0.0 { blur_radius + 1.0 } else { 1.0 };
     let ex = x - pad;
     let ey = y - pad;
@@ -523,6 +663,69 @@ pub fn quad_vertices_sdf_gradient(
         v([x0, y1], [lx0, ly1], fill_color_bottom),
         v([x1, y0], [lx1, ly0], fill_color_top),
         v([x1, y1], [lx1, ly1], fill_color_bottom),
+    ]
+}
+
+/// Build 6 vertices for an SDF rounded rectangle with a horizontal gradient.
+/// Left vertices get `fill_color_left`, right get `fill_color_right`.
+/// The GPU interpolates the color smoothly across the shape.
+pub fn quad_vertices_sdf_gradient_h(
+    x: f32, y: f32, w: f32, h: f32,
+    viewport_w: f32, viewport_h: f32,
+    fill_color_left: [f32; 4],
+    fill_color_right: [f32; 4],
+    corner_radii: [f32; 4],
+    border_width: f32,
+    border_color: [f32; 4],
+) -> [QuadVertex; 6] {
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let max_r = half_w.min(half_h);
+    let radii = [
+        corner_radii[0].min(max_r),
+        corner_radii[1].min(max_r),
+        corner_radii[2].min(max_r),
+        corner_radii[3].min(max_r),
+    ];
+
+    let pad = 1.0;
+    let ex = x - pad;
+    let ey = y - pad;
+    let ew = w + pad * 2.0;
+    let eh = h + pad * 2.0;
+
+    let x0 = ex / viewport_w * 2.0 - 1.0;
+    let y0 = -(ey / viewport_h * 2.0 - 1.0);
+    let x1 = (ex + ew) / viewport_w * 2.0 - 1.0;
+    let y1 = -((ey + eh) / viewport_h * 2.0 - 1.0);
+
+    let lx0 = -(half_w + pad);
+    let ly0 = -(half_h + pad);
+    let lx1 = half_w + pad;
+    let ly1 = half_h + pad;
+
+    let he = [half_w, half_h];
+
+    let v = |pos: [f32; 2], lp: [f32; 2], color: [f32; 4]| QuadVertex {
+        position: pos,
+        fill_color: color,
+        local_pos: lp,
+        rect_half_ext: he,
+        corner_radii: radii,
+        border_width,
+        border_color,
+        blur_radius: 0.0,
+        rotation: 0.0,
+    };
+
+    // Horizontal: left=fill_color_left, right=fill_color_right
+    [
+        v([x0, y0], [lx0, ly0], fill_color_left),
+        v([x1, y0], [lx1, ly0], fill_color_right),
+        v([x0, y1], [lx0, ly1], fill_color_left),
+        v([x0, y1], [lx0, ly1], fill_color_left),
+        v([x1, y0], [lx1, ly0], fill_color_right),
+        v([x1, y1], [lx1, ly1], fill_color_right),
     ]
 }
 

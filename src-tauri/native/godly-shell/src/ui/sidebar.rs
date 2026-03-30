@@ -1,5 +1,6 @@
 //! Left sidebar: session list with names, active indicator, and new session button.
 
+use super::anim::{self, Anim, AnimVec, lerp_color, lerp};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
@@ -36,7 +37,18 @@ pub struct Sidebar {
     pub items: Vec<SidebarItem>,
     pub agents: Vec<AgentItem>,
     pub hovered_index: Option<usize>,
+    pub hovered_agent: Option<usize>,
     pub hovered_new: bool,
+    pub hovered_settings: bool,
+    // Smooth animation state
+    item_hover_anim: AnimVec,
+    active_anim: AnimVec,
+    agent_hover_anim: AnimVec,
+    new_btn_anim: Anim,
+    settings_anim: Anim,
+    /// Continuous phase for ambient breathing glow on active elements.
+    /// Incremented each frame; `sin(glow_phase)` modulates glow intensity.
+    glow_phase: f32,
 }
 
 impl Sidebar {
@@ -68,6 +80,11 @@ impl Sidebar {
                     active: false,
                 },
             ],
+            item_hover_anim: AnimVec::default(),
+            active_anim: AnimVec::default(),
+            agent_hover_anim: AnimVec::default(),
+            new_btn_anim: Anim::default(),
+            settings_anim: Anim::default(),
             agents: vec![
                 AgentItem {
                     icon: "\u{2191}",
@@ -89,8 +106,47 @@ impl Sidebar {
                 },
             ],
             hovered_index: None,
+            hovered_agent: None,
             hovered_new: false,
+            hovered_settings: false,
+            glow_phase: 0.0,
         }
+    }
+
+    /// Advance all hover animations. `dt` = seconds since last frame. Returns `true` if still animating.
+    pub fn tick_animations(&mut self, dt: f32) -> bool {
+        let hl = anim::timing::HOVER;
+        self.item_hover_anim.ensure_len(self.items.len());
+        for i in 0..self.items.len() {
+            self.item_hover_anim.set(i, if self.hovered_index == Some(i) { 1.0 } else { 0.0 });
+        }
+        self.agent_hover_anim.ensure_len(self.agents.len());
+        for i in 0..self.agents.len() {
+            self.agent_hover_anim.set(i, if self.hovered_agent == Some(i) { 1.0 } else { 0.0 });
+        }
+        self.new_btn_anim.set(if self.hovered_new { 1.0 } else { 0.0 });
+        self.settings_anim.set(if self.hovered_settings { 1.0 } else { 0.0 });
+        self.active_anim.ensure_len(self.items.len());
+        for i in 0..self.items.len() {
+            self.active_anim.set(i, if self.items[i].active { 1.0 } else { 0.0 });
+        }
+        let mut animating = false;
+        animating |= self.active_anim.tick(hl, dt);
+        animating |= self.item_hover_anim.tick(hl, dt);
+        animating |= self.agent_hover_anim.tick(hl, dt);
+        animating |= self.new_btn_anim.tick(hl, dt);
+        animating |= self.settings_anim.tick(hl, dt);
+
+        // Ambient breathing glow: ~3.5s period, frame-rate independent.
+        let has_active = self.items.iter().any(|i| i.active)
+            || self.agents.iter().any(|a| matches!(a.status, AgentStatus::Running));
+        if has_active {
+            self.glow_phase += dt * std::f32::consts::TAU / 3.5;
+            if self.glow_phase > std::f32::consts::TAU { self.glow_phase -= std::f32::consts::TAU; }
+            animating = true;
+        }
+
+        animating
     }
 
     fn item_height_for(&self, index: usize, scale: f32) -> f32 {
@@ -117,6 +173,17 @@ impl Sidebar {
             y: sidebar.y + header_h + self.items_y_offset(index, scale),
             width: sidebar.width,
             height: h,
+        }
+    }
+
+    fn settings_rect(&self, sidebar: Rect, scale: f32) -> Rect {
+        let pad_h = (ITEM_PADDING_H * scale).round();
+        let settings_h = (32.0 * scale).round();
+        Rect {
+            x: sidebar.x + pad_h,
+            y: sidebar.bottom() - settings_h,
+            width: sidebar.width - pad_h * 2.0,
+            height: settings_h,
         }
     }
 
@@ -155,10 +222,27 @@ impl Sidebar {
         ];
         ui.fill_gradient(sidebar, colors::BG_DARK, sidebar_bottom_color);
 
-        // Right border separator (fades at top and bottom for softer edges)
-        ui.vline_fade(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0, colors::BORDER, s(12.0));
-        // Inner bevel highlight
-        ui.hline(sidebar.x, sidebar.y, sidebar.width - 1.0, 1.0, [1.0, 1.0, 1.0, 0.02]);
+        // Convexity gradient: very subtle left-brighter overlay that suggests
+        // the sidebar surface has slight curvature catching light from the left.
+        // At 0.02 alpha this shifts brightness by ~5/255 — barely perceptible
+        // but contributes to the "real material" feel.
+        ui.fill_gradient_h(
+            sidebar,
+            [1.0, 1.0, 1.0, 0.02],
+            [1.0, 1.0, 1.0, 0.0],
+        );
+
+        // Right border separator — embossed groove for professional panel junction.
+        // Dark edge + light highlight creates an inset channel effect.
+        let groove_dark = [0.0, 0.0, 0.0, 0.15];
+        let groove_light = [1.0, 1.0, 1.0, 0.04];
+        ui.vgroove_fade(sidebar.right() - 2.0, sidebar.y, sidebar.height, groove_dark, groove_light, s(12.0));
+        // SDF inner shadow — smooth Gaussian falloff from all edges for recessed depth.
+        // Replaces separate gradient overlays with a single, more natural shadow.
+        ui.fill_inner_shadow(sidebar, [0.0, 0.0, 0.0, 0.06], 0.0, s(5.0));
+        // Inner bevel highlight (faded at edges for softer integration)
+        // Slightly brighter than typical to be perceptible on dark themes.
+        ui.hline_fade(sidebar.x + s(4.0), sidebar.y, sidebar.width - s(8.0) - 1.0, 1.0, [1.0, 1.0, 1.0, 0.04], s(12.0));
 
         // "Sessions" header with count
         let header_rect = Rect {
@@ -186,9 +270,9 @@ impl Sidebar {
             colors::FG_MUTED,
             colors::BG_DARK,
         );
-        // Header bottom separator (faded edges)
-        ui.hline_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
-                 sidebar.width - pad_h * 2.0, 1.0, colors::BORDER, s(8.0));
+        // Header bottom separator — groove for embossed look
+        ui.hgroove_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
+                 sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(8.0));
 
         // Layout: [pad][num][gap][name...][gap][branch][pad]
         // Two-line items: line 1 = number + name + branch, line 2 = description
@@ -212,7 +296,7 @@ impl Sidebar {
                 height: this_item_h,
             };
 
-            // Hover background (rounded)
+            // Hover background (rounded, animated)
             let item_radius = s(4.0);
             let inset_rect = Rect {
                 x: rect.x + s(6.0),
@@ -220,65 +304,85 @@ impl Sidebar {
                 width: rect.width - s(12.0),
                 height: rect.height - s(4.0),
             };
-            if self.hovered_index == Some(i) && !item.active {
-                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.4];
-                // Gradient hover: slightly lighter top for raised feel
-                let hover_top = [
-                    colors::BG_HOVER[0] * 1.08,
-                    colors::BG_HOVER[1] * 1.08,
-                    colors::BG_HOVER[2] * 1.08,
-                    colors::BG_HOVER[3],
-                ];
-                ui.fill_rounded_gradient(inset_rect, hover_top, colors::BG_HOVER, item_radius);
-                ui.stroke_rounded(inset_rect, item_radius, 0.5, hover_border);
-            } else if !item.active {
-                // Rest state: very subtle rounded rect to signal interactivity
-                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12];
-                ui.stroke_rounded(inset_rect, item_radius, 0.5, rest_border);
+            let hover_t = self.item_hover_anim.get(i);
+            let active_t = self.active_anim.get(i);
+
+            // Inactive hover state (fades out as active_t increases)
+            if active_t < 0.995 {
+                let inv_active = 1.0 - active_t;
+                if hover_t > 0.005 {
+                    let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], lerp(0.12, 0.4, hover_t) * inv_active];
+                    let hover_top = [
+                        colors::BG_HOVER[0] * lerp(1.0, 1.08, hover_t),
+                        colors::BG_HOVER[1] * lerp(1.0, 1.08, hover_t),
+                        colors::BG_HOVER[2] * lerp(1.0, 1.08, hover_t),
+                        colors::BG_HOVER[3] * hover_t * inv_active,
+                    ];
+                    let hover_bot = [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * hover_t * inv_active];
+                    ui.fill_rounded_gradient(inset_rect, hover_top, hover_bot, item_radius);
+                    ui.stroke_rounded(inset_rect, item_radius, 0.5, hover_border);
+                } else if active_t < 0.005 {
+                    let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12];
+                    ui.stroke_rounded(inset_rect, item_radius, 0.5, rest_border);
+                }
             }
 
-            // Active item background (rounded with subtle blue-tinted border + ambient glow)
-            if item.active {
-                // Outer ambient glow from accent color (creates luminous aura)
+            // Active state (fades in with active_t)
+            if active_t > 0.005 {
+                let breath = 0.85 + 0.15 * self.glow_phase.sin();
                 let glow_rect = Rect {
-                    x: inset_rect.x - s(2.0),
-                    y: inset_rect.y - s(2.0),
-                    width: inset_rect.width + s(4.0),
-                    height: inset_rect.height + s(4.0),
+                    x: inset_rect.x - s(3.0),
+                    y: inset_rect.y - s(3.0),
+                    width: inset_rect.width + s(6.0),
+                    height: inset_rect.height + s(6.0),
                 };
-                ui.fill_shadow(glow_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.06], item_radius + s(2.0), s(8.0));
-
-                // Inner shadow behind active item for depth
-                ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.15], item_radius, s(6.0));
-
+                ui.fill_shadow(glow_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.08 * breath * active_t], item_radius + s(3.0), s(10.0));
+                ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.12 * active_t], item_radius, s(5.0));
                 let active_border = [
                     colors::ACCENT_BLUE[0] * 0.35,
                     colors::ACCENT_BLUE[1] * 0.35,
                     colors::ACCENT_BLUE[2] * 0.35,
-                    0.6,
+                    0.6 * active_t,
                 ];
+                let active_bg = lerp_color(colors::BG_DARK, colors::BG_ACTIVE, active_t);
                 ui.fill_rounded_bordered(
-                    inset_rect, colors::BG_ACTIVE, item_radius,
+                    inset_rect, active_bg, item_radius,
                     0.5, active_border,
                 );
-
-                // Subtle inner highlight at top edge (bevel)
-                ui.hline(inset_rect.x + item_radius, inset_rect.y + 1.0,
-                         inset_rect.width - item_radius * 2.0, 1.0,
-                         [1.0, 1.0, 1.0, 0.04]);
+                let ambient = Rect {
+                    x: inset_rect.x + 1.0, y: inset_rect.y + 1.0,
+                    width: inset_rect.width - 2.0, height: inset_rect.height - 1.0,
+                };
+                let inner_r = (item_radius - 1.0).max(0.0);
+                ui.fill_rounded_gradient(ambient,
+                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.04 * active_t],
+                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.0],
+                    inner_r,
+                );
             }
 
-            // Active indicator (left colored bar, pill shape via SDF + glow)
-            if item.active {
+            // Active indicator (left colored bar, pill shape via SDF + breathing glow)
+            if active_t > 0.005 {
                 let indicator_rect = Rect {
                     x: rect.x + s(3.0),
                     y: rect.y + s(8.0),
                     width: indicator_w,
                     height: rect.height - s(16.0),
                 };
-                // Soft glow behind the indicator
-                ui.fill_shadow(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.15], indicator_w, s(4.0));
-                ui.fill_rounded(indicator_rect, colors::ACCENT_BLUE, indicator_w / 2.0);
+                let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                let glow_alpha = 0.20 * breath * active_t;
+                ui.fill_shadow(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], glow_alpha], indicator_w, s(6.0));
+                ui.fill_rounded(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], active_t], indicator_w / 2.0);
+
+                let trail_rect = Rect {
+                    x: indicator_rect.right(),
+                    y: indicator_rect.y + indicator_rect.height * 0.2,
+                    width: s(16.0),
+                    height: indicator_rect.height * 0.6,
+                };
+                ui.fill_shadow(trail_rect,
+                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.06 * breath * active_t],
+                    0.0, s(10.0));
             }
 
             // Text y position: centered for compact, top-aligned for two-line
@@ -288,17 +392,20 @@ impl Sidebar {
                 rect.y + line1_y_off
             };
 
-            // Session number
-            let item_bg = if item.active { colors::BG_ACTIVE } else if self.hovered_index == Some(i) { colors::BG_HOVER } else { colors::BG_DARK };
+            // Session number — text bg smoothly blends with hover and active
+            let item_bg = lerp_color(
+                lerp_color(colors::BG_DARK, colors::BG_HOVER, hover_t),
+                colors::BG_ACTIVE,
+                active_t,
+            );
             let num_str = format!("{}", item.number);
-            let fg = if item.active { colors::ACCENT_BLUE } else { colors::FG_MUTED };
-            ui.text(text, &num_str,
-                    num_x,
-                    text_y,
-                    fg, item_bg);
+            let inactive_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t);
+            let fg = lerp_color(inactive_fg, colors::ACCENT_BLUE, active_t);
+            ui.text(text, &num_str, num_x, text_y, fg, item_bg);
 
-            // Session name (truncated to fit)
-            let name_fg = if item.active { colors::FG_PRIMARY } else { colors::FG_SECONDARY };
+            // Session name (truncated to fit) — text brightens on hover and active
+            let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.4);
+            let name_fg = lerp_color(inactive_name, colors::FG_PRIMARY, active_t);
             let name = if item.label.len() > name_max_chars {
                 format!("{}\u{2026}", &item.label[..name_max_chars.saturating_sub(1)])
             } else {
@@ -323,7 +430,7 @@ impl Sidebar {
                         colors::FG_MUTED, item_bg);
             }
 
-            // Description line (second row, muted)
+            // Description line (second row, brightens on hover for readability)
             if !item.description.is_empty() {
                 let desc_max_chars = ((sidebar.width - pad_h * 2.0 - cw * 2.0) / cw).floor().max(1.0) as usize;
                 let desc = if item.description.len() > desc_max_chars {
@@ -331,10 +438,29 @@ impl Sidebar {
                 } else {
                     item.description.clone()
                 };
+                let inactive_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t * 0.3);
+                let desc_fg = lerp_color(inactive_desc, colors::FG_MUTED, active_t);
                 ui.text(text, &desc,
                         name_x,
                         rect.y + line2_y_off,
-                        colors::FG_MUTED, item_bg);
+                        desc_fg, item_bg);
+            }
+
+            // Subtle separator between items (faded, skip for last item)
+            if i + 1 < self.items.len() {
+                let next_active = self.items[i + 1].active;
+                if !item.active && !next_active {
+                    let sep_fade = 1.0 - hover_t.max(self.item_hover_anim.get(i + 1));
+                    let sep_color = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.2 * sep_fade];
+                    ui.hline_fade(
+                        sidebar.x + pad_h + cw * 2.0,
+                        rect.bottom() - 1.0,
+                        sidebar.width - pad_h * 2.0 - cw * 2.0,
+                        1.0,
+                        sep_color,
+                        s(8.0),
+                    );
+                }
             }
         }
 
@@ -347,48 +473,46 @@ impl Sidebar {
             width: sidebar.width - pad_h * 2.0,
             height: compact_h,
         };
-        let new_bg = if self.hovered_new { colors::BG_SURFACE } else { colors::BG_DARK };
-        if self.hovered_new {
-            let new_top = [
-                colors::BG_SURFACE[0] * 1.08,
-                colors::BG_SURFACE[1] * 1.08,
-                colors::BG_SURFACE[2] * 1.08,
-                colors::BG_SURFACE[3],
-            ];
-            ui.fill_rounded_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0));
-            ui.stroke_rounded(new_rect, s(4.0), 0.5, colors::BORDER);
+        let new_t = self.new_btn_anim.value();
+        if new_t > 0.005 {
+            let bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
+            let new_top = [bg[0] * lerp(1.0, 1.08, new_t), bg[1] * lerp(1.0, 1.08, new_t), bg[2] * lerp(1.0, 1.08, new_t), bg[3]];
+            let border_alpha = lerp(0.18, colors::BORDER[3], new_t);
+            let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
+            ui.fill_rounded_gradient(new_rect, new_top, bg, s(4.0));
+            ui.stroke_rounded(new_rect, s(4.0), 0.5, border);
         } else {
-            // Rest state: dashed-feel border hint to signal "add" affordance
             let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
             ui.stroke_rounded(new_rect, s(4.0), 0.5, rest_border);
         }
-        ui.text(text, "+ New Session",
-                new_rect.x + s(8.0),
+        // Plus icon + label
+        let icon_t = (1.2 * text.scale).max(1.0);
+        let icon_rect = Rect {
+            x: new_rect.x, y: new_rect.y,
+            width: s(24.0), height: new_rect.height,
+        };
+        let new_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
+        ui.icon_plus(icon_rect, icon_t, s(4.0), new_fg);
+        let new_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
+        ui.text(text, "New Session",
+                new_rect.x + s(22.0),
                 new_rect.y + text_y_off(compact_h),
-                colors::FG_MUTED, new_bg);
+                new_fg, new_bg);
 
         // Bottom panel: running agents/processes
         if !self.agents.is_empty() {
             let agent_item_h = s(44.0);
             let header_section_h = s(28.0);
             let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(8.0);
-            // Anchor agent panel to the actual bottom of the sidebar
-            let panel_y = sidebar.bottom() - agent_panel_h;
+            // Anchor agent panel above the bottom settings row
+            let settings_row_h = s(32.0);
+            let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
             let panel = Rect {
                 x: sidebar.x,
                 y: panel_y,
                 width: sidebar.width,
                 height: agent_panel_h.min(bottom_panel_h),
             };
-
-            // Soft shadow above the panel for depth
-            let shadow_rect = Rect {
-                x: panel.x + pad_h,
-                y: panel_y - s(4.0),
-                width: panel.width - pad_h * 2.0,
-                height: s(6.0),
-            };
-            ui.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.12], 0.0, s(4.0));
 
             // Panel container — rounded rect with subtle border for depth
             let panel_inset = Rect {
@@ -399,8 +523,13 @@ impl Sidebar {
             };
             let panel_radius = s(6.0);
             let panel_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-            // Shadow behind the panel for lift
-            ui.fill_shadow(panel_inset, [0.0, 0.0, 0.0, 0.10], panel_radius, s(4.0));
+            // Directional shadow — offset downward for natural top-left light
+            // source depth.  More convincing than centered shadows.
+            ui.fill_shadow_offset(
+                panel_inset, [0.0, 0.0, 0.0, 0.12],
+                panel_radius, s(8.0),
+                0.0, s(2.0),
+            );
             // Gradient panel background (slightly lighter top for 3D)
             let panel_top = [
                 colors::BG_RAISED[0] * 1.06,
@@ -410,10 +539,8 @@ impl Sidebar {
             ];
             ui.fill_rounded_gradient(panel_inset, panel_top, colors::BG_RAISED, panel_radius);
             ui.stroke_rounded(panel_inset, panel_radius, 0.5, panel_border);
-            // Top inner highlight (bevel)
-            ui.hline(panel_inset.x + panel_radius, panel_inset.y + 1.0,
-                     panel_inset.width - panel_radius * 2.0, 1.0,
-                     [1.0, 1.0, 1.0, 0.03]);
+            // Subtle inner shadow for recessed card depth
+            ui.fill_inner_shadow(panel_inset, [0.0, 0.0, 0.0, 0.06], panel_radius, s(4.0));
 
             // "Processes" header
             ui.text(text, "Processes",
@@ -422,7 +549,7 @@ impl Sidebar {
                     colors::FG_MUTED, colors::BG_RAISED);
 
             let mut ay = panel_y + header_section_h;
-            for agent in &self.agents {
+            for (ai, agent) in self.agents.iter().enumerate() {
                 let status_color = match agent.status {
                     AgentStatus::Running => colors::ACCENT_GREEN,
                     AgentStatus::Waiting => colors::ACCENT_PEACH,
@@ -433,6 +560,22 @@ impl Sidebar {
                     AgentStatus::Waiting => "waiting",
                     AgentStatus::Stopped => "stopped",
                 };
+
+                // Agent item hover background (animated)
+                let agent_hover_t = self.agent_hover_anim.get(ai);
+                let agent_inset = Rect {
+                    x: panel_inset.x + s(4.0),
+                    y: ay + s(1.0),
+                    width: panel_inset.width - s(8.0),
+                    height: agent_item_h - s(2.0),
+                };
+                if agent_hover_t > 0.005 {
+                    let ahover_bg = [
+                        colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2],
+                        colors::BG_HOVER[3] * 0.5 * agent_hover_t,
+                    ];
+                    ui.fill_rounded(agent_inset, ahover_bg, s(3.0));
+                }
 
                 // Line 1: icon + agent name + status (right-aligned)
                 let line1_y = ay + s(6.0);
@@ -448,21 +591,50 @@ impl Sidebar {
                     width: dot_size,
                     height: dot_size,
                 };
-                // Running agents get a luminous glow to convey active state
+                // Running agents get a breathing Gaussian glow + spinning orbit arc
                 if matches!(agent.status, AgentStatus::Running) {
+                    let breath = 0.80 + 0.20 * self.glow_phase.sin();
                     let glow_rect = Rect {
-                        x: dot_rect.x - s(2.0), y: dot_rect.y - s(2.0),
-                        width: dot_size + s(4.0), height: dot_size + s(4.0),
+                        x: dot_rect.x - s(3.0), y: dot_rect.y - s(3.0),
+                        width: dot_size + s(6.0), height: dot_size + s(6.0),
                     };
-                    ui.fill_shadow(glow_rect, [status_color[0], status_color[1], status_color[2], 0.20], dot_r + s(2.0), s(4.0));
+                    ui.fill_shadow(glow_rect, [status_color[0], status_color[1], status_color[2], 0.25 * breath], dot_r + s(3.0), s(6.0));
+
+                    // Spinning orbit: two small accent-colored dots orbiting the
+                    // center, 180° apart.  Uses glow_phase (which advances at
+                    // ~1.8 rad/s) multiplied by 2 for a visible spin speed.
+                    // Each orbiter is a tiny SDF circle with its own soft glow.
+                    let orbit_r = dot_r + s(3.0); // radius of orbit path
+                    let spin = self.glow_phase * 2.0;
+                    let orbiter_sz = s(1.5);
+                    let (dcx, dcy) = dot_rect.center();
+                    for k in 0..2u32 {
+                        let angle = spin + k as f32 * std::f32::consts::PI;
+                        let ox = dcx + orbit_r * angle.cos() - orbiter_sz / 2.0;
+                        let oy = dcy + orbit_r * angle.sin() - orbiter_sz / 2.0;
+                        let orbit_color = [status_color[0], status_color[1], status_color[2], 0.6 * breath];
+                        ui.fill_rounded(
+                            Rect { x: ox, y: oy, width: orbiter_sz, height: orbiter_sz },
+                            orbit_color, orbiter_sz / 2.0,
+                        );
+                    }
+                    // Orbit trail: faint ring around the dot path for visual continuity
+                    let ring_rect = Rect {
+                        x: dcx - orbit_r - s(0.5), y: dcy - orbit_r - s(0.5),
+                        width: orbit_r * 2.0 + s(1.0), height: orbit_r * 2.0 + s(1.0),
+                    };
+                    let ring_alpha = 0.10 * breath;
+                    ui.stroke_rounded(ring_rect, orbit_r + s(0.5), 0.5,
+                        [status_color[0], status_color[1], status_color[2], ring_alpha]);
                 }
                 ui.fill_rounded(dot_rect, status_color, dot_r);
 
-                // Agent name
+                // Agent name (brightens on hover)
+                let agent_name_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, agent_hover_t * 0.4);
                 ui.text(text, &agent.name,
                         sidebar.x + pad_h + cw * 2.0,
                         line1_y,
-                        colors::FG_SECONDARY, panel_bg);
+                        agent_name_fg, panel_bg);
 
                 // Status label (right-aligned)
                 let sw = text.text_width(status_text);
@@ -471,7 +643,7 @@ impl Sidebar {
                         line1_y,
                         status_color, panel_bg);
 
-                // Line 2: task description (muted, indented)
+                // Line 2: task description (brightens on hover for readability)
                 if !agent.task.is_empty() && agent.task != status_text {
                     let line2_y = line1_y + ch + s(2.0);
                     let task_max_chars = ((sidebar.width - pad_h * 2.0 - cw * 2.0) / cw).floor().max(1.0) as usize;
@@ -480,10 +652,11 @@ impl Sidebar {
                     } else {
                         agent.task.clone()
                     };
+                    let task_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, agent_hover_t * 0.3);
                     ui.text(text, &task,
                             sidebar.x + pad_h + cw * 2.0,
                             line2_y,
-                            colors::FG_MUTED, panel_bg);
+                            task_fg, panel_bg);
                 }
 
                 ay += agent_item_h;
@@ -501,6 +674,56 @@ impl Sidebar {
                 }
             }
         }
+
+        // Bottom settings row — gear icon + "Settings" label (anchored to very bottom, animated hover)
+        {
+            let settings_h = s(32.0);
+            let settings_y = sidebar.bottom() - settings_h;
+            let settings_t = self.settings_anim.value();
+            // Top separator — groove for consistency
+            ui.hgroove_fade(sidebar.x + pad_h, settings_y, sidebar.width - pad_h * 2.0,
+                         [0.0, 0.0, 0.0, 0.12], [1.0, 1.0, 1.0, 0.03], s(8.0));
+
+            // Hover background (animated rounded rect)
+            let settings_inset = Rect {
+                x: sidebar.x + s(6.0),
+                y: settings_y + s(2.0),
+                width: sidebar.width - s(12.0),
+                height: settings_h - s(4.0),
+            };
+            if settings_t > 0.005 {
+                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], lerp(0.0, 0.4, settings_t)];
+                let hover_top = [
+                    colors::BG_HOVER[0] * lerp(1.0, 1.08, settings_t),
+                    colors::BG_HOVER[1] * lerp(1.0, 1.08, settings_t),
+                    colors::BG_HOVER[2] * lerp(1.0, 1.08, settings_t),
+                    colors::BG_HOVER[3] * settings_t,
+                ];
+                let hover_bot = [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * settings_t];
+                ui.fill_rounded_gradient(settings_inset, hover_top, hover_bot, s(4.0));
+                ui.stroke_rounded(settings_inset, s(4.0), 0.5, hover_border);
+            }
+
+            let settings_bg = lerp_color(colors::BG_DARK, colors::BG_HOVER, settings_t);
+
+            // Gear icon (circle ring) — brightens on hover
+            let gear_sz = s(14.0);
+            let gear_rect = Rect {
+                x: sidebar.x + pad_h,
+                y: settings_y + (settings_h - gear_sz) / 2.0,
+                width: gear_sz,
+                height: gear_sz,
+            };
+            let gear_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, settings_t);
+            ui.icon_gear(gear_rect, gear_sz, gear_sz * 0.5, gear_fg, settings_bg);
+
+            // "Settings" label — brightens on hover
+            let settings_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, settings_t);
+            ui.text(text, "Settings",
+                    sidebar.x + pad_h + gear_sz + s(8.0),
+                    settings_y + (settings_h - ch) / 2.0,
+                    settings_fg, settings_bg);
+        }
     }
 
     pub fn on_mouse(&mut self, event: MouseEvent, sidebar: Rect, scale: f32) -> Option<UiAction> {
@@ -508,11 +731,35 @@ impl Sidebar {
         match event {
             MouseEvent::Move { x, y } => {
                 self.hovered_index = None;
+                self.hovered_agent = None;
                 self.hovered_new = false;
+                self.hovered_settings = false;
                 for (i, _) in self.items.iter().enumerate() {
                     if self.item_rect(i, sidebar, scale).contains(x, y) { self.hovered_index = Some(i); }
                 }
+                // Agent item hover detection
+                if !self.agents.is_empty() {
+                    let agent_item_h = (44.0 * scale).round();
+                    let header_section_h = (28.0 * scale).round();
+                    let settings_row_h = (32.0 * scale).round();
+                    let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + (8.0 * scale).round();
+                    let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
+                    let mut ay = panel_y + header_section_h;
+                    for i in 0..self.agents.len() {
+                        let agent_rect = Rect {
+                            x: sidebar.x,
+                            y: ay,
+                            width: sidebar.width,
+                            height: agent_item_h,
+                        };
+                        if agent_rect.contains(x, y) {
+                            self.hovered_agent = Some(i);
+                        }
+                        ay += agent_item_h;
+                    }
+                }
                 if self.new_button_rect(sidebar, scale).contains(x, y) { self.hovered_new = true; }
+                if self.settings_rect(sidebar, scale).contains(x, y) { self.hovered_settings = true; }
                 None
             }
             MouseEvent::Press { x, y } => {

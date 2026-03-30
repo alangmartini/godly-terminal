@@ -3,7 +3,7 @@
 //! `UiBuilder` collects quad and text vertices during the build phase,
 //! then returns them in `finish()` for the GPU render pass.
 
-use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf, quad_vertices_sdf_gradient, quad_vertices_sdf_rotated, QuadVertex};
+use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf, quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated, QuadVertex};
 use super::widget::Rect;
 
 /// Catppuccin Mocha palette for all UI chrome.
@@ -206,6 +206,52 @@ impl UiBuilder {
         ));
     }
 
+    /// SDF rounded rectangle with horizontal gradient fill (left → right).
+    pub fn fill_rounded_gradient_h(
+        &mut self,
+        rect: Rect,
+        left_color: [f32; 4],
+        right_color: [f32; 4],
+        radius: f32,
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf_gradient_h(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, left_color, right_color,
+            [radius; 4], 0.0, [0.0; 4],
+        ));
+    }
+
+    /// SDF rounded rectangle with per-corner radii and horizontal gradient fill.
+    pub fn fill_rounded_custom_gradient_h(
+        &mut self,
+        rect: Rect,
+        left_color: [f32; 4],
+        right_color: [f32; 4],
+        radii: [f32; 4],
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf_gradient_h(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, left_color, right_color,
+            radii, 0.0, [0.0; 4],
+        ));
+    }
+
+    /// SDF rounded rectangle with per-corner radii and vertical gradient fill.
+    /// Useful for gradient overlays inside shapes with non-uniform rounding (e.g. tabs).
+    pub fn fill_rounded_custom_gradient(
+        &mut self,
+        rect: Rect,
+        top_color: [f32; 4],
+        bottom_color: [f32; 4],
+        radii: [f32; 4],
+    ) {
+        self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
+            rect.x, rect.y, rect.width, rect.height,
+            self.vw, self.vh, top_color, bottom_color,
+            radii, 0.0, [0.0; 4],
+        ));
+    }
+
     /// SDF rounded rectangle outline (border only, transparent fill).
     /// Produces smooth anti-aliased edges — use instead of stroke_rect for polish.
     pub fn stroke_rounded(
@@ -240,6 +286,52 @@ impl UiBuilder {
         self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur);
     }
 
+    /// Offset shadow for directional depth (light from top-left → shadow bottom-right).
+    /// Shifts the shadow quad by `(dx, dy)` pixels while keeping the same shape.
+    pub fn fill_shadow_offset(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        blur: f32,
+        dx: f32,
+        dy: f32,
+    ) {
+        let offset_rect = Rect {
+            x: rect.x + dx,
+            y: rect.y + dy,
+            width: rect.width,
+            height: rect.height,
+        };
+        self.fill_sdf(offset_rect, color, [radius; 4], 0.0, [0.0; 4], blur);
+    }
+
+    /// Inner shadow: shadow rendered *inside* a rounded rectangle, fading inward
+    /// from the edges.  Creates a recessed/carved-in depth effect — much crisper
+    /// than gradient overlay approximations.
+    ///
+    /// Uses negative `blur_radius` to signal inner shadow mode to the SDF shader.
+    pub fn fill_inner_shadow(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        blur: f32,
+    ) {
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], -blur);
+    }
+
+    /// Inner shadow with per-corner radii [TL, TR, BR, BL].
+    pub fn fill_inner_shadow_custom(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radii: [f32; 4],
+        blur: f32,
+    ) {
+        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], -blur);
+    }
+
     /// Horizontal line of thickness `t`.
     pub fn hline(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4]) {
         self.quads.extend_from_slice(&quad_vertices(
@@ -251,6 +343,25 @@ impl UiBuilder {
     pub fn vline(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4]) {
         self.quads.extend_from_slice(&quad_vertices(
             x, y, t, h, self.vw, self.vh, color,
+        ));
+    }
+
+    /// Anti-aliased horizontal line via SDF.  Produces crisp sub-pixel edges
+    /// at any DPI, unlike the flat-quad `hline` which can blur at fractional scales.
+    pub fn hline_aa(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4]) {
+        let r = (t * 0.5).min(1.0);
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            x, y, w, t, self.vw, self.vh, color,
+            [r; 4], 0.0, [0.0; 4], 0.0,
+        ));
+    }
+
+    /// Anti-aliased vertical line via SDF.
+    pub fn vline_aa(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4]) {
+        let r = (t * 0.5).min(1.0);
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            x, y, t, h, self.vw, self.vh, color,
+            [r; 4], 0.0, [0.0; 4], 0.0,
         ));
     }
 
@@ -297,6 +408,33 @@ impl UiBuilder {
         }
     }
 
+    /// Embossed groove: dark line + light line pair that creates an inset
+    /// channel effect at panel boundaries.  Much more professional than a
+    /// single flat line — mimics the classic Win32/macOS panel separator look.
+    /// `dark` is the shadow line, `light` is the highlight below/right of it.
+    pub fn hgroove(&mut self, x: f32, y: f32, w: f32, dark: [f32; 4], light: [f32; 4]) {
+        self.hline_aa(x, y, w, 1.0, dark);
+        self.hline_aa(x, y + 1.0, w, 1.0, light);
+    }
+
+    /// Vertical embossed groove (dark + light pair).
+    pub fn vgroove(&mut self, x: f32, y: f32, h: f32, dark: [f32; 4], light: [f32; 4]) {
+        self.vline_aa(x, y, h, 1.0, dark);
+        self.vline_aa(x + 1.0, y, h, 1.0, light);
+    }
+
+    /// Horizontal groove with faded ends (combines groove + fade for softer look).
+    pub fn hgroove_fade(&mut self, x: f32, y: f32, w: f32, dark: [f32; 4], light: [f32; 4], fade: f32) {
+        self.hline_fade(x, y, w, 1.0, dark, fade);
+        self.hline_fade(x, y + 1.0, w, 1.0, light, fade);
+    }
+
+    /// Vertical groove with faded ends.
+    pub fn vgroove_fade(&mut self, x: f32, y: f32, h: f32, dark: [f32; 4], light: [f32; 4], fade: f32) {
+        self.vline_fade(x, y, h, 1.0, dark, fade);
+        self.vline_fade(x + 1.0, y, h, 1.0, light, fade);
+    }
+
     /// Rectangle outline (4 lines of thickness `t`, drawn inward).
     pub fn stroke_rect(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
         self.hline(rect.x, rect.y, rect.width, t, color); // top
@@ -328,10 +466,24 @@ impl UiBuilder {
     // -- Icon helpers ---------------------------------------------------------
 
     /// Plus (+) icon centered in `rect`.  `t` = line thickness, `arm` = half-length.
+    /// Rendered as two SDF pill shapes for smooth anti-aliased edges (matching icon_x quality).
     pub fn icon_plus(&mut self, rect: Rect, t: f32, arm: f32, color: [f32; 4]) {
         let (cx, cy) = rect.center();
-        self.hline(cx - arm, cy - t / 2.0, arm * 2.0, t, color);
-        self.vline(cx - t / 2.0, cy - arm, arm * 2.0, t, color);
+        let r = t * 0.5; // pill-shaped rounded caps
+        let radii = [r; 4];
+        let no_border = [0.0f32; 4];
+        // Horizontal bar
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            cx - arm, cy - t / 2.0, arm * 2.0, t,
+            self.vw, self.vh, color,
+            radii, 0.0, no_border, 0.0,
+        ));
+        // Vertical bar
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            cx - t / 2.0, cy - arm, t, arm * 2.0,
+            self.vw, self.vh, color,
+            radii, 0.0, no_border, 0.0,
+        ));
     }
 
     /// X (close) icon centered in `rect`, drawn as two rotated SDF pill shapes
@@ -361,9 +513,15 @@ impl UiBuilder {
     }
 
     /// Minimize icon: a short horizontal bar centered in `rect`.
+    /// Rendered as an SDF pill shape for smooth anti-aliased edges.
     pub fn icon_minimize(&mut self, rect: Rect, bar_w: f32, t: f32, color: [f32; 4]) {
         let (cx, cy) = rect.center();
-        self.hline(cx - bar_w / 2.0, cy - t / 2.0, bar_w, t, color);
+        let r = t * 0.5; // pill-shaped rounded caps
+        self.quads.extend_from_slice(&quad_vertices_sdf(
+            cx - bar_w / 2.0, cy - t / 2.0, bar_w, t,
+            self.vw, self.vh, color,
+            [r; 4], 0.0, [0.0; 4], 0.0,
+        ));
     }
 
     /// Maximize icon: a small rounded square outline centered in `rect` (SDF anti-aliased).
@@ -378,18 +536,19 @@ impl UiBuilder {
         self.stroke_rounded(inner, t * 0.8, t, color);
     }
 
-    /// Gear icon (approximated): filled outer circle minus filled inner circle.
-    /// Drawn as a filled square (outer) on top of a bg-colored square (inner).
-    pub fn icon_gear(&mut self, rect: Rect, outer: f32, inner: f32, fg: [f32; 4], bg: [f32; 4]) {
+    /// Gear icon (approximated): SDF circle ring (outer circle with inner cutout).
+    /// Uses rounded rectangle with full corner radius for smooth anti-aliased circles.
+    pub fn icon_gear(&mut self, rect: Rect, outer: f32, inner: f32, fg: [f32; 4], _bg: [f32; 4]) {
         let (cx, cy) = rect.center();
-        self.fill(
-            Rect { x: cx - outer / 2.0, y: cy - outer / 2.0, width: outer, height: outer },
-            fg,
-        );
-        self.fill(
-            Rect { x: cx - inner / 2.0, y: cy - inner / 2.0, width: inner, height: inner },
-            bg,
-        );
+        let ring_width = (outer - inner) / 2.0;
+        let mid_size = (outer + inner) / 2.0;
+        let mid_rect = Rect {
+            x: cx - mid_size / 2.0,
+            y: cy - mid_size / 2.0,
+            width: mid_size,
+            height: mid_size,
+        };
+        self.stroke_rounded(mid_rect, mid_size / 2.0, ring_width, fg);
     }
 
     /// Consume the builder and return quad vertices + text commands.

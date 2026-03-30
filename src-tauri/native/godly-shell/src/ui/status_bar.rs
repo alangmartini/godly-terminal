@@ -1,7 +1,22 @@
 //! Status bar: working directory, git branch, terminal dimensions.
+//!
+//! Each pill (cwd, git branch, dimensions, hints) responds to mouse hover
+//! with smooth animated transitions — background brightens, border sharpens,
+//! and a subtle lift effect creates tactile feedback.
 
+use super::anim::{self, Anim, lerp, lerp_color};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
-use super::widget::Rect;
+use super::widget::{Rect, MouseEvent};
+
+/// Identifies which status bar pill is hovered (if any).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum StatusPill {
+    Mode,
+    Cwd,
+    GitBranch,
+    Dims,
+    Hints,
+}
 
 pub struct StatusBar {
     pub process_name: String,
@@ -10,6 +25,13 @@ pub struct StatusBar {
     pub terminal_size: (u16, u16),
     pub sidebar_width: f32,
     pub git_diff_summary: String,
+    // Hover state
+    hovered_pill: Option<StatusPill>,
+    mode_anim: Anim,
+    cwd_anim: Anim,
+    git_anim: Anim,
+    dims_anim: Anim,
+    hints_anim: Anim,
 }
 
 impl StatusBar {
@@ -21,10 +43,33 @@ impl StatusBar {
             terminal_size: (24, 80),
             sidebar_width: 0.0,
             git_diff_summary: String::new(),
+            hovered_pill: None,
+            mode_anim: Anim::default(),
+            cwd_anim: Anim::default(),
+            git_anim: Anim::default(),
+            dims_anim: Anim::default(),
+            hints_anim: Anim::default(),
         }
     }
 
-    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
+    /// Advance hover animations. Returns `true` if still animating.
+    pub fn tick_animations(&mut self, dt: f32) -> bool {
+        let hl = anim::timing::HOVER;
+        self.mode_anim.set(if self.hovered_pill == Some(StatusPill::Mode) { 1.0 } else { 0.0 });
+        self.cwd_anim.set(if self.hovered_pill == Some(StatusPill::Cwd) { 1.0 } else { 0.0 });
+        self.git_anim.set(if self.hovered_pill == Some(StatusPill::GitBranch) { 1.0 } else { 0.0 });
+        self.dims_anim.set(if self.hovered_pill == Some(StatusPill::Dims) { 1.0 } else { 0.0 });
+        self.hints_anim.set(if self.hovered_pill == Some(StatusPill::Hints) { 1.0 } else { 0.0 });
+        let mut a = false;
+        a |= self.mode_anim.tick(hl, dt);
+        a |= self.cwd_anim.tick(hl, dt);
+        a |= self.git_anim.tick(hl, dt);
+        a |= self.dims_anim.tick(hl, dt);
+        a |= self.hints_anim.tick(hl, dt);
+        a
+    }
+
+    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer, glow_phase: f32) {
         let s = |v: f32| text.s(v);
         let cw = text.cell_width;
         let ch = text.cell_height;
@@ -55,82 +100,89 @@ impl StatusBar {
                 1.0,
             ];
             ui.fill_gradient(sidebar_status, sidebar_bg, sidebar_bg_bottom);
-            // Right border on sidebar section (faded for softer look)
-            ui.vline_fade(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER, s(6.0));
+            // Right border on sidebar section — groove for embossed depth
+            ui.vgroove_fade(self.sidebar_width - 2.0, bar.y, bar.height,
+                [0.0, 0.0, 0.0, 0.15], [1.0, 1.0, 1.0, 0.04], s(6.0));
+            // SDF inner shadow for recessed sidebar section depth
+            ui.fill_inner_shadow(sidebar_status, [0.0, 0.0, 0.0, 0.04], 0.0, s(4.0));
         }
 
-        // Top separator line + inner bevel highlight (consistent with tab bar)
-        ui.hline(bar.x, bar.y, bar.width, 1.0, colors::BORDER);
-        ui.hline(bar.x, bar.y + 1.0, bar.width, 1.0, [1.0, 1.0, 1.0, 0.025]);
+        // Top separator — embossed groove for professional panel junction.
+        ui.hgroove(bar.x, bar.y, bar.width, colors::BORDER, [1.0, 1.0, 1.0, 0.04]);
+        // Top inner bevel highlight (matches tab bar for visual consistency).
+        // Sits just below the groove pair to read as the inner lit edge of the panel.
+        ui.hline_fade(bar.x + s(4.0), bar.y + 2.0, bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
+        // Bottom edge: subtle dark line for window frame definition
+        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, [0.0, 0.0, 0.0, 0.15]);
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
+
+        // Shared pill rendering helper — creates a hover-responsive pill.
+        // `hover_t` drives: background brighten, border sharpen, text lighten.
+        let pill_base_top = [
+            colors::BG_HOVER[0] * 1.08,
+            colors::BG_HOVER[1] * 1.08,
+            colors::BG_HOVER[2] * 1.08,
+            colors::BG_HOVER[3],
+        ];
+        let pill_base_bot = colors::BG_HOVER;
 
         // --- Sidebar section: mode indicator with dot ---
         if self.sidebar_width > 0.0 {
             let sx = bar.x + s(14.0);
-            // Show process name or fallback to session label
             let label = if !self.process_name.is_empty() {
                 &self.process_name
             } else {
                 "Sessions"
             };
-            // Pill padding constants
             let pad_h = s(4.0);
             let pad_v = s(2.0);
-            // Small green dot (circle via SDF) to indicate active process
             let dot_sz = s(4.0);
             let label_w = text.text_width(label);
-            // Pill covers: left-pad + dot + gap + label + right-pad
             let pill_inner_w = dot_sz + s(6.0) + label_w;
             let pill_w = pill_inner_w + pad_h * 2.0;
             let pill_h = ch + pad_v * 2.0;
             let pill_y = bar.y + (bar.height - pill_h) / 2.0;
-            let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-            let mode_pill_top = [
-                colors::BG_HOVER[0] * 1.08,
-                colors::BG_HOVER[1] * 1.08,
-                colors::BG_HOVER[2] * 1.08,
-                colors::BG_HOVER[3],
-            ];
             let mode_pill_rect = Rect { x: sx, y: pill_y, width: pill_w, height: pill_h };
-            ui.fill_rounded_gradient(mode_pill_rect, mode_pill_top, colors::BG_HOVER, s(3.0));
-            ui.stroke_rounded(mode_pill_rect, s(3.0), 0.5, pill_border);
+
+            let ht = self.mode_anim.value();
+            let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
+            let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
+            let border = Self::hover_pill_border(ht, 0.5);
+            ui.fill_rounded_gradient(mode_pill_rect, top, bot, s(3.0));
+            ui.stroke_rounded(mode_pill_rect, s(3.0), 0.5, border);
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
-            // Glow behind green dot to convey "active"
+            let breath = 0.80 + 0.20 * glow_phase.sin();
             let glow_rect = Rect {
-                x: sx + pad_h - s(2.0), y: dot_y - s(2.0),
-                width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+                x: sx + pad_h - s(3.0), y: dot_y - s(3.0),
+                width: dot_sz + s(6.0), height: dot_sz + s(6.0),
             };
-            ui.fill_shadow(glow_rect, [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.18], dot_sz, s(3.0));
+            ui.fill_shadow(glow_rect, [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.22 * breath], dot_sz, s(5.0));
             ui.fill_rounded(
                 Rect { x: sx + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
                 colors::ACCENT_GREEN,
                 dot_sz / 2.0,
             );
-            // Inner highlight on pill top edge (bevel)
-            ui.hline(mode_pill_rect.x + s(3.0), mode_pill_rect.y + 1.0,
-                     mode_pill_rect.width - s(6.0), 1.0,
-                     [1.0, 1.0, 1.0, 0.04]);
-            ui.text(text, label, sx + pad_h + dot_sz + s(6.0), y_center, colors::FG_SECONDARY, colors::BG_HOVER);
+            let label_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.4);
+            ui.text(text, label, sx + pad_h + dot_sz + s(6.0), y_center, label_fg, colors::BG_HOVER);
         }
 
         // --- Content section: cwd + git branch + dimensions ---
         let content_x = if self.sidebar_width > 0.0 { self.sidebar_width + s(14.0) } else { bar.x + s(14.0) };
         let mut x = content_x;
 
-        // Working directory
+        // Working directory pill
         if !self.cwd.is_empty() {
-            // Reserve space for right-aligned pill items:
-            //   hints pill: text + 2*pad_h + outer margin
-            //   dims pill:  text + 2*pad_h + gap between pills
             let hints_label = "? for shortcuts";
             let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
             let right_reserved = text.text_width(&dims) + text.text_width(hints_label)
-                + s(4.0) * 4.0   // 2x pad_h per pill
-                + s(8.0)          // gap between the two pills
-                + s(10.0)         // outer right margin
-                + cw * 2.0;       // breathing room
-            let avail_for_cwd = bar.right() - x - right_reserved - cw * 4.0;
+                + s(4.0) * 4.0
+                + s(8.0)
+                + s(10.0)
+                + cw * 2.0;
+            let cwd_pad_h = s(4.0);
+            let cwd_pad_v = s(2.0);
+            let avail_for_cwd = bar.right() - x - right_reserved - cw * 4.0 - cwd_pad_h * 2.0;
             let max_chars = (avail_for_cwd / cw).floor().max(4.0) as usize;
 
             let display_cwd = if self.cwd.len() > max_chars {
@@ -138,15 +190,27 @@ impl StatusBar {
             } else {
                 self.cwd.clone()
             };
-            ui.text(text, &display_cwd, x, y_center, colors::FG_MUTED, content_bg);
-            x += text.text_width(&display_cwd) + cw * 2.0;
+            let cwd_text_w = text.text_width(&display_cwd);
+            let cwd_pill_w = cwd_text_w + cwd_pad_h * 2.0;
+            let cwd_pill_h = ch + cwd_pad_v * 2.0;
+            let cwd_pill_y = bar.y + (bar.height - cwd_pill_h) / 2.0;
+            let cwd_pill = Rect { x, y: cwd_pill_y, width: cwd_pill_w, height: cwd_pill_h };
+
+            let ht = self.cwd_anim.value();
+            let top = Self::hover_pill_top(pill_base_top, ht, 0.5);
+            let bot = Self::hover_pill_bot(pill_base_bot, ht, 0.5);
+            let border = Self::hover_pill_border(ht, 0.3);
+            ui.fill_rounded_gradient(cwd_pill, top, bot, s(3.0));
+            ui.stroke_rounded(cwd_pill, s(3.0), 0.5, border);
+            let cwd_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.5);
+            ui.text(text, &display_cwd, x + cwd_pad_h, y_center, cwd_fg, colors::BG_HOVER);
+            x += cwd_pill_w + cw * 2.0;
         }
 
-        // Git branch with branch icon wrapped in a gradient pill
+        // Git branch pill
         if !self.git_branch.is_empty() {
             let pad_h = s(4.0);
             let pad_v = s(2.0);
-            // Small dot before branch name
             let dot_sz = s(4.0);
             let branch_text = format!(" {}", self.git_branch);
             let branch_w = text.text_width(&branch_text);
@@ -154,42 +218,28 @@ impl StatusBar {
             let pill_w = pill_inner_w + pad_h * 2.0;
             let pill_h = ch + pad_v * 2.0;
             let pill_y = bar.y + (bar.height - pill_h) / 2.0;
-            let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-            // Gradient pill: slightly lighter top for 3D depth
-            let pill_top = [
-                colors::BG_HOVER[0] * 1.08,
-                colors::BG_HOVER[1] * 1.08,
-                colors::BG_HOVER[2] * 1.08,
-                colors::BG_HOVER[3],
-            ];
-            ui.fill_rounded_gradient(
-                Rect { x, y: pill_y, width: pill_w, height: pill_h },
-                pill_top, colors::BG_HOVER,
-                s(3.0),
-            );
-            // Pill border overlay
-            ui.stroke_rounded(
-                Rect { x, y: pill_y, width: pill_w, height: pill_h },
-                s(3.0), 0.5, pill_border,
-            );
+            let git_pill = Rect { x, y: pill_y, width: pill_w, height: pill_h };
+
+            let ht = self.git_anim.value();
+            let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
+            let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
+            let border = Self::hover_pill_border(ht, 0.5);
+            ui.fill_rounded_gradient(git_pill, top, bot, s(3.0));
+            ui.stroke_rounded(git_pill, s(3.0), 0.5, border);
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
-            // Glow behind peach dot
+            let breath_peach = 0.85 + 0.15 * glow_phase.sin();
             let glow_rect = Rect {
-                x: x + pad_h - s(2.0), y: dot_y - s(2.0),
-                width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+                x: x + pad_h - s(3.0), y: dot_y - s(3.0),
+                width: dot_sz + s(6.0), height: dot_sz + s(6.0),
             };
-            ui.fill_shadow(glow_rect, [colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1], colors::ACCENT_PEACH[2], 0.15], dot_sz, s(3.0));
+            ui.fill_shadow(glow_rect, [colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1], colors::ACCENT_PEACH[2], 0.20 * breath_peach], dot_sz, s(5.0));
             ui.fill_rounded(
                 Rect { x: x + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
                 colors::ACCENT_PEACH,
                 dot_sz / 2.0,
             );
-            // Inner highlight on pill top edge (bevel)
-            let git_pill_rect = Rect { x, y: pill_y, width: pill_w, height: pill_h };
-            ui.hline(git_pill_rect.x + s(3.0), git_pill_rect.y + 1.0,
-                     git_pill_rect.width - s(6.0), 1.0,
-                     [1.0, 1.0, 1.0, 0.04]);
-            ui.text(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, colors::ACCENT_PEACH, colors::BG_HOVER);
+            let branch_fg = lerp_color(colors::ACCENT_PEACH, [1.0, 0.85, 0.72, 1.0], ht * 0.3);
+            ui.text(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, branch_fg, colors::BG_HOVER);
             x += pill_w + cw * 2.0;
         }
 
@@ -201,41 +251,172 @@ impl StatusBar {
             }
         }
 
-        // Right-aligned: keyboard hints pill (gradient for 3D depth)
+        // Right-aligned pills
         let pad_h = s(4.0);
         let pad_v = s(2.0);
         let pill_h = ch + pad_v * 2.0;
-        let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-        let pill_top = [
-            colors::BG_HOVER[0] * 1.08,
-            colors::BG_HOVER[1] * 1.08,
-            colors::BG_HOVER[2] * 1.08,
-            colors::BG_HOVER[3],
-        ];
+        let pill_y = bar.y + (bar.height - pill_h) / 2.0;
+
+        // Keyboard hints pill
         let hints_label = "? for shortcuts";
         let hints_text_w = text.text_width(hints_label);
         let hints_pill_w = hints_text_w + pad_h * 2.0;
         let hints_pill_x = bar.right() - hints_pill_w - s(10.0);
-        let pill_y = bar.y + (bar.height - pill_h) / 2.0;
         let hints_rect = Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h };
-        ui.fill_rounded_gradient(hints_rect, pill_top, colors::BG_HOVER, s(3.0));
-        ui.stroke_rounded(hints_rect, s(3.0), 0.5, pill_border);
-        ui.hline(hints_rect.x + s(3.0), hints_rect.y + 1.0,
-                 hints_rect.width - s(6.0), 1.0,
-                 [1.0, 1.0, 1.0, 0.04]);
-        ui.text(text, hints_label, hints_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
+        {
+            let ht = self.hints_anim.value();
+            let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
+            let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
+            let border = Self::hover_pill_border(ht, 0.5);
+            ui.fill_rounded_gradient(hints_rect, top, bot, s(3.0));
+            ui.stroke_rounded(hints_rect, s(3.0), 0.5, border);
+            let fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.5);
+            ui.text(text, hints_label, hints_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
+        }
 
-        // Terminal dimensions pill (left of hints, gradient)
+        // Terminal dimensions pill
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
         let dims_text_w = text.text_width(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
         let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
         let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
-        ui.fill_rounded_gradient(dims_rect, pill_top, colors::BG_HOVER, s(3.0));
-        ui.stroke_rounded(dims_rect, s(3.0), 0.5, pill_border);
-        ui.hline(dims_rect.x + s(3.0), dims_rect.y + 1.0,
-                 dims_rect.width - s(6.0), 1.0,
-                 [1.0, 1.0, 1.0, 0.04]);
-        ui.text(text, &dims, dims_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
+        {
+            let ht = self.dims_anim.value();
+            let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
+            let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
+            let border = Self::hover_pill_border(ht, 0.5);
+            ui.fill_rounded_gradient(dims_rect, top, bot, s(3.0));
+            ui.stroke_rounded(dims_rect, s(3.0), 0.5, border);
+            let fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.5);
+            ui.text(text, &dims, dims_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
+        }
+    }
+
+    // -- Pill hover color helpers -------------------------------------------
+    // These produce smooth transitions between rest and hovered pill states.
+    // `base_alpha` is the rest-state alpha (1.0 for fully opaque pills, 0.5 for
+    // semi-transparent ones like the cwd pill).
+
+    /// Hovered pill top color: brightens toward BG_SURFACE for a visible "lift".
+    /// On dark themes, multiplicative boosts are invisible — we need additive shift.
+    fn hover_pill_top(base_top: [f32; 4], hover_t: f32, base_alpha: f32) -> [f32; 4] {
+        // Additive brighten: blend toward a lighter surface color
+        let target = colors::BG_HOVER;
+        let alpha = lerp(base_alpha, 1.0, hover_t);
+        [
+            lerp(base_top[0], target[0] * 1.4, hover_t),
+            lerp(base_top[1], target[1] * 1.4, hover_t),
+            lerp(base_top[2], target[2] * 1.4, hover_t),
+            base_top[3] * alpha,
+        ]
+    }
+
+    /// Hovered pill bottom color: slightly less bright than top for gradient.
+    fn hover_pill_bot(base_bot: [f32; 4], hover_t: f32, base_alpha: f32) -> [f32; 4] {
+        let target = colors::BG_HOVER;
+        let alpha = lerp(base_alpha, 1.0, hover_t);
+        [
+            lerp(base_bot[0], target[0] * 1.2, hover_t),
+            lerp(base_bot[1], target[1] * 1.2, hover_t),
+            lerp(base_bot[2], target[2] * 1.2, hover_t),
+            base_bot[3] * alpha,
+        ]
+    }
+
+    fn hover_pill_border(hover_t: f32, base_alpha: f32) -> [f32; 4] {
+        [
+            lerp(colors::BORDER[0], colors::BORDER[0] * 1.5, hover_t),
+            lerp(colors::BORDER[1], colors::BORDER[1] * 1.5, hover_t),
+            lerp(colors::BORDER[2], colors::BORDER[2] * 1.5, hover_t),
+            lerp(base_alpha, 1.0, hover_t),
+        ]
+    }
+
+    /// Compute pill rectangles for hit-testing. Must stay in sync with `build()`.
+    fn pill_rects(&self, bar: Rect, text: &UiTextRenderer) -> Vec<(Rect, StatusPill)> {
+        let s = |v: f32| text.s(v);
+        let cw = text.cell_width;
+        let ch = text.cell_height;
+        let pad_h = s(4.0);
+        let pad_v = s(2.0);
+        let pill_h = ch + pad_v * 2.0;
+        let pill_y = bar.y + (bar.height - pill_h) / 2.0;
+        let mut pills = Vec::new();
+
+        // Mode pill (sidebar section)
+        if self.sidebar_width > 0.0 {
+            let sx = bar.x + s(14.0);
+            let label = if !self.process_name.is_empty() { &self.process_name } else { "Sessions" };
+            let dot_sz = s(4.0);
+            let label_w = text.text_width(label);
+            let pill_w = dot_sz + s(6.0) + label_w + pad_h * 2.0;
+            pills.push((Rect { x: sx, y: pill_y, width: pill_w, height: pill_h }, StatusPill::Mode));
+        }
+
+        // Content pills
+        let content_x = if self.sidebar_width > 0.0 { self.sidebar_width + s(14.0) } else { bar.x + s(14.0) };
+        let mut x = content_x;
+
+        // Cwd pill
+        if !self.cwd.is_empty() {
+            let hints_label = "? for shortcuts";
+            let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
+            let right_reserved = text.text_width(&dims) + text.text_width(hints_label)
+                + s(4.0) * 4.0 + s(8.0) + s(10.0) + cw * 2.0;
+            let avail = bar.right() - x - right_reserved - cw * 4.0 - pad_h * 2.0;
+            let max_chars = (avail / cw).floor().max(4.0) as usize;
+            let display_cwd = if self.cwd.len() > max_chars {
+                format!("\u{2026}{}", &self.cwd[self.cwd.len() - (max_chars - 1)..])
+            } else {
+                self.cwd.clone()
+            };
+            let cwd_text_w = text.text_width(&display_cwd);
+            let cwd_pill_w = cwd_text_w + pad_h * 2.0;
+            let cwd_pill_h = ch + pad_v * 2.0;
+            let cwd_pill_y = bar.y + (bar.height - cwd_pill_h) / 2.0;
+            pills.push((Rect { x, y: cwd_pill_y, width: cwd_pill_w, height: cwd_pill_h }, StatusPill::Cwd));
+            x += cwd_pill_w + cw * 2.0;
+        }
+
+        // Git branch pill
+        if !self.git_branch.is_empty() {
+            let dot_sz = s(4.0);
+            let branch_text = format!(" {}", self.git_branch);
+            let branch_w = text.text_width(&branch_text);
+            let pill_w = dot_sz + s(4.0) + branch_w + pad_h * 2.0;
+            pills.push((Rect { x, y: pill_y, width: pill_w, height: pill_h }, StatusPill::GitBranch));
+        }
+
+        // Right-aligned pills
+        let hints_label = "? for shortcuts";
+        let hints_text_w = text.text_width(hints_label);
+        let hints_pill_w = hints_text_w + pad_h * 2.0;
+        let hints_pill_x = bar.right() - hints_pill_w - s(10.0);
+        pills.push((Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h }, StatusPill::Hints));
+
+        let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
+        let dims_text_w = text.text_width(&dims);
+        let dims_pill_w = dims_text_w + pad_h * 2.0;
+        let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
+        pills.push((Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h }, StatusPill::Dims));
+
+        pills
+    }
+
+    pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect, text: &UiTextRenderer) {
+        match event {
+            MouseEvent::Move { x, y } => {
+                self.hovered_pill = None;
+                if bar.contains(x, y) {
+                    for (rect, pill) in self.pill_rects(bar, text) {
+                        if rect.contains(x, y) {
+                            self.hovered_pill = Some(pill);
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
