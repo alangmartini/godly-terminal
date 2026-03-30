@@ -222,11 +222,28 @@ impl Sidebar {
             };
             if self.hovered_index == Some(i) && !item.active {
                 let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.4];
-                ui.fill_rounded_bordered(inset_rect, colors::BG_HOVER, item_radius, 0.5, hover_border);
+                // Gradient hover: slightly lighter top for raised feel
+                let hover_top = [
+                    colors::BG_HOVER[0] * 1.08,
+                    colors::BG_HOVER[1] * 1.08,
+                    colors::BG_HOVER[2] * 1.08,
+                    colors::BG_HOVER[3],
+                ];
+                ui.fill_rounded_gradient(inset_rect, hover_top, colors::BG_HOVER, item_radius);
+                ui.stroke_rounded(inset_rect, item_radius, 0.5, hover_border);
             }
 
-            // Active item background (rounded with subtle blue-tinted border)
+            // Active item background (rounded with subtle blue-tinted border + ambient glow)
             if item.active {
+                // Outer ambient glow from accent color (creates luminous aura)
+                let glow_rect = Rect {
+                    x: inset_rect.x - s(2.0),
+                    y: inset_rect.y - s(2.0),
+                    width: inset_rect.width + s(4.0),
+                    height: inset_rect.height + s(4.0),
+                };
+                ui.fill_shadow(glow_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.06], item_radius + s(2.0), s(8.0));
+
                 // Inner shadow behind active item for depth
                 ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.15], item_radius, s(6.0));
 
@@ -240,6 +257,11 @@ impl Sidebar {
                     inset_rect, colors::BG_ACTIVE, item_radius,
                     0.5, active_border,
                 );
+
+                // Subtle inner highlight at top edge (bevel)
+                ui.hline(inset_rect.x + item_radius, inset_rect.y + 1.0,
+                         inset_rect.width - item_radius * 2.0, 1.0,
+                         [1.0, 1.0, 1.0, 0.04]);
             }
 
             // Active indicator (left colored bar, pill shape via SDF + glow)
@@ -323,7 +345,14 @@ impl Sidebar {
         };
         let new_bg = if self.hovered_new { colors::BG_SURFACE } else { colors::BG_DARK };
         if self.hovered_new {
-            ui.fill_rounded_bordered(new_rect, colors::BG_SURFACE, s(4.0), 0.5, colors::BORDER);
+            let new_top = [
+                colors::BG_SURFACE[0] * 1.08,
+                colors::BG_SURFACE[1] * 1.08,
+                colors::BG_SURFACE[2] * 1.08,
+                colors::BG_SURFACE[3],
+            ];
+            ui.fill_rounded_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0));
+            ui.stroke_rounded(new_rect, s(4.0), 0.5, colors::BORDER);
         }
         ui.text(text, "+ New Session",
                 new_rect.x + s(8.0),
@@ -364,7 +393,15 @@ impl Sidebar {
             let panel_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
             // Shadow behind the panel for lift
             ui.fill_shadow(panel_inset, [0.0, 0.0, 0.0, 0.10], panel_radius, s(4.0));
-            ui.fill_rounded_bordered(panel_inset, colors::BG_RAISED, panel_radius, 0.5, panel_border);
+            // Gradient panel background (slightly lighter top for 3D)
+            let panel_top = [
+                colors::BG_RAISED[0] * 1.06,
+                colors::BG_RAISED[1] * 1.06,
+                colors::BG_RAISED[2] * 1.06,
+                colors::BG_RAISED[3],
+            ];
+            ui.fill_rounded_gradient(panel_inset, panel_top, colors::BG_RAISED, panel_radius);
+            ui.stroke_rounded(panel_inset, panel_radius, 0.5, panel_border);
             // Top inner highlight (bevel)
             ui.hline(panel_inset.x + panel_radius, panel_inset.y + 1.0,
                      panel_inset.width - panel_radius * 2.0, 1.0,
@@ -434,6 +471,18 @@ impl Sidebar {
                 }
 
                 ay += agent_item_h;
+
+                // Subtle separator between agent items (faded edges)
+                if !std::ptr::eq(agent, self.agents.last().unwrap()) {
+                    ui.hline_fade(
+                        sidebar.x + pad_h + cw * 2.0,
+                        ay - 1.0,
+                        sidebar.width - pad_h * 2.0 - cw * 2.0,
+                        1.0,
+                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.3],
+                        s(8.0),
+                    );
+                }
             }
         }
     }

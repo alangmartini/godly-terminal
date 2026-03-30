@@ -240,14 +240,24 @@ impl TabBar {
                     1.0,
                 ];
                 ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, 1.0, colors::BORDER);
+                // Full-tab ambient glow from accent color (subtle luminosity across entire tab)
+                let ambient_rect = Rect {
+                    x: rect.x + 1.0,
+                    y: rect.y + 1.0,
+                    width: rect.width - 2.0,
+                    height: rect.height - 1.0,
+                };
+                let ambient_top = [accent[0], accent[1], accent[2], 0.06];
+                let ambient_bottom = [accent[0], accent[1], accent[2], 0.0];
+                ui.fill_gradient(ambient_rect, ambient_top, ambient_bottom);
                 // Soft glow behind the accent bar (luminous highlight)
-                let glow_rect = super::widget::Rect {
+                let glow_rect = Rect {
                     x: rect.x + tab_radius,
                     y: rect.y,
                     width: rect.width - tab_radius * 2.0,
                     height: s(6.0),
                 };
-                let glow_color = [accent[0], accent[1], accent[2], 0.10];
+                let glow_color = [accent[0], accent[1], accent[2], 0.12];
                 ui.fill_rounded(glow_rect, glow_color, s(3.0));
                 // Top accent bar (inset from corners)
                 ui.hline(rect.x + tab_radius, rect.y + 1.0, rect.width - tab_radius * 2.0, s(2.0), accent);
@@ -339,7 +349,13 @@ impl TabBar {
         let new_y = bar.y + tab_inset;
         let new_rect = Rect { x: new_x, y: new_y, width: s(28.0), height: bar.height - tab_inset };
         let new_tab_bg = if self.hovered_new_tab {
-            ui.fill_rounded_top(new_rect, colors::BG_SURFACE, s(4.0));
+            let new_top = [
+                colors::BG_SURFACE[0] * 1.08,
+                colors::BG_SURFACE[1] * 1.08,
+                colors::BG_SURFACE[2] * 1.08,
+                colors::BG_SURFACE[3],
+            ];
+            ui.fill_rounded_top_gradient(new_rect, new_top, colors::BG_SURFACE, s(4.0), 0.0, [0.0; 4]);
             colors::BG_SURFACE
         } else {
             colors::BG_DARK

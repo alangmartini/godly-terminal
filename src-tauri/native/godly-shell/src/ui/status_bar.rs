@@ -80,13 +80,15 @@ impl StatusBar {
             let pill_h = ch + pad_v * 2.0;
             let pill_y = bar.y + (bar.height - pill_h) / 2.0;
             let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-            ui.fill_rounded_bordered(
-                Rect { x: sx, y: pill_y, width: pill_w, height: pill_h },
-                colors::BG_HOVER,
-                s(3.0),
-                0.5,
-                pill_border,
-            );
+            let mode_pill_top = [
+                colors::BG_HOVER[0] * 1.08,
+                colors::BG_HOVER[1] * 1.08,
+                colors::BG_HOVER[2] * 1.08,
+                colors::BG_HOVER[3],
+            ];
+            let mode_pill_rect = Rect { x: sx, y: pill_y, width: pill_w, height: pill_h };
+            ui.fill_rounded_gradient(mode_pill_rect, mode_pill_top, colors::BG_HOVER, s(3.0));
+            ui.stroke_rounded(mode_pill_rect, s(3.0), 0.5, pill_border);
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
             ui.fill_rounded(
                 Rect { x: sx + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
@@ -124,7 +126,7 @@ impl StatusBar {
             x += text.text_width(&display_cwd) + cw * 2.0;
         }
 
-        // Git branch with branch icon wrapped in a pill
+        // Git branch with branch icon wrapped in a gradient pill
         if !self.git_branch.is_empty() {
             let pad_h = s(4.0);
             let pad_v = s(2.0);
@@ -137,12 +139,22 @@ impl StatusBar {
             let pill_h = ch + pad_v * 2.0;
             let pill_y = bar.y + (bar.height - pill_h) / 2.0;
             let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-            ui.fill_rounded_bordered(
+            // Gradient pill: slightly lighter top for 3D depth
+            let pill_top = [
+                colors::BG_HOVER[0] * 1.08,
+                colors::BG_HOVER[1] * 1.08,
+                colors::BG_HOVER[2] * 1.08,
+                colors::BG_HOVER[3],
+            ];
+            ui.fill_rounded_gradient(
                 Rect { x, y: pill_y, width: pill_w, height: pill_h },
-                colors::BG_HOVER,
+                pill_top, colors::BG_HOVER,
                 s(3.0),
-                0.5,
-                pill_border,
+            );
+            // Pill border overlay
+            ui.stroke_rounded(
+                Rect { x, y: pill_y, width: pill_w, height: pill_h },
+                s(3.0), 0.5, pill_border,
             );
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
             ui.fill_rounded(
@@ -162,37 +174,35 @@ impl StatusBar {
             }
         }
 
-        // Right-aligned: keyboard hints pill
+        // Right-aligned: keyboard hints pill (gradient for 3D depth)
         let pad_h = s(4.0);
         let pad_v = s(2.0);
         let pill_h = ch + pad_v * 2.0;
         let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
+        let pill_top = [
+            colors::BG_HOVER[0] * 1.08,
+            colors::BG_HOVER[1] * 1.08,
+            colors::BG_HOVER[2] * 1.08,
+            colors::BG_HOVER[3],
+        ];
         let hints_label = "? for shortcuts";
         let hints_text_w = text.text_width(hints_label);
         let hints_pill_w = hints_text_w + pad_h * 2.0;
         let hints_pill_x = bar.right() - hints_pill_w - s(10.0);
         let pill_y = bar.y + (bar.height - pill_h) / 2.0;
-        ui.fill_rounded_bordered(
-            Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h },
-            colors::BG_HOVER,
-            s(3.0),
-            0.5,
-            pill_border,
-        );
+        let hints_rect = Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h };
+        ui.fill_rounded_gradient(hints_rect, pill_top, colors::BG_HOVER, s(3.0));
+        ui.stroke_rounded(hints_rect, s(3.0), 0.5, pill_border);
         ui.text(text, hints_label, hints_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
 
-        // Terminal dimensions pill (left of hints)
+        // Terminal dimensions pill (left of hints, gradient)
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
         let dims_text_w = text.text_width(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
         let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
-        ui.fill_rounded_bordered(
-            Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h },
-            colors::BG_HOVER,
-            s(3.0),
-            0.5,
-            pill_border,
-        );
+        let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
+        ui.fill_rounded_gradient(dims_rect, pill_top, colors::BG_HOVER, s(3.0));
+        ui.stroke_rounded(dims_rect, s(3.0), 0.5, pill_border);
         ui.text(text, &dims, dims_pill_x + pad_h, y_center, colors::FG_MUTED, colors::BG_HOVER);
     }
 }

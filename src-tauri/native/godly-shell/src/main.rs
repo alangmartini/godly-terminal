@@ -583,6 +583,12 @@ impl App {
                 let track_alpha = 0.03 + 0.04 * hover_t;
                 ui_builder.fill_rounded(track_rect, [1.0, 1.0, 1.0, track_alpha], bar_w / 2.0);
 
+                // Thumb shadow for depth (subtle, only visible on hover proximity)
+                if hover_t > 0.1 {
+                    let shadow_alpha = 0.12 * hover_t;
+                    ui_builder.fill_shadow(thumb_rect, [0.0, 0.0, 0.0, shadow_alpha], bar_w / 2.0, s(3.0));
+                }
+
                 // Thumb: boost opacity on proximity and when scrolled
                 let base_alpha = if self.scrollback_offset > 0 { 0.28 } else { 0.15 };
                 let scroll_alpha = base_alpha + 0.20 * hover_t;
@@ -594,6 +600,20 @@ impl App {
                     thumb_rect, thumb_color, bar_w / 2.0,
                     0.5, thumb_border,
                 );
+                // Inner highlight on thumb for glossy feel (only on hover)
+                if hover_t > 0.2 {
+                    let hl_rect = ui::widget::Rect {
+                        x: thumb_rect.x + 1.0,
+                        y: thumb_rect.y + 1.0,
+                        width: thumb_rect.width - 2.0,
+                        height: thumb_rect.height * 0.4,
+                    };
+                    let hl_alpha = 0.06 * hover_t;
+                    ui_builder.fill_gradient(hl_rect,
+                        [1.0, 1.0, 1.0, hl_alpha],
+                        [1.0, 1.0, 1.0, 0.0],
+                    );
+                }
 
                 // Scroll-away fog: subtle gradient at bottom edge when scrolled up
                 // from live position, hinting that there's newer content below.
@@ -619,12 +639,17 @@ impl App {
         self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
         self.status_bar.sidebar_width = layout.sidebar.width;
         self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle);
-        // Window outer border — SDF rounded for anti-aliased edges against the desktop
+        // Window outer border — double-border for solid professional edge
         {
-            let border_color = ui::builder::colors::BORDER;
             let r = ui_text_handle.s(3.0);
             let full = ui::widget::Rect { x: 0.0, y: 0.0, width: vw, height: vh };
-            ui_builder.stroke_rounded(full, r, 1.0, border_color);
+            // Outer border: darker edge against desktop
+            let outer_border = [0.05, 0.05, 0.08, 0.9];
+            ui_builder.stroke_rounded(full, r, 1.0, outer_border);
+            // Inner highlight: subtle bright edge just inside for depth
+            let inner = ui::widget::Rect { x: 1.0, y: 1.0, width: vw - 2.0, height: vh - 2.0 };
+            let inner_highlight = [1.0, 1.0, 1.0, 0.04];
+            ui_builder.stroke_rounded(inner, r.max(1.0) - 1.0, 1.0, inner_highlight);
         }
 
         let (chrome_quads, text_commands) = ui_builder.finish();
