@@ -479,6 +479,31 @@ impl App {
                 [0.0, 0.0, 0.0, 0.0],   // transparent at top
                 [0.0, 0.0, 0.0, 0.08],  // semi-transparent dark at bottom
             );
+
+            // Concave corner fill at sidebar-terminal junction (top-left of content area).
+            // A small rounded dark shape softens the hard 90° corner where sidebar
+            // meets tab bar, creating a smooth inset feel like professional editors.
+            if layout.sidebar.width > 0.0 {
+                let corner_r = ui_text_handle.s(6.0);
+                let corner_rect = ui::widget::Rect {
+                    x: layout.terminal.x,
+                    y: layout.terminal.y,
+                    width: corner_r,
+                    height: corner_r,
+                };
+                // Only round the top-left corner; the other three stay sharp to blend
+                // seamlessly with the sidebar border and tab bar bottom edge.
+                ui_builder.fill_rounded_custom(corner_rect, ui::builder::colors::BG_DARK, [corner_r, 0.0, 0.0, 0.0]);
+
+                // Matching corner at bottom-left of content area (sidebar-status junction)
+                let bottom_corner = ui::widget::Rect {
+                    x: layout.terminal.x,
+                    y: layout.terminal.y + layout.terminal.height - corner_r,
+                    width: corner_r,
+                    height: corner_r,
+                };
+                ui_builder.fill_rounded_custom(bottom_corner, ui::builder::colors::BG_DARK, [0.0, 0.0, 0.0, corner_r]);
+            }
         }
 
         // Placeholder text when no terminal content is available

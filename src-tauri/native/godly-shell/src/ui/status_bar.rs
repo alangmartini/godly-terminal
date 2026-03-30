@@ -53,8 +53,9 @@ impl StatusBar {
             ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
         }
 
-        // Top separator line
+        // Top separator line + inner bevel highlight (consistent with tab bar)
         ui.hline(bar.x, bar.y, bar.width, 1.0, colors::BORDER);
+        ui.hline(bar.x, bar.y + 1.0, bar.width, 1.0, [1.0, 1.0, 1.0, 0.025]);
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
 

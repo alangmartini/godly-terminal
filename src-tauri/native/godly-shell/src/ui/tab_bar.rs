@@ -40,12 +40,13 @@ pub struct TabBar {
     pub hovered_tab: Option<usize>,
     pub hovered_close_tab: Option<usize>,
     pub hovered_button: Option<WindowButton>,
+    pub hovered_new_tab: bool,
     pub sidebar_width: f32,
 }
 
 impl TabBar {
     pub fn new() -> Self {
-        Self { tabs: Vec::new(), hovered_tab: None, hovered_close_tab: None, hovered_button: None, sidebar_width: 0.0 }
+        Self { tabs: Vec::new(), hovered_tab: None, hovered_close_tab: None, hovered_button: None, hovered_new_tab: false, sidebar_width: 0.0 }
     }
 
     /// The x-offset where tabs begin (after sidebar area).
@@ -106,6 +107,20 @@ impl TabBar {
         ]
     }
 
+    fn new_tab_rect(&self, bar: Rect, scale: f32) -> Rect {
+        let tab_w = self.effective_tab_width(bar, scale);
+        let tab_gap = (TAB_GAP * scale).round();
+        let tab_inset = (TAB_INSET_V * scale).round();
+        let origin = self.tabs_origin_x(bar, scale);
+        let new_x = origin + self.tabs.len() as f32 * (tab_w + tab_gap) + (8.0 * scale).round();
+        Rect {
+            x: new_x,
+            y: bar.y + tab_inset,
+            width: (28.0 * scale).round(),
+            height: bar.height - tab_inset,
+        }
+    }
+
     fn accent_for(&self, index: usize) -> [f32; 4] {
         TAB_ACCENTS[index % TAB_ACCENTS.len()]
     }
@@ -139,13 +154,37 @@ impl TabBar {
             .find(|(_, t)| t.active)
             .map(|(i, _)| self.tab_rect(i, bar, text.scale));
         if let Some(ar) = active_rect {
-            // Left segment (bar start to active tab left edge)
+            let ear_r = s(5.0); // radius of the inverse corner "ear" shapes
+            // Left segment (bar start to active tab left edge, shortened for ear)
             if ar.x > bar.x {
-                ui.hline(bar.x, bar.bottom() - 1.0, ar.x - bar.x, 1.0, colors::BORDER);
+                let seg_end = ar.x - ear_r;
+                if seg_end > bar.x {
+                    ui.hline(bar.x, bar.bottom() - 1.0, seg_end - bar.x, 1.0, colors::BORDER);
+                }
+                // Left ear: small BG_BASE rounded corner that creates concave curve
+                // Only bottom-right corner is rounded to form the inverse curve
+                let ear_rect = Rect {
+                    x: ar.x - ear_r,
+                    y: bar.bottom() - ear_r,
+                    width: ear_r,
+                    height: ear_r,
+                };
+                ui.fill_rounded_custom(ear_rect, colors::BG_DARK, [0.0, 0.0, ear_r, 0.0]);
             }
-            // Right segment (active tab right edge to bar end)
+            // Right segment (active tab right edge to bar end, shortened for ear)
             if ar.right() < bar.right() {
-                ui.hline(ar.right(), bar.bottom() - 1.0, bar.right() - ar.right(), 1.0, colors::BORDER);
+                let seg_start = ar.right() + ear_r;
+                if seg_start < bar.right() {
+                    ui.hline(seg_start, bar.bottom() - 1.0, bar.right() - seg_start, 1.0, colors::BORDER);
+                }
+                // Right ear: concave curve on the other side
+                let ear_rect = Rect {
+                    x: ar.right(),
+                    y: bar.bottom() - ear_r,
+                    width: ear_r,
+                    height: ear_r,
+                };
+                ui.fill_rounded_custom(ear_rect, colors::BG_DARK, [0.0, 0.0, 0.0, ear_r]);
             }
         } else {
             ui.hline(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
@@ -299,7 +338,14 @@ impl TabBar {
         let new_x = origin + self.tabs.len() as f32 * (tab_w + tab_gap) + s(8.0);
         let new_y = bar.y + tab_inset;
         let new_rect = Rect { x: new_x, y: new_y, width: s(28.0), height: bar.height - tab_inset };
-        ui.text(text, "+", new_x + s(8.0), text_y(new_rect.height, new_y), colors::FG_MUTED, colors::BG_DARK);
+        let new_tab_bg = if self.hovered_new_tab {
+            ui.fill_rounded_top(new_rect, colors::BG_SURFACE, s(4.0));
+            colors::BG_SURFACE
+        } else {
+            colors::BG_DARK
+        };
+        let new_tab_fg = if self.hovered_new_tab { colors::FG_SECONDARY } else { colors::FG_MUTED };
+        ui.text(text, "+", new_x + s(8.0), text_y(new_rect.height, new_y), new_tab_fg, new_tab_bg);
 
         // Right-aligned indicators (bun icon + session name) — positioned before window buttons
         let btn_reserve = s(BUTTON_WIDTH) * 3.0 + s(8.0);
@@ -358,6 +404,7 @@ impl TabBar {
                 self.hovered_tab = None;
                 self.hovered_close_tab = None;
                 self.hovered_button = None;
+                self.hovered_new_tab = self.new_tab_rect(bar, scale).contains(x, y);
                 let close_btn_sz = 16.0 * scale;
                 let close_btn_pad = 8.0 * scale;
                 for (i, tab) in self.tabs.iter().enumerate() {

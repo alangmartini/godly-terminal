@@ -254,6 +254,49 @@ impl UiBuilder {
         ));
     }
 
+    /// Vertical line that fades to transparent at both ends over `fade` pixels.
+    /// Creates a softer separator that doesn't visually "crash" into edges.
+    pub fn vline_fade(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4], fade: f32) {
+        let transparent = [color[0], color[1], color[2], 0.0];
+        if fade > 0.0 && h > fade * 2.0 {
+            // Top fade segment
+            self.quads.extend_from_slice(&quad_vertices_gradient(
+                x, y, t, fade, self.vw, self.vh, transparent, color,
+            ));
+            // Solid middle
+            self.quads.extend_from_slice(&quad_vertices(
+                x, y + fade, t, h - fade * 2.0, self.vw, self.vh, color,
+            ));
+            // Bottom fade segment
+            self.quads.extend_from_slice(&quad_vertices_gradient(
+                x, y + h - fade, t, fade, self.vw, self.vh, color, transparent,
+            ));
+        } else {
+            self.vline(x, y, h, t, color);
+        }
+    }
+
+    /// Horizontal line that fades to transparent at both ends over `fade` pixels.
+    pub fn hline_fade(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4], fade: f32) {
+        let transparent = [color[0], color[1], color[2], 0.0];
+        if fade > 0.0 && w > fade * 2.0 {
+            // Left fade segment
+            self.quads.extend_from_slice(&quad_vertices_gradient_h(
+                x, y, fade, t, self.vw, self.vh, transparent, color,
+            ));
+            // Solid middle
+            self.quads.extend_from_slice(&quad_vertices(
+                x + fade, y, w - fade * 2.0, t, self.vw, self.vh, color,
+            ));
+            // Right fade segment
+            self.quads.extend_from_slice(&quad_vertices_gradient_h(
+                x + w - fade, y, fade, t, self.vw, self.vh, color, transparent,
+            ));
+        } else {
+            self.hline(x, y, w, t, color);
+        }
+    }
+
     /// Rectangle outline (4 lines of thickness `t`, drawn inward).
     pub fn stroke_rect(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
         self.hline(rect.x, rect.y, rect.width, t, color); // top

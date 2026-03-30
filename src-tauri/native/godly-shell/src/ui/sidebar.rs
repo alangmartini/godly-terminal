@@ -155,8 +155,10 @@ impl Sidebar {
         ];
         ui.fill_gradient(sidebar, colors::BG_DARK, sidebar_bottom_color);
 
-        // Right border separator
-        ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0, colors::BORDER);
+        // Right border separator (fades at top and bottom for softer edges)
+        ui.vline_fade(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0, colors::BORDER, s(12.0));
+        // Inner bevel highlight
+        ui.hline(sidebar.x, sidebar.y, sidebar.width - 1.0, 1.0, [1.0, 1.0, 1.0, 0.02]);
 
         // "Sessions" header with count
         let header_rect = Rect {
@@ -184,9 +186,9 @@ impl Sidebar {
             colors::FG_MUTED,
             colors::BG_DARK,
         );
-        // Header bottom separator
-        ui.hline(sidebar.x + pad_h, header_rect.bottom() - 1.0,
-                 sidebar.width - pad_h * 2.0, 1.0, colors::BORDER);
+        // Header bottom separator (faded edges)
+        ui.hline_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
+                 sidebar.width - pad_h * 2.0, 1.0, colors::BORDER, s(8.0));
 
         // Layout: [pad][num][gap][name...][gap][branch][pad]
         // Two-line items: line 1 = number + name + branch, line 2 = description
