@@ -634,6 +634,75 @@ impl App {
                 renderer.draw(&mut pass);
             }
 
+            // Draw selection highlight overlay (between text and cursor)
+            if let Some(quad_pipe) = &mut self.quad_pipeline {
+                if self.selection.has_selection() {
+                    if let (Some(grid), Some(r)) = (&self.current_grid, &self.renderer) {
+                        let m = r.font_metrics().scaled_for_render();
+                        let cw = m.cell_width;
+                        let ch = m.cell_height;
+                        let (sel_start, sel_end) = self.selection.normalized();
+                        let cols = grid.dimensions.cols as usize;
+                        let radius = 3.0 * self.scale_factor;
+                        // Accent blue at 22% opacity — visible but text stays legible
+                        let sel_color = [0.537, 0.706, 0.980, 0.22];
+                        let sel_border = [0.537, 0.706, 0.980, 0.10];
+
+                        let mut sel_verts = Vec::new();
+                        for row in sel_start.row..=sel_end.row {
+                            if row >= grid.rows.len() { break; }
+
+                            // Determine column range for this row
+                            let col_start = if row == sel_start.row { sel_start.col } else { 0 };
+                            let col_end = if row == sel_end.row {
+                                sel_end.col
+                            } else {
+                                cols.saturating_sub(1)
+                            };
+                            if col_start > col_end { continue; }
+
+                            let px = (col_start as f32 * cw).round() + layout.terminal_content.x;
+                            let py = (row as f32 * ch).round() + layout.terminal_content.y;
+                            let pw = ((col_end - col_start + 1) as f32 * cw).round();
+                            let ph = ch;
+
+                            // Clip to terminal area
+                            if px >= layout.terminal_content.x + layout.terminal_content.width
+                                || py >= layout.terminal_content.y + layout.terminal_content.height
+                            {
+                                continue;
+                            }
+
+                            // Corner radii: round outer edges of the selection shape
+                            let is_single = sel_start.row == sel_end.row;
+                            let is_first = row == sel_start.row;
+                            let is_last = row == sel_end.row;
+                            let radii = if is_single {
+                                [radius; 4]
+                            } else if is_first {
+                                [radius, radius, 0.0, 0.0]
+                            } else if is_last {
+                                [0.0, 0.0, radius, radius]
+                            } else {
+                                [0.0; 4]
+                            };
+
+                            sel_verts.extend_from_slice(
+                                &ui::quad_renderer::quad_vertices_sdf(
+                                    px, py, pw, ph,
+                                    vw, vh, sel_color,
+                                    radii, 0.5, sel_border, 0.0,
+                                ),
+                            );
+                        }
+
+                        if !sel_verts.is_empty() {
+                            quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &sel_verts);
+                        }
+                    }
+                }
+            }
+
             // Draw cursor overlay via SDF quad pipeline (on top of terminal text)
             // for rounded corners and subtle glow — professional look.
             if let Some(quad_pipe) = &mut self.quad_pipeline {
