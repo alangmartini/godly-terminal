@@ -144,14 +144,26 @@ fn sd_rounded_rect(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 
     return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
+// Triangle-distributed noise for gradient dithering.
+// Eliminates visible color banding on dark gradients (8-bit displays).
+fn dither_noise(pos: vec2<f32>) -> f32 {
+    // Two independent hash values combined into triangle distribution
+    let n1 = fract(sin(dot(pos, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    let n2 = fract(sin(dot(pos, vec2<f32>(39.346, 11.135))) * 43758.5453);
+    return (n1 + n2 - 1.0) / 255.0;  // ±1 LSB triangle noise
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let fill = input.fill_color;
     let he = input.rect_half_ext;
+    let screen_pos = input.position.xy;
 
     // Fast path: flat quads with no SDF (rect_half_ext.x <= 0 signals flat mode)
     if (he.x <= 0.0) {
-        return vec4<f32>(pow(fill.rgb, vec3<f32>(2.2)), fill.a);
+        let linear = pow(fill.rgb, vec3<f32>(2.2));
+        let d = dither_noise(screen_pos);
+        return vec4<f32>(linear + vec3<f32>(d), fill.a);
     }
 
     // Rotate local_pos into shape space when rotation is non-zero
@@ -184,8 +196,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
     }
 
-    // Convert sRGB to linear + apply AA alpha
-    return vec4<f32>(pow(color.rgb, vec3<f32>(2.2)), color.a * aa);
+    // Convert sRGB to linear + apply AA alpha + dither
+    let linear = pow(color.rgb, vec3<f32>(2.2));
+    let d = dither_noise(screen_pos);
+    return vec4<f32>(linear + vec3<f32>(d), color.a * aa);
 }
 "#;
 

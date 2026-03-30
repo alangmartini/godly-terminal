@@ -60,6 +60,7 @@ struct App {
     sidebar: ui::sidebar::Sidebar,
     status_bar: ui::status_bar::StatusBar,
     scale_factor: f32,
+    window_focused: bool,
 }
 
 impl App {
@@ -93,6 +94,7 @@ impl App {
                 tb
             },
             scale_factor: 1.0,
+            window_focused: true,
             sidebar: ui::sidebar::Sidebar::new(),
             status_bar: {
                 let mut sb = ui::status_bar::StatusBar::new();
@@ -522,13 +524,36 @@ impl App {
         }
 
         // Scrollbar (rendered before chrome so it layers under borders)
+        // Hover proximity: scrollbar widens and brightens when mouse is near.
         if let Some(grid) = &self.current_grid {
             let visible_rows = self.terminal_size().0 as usize;
             let total = grid.total_scrollback + visible_rows;
             if total > visible_rows && visible_rows > 0 {
                 let s = |v: f32| ui_text_handle.s(v);
                 let track_margin = s(2.0);
-                let bar_w = s(6.0);
+
+                // Mouse proximity calculation — how close is cursor to scrollbar edge?
+                let scrollbar_edge_x = layout.terminal.x + layout.terminal.width - track_margin;
+                let proximity_zone = s(40.0); // pixels within which scrollbar reacts
+                let hover_t = if let Some((mx, _my)) = self.mouse_position {
+                    let mx = mx as f32;
+                    let dist = (scrollbar_edge_x - mx).abs();
+                    if dist < proximity_zone {
+                        // Smooth ease: closer = stronger (0.0 far → 1.0 touching)
+                        let t = 1.0 - (dist / proximity_zone);
+                        t * t // quadratic ease-in for snappier feel near the edge
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                // Interpolate bar width: thin (6px) when far, wide (10px) when close
+                let bar_w_min = s(6.0);
+                let bar_w_max = s(10.0);
+                let bar_w = bar_w_min + (bar_w_max - bar_w_min) * hover_t;
+
                 let track_rect = ui::widget::Rect {
                     x: layout.terminal.x + layout.terminal.width - bar_w - track_margin,
                     y: layout.terminal.y + track_margin,
@@ -554,13 +579,16 @@ impl App {
                     height: thumb_h,
                 };
 
-                // Subtle track background (visible when scrollback exists)
-                ui_builder.fill_rounded(track_rect, [1.0, 1.0, 1.0, 0.03], bar_w / 2.0);
+                // Track background: more visible on hover
+                let track_alpha = 0.03 + 0.04 * hover_t;
+                ui_builder.fill_rounded(track_rect, [1.0, 1.0, 1.0, track_alpha], bar_w / 2.0);
 
-                // Thumb: more opaque when scrolled away from live position
-                let scroll_alpha = if self.scrollback_offset > 0 { 0.28 } else { 0.15 };
+                // Thumb: boost opacity on proximity and when scrolled
+                let base_alpha = if self.scrollback_offset > 0 { 0.28 } else { 0.15 };
+                let scroll_alpha = base_alpha + 0.20 * hover_t;
                 let thumb_color = [1.0, 1.0, 1.0, scroll_alpha];
-                let border_alpha = if self.scrollback_offset > 0 { 0.12 } else { 0.08 };
+                let base_border = if self.scrollback_offset > 0 { 0.12 } else { 0.08 };
+                let border_alpha = base_border + 0.10 * hover_t;
                 let thumb_border = [1.0, 1.0, 1.0, border_alpha];
                 ui_builder.fill_rounded_bordered(
                     thumb_rect, thumb_color, bar_w / 2.0,
@@ -778,6 +806,18 @@ impl App {
                     }
                 }
             }
+
+            // Unfocused window dimming overlay — drawn last, on top of everything.
+            // Professional apps (VS Code, Zed) subtly desaturate/dim when inactive.
+            if !self.window_focused {
+                if let Some(quad_pipe) = &mut self.quad_pipeline {
+                    let dim_overlay = ui::quad_renderer::quad_vertices(
+                        0.0, 0.0, vw, vh, vw, vh,
+                        [0.0, 0.0, 0.0, 0.15], // subtle 15% dark overlay
+                    );
+                    quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &dim_overlay);
+                }
+            }
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
@@ -892,6 +932,10 @@ impl ApplicationHandler<AsyncEvent> for App {
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
+            }
+            WindowEvent::Focused(focused) => {
+                self.window_focused = focused;
+                if let Some(w) = &self.window { w.request_redraw(); }
             }
             WindowEvent::RedrawRequested => {
                 self.render();
