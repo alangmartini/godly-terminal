@@ -38,6 +38,10 @@ demo-screenshots/
 # Personal scripts (tunnel configs, credentials)
 scripts/*.local.ps1
 
+# Debug screenshots and logs
+screenshot*.png
+shell*.log
+
 # Scratch / personal notes
 TODO.md
 commands.txt
