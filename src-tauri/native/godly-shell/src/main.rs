@@ -969,6 +969,30 @@ impl App {
                         let sel_border = [accent[0], accent[1], accent[2], 0.10];
 
                         let mut sel_verts = Vec::new();
+
+                        // Selection bounding-box glow: soft Gaussian emission around the
+                        // entire selection area.  Creates a subtle "spotlight" effect that
+                        // draws the eye to selected content — matching the accent glow
+                        // language used on active tabs and sidebar indicators.
+                        {
+                            let first_row_px = (sel_start.row as f32 * ch).round() + layout.terminal_content.y;
+                            let last_row_py = ((sel_end.row + 1) as f32 * ch).round() + layout.terminal_content.y;
+                            let bbox_x = layout.terminal_content.x;
+                            let bbox_w = layout.terminal_content.width;
+                            let bbox_h = last_row_py - first_row_px;
+                            if bbox_h > 0.0 {
+                                sel_verts.extend_from_slice(
+                                    &ui::quad_renderer::quad_vertices_sdf(
+                                        bbox_x, first_row_px, bbox_w, bbox_h,
+                                        vw, vh,
+                                        [accent[0], accent[1], accent[2], 0.04],
+                                        [radius; 4], 0.0, [0.0; 4],
+                                        6.0 * self.scale_factor,
+                                    ),
+                                );
+                            }
+                        }
+
                         for row in sel_start.row..=sel_end.row {
                             if row >= grid.rows.len() { break; }
 
@@ -1041,11 +1065,9 @@ impl App {
                             if cpx < clip_r && cpy < clip_b {
                                 use godly_protocol::types::CursorShape;
                                 let blink_t = self.cursor_blink_anim.value();
-                                let cursor_color = [1.0f32, 1.0, 1.0, 0.85 * blink_t];
-                                // Cursor glow matches active tab accent for visual coherence
                                 let accent = active_accent;
-                                let glow_color = [accent[0], accent[1], accent[2], 0.14 * blink_t];
                                 let radius = 2.0 * self.scale_factor;
+                                let focused = self.window_focused;
 
                                 let (cx, cy, cwidth, cheight) = match grid.cursor.cursor_style {
                                     CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
@@ -1061,24 +1083,91 @@ impl App {
                                     }
                                 };
 
+                                let is_block = matches!(grid.cursor.cursor_style,
+                                    CursorShape::BlinkBlock | CursorShape::SteadyBlock);
+
                                 let mut cursor_verts = Vec::new();
-                                // Glow behind cursor (expanded soft shadow)
-                                cursor_verts.extend_from_slice(
-                                    &ui::quad_renderer::quad_vertices_sdf(
-                                        cx, cy, cwidth, cheight,
-                                        vw, vh, glow_color,
-                                        [radius; 4], 0.0, [0.0; 4],
-                                        4.0 * self.scale_factor,
-                                    ),
-                                );
-                                // Cursor body (rounded rectangle)
-                                cursor_verts.extend_from_slice(
-                                    &ui::quad_renderer::quad_vertices_sdf(
-                                        cx, cy, cwidth, cheight,
-                                        vw, vh, cursor_color,
-                                        [radius; 4], 0.0, [0.0; 4], 0.0,
-                                    ),
-                                );
+
+                                if focused {
+                                    // Focused cursor: accent-tinted body with gradient for 3D depth.
+                                    // Blends white toward the active tab accent for visual coherence
+                                    // with selection highlights, glow, and tab chrome.
+                                    let accent_blend = 0.15;
+                                    let base_r = 1.0 * (1.0 - accent_blend) + accent[0] * accent_blend;
+                                    let base_g = 1.0 * (1.0 - accent_blend) + accent[1] * accent_blend;
+                                    let base_b = 1.0 * (1.0 - accent_blend) + accent[2] * accent_blend;
+                                    let base_a = 0.85 * blink_t;
+
+                                    // Glow behind cursor (accent-colored Gaussian emission)
+                                    let glow_color = [accent[0], accent[1], accent[2], 0.14 * blink_t];
+                                    cursor_verts.extend_from_slice(
+                                        &ui::quad_renderer::quad_vertices_sdf(
+                                            cx, cy, cwidth, cheight,
+                                            vw, vh, glow_color,
+                                            [radius; 4], 0.0, [0.0; 4],
+                                            4.0 * self.scale_factor,
+                                        ),
+                                    );
+
+                                    // Cursor body: SDF gradient (brighter top → slightly darker bottom)
+                                    // for consistent 3D depth with the rest of the UI chrome.
+                                    let cursor_top = [base_r, base_g, base_b, base_a];
+                                    let cursor_bot = [base_r * 0.92, base_g * 0.92, base_b * 0.92, base_a];
+                                    cursor_verts.extend_from_slice(
+                                        &ui::quad_renderer::quad_vertices_sdf_gradient(
+                                            cx, cy, cwidth, cheight,
+                                            vw, vh, cursor_top, cursor_bot,
+                                            [radius; 4], 0.0, [0.0; 4],
+                                        ),
+                                    );
+                                } else if is_block {
+                                    // Unfocused block cursor: hollow outline (standard terminal behavior).
+                                    // Professional terminals (iTerm2, VS Code, Windows Terminal, kitty)
+                                    // switch to an outline when the window loses focus — signals
+                                    // "this pane isn't receiving input" without hiding the cursor.
+                                    let outline_w = (1.0 * self.scale_factor).max(1.0);
+                                    let outline_color = [
+                                        0.7 * (1.0 - 0.15) + accent[0] * 0.15,
+                                        0.7 * (1.0 - 0.15) + accent[1] * 0.15,
+                                        0.7 * (1.0 - 0.15) + accent[2] * 0.15,
+                                        0.5 * blink_t,
+                                    ];
+                                    // Faint glow (dimmer than focused)
+                                    let glow_color = [accent[0], accent[1], accent[2], 0.06 * blink_t];
+                                    cursor_verts.extend_from_slice(
+                                        &ui::quad_renderer::quad_vertices_sdf(
+                                            cx, cy, cwidth, cheight,
+                                            vw, vh, glow_color,
+                                            [radius; 4], 0.0, [0.0; 4],
+                                            3.0 * self.scale_factor,
+                                        ),
+                                    );
+                                    // Hollow outline (transparent fill + border)
+                                    cursor_verts.extend_from_slice(
+                                        &ui::quad_renderer::quad_vertices_sdf(
+                                            cx, cy, cwidth, cheight,
+                                            vw, vh, [0.0, 0.0, 0.0, 0.0],
+                                            [radius; 4], outline_w, outline_color, 0.0,
+                                        ),
+                                    );
+                                } else {
+                                    // Unfocused bar/underline cursor: dimmed solid (thin enough
+                                    // that outline wouldn't be visible, so just reduce opacity).
+                                    let dim_color = [
+                                        0.7 * (1.0 - 0.15) + accent[0] * 0.15,
+                                        0.7 * (1.0 - 0.15) + accent[1] * 0.15,
+                                        0.7 * (1.0 - 0.15) + accent[2] * 0.15,
+                                        0.45 * blink_t,
+                                    ];
+                                    cursor_verts.extend_from_slice(
+                                        &ui::quad_renderer::quad_vertices_sdf(
+                                            cx, cy, cwidth, cheight,
+                                            vw, vh, dim_color,
+                                            [radius; 4], 0.0, [0.0; 4], 0.0,
+                                        ),
+                                    );
+                                }
+
                                 quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &cursor_verts);
                             }
                         }
