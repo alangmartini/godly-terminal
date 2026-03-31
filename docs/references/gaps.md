@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 27)
+Last updated: 2026-03-30 (Iteration 28)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -36,6 +36,10 @@ Last updated: 2026-03-30 (Iteration 27)
 | Welcome screen subtitle | Done | "GPU-accelerated terminal" subtitle below branded header (iteration 27) |
 | Loading spinner animation | Done | Spinning arc indicator dots next to status message (iteration 27) |
 | Status bar text contrast | Done | Content pills use FG_SECONDARY base instead of FG_MUTED for readability (iteration 27) |
+| Chrome compaction | Done | Tab bar 33px, status bar 25px, sidebar header 30px, settings row 28px (iteration 28) |
+| Sidebar-tab visual continuity | Done | Session accent dots match tab bar color cycle (blue, green, peach, mauve, red) (iteration 28) |
+| Green "New Session" icon | Done | Plus icon uses accent green for visual pop (iteration 28) |
+| Status bar content inner shadow | Done | Recessed shadow on content section for depth (iteration 28) |
 
 ## Remaining Gaps (Priority Order)
 
@@ -44,12 +48,11 @@ Last updated: 2026-03-30 (Iteration 27)
 2. **Proportional sidebar labels** - Session names use monospace font; references use proportional sans-serif for UI labels
 
 ### Medium Impact
-3. **Tab bar could be even more compact** - Zed's tab bar is ~30-32px; ours is 36px
-4. **Multi-pane terminal layout** - opensessions reference shows 2-3 panes side by side; requires daemon
+3. **Multi-pane terminal layout** - opensessions reference shows 2-3 panes side by side; requires daemon
 
 ### Low Impact
-5. **Context menu backdrop blur** - Professional apps use backdrop blur for floating menus
-6. **Font weight differentiation** - Active tab labels could use medium/semibold weight
+4. **Context menu backdrop blur** - Professional apps use backdrop blur for floating menus
+5. **Font weight differentiation** - Active tab labels could use medium/semibold weight
 
 ## Active Theme Color Notes (Zed One Dark)
 - Chrome/sidebar: `#1b1e24` (BG_DARK)

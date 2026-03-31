@@ -4,12 +4,21 @@ use super::anim::{self, Anim, AnimVec, lerp_color, lerp};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
-const HEADER_HEIGHT: f32 = 34.0;
+const HEADER_HEIGHT: f32 = 30.0;
 const ITEM_HEIGHT: f32 = 50.0;
 const ITEM_HEIGHT_COMPACT: f32 = 34.0;
 const ITEM_PADDING_H: f32 = 14.0;
 const ACTIVE_INDICATOR_W: f32 = 3.0;
 const BOTTOM_PANEL_HEIGHT: f32 = 160.0;
+
+/// Accent colors for each session position (same cycle as tab bar).
+const SESSION_ACCENTS: &[[f32; 4]] = &[
+    colors::ACCENT_BLUE,
+    colors::ACCENT_GREEN,
+    colors::ACCENT_PEACH,
+    colors::ACCENT_MAUVE,
+    colors::ACCENT_RED,
+];
 
 pub struct SidebarItem {
     pub id: String,
@@ -178,7 +187,7 @@ impl Sidebar {
 
     fn settings_rect(&self, sidebar: Rect, scale: f32) -> Rect {
         let pad_h = (ITEM_PADDING_H * scale).round();
-        let settings_h = (32.0 * scale).round();
+        let settings_h = (28.0 * scale).round();
         Rect {
             x: sidebar.x + pad_h,
             y: sidebar.bottom() - settings_h,
@@ -290,10 +299,11 @@ impl Sidebar {
         ui.hgroove_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
                  sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(8.0));
 
-        // Layout: [pad][num][gap][name...][gap][branch][pad]
-        // Two-line items: line 1 = number + name + branch, line 2 = description
+        // Layout: [pad][dot][gap][num][gap][name...][gap][branch][pad]
+        // Two-line items: line 1 = dot + number + name + branch, line 2 = description
         let num_x = sidebar.x + pad_h;
-        let name_x = num_x + cw * 2.0;
+        let dot_space = s(5.0) + s(4.0); // dot width + gap
+        let name_x = num_x + dot_space + cw * 2.0;
         let branch_max_chars: usize = 6;
         let branch_reserve = cw * (branch_max_chars as f32) + pad_h + cw;
         let name_max_w = sidebar.width - (name_x - sidebar.x) - branch_reserve;
@@ -414,10 +424,38 @@ impl Sidebar {
                 colors::BG_ACTIVE,
                 active_t,
             );
+
+            // Session accent dot — small colored circle matching the tab accent
+            // color cycle. Creates visual continuity between tab bar badges and
+            // the sidebar session list.
+            let session_accent = SESSION_ACCENTS[i % SESSION_ACCENTS.len()];
+            let dot_sz = s(5.0);
+            let dot_x = num_x;
+            let dot_y = text_y + (ch - dot_sz) / 2.0;
+            let dot_rect = Rect {
+                x: dot_x, y: dot_y, width: dot_sz, height: dot_sz,
+            };
+            let dot_alpha = lerp(0.5, 1.0, active_t.max(hover_t * 0.6));
+            let dot_color = [session_accent[0], session_accent[1], session_accent[2], dot_alpha];
+            ui.fill_rounded(dot_rect, dot_color, dot_sz / 2.0);
+            // Subtle glow on active session dot
+            if active_t > 0.005 {
+                let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                let glow_rect = Rect {
+                    x: dot_x - s(2.0), y: dot_y - s(2.0),
+                    width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+                };
+                ui.fill_shadow(glow_rect,
+                    [session_accent[0], session_accent[1], session_accent[2], 0.15 * breath * active_t],
+                    dot_sz / 2.0 + s(2.0), s(4.0));
+            }
+
+            // Session number (shifted right to make room for accent dot)
+            let num_x_shifted = num_x + dot_sz + s(4.0);
             let num_str = format!("{}", item.number);
             let inactive_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t);
-            let fg = lerp_color(inactive_fg, colors::ACCENT_BLUE, active_t);
-            ui.text(text, &num_str, num_x, text_y, fg, item_bg);
+            let fg = lerp_color(inactive_fg, session_accent, active_t);
+            ui.text(text, &num_str, num_x_shifted, text_y, fg, item_bg);
 
             // Session name (truncated to fit) — text brightens on hover and active
             let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.4);
@@ -501,14 +539,19 @@ impl Sidebar {
             let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
             ui.stroke_rounded(new_rect, s(4.0), 0.5, rest_border);
         }
-        // Plus icon + label
+        // Plus icon + label — icon uses accent green for visual pop
         let icon_t = (1.2 * text.scale).max(1.0);
         let icon_rect = Rect {
             x: new_rect.x, y: new_rect.y,
             width: s(24.0), height: new_rect.height,
         };
+        let icon_fg = lerp_color(
+            [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.5],
+            colors::ACCENT_GREEN,
+            new_t,
+        );
+        ui.icon_plus(icon_rect, icon_t, s(4.0), icon_fg);
         let new_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
-        ui.icon_plus(icon_rect, icon_t, s(4.0), new_fg);
         let new_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
         ui.text(text, "New Session",
                 new_rect.x + s(22.0),
@@ -521,7 +564,7 @@ impl Sidebar {
             let header_section_h = s(28.0);
             let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(8.0);
             // Anchor agent panel above the bottom settings row
-            let settings_row_h = s(32.0);
+            let settings_row_h = s(28.0);
             let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
             let panel = Rect {
                 x: sidebar.x,
@@ -734,7 +777,7 @@ impl Sidebar {
 
         // Bottom settings row — gear icon + "Settings" label (anchored to very bottom, animated hover)
         {
-            let settings_h = s(32.0);
+            let settings_h = s(28.0);
             let settings_y = sidebar.bottom() - settings_h;
             let settings_t = self.settings_anim.value();
             // Top separator — groove for consistency
@@ -798,7 +841,7 @@ impl Sidebar {
                 if !self.agents.is_empty() {
                     let agent_item_h = (44.0 * scale).round();
                     let header_section_h = (28.0 * scale).round();
-                    let settings_row_h = (32.0 * scale).round();
+                    let settings_row_h = (28.0 * scale).round();
                     let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + (8.0 * scale).round();
                     let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
                     let mut ay = panel_y + header_section_h;

@@ -2,8 +2,8 @@
 
 use super::widget::Rect;
 
-pub const TAB_BAR_HEIGHT: f32 = 36.0;
-pub const STATUS_BAR_HEIGHT: f32 = 28.0;
+pub const TAB_BAR_HEIGHT: f32 = 33.0;
+pub const STATUS_BAR_HEIGHT: f32 = 25.0;
 pub const SIDEBAR_WIDTH: f32 = 220.0;
 pub const TERMINAL_PAD_LEFT: f32 = 8.0;
 pub const TERMINAL_PAD_TOP: f32 = 6.0;

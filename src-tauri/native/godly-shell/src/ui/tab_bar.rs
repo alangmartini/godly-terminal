@@ -9,7 +9,7 @@ const TAB_MAX_WIDTH: f32 = 170.0;
 const TAB_MIN_WIDTH: f32 = 90.0;
 const TAB_GAP: f32 = 1.0;
 const TAB_MARGIN_LEFT: f32 = 6.0;
-const TAB_INSET_V: f32 = 4.0;
+const TAB_INSET_V: f32 = 3.0;
 const BUTTON_WIDTH: f32 = 46.0;
 const ICON_LINE_T: f32 = 1.2;
 

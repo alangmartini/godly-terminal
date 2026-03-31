@@ -837,6 +837,64 @@ Status bar text is noticeably more readable without being distractingly bright.
 - Loading animation: ✓ Subtle spinning indicator for connection state
 - Overall polish: ✓ More complete and professional empty state
 
+**Remaining gaps vs reference (iteration 27)**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
+
+## Iteration 28 — Chrome Compaction & Sidebar-Tab Visual Continuity
+
+**Goal**: Reduce chrome weight to give more space to content, and create visual
+continuity between the tab bar's colored badges and the sidebar session list.
+
+**Changes made**:
+
+1. **Chrome compaction** (`ui/layout.rs`, `ui/tab_bar.rs`, `ui/sidebar.rs`):
+   - Tab bar height: 36px → 33px (closer to Zed's ~30-32px)
+   - Status bar height: 28px → 25px (minimal status bar)
+   - Sidebar header height: 34px → 30px
+   - Settings row height: 32px → 28px
+   - Tab vertical inset: 4px → 3px (tabs start higher in the bar)
+
+2. **Sidebar session accent dots** (`ui/sidebar.rs`): Each session entry now
+   shows a small colored circle (5px) matching the tab accent color cycle
+   (blue, green, peach, mauve, red). Active sessions get a brighter dot with
+   breathing glow shadow. This creates a direct visual link between the tab
+   bar's numbered circle badges and the sidebar session list, making it
+   immediately clear which session corresponds to which tab.
+
+3. **Sidebar "New Session" green icon** (`ui/sidebar.rs`): The plus icon on
+   the "New Session" button now uses accent green (50% opacity at rest,
+   full on hover) for visual pop, distinguishing it from regular sessions.
+
+4. **Status bar inner shadow** (`ui/status_bar.rs`): Added a recessed inner
+   shadow on the content section of the status bar for additional depth.
+
+**Technical details**:
+- Session accent colors defined as `SESSION_ACCENTS` constant array, same
+  cycle as `TAB_ACCENTS` in `tab_bar.rs`. Session number i uses
+  `SESSION_ACCENTS[i % 5]`.
+- Accent dot glow uses the sidebar's shared `glow_phase` for synchronized
+  breathing with the active indicator bar.
+- Layout shifts: number text shifted right by `dot_sz + s(4.0)` to make
+  room for the accent dot. Name x-position recalculated to account for the
+  wider prefix.
+
+**Result**: UI chrome is significantly more compact. The tab bar, sidebar,
+and status bar all take up fewer pixels, giving ~20 more logical pixels
+to the terminal content area at 1.5× DPI. The colored session dots create
+immediate visual association between tabs and sidebar entries, improving
+navigation clarity. The "New Session" button is visually distinct from
+regular sessions.
+
+**Visual comparison with reference**:
+- Tab bar compactness: ✓ 33px approaches Zed's ~30-32px density
+- Status bar slimness: ✓ 25px is appropriately minimal
+- Sidebar-tab continuity: ✓ Color dots match tab badge colors
+- Settings compaction: ✓ 28px settings row is tight but readable
+- Overall chrome weight: ✓ More content area, less visual overhead
+- New Session distinction: ✓ Green icon clearly identifies the add action
+
 **Remaining gaps vs reference**:
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished

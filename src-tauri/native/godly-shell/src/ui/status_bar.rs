@@ -107,6 +107,17 @@ impl StatusBar {
             ui.fill_inner_shadow(sidebar_status, [0.0, 0.0, 0.0, 0.04], 0.0, s(4.0));
         }
 
+        // Recessed inner shadow on the content section for depth
+        {
+            let content_section = Rect {
+                x: self.sidebar_width,
+                y: bar.y,
+                width: bar.width - self.sidebar_width,
+                height: bar.height,
+            };
+            ui.fill_inner_shadow(content_section, [0.0, 0.0, 0.0, 0.04], 0.0, s(3.0));
+        }
+
         // Top separator — embossed groove for professional panel junction.
         ui.hgroove(bar.x, bar.y, bar.width, colors::BORDER, [1.0, 1.0, 1.0, 0.04]);
         // Top inner bevel highlight (matches tab bar for visual consistency).
