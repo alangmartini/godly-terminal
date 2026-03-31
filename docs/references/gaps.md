@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 44)
+Last updated: 2026-03-31 (Iteration 45)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -111,6 +111,10 @@ Last updated: 2026-03-31 (Iteration 44)
 | Scrollbar near-invisible | Done | Track and thumb at minimal opacity at rest, fade in on hover (iteration 44) |
 | Tab bar border softening | Done | Bottom separator at 50% opacity, sidebar section uses thin line (iteration 44) |
 | Surface effect reduction | Done | Tab bar bevel and glass sheen reduced for calmer aesthetic (iteration 44) |
+| Status bar metadata dividers | Done | Vertical pipe separators between UTF-8, LF, Ln/Col, dimensions — matches VS Code/Zed (iteration 45) |
+| Dynamic bottom accent stripe | Done | Bottom window edge accent follows active tab color (was hardcoded blue), matches top stripe (iteration 45) |
+| Breadcrumb text readability | Done | Path segment text contrast boosted; last segment brighter; chevrons more visible (iteration 45) |
+| Breadcrumb gradient background | Done | Subtle top-down gradient (darker near tab bar → lighter near content) for smooth transition (iteration 45) |
 
 ## Remaining Gaps (Priority Order)
 

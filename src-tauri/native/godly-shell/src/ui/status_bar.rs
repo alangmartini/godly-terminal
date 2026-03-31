@@ -78,7 +78,7 @@ impl StatusBar {
         a
     }
 
-    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer, glow_phase: f32) {
+    pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer, glow_phase: f32, active_accent: [f32; 4]) {
         let s = |v: f32| text.s(v);
         let cw = text.cell_width;
         let ch = text.cell_height;
@@ -131,10 +131,11 @@ impl StatusBar {
         ui.hline_fade(bar.x, bar.y, bar.width, 1.0,
             [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35], s(4.0));
         // Bottom accent stripe — 1px accent-tinted line at window bottom edge.
-        // Bookends with the top accent stripe for visual frame cohesion.
-        let accent = colors::ACCENT_BLUE;
+        // Uses the active tab's accent color to match the top accent stripe,
+        // creating a cohesive visual frame around the entire window.
+        let breath = 0.92 + 0.08 * glow_phase.sin();
         ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
-            [accent[0] * 0.5, accent[1] * 0.5, accent[2] * 0.5, 0.35]);
+            [active_accent[0] * 0.5, active_accent[1] * 0.5, active_accent[2] * 0.5, 0.30 * breath]);
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
 
@@ -323,35 +324,48 @@ impl StatusBar {
             ui.text_ui(text, hints_label, hints_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
         }
 
-        // Encoding label — simple muted text (no pill)
+        // Metadata labels with vertical divider separators (matches VS Code/Zed)
+        let meta_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55];
+        let divider_fg = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25];
+        let divider_h = ch * 0.6;
+        let divider_y = bar.y + (bar.height - divider_h) / 2.0;
+        let meta_gap = s(8.0); // gap on each side of a divider
+
+        // Encoding label
         let enc_label = "UTF-8";
         let enc_w = text.text_width_ui(enc_label);
         let enc_x = hints_pill_x - enc_w - s(14.0);
-        ui.text_ui(text, enc_label, enc_x, y_center,
-            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
-            content_bg);
+        ui.text_ui(text, enc_label, enc_x, y_center, meta_fg, content_bg);
 
-        // Line ending label — simple muted text
+        // Divider between encoding and line ending
+        let div1_x = enc_x - meta_gap;
+        ui.vline(div1_x, divider_y, divider_h, 1.0, divider_fg);
+
+        // Line ending label
         let le_label = "LF";
         let le_w = text.text_width_ui(le_label);
-        let le_x = enc_x - le_w - s(10.0);
-        ui.text_ui(text, le_label, le_x, y_center,
-            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
-            content_bg);
+        let le_x = div1_x - meta_gap - le_w;
+        ui.text_ui(text, le_label, le_x, y_center, meta_fg, content_bg);
+
+        // Divider between line ending and cursor position
+        let div2_x = le_x - meta_gap;
+        ui.vline(div2_x, divider_y, divider_h, 1.0, divider_fg);
 
         // Cursor position label — "Ln 1, Col 1" style (matches VS Code/Zed)
         let cursor_label = format!("Ln {}, Col {}", self.cursor_line, self.cursor_col);
         let cursor_w = text.text_width_ui(&cursor_label);
-        let cursor_x = le_x - cursor_w - s(10.0);
-        ui.text_ui(text, &cursor_label, cursor_x, y_center,
-            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
-            content_bg);
+        let cursor_x = div2_x - meta_gap - cursor_w;
+        ui.text_ui(text, &cursor_label, cursor_x, y_center, meta_fg, content_bg);
+
+        // Divider between cursor position and dimensions
+        let div3_x = cursor_x - meta_gap;
+        ui.vline(div3_x, divider_y, divider_h, 1.0, divider_fg);
 
         // Terminal dimensions pill
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
         let dims_text_w = text.text_width_ui(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
-        let dims_pill_x = cursor_x - dims_pill_w - s(8.0);
+        let dims_pill_x = div3_x - meta_gap - dims_pill_w;
         let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
         {
             let ht = self.dims_anim.value();

@@ -1287,7 +1287,7 @@ impl App {
         self.tab_bar.build(&mut ui_builder, layout.tab_bar, &ui_text_handle);
         self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
         self.status_bar.sidebar_width = layout.sidebar.width;
-        self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle, self.tab_bar.glow_phase());
+        self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle, self.tab_bar.glow_phase(), self.active_accent());
 
         // Breadcrumb/path bar — thin bar between tab bar and content showing
         // the current working directory as segmented path with chevron separators.
@@ -1296,19 +1296,26 @@ impl App {
             let s = |v: f32| ui_text_handle.s(v);
             let ch = ui_text_handle.cell_height;
 
-            // Background: slightly lighter than content for subtle visual separation
+            // Background: subtle gradient — slightly darker at top (near tab bar)
+            // fading to content-adjacent tone at bottom for smooth transition.
+            let bc_bg_top = [
+                ui::builder::colors::BG_BASE[0] * 0.93,
+                ui::builder::colors::BG_BASE[1] * 0.93,
+                ui::builder::colors::BG_BASE[2] * 0.93,
+                1.0,
+            ];
             let bc_bg = [
                 ui::builder::colors::BG_BASE[0] * 0.96,
                 ui::builder::colors::BG_BASE[1] * 0.96,
                 ui::builder::colors::BG_BASE[2] * 0.96,
                 1.0,
             ];
-            ui_builder.fill(*bc, bc_bg);
+            ui_builder.fill_gradient(*bc, bc_bg_top, bc_bg);
 
-            // Bottom separator — very subtle groove
+            // Bottom separator — thin line for content area boundary
             ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
                 [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.3]);
+                 ui::builder::colors::BORDER[2], 0.25]);
             // Left inner shadow for sidebar-cast depth
             ui_builder.fill_gradient_h(
                 ui::widget::Rect { x: bc.x, y: bc.y, width: s(6.0), height: bc.height },
@@ -1344,10 +1351,19 @@ impl App {
                     (false, all_segments.as_slice())
                 };
                 let chevron_fg = [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
-                                  ui::builder::colors::FG_MUTED[2], 0.4];
-                let segment_fg = [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
-                                  ui::builder::colors::FG_MUTED[2], 0.65];
-                let last_fg = ui::builder::colors::FG_SECONDARY;
+                                  ui::builder::colors::FG_MUTED[2], 0.50];
+                let segment_fg = [
+                    ui::builder::colors::FG_MUTED[0] * 0.5 + ui::builder::colors::FG_SECONDARY[0] * 0.5,
+                    ui::builder::colors::FG_MUTED[1] * 0.5 + ui::builder::colors::FG_SECONDARY[1] * 0.5,
+                    ui::builder::colors::FG_MUTED[2] * 0.5 + ui::builder::colors::FG_SECONDARY[2] * 0.5,
+                    0.75,
+                ];
+                let last_fg = [
+                    ui::builder::colors::FG_SECONDARY[0] * 0.7 + ui::builder::colors::FG_PRIMARY[0] * 0.3,
+                    ui::builder::colors::FG_SECONDARY[1] * 0.7 + ui::builder::colors::FG_PRIMARY[1] * 0.3,
+                    ui::builder::colors::FG_SECONDARY[2] * 0.7 + ui::builder::colors::FG_PRIMARY[2] * 0.3,
+                    0.9,
+                ];
 
                 // SDF chevron icon dimensions — matches text line height for alignment
                 let chevron_sz = ch * 0.55;

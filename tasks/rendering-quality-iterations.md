@@ -2066,3 +2066,64 @@ surfaces speak through color, not borders.
 **Remaining gaps vs reference (iteration 44)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 45 — Status bar dividers, dynamic accent, breadcrumb readability
+
+**Goal**: Polish status bar with VS Code–style vertical dividers between
+metadata labels, make the bottom accent stripe dynamic (matching active tab
+accent like the top stripe), and improve breadcrumb bar text contrast for
+better readability.
+
+**Changes made**:
+
+1. **Status bar vertical dividers** (`ui/status_bar.rs`): Added 1px vertical
+   pipe separators between the metadata text labels (UTF-8, LF, Ln/Col,
+   dimensions). Each divider is BORDER color at 25% opacity, 60% of cell
+   height, vertically centered. Gap: 8px on each side. This matches the
+   VS Code/Zed convention of visually grouped status bar items with subtle
+   dividers rather than just whitespace.
+
+2. **Dynamic bottom accent stripe** (`ui/status_bar.rs`): Changed the bottom
+   window edge accent line from hardcoded `ACCENT_BLUE` to the active tab's
+   accent color (passed as new `active_accent` parameter). Now the bottom
+   stripe color changes when switching tabs, matching the top accent stripe
+   behavior. Breathing modulation (±8%) added for consistency with other
+   accent elements. Alpha: 0.30 × breath (slightly softer than before).
+
+3. **Breadcrumb text contrast** (`main.rs`): Boosted all breadcrumb path
+   segment text colors:
+   - Chevron separators: 0.40 → 0.50 alpha (more visible)
+   - Non-last segments: pure FG_MUTED → 50/50 blend of FG_MUTED and
+     FG_SECONDARY at 0.75 alpha (significantly more readable)
+   - Last segment: FG_SECONDARY → 70/30 blend toward FG_PRIMARY at 0.90
+     alpha (current directory stands out clearly)
+
+4. **Breadcrumb gradient background** (`main.rs`): Changed breadcrumb bar
+   from flat fill (96% BG_BASE) to a subtle vertical gradient: 93% BG_BASE
+   at top → 96% BG_BASE at bottom. The darker top edge creates a smoother
+   visual transition from the tab bar chrome to the content area below.
+   Bottom separator alpha reduced (0.30 → 0.25) to complement the gradient.
+
+**Technical details**:
+- `StatusBar::build()` signature now takes `active_accent: [f32; 4]` as
+  the 5th parameter. The caller in `main.rs` passes `self.active_accent()`.
+- Divider layout chain: `hints_pill_x → enc_x → div1_x → le_x → div2_x →
+  cursor_x → div3_x → dims_pill_x`. Each element's x-position is computed
+  from its neighbor using `meta_gap` (8px scaled) spacing.
+- Breadcrumb gradient uses `fill_gradient()` with the two tones.
+
+**Result**: The status bar now has clear visual structure with dividers
+separating each metadata field. The bottom accent stripe dynamically matches
+the active tab, creating full window-frame color cohesion. The breadcrumb
+bar text is noticeably more readable, and the gradient background provides
+a smoother chrome-to-content transition.
+
+**Visual comparison with reference**:
+- Status bar structure: ✓ Dividers match VS Code/Zed status bar convention
+- Window frame cohesion: ✓ Top and bottom accent stripes match in color
+- Breadcrumb readability: ✓ Path text clearly visible at all levels
+- Chrome transitions: ✓ Gradient breadcrumb blends tab bar → content
+
+**Remaining gaps vs reference (iteration 45)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
