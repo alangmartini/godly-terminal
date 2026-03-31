@@ -455,6 +455,18 @@ impl TabBar {
                 let radius = lerp(s(3.0), s(4.0), hover_t);
                 let border_w = lerp(0.0, 0.5, hover_t) * inv_active;
                 ui.fill_rounded_top_gradient(rect, hover_top, hover_bottom, radius, border_w, hover_border);
+                // Faint accent preview line at the top of the hovered tab —
+                // previews the active tab's accent color for this position.
+                let preview_alpha = lerp(0.0, 0.35, hover_t) * inv_active;
+                let preview_bar = Rect {
+                    x: rect.x + radius + s(2.0),
+                    y: rect.y + 1.0,
+                    width: rect.width - (radius + s(2.0)) * 2.0,
+                    height: s(2.0),
+                };
+                ui.fill_rounded(preview_bar,
+                    [accent[0], accent[1], accent[2], preview_alpha],
+                    s(1.0));
             }
             if active_t < 0.005 && hover_t < 0.005 {
                 // Inactive rest state: clearly tab-shaped but receding.

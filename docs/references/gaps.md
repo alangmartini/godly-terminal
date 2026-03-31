@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 51)
+Last updated: 2026-03-31 (Iteration 52)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -144,6 +144,8 @@ Last updated: 2026-03-31 (Iteration 51)
 | Hero icon legibility | Done | Monitor/caret strokes 2.0px, stand 1.6px at 65% opacity for confident rendering at 48px (iteration 51) |
 | CTA button elevation | Done | Shadow offset 3px, blur 8px, alpha 0.32 for convincing floating button (iteration 51) |
 | Active tab warmth | Done | 8% accent tint (was 5%), border alpha 0.85× (was 0.7×) for stronger tab-content connection (iteration 51) |
+| Tab hover accent preview | Done | Faint accent-colored line at top of inactive tabs on hover, previews active state color (iteration 52) |
+| Sidebar compact timestamps | Done | Timestamps on first line for compact items, second line only for items with descriptions (iteration 52) |
 
 ## Remaining Gaps (Priority Order)
 

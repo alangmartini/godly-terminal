@@ -1434,6 +1434,52 @@ without adding any new visual elements or render passes.
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
 
+## Iteration 52 — Tab Hover Accent Preview, Sidebar Timestamp Fix
+
+**Goal**: Improve tab bar interaction feedback and fix sidebar compact
+item layout. Correct package target from iced-shell to godly-shell
+(the active native shell on the `breaking/dropping-iced` branch).
+
+**Changes made**:
+
+1. **Tab bar: inactive tab hover accent preview** (`ui/tab_bar.rs`):
+   Added a faint accent-colored line at the top of inactive tabs
+   when hovered. The line uses the tab's own accent color from the
+   cycling palette (blue, green, peach, mauve, red) at 35% alpha,
+   smoothly fading in with the hover animation. This previews what
+   the active state would look like, creating better interaction
+   feedback and visual continuity with the active tab's accent bar.
+
+2. **Sidebar: compact item timestamp positioning** (`ui/sidebar.rs`):
+   Fixed timestamp labels for compact (single-line) items. Previously,
+   timestamps always rendered at `line2_y_off` (second line position),
+   which placed them below the visible area of compact items without
+   descriptions. Now timestamps render on the first line (centered
+   vertically) for compact items and on the second line only for
+   two-line items that have an explicit description.
+
+**Technical details**:
+- Hover accent preview uses `fill_rounded` with the tab's accent
+  color at `lerp(0.0, 0.35, hover_t) * inv_active` alpha. The line
+  is inset by `radius + s(2.0)` on each side to sit within the tab's
+  rounded top corners. Uses `s(2.0)` height and `s(1.0)` corner radius.
+- Timestamp y-position now branches on `item.description.is_empty()`:
+  empty → `text_y` (first line center), non-empty → `rect.y + line2_y_off`.
+
+**Result**: Tab bar hover states now telegraph which accent color the
+tab will have when activated. Sidebar compact items show their
+timestamps inline on the first line, making the information visible
+without needing a second line.
+
+**Visual comparison with reference**:
+- Tab hover feedback: ✓ Faint accent preview matches professional tab interactions
+- Sidebar information density: ✓ Timestamps visible on compact items
+- Code correctness: ✓ Rendering targets correct package (godly-shell)
+
+**Remaining gaps vs reference (iteration 52)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
+
 ## Iteration 35 — Session Metadata, Shell Type Badges, Filled CTA Button
 
 **Goal**: Enrich sidebar sessions with shell type identification, working

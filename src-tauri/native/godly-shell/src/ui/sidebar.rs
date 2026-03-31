@@ -612,11 +612,17 @@ impl Sidebar {
                         desc_fg, item_bg);
             }
 
-            // Timestamp label (right-aligned on second line, very muted)
+            // Timestamp label — right-aligned, very muted.
+            // On two-line items (with description): second line.
+            // On compact items (no description): first line, after branch.
             if !item.timestamp.is_empty() {
                 let ts_w = text.text_width_ui(&item.timestamp);
                 let ts_x = rect.right() - pad_h - ts_w;
-                let ts_y = rect.y + line2_y_off;
+                let ts_y = if item.description.is_empty() {
+                    text_y  // first line for compact items
+                } else {
+                    rect.y + line2_y_off  // second line for two-line items
+                };
                 let ts_alpha = lerp(0.35, 0.55, hover_t.max(active_t * 0.3));
                 let ts_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], ts_alpha];
                 ui.text_ui(text, &item.timestamp, ts_x, ts_y, ts_fg, item_bg);
