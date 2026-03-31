@@ -244,7 +244,7 @@ impl Sidebar {
         // Slightly brighter than typical to be perceptible on dark themes.
         ui.hline_fade(sidebar.x + s(4.0), sidebar.y, sidebar.width - s(8.0) - 1.0, 1.0, [1.0, 1.0, 1.0, 0.04], s(12.0));
 
-        // "Sessions" header with count
+        // "Sessions" header with count badge
         let header_rect = Rect {
             x: sidebar.x,
             y: sidebar.y,
@@ -259,16 +259,31 @@ impl Sidebar {
             colors::FG_MUTED,
             colors::BG_DARK,
         );
-        // Session count (right-aligned in header)
+        // Session count badge (right-aligned, pill-shaped)
         let count_str = format!("{}", self.items.len());
         let count_w = text.text_width(&count_str);
+        let badge_pad_h = s(4.0);
+        let badge_h = ch * 0.85;
+        let badge_w = (count_w + badge_pad_h * 2.0).max(badge_h);
+        let badge_x = header_rect.right() - badge_w - pad_h;
+        let badge_y = header_rect.y + (header_h - badge_h) / 2.0;
+        let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_w, height: badge_h };
+        let badge_radius = badge_h / 2.0;
+        ui.fill_rounded(badge_rect, [
+            colors::BG_SURFACE[0], colors::BG_SURFACE[1],
+            colors::BG_SURFACE[2], 0.5,
+        ], badge_radius);
+        ui.stroke_rounded(badge_rect, badge_radius, 0.5,
+            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.2]);
+        let count_text_x = badge_x + (badge_w - count_w) / 2.0;
+        let count_text_y = badge_y + (badge_h - ch) / 2.0;
         ui.text(
             text,
             &count_str,
-            header_rect.right() - count_w - pad_h,
-            header_rect.y + text_y_off(header_h),
+            count_text_x,
+            count_text_y,
             colors::FG_MUTED,
-            colors::BG_DARK,
+            colors::BG_SURFACE,
         );
         // Header bottom separator — groove for embossed look
         ui.hgroove_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
@@ -636,11 +651,27 @@ impl Sidebar {
                         line1_y,
                         agent_name_fg, panel_bg);
 
-                // Status label (right-aligned)
+                // Status label (right-aligned, pill-shaped badge)
                 let sw = text.text_width(status_text);
+                let status_badge_pad_h = s(4.0);
+                let status_badge_h = ch * 0.85;
+                let status_badge_w = sw + status_badge_pad_h * 2.0;
+                let status_badge_x = sidebar.right() - status_badge_w - pad_h - s(6.0);
+                let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
+                let status_badge_rect = Rect {
+                    x: status_badge_x, y: status_badge_y,
+                    width: status_badge_w, height: status_badge_h,
+                };
+                let status_badge_r = status_badge_h / 2.0;
+                // Subtle tinted background for the status badge
+                let status_bg = [status_color[0], status_color[1], status_color[2], 0.12];
+                ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
+                ui.stroke_rounded(status_badge_rect, status_badge_r, 0.5,
+                    [status_color[0], status_color[1], status_color[2], 0.25]);
+                let status_text_x = status_badge_x + status_badge_pad_h;
+                let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
                 ui.text(text, status_text,
-                        sidebar.right() - sw - pad_h - 1.0,
-                        line1_y,
+                        status_text_x, status_text_y,
                         status_color, panel_bg);
 
                 // Line 2: task description (brightens on hover for readability)

@@ -347,7 +347,9 @@ impl TabBar {
         let close_btn_pad = s(8.0);
 
         // Max chars for tab title (dynamic based on effective width, reserves close button space)
-        let title_x_offset = cw * 2.0 + s(22.0);
+        // Badge is ch*0.9 wide circle at x+10, then gap before title
+        let badge_sz = ch * 0.9;
+        let title_x_offset = s(10.0) + badge_sz + s(6.0);
         let title_max_w = tab_w - title_x_offset - close_btn_sz - close_btn_pad - s(4.0);
         let title_max_chars = (title_max_w / cw).floor().max(1.0) as usize;
 
@@ -448,30 +450,41 @@ impl TabBar {
                 ui.fill_rounded_top_gradient(rect, rest_top, rest_bot, s(3.0), 0.5, rest_border);
             }
 
-            // Colored dot indicator (circle via SDF + breathing glow on active tab)
-            let dot_x = rect.x + s(10.0);
-            let dot_sz = s(5.0);
-            let dot_y = rect.y + rect.height / 2.0 - dot_sz / 2.0;
-            let dot_glow_rect = Rect {
-                x: dot_x - s(3.0), y: dot_y - s(3.0),
-                width: dot_sz + s(6.0), height: dot_sz + s(6.0),
-            };
-            let dot_glow_alpha = if active_t > 0.005 {
-                let breath = 0.85 + 0.15 * self.glow_phase.sin();
-                lerp(0.20, 0.20 * breath, active_t)
-            } else {
-                0.20
-            };
-            ui.fill_shadow(dot_glow_rect, [accent[0], accent[1], accent[2], dot_glow_alpha], dot_sz, s(6.0));
-            ui.fill_rounded(
-                Rect { x: dot_x, y: dot_y, width: dot_sz, height: dot_sz },
-                accent, dot_sz / 2.0,
-            );
-
-            // Tab number
+            // Numbered circle badge — number rendered inside a colored circle
+            // (matches opensessions reference where tabs show "1", "2", etc in colored circles)
             let num_str = format!("{}", i + 1);
-            let num_x = dot_x + dot_sz + s(5.0);
-            ui.text(text, &num_str, num_x, text_y(rect.height, rect.y), accent, bg);
+            let badge_sz = ch * 0.9; // slightly smaller than line height
+            let badge_x = rect.x + s(10.0);
+            let badge_y = rect.y + (rect.height - badge_sz) / 2.0;
+            let badge_r = badge_sz / 2.0;
+            let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_sz, height: badge_sz };
+
+            // Breathing glow (SDF shadow behind circle)
+            let glow_alpha = if active_t > 0.005 {
+                let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                lerp(0.18, 0.22 * breath, active_t)
+            } else {
+                0.14
+            };
+            let glow_rect = Rect {
+                x: badge_x - s(3.0), y: badge_y - s(3.0),
+                width: badge_sz + s(6.0), height: badge_sz + s(6.0),
+            };
+            ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], glow_alpha], badge_r + s(3.0), s(6.0));
+
+            // Circle background — gradient for 3D depth
+            let badge_top = [accent[0] * 1.15, accent[1] * 1.15, accent[2] * 1.15, accent[3]];
+            let badge_bot = [accent[0] * 0.85, accent[1] * 0.85, accent[2] * 0.85, accent[3]];
+            ui.fill_rounded_gradient(badge_rect, badge_top, badge_bot, badge_r);
+            // Subtle border for definition
+            ui.stroke_rounded(badge_rect, badge_r, 0.5,
+                [accent[0] * 0.6, accent[1] * 0.6, accent[2] * 0.6, 0.3]);
+
+            // Number text (centered in circle, dark on accent background)
+            let num_w = text.text_width(&num_str);
+            let num_x = badge_x + (badge_sz - num_w) / 2.0;
+            let num_y = badge_y + (badge_sz - ch) / 2.0;
+            ui.text(text, &num_str, num_x, num_y, [0.06, 0.06, 0.08, 1.0], accent);
 
             // Tab title (truncated to fit)
             let fg = lerp_color(
@@ -489,7 +502,7 @@ impl TabBar {
                 String::new()
             };
             if !title.is_empty() {
-                let title_x = num_x + cw + s(4.0);
+                let title_x = rect.x + title_x_offset;
                 ui.text(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
             }
 

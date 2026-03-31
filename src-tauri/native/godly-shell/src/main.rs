@@ -689,14 +689,15 @@ impl App {
             }
         }
 
-        // Empty terminal welcome state — professional centered layout with
-        // status message and keyboard shortcut hints.
+        // Empty terminal welcome state — styled welcome screen with branded
+        // header, status indicator, and keyboard shortcut cards.
         if self.current_grid.is_none() {
             let s = |v: f32| ui_text_handle.s(v);
-            let cw = ui_text_handle.cell_width;
+            let _cw = ui_text_handle.cell_width;
             let ch = ui_text_handle.cell_height;
             let tc = &layout.terminal_content;
             let bg = ui::builder::colors::BG_BASE;
+            let active_accent = self.active_accent();
 
             let status = if self.daemon.is_none() {
                 "Connecting to daemon..."
@@ -706,42 +707,189 @@ impl App {
                 "Waiting for output..."
             };
 
-            // Center block vertically at ~40% from top (golden ratio area)
-            let block_y = tc.y + tc.height * 0.35;
+            // Center block vertically at ~35% from top (golden ratio)
             let center_x = tc.x + tc.width / 2.0;
+            let block_y = tc.y + tc.height * 0.30;
 
-            // Status message (centered)
+            // --- Branded header ---
+            let title = "Godly Terminal";
+            let title_w = ui_text_handle.text_width(title);
+            let title_x = center_x - title_w / 2.0;
+            // Title text with subtle accent tint
+            let title_fg = [
+                ui::builder::colors::FG_SECONDARY[0] * 0.80 + active_accent[0] * 0.20,
+                ui::builder::colors::FG_SECONDARY[1] * 0.80 + active_accent[1] * 0.20,
+                ui::builder::colors::FG_SECONDARY[2] * 0.80 + active_accent[2] * 0.20,
+                0.7,
+            ];
+            ui_builder.text(&ui_text_handle, title, title_x, block_y, title_fg, bg);
+
+            // Accent underline below title (breathing, matches active tab)
+            let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+            let underline_w = title_w * 0.6;
+            let underline_y = block_y + ch + s(4.0);
+            let underline_h = s(1.5);
+            let underline_color = [active_accent[0], active_accent[1], active_accent[2], 0.25 * breath];
+            let underline_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect {
+                    x: center_x - underline_w / 2.0,
+                    y: underline_y,
+                    width: underline_w * 0.25,
+                    height: underline_h,
+                },
+                underline_zero, underline_color,
+            );
+            ui_builder.fill(
+                ui::widget::Rect {
+                    x: center_x - underline_w * 0.25,
+                    y: underline_y,
+                    width: underline_w * 0.5,
+                    height: underline_h,
+                },
+                underline_color,
+            );
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect {
+                    x: center_x + underline_w * 0.25,
+                    y: underline_y,
+                    width: underline_w * 0.25,
+                    height: underline_h,
+                },
+                underline_color, underline_zero,
+            );
+
+            // --- Status message ---
+            let status_y = underline_y + s(16.0);
             let status_w = ui_text_handle.text_width(status);
             ui_builder.text(&ui_text_handle, status,
-                center_x - status_w / 2.0, block_y,
+                center_x - status_w / 2.0, status_y,
                 ui::builder::colors::FG_MUTED, bg);
 
-            // Keyboard shortcut hints (below status, centered)
+            // --- Keyboard shortcut cards ---
+            // Each hint is rendered as a styled card: [key badge] description
             let hints = [
                 ("Ctrl+T", "New tab"),
                 ("Ctrl+W", "Close tab"),
                 ("Ctrl+Tab", "Next tab"),
                 ("Ctrl+,", "Settings"),
             ];
-            let hint_y_start = block_y + ch * 3.0;
-            let key_color = ui::builder::colors::FG_SECONDARY;
-            let desc_color = [
-                ui::builder::colors::FG_MUTED[0],
-                ui::builder::colors::FG_MUTED[1],
-                ui::builder::colors::FG_MUTED[2],
-                0.7,
+
+            let card_pad_h = s(8.0);
+            let card_pad_v = s(4.0);
+            let card_gap = s(6.0);
+            let key_badge_pad_h = s(5.0);
+            let key_badge_pad_v = s(2.0);
+            let key_badge_radius = s(3.0);
+            let card_radius = s(5.0);
+            let key_desc_gap = s(10.0);
+
+            // Calculate card width (all cards same width for alignment)
+            let max_key_w = hints.iter()
+                .map(|(k, _)| ui_text_handle.text_width(k))
+                .fold(0.0f32, f32::max);
+            let max_desc_w = hints.iter()
+                .map(|(_, d)| ui_text_handle.text_width(d))
+                .fold(0.0f32, f32::max);
+            let card_inner_w = (max_key_w + key_badge_pad_h * 2.0) + key_desc_gap + max_desc_w;
+            let card_w = card_inner_w + card_pad_h * 2.0;
+            let card_h = ch + card_pad_v * 2.0;
+
+            let cards_start_y = status_y + ch + s(20.0);
+            let card_x = center_x - card_w / 2.0;
+
+            // Card container — subtle rounded backdrop behind all cards
+            let container_pad = s(10.0);
+            let container_rect = ui::widget::Rect {
+                x: card_x - container_pad,
+                y: cards_start_y - container_pad,
+                width: card_w + container_pad * 2.0,
+                height: hints.len() as f32 * (card_h + card_gap) - card_gap + container_pad * 2.0,
+            };
+            let container_bg = [
+                ui::builder::colors::BG_DARK[0],
+                ui::builder::colors::BG_DARK[1],
+                ui::builder::colors::BG_DARK[2],
+                0.3,
             ];
+            ui_builder.fill_rounded(container_rect, container_bg, s(8.0));
+            ui_builder.stroke_rounded(container_rect, s(8.0), 0.5,
+                [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
+                 ui::builder::colors::BORDER[2], 0.2]);
+
             for (i, (key, desc)) in hints.iter().enumerate() {
-                let y = hint_y_start + i as f32 * (ch + s(6.0));
-                let line = format!("{}  {}", key, desc);
-                let line_w = ui_text_handle.text_width(&line);
-                let lx = center_x - line_w / 2.0;
+                let y = cards_start_y + i as f32 * (card_h + card_gap);
+
+                // Card background (subtle gradient)
+                let card_rect = ui::widget::Rect {
+                    x: card_x, y, width: card_w, height: card_h,
+                };
+                let card_top = [
+                    ui::builder::colors::BG_SURFACE[0] * 0.6,
+                    ui::builder::colors::BG_SURFACE[1] * 0.6,
+                    ui::builder::colors::BG_SURFACE[2] * 0.6,
+                    0.4,
+                ];
+                let card_bot = [
+                    ui::builder::colors::BG_SURFACE[0] * 0.5,
+                    ui::builder::colors::BG_SURFACE[1] * 0.5,
+                    ui::builder::colors::BG_SURFACE[2] * 0.5,
+                    0.35,
+                ];
+                ui_builder.fill_rounded_gradient(card_rect, card_top, card_bot, card_radius);
+                ui_builder.stroke_rounded(card_rect, card_radius, 0.5,
+                    [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
+                     ui::builder::colors::BORDER[2], 0.15]);
+
+                // Key badge (darker inset pill)
                 let key_w = ui_text_handle.text_width(key);
-                // Key in brighter color, description in muted
-                ui_builder.text(&ui_text_handle, key, lx, y, key_color, bg);
-                let sep = "  ";
-                let sep_w = ui_text_handle.text_width(sep);
-                ui_builder.text(&ui_text_handle, desc, lx + key_w + sep_w, y, desc_color, bg);
+                let badge_w = key_w + key_badge_pad_h * 2.0;
+                let badge_h = ch + key_badge_pad_v * 2.0;
+                let badge_x = card_x + card_pad_h;
+                let badge_y = y + (card_h - badge_h) / 2.0;
+                let badge_rect = ui::widget::Rect {
+                    x: badge_x, y: badge_y, width: badge_w, height: badge_h,
+                };
+                // Key badge: darker background with subtle border (like a physical keycap)
+                let badge_bg_top = [
+                    ui::builder::colors::BG_DARK[0] * 1.1,
+                    ui::builder::colors::BG_DARK[1] * 1.1,
+                    ui::builder::colors::BG_DARK[2] * 1.1,
+                    0.9,
+                ];
+                let badge_bg_bot = [
+                    ui::builder::colors::BG_DARK[0] * 0.9,
+                    ui::builder::colors::BG_DARK[1] * 0.9,
+                    ui::builder::colors::BG_DARK[2] * 0.9,
+                    0.9,
+                ];
+                ui_builder.fill_rounded_gradient(badge_rect, badge_bg_top, badge_bg_bot, key_badge_radius);
+                // Top highlight (keycap bevel)
+                ui_builder.hline_fade(
+                    badge_x + key_badge_radius, badge_y + 1.0,
+                    badge_w - key_badge_radius * 2.0, 1.0,
+                    [1.0, 1.0, 1.0, 0.08], s(4.0),
+                );
+                // Bottom shadow (keycap depth)
+                ui_builder.hline_fade(
+                    badge_x + key_badge_radius, badge_y + badge_h - 1.0,
+                    badge_w - key_badge_radius * 2.0, 1.0,
+                    [0.0, 0.0, 0.0, 0.15], s(4.0),
+                );
+                ui_builder.stroke_rounded(badge_rect, key_badge_radius, 0.5,
+                    [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
+                     ui::builder::colors::BORDER[2], 0.4]);
+
+                // Key text (centered in badge)
+                let key_text_x = badge_x + key_badge_pad_h;
+                let key_text_y = y + (card_h - ch) / 2.0;
+                ui_builder.text(&ui_text_handle, key, key_text_x, key_text_y,
+                    ui::builder::colors::FG_PRIMARY, ui::builder::colors::BG_DARK);
+
+                // Description text (after badge)
+                let desc_x = badge_x + badge_w + key_desc_gap;
+                ui_builder.text(&ui_text_handle, desc, desc_x, key_text_y,
+                    ui::builder::colors::FG_MUTED, bg);
             }
         }
 
@@ -965,11 +1113,11 @@ impl App {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // Catppuccin Mocha Crust (#11111b) in linear space
+                        // One Dark BG_DARK (#1b1e24) in linear space
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.00338,
-                            g: 0.00338,
-                            b: 0.00815,
+                            r: 0.0094,
+                            g: 0.0118,
+                            b: 0.0170,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

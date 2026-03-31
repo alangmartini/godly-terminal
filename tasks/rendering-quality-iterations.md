@@ -650,3 +650,77 @@ rendering, animations, and depth cues work unchanged with the new palette.
 - Sidebar labels use monospace; proportional sans-serif would look more polished
 - Font weight differentiation (active vs inactive tabs)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 25 — Polished Welcome State, Tab Numbered Badges, UI Badges
+
+**Goal**: Professional welcome screen with styled shortcut cards, tab indicators
+matching the opensessions reference (numbered circles), and pill-shaped badges
+throughout the sidebar.
+
+**Changes made**:
+
+1. **Empty terminal welcome state** (`main.rs`): Complete redesign:
+   - "Godly Terminal" branded header with accent-tinted text color
+   - Breathing accent underline below header (gradient fade at edges)
+   - Status message ("Starting session...", "Connecting to daemon...", etc.)
+   - Four keyboard shortcut hints rendered as styled cards inside a
+     rounded container backdrop
+   - Each card has a keycap-style key badge (gradient, top bevel highlight,
+     bottom shadow, border) with the key text inside
+   - Description text after each badge in muted color
+   - Visual hierarchy: brand → status → shortcut cards
+
+2. **Tab numbered circle badges** (`tab_bar.rs`): Replaced dot + number with
+   number-inside-colored-circle to match opensessions reference:
+   - Each tab shows its number (1-5) inside a gradient-filled colored circle
+   - Circle has top-to-bottom gradient (lighter top, darker bottom) for 3D depth
+   - Subtle dark border ring for definition
+   - Breathing glow shadow behind circle on active tab
+   - Dark text on accent background for readability
+   - Title x-offset calculation updated for new badge size
+
+3. **Sidebar session count badge** (`sidebar.rs`): "Sessions" header count is now
+   a pill-shaped badge instead of plain text:
+   - SDF rounded pill with BG_SURFACE background at 50% opacity
+   - Subtle border stroke for definition
+   - Count text centered in pill
+
+4. **Agent status badges** (`sidebar.rs`): Status labels in the "Processes" panel
+   are now tinted pill badges instead of plain colored text:
+   - Pill-shaped badge with accent-tinted background (12% opacity)
+   - Matching accent-colored border stroke (25% opacity)
+   - Status text centered inside badge
+   - Colors match agent status: green (running), peach (waiting), red (stopped)
+
+5. **Clear color correction** (`main.rs`): Updated wgpu clear color from Catppuccin
+   Mocha Crust (#11111b) to One Dark BG_DARK (#1b1e24) in linear space, ensuring
+   the background behind all chrome matches the palette.
+
+**Technical details**:
+- Keycap key badges: gradient background (brighter top → darker bottom) with
+  1px top highlight bevel and 1px bottom shadow line. The gradient + bevel
+  combination creates a physical "keycap" appearance.
+- Tab numbered circles: badge_sz = ch * 0.9 ensures the circle is slightly
+  smaller than line height, fitting neatly within the tab without feeling cramped.
+  The gradient (accent * 1.15 top → accent * 0.85 bottom) adds dimensional depth.
+- Container backdrop: 30% BG_DARK fill with 20% border creates a subtle card
+  grouping without competing with the shortcut cards themselves.
+
+**Result**: The welcome state now looks like a professional app's start page
+with branded header, styled keyboard shortcut reference cards, and physical
+keycap-style key badges. Tab indicators match the opensessions reference with
+numbers inside colored circles. The sidebar uses consistent pill/badge styling
+for counts and agent statuses throughout.
+
+**Visual comparison with reference**:
+- Tab numbered circles: ✓ Matches opensessions reference exactly
+- Welcome state design: ✓ Professional branded start page
+- Sidebar count badge: ✓ Pill-shaped, consistent with status bar pills
+- Agent status badges: ✓ Tinted pills matching status colors
+- Clear color: ✓ Matches One Dark palette
+- Overall polish: ✓ UI elements use consistent badge/pill design language
+
+**Remaining gaps vs reference**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
