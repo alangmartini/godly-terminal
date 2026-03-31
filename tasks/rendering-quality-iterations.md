@@ -1975,3 +1975,94 @@ line ending, dimensions).
 **Remaining gaps vs reference (iteration 43)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 44 — Visual Noise Reduction Pass (Borders, Grooves, Shadows)
+
+**Goal**: Remove visual noise from accumulated borders, embossed grooves,
+and heavy inner shadows. Modern apps (Zed, Linear, Arc) rely on surface
+color differences for separation, not explicit border lines. This is a
+subtractive refinement pass.
+
+**Changes made**:
+
+1. **Sidebar resting borders removed** (`ui/sidebar.rs`): Removed the
+   0.12-alpha `stroke_rounded` border drawn on every session item at rest.
+   Items now show borders only on hover/active states. This is the single
+   biggest visual noise reducer — 4 items × 1 border each = 4 fewer
+   visual elements competing for attention. Matches Zed's clean tree view.
+
+2. **Section grooves → thin lines** (`ui/sidebar.rs`): Replaced all
+   three embossed groove separators (dark edge + light highlight pairs)
+   with single thin hairline separators:
+   - Header bottom: `hgroove_fade` → `hline_fade` at 0.15 alpha
+   - Session-to-button divider: `hgroove_fade` → `hline_fade` at 0.12 alpha
+   - Processes divider: `hgroove_fade` → `hline_fade` at 0.12 alpha
+   Longer fade radius (12→16px) for softer edge integration.
+   Removed unused `groove_dark`/`groove_light` variables.
+
+3. **Status bar top separator softened** (`ui/status_bar.rs`): Replaced
+   embossed groove (dark+light line pair) + inner bevel highlight with
+   a single thin line at 0.35 alpha. Removes 3 draw calls worth of
+   visual weight from the panel junction.
+
+4. **Status bar inner shadows reduced** (`ui/status_bar.rs`):
+   - Sidebar section: 0.04 alpha → 0.02, blur 4→3px
+   - Content section: 0.04 alpha → 0.02, blur 3→2px
+   These inner shadows were adding unnecessary depth to an already-small
+   25px status bar.
+
+5. **Status bar sidebar groove → thin line** (`ui/status_bar.rs`):
+   Replaced `vgroove_fade` with single `vline` at 0.18 alpha.
+
+6. **Sidebar inner shadow reduced** (`ui/sidebar.rs`): Main sidebar
+   inner shadow from 0.06 alpha → 0.03, blur 5→4px. Removed the
+   top inner bevel highlight line entirely. The sidebar no longer
+   feels "recessed into a slot" — it just sits alongside the content.
+
+7. **Sidebar right edge softened** (`ui/sidebar.rs`):
+   - Hairline border: 0.25 → 0.18 alpha
+   - Inward shadow: 6→4px width, 0.06→0.04 alpha
+
+8. **Scrollbar track nearly invisible** (`ui/sidebar.rs`):
+   - Track rail: 0.08→0.03 alpha (0.06 on hover)
+   - Thumb: 0.14→0.08 alpha (0.18 on hover)
+   Scrollbar now appears only when you look for it.
+
+9. **Tab bar bottom border softened** (`ui/tab_bar.rs`): Left and right
+   separator segments around the active tab gap: full BORDER opacity → 0.5.
+   The separator is now barely visible, letting the color difference
+   between tab bar and content provide primary separation.
+
+10. **Tab bar sidebar section separator** (`ui/tab_bar.rs`): Replaced
+    `vgroove_fade` with single `vline` at 0.18 alpha, matching the
+    sidebar right edge styling.
+
+11. **Tab bar surface effects reduced** (`ui/tab_bar.rs`):
+    - Top edge bevel: 0.05→0.03 alpha, fade 16→20px
+    - Glass sheen band: 0.025→0.015 alpha
+    These effects were adding subtle but cumulative visual noise.
+
+**Design principle**: Every separator, shadow, and effect was originally
+added for good reason (depth, separation, material feel). But 43
+iterations of additive polish accumulated more visual weight than any
+individual element warranted. This pass halves border/shadow intensity
+across the board, trusting the color palette's surface hierarchy
+(BG_DARK < BG_BASE < BG_SURFACE) to do the separation work.
+
+**Result**: The UI feels significantly calmer and more confident. Session
+items float cleanly without border boxes. Panel junctions use thin single
+lines instead of embossed pairs. The status bar is lighter. The overall
+aesthetic moves closer to Zed's "quiet material" design language where
+surfaces speak through color, not borders.
+
+**Visual comparison with reference**:
+- Sidebar cleanliness: ✓ No resting borders, matches Zed tree view
+- Panel separators: ✓ Single thin lines vs embossed grooves
+- Status bar weight: ✓ Lighter top separator, reduced inner shadows
+- Scrollbar subtlety: ✓ Nearly invisible at rest, appears on hover
+- Overall noise level: ✓ Significantly reduced across all chrome
+- Surface-based separation: ✓ Color difference does the work, not borders
+
+**Remaining gaps vs reference (iteration 44)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

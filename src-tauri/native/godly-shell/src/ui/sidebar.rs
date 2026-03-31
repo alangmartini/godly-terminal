@@ -271,25 +271,18 @@ impl Sidebar {
         );
 
         // Right border separator — soft gradient shadow for modern panel junction.
-        // Gradient fade from dark (at edge) to transparent replaces old groove.
-        let groove_dark = [0.0, 0.0, 0.0, 0.15];
-        let groove_light = [1.0, 1.0, 1.0, 0.04];
-        // 1px hairline border at the right edge
+        // 1px hairline border at the right edge — very subtle
         ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25]);
+            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18]);
         // Soft inward shadow (gradient from right edge inward)
-        let shadow_w = s(6.0);
+        let shadow_w = s(4.0);
         ui.fill_gradient_h(
             Rect { x: sidebar.right() - shadow_w - 1.0, y: sidebar.y, width: shadow_w, height: sidebar.height },
             [0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 0.06],
+            [0.0, 0.0, 0.0, 0.04],
         );
-        // SDF inner shadow — smooth Gaussian falloff from all edges for recessed depth.
-        // Replaces separate gradient overlays with a single, more natural shadow.
-        ui.fill_inner_shadow(sidebar, [0.0, 0.0, 0.0, 0.06], 0.0, s(5.0));
-        // Inner bevel highlight (faded at edges for softer integration)
-        // Slightly brighter than typical to be perceptible on dark themes.
-        ui.hline_fade(sidebar.x + s(4.0), sidebar.y, sidebar.width - s(8.0) - 1.0, 1.0, [1.0, 1.0, 1.0, 0.04], s(12.0));
+        // SDF inner shadow — very subtle Gaussian falloff for gentle recessed depth.
+        ui.fill_inner_shadow(sidebar, [0.0, 0.0, 0.0, 0.03], 0.0, s(4.0));
 
         // "Sessions" header with count badge
         let header_rect = Rect {
@@ -344,9 +337,10 @@ impl Sidebar {
             colors::FG_MUTED,
             colors::BG_SURFACE,
         );
-        // Header bottom separator — groove for embossed look
-        ui.hgroove_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
-                 sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(8.0));
+        // Header bottom separator — single thin line (modern, clean)
+        ui.hline_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
+                 sidebar.width - pad_h * 2.0, 1.0,
+                 [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15], s(12.0));
 
         // Layout: [pad][dot][gap][num][gap][name...][gap][branch][pad]
         // Two-line items: line 1 = dot + number + name + branch, line 2 = description
@@ -407,9 +401,6 @@ impl Sidebar {
                     let hover_bot = [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * hover_t * inv_active];
                     ui.fill_rounded_gradient(inset_rect, hover_top, hover_bot, item_radius);
                     ui.stroke_rounded(inset_rect, item_radius, 0.5, hover_border);
-                } else if active_t < 0.005 {
-                    let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12];
-                    ui.stroke_rounded(inset_rect, item_radius, 0.5, rest_border);
                 }
             }
 
@@ -664,30 +655,32 @@ impl Sidebar {
             let track_h = items_total_h - s(4.0);
             let track_w = s(2.0);
             if track_h > s(10.0) {
-                // Track rail — very subtle background
+                // Track rail — nearly invisible at rest
                 let track_rect = Rect { x: track_x, y: track_y, width: track_w, height: track_h };
+                let any_hover = self.hovered_index.is_some();
+                let track_alpha = if any_hover { 0.06 } else { 0.03 };
                 ui.fill_rounded(track_rect,
-                    [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.08],
+                    [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], track_alpha],
                     track_w / 2.0);
-                // Thumb — proportional, accent-tinted when hovered
+                // Thumb — proportional, fades in on hover
                 let visible_ratio = 1.0_f32; // all items visible for now
                 let thumb_h = (track_h * visible_ratio).max(s(16.0)).min(track_h);
                 let thumb_y = track_y; // scroll_offset * (track_h - thumb_h) for real scrolling
                 let thumb_rect = Rect { x: track_x, y: thumb_y, width: track_w, height: thumb_h };
-                let any_hover = self.hovered_index.is_some();
-                let thumb_alpha = if any_hover { 0.25 } else { 0.14 };
+                let thumb_alpha = if any_hover { 0.18 } else { 0.08 };
                 ui.fill_rounded(thumb_rect,
                     [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], thumb_alpha],
                     track_w / 2.0);
             }
         }
 
-        // Section divider between session list and new-session button
+        // Section divider between session list and new-session button — thin line
         {
             let items_total_h = self.items_y_offset(self.items.len(), text.scale);
             let div_y = sidebar.y + header_h + items_total_h + s(1.0);
-            ui.hgroove_fade(sidebar.x + pad_h, div_y,
-                     sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(12.0));
+            ui.hline_fade(sidebar.x + pad_h * 1.5, div_y,
+                     sidebar.width - pad_h * 3.0, 1.0,
+                     [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12], s(16.0));
         }
 
         // "+ New session" button
@@ -768,7 +761,7 @@ impl Sidebar {
                 new_rect.y + text_y_off(compact_h),
                 new_fg, new_bg);
 
-        // Section divider above processes panel
+        // Section divider above processes panel — thin line
         if !self.agents.is_empty() {
             let settings_row_h = s(28.0);
             let header_section_h = s(28.0);
@@ -777,8 +770,9 @@ impl Sidebar {
             let panel_y_est = sidebar.bottom() - settings_row_h - agent_panel_h_est;
             let div_y = panel_y_est - s(4.0);
             if div_y > new_y + compact_h + s(4.0) {
-                ui.hgroove_fade(sidebar.x + pad_h, div_y,
-                         sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(12.0));
+                ui.hline_fade(sidebar.x + pad_h * 1.5, div_y,
+                         sidebar.width - pad_h * 3.0, 1.0,
+                         [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12], s(16.0));
             }
         }
 

@@ -109,11 +109,11 @@ impl StatusBar {
                 1.0,
             ];
             ui.fill_gradient(sidebar_status, sidebar_bg, sidebar_bg_bottom);
-            // Right border on sidebar section — groove for embossed depth
-            ui.vgroove_fade(self.sidebar_width - 2.0, bar.y, bar.height,
-                [0.0, 0.0, 0.0, 0.15], [1.0, 1.0, 1.0, 0.04], s(6.0));
-            // SDF inner shadow for recessed sidebar section depth
-            ui.fill_inner_shadow(sidebar_status, [0.0, 0.0, 0.0, 0.04], 0.0, s(4.0));
+            // Right border on sidebar section — thin line
+            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0,
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18]);
+            // Very subtle inner shadow for sidebar section depth
+            ui.fill_inner_shadow(sidebar_status, [0.0, 0.0, 0.0, 0.02], 0.0, s(3.0));
         }
 
         // Recessed inner shadow on the content section for depth
@@ -124,14 +124,12 @@ impl StatusBar {
                 width: bar.width - self.sidebar_width,
                 height: bar.height,
             };
-            ui.fill_inner_shadow(content_section, [0.0, 0.0, 0.0, 0.04], 0.0, s(3.0));
+            ui.fill_inner_shadow(content_section, [0.0, 0.0, 0.0, 0.02], 0.0, s(2.0));
         }
 
-        // Top separator — embossed groove for professional panel junction.
-        ui.hgroove(bar.x, bar.y, bar.width, colors::BORDER, [1.0, 1.0, 1.0, 0.04]);
-        // Top inner bevel highlight (matches tab bar for visual consistency).
-        // Sits just below the groove pair to read as the inner lit edge of the panel.
-        ui.hline_fade(bar.x + s(4.0), bar.y + 2.0, bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
+        // Top separator — single thin line for clean panel junction.
+        ui.hline_fade(bar.x, bar.y, bar.width, 1.0,
+            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35], s(4.0));
         // Bottom accent stripe — 1px accent-tinted line at window bottom edge.
         // Bookends with the top accent stripe for visual frame cohesion.
         let accent = colors::ACCENT_BLUE;

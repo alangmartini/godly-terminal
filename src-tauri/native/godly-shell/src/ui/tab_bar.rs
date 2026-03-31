@@ -248,8 +248,8 @@ impl TabBar {
             );
         }
 
-        // Top edge bevel highlight (below accent stripe, faded at corners for softer window integration)
-        ui.hline_fade(bar.x + s(4.0), bar.y + s(2.0), bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
+        // Top edge bevel highlight (below accent stripe, very subtle)
+        ui.hline_fade(bar.x + s(4.0), bar.y + s(2.0), bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.03], s(20.0));
 
         // Glass sheen band: very subtle horizontal highlight at ~25% from top.
         // Simulates reflective curvature on a polished chrome surface — the
@@ -257,7 +257,7 @@ impl TabBar {
         {
             let sheen_y = bar.y + bar.height * 0.25;
             let sheen_h = s(4.0);
-            let sheen_peak = [1.0, 1.0, 1.0, 0.025];
+            let sheen_peak = [1.0, 1.0, 1.0, 0.015];
             let sheen_edge = [1.0, 1.0, 1.0, 0.0];
             // Top half: fade in
             ui.fill_gradient(
@@ -281,7 +281,8 @@ impl TabBar {
             if ar.x > bar.x {
                 let seg_end = ar.x - ear_r;
                 if seg_end > bar.x {
-                    ui.hline_aa(bar.x, bar.bottom() - 1.0, seg_end - bar.x, 1.0, colors::BORDER);
+                    ui.hline_aa(bar.x, bar.bottom() - 1.0, seg_end - bar.x, 1.0,
+                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
                 }
                 // Left ear: small rounded corner that creates concave curve
                 // Only bottom-right corner is rounded to form the inverse curve
@@ -298,7 +299,8 @@ impl TabBar {
             if ar.right() < bar.right() {
                 let seg_start = ar.right() + ear_r;
                 if seg_start < bar.right() {
-                    ui.hline_aa(seg_start, bar.bottom() - 1.0, bar.right() - seg_start, 1.0, colors::BORDER);
+                    ui.hline_aa(seg_start, bar.bottom() - 1.0, bar.right() - seg_start, 1.0,
+                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
                 }
                 // Right ear: concave curve on the other side
                 // Uses bar_bottom color to match gradient at this y-position
@@ -328,7 +330,8 @@ impl TabBar {
                 s(2.0), s(5.0),
             );
         } else {
-            ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
+            ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
         }
 
         // Sidebar section: "Godly Terminal" branding with subtle differentiation
@@ -381,9 +384,9 @@ impl TabBar {
             );
             ui.text_ui_bold(text, "Godly Terminal", brand_x, brand_y,
                     brand_fg, colors::BG_DARK);
-            // Right border for sidebar section — groove for embossed depth
-            ui.vgroove_fade(self.sidebar_width - 2.0, bar.y, bar.height,
-                [0.0, 0.0, 0.0, 0.15], [1.0, 1.0, 1.0, 0.04], s(8.0));
+            // Right border for sidebar section — thin line
+            ui.vline(self.sidebar_width - 1.0, bar.y + s(6.0), bar.height - s(12.0), 1.0,
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18]);
         }
 
         // Icon line thickness (used for close buttons in tabs and window controls)

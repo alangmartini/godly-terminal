@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 43)
+Last updated: 2026-03-31 (Iteration 44)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -104,6 +104,13 @@ Last updated: 2026-03-31 (Iteration 43)
 | Window top accent stripe | Done | 2px dynamic accent line at window top edge, color follows active tab accent (iteration 43) |
 | Accent glow spill | Done | Breathing glow gradient below top accent stripe for depth (iteration 43) |
 | Status bar bottom accent edge | Done | Subtle accent-tinted bottom border for visual window frame bookending (iteration 43) |
+| Sidebar resting borders removed | Done | Session items show borders only on hover/active, not at rest — matches Zed (iteration 44) |
+| Section grooves → thin lines | Done | All sidebar section dividers use single hairlines instead of embossed groove pairs (iteration 44) |
+| Status bar separator softened | Done | Top separator uses single thin line instead of groove + bevel (iteration 44) |
+| Reduced inner shadows | Done | Sidebar and status bar inner shadows halved for lighter feel (iteration 44) |
+| Scrollbar near-invisible | Done | Track and thumb at minimal opacity at rest, fade in on hover (iteration 44) |
+| Tab bar border softening | Done | Bottom separator at 50% opacity, sidebar section uses thin line (iteration 44) |
+| Surface effect reduction | Done | Tab bar bevel and glass sheen reduced for calmer aesthetic (iteration 44) |
 
 ## Remaining Gaps (Priority Order)
 
