@@ -4,6 +4,7 @@ use super::widget::Rect;
 
 pub const TAB_BAR_HEIGHT: f32 = 33.0;
 pub const STATUS_BAR_HEIGHT: f32 = 25.0;
+pub const BREADCRUMB_HEIGHT: f32 = 22.0;
 pub const SIDEBAR_WIDTH: f32 = 220.0;
 pub const TERMINAL_PAD_LEFT: f32 = 8.0;
 pub const TERMINAL_PAD_TOP: f32 = 6.0;
@@ -13,6 +14,8 @@ pub const TERMINAL_PAD_TOP: f32 = 6.0;
 pub struct ShellLayout {
     pub sidebar: Rect,
     pub tab_bar: Rect,
+    /// Breadcrumb/path bar between tab bar and content (content-area width only).
+    pub breadcrumb: Rect,
     pub terminal: Rect,
     /// Terminal content area (inset by padding from terminal rect)
     pub terminal_content: Rect,
@@ -25,6 +28,7 @@ impl ShellLayout {
     pub fn compute(viewport_w: f32, viewport_h: f32, sidebar_visible: bool, scale: f32) -> Self {
         let tab_h = (TAB_BAR_HEIGHT * scale).round();
         let status_h = (STATUS_BAR_HEIGHT * scale).round();
+        let breadcrumb_h = (BREADCRUMB_HEIGHT * scale).round();
         let sidebar_w = if sidebar_visible { (SIDEBAR_WIDTH * scale).round() } else { 0.0 };
 
         // Status bar spans full width at the very bottom
@@ -52,7 +56,16 @@ impl ShellLayout {
             width: viewport_w,
             height: tab_h,
         };
-        let terminal_y = tab_h;
+
+        // Breadcrumb bar between tab bar and content (only in content area)
+        let breadcrumb = Rect {
+            x: content_x,
+            y: tab_h,
+            width: content_w,
+            height: breadcrumb_h,
+        };
+
+        let terminal_y = tab_h + breadcrumb_h;
         let terminal_h = (viewport_h - terminal_y - status_h).max(0.0);
         let terminal = Rect {
             x: content_x,
@@ -70,6 +83,6 @@ impl ShellLayout {
             height: (terminal.height - pad_top).max(0.0),
         };
 
-        Self { sidebar, tab_bar, terminal, terminal_content, status_bar }
+        Self { sidebar, tab_bar, breadcrumb, terminal, terminal_content, status_bar }
     }
 }

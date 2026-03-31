@@ -1516,3 +1516,49 @@ rendering for crisp anti-aliased edges at any DPI.
 **Remaining gaps vs reference (iteration 37)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 37b — Breadcrumb Path Bar & Content Spotlight
+
+**Goal**: Add a breadcrumb/path bar between the tab bar and content area
+(like Zed/VS Code) for visual structure, and a radial spotlight behind
+the welcome content to reduce the "empty dark space" feel.
+
+**Changes made**:
+
+1. **Breadcrumb bar layout** (`ui/layout.rs`): Added `BREADCRUMB_HEIGHT`
+   (22px logical) constant and `breadcrumb: Rect` field to `ShellLayout`.
+   The breadcrumb bar sits between the tab bar and terminal content,
+   spanning only the content-area width (not the sidebar). Terminal y-
+   position adjusted downward to accommodate the new bar.
+
+2. **Breadcrumb rendering** (`main.rs`): Renders the current working
+   directory as segmented path with chevron separators:
+   - Slightly darker background than content area for subtle separation
+   - Thin bottom groove separator
+   - Small SDF folder icon at the start
+   - Path truncated to last 4 segments with "…" ellipsis prefix
+   - Each segment in muted text, last segment brighter (FG_SECONDARY)
+   - Chevron separators ("›") in very muted text (40% opacity)
+
+3. **Radial spotlight** (`main.rs`): Added a large, soft SDF shadow
+   centered behind the welcome content area. Uses the active tab's
+   accent color at 1.8% opacity with breathing animation. Creates a
+   subtle glow that draws the eye to the welcome screen elements and
+   reduces the "flat dark void" feel of the empty content area.
+
+**Technical details**:
+- Breadcrumb path splitting: detects `\` vs `/` separator, splits into
+  segments, takes the last `max_segments=4` if path is long.
+- Spotlight uses `fill_shadow` with very large blur radius (40% of
+  content width) for a smooth radial gradient falloff.
+- Terminal content `y` position shifts down by `breadcrumb_h` pixels,
+  so the terminal grid renders below the breadcrumb bar.
+
+**Result**: The content area now has more visual structure with the
+breadcrumb bar providing path context and the spotlight adding subtle
+depth. The overall composition feels more complete and professional,
+with less "empty dark space" in the content area.
+
+**Remaining gaps vs reference (iteration 37b)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

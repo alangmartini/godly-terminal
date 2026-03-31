@@ -769,6 +769,24 @@ impl App {
             let center_x = tc.x + tc.width / 2.0;
             let block_y = tc.y + tc.height * 0.33;
 
+            // --- Radial spotlight behind welcome content ---
+            // Creates a soft, centered glow that fills the dark content area
+            // and draws the eye toward the welcome screen elements.
+            {
+                let spot_w = tc.width * 0.65;
+                let spot_h = tc.height * 0.55;
+                let spot_rect = ui::widget::Rect {
+                    x: center_x - spot_w / 2.0,
+                    y: block_y - ch * 6.0,
+                    width: spot_w,
+                    height: spot_h,
+                };
+                let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+                ui_builder.fill_shadow(spot_rect,
+                    [active_accent[0], active_accent[1], active_accent[2], 0.018 * breath],
+                    spot_w * 0.3, spot_w * 0.4);
+            }
+
             // --- Hero terminal icon ---
             // Large branding icon above the title — a stylized monitor with
             // prompt caret, rendered at ~4× the tab-bar icon size for hero
@@ -1212,6 +1230,79 @@ impl App {
         self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
         self.status_bar.sidebar_width = layout.sidebar.width;
         self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle, self.tab_bar.glow_phase());
+
+        // Breadcrumb/path bar — thin bar between tab bar and content showing
+        // the current working directory as segmented path with chevron separators.
+        {
+            let bc = &layout.breadcrumb;
+            let s = |v: f32| ui_text_handle.s(v);
+            let ch = ui_text_handle.cell_height;
+
+            // Background: slightly lighter than content for subtle visual separation
+            let bc_bg = [
+                ui::builder::colors::BG_BASE[0] * 0.96,
+                ui::builder::colors::BG_BASE[1] * 0.96,
+                ui::builder::colors::BG_BASE[2] * 0.96,
+                1.0,
+            ];
+            ui_builder.fill(*bc, bc_bg);
+
+            // Bottom separator — very subtle groove
+            ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
+                [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
+                 ui::builder::colors::BORDER[2], 0.3]);
+
+            // Path segments: show CWD as breadcrumb with "›" separators
+            let cwd = &self.status_bar.cwd;
+            if !cwd.is_empty() {
+                let y_center = bc.y + (bc.height - ch) / 2.0;
+                let mut x = bc.x + s(12.0);
+                let icon_sz = ch * 0.75;
+                let icon_t = (0.8 * ui_text_handle.scale).max(1.0);
+
+                // Small folder icon at start
+                ui_builder.icon_folder(
+                    ui::widget::Rect { x, y: bc.y + (bc.height - icon_sz) / 2.0, width: icon_sz, height: icon_sz },
+                    icon_t,
+                    [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
+                     ui::builder::colors::FG_MUTED[2], 0.6],
+                );
+                x += icon_sz + s(6.0);
+
+                // Split path into segments — show at most 4 segments,
+                // with ellipsis for earlier segments that are elided.
+                let sep = if cwd.contains('\\') { '\\' } else { '/' };
+                let all_segments: Vec<&str> = cwd.split(sep).filter(|s| !s.is_empty()).collect();
+                let max_segments = 4;
+                let (show_ellipsis, segments) = if all_segments.len() > max_segments {
+                    (true, &all_segments[all_segments.len() - max_segments..])
+                } else {
+                    (false, all_segments.as_slice())
+                };
+                let chevron_fg = [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
+                                  ui::builder::colors::FG_MUTED[2], 0.4];
+                let segment_fg = [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
+                                  ui::builder::colors::FG_MUTED[2], 0.65];
+                let last_fg = ui::builder::colors::FG_SECONDARY;
+
+                if show_ellipsis {
+                    ui_builder.text_ui(&ui_text_handle, "\u{2026}", x, y_center, chevron_fg, bc_bg);
+                    x += ui_text_handle.text_width_ui("\u{2026}") + s(2.0);
+                    ui_builder.text_ui(&ui_text_handle, "\u{203A}", x, y_center, chevron_fg, bc_bg);
+                    x += ui_text_handle.text_width_ui("\u{203A}") + s(4.0);
+                }
+                for (i, seg) in segments.iter().enumerate() {
+                    if i > 0 {
+                        // Chevron separator
+                        ui_builder.text_ui(&ui_text_handle, "\u{203A}", x, y_center, chevron_fg, bc_bg);
+                        x += ui_text_handle.text_width_ui("\u{203A}") + s(4.0);
+                    }
+                    let fg = if i == segments.len() - 1 { last_fg } else { segment_fg };
+                    ui_builder.text_ui(&ui_text_handle, seg, x, y_center, fg, bc_bg);
+                    x += ui_text_handle.text_width_ui(seg) + s(4.0);
+                }
+            }
+        }
         // Window outer border — multi-layer shadow + border for professional depth.
         // When maximized, shadows are invisible (window fills screen) so skip them
         // to save GPU work.  Borders and accent top edge still render for polish.

@@ -76,6 +76,8 @@ Last updated: 2026-03-31 (Iteration 37)
 | SDF git branch icon | Done | Forked-line branch icon replacing dot before git branch in status bar (iteration 37) |
 | Improved gear cog icon | Done | Gear icon now has 6 SDF teeth + center dot instead of plain ring (iteration 37) |
 | Sidebar session timestamps | Done | Relative time labels ("5m", "2h", "1d", "3d") right-aligned on second line (iteration 37) |
+| Breadcrumb/path bar | Done | Thin bar between tab bar and content showing CWD as segmented path with chevrons (iteration 37) |
+| Content area radial spotlight | Done | Soft accent-tinted glow behind welcome screen for visual depth (iteration 37) |
 
 ## Remaining Gaps (Priority Order)
 
