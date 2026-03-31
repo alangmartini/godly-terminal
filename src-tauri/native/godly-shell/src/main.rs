@@ -742,10 +742,24 @@ impl App {
             ];
             ui_builder.text(&ui_text_handle, title, title_x, block_y, title_fg, bg);
 
-            // Accent underline below title (breathing, matches active tab)
+            // Subtitle line — "GPU-accelerated terminal" in very muted text
+            let subtitle = "GPU-accelerated terminal";
+            let subtitle_w = ui_text_handle.text_width(subtitle);
+            let subtitle_y = block_y + ch + s(2.0);
+            let subtitle_fg = [
+                ui::builder::colors::FG_MUTED[0],
+                ui::builder::colors::FG_MUTED[1],
+                ui::builder::colors::FG_MUTED[2],
+                0.45,
+            ];
+            ui_builder.text(&ui_text_handle, subtitle,
+                center_x - subtitle_w / 2.0, subtitle_y,
+                subtitle_fg, bg);
+
+            // Accent underline below subtitle (breathing, matches active tab)
             let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
             let underline_w = title_w * 0.6;
-            let underline_y = block_y + ch + s(4.0);
+            let underline_y = subtitle_y + ch + s(4.0);
             let underline_h = s(1.5);
             let underline_color = [active_accent[0], active_accent[1], active_accent[2], 0.25 * breath];
             let underline_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
@@ -777,12 +791,42 @@ impl App {
                 underline_color, underline_zero,
             );
 
-            // --- Status message ---
+            // --- Status message with animated loading indicator ---
             let status_y = underline_y + s(16.0);
             let status_w = ui_text_handle.text_width(status);
             ui_builder.text(&ui_text_handle, status,
                 center_x - status_w / 2.0, status_y,
                 ui::builder::colors::FG_MUTED, bg);
+
+            // Spinning arc indicator — small ring with a moving bright segment
+            // that suggests "loading" without being distracting.
+            {
+                let spin_phase = self.tab_bar.glow_phase() * 1.5; // slightly faster spin
+                let arc_r = ch * 0.4;
+                let arc_cx = center_x - status_w / 2.0 - s(14.0);
+                let arc_cy = status_y + ch / 2.0;
+                // Background ring (very faint)
+                let ring_rect = ui::widget::Rect {
+                    x: arc_cx - arc_r, y: arc_cy - arc_r,
+                    width: arc_r * 2.0, height: arc_r * 2.0,
+                };
+                ui_builder.stroke_rounded(ring_rect, arc_r, 0.8,
+                    [active_accent[0], active_accent[1], active_accent[2], 0.08]);
+                // Bright arc segment — 3 dots positioned along the ring at
+                // the leading edge of a rotating sweep
+                let dot_sz = s(2.0);
+                for k in 0..3u32 {
+                    let angle = spin_phase + k as f32 * 0.3;
+                    let fade = 1.0 - k as f32 * 0.3;
+                    let dx = arc_cx + arc_r * angle.cos() - dot_sz / 2.0;
+                    let dy = arc_cy + arc_r * angle.sin() - dot_sz / 2.0;
+                    ui_builder.fill_rounded(
+                        ui::widget::Rect { x: dx, y: dy, width: dot_sz, height: dot_sz },
+                        [active_accent[0], active_accent[1], active_accent[2], 0.5 * fade],
+                        dot_sz / 2.0,
+                    );
+                }
+            }
 
             // --- Keyboard shortcut cards ---
             // Each hint is rendered as a styled card: [key badge] description

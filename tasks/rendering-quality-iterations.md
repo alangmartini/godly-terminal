@@ -778,6 +778,65 @@ is more professional with Zed-style uppercase muting.
 - Sidebar header: ✓ Uppercase muted style matches Zed
 - Overall clutter: ✓ Reduced — less fake data, more focused UI
 
+**Remaining gaps vs reference (iteration 26)**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
+
+## Iteration 27 — Welcome Screen Polish, Section Headers, Status Bar Contrast
+
+**Goal**: Improve welcome screen composition with subtitle and loading animation,
+standardize section headers, and boost status bar readability.
+
+**Changes made**:
+
+1. **Sidebar "PROCESSES" header** (`ui/sidebar.rs`): Changed "Processes" to
+   "PROCESSES" with 65% FG_MUTED opacity, matching the "SESSIONS" section header
+   style. Added a pill-shaped count badge (right-aligned) showing the number of
+   agents, consistent with the session count badge above.
+
+2. **Welcome screen subtitle** (`main.rs`): Added "GPU-accelerated terminal"
+   subtitle line below the "Godly Terminal" title. Rendered in very muted text
+   (45% FG_MUTED opacity) for professional context without competing with the
+   title. Accent underline now positioned below the subtitle instead of the title.
+
+3. **Loading spinner animation** (`main.rs`): Added an animated spinning arc
+   indicator to the left of the "Starting session..." status message. Consists
+   of a faint background ring with 3 orbiting dots that trail along the arc,
+   each progressively fading. Uses the active accent color and syncs with
+   the tab bar's glow_phase (at 1.5x speed for visible motion).
+
+4. **Status bar text contrast** (`ui/status_bar.rs`): Changed content-area pill
+   text rest-state from FG_MUTED → FG_SECONDARY for all three content pills
+   (CWD, dimensions, keyboard hints). Hover state now brightens from
+   FG_SECONDARY → FG_PRIMARY at 30%. This makes status bar information
+   noticeably more readable against the dark background while maintaining
+   the muted professional aesthetic.
+
+**Technical details**:
+- Loading spinner: 3 SDF circle dots at radius ch*0.4, spaced 0.3 radians
+  apart along the arc. Each dot fades by 0.3 alpha from the leading edge.
+  Background ring uses stroke_rounded at 0.08 accent opacity.
+- PROCESSES count badge: Same styling as SESSIONS count badge — pill-shaped
+  SDF rounded rect with BG_SURFACE at 40% opacity + BORDER stroke at 15%.
+- Status bar text: `lerp_color(FG_SECONDARY, FG_PRIMARY, ht * 0.3)` replaces
+  `lerp_color(FG_MUTED, FG_SECONDARY, ht * 0.5)`. The base luminance jump
+  from FG_MUTED (#5c6370, ~39% gray) to FG_SECONDARY (#828997, ~53% gray)
+  significantly improves readability on the dark BG_SURFACE background.
+
+**Result**: Welcome screen has a more complete, professional composition with
+title + subtitle + loading animation + shortcut cards. The PROCESSES section
+now matches SESSIONS with consistent uppercase muted headers and count badges.
+Status bar text is noticeably more readable without being distractingly bright.
+
+**Visual comparison with reference**:
+- Welcome screen composition: ✓ Title + subtitle + loading + shortcuts
+- Section header consistency: ✓ SESSIONS and PROCESSES both uppercase muted
+- Count badge consistency: ✓ Both sections have right-aligned pill badges
+- Status bar readability: ✓ Content pills readable at rest
+- Loading animation: ✓ Subtle spinning indicator for connection state
+- Overall polish: ✓ More complete and professional empty state
+
 **Remaining gaps vs reference**:
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished

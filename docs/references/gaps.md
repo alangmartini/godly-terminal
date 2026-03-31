@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 26)
+Last updated: 2026-03-30 (Iteration 27)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -32,6 +32,10 @@ Last updated: 2026-03-30 (Iteration 26)
 | Clean tab bar | Done | Removed hardcoded placeholder pills, tabs use full available width (iteration 26) |
 | Zed-style sidebar header | Done | "SESSIONS" uppercase muted text like Zed section headers (iteration 26) |
 | Accent glow continuity | Done | Active tab accent glow bleeds into content area for visual connection (iteration 26) |
+| PROCESSES section header | Done | Uppercase muted header with count badge, matching SESSIONS style (iteration 27) |
+| Welcome screen subtitle | Done | "GPU-accelerated terminal" subtitle below branded header (iteration 27) |
+| Loading spinner animation | Done | Spinning arc indicator dots next to status message (iteration 27) |
+| Status bar text contrast | Done | Content pills use FG_SECONDARY base instead of FG_MUTED for readability (iteration 27) |
 
 ## Remaining Gaps (Priority Order)
 

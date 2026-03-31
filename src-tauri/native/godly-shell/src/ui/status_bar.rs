@@ -202,7 +202,7 @@ impl StatusBar {
             let border = Self::hover_pill_border(ht, 0.3);
             ui.fill_rounded_gradient(cwd_pill, top, bot, s(3.0));
             ui.stroke_rounded(cwd_pill, s(3.0), 0.5, border);
-            let cwd_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.5);
+            let cwd_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
             ui.text(text, &display_cwd, x + cwd_pad_h, y_center, cwd_fg, colors::BG_HOVER);
             x += cwd_pill_w + cw * 2.0;
         }
@@ -270,7 +270,7 @@ impl StatusBar {
             let border = Self::hover_pill_border(ht, 0.5);
             ui.fill_rounded_gradient(hints_rect, top, bot, s(3.0));
             ui.stroke_rounded(hints_rect, s(3.0), 0.5, border);
-            let fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.5);
+            let fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
             ui.text(text, hints_label, hints_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
         }
 
@@ -287,7 +287,7 @@ impl StatusBar {
             let border = Self::hover_pill_border(ht, 0.5);
             ui.fill_rounded_gradient(dims_rect, top, bot, s(3.0));
             ui.stroke_rounded(dims_rect, s(3.0), 0.5, border);
-            let fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.5);
+            let fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
             ui.text(text, &dims, dims_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
         }
     }

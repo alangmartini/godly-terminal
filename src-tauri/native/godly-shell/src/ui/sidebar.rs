@@ -558,11 +558,36 @@ impl Sidebar {
             // Subtle inner shadow for recessed card depth
             ui.fill_inner_shadow(panel_inset, [0.0, 0.0, 0.0, 0.06], panel_radius, s(4.0));
 
-            // "Processes" header
-            ui.text(text, "Processes",
+            // "PROCESSES" header (uppercase muted, matching SESSIONS section style)
+            ui.text(text, "PROCESSES",
                     sidebar.x + pad_h,
                     panel_y + (header_section_h - ch) / 2.0,
-                    colors::FG_MUTED, colors::BG_RAISED);
+                    [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
+                    colors::BG_RAISED);
+            // Agent count badge (right-aligned, pill-shaped — matches session count badge)
+            let agent_count_str = format!("{}", self.agents.len());
+            let agent_count_w = text.text_width(&agent_count_str);
+            let agent_badge_pad_h = s(4.0);
+            let agent_badge_h = ch * 0.85;
+            let agent_badge_w = (agent_count_w + agent_badge_pad_h * 2.0).max(agent_badge_h);
+            let agent_badge_x = panel_inset.right() - agent_badge_w - s(8.0);
+            let agent_badge_y = panel_y + (header_section_h - agent_badge_h) / 2.0;
+            let agent_badge_rect = Rect {
+                x: agent_badge_x, y: agent_badge_y,
+                width: agent_badge_w, height: agent_badge_h,
+            };
+            let agent_badge_radius = agent_badge_h / 2.0;
+            ui.fill_rounded(agent_badge_rect, [
+                colors::BG_SURFACE[0], colors::BG_SURFACE[1],
+                colors::BG_SURFACE[2], 0.4,
+            ], agent_badge_radius);
+            ui.stroke_rounded(agent_badge_rect, agent_badge_radius, 0.5,
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15]);
+            let agent_count_text_x = agent_badge_x + (agent_badge_w - agent_count_w) / 2.0;
+            let agent_count_text_y = agent_badge_y + (agent_badge_h - ch) / 2.0;
+            ui.text(text, &agent_count_str,
+                    agent_count_text_x, agent_count_text_y,
+                    colors::FG_MUTED, colors::BG_SURFACE);
 
             let mut ay = panel_y + header_section_h;
             for (ai, agent) in self.agents.iter().enumerate() {
