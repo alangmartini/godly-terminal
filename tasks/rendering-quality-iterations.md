@@ -583,3 +583,70 @@ proportions are closer to the reference apps.
 - Sidebar labels use monospace; proportional sans-serif would look more polished
 - Tab bar could be further reduced to ~32px with smaller font support
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 24 — Warm Palette + Empty State (Zed One Dark)
+
+**Goal**: Replace the Catppuccin Mocha cool blue-purple palette with Zed One Dark's
+warm neutral tones, and add a professional empty terminal welcome state.
+
+**Context**: The single biggest visual gap vs reference apps was color temperature.
+Catppuccin Mocha uses `#11111b` (dark blue-purple) backgrounds and `#cdd6f4` (blue-
+tinted white) text. Zed/VS Code use warm neutral grays like `#21252b` and `#abb2bf`.
+
+**Changes made**:
+
+1. **Color palette** (`ui/builder.rs`): Complete palette swap from Catppuccin Mocha to
+   Zed One Dark warm neutrals:
+   - BG_DARK: `#11111b` → `#1b1e24` (warm dark chrome)
+   - BG_BASE: `#1e1e2e` → `#21252b` (warm content area)
+   - BG_RAISED: `#1c1c27` → `#1e2228` (warm elevated panels)
+   - BG_SURFACE: `#2e2f3d` → `#2c313a` (warm hover base)
+   - BG_HOVER: `#393b4a` → `#343946` (warm hover)
+   - BG_ACTIVE: `#262735` → `#262b33` (warm active selection)
+   - FG_PRIMARY: `#cdd6f4` → `#abb2bf` (warm off-white text)
+   - FG_SECONDARY: `#b3bad5` → `#828997` (warm subtext)
+   - FG_MUTED: `#6d7189` → `#5c6370` (warm muted)
+   - ACCENT_BLUE: `#89b4fa` → `#61afef` (One Dark blue)
+   - ACCENT_GREEN: `#a6e3a1` → `#98c379` (One Dark green)
+   - ACCENT_PEACH: `#fab387` → `#e5c07b` (One Dark yellow)
+   - ACCENT_MAUVE: `#cba6f7` → `#c678dd` (One Dark purple)
+   - ACCENT_RED: `#f38ba8` → `#e06c75` (One Dark red)
+   - BORDER: `#2e303e` → `#3e4451` (warm border)
+
+2. **Terminal renderer** (`terminal_renderer.rs`): Updated default fg/bg to match new
+   palette: `#abb2bf` (One Dark Text) and `#21252b` (One Dark Base).
+
+3. **Empty terminal state** (`main.rs`): Replaced simple "Starting session..." text with
+   a professional centered welcome layout:
+   - Status message centered at golden-ratio vertical position (~35% from top)
+   - Four keyboard shortcut hints below: Ctrl+T (New tab), Ctrl+W (Close tab),
+     Ctrl+Tab (Next tab), Ctrl+, (Settings)
+   - Keys rendered in FG_SECONDARY, descriptions in muted FG for visual hierarchy
+
+**Technical details**:
+- All 17 named color constants updated in the `colors` module
+- The warm palette preserves the same luminance relationships between surfaces
+  (BG_DARK < BG_BASE < BG_SURFACE < BG_HOVER) so all existing contrast/hover
+  logic works without adjustment
+- Accent colors shifted to One Dark's more muted palette, which better matches
+  the warmer background tones (Catppuccin's vivid accents looked garish against
+  warm grays)
+
+**Result**: The entire UI now has the characteristic warm-neutral dark tone of Zed and
+VS Code's One Dark theme family. The blue/purple tint is gone, replaced by warmer
+grays with subtle blue undertone. Text is warmer and more comfortable to read. The
+empty terminal state provides useful orientation for new users. All existing SDF
+rendering, animations, and depth cues work unchanged with the new palette.
+
+**Visual comparison with reference**:
+- Color temperature: ✓ Warm neutral grays match Zed/One Dark tone
+- Text warmth: ✓ `#abb2bf` off-white is comfortable and professional
+- Accent harmony: ✓ One Dark accents integrate with warm backgrounds
+- Empty state: ✓ Centered shortcut hints instead of orphaned status text
+- Overall mood: ✓ Professional, mature, comfortable for long sessions
+
+**Remaining gaps vs reference**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Font weight differentiation (active vs inactive tabs)
+- Multi-pane terminal layout needs daemon content

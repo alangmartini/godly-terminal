@@ -689,19 +689,60 @@ impl App {
             }
         }
 
-        // Placeholder text when no terminal content is available
+        // Empty terminal welcome state — professional centered layout with
+        // status message and keyboard shortcut hints.
         if self.current_grid.is_none() {
-            let placeholder = if self.daemon.is_none() {
-                "Connecting to terminal..."
+            let s = |v: f32| ui_text_handle.s(v);
+            let cw = ui_text_handle.cell_width;
+            let ch = ui_text_handle.cell_height;
+            let tc = &layout.terminal_content;
+            let bg = ui::builder::colors::BG_BASE;
+
+            let status = if self.daemon.is_none() {
+                "Connecting to daemon..."
             } else if self.active_session.is_none() {
                 "Starting session..."
             } else {
                 "Waiting for output..."
             };
-            let ph_x = layout.terminal_content.x + ui_text_handle.s(16.0);
-            let ph_y = layout.terminal_content.y + ui_text_handle.s(16.0);
-            ui_builder.text(&ui_text_handle, placeholder, ph_x, ph_y,
-                           ui::builder::colors::FG_MUTED, ui::builder::colors::BG_BASE);
+
+            // Center block vertically at ~40% from top (golden ratio area)
+            let block_y = tc.y + tc.height * 0.35;
+            let center_x = tc.x + tc.width / 2.0;
+
+            // Status message (centered)
+            let status_w = ui_text_handle.text_width(status);
+            ui_builder.text(&ui_text_handle, status,
+                center_x - status_w / 2.0, block_y,
+                ui::builder::colors::FG_MUTED, bg);
+
+            // Keyboard shortcut hints (below status, centered)
+            let hints = [
+                ("Ctrl+T", "New tab"),
+                ("Ctrl+W", "Close tab"),
+                ("Ctrl+Tab", "Next tab"),
+                ("Ctrl+,", "Settings"),
+            ];
+            let hint_y_start = block_y + ch * 3.0;
+            let key_color = ui::builder::colors::FG_SECONDARY;
+            let desc_color = [
+                ui::builder::colors::FG_MUTED[0],
+                ui::builder::colors::FG_MUTED[1],
+                ui::builder::colors::FG_MUTED[2],
+                0.7,
+            ];
+            for (i, (key, desc)) in hints.iter().enumerate() {
+                let y = hint_y_start + i as f32 * (ch + s(6.0));
+                let line = format!("{}  {}", key, desc);
+                let line_w = ui_text_handle.text_width(&line);
+                let lx = center_x - line_w / 2.0;
+                let key_w = ui_text_handle.text_width(key);
+                // Key in brighter color, description in muted
+                ui_builder.text(&ui_text_handle, key, lx, y, key_color, bg);
+                let sep = "  ";
+                let sep_w = ui_text_handle.text_width(sep);
+                ui_builder.text(&ui_text_handle, desc, lx + key_w + sep_w, y, desc_color, bg);
+            }
         }
 
         // Scrollbar (rendered before chrome so it layers under borders)

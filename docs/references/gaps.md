@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 23)
+Last updated: 2026-03-30 (Iteration 24)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -20,6 +20,8 @@ Last updated: 2026-03-30 (Iteration 23)
 | Chrome compactness | Done | Tab bar 36px, status bar 28px, sidebar header 34px (iteration 23) |
 | Inactive tab shapes | Done | Tab-shaped with gradient, border, alpha 0.75 (iteration 23) |
 | Terminal padding | Done | 8px left, 6px top (iteration 23) |
+| Warm color palette | Done | Zed One Dark warm neutrals replace Catppuccin cool blues (iteration 24) |
+| Empty terminal state | Done | Centered status + keyboard shortcut hints (iteration 24) |
 | Bottom separator break | Done | Active tab breaks separator with SDF inverse corner ears |
 | SDF rendering | Done | Anti-aliased rounded rects, circles, borders, inner shadows |
 | Gradients and depth | Done | Vertical/horizontal gradients, inner shadows, convexity gradients |
@@ -38,10 +40,19 @@ Last updated: 2026-03-30 (Iteration 23)
 ### Low Impact
 5. **Context menu backdrop blur** - Professional apps use backdrop blur for floating menus; custom GPU pipeline doesn't support this natively
 6. **Font weight differentiation** - Active tab labels could use medium/semibold weight vs normal for inactive (requires multi-weight text renderer)
-7. **Warm color option** - References use warmer brown/gray tones; our theme is blue/purple. A "Zed One Dark" warm palette option would match closer.
 
-## Theme Color Notes (ZedOneDark-like)
-- Terminal/content: `#282c33` (darkest, BG_BASE)
-- Sidebar/chrome: `#2f343e` (medium, BG_DARK)
-- Borders (full): `#464b57` (visible but rendered at reduced opacity)
-- Accent: `#74ade8` (blue)
+## Active Theme Color Notes (Zed One Dark)
+- Chrome/sidebar: `#1b1e24` (BG_DARK)
+- Content/terminal: `#21252b` (BG_BASE)
+- Elevated panels: `#1e2228` (BG_RAISED)
+- Surface/hover: `#2c313a` (BG_SURFACE)
+- Hover states: `#343946` (BG_HOVER)
+- Text: `#abb2bf` (FG_PRIMARY)
+- Subtext: `#828997` (FG_SECONDARY)
+- Muted: `#5c6370` (FG_MUTED)
+- Blue accent: `#61afef`
+- Green: `#98c379`
+- Peach/Yellow: `#e5c07b`
+- Purple: `#c678dd`
+- Red: `#e06c75`
+- Border: `#3e4451` (warm gray)

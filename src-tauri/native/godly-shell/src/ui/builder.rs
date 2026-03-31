@@ -6,30 +6,32 @@
 use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf, quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated, QuadVertex};
 use super::widget::Rect;
 
-/// Catppuccin Mocha palette for all UI chrome.
+/// Zed One Dark–inspired warm neutral palette for all UI chrome.
+/// Warm grays with subtle blue undertone — matches professional editors
+/// (Zed, VS Code One Dark) rather than the cooler Catppuccin Mocha.
 pub mod colors {
-    // Catppuccin Mocha base colors
-    pub const BG_DARK: [f32; 4] = [0.071, 0.071, 0.106, 1.0];      // #11111b Crust
-    pub const BG_BASE: [f32; 4] = [0.118, 0.118, 0.180, 1.0];      // #1e1e2e Base
-    pub const BG_RAISED: [f32; 4] = [0.114, 0.114, 0.153, 1.0];    // #1c1c27 (between crust and mantle)
-    pub const BG_SURFACE: [f32; 4] = [0.180, 0.184, 0.239, 1.0];   // #2e2f3d Surface0
-    pub const BG_HOVER: [f32; 4] = [0.224, 0.227, 0.290, 1.0];     // #393b4a Surface1
-    pub const BG_ACTIVE: [f32; 4] = [0.149, 0.153, 0.208, 1.0];    // #262735 Mantle-ish
-    pub const BG_ACTIVE_ACC: [f32; 4] = [0.180, 0.204, 0.290, 1.0]; // blue-tinted surface
-    pub const FG_PRIMARY: [f32; 4] = [0.804, 0.839, 0.957, 1.0];   // #cdd6f4 Text
-    pub const FG_SECONDARY: [f32; 4] = [0.702, 0.729, 0.835, 1.0]; // #b3bad5 Subtext1
-    pub const FG_MUTED: [f32; 4] = [0.427, 0.443, 0.537, 1.0];     // #6d7189 Overlay0
-    pub const ACCENT_BLUE: [f32; 4] = [0.537, 0.706, 0.980, 1.0];  // #89b4fa Blue
-    pub const ACCENT_GREEN: [f32; 4] = [0.651, 0.890, 0.631, 1.0]; // #a6e3a1 Green
-    pub const ACCENT_PEACH: [f32; 4] = [0.980, 0.702, 0.529, 1.0]; // #fab387 Peach
-    pub const ACCENT_MAUVE: [f32; 4] = [0.796, 0.651, 0.969, 1.0]; // #cba6f7 Mauve
-    pub const ACCENT_RED: [f32; 4] = [0.953, 0.545, 0.659, 1.0];   // #f38ba8 Red
-    pub const RED_HOVER: [f32; 4] = [0.953, 0.545, 0.659, 0.8];
-    pub const RED_SUBTLE: [f32; 4] = [0.15, 0.12, 0.12, 1.0];
+    // Warm dark base colors (One Dark Pro inspired)
+    pub const BG_DARK: [f32; 4] = [0.106, 0.118, 0.141, 1.0];      // #1b1e24 Chrome/sidebar
+    pub const BG_BASE: [f32; 4] = [0.129, 0.145, 0.169, 1.0];      // #21252b Content/terminal
+    pub const BG_RAISED: [f32; 4] = [0.118, 0.133, 0.157, 1.0];    // #1e2228 Elevated panels
+    pub const BG_SURFACE: [f32; 4] = [0.173, 0.192, 0.227, 1.0];   // #2c313a Surface/hover base
+    pub const BG_HOVER: [f32; 4] = [0.204, 0.224, 0.263, 1.0];     // #343946 Hover states
+    pub const BG_ACTIVE: [f32; 4] = [0.149, 0.169, 0.200, 1.0];    // #262b33 Active selection
+    pub const BG_ACTIVE_ACC: [f32; 4] = [0.157, 0.188, 0.251, 1.0]; // #283040 Blue-tinted active
+    pub const FG_PRIMARY: [f32; 4] = [0.671, 0.698, 0.749, 1.0];   // #abb2bf Text
+    pub const FG_SECONDARY: [f32; 4] = [0.510, 0.537, 0.592, 1.0]; // #828997 Subtext
+    pub const FG_MUTED: [f32; 4] = [0.361, 0.388, 0.439, 1.0];     // #5c6370 Overlay/muted
+    pub const ACCENT_BLUE: [f32; 4] = [0.380, 0.686, 0.937, 1.0];  // #61afef Blue
+    pub const ACCENT_GREEN: [f32; 4] = [0.596, 0.765, 0.475, 1.0]; // #98c379 Green
+    pub const ACCENT_PEACH: [f32; 4] = [0.898, 0.753, 0.482, 1.0]; // #e5c07b Yellow/Peach
+    pub const ACCENT_MAUVE: [f32; 4] = [0.776, 0.471, 0.867, 1.0]; // #c678dd Purple
+    pub const ACCENT_RED: [f32; 4] = [0.878, 0.424, 0.459, 1.0];   // #e06c75 Red
+    pub const RED_HOVER: [f32; 4] = [0.878, 0.424, 0.459, 0.8];
+    pub const RED_SUBTLE: [f32; 4] = [0.15, 0.11, 0.11, 1.0];
     pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
     pub const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-    // Separator / border color
-    pub const BORDER: [f32; 4] = [0.220, 0.224, 0.280, 0.8];       // Surface0-ish, more visible
+    // Separator / border color — warm gray
+    pub const BORDER: [f32; 4] = [0.243, 0.267, 0.318, 0.8];       // #3e4451 warm border
 }
 
 /// A deferred text draw command. Characters are rasterized through the

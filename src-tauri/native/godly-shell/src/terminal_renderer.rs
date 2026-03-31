@@ -37,8 +37,8 @@ impl TerminalRenderer {
             glyph_atlas,
             rasterizer,
             font_metrics,
-            default_fg: Color::new(0.804, 0.839, 0.957, 1.0),  // Catppuccin Text
-            default_bg: Color::new(0.118, 0.118, 0.180, 1.0), // Catppuccin Base
+            default_fg: Color::new(0.671, 0.698, 0.749, 1.0),  // One Dark Text #abb2bf
+            default_bg: Color::new(0.129, 0.145, 0.169, 1.0), // One Dark Base #21252b
         }
     }
 
