@@ -2811,3 +2811,66 @@ The status bar bottom accent stripe matches the top for symmetrical framing.
 **Remaining gaps vs reference (iteration 56)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 57 — Accent Color Consistency Pass
+
+**Goal**: Improve accent color continuity across all chrome elements. The
+active tab's accent color should thread consistently through the breadcrumb,
+status bar, and window frame — creating a cohesive visual language where
+every element acknowledges the active workspace's identity color.
+
+**Changes made**:
+
+1. **Bottom accent stripe edge fades** (`ui/status_bar.rs`): Replaced the
+   flat `fill` with a three-part gradient (fade-in | solid | fade-out)
+   matching the top accent stripe's treatment. Also added focus-responsive
+   dimming: `0.20 * breath` when focused, `0.06` when unfocused — identical
+   to the top stripe's behavior. Previously the bottom stripe was a flat
+   fill at `accent * 0.5` with no focus response.
+
+2. **Content spotlight intensity** (`main.rs`): Increased the radial accent
+   glow behind the welcome screen from 1.2% → 2.0% alpha. The warm
+   accent-tinted spotlight is now more perceptible, reducing the "dark void"
+   feel of the empty content area and creating a subtle focal point.
+
+3. **Breadcrumb last-segment accent tint** (`main.rs`): The pill background
+   on the current directory segment now blends 8% of the active accent color
+   into its fill and 15% accent into its border. This creates a subtle color
+   echo of the active tab's accent, connecting the breadcrumb visually to
+   the tab bar's accent language.
+
+4. **Mode pill accent border** (`ui/status_bar.rs`): The status bar's mode
+   indicator pill (showing "Ready" / process name) now blends 15% of the
+   active accent color into its border. This carries the accent color down
+   to the bottom of the window, completing the top-to-bottom accent thread.
+
+5. **Window focus propagation** (`main.rs`, `ui/status_bar.rs`): Added
+   `window_focused` field to `StatusBar` struct, updated on focus events.
+   The bottom accent stripe now correctly responds to window focus/unfocus
+   transitions alongside the top stripe.
+
+**Technical details**:
+- Bottom stripe gradient uses identical `s(40.0)` fade width as the top
+  stripe (`accent_fade` in the window border code), ensuring visual symmetry.
+- Accent tint calculations use weighted color blending (`color_a * (1-mix) +
+  accent * mix`) rather than additive, preserving the base color temperature
+  while adding a controlled accent wash.
+- `window_focused` propagation through `WindowEvent::Focused` handler ensures
+  both the app-level top stripe and the status-bar bottom stripe dim in sync.
+
+**Result**: The active tab's accent color now flows consistently through
+every chrome element: tab badge → tab accent bar → breadcrumb segment →
+mode pill border → top/bottom accent stripes. This creates a strong
+"workspace identity" visual language where changing tabs visually shifts
+the entire interface's accent threading.
+
+**Visual comparison with reference**:
+- Accent consistency: ✓ Single color threads from tab bar to status bar
+- Bottom stripe polish: ✓ Edge fades match top stripe for symmetrical framing
+- Content warmth: ✓ Stronger spotlight reduces empty-area darkness
+- Breadcrumb integration: ✓ Active segment echoes tab accent
+- Focus states: ✓ Top and bottom stripes dim together on unfocus
+
+**Remaining gaps vs reference (iteration 57)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
