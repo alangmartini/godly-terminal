@@ -4,7 +4,7 @@ use super::anim::{self, Anim, AnimVec, lerp_color, lerp};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
-const HEADER_HEIGHT: f32 = 38.0;
+const HEADER_HEIGHT: f32 = 34.0;
 const ITEM_HEIGHT: f32 = 50.0;
 const ITEM_HEIGHT_COMPACT: f32 = 34.0;
 const ITEM_PADDING_H: f32 = 14.0;

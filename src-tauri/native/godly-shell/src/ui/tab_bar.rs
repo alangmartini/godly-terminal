@@ -9,7 +9,7 @@ const TAB_MAX_WIDTH: f32 = 170.0;
 const TAB_MIN_WIDTH: f32 = 90.0;
 const TAB_GAP: f32 = 1.0;
 const TAB_MARGIN_LEFT: f32 = 6.0;
-const TAB_INSET_V: f32 = 5.0;
+const TAB_INSET_V: f32 = 4.0;
 const RIGHT_INDICATORS_WIDTH: f32 = 200.0;
 const BUTTON_WIDTH: f32 = 46.0;
 const ICON_LINE_T: f32 = 1.2;
@@ -435,15 +435,16 @@ impl TabBar {
                 // Inactive rest state: clearly tab-shaped but receding.
                 // Gradient (brighter top) gives subtle convex depth, and a
                 // faint border defines the shape without competing with active.
+                // Alpha 0.75 (up from 0.65) for better readability on dark bg.
                 let rest_top = [
                     colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06,
-                    colors::BG_DARK[2] * 1.06, 0.65,
+                    colors::BG_DARK[2] * 1.06, 0.75,
                 ];
                 let rest_bot = [
                     colors::BG_DARK[0] * 1.02, colors::BG_DARK[1] * 1.02,
-                    colors::BG_DARK[2] * 1.02, 0.65,
+                    colors::BG_DARK[2] * 1.02, 0.75,
                 ];
-                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15];
+                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
                 ui.fill_rounded_top_gradient(rect, rest_top, rest_bot, s(3.0), 0.5, rest_border);
             }
 

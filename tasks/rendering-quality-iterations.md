@@ -526,3 +526,60 @@ sidebar, and status bar.
 - Sidebar secondary text (branches, paths) could be slightly larger (10→11pt)
 - Tab bar height could be reduced (36→34px) for compactness
 - Animated hover transitions not possible in Iced's immediate-mode rendering
+
+## Iteration 23 — Chrome Compactness & Proportions (GPU Shell)
+
+**Goal**: Reduce visual chrome weight by making the tab bar, status bar, and
+sidebar header more compact, closer to Zed/VS Code proportions.  Improve
+inactive tab readability and add terminal content breathing room.
+
+**Context**: The active binary is `godly-shell` (winit + wgpu GPU-rendered UI),
+NOT `godly-iced-shell` (which has pre-existing compilation errors on this
+branch `breaking/dropping-iced`).  All changes target files in
+`src-tauri/native/godly-shell/src/ui/`.
+
+**Changes made**:
+
+1. **Layout** (`ui/layout.rs`):
+   - Tab bar height: 40px → 36px (closer to Zed's ~32px)
+   - Status bar height: 34px → 28px (closer to VS Code's status bar)
+   - Terminal left padding: 6px → 8px (more breathing room)
+   - Terminal top padding: 4px → 6px (more breathing room)
+
+2. **Tab bar** (`ui/tab_bar.rs`):
+   - Tab vertical inset: 5px → 4px (tabs start higher, feel less cramped)
+   - Inactive tab rest-state alpha: 0.65 → 0.75 (better readability against
+     dark background — tabs were too faint at 0.65)
+   - Inactive tab border alpha: 0.15 → 0.18 (slightly sharper definition)
+
+3. **Sidebar** (`ui/sidebar.rs`):
+   - Header height: 38px → 34px (matches reduced tab bar proportions)
+
+**Technical details**:
+- Layout constants are in logical pixels, scaled by DPI factor.  At 1.5× DPI,
+  the physical tab bar height goes from 60px → 54px, which is still comfortable
+  for click targets while looking more compact.
+- The status bar reduction (34 → 28px) saves 6 logical pixels, giving ~9 more
+  physical pixels to the terminal content area.  This is notable on smaller
+  screens where every pixel matters.
+- Inactive tab alpha increase (0.65 → 0.75) makes tab labels readable without
+  competing with the active tab's full-opacity treatment.
+
+**Result**: UI chrome feels significantly more compact and professional.  The
+tab bar, sidebar header, and status bar all take less space, giving more room
+to the terminal content area.  Inactive tabs are more readable.  Overall
+proportions are closer to the reference apps.
+
+**Visual comparison with reference**:
+- Tab bar compactness: ✓ 36px matches opensessions-style density
+- Status bar slimness: ✓ 28px is appropriately minimal
+- Sidebar header: ✓ 34px compact without feeling cramped
+- Inactive tab visibility: ✓ Tabs are clearly tab-shaped even at rest
+- Terminal padding: ✓ Content has appropriate breathing room
+- Overall chrome weight: ✓ Less visual overhead, more content space
+
+**Remaining gaps vs reference**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Tab bar could be further reduced to ~32px with smaller font support
+- Multi-pane terminal layout needs daemon content
