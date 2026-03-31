@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 36)
+Last updated: 2026-03-31 (Iteration 37)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -72,6 +72,10 @@ Last updated: 2026-03-31 (Iteration 36)
 | Welcome card container depth | Done | Drop shadow below card container for floating effect (iteration 36) |
 | Version indicator | Done | Muted version string below welcome shortcut cards (iteration 36) |
 | SDF chevron icon rendering | Done | Terminal icon chevron uses SDF rotated pills for clean scaling (iteration 36) |
+| SDF folder icon | Done | Folder outline icon before CWD in status bar for visual identification (iteration 37) |
+| SDF git branch icon | Done | Forked-line branch icon replacing dot before git branch in status bar (iteration 37) |
+| Improved gear cog icon | Done | Gear icon now has 6 SDF teeth + center dot instead of plain ring (iteration 37) |
+| Sidebar session timestamps | Done | Relative time labels ("5m", "2h", "1d", "3d") right-aligned on second line (iteration 37) |
 
 ## Remaining Gaps (Priority Order)
 

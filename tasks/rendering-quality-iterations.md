@@ -1449,3 +1449,70 @@ The version indicator adds professional completeness.
 **Remaining gaps vs reference (iteration 36)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 37 — SDF Icons, Sidebar Timestamps, Status Bar Polish
+
+**Goal**: Add SDF-rendered icons for visual identification of status bar
+elements, enrich sidebar sessions with relative timestamps, and improve
+the gear icon from a plain ring to a proper cog shape.
+
+**Changes made**:
+
+1. **SDF folder icon** (`ui/builder.rs`): New `icon_folder()` method draws
+   a folder outline (body rectangle + top-left tab) using SDF rounded rects.
+   Applied to the CWD pill in the status bar for at-a-glance identification.
+
+2. **SDF git branch icon** (`ui/builder.rs`): New `icon_git_branch()` method
+   draws a forked version-control icon — two circles (nodes) connected by
+   SDF rotated pill lines (trunk + diagonal branch arm). Replaces the plain
+   colored dot before the git branch name in the status bar.
+
+3. **Improved gear/cog icon** (`ui/builder.rs`): Rewrote `icon_gear()` from
+   a simple circle ring to a proper cog shape: SDF ring + center dot + 6
+   SDF rotated pill teeth evenly spaced around the perimeter. Each tooth is
+   a small rounded rectangle pointing outward. The Settings row icon now
+   looks like an actual gear.
+
+4. **Sidebar session timestamps** (`ui/sidebar.rs`): Added `timestamp: String`
+   field to `SidebarItem`. Timestamps ("5m", "2h", "1d", "3d") render
+   right-aligned on the second line of each session in very muted text
+   (35–55% opacity, brightening on hover). The description/CWD text
+   truncation accounts for timestamp space to avoid overlap.
+
+5. **Status bar CWD folder icon** (`ui/status_bar.rs`): The working directory
+   pill now shows a small SDF folder icon to the left of the path text.
+   Pill width calculation updated to account for icon + gap.
+
+6. **Status bar git branch icon** (`ui/status_bar.rs`): The git branch pill
+   now shows an SDF fork icon with breathing accent-tinted opacity instead
+   of a plain peach dot. The branch text follows the icon naturally.
+
+**Technical details**:
+- Folder icon: two SDF quads — body outline (`stroke_rounded` rectangle)
+  and top-left tab (`fill_rounded_custom` with top-only rounding).
+- Git branch icon: three SDF circle nodes + two SDF rotated pill line
+  segments (trunk: bottom→top-right, branch: mid-trunk→top-left).
+  The fork point is at ~10% from bottom for natural branch appearance.
+- Gear teeth: 6 `quad_vertices_sdf_rotated` pills at 60° intervals,
+  positioned at `tooth_center_r` from center (ring midpoint + tooth
+  length offset). Tooth proportions: length 18%, width 14% of outer.
+- Timestamp layout: `ts_reserve` variable reserves right-aligned space
+  in the description line's available width calculation, preventing
+  overlap between CWD text and timestamp.
+
+**Result**: Status bar pills now have small but recognizable icons for
+visual identification — folder for CWD, git fork for branch. The sidebar
+shows when each session was last active via relative timestamps. The
+Settings gear icon now looks like an actual cog wheel. All icons use SDF
+rendering for crisp anti-aliased edges at any DPI.
+
+**Visual comparison with reference**:
+- Status bar icons: ✓ Folder + branch icons match IDE-style status bars
+- Gear cog icon: ✓ Proper cog shape instead of circle ring
+- Session timestamps: ✓ Relative time labels add information density
+- Icon rendering: ✓ SDF-based, smooth at all scales
+- Overall polish: ✓ More identifiable, professional status bar
+
+**Remaining gaps vs reference (iteration 37)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

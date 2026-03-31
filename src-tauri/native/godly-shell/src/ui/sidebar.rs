@@ -31,6 +31,9 @@ pub struct SidebarItem {
     pub shell_type: String,
     /// Working directory shown as secondary text when description is empty.
     pub cwd: String,
+    /// Relative timestamp label (e.g. "5m", "2h", "3d"). Displayed right-aligned
+    /// on the second line in very muted text.
+    pub timestamp: String,
 }
 
 pub struct AgentItem {
@@ -77,6 +80,7 @@ impl Sidebar {
                     active: true,
                     shell_type: "pwsh".into(),
                     cwd: "~/dev/plane".into(),
+                    timestamp: "5m".into(),
                 },
                 SidebarItem {
                     id: "session-2".into(),
@@ -87,6 +91,7 @@ impl Sidebar {
                     active: false,
                     shell_type: "pwsh".into(),
                     cwd: "~/work/opensessions".into(),
+                    timestamp: "2h".into(),
                 },
                 SidebarItem {
                     id: "session-3".into(),
@@ -97,6 +102,7 @@ impl Sidebar {
                     active: false,
                     shell_type: "bash".into(),
                     cwd: "~/dev/quiver".into(),
+                    timestamp: "1d".into(),
                 },
                 SidebarItem {
                     id: "session-4".into(),
@@ -107,6 +113,7 @@ impl Sidebar {
                     active: false,
                     shell_type: "pwsh".into(),
                     cwd: "~/dev/godly-terminal".into(),
+                    timestamp: "3d".into(),
                 },
             ],
             item_hover_anim: AnimVec::default(),
@@ -566,7 +573,14 @@ impl Sidebar {
                 (String::new(), false)
             };
             if !second_line.is_empty() {
-                let desc_max_chars = ((sidebar.width - pad_h * 2.0 - cw * 2.0) / cw).floor().max(1.0) as usize;
+                // Reserve space for timestamp if present
+                let ts_reserve = if !item.timestamp.is_empty() {
+                    text.text_width_ui(&item.timestamp) + s(8.0)
+                } else {
+                    0.0
+                };
+                let desc_avail = sidebar.width - pad_h * 2.0 - cw * 2.0 - ts_reserve;
+                let desc_max_chars = (desc_avail / cw).floor().max(1.0) as usize;
                 let desc = if second_line.len() > desc_max_chars {
                     format!("{}\u{2026}", &second_line[..desc_max_chars.saturating_sub(1)])
                 } else {
@@ -588,6 +602,16 @@ impl Sidebar {
                         desc_x,
                         rect.y + line2_y_off,
                         desc_fg, item_bg);
+            }
+
+            // Timestamp label (right-aligned on second line, very muted)
+            if !item.timestamp.is_empty() {
+                let ts_w = text.text_width_ui(&item.timestamp);
+                let ts_x = rect.right() - pad_h - ts_w;
+                let ts_y = rect.y + line2_y_off;
+                let ts_alpha = lerp(0.35, 0.55, hover_t.max(active_t * 0.3));
+                let ts_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], ts_alpha];
+                ui.text_ui(text, &item.timestamp, ts_x, ts_y, ts_fg, item_bg);
             }
 
             // Subtle separator between items (faded, skip for last item)

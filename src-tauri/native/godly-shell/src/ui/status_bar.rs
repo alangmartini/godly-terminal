@@ -189,7 +189,7 @@ impl StatusBar {
         let content_x = if self.sidebar_width > 0.0 { self.sidebar_width + s(14.0) } else { bar.x + s(14.0) };
         let mut x = content_x;
 
-        // Working directory pill
+        // Working directory pill (with folder icon)
         if !self.cwd.is_empty() {
             let hints_label = "? for shortcuts";
             let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
@@ -200,7 +200,9 @@ impl StatusBar {
                 + cw * 2.0;
             let cwd_pad_h = s(4.0);
             let cwd_pad_v = s(2.0);
-            let avail_for_cwd = bar.right() - x - right_reserved - cw * 4.0 - cwd_pad_h * 2.0;
+            let icon_sz = ch * 0.85;
+            let icon_gap = s(4.0);
+            let avail_for_cwd = bar.right() - x - right_reserved - cw * 4.0 - cwd_pad_h * 2.0 - icon_sz - icon_gap;
             let max_chars = (avail_for_cwd / cw).floor().max(4.0) as usize;
 
             let display_cwd = if self.cwd.len() > max_chars {
@@ -209,7 +211,7 @@ impl StatusBar {
                 self.cwd.clone()
             };
             let cwd_text_w = text.text_width_ui(&display_cwd);
-            let cwd_pill_w = cwd_text_w + cwd_pad_h * 2.0;
+            let cwd_pill_w = icon_sz + icon_gap + cwd_text_w + cwd_pad_h * 2.0;
             let cwd_pill_h = ch + cwd_pad_v * 2.0;
             let cwd_pill_y = bar.y + (bar.height - cwd_pill_h) / 2.0;
             let cwd_pill = Rect { x, y: cwd_pill_y, width: cwd_pill_w, height: cwd_pill_h };
@@ -220,20 +222,27 @@ impl StatusBar {
             let border = Self::hover_pill_border(ht, 0.3);
             ui.fill_rounded_gradient(cwd_pill, top, bot, s(3.0));
             ui.stroke_rounded(cwd_pill, s(3.0), 0.5, border);
+            // Folder icon
+            let icon_y = bar.y + (bar.height - icon_sz) / 2.0;
+            let icon_t = (1.0 * text.scale).max(1.0);
+            let icon_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, ht * 0.3);
+            ui.icon_folder(
+                Rect { x: x + cwd_pad_h, y: icon_y, width: icon_sz, height: icon_sz },
+                icon_t, icon_fg,
+            );
             let cwd_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
-            ui.text_ui(text, &display_cwd, x + cwd_pad_h, y_center, cwd_fg, colors::BG_HOVER);
+            ui.text_ui(text, &display_cwd, x + cwd_pad_h + icon_sz + icon_gap, y_center, cwd_fg, colors::BG_HOVER);
             x += cwd_pill_w + cw * 2.0;
         }
 
-        // Git branch pill
+        // Git branch pill (with branch icon instead of dot)
         if !self.git_branch.is_empty() {
             let pad_h = s(4.0);
             let pad_v = s(2.0);
-            let dot_sz = s(4.0);
-            let branch_text = format!(" {}", self.git_branch);
-            let branch_w = text.text_width_ui(&branch_text);
-            let pill_inner_w = dot_sz + s(4.0) + branch_w;
-            let pill_w = pill_inner_w + pad_h * 2.0;
+            let icon_sz = ch * 0.85;
+            let icon_gap = s(3.0);
+            let branch_w = text.text_width_ui(&self.git_branch);
+            let pill_w = icon_sz + icon_gap + branch_w + pad_h * 2.0;
             let pill_h = ch + pad_v * 2.0;
             let pill_y = bar.y + (bar.height - pill_h) / 2.0;
             let git_pill = Rect { x, y: pill_y, width: pill_w, height: pill_h };
@@ -244,20 +253,20 @@ impl StatusBar {
             let border = Self::hover_pill_border(ht, 0.5);
             ui.fill_rounded_gradient(git_pill, top, bot, s(3.0));
             ui.stroke_rounded(git_pill, s(3.0), 0.5, border);
-            let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
+            // Git branch icon (replaces plain dot)
+            let icon_y = bar.y + (bar.height - icon_sz) / 2.0;
+            let icon_t = (1.0 * text.scale).max(1.0);
             let breath_peach = 0.85 + 0.15 * glow_phase.sin();
-            let glow_rect = Rect {
-                x: x + pad_h - s(3.0), y: dot_y - s(3.0),
-                width: dot_sz + s(6.0), height: dot_sz + s(6.0),
-            };
-            ui.fill_shadow(glow_rect, [colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1], colors::ACCENT_PEACH[2], 0.20 * breath_peach], dot_sz, s(5.0));
-            ui.fill_rounded(
-                Rect { x: x + pad_h, y: dot_y, width: dot_sz, height: dot_sz },
-                colors::ACCENT_PEACH,
-                dot_sz / 2.0,
+            let icon_fg = [
+                colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1],
+                colors::ACCENT_PEACH[2], 0.7 + 0.15 * breath_peach,
+            ];
+            ui.icon_git_branch(
+                Rect { x: x + pad_h, y: icon_y, width: icon_sz, height: icon_sz },
+                icon_t, icon_fg,
             );
             let branch_fg = lerp_color(colors::ACCENT_PEACH, [1.0, 0.85, 0.72, 1.0], ht * 0.3);
-            ui.text_ui(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, branch_fg, colors::BG_HOVER);
+            ui.text_ui(text, &self.git_branch, x + pad_h + icon_sz + icon_gap, y_center, branch_fg, colors::BG_HOVER);
             x += pill_w + cw * 2.0;
         }
 

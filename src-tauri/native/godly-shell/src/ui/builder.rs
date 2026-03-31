@@ -605,19 +605,117 @@ impl UiBuilder {
         self.stroke_rounded(inner, t * 0.8, t, color);
     }
 
-    /// Gear icon (approximated): SDF circle ring (outer circle with inner cutout).
-    /// Uses rounded rectangle with full corner radius for smooth anti-aliased circles.
-    pub fn icon_gear(&mut self, rect: Rect, outer: f32, inner: f32, fg: [f32; 4], _bg: [f32; 4]) {
+    /// Gear/cog icon: SDF circle ring with 6 rectangular teeth around the
+    /// perimeter and a small center dot.  Each tooth is a rotated SDF pill.
+    pub fn icon_gear(&mut self, rect: Rect, outer: f32, _inner: f32, fg: [f32; 4], _bg: [f32; 4]) {
         let (cx, cy) = rect.center();
-        let ring_width = (outer - inner) / 2.0;
-        let mid_size = (outer + inner) / 2.0;
+        let radius = outer * 0.38;       // ring mid-radius
+        let ring_t = outer * 0.12;       // ring stroke thickness
+        let mid_size = radius * 2.0;
         let mid_rect = Rect {
             x: cx - mid_size / 2.0,
             y: cy - mid_size / 2.0,
             width: mid_size,
             height: mid_size,
         };
-        self.stroke_rounded(mid_rect, mid_size / 2.0, ring_width, fg);
+        self.stroke_rounded(mid_rect, mid_size / 2.0, ring_t, fg);
+        // Center dot
+        let dot_r = outer * 0.10;
+        let dot_rect = Rect {
+            x: cx - dot_r, y: cy - dot_r,
+            width: dot_r * 2.0, height: dot_r * 2.0,
+        };
+        self.fill_rounded(dot_rect, fg, dot_r);
+        // 6 teeth — short rounded rects pointing outward from the ring
+        let tooth_len = outer * 0.18;
+        let tooth_w = outer * 0.14;
+        let tooth_r = tooth_w * 0.3;
+        let tooth_center_r = radius + tooth_len * 0.35;
+        let no_border = [0.0f32; 4];
+        for i in 0..6u32 {
+            let angle = i as f32 * std::f32::consts::TAU / 6.0;
+            let tx = cx + tooth_center_r * angle.cos();
+            let ty = cy + tooth_center_r * angle.sin();
+            self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+                tx, ty, tooth_len, tooth_w,
+                angle,
+                self.vw, self.vh, fg,
+                [tooth_r; 4], 0.0, no_border, 0.0,
+            ));
+        }
+    }
+
+    /// Folder icon: rectangle body with a small tab on the top-left.
+    /// Drawn as two SDF rounded rects for crisp anti-aliased edges.
+    pub fn icon_folder(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
+        let (cx, cy) = rect.center();
+        let hw = rect.width * 0.38;
+        let hh = rect.height * 0.28;
+        let r = hw * 0.15;
+        // Main body
+        let body = Rect {
+            x: cx - hw, y: cy - hh * 0.6,
+            width: hw * 2.0, height: hh * 2.0 * 0.8,
+        };
+        self.stroke_rounded(body, r, t, color);
+        // Tab on top-left
+        let tab_w = hw * 0.7;
+        let tab_h = hh * 0.5;
+        let tab = Rect {
+            x: cx - hw, y: cy - hh * 0.6 - tab_h + t * 0.5,
+            width: tab_w, height: tab_h + t * 0.5,
+        };
+        self.fill_rounded_custom(tab, color, [r, r * 0.6, 0.0, 0.0]);
+    }
+
+    /// Git branch icon: a forked line representing version control.
+    /// Two circles (nodes) connected by lines — bottom node forks upward
+    /// into two diagonal arms ending at top nodes.
+    pub fn icon_git_branch(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
+        let (cx, cy) = rect.center();
+        let hw = rect.width * 0.30;
+        let hh = rect.height * 0.36;
+        let node_r = t * 1.2;
+        let r = t * 0.5;
+        let radii = [r; 4];
+        let no_border = [0.0f32; 4];
+        // Bottom node (trunk)
+        let bottom = (cx, cy + hh);
+        let node_rect = |x: f32, y: f32| Rect {
+            x: x - node_r, y: y - node_r,
+            width: node_r * 2.0, height: node_r * 2.0,
+        };
+        self.fill_rounded(node_rect(bottom.0, bottom.1), color, node_r);
+        // Top-left node (branch)
+        let top_left = (cx - hw, cy - hh);
+        self.fill_rounded(node_rect(top_left.0, top_left.1), color, node_r);
+        // Top-right node (trunk tip)
+        let top_right = (cx + hw * 0.3, cy - hh);
+        self.fill_rounded(node_rect(top_right.0, top_right.1), color, node_r);
+        // Trunk line: bottom → top-right
+        let dx = top_right.0 - bottom.0;
+        let dy = top_right.1 - bottom.1;
+        let len = (dx * dx + dy * dy).sqrt();
+        let angle = dy.atan2(dx);
+        let mcx = (bottom.0 + top_right.0) / 2.0;
+        let mcy = (bottom.1 + top_right.1) / 2.0;
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            mcx, mcy, len, t, angle,
+            self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
+        // Branch line: mid-trunk → top-left
+        let fork_y = cy + hh * 0.1;
+        let fork_x = cx + hw * 0.3 * 0.1; // slight offset matching trunk angle
+        let dx2 = top_left.0 - fork_x;
+        let dy2 = top_left.1 - fork_y;
+        let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
+        let angle2 = dy2.atan2(dx2);
+        let mcx2 = (fork_x + top_left.0) / 2.0;
+        let mcy2 = (fork_y + top_left.1) / 2.0;
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            mcx2, mcy2, len2, t, angle2,
+            self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
     }
 
     /// Draw a terminal icon: monitor outline + prompt chevron + cursor inside.
