@@ -91,11 +91,11 @@ impl App {
                 let mut tb = ui::tab_bar::TabBar::new();
                 // Pre-populate demo tabs to match the reference UI
                 tb.tabs = vec![
-                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "opensessions".into(), active: true, unread_count: 0 },
-                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "work".into(), active: false, unread_count: 3 },
-                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "opensessions".into(), active: false, unread_count: 0 },
-                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "opensessions".into(), active: false, unread_count: 12 },
-                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "opensessions".into(), active: false, unread_count: 0 },
+                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "plane".into(), active: true, unread_count: 0 },
+                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "opensessions".into(), active: false, unread_count: 3 },
+                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "quiver".into(), active: false, unread_count: 0 },
+                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "godly-terminal".into(), active: false, unread_count: 12 },
+                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "notes".into(), active: false, unread_count: 0 },
                 ];
                 tb
             },

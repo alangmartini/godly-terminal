@@ -25,6 +25,8 @@ pub struct StatusBar {
     pub terminal_size: (u16, u16),
     pub sidebar_width: f32,
     pub git_diff_summary: String,
+    /// Connection status label (e.g. "Ready", "Connecting...", "Disconnected").
+    pub connection_status: String,
     // Hover state
     hovered_pill: Option<StatusPill>,
     mode_anim: Anim,
@@ -43,6 +45,7 @@ impl StatusBar {
             terminal_size: (24, 80),
             sidebar_width: 0.0,
             git_diff_summary: String::new(),
+            connection_status: "Ready".into(),
             hovered_pill: None,
             mode_anim: Anim::default(),
             cwd_anim: Anim::default(),
@@ -141,8 +144,12 @@ impl StatusBar {
         // --- Sidebar section: mode indicator with dot ---
         if self.sidebar_width > 0.0 {
             let sx = bar.x + s(14.0);
-            let label = if !self.process_name.is_empty() {
+            let label_owned;
+            let label: &str = if !self.process_name.is_empty() {
                 &self.process_name
+            } else if !self.connection_status.is_empty() {
+                label_owned = self.connection_status.clone();
+                &label_owned
             } else {
                 "Sessions"
             };

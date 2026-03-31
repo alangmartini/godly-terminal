@@ -27,6 +27,10 @@ pub struct SidebarItem {
     pub branch: String,
     pub description: String,
     pub active: bool,
+    /// Shell type displayed as a small pill badge (e.g. "pwsh", "bash", "zsh").
+    pub shell_type: String,
+    /// Working directory shown as secondary text when description is empty.
+    pub cwd: String,
 }
 
 pub struct AgentItem {
@@ -71,6 +75,8 @@ impl Sidebar {
                     branch: "fix/pd".into(),
                     description: "fix/pdf-export...".into(),
                     active: true,
+                    shell_type: "pwsh".into(),
+                    cwd: "~/dev/plane".into(),
                 },
                 SidebarItem {
                     id: "session-2".into(),
@@ -79,6 +85,8 @@ impl Sidebar {
                     branch: "main".into(),
                     description: "".into(),
                     active: false,
+                    shell_type: "pwsh".into(),
+                    cwd: "~/work/opensessions".into(),
                 },
                 SidebarItem {
                     id: "session-3".into(),
@@ -87,6 +95,18 @@ impl Sidebar {
                     branch: "main".into(),
                     description: "".into(),
                     active: false,
+                    shell_type: "bash".into(),
+                    cwd: "~/dev/quiver".into(),
+                },
+                SidebarItem {
+                    id: "session-4".into(),
+                    label: "godly-terminal".into(),
+                    number: 4,
+                    branch: "feat/sh".into(),
+                    description: "".into(),
+                    active: false,
+                    shell_type: "pwsh".into(),
+                    cwd: "~/dev/godly-terminal".into(),
                 },
             ],
             item_hover_anim: AnimVec::default(),
@@ -159,7 +179,9 @@ impl Sidebar {
     }
 
     fn item_height_for(&self, index: usize, scale: f32) -> f32 {
-        if self.items[index].description.is_empty() {
+        let item = &self.items[index];
+        // Two-line if there's a description or a working directory to show
+        if item.description.is_empty() && item.cwd.is_empty() {
             (ITEM_HEIGHT_COMPACT * scale).round()
         } else {
             (ITEM_HEIGHT * scale).round()
@@ -487,7 +509,38 @@ impl Sidebar {
                 ui.text_ui(text, &name, name_x, text_y, name_fg, item_bg);
             }
 
-            // Branch info (right-aligned, truncated)
+            // Shell type pill badge (right-aligned, next to branch)
+            // Small pill showing "pwsh", "bash", etc. for at-a-glance shell identification
+            let mut right_edge = rect.right() - pad_h;
+            if !item.shell_type.is_empty() && sidebar.width > s(130.0) {
+                let shell_w = text.text_width_ui(&item.shell_type);
+                let pill_pad_h = s(4.0);
+                let pill_h = ch * 0.75;
+                let pill_w = shell_w + pill_pad_h * 2.0;
+                let pill_x = right_edge - pill_w;
+                let pill_y = text_y + (ch - pill_h) / 2.0;
+                let pill_rect = Rect { x: pill_x, y: pill_y, width: pill_w, height: pill_h };
+                let pill_r = pill_h / 2.0;
+                // Muted pill background — very subtle, doesn't compete with session name
+                let pill_bg_alpha = lerp(0.25, 0.40, hover_t.max(active_t * 0.5));
+                ui.fill_rounded(pill_rect, [
+                    colors::BG_SURFACE[0], colors::BG_SURFACE[1],
+                    colors::BG_SURFACE[2], pill_bg_alpha,
+                ], pill_r);
+                ui.stroke_rounded(pill_rect, pill_r, 0.5,
+                    [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12]);
+                let pill_fg = lerp_color(
+                    [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.7],
+                    colors::FG_MUTED,
+                    hover_t * 0.3,
+                );
+                let pill_text_x = pill_x + pill_pad_h;
+                let pill_text_y = pill_y + (pill_h - ch) / 2.0;
+                ui.text_ui(text, &item.shell_type, pill_text_x, pill_text_y, pill_fg, item_bg);
+                right_edge = pill_x - s(4.0);
+            }
+
+            // Branch info (right-aligned, before shell pill)
             if !item.branch.is_empty() && sidebar.width > s(150.0) {
                 let branch = if item.branch.len() > branch_max_chars {
                     format!("{}\u{2026}", &item.branch[..branch_max_chars - 1])
@@ -498,25 +551,41 @@ impl Sidebar {
                 // Boost readability: start at 40% toward FG_SECONDARY (up from 25%)
                 let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
                 ui.text_ui(text, &branch,
-                        rect.right() - branch_w - pad_h,
+                        right_edge - branch_w,
                         text_y,
                         branch_fg, item_bg);
             }
 
-            // Description line (second row, brightens on hover for readability)
-            if !item.description.is_empty() {
+            // Description/CWD line (second row, brightens on hover for readability)
+            // Show description if available, otherwise show working directory
+            let (second_line, is_cwd) = if !item.description.is_empty() {
+                (item.description.clone(), false)
+            } else if !item.cwd.is_empty() {
+                (item.cwd.clone(), true)
+            } else {
+                (String::new(), false)
+            };
+            if !second_line.is_empty() {
                 let desc_max_chars = ((sidebar.width - pad_h * 2.0 - cw * 2.0) / cw).floor().max(1.0) as usize;
-                let desc = if item.description.len() > desc_max_chars {
-                    format!("{}\u{2026}", &item.description[..desc_max_chars.saturating_sub(1)])
+                let desc = if second_line.len() > desc_max_chars {
+                    format!("{}\u{2026}", &second_line[..desc_max_chars.saturating_sub(1)])
                 } else {
-                    item.description.clone()
+                    second_line
                 };
                 // Start from a blend between FG_MUTED and FG_SECONDARY for better baseline readability
                 let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40);
                 let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);
                 let desc_fg = lerp_color(inactive_desc, colors::FG_SECONDARY, active_t * 0.5);
+                // Render a small chevron for CWD paths to distinguish from descriptions
+                let desc_x = if is_cwd {
+                    let icon_fg = [desc_fg[0], desc_fg[1], desc_fg[2], desc_fg[3] * 0.6];
+                    ui.text_ui(text, "\u{203A}", name_x, rect.y + line2_y_off, icon_fg, item_bg);
+                    name_x + text.text_width_ui("\u{203A}") + s(2.0)
+                } else {
+                    name_x
+                };
                 ui.text_ui(text, &desc,
-                        name_x,
+                        desc_x,
                         rect.y + line2_y_off,
                         desc_fg, item_bg);
             }
@@ -557,35 +626,47 @@ impl Sidebar {
             height: compact_h,
         };
         let new_t = self.new_btn_anim.value();
-        // Rest state: dashed-looking border with green accent tint to hint at CTA
-        let rest_border = [
-            colors::ACCENT_GREEN[0] * 0.3 + colors::BORDER[0] * 0.7,
-            colors::ACCENT_GREEN[1] * 0.3 + colors::BORDER[1] * 0.7,
-            colors::ACCENT_GREEN[2] * 0.3 + colors::BORDER[2] * 0.7,
-            0.25,
+        let btn_r = s(6.0);
+        // Filled CTA button: subtle green-tinted fill at rest, brighter on hover.
+        // Rest state has a green wash so it reads as an action button.
+        let rest_fill = [
+            colors::ACCENT_GREEN[0] * 0.15 + colors::BG_DARK[0] * 0.85,
+            colors::ACCENT_GREEN[1] * 0.15 + colors::BG_DARK[1] * 0.85,
+            colors::ACCENT_GREEN[2] * 0.15 + colors::BG_DARK[2] * 0.85,
+            1.0,
         ];
+        let rest_border = [
+            colors::ACCENT_GREEN[0] * 0.30 + colors::BORDER[0] * 0.70,
+            colors::ACCENT_GREEN[1] * 0.30 + colors::BORDER[1] * 0.70,
+            colors::ACCENT_GREEN[2] * 0.30 + colors::BORDER[2] * 0.70,
+            0.40,
+        ];
+        let hover_fill = [
+            colors::ACCENT_GREEN[0] * 0.22 + colors::BG_SURFACE[0] * 0.78,
+            colors::ACCENT_GREEN[1] * 0.22 + colors::BG_SURFACE[1] * 0.78,
+            colors::ACCENT_GREEN[2] * 0.22 + colors::BG_SURFACE[2] * 0.78,
+            1.0,
+        ];
+        let hover_border = [
+            colors::ACCENT_GREEN[0] * 0.45 + colors::BORDER[0] * 0.55,
+            colors::ACCENT_GREEN[1] * 0.45 + colors::BORDER[1] * 0.55,
+            colors::ACCENT_GREEN[2] * 0.45 + colors::BORDER[2] * 0.55,
+            0.60,
+        ];
+        let btn_fill = lerp_color(rest_fill, hover_fill, new_t);
+        let btn_fill_top = [btn_fill[0] * 1.06, btn_fill[1] * 1.06, btn_fill[2] * 1.06, btn_fill[3]];
+        let btn_border = lerp_color(rest_border, hover_border, new_t);
+        ui.fill_rounded_gradient(new_rect, btn_fill_top, btn_fill, btn_r);
+        ui.stroke_rounded(new_rect, btn_r, 0.5, btn_border);
+        // Green glow on hover
         if new_t > 0.005 {
-            let bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
-            let new_top = [bg[0] * lerp(1.0, 1.08, new_t), bg[1] * lerp(1.0, 1.08, new_t), bg[2] * lerp(1.0, 1.08, new_t), bg[3]];
-            let border_alpha = lerp(0.25, 0.6, new_t);
-            let border = [
-                lerp(rest_border[0], colors::ACCENT_GREEN[0] * 0.5, new_t),
-                lerp(rest_border[1], colors::ACCENT_GREEN[1] * 0.5, new_t),
-                lerp(rest_border[2], colors::ACCENT_GREEN[2] * 0.5, new_t),
-                border_alpha,
-            ];
-            ui.fill_rounded_gradient(new_rect, new_top, bg, s(5.0));
-            ui.stroke_rounded(new_rect, s(5.0), 0.5, border);
-            // Subtle green glow on hover
             let glow_rect = Rect {
                 x: new_rect.x - s(2.0), y: new_rect.y - s(1.0),
                 width: new_rect.width + s(4.0), height: new_rect.height + s(2.0),
             };
             ui.fill_shadow(glow_rect,
-                [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.05 * new_t],
-                s(5.0), s(8.0));
-        } else {
-            ui.stroke_rounded(new_rect, s(5.0), 0.5, rest_border);
+                [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.06 * new_t],
+                btn_r, s(8.0));
         }
         // Plus icon + label — icon uses accent green for visual pop
         let icon_t = (1.2 * text.scale).max(1.0);
@@ -594,20 +675,20 @@ impl Sidebar {
             width: s(24.0), height: new_rect.height,
         };
         let icon_fg = lerp_color(
-            [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.55],
+            [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.65],
             colors::ACCENT_GREEN,
             new_t,
         );
         ui.icon_plus(icon_rect, icon_t, s(4.0), icon_fg);
         let new_fg = lerp_color(
-            [colors::FG_MUTED[0] * 0.7 + colors::ACCENT_GREEN[0] * 0.3,
-             colors::FG_MUTED[1] * 0.7 + colors::ACCENT_GREEN[1] * 0.3,
-             colors::FG_MUTED[2] * 0.7 + colors::ACCENT_GREEN[2] * 0.3,
+            [colors::FG_MUTED[0] * 0.6 + colors::ACCENT_GREEN[0] * 0.4,
+             colors::FG_MUTED[1] * 0.6 + colors::ACCENT_GREEN[1] * 0.4,
+             colors::FG_MUTED[2] * 0.6 + colors::ACCENT_GREEN[2] * 0.4,
              colors::FG_MUTED[3]],
-            colors::FG_SECONDARY,
+            colors::FG_PRIMARY,
             new_t,
         );
-        let new_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
+        let new_bg = btn_fill;
         ui.text_ui(text, "New Session",
                 new_rect.x + s(22.0),
                 new_rect.y + text_y_off(compact_h),
@@ -892,6 +973,19 @@ impl Sidebar {
                     sidebar.x + pad_h + gear_sz + s(8.0),
                     settings_y + (settings_h - ch) / 2.0,
                     settings_fg, settings_bg);
+
+            // Keyboard shortcut hint (right-aligned, very muted)
+            let hint = "Ctrl+,";
+            let hint_w = text.text_width_ui(hint);
+            let hint_fg = lerp_color(
+                [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.4],
+                [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.7],
+                settings_t,
+            );
+            ui.text_ui(text, hint,
+                    sidebar.right() - hint_w - pad_h,
+                    settings_y + (settings_h - ch) / 2.0,
+                    hint_fg, settings_bg);
         }
     }
 

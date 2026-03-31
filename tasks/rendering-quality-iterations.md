@@ -1297,3 +1297,80 @@ Sidebar metadata text is more comfortable to scan without hovering.
 **Remaining gaps vs reference (iteration 34)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 35 — Session Metadata, Shell Type Badges, Filled CTA Button
+
+**Goal**: Enrich sidebar sessions with shell type identification, working
+directories, and transform the "New Session" button into a proper filled
+call-to-action. Add realistic tab names and connection status.
+
+**Changes made**:
+
+1. **Shell type pill badges** (`ui/sidebar.rs`):
+   - Added `shell_type: String` and `cwd: String` fields to `SidebarItem`
+   - Renders a small pill badge ("pwsh", "bash") right-aligned on each
+     session's first line, before the branch name
+   - Pill has muted BG_SURFACE fill at 25-40% opacity (brighter on hover)
+     with subtle BORDER stroke — doesn't compete with session name
+
+2. **Working directory on session items** (`ui/sidebar.rs`):
+   - Sessions without a description now show their `cwd` as second-line text
+   - CWD paths prefixed with a subtle chevron character "›" to distinguish
+     from task descriptions
+   - `item_height_for()` updated to use two-line height when CWD is present
+   - All demo sessions now have CWD data (~/dev/plane, ~/work/opensessions, etc.)
+
+3. **Filled "New Session" CTA button** (`ui/sidebar.rs`):
+   - Changed from border-only outline to green-tinted filled button at rest
+   - Rest fill: 15% ACCENT_GREEN + 85% BG_DARK (was 0% fill)
+   - Rest border: 30% green tint at 40% alpha (was 25% at 25%)
+   - Hover fill: 22% green + 78% BG_SURFACE (was 18%)
+   - Button now reads as an action element even at rest, matching professional
+     app CTA conventions
+
+4. **Realistic tab names** (`main.rs`):
+   - Updated demo tab titles to match sidebar sessions: "plane", "opensessions",
+     "quiver", "godly-terminal", "notes" (was all "opensessions")
+   - Shows truncation behavior naturally ("godly-termi...")
+
+5. **Fourth session added** (`ui/sidebar.rs`):
+   - "godly-terminal" session on branch "feat/sh" with pwsh shell type
+   - Demonstrates sidebar density with 4 two-line entries
+
+6. **Settings keyboard shortcut hint** (`ui/sidebar.rs`):
+   - Added "Ctrl+," hint right-aligned on the Settings row
+   - Very muted at rest (40% alpha), brightens on hover (70%)
+   - Provides discoverability for keyboard navigation
+
+7. **Connection status in status bar** (`ui/status_bar.rs`):
+   - Added `connection_status: String` field
+   - Mode pill label falls through: process_name → connection_status → "Sessions"
+   - Default: "Ready" — shows with green breathing dot
+
+**Technical details**:
+- Shell type pills use `text_width_ui()` for proportional layout and
+  `text_ui()` for proportional rendering, consistent with other sidebar text
+- CWD chevron "›" (U+203A, single right-pointing angle quotation mark) renders
+  in the UI proportional font at reduced opacity for subtle visual hierarchy
+- `right_edge` tracking variable ensures shell pill → branch → session name
+  layout doesn't overlap: right_edge decrements as right-aligned elements claim space
+- The `label_owned` variable in status bar avoids borrowing issues with
+  connection_status (clone into owned String, then borrow)
+
+**Result**: Sidebar sessions are now rich and informative — each entry shows
+name, branch, shell type, and working directory. The "New Session" button
+clearly reads as an action element. Tab names are realistic and show natural
+truncation. The Settings row provides keyboard shortcut discoverability.
+The status bar shows connection status.
+
+**Visual comparison with reference**:
+- Session metadata richness: ✓ Shell type, CWD, branch on every session
+- Shell type identification: ✓ "pwsh"/"bash" pill badges like IDE status bars
+- CTA button styling: ✓ Filled green-tinted button reads as primary action
+- Tab-session name consistency: ✓ Tab titles match sidebar session names
+- Settings discoverability: ✓ "Ctrl+," shortcut hint on Settings row
+- Connection status: ✓ "Ready" with breathing green dot in status bar
+
+**Remaining gaps vs reference (iteration 35)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

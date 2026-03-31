@@ -61,6 +61,12 @@ Last updated: 2026-03-31 (Iteration 34)
 | Sidebar-tab accent color continuity | Done | Active workspace indicator, border, glow uses session's own accent color from rotating palette (iteration 34) |
 | Terminal branding icon | Done | Canvas-drawn terminal monitor + prompt icon next to "Godly Terminal" text in title bar (iteration 34) |
 | Sidebar metadata readability | Done | Branch/description text base luminance boosted (0.25→0.40 blend toward FG_SECONDARY) (iteration 34) |
+| Shell type pill badges | Done | "pwsh"/"bash" pills right-aligned on sidebar sessions for shell identification (iteration 35) |
+| Session working directories | Done | CWD shown as second-line text with "›" chevron prefix on sessions without descriptions (iteration 35) |
+| Filled "New Session" CTA | Done | Green-tinted filled button (15% green wash) at rest, reads as primary action (iteration 35) |
+| Tab-session name consistency | Done | Tab titles match sidebar session names (plane, opensessions, quiver, etc.) (iteration 35) |
+| Settings keyboard shortcut | Done | "Ctrl+," hint right-aligned on Settings row for discoverability (iteration 35) |
+| Status bar connection status | Done | "Ready" label with breathing green dot in mode pill (iteration 35) |
 
 ## Remaining Gaps (Priority Order)
 
