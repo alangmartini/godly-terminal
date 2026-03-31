@@ -337,6 +337,17 @@ impl Sidebar {
             if active_t < 0.995 {
                 let inv_active = 1.0 - active_t;
                 if hover_t > 0.005 {
+                    // Soft glow shadow behind hovered item for "lift" effect
+                    let session_accent = SESSION_ACCENTS[i % SESSION_ACCENTS.len()];
+                    let glow_rect = Rect {
+                        x: inset_rect.x - s(2.0),
+                        y: inset_rect.y - s(1.0),
+                        width: inset_rect.width + s(4.0),
+                        height: inset_rect.height + s(2.0),
+                    };
+                    ui.fill_shadow(glow_rect,
+                        [session_accent[0], session_accent[1], session_accent[2], 0.06 * hover_t * inv_active],
+                        item_radius + s(2.0), s(8.0));
                     let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], lerp(0.12, 0.4, hover_t) * inv_active];
                     let hover_top = [
                         colors::BG_HOVER[0] * lerp(1.0, 1.08, hover_t),

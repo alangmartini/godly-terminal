@@ -895,6 +895,73 @@ regular sessions.
 - Overall chrome weight: ✓ More content area, less visual overhead
 - New Session distinction: ✓ Green icon clearly identifies the add action
 
+**Remaining gaps vs reference (iteration 28)**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
+
+## Iteration 29 — Depth & Physicality Pass
+
+**Goal**: Add consistent depth cues across all UI elements through shadows,
+embossed grooves, and physical material effects. Close the gap between flat
+colored rectangles and professional "3D" chrome.
+
+**Changes made**:
+
+1. **Embossed tab separators** (`ui/tab_bar.rs`): Replaced simple faded
+   vlines between tabs with embossed groove pairs (dark edge + light
+   highlight), matching the sidebar's established groove depth language.
+   This creates consistent panel junction styling across the entire UI.
+
+2. **Inactive tab baseline shadows** (`ui/tab_bar.rs`): Added subtle drop
+   shadows (0.08 alpha, 4px blur) below each inactive tab at rest. This
+   creates a "raised from the bar" physical depth effect, making tabs
+   feel like they float slightly above the tab bar surface.
+
+3. **Keycap badge drop shadows** (`main.rs`): Added offset drop shadows
+   (0.2 alpha, 3px blur, 1.5px offset) behind each keyboard shortcut
+   key badge. Combined with strengthened top bevel (0.08→0.10 alpha),
+   bottom shadow (0.15→0.20), and border (0.4→0.5 alpha), keycaps now
+   look like physical raised keys rather than flat colored pills.
+
+4. **Welcome container inner shadow** (`main.rs`): Added SDF inner shadow
+   (0.08 alpha, 4px blur, 8px corner radius) to the shortcut card
+   container. Strengthened container border (0.20→0.25 alpha). Creates
+   a recessed "inset panel" feel that groups the cards visually.
+
+5. **Sidebar hover glow** (`ui/sidebar.rs`): Added accent-tinted glow
+   shadow behind hovered session items. Uses the session's accent color
+   from the cycling palette (blue, green, peach, mauve, red) at 0.06
+   alpha with 8px blur. Creates a "lift" effect on hover that reinforces
+   the sidebar-tab color continuity.
+
+**Technical details**:
+- Tab groove separators use `vgroove_fade()` with 0.12 dark + 0.04 light
+  alpha, fading with combined hover_t of adjacent tabs (same as before).
+- Baseline shadow renders BEFORE the tab background so it appears to cast
+  from the tab's bottom edge. Shadow rect is inset 4px from edges with
+  3px height at bar bottom.
+- Keycap shadow offset: rect shifted 1px right + 1.5px down from badge
+  position, creating natural top-left light source effect.
+- Inner shadow on container uses `fill_inner_shadow_custom()` with
+  uniform [s(8.0); 4] corner radii matching the container's rounded rect.
+- Sidebar hover glow extends 2px beyond inset_rect on each side, using
+  the per-session accent color to reinforce the color-coding system.
+
+**Result**: UI chrome has significantly more physical depth. Tabs feel
+raised above the bar, keycaps look like real keyboard keys, the card
+container feels inset into the welcome screen, and sidebar items glow
+when hovered. The consistent groove language across tab bar and sidebar
+creates unified depth vocabulary.
+
+**Visual comparison with reference**:
+- Tab separator depth: ✓ Embossed grooves match sidebar groove style
+- Inactive tab physicality: ✓ Baseline shadows create "raised" feel
+- Keycap realism: ✓ Drop shadows + stronger bevels = physical keys
+- Card container depth: ✓ Inner shadow creates recessed grouping
+- Sidebar hover feedback: ✓ Accent-colored glow on hover
+- Depth consistency: ✓ Unified shadow/groove vocabulary across all chrome
+
 **Remaining gaps vs reference**:
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished

@@ -875,9 +875,12 @@ impl App {
                 0.3,
             ];
             ui_builder.fill_rounded(container_rect, container_bg, s(8.0));
+            // Inner shadow for recessed depth on card container
+            ui_builder.fill_inner_shadow_custom(container_rect,
+                [0.0, 0.0, 0.0, 0.08], [s(8.0); 4], s(4.0));
             ui_builder.stroke_rounded(container_rect, s(8.0), 0.5,
                 [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.2]);
+                 ui::builder::colors::BORDER[2], 0.25]);
 
             for (i, (key, desc)) in hints.iter().enumerate() {
                 let y = cards_start_y + i as f32 * (card_h + card_gap);
@@ -925,22 +928,31 @@ impl App {
                     ui::builder::colors::BG_DARK[2] * 0.9,
                     0.9,
                 ];
+                // Drop shadow below keycap for physical "raised key" depth
+                let keycap_shadow_rect = ui::widget::Rect {
+                    x: badge_x + s(1.0),
+                    y: badge_y + s(1.5),
+                    width: badge_w - s(2.0),
+                    height: badge_h,
+                };
+                ui_builder.fill_shadow(keycap_shadow_rect,
+                    [0.0, 0.0, 0.0, 0.2], key_badge_radius, s(3.0));
                 ui_builder.fill_rounded_gradient(badge_rect, badge_bg_top, badge_bg_bot, key_badge_radius);
                 // Top highlight (keycap bevel)
                 ui_builder.hline_fade(
                     badge_x + key_badge_radius, badge_y + 1.0,
                     badge_w - key_badge_radius * 2.0, 1.0,
-                    [1.0, 1.0, 1.0, 0.08], s(4.0),
+                    [1.0, 1.0, 1.0, 0.10], s(4.0),
                 );
                 // Bottom shadow (keycap depth)
                 ui_builder.hline_fade(
                     badge_x + key_badge_radius, badge_y + badge_h - 1.0,
                     badge_w - key_badge_radius * 2.0, 1.0,
-                    [0.0, 0.0, 0.0, 0.15], s(4.0),
+                    [0.0, 0.0, 0.0, 0.20], s(4.0),
                 );
                 ui_builder.stroke_rounded(badge_rect, key_badge_radius, 0.5,
                     [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                     ui::builder::colors::BORDER[2], 0.4]);
+                     ui::builder::colors::BORDER[2], 0.5]);
 
                 // Key text (centered in badge)
                 let key_text_x = badge_x + key_badge_pad_h;

@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 28)
+Last updated: 2026-03-30 (Iteration 29)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -40,6 +40,11 @@ Last updated: 2026-03-30 (Iteration 28)
 | Sidebar-tab visual continuity | Done | Session accent dots match tab bar color cycle (blue, green, peach, mauve, red) (iteration 28) |
 | Green "New Session" icon | Done | Plus icon uses accent green for visual pop (iteration 28) |
 | Status bar content inner shadow | Done | Recessed shadow on content section for depth (iteration 28) |
+| Embossed tab separators | Done | Groove pairs between tabs matching sidebar depth language (iteration 29) |
+| Inactive tab baseline shadows | Done | Drop shadows below inactive tabs for physical depth (iteration 29) |
+| Keycap badge drop shadows | Done | Physical "raised key" shadows on welcome shortcut badges (iteration 29) |
+| Welcome container inner shadow | Done | Recessed inner shadow on shortcut card container (iteration 29) |
+| Sidebar hover glow | Done | Accent-tinted glow shadow on hovered session items (iteration 29) |
 
 ## Remaining Gaps (Priority Order)
 

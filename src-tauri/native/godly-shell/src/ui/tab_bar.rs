@@ -449,6 +449,14 @@ impl TabBar {
                     colors::BG_DARK[2] * 1.02, 0.75,
                 ];
                 let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
+                // Subtle baseline shadow below inactive tab for physical depth
+                let shadow_rect = Rect {
+                    x: rect.x + s(4.0),
+                    y: rect.bottom() - s(2.0),
+                    width: rect.width - s(8.0),
+                    height: s(3.0),
+                };
+                ui.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.08], s(2.0), s(4.0));
                 ui.fill_rounded_top_gradient(rect, rest_top, rest_bot, s(3.0), 0.5, rest_border);
             }
 
@@ -590,15 +598,18 @@ impl TabBar {
                 }
             }
 
-            // Right separator between tabs (faded, skip for active and last tab)
+            // Right separator between tabs — embossed groove for depth
+            // (matches sidebar groove language: dark edge + light highlight pair)
             if !tab.active && i + 1 < self.tabs.len() {
                 let next_active = self.tabs.get(i + 1).map_or(false, |t| t.active);
                 if !next_active {
                     // Fade separator out when either adjacent tab is hovered
                     let next_hover = self.tab_hover_anim.get(i + 1);
                     let sep_fade = 1.0 - (hover_t.max(next_hover));
-                    let sep_color = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5 * sep_fade];
-                    ui.vline_fade(rect.right(), rect.y + s(6.0), rect.height - s(12.0), 1.0, sep_color, s(6.0));
+                    let groove_dark = [0.0, 0.0, 0.0, 0.12 * sep_fade];
+                    let groove_light = [1.0, 1.0, 1.0, 0.04 * sep_fade];
+                    ui.vgroove_fade(rect.right(), rect.y + s(6.0), rect.height - s(12.0),
+                        groove_dark, groove_light, s(6.0));
                 }
             }
         }
