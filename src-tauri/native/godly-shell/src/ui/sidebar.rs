@@ -494,7 +494,7 @@ impl Sidebar {
             let dot_rect = Rect {
                 x: dot_x, y: dot_y, width: dot_sz, height: dot_sz,
             };
-            let dot_alpha = lerp(0.50, 0.90, active_t.max(hover_t * 0.5));
+            let dot_alpha = lerp(0.62, 0.92, active_t.max(hover_t * 0.5));
             let dot_color = [session_accent[0], session_accent[1], session_accent[2], dot_alpha];
             ui.fill_rounded(dot_rect, dot_color, dot_sz / 2.0);
             // Subtle glow ring on active session dot

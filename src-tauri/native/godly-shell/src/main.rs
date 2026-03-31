@@ -745,6 +745,20 @@ impl App {
                     [0.0, 0.0, 0.0, 0.04],
                 );
             }
+
+            // Subtle accent-tinted inner frame — a very faint top-edge glow
+            // using the active tab's accent color. Creates a warm connection
+            // between the tab bar accent and the content area below it.
+            {
+                let accent = self.active_accent();
+                let frame_h = ui_text_handle.s(2.0);
+                let tc = &layout.terminal;
+                ui_builder.fill_gradient(
+                    ui::widget::Rect { x: tc.x, y: tc.y, width: tc.width, height: frame_h },
+                    [accent[0], accent[1], accent[2], 0.06],
+                    [accent[0], accent[1], accent[2], 0.0],
+                );
+            }
         }
 
         // Empty terminal welcome state — styled welcome screen with branded

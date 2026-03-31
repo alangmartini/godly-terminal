@@ -227,15 +227,25 @@ impl TabBar {
             .unwrap_or(colors::ACCENT_BLUE);
         {
             let stripe_h = s(2.0);
-            let stripe_rect = Rect {
-                x: bar.x,
-                y: bar.y,
-                width: bar.width,
-                height: stripe_h,
-            };
-            ui.fill(stripe_rect, active_accent);
-            // Subtle glow spill below the stripe for depth
             let breath = 0.92 + 0.08 * self.glow_phase.sin();
+            let stripe_alpha = 0.85 * breath;
+            let fade_w = s(40.0);
+            let stripe_full = [active_accent[0], active_accent[1], active_accent[2], stripe_alpha];
+            let stripe_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
+            // Three-part gradient: fade-in | solid | fade-out (matches bottom stripe)
+            ui.fill_gradient_h(
+                Rect { x: bar.x, y: bar.y, width: fade_w, height: stripe_h },
+                stripe_zero, stripe_full,
+            );
+            ui.fill(
+                Rect { x: bar.x + fade_w, y: bar.y, width: bar.width - fade_w * 2.0, height: stripe_h },
+                stripe_full,
+            );
+            ui.fill_gradient_h(
+                Rect { x: bar.x + bar.width - fade_w, y: bar.y, width: fade_w, height: stripe_h },
+                stripe_full, stripe_zero,
+            );
+            // Subtle glow spill below the stripe for depth
             let glow_rect = Rect {
                 x: bar.x,
                 y: bar.y + stripe_h,
@@ -556,12 +566,11 @@ impl TabBar {
                 }
             }
 
-            // Close button — smoothly fades in based on active/hover state.
-            // On active tabs the button is fully visible; on hovered inactive
-            // tabs it fades in with the hover animation; on untouched inactive
-            // tabs it's hidden. Uses smooth alpha for graceful transition.
-            let close_fade = active_t.max(hover_t);
-            if close_fade > 0.005 {
+            // Close button — always faintly visible for discoverability.
+            // Active tabs: fully visible. Hovered inactive: fades in with hover.
+            // Rest inactive: very faint (0.18 alpha) so users know it's there.
+            let close_fade = active_t.max(hover_t).max(0.18);
+            {
                 let close_t = self.close_hover_anim.get(i);
                 let close_rect = Rect {
                     x: rect.right() - close_btn_sz - close_btn_pad,
