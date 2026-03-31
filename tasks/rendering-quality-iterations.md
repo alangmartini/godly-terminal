@@ -1298,6 +1298,72 @@ Sidebar metadata text is more comfortable to scan without hovering.
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
 
+## Iteration 50 — Visual Restraint Pass
+
+**Goal**: Reduce visual noise across all chrome elements. Remove effects that
+add complexity without clearly improving the appearance — matching Zed's
+principle of "less is more" in UI rendering.
+
+**Changes made**:
+
+1. **Tab bar glass sheen removed** (`ui/tab_bar.rs`): Removed the "brushed
+   metal" horizontal highlight band at 25% from top and the bevel highlight
+   line below the accent stripe. These added 4 gradient render passes with
+   barely perceptible results. The tab bar is now a clean flat gradient.
+
+2. **Tab accent bar shimmer removed** (`ui/tab_bar.rs`): Replaced the animated
+   left/right shimmer sweep on the active tab's accent bar with a clean static
+   solid color fill. The shimmer was a subtle animated gradient that added
+   visual noise without matching any reference app. Active tab accent is now
+   a clean, crisp colored line.
+
+3. **Sidebar convexity gradient removed** (`ui/sidebar.rs`): Removed the
+   left-to-right brightness gradient (0.02 alpha white overlay) that simulated
+   surface curvature. At 5/255 brightness shift it was sub-perceptual but
+   added a full-sidebar render pass.
+
+4. **PROCESSES panel flattened** (`ui/sidebar.rs`): Removed the card container
+   around the agents section — the rounded rect with gradient background,
+   border stroke, inner shadow, and directional drop shadow. Agents now render
+   as flat inline items like sessions, with just a section header + thin
+   separator. This eliminates 5 render passes (shadow, gradient bg, stroke,
+   inner shadow, inner gradient) and removes the "card within card" visual
+   heaviness.
+
+5. **Agent items compacted** (`ui/sidebar.rs`): Agent items reduced from 44px
+   to 36px (single-line). Removed the task description second line and the
+   spinning orbit animation around the running status dot. Running agents
+   still show a breathing glow, but the orbit ring + 2 orbiting dots
+   (6 SDF draws per running agent per frame) are gone. Status badge alpha
+   reduced (bg 0.18→0.12, border 0.35→0.25) for lighter feel.
+
+**Technical details**:
+- Glass sheen removal: deleted 2 gradient fill_gradient calls + 1 hline_fade
+- Shimmer removal: `fill_rounded_gradient_h` (animated) → `fill_rounded` (static)
+- Convexity gradient: deleted 1 fill_gradient_h call
+- Agent panel: removed fill_shadow_offset, fill_rounded_gradient, stroke_rounded,
+  fill_inner_shadow (4 draw calls). Panel background text now uses BG_DARK instead
+  of BG_RAISED.
+- Agent items: no second line (task_fg render removed), no orbit animation (orbit_r,
+  orbiter_sz, ring_rect renders removed). Single-line vertical centering.
+
+**Result**: The UI is noticeably cleaner and more restrained. The tab bar has
+a simpler, more Zed-like feel. The sidebar's PROCESSES section integrates
+naturally with the session list instead of floating as a separate card. Agent
+items are compact single-line entries consistent with session item styling.
+
+**Visual comparison with reference**:
+- Tab bar cleanliness: ✓ Flat gradient, no decorative effects
+- Active tab accent: ✓ Clean static colored line
+- Sidebar flatness: ✓ No surface curvature simulation
+- Agent panel integration: ✓ Flat inline items, no card container
+- Agent item compactness: ✓ Single-line, no orbit animation
+- Overall restraint: ✓ Fewer render passes, cleaner aesthetic
+
+**Remaining gaps vs reference (iteration 50)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
+
 ## Iteration 35 — Session Metadata, Shell Type Badges, Filled CTA Button
 
 **Goal**: Enrich sidebar sessions with shell type identification, working

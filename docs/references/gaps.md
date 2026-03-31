@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 49)
+Last updated: 2026-03-31 (Iteration 50)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -136,6 +136,10 @@ Last updated: 2026-03-31 (Iteration 49)
 | Proportional font width calc | Done | Tab titles, sidebar names, status bar CWD use UI font advance (~25% more visible text) (iteration 49) |
 | Tab hover lift effect | Done | Inactive tabs shift up 1.5px on hover for physical "raise" feel (iteration 49) |
 | Smooth close button fade | Done | Close button uses smooth alpha (max of active_t, hover_t) instead of binary threshold (iteration 49) |
+| Tab bar visual restraint | Done | Removed glass sheen band, bevel highlight, and shimmer from accent bar for clean flat aesthetic (iteration 50) |
+| Flat sidebar surface | Done | Removed convexity gradient overlay for consistent flat surface matching Zed (iteration 50) |
+| Flat agent panel | Done | PROCESSES panel uses inline items (no card container, shadow, inner shadow) matching sessions section style (iteration 50) |
+| Compact agent items | Done | Single-line 36px agents, no task description or orbit animation — clean status dot + name + badge (iteration 50) |
 
 ## Remaining Gaps (Priority Order)
 
