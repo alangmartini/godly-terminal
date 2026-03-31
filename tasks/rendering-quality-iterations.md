@@ -2749,3 +2749,65 @@ without hovering. The title bar has more perceptible depth gradient.
 **Remaining gaps vs reference (iteration 55)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 56 — Visual Quieting Pass
+
+**Goal**: Reduce visual noise by flattening surfaces, softening borders, and
+compacting the breadcrumb bar. Match Zed's principle of letting color difference
+provide separation rather than visible border lines.
+
+**Changes made**:
+
+1. **Sidebar background flattened** (`ui/sidebar.rs`): Bottom darkening reduced
+   from 10% to 4%. The sidebar is now nearly flat, matching Zed/VS Code's
+   restrained surface treatment. Eliminates visible gradient banding.
+
+2. **Sidebar right border softened** (`ui/sidebar.rs`): Hairline alpha reduced
+   from 0.18 to 0.12. Inward shadow shortened (4px→3px) and lightened
+   (0.04→0.03 alpha). Inner shadow reduced (0.03→0.02 alpha, 4px→3px blur).
+   The BG_DARK→BG_BASE color difference now provides primary separation.
+
+3. **Breadcrumb bar compacted** (`ui/layout.rs`): Height reduced from 22px to
+   20px logical, gaining 2 logical pixels (3 physical at 1.5×) for the
+   terminal content area. More compact like VS Code's breadcrumb.
+
+4. **Breadcrumb gradient softened** (`main.rs`): Top brightness reduced from
+   88% to 92%, bottom from 96% to 98%. The gradient is now subtle enough
+   to avoid visible banding in the compact 20px bar.
+
+5. **Breadcrumb bottom separator softened** (`main.rs`): Alpha reduced from
+   0.30 to 0.20. The gradient difference between breadcrumb and content area
+   provides primary separation.
+
+6. **Tab bar branding right border softened** (`ui/tab_bar.rs`): Alpha reduced
+   from 0.18 to 0.12, matching the sidebar right border.
+
+7. **Status bar bottom accent stripe widened** (`ui/status_bar.rs`): Changed
+   from 1px hline to 2px fill bar, matching the 2px top accent stripe for
+   cohesive visual window framing.
+
+8. **Status bar top separator softened** (`ui/status_bar.rs`): Alpha reduced
+   from 0.35 to 0.28 for consistent quieting.
+
+9. **Corner fill updated** (`main.rs`): Bottom-left content corner fill now
+   uses BG_DARK × 0.96 (was 0.90), matching the new sidebar gradient.
+
+**Design principle**: Borders and separators are visual noise. Professional apps
+like Zed rely on surface color differences (BG_DARK vs BG_BASE, gradient
+transitions) for panel separation, reserving visible borders for interactive
+elements. This pass reduces all structural borders to near-invisibility.
+
+**Result**: The UI feels calmer and more cohesive. Panel junctions are defined
+by color difference rather than drawn lines. The breadcrumb bar is more compact.
+The status bar bottom accent stripe matches the top for symmetrical framing.
+
+**Visual comparison with reference**:
+- Sidebar flatness: ✓ Nearly flat background, matching Zed's restrained surfaces
+- Panel separation: ✓ Color difference provides separation, not drawn borders
+- Breadcrumb compactness: ✓ 20px approaches VS Code density
+- Window frame symmetry: ✓ 2px accent stripes top and bottom
+- Overall noise reduction: ✓ Fewer visible structural borders across all chrome
+
+**Remaining gaps vs reference (iteration 56)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

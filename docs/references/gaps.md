@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 55)
+Last updated: 2026-03-31 (Iteration 56)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -155,6 +155,10 @@ Last updated: 2026-03-31 (Iteration 55)
 | Inactive tab close visibility | Done | Close buttons at 25% text opacity on inactive tabs for discoverability (iteration 55) |
 | Title bar gradient strength | Done | Gradient offset 0.012→0.020 for perceptible depth matching tab bar language (iteration 55) |
 | Inactive tab rest borders | Done | Faint BORDER_VARIANT × 0.15 borders on inactive tabs for shape definition at rest (iteration 55) |
+| Sidebar background flatness | Done | 4% bottom darkening (was 10%), matching Zed's flat sidebar surfaces (iteration 56) |
+| Softened structural borders | Done | All panel borders reduced to 0.12 alpha — color difference provides primary separation (iteration 56) |
+| Breadcrumb compactness | Done | 20px height (was 22px), subtle gradient (92/98%), softer separator (0.20 alpha) (iteration 56) |
+| Window frame accent symmetry | Done | 2px bottom accent stripe matching top stripe for cohesive framing (iteration 56) |
 
 ## Remaining Gaps (Priority Order)
 
