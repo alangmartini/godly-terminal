@@ -248,28 +248,7 @@ impl TabBar {
             );
         }
 
-        // Top edge bevel highlight (below accent stripe, very subtle)
-        ui.hline_fade(bar.x + s(4.0), bar.y + s(2.0), bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.03], s(20.0));
-
-        // Glass sheen band: very subtle horizontal highlight at ~25% from top.
-        // Simulates reflective curvature on a polished chrome surface — the
-        // "brushed metal title bar" feel from macOS/Arc browser.
-        {
-            let sheen_y = bar.y + bar.height * 0.25;
-            let sheen_h = s(4.0);
-            let sheen_peak = [1.0, 1.0, 1.0, 0.015];
-            let sheen_edge = [1.0, 1.0, 1.0, 0.0];
-            // Top half: fade in
-            ui.fill_gradient(
-                Rect { x: bar.x, y: sheen_y, width: bar.width, height: sheen_h * 0.5 },
-                sheen_edge, sheen_peak,
-            );
-            // Bottom half: fade out
-            ui.fill_gradient(
-                Rect { x: bar.x, y: sheen_y + sheen_h * 0.5, width: bar.width, height: sheen_h * 0.5 },
-                sheen_peak, sheen_edge,
-            );
-        }
+        // (Glass sheen and bevel removed — clean flat bar matches Zed/VS Code restraint)
 
         // Bottom separator line — break under the active tab for seamless join
         let active_rect = self.tabs.iter().enumerate()
@@ -455,30 +434,15 @@ impl TabBar {
                 };
                 ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], 0.08 * breath * active_t], s(2.0), s(4.0));
 
-                // Top accent bar (fades in with active_t)
+                // Top accent bar — clean static line (fades in with active_t)
                 let accent_bar = Rect {
                     x: rect.x + tab_radius,
                     y: rect.y + 1.0,
                     width: rect.width - tab_radius * 2.0,
                     height: s(2.0),
                 };
-                let sweep_t = self.glow_phase.sin() * 0.5 + 0.5;
-                let left_boost = (1.0 - sweep_t).max(0.0).min(1.0);
-                let right_boost = sweep_t.max(0.0).min(1.0);
-                let shimmer_strength = 0.15;
-                let left_color = [
-                    accent[0] * (1.0 + shimmer_strength * left_boost),
-                    accent[1] * (1.0 + shimmer_strength * left_boost),
-                    accent[2] * (1.0 + shimmer_strength * left_boost),
-                    accent[3] * active_t,
-                ];
-                let right_color = [
-                    accent[0] * (1.0 + shimmer_strength * right_boost),
-                    accent[1] * (1.0 + shimmer_strength * right_boost),
-                    accent[2] * (1.0 + shimmer_strength * right_boost),
-                    accent[3] * active_t,
-                ];
-                ui.fill_rounded_gradient_h(accent_bar, left_color, right_color, s(1.0));
+                let accent_color = [accent[0], accent[1], accent[2], accent[3] * active_t];
+                ui.fill_rounded(accent_bar, accent_color, s(1.0));
             }
             if active_t < 0.995 && hover_t > 0.005 {
                 // Hover state for non-fully-active tabs

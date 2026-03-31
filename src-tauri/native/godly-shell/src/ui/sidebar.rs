@@ -249,7 +249,7 @@ impl Sidebar {
         let item_h = s(ITEM_HEIGHT);
         let pad_h = s(ITEM_PADDING_H);
         let indicator_w = s(ACTIVE_INDICATOR_W);
-        let bottom_panel_h = s(BOTTOM_PANEL_HEIGHT);
+        let _bottom_panel_h = s(BOTTOM_PANEL_HEIGHT);
         let text_y_off = |area_h: f32| (area_h - ch) / 2.0;
 
         // Sidebar background — subtle vertical gradient (slightly darker at bottom)
@@ -261,15 +261,7 @@ impl Sidebar {
         ];
         ui.fill_gradient(sidebar, colors::BG_DARK, sidebar_bottom_color);
 
-        // Convexity gradient: very subtle left-brighter overlay that suggests
-        // the sidebar surface has slight curvature catching light from the left.
-        // At 0.02 alpha this shifts brightness by ~5/255 — barely perceptible
-        // but contributes to the "real material" feel.
-        ui.fill_gradient_h(
-            sidebar,
-            [1.0, 1.0, 1.0, 0.02],
-            [1.0, 1.0, 1.0, 0.0],
-        );
+        // (Convexity gradient removed — flat surface matches Zed/VS Code restraint)
 
         // Right border separator — soft gradient shadow for modern panel junction.
         // 1px hairline border at the right edge — very subtle
@@ -768,8 +760,8 @@ impl Sidebar {
         if !self.agents.is_empty() {
             let settings_row_h = s(28.0);
             let header_section_h = s(28.0);
-            let agent_item_h = s(44.0);
-            let agent_panel_h_est = header_section_h + self.agents.len() as f32 * agent_item_h + s(8.0);
+            let agent_item_h = s(36.0);
+            let agent_panel_h_est = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
             let panel_y_est = sidebar.bottom() - settings_row_h - agent_panel_h_est;
             let div_y = panel_y_est - s(4.0);
             if div_y > new_y + compact_h + s(4.0) {
@@ -779,48 +771,14 @@ impl Sidebar {
             }
         }
 
-        // Bottom panel: running agents/processes
+        // Bottom panel: running agents/processes — flat inline layout matching
+        // SESSIONS section style (no card container, just header + items).
         if !self.agents.is_empty() {
-            let agent_item_h = s(44.0);
+            let agent_item_h = s(36.0);
             let header_section_h = s(28.0);
-            let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(8.0);
-            // Anchor agent panel above the bottom settings row
+            let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
             let settings_row_h = s(28.0);
             let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
-            let panel = Rect {
-                x: sidebar.x,
-                y: panel_y,
-                width: sidebar.width,
-                height: agent_panel_h.min(bottom_panel_h),
-            };
-
-            // Panel container — rounded rect with subtle border for depth
-            let panel_inset = Rect {
-                x: panel.x + s(6.0),
-                y: panel.y + s(2.0),
-                width: panel.width - s(12.0),
-                height: panel.height - s(4.0),
-            };
-            let panel_radius = s(6.0);
-            let panel_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5];
-            // Directional shadow — offset downward for natural top-left light
-            // source depth.  More convincing than centered shadows.
-            ui.fill_shadow_offset(
-                panel_inset, [0.0, 0.0, 0.0, 0.12],
-                panel_radius, s(8.0),
-                0.0, s(2.0),
-            );
-            // Gradient panel background (slightly lighter top for 3D)
-            let panel_top = [
-                colors::BG_RAISED[0] * 1.06,
-                colors::BG_RAISED[1] * 1.06,
-                colors::BG_RAISED[2] * 1.06,
-                colors::BG_RAISED[3],
-            ];
-            ui.fill_rounded_gradient(panel_inset, panel_top, colors::BG_RAISED, panel_radius);
-            ui.stroke_rounded(panel_inset, panel_radius, 0.5, panel_border);
-            // Subtle inner shadow for recessed card depth
-            ui.fill_inner_shadow(panel_inset, [0.0, 0.0, 0.0, 0.06], panel_radius, s(4.0));
 
             // "PROCESSES" header (disclosure triangle + uppercase muted, matching SESSIONS style)
             let proc_disc_sz = ch * 0.55;
@@ -837,14 +795,14 @@ impl Sidebar {
                     sidebar.x + pad_h + proc_disc_sz + s(4.0),
                     panel_y + (header_section_h - ch) / 2.0,
                     [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
-                    colors::BG_RAISED);
+                    colors::BG_DARK);
             // Agent count badge (right-aligned, pill-shaped — matches session count badge)
             let agent_count_str = format!("{}", self.agents.len());
             let agent_count_w = text.text_width(&agent_count_str);
             let agent_badge_pad_h = s(4.0);
             let agent_badge_h = ch * 0.85;
             let agent_badge_w = (agent_count_w + agent_badge_pad_h * 2.0).max(agent_badge_h);
-            let agent_badge_x = panel_inset.right() - agent_badge_w - s(8.0);
+            let agent_badge_x = sidebar.right() - pad_h - agent_badge_w;
             let agent_badge_y = panel_y + (header_section_h - agent_badge_h) / 2.0;
             let agent_badge_rect = Rect {
                 x: agent_badge_x, y: agent_badge_y,
@@ -862,6 +820,10 @@ impl Sidebar {
             ui.text(text, &agent_count_str,
                     agent_count_text_x, agent_count_text_y,
                     colors::FG_MUTED, colors::BG_SURFACE);
+            // Thin separator below header
+            ui.hline_fade(sidebar.x + pad_h, panel_y + header_section_h - 1.0,
+                     sidebar.width - pad_h * 2.0, 1.0,
+                     [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15], s(12.0));
 
             let mut ay = panel_y + header_section_h;
             for (ai, agent) in self.agents.iter().enumerate() {
@@ -876,12 +838,12 @@ impl Sidebar {
                     AgentStatus::Stopped => "stopped",
                 };
 
-                // Agent item hover background (animated)
+                // Single-line agent item: dot + name + status badge
                 let agent_hover_t = self.agent_hover_anim.get(ai);
                 let agent_inset = Rect {
-                    x: panel_inset.x + s(4.0),
+                    x: sidebar.x + s(6.0),
                     y: ay + s(1.0),
-                    width: panel_inset.width - s(8.0),
+                    width: sidebar.width - s(12.0),
                     height: agent_item_h - s(2.0),
                 };
                 if agent_hover_t > 0.005 {
@@ -892,55 +854,26 @@ impl Sidebar {
                     ui.fill_rounded(agent_inset, ahover_bg, s(3.0));
                 }
 
-                // Line 1: icon + agent name + status (right-aligned)
-                let line1_y = ay + s(6.0);
+                let text_y = ay + (agent_item_h - ch) / 2.0;
+                let panel_bg = colors::BG_DARK;
 
-                let panel_bg = colors::BG_RAISED;
-
-                // Status indicator: small SDF colored dot with glow for active states
+                // Status indicator dot — clean, no orbit animation
                 let dot_r = s(2.5);
                 let dot_size = dot_r * 2.0;
                 let dot_rect = Rect {
                     x: sidebar.x + pad_h + (cw - dot_size) / 2.0,
-                    y: line1_y + (ch - dot_size) / 2.0,
+                    y: text_y + (ch - dot_size) / 2.0,
                     width: dot_size,
                     height: dot_size,
                 };
-                // Running agents get a breathing Gaussian glow + spinning orbit arc
+                // Running dots get subtle breathing glow only
                 if matches!(agent.status, AgentStatus::Running) {
                     let breath = 0.92 + 0.08 * self.glow_phase.sin();
                     let glow_rect = Rect {
-                        x: dot_rect.x - s(3.0), y: dot_rect.y - s(3.0),
-                        width: dot_size + s(6.0), height: dot_size + s(6.0),
+                        x: dot_rect.x - s(2.0), y: dot_rect.y - s(2.0),
+                        width: dot_size + s(4.0), height: dot_size + s(4.0),
                     };
-                    ui.fill_shadow(glow_rect, [status_color[0], status_color[1], status_color[2], 0.25 * breath], dot_r + s(3.0), s(6.0));
-
-                    // Spinning orbit: two small accent-colored dots orbiting the
-                    // center, 180° apart.  Uses glow_phase (which advances at
-                    // ~1.8 rad/s) multiplied by 2 for a visible spin speed.
-                    // Each orbiter is a tiny SDF circle with its own soft glow.
-                    let orbit_r = dot_r + s(3.0); // radius of orbit path
-                    let spin = self.glow_phase * 2.0;
-                    let orbiter_sz = s(1.5);
-                    let (dcx, dcy) = dot_rect.center();
-                    for k in 0..2u32 {
-                        let angle = spin + k as f32 * std::f32::consts::PI;
-                        let ox = dcx + orbit_r * angle.cos() - orbiter_sz / 2.0;
-                        let oy = dcy + orbit_r * angle.sin() - orbiter_sz / 2.0;
-                        let orbit_color = [status_color[0], status_color[1], status_color[2], 0.6 * breath];
-                        ui.fill_rounded(
-                            Rect { x: ox, y: oy, width: orbiter_sz, height: orbiter_sz },
-                            orbit_color, orbiter_sz / 2.0,
-                        );
-                    }
-                    // Orbit trail: faint ring around the dot path for visual continuity
-                    let ring_rect = Rect {
-                        x: dcx - orbit_r - s(0.5), y: dcy - orbit_r - s(0.5),
-                        width: orbit_r * 2.0 + s(1.0), height: orbit_r * 2.0 + s(1.0),
-                    };
-                    let ring_alpha = 0.10 * breath;
-                    ui.stroke_rounded(ring_rect, orbit_r + s(0.5), 0.5,
-                        [status_color[0], status_color[1], status_color[2], ring_alpha]);
+                    ui.fill_shadow(glow_rect, [status_color[0], status_color[1], status_color[2], 0.15 * breath], dot_r + s(2.0), s(4.0));
                 }
                 ui.fill_rounded(dot_rect, status_color, dot_r);
 
@@ -948,58 +881,41 @@ impl Sidebar {
                 let agent_name_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, agent_hover_t * 0.4);
                 ui.text_ui(text, &agent.name,
                         sidebar.x + pad_h + cw * 2.0,
-                        line1_y,
+                        text_y,
                         agent_name_fg, panel_bg);
 
                 // Status label (right-aligned, pill-shaped badge)
                 let sw = text.text_width_ui(status_text);
                 let status_badge_pad_h = s(4.0);
-                let status_badge_h = ch * 0.85;
+                let status_badge_h = ch * 0.75;
                 let status_badge_w = sw + status_badge_pad_h * 2.0;
-                let status_badge_x = sidebar.right() - status_badge_w - pad_h - s(6.0);
-                let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
+                let status_badge_x = sidebar.right() - status_badge_w - pad_h;
+                let status_badge_y = text_y + (ch - status_badge_h) / 2.0;
                 let status_badge_rect = Rect {
                     x: status_badge_x, y: status_badge_y,
                     width: status_badge_w, height: status_badge_h,
                 };
                 let status_badge_r = status_badge_h / 2.0;
-                // Tinted background for the status badge (clearer definition)
-                let status_bg = [status_color[0], status_color[1], status_color[2], 0.18];
+                let status_bg = [status_color[0], status_color[1], status_color[2], 0.12];
                 ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
                 ui.stroke_rounded(status_badge_rect, status_badge_r, 0.5,
-                    [status_color[0], status_color[1], status_color[2], 0.35]);
+                    [status_color[0], status_color[1], status_color[2], 0.25]);
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
                 ui.text_ui(text, status_text,
                         status_text_x, status_text_y,
                         status_color, panel_bg);
 
-                // Line 2: task description (brightens on hover for readability)
-                if !agent.task.is_empty() && agent.task != status_text {
-                    let line2_y = line1_y + ch + s(2.0);
-                    let task_max_chars = ((sidebar.width - pad_h * 2.0 - ui_cw * 2.0) / ui_cw).floor().max(1.0) as usize;
-                    let task = if agent.task.len() > task_max_chars {
-                        format!("{}\u{2026}", &agent.task[..task_max_chars.saturating_sub(1)])
-                    } else {
-                        agent.task.clone()
-                    };
-                    let task_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, agent_hover_t * 0.3);
-                    ui.text_ui(text, &task,
-                            sidebar.x + pad_h + cw * 2.0,
-                            line2_y,
-                            task_fg, panel_bg);
-                }
-
                 ay += agent_item_h;
 
-                // Subtle separator between agent items (faded edges)
+                // Subtle separator between agent items
                 if !std::ptr::eq(agent, self.agents.last().unwrap()) {
                     ui.hline_fade(
                         sidebar.x + pad_h + cw * 2.0,
                         ay - 1.0,
                         sidebar.width - pad_h * 2.0 - cw * 2.0,
                         1.0,
-                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.3],
+                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12],
                         s(8.0),
                     );
                 }
