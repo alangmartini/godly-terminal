@@ -3,7 +3,7 @@ use iced::{
     Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
 };
 
-use crate::theme::{BORDER, DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
+use crate::theme::{ACCENT, BORDER, DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
 
 /// Height of the custom title bar in logical pixels.
 pub const TITLE_BAR_HEIGHT: f32 = 34.0;
@@ -144,8 +144,16 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
     on_maximize: M,
     on_close: M,
 ) -> Element<'a, M> {
+    // Blend accent color into icon for subtle brand tint
+    let base = TEXT_SECONDARY();
+    let accent = ACCENT();
+    let icon_color = Color::from_rgb(
+        base.r * 0.65 + accent.r * 0.35,
+        base.g * 0.65 + accent.g * 0.35,
+        base.b * 0.65 + accent.b * 0.35,
+    );
     let icon = canvas(TerminalIcon {
-        color: TEXT_SECONDARY(),
+        color: icon_color,
     })
     .width(Length::Fixed(16.0))
     .height(Length::Fixed(16.0));

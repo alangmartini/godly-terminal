@@ -1,7 +1,7 @@
 use iced::widget::{column, container, row, rule, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
 
-use crate::theme::{BORDER, BORDER_VARIANT, GHOST_HOVER, STATUS_BAR_BG, TEXT_SECONDARY};
+use crate::theme::{ACCENT, BORDER, BORDER_VARIANT, GHOST_HOVER, STATUS_BAR_BG, TEXT_SECONDARY};
 
 /// Height of the status bar in logical pixels.
 /// Includes 1px top separator line.
@@ -55,7 +55,56 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
             info.font,
             info.git_branch.map(|s| s.to_string()),
         ),
-        None => (String::new(), String::new(), String::new(), Font::default(), None),
+        None => {
+            // Empty state: show branded "Ready" indicator
+            let ready_dot_color = {
+                let a = ACCENT();
+                Color::from_rgba(a.r, a.g, a.b, 0.55)
+            };
+            let ready_dot = container(
+                Space::new().width(Length::Fixed(6.0)).height(Length::Fixed(6.0)),
+            )
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(ready_dot_color)),
+                border: Border {
+                    radius: 99.0.into(),
+                    ..Border::default()
+                },
+                ..container::Style::default()
+            });
+            let muted = TEXT_SECONDARY();
+            let ready_label = text("Ready").size(10).color(muted).font(Font::default());
+            let app_label = text("Godly Terminal").size(10).color(Color::from_rgba(
+                muted.r, muted.g, muted.b, 0.6,
+            )).font(Font::default());
+            let content = row![
+                container(
+                    row![ready_dot, ready_label].spacing(5).align_y(iced::Alignment::Center)
+                ).padding(Padding::from([0, 8])),
+                Space::new().width(Length::Fill),
+                container(app_label).padding(Padding::from([0, 8])),
+            ]
+            .align_y(iced::Alignment::Center)
+            .height(Length::Fixed(STATUS_BAR_HEIGHT));
+            let status_sep_color = {
+                let b = BORDER();
+                Color::from_rgba(b.r, b.g, b.b, 0.52)
+            };
+            let separator = rule::horizontal(1).style(move |_theme| rule::Style {
+                color: status_sep_color,
+                radius: 0.0.into(),
+                fill_mode: rule::FillMode::Full,
+                snap: true,
+            });
+            let bar = container(content)
+                .width(Length::Fill)
+                .height(Length::Fixed(STATUS_BAR_HEIGHT))
+                .style(|_theme| container::Style {
+                    background: Some(iced::Background::Color(STATUS_BAR_BG())),
+                    ..container::Style::default()
+                });
+            return column![separator, bar].width(Length::Fill).into();
+        }
     };
 
     let shell_text = text(shell)

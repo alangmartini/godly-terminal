@@ -32,6 +32,8 @@ const ICON_SETTINGS: &str = "\u{EB51}";
 const ICON_ADD: &str = "\u{EA60}";
 /// Codicon: folder (workspace icon)
 const ICON_FOLDER: &str = "\u{EA83}";
+/// Codicon: file (document icon for CLAUDE.md buttons)
+const ICON_FILE: &str = "\u{EB60}";
 
 /// Proportional sans-serif for sidebar labels and workspace names.
 const SIDEBAR_FONT: Font = Font {
@@ -296,7 +298,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
-        // Left accent bar: visible on active workspace.
+        // Left accent bar: visible on active workspace with subtle glow.
         let accent_bar_color = if is_active {
             ACCENT()
         } else {
@@ -312,6 +314,16 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             border: Border {
                 radius: 2.0.into(),
                 ..Border::default()
+            },
+            shadow: if is_active {
+                let a = accent_bar_color;
+                iced::Shadow {
+                    color: Color::from_rgba(a.r, a.g, a.b, 0.35),
+                    offset: iced::Vector::new(1.0, 0.0),
+                    blur_radius: 6.0,
+                }
+            } else {
+                iced::Shadow::default()
             },
             ..container::Style::default()
         });
@@ -702,13 +714,19 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     // --- K1: CLAUDE.md editor buttons ---
     let claude_md_btn = |label: &'a str, action: SidebarAction| {
-        let prefixed = label.to_string();
-        button(
-            text(prefixed)
+        let btn_content = row![
+            text(ICON_FILE)
+                .font(CODICON_FONT)
+                .size(12)
+                .color(TEXT_SECONDARY()),
+            text(label.to_string())
                 .size(11)
                 .color(TEXT_SECONDARY())
                 .font(SIDEBAR_FONT),
-        )
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+        button(btn_content)
         .on_press(on_action(action))
         .padding(Padding::from([4, 8]))
         .width(Length::Fill)
