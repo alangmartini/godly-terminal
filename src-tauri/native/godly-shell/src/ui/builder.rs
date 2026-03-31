@@ -718,6 +718,48 @@ impl UiBuilder {
         ));
     }
 
+    /// Disclosure triangle (▾): filled downward-pointing triangle centered in `rect`.
+    /// Used for collapsible section headers in the sidebar (Zed/VS Code pattern).
+    /// `size` is the bounding triangle dimension; rendered as 3 SDF pill arms.
+    pub fn icon_disclosure_down(&mut self, rect: Rect, size: f32, t: f32, color: [f32; 4]) {
+        let (cx, cy) = rect.center();
+        let half = size * 0.45;
+        // Three corners of the triangle: top-left, top-right, bottom-center
+        let tl = (cx - half, cy - half * 0.35);
+        let tr = (cx + half, cy - half * 0.35);
+        let bc = (cx, cy + half * 0.55);
+        let r = t * 0.5;
+        let radii = [r; 4];
+        let no_border = [0.0f32; 4];
+        // Arm: top-left → bottom-center
+        let dx1 = bc.0 - tl.0;
+        let dy1 = bc.1 - tl.1;
+        let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
+        let a1 = dy1.atan2(dx1);
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            (tl.0 + bc.0) / 2.0, (tl.1 + bc.1) / 2.0, len1, t,
+            a1, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
+        // Arm: top-right → bottom-center
+        let dx2 = bc.0 - tr.0;
+        let dy2 = bc.1 - tr.1;
+        let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
+        let a2 = dy2.atan2(dx2);
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            (tr.0 + bc.0) / 2.0, (tr.1 + bc.1) / 2.0, len2, t,
+            a2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
+        // Arm: top-left → top-right (closes the top edge)
+        let dx3 = tr.0 - tl.0;
+        let dy3 = tr.1 - tl.1;
+        let len3 = (dx3 * dx3 + dy3 * dy3).sqrt();
+        let a3 = dy3.atan2(dx3);
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            (tl.0 + tr.0) / 2.0, (tl.1 + tr.1) / 2.0, len3, t,
+            a3, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
+    }
+
     /// Draw a terminal icon: monitor outline + prompt chevron + cursor inside.
     /// Uses SDF rotated pills for the chevron so it scales cleanly at any size.
     pub fn icon_terminal(&mut self, rect: Rect, t: f32, color: [f32; 4]) {

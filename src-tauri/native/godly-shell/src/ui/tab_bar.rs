@@ -553,6 +553,14 @@ impl TabBar {
                 };
                 // Animated hover circle behind X icon (subtle red tint for destructive hint)
                 if close_t > 0.005 {
+                    // Red glow shadow behind close button for physical depth
+                    let glow_rect = Rect {
+                        x: close_rect.x - s(3.0), y: close_rect.y - s(3.0),
+                        width: close_rect.width + s(6.0), height: close_rect.height + s(6.0),
+                    };
+                    ui.fill_shadow(glow_rect,
+                        [colors::ACCENT_RED[0], colors::ACCENT_RED[1], colors::ACCENT_RED[2], 0.10 * close_t],
+                        close_btn_sz / 2.0 + s(3.0), s(6.0));
                     let base = lerp_color(colors::BG_HOVER, colors::RED_SUBTLE, close_t * 0.6);
                     let hover_top = [
                         base[0] * 1.1, base[1] * 1.1,

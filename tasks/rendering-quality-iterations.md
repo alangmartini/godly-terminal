@@ -1630,3 +1630,67 @@ highlight and has better depth integration with the sidebar.
 **Remaining gaps vs reference (iteration 38)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 39 — Section Headers, Status Bar Completeness, Close Button Polish
+
+**Goal**: Add professional desktop app conventions (disclosure triangles,
+metadata indicators) and polish interactive element feedback (close button
+glow) to close the remaining gap with Zed/VS Code chrome quality.
+
+**Changes made**:
+
+1. **Section disclosure triangles** (`ui/builder.rs`, `ui/sidebar.rs`):
+   Added small ▾ (downward-pointing triangle) icons before "SESSIONS" and
+   "PROCESSES" section headers. Rendered as 3 SDF rotated pill arms forming
+   a filled triangle shape. This is a universal pattern in professional
+   desktop apps (Zed, VS Code, Finder) for indicating collapsible sections.
+   The triangle icon is muted (0.45 alpha) to not compete with content.
+
+2. **Sidebar version indicator** (`ui/sidebar.rs`): Added a very muted
+   version string (CARGO_PKG_VERSION) below the Settings row at the
+   sidebar bottom. Right-aligned, 0.25 alpha — barely visible but present
+   for identity and polish, matching Zed's about/version info placement.
+
+3. **Tab close button red glow** (`ui/tab_bar.rs`): Added a red-tinted
+   SDF glow shadow (0.10 alpha, 6px blur) behind the close button when
+   hovered. This creates a physical "danger zone" depth effect that
+   complements the existing red background circle + border. Professional
+   apps use colored glow to telegraph destructive actions before click.
+
+4. **Status bar encoding and line-ending labels** (`ui/status_bar.rs`):
+   Added "UTF-8" and "LF" muted text labels in the right section of the
+   status bar, positioned between the dimensions pill and the hints pill.
+   These read-only indicators match VS Code/Zed status bars that always
+   show file encoding and line-ending metadata for professional context.
+
+**Technical details**:
+- `icon_disclosure_down()` uses 3 `quad_vertices_sdf_rotated` calls to
+  form a filled triangle from pill arms. The triangle points downward
+  with corners at top-left, top-right, and bottom-center of the bounding
+  rect. Each arm is a thin SDF pill with rounded caps.
+- Disclosure triangle sizing: `ch * 0.55` for compact fit in the 30px
+  section headers. Stroke thickness scales with DPI (`0.8 * scale`).
+- Version indicator uses `env!("CARGO_PKG_VERSION")` so it auto-updates
+  with Cargo.toml changes. Very muted (0.25 alpha FG_MUTED) so it reads
+  as ambient information, not interactive.
+- Close button glow extends 3px beyond the button rect on each side with
+  6px blur, creating a soft halo that only appears during the hover
+  animation (`close_t` > 0.005). Uses ACCENT_RED for color consistency.
+- Encoding/LF labels are plain text without pill backgrounds — they're
+  metadata, not interactive pills. Positioned by subtracting from the
+  hints_pill_x anchor for right-to-left layout.
+
+**Result**: The sidebar now has proper section toggle affordances matching
+professional desktop app conventions. The status bar shows complete
+terminal metadata (encoding, line endings) like VS Code. The close button
+has more physical feedback with the red glow shadow.
+
+**Visual comparison with reference**:
+- Section disclosure: ✓ Small triangles match Zed/VS Code sidebar pattern
+- Version indicator: ✓ Subtle identity text in sidebar footer
+- Close button feedback: ✓ Red glow for destructive action telegraph
+- Status bar metadata: ✓ Encoding + line ending labels match VS Code
+
+**Remaining gaps vs reference (iteration 39)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

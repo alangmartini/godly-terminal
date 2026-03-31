@@ -289,11 +289,22 @@ impl Sidebar {
             width: sidebar.width,
             height: header_h,
         };
-        // All-caps section header (Zed-style: small, muted, uppercase)
+        // Disclosure triangle + all-caps section header (Zed/VS Code pattern)
+        let disclosure_sz = ch * 0.55;
+        let disclosure_t = (0.8 * text.scale).max(0.5);
+        let disclosure_rect = Rect {
+            x: header_rect.x + pad_h,
+            y: header_rect.y + (header_h - disclosure_sz) / 2.0,
+            width: disclosure_sz,
+            height: disclosure_sz,
+        };
+        ui.icon_disclosure_down(disclosure_rect, disclosure_sz, disclosure_t,
+            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.45]);
+        let header_text_x = header_rect.x + pad_h + disclosure_sz + s(4.0);
         ui.text_ui(
             text,
             "SESSIONS",
-            header_rect.x + pad_h,
+            header_text_x,
             header_rect.y + text_y_off(header_h),
             [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
             colors::BG_DARK,
@@ -804,9 +815,19 @@ impl Sidebar {
             // Subtle inner shadow for recessed card depth
             ui.fill_inner_shadow(panel_inset, [0.0, 0.0, 0.0, 0.06], panel_radius, s(4.0));
 
-            // "PROCESSES" header (uppercase muted, matching SESSIONS section style)
+            // "PROCESSES" header (disclosure triangle + uppercase muted, matching SESSIONS style)
+            let proc_disc_sz = ch * 0.55;
+            let proc_disc_t = (0.8 * text.scale).max(0.5);
+            let proc_disc_rect = Rect {
+                x: sidebar.x + pad_h,
+                y: panel_y + (header_section_h - proc_disc_sz) / 2.0,
+                width: proc_disc_sz,
+                height: proc_disc_sz,
+            };
+            ui.icon_disclosure_down(proc_disc_rect, proc_disc_sz, proc_disc_t,
+                [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.45]);
             ui.text_ui(text, "PROCESSES",
-                    sidebar.x + pad_h,
+                    sidebar.x + pad_h + proc_disc_sz + s(4.0),
                     panel_y + (header_section_h - ch) / 2.0,
                     [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
                     colors::BG_RAISED);
@@ -1039,6 +1060,21 @@ impl Sidebar {
                     sidebar.right() - hint_w - pad_h,
                     settings_y + (settings_h - ch) / 2.0,
                     hint_fg, settings_bg);
+
+            // Version indicator — very muted, right-aligned below Settings row
+            let version_str = concat!("v", env!("CARGO_PKG_VERSION"));
+            let version_w = text.text_width_ui(version_str);
+            let version_y = settings_y + settings_h + s(2.0);
+            if version_y + ch < sidebar.bottom() {
+                let version_fg = [
+                    colors::FG_MUTED[0], colors::FG_MUTED[1],
+                    colors::FG_MUTED[2], 0.25,
+                ];
+                ui.text_ui(text, version_str,
+                    sidebar.right() - version_w - pad_h,
+                    version_y,
+                    version_fg, colors::BG_DARK);
+            }
         }
     }
 

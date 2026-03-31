@@ -316,11 +316,27 @@ impl StatusBar {
             ui.text_ui(text, hints_label, hints_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
         }
 
+        // Encoding label — simple muted text (no pill)
+        let enc_label = "UTF-8";
+        let enc_w = text.text_width_ui(enc_label);
+        let enc_x = hints_pill_x - enc_w - s(14.0);
+        ui.text_ui(text, enc_label, enc_x, y_center,
+            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
+            content_bg);
+
+        // Line ending label — simple muted text
+        let le_label = "LF";
+        let le_w = text.text_width_ui(le_label);
+        let le_x = enc_x - le_w - s(10.0);
+        ui.text_ui(text, le_label, le_x, y_center,
+            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
+            content_bg);
+
         // Terminal dimensions pill
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
         let dims_text_w = text.text_width_ui(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
-        let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
+        let dims_pill_x = le_x - dims_pill_w - s(8.0);
         let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
         {
             let ht = self.dims_anim.value();

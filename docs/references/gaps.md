@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 38)
+Last updated: 2026-03-31 (Iteration 39)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -82,6 +82,10 @@ Last updated: 2026-03-31 (Iteration 38)
 | Sidebar scrollbar track | Done | Thin decorative scrollbar rail on session list right edge (iteration 38) |
 | Breadcrumb last-segment pill | Done | Subtle rounded background highlight on current directory in breadcrumb (iteration 38) |
 | Breadcrumb left depth shadow | Done | Inner shadow at breadcrumb left edge for sidebar-cast depth (iteration 38) |
+| Section disclosure triangles | Done | Small ▾ triangles before "SESSIONS" and "PROCESSES" section headers (iteration 39) |
+| Sidebar version indicator | Done | Muted version string at bottom of sidebar below Settings row (iteration 39) |
+| Tab close button glow | Done | Red accent glow shadow behind close button on hover (iteration 39) |
+| Status bar encoding/LF labels | Done | "UTF-8" and "LF" muted text labels in status bar for professional completeness (iteration 39) |
 
 ## Remaining Gaps (Priority Order)
 
