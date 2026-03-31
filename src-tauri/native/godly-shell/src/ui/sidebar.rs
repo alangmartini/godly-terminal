@@ -477,10 +477,11 @@ impl Sidebar {
             } else {
                 item.label.clone()
             };
-            ui.text(text, &name,
-                    name_x,
-                    text_y,
-                    name_fg, item_bg);
+            if item.active {
+                ui.text_bold(text, &name, name_x, text_y, name_fg, item_bg);
+            } else {
+                ui.text(text, &name, name_x, text_y, name_fg, item_bg);
+            }
 
             // Branch info (right-aligned, truncated)
             if !item.branch.is_empty() && sidebar.width > s(150.0) {

@@ -202,8 +202,17 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let has_workspace_notification =
             workspace_signals.has_workspace_notification(ws.id.as_str());
 
-        let row_text = TEXT_PRIMARY();
-        let name_label = text(&ws.name).size(13).color(row_text).font(font);
+        let row_text = if is_active {
+            TEXT_ACTIVE()
+        } else {
+            TEXT_PRIMARY()
+        };
+        let name_font = if is_active {
+            SIDEBAR_FONT_SEMIBOLD
+        } else {
+            font
+        };
+        let name_label = text(&ws.name).size(13).color(row_text).font(name_font);
 
         // Extract folder name for subtitle
         let folder_display = std::path::Path::new(&ws.folder_path)

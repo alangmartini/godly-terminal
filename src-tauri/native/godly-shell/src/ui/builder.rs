@@ -44,6 +44,8 @@ pub struct TextCommand {
     pub y: f32,
     pub fg: [f32; 4],
     pub bg: [f32; 4],
+    /// When true, renders glyphs with the bold font variant.
+    pub bold: bool,
 }
 
 /// Thin handle passed to widget `build()` methods. Carries actual cell
@@ -462,6 +464,28 @@ impl UiBuilder {
             y,
             fg,
             bg,
+            bold: false,
+        });
+    }
+
+    /// Record a bold text draw command. Same as `text()` but renders with
+    /// the bold font variant for typographic hierarchy.
+    pub fn text_bold(
+        &mut self,
+        _renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x,
+            y,
+            fg,
+            bg,
+            bold: true,
         });
     }
 

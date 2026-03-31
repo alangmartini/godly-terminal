@@ -1071,7 +1071,76 @@ apps. Status bar can now display git diff information in a styled pill.
 - Git diff styling: ✓ Consistent pill treatment in status bar
 - Welcome positioning: ✓ Better vertical balance
 
-**Remaining gaps vs reference**:
+**Remaining gaps vs reference (iteration 31)**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
+
+## Iteration 32 — Typography Hierarchy via Bold Text
+
+**Goal**: Add typographic hierarchy by using bold font weight for active/prominent
+elements. Professional apps (Zed, VS Code) use font weight differentiation to
+create clear visual hierarchy between active and inactive states.
+
+**Changes made**:
+
+1. **Bold text support in GPU renderer** (`ui/builder.rs`):
+   - Added `bold: bool` field to `TextCommand` struct
+   - Added `text_bold()` method to `UiBuilder` for rendering with bold font variant
+   - Default `text()` method continues to use regular weight (bold=false)
+
+2. **Bold glyph rendering** (`terminal_renderer.rs`):
+   - Changed `GlyphKey::new(ch, phys.font_size, false, false)` to pass
+     `cmd.bold` through, so bold text commands rasterize with the bold font face
+
+3. **Active tab title bold** (`ui/tab_bar.rs`):
+   - Active tab title uses `text_bold()` for clear active/inactive distinction
+   - The heavier stroke width of bold glyphs creates immediate visual hierarchy
+     without needing different colors or sizes
+
+4. **App branding bold** (`ui/tab_bar.rs`):
+   - "Godly Terminal" branding in title bar section uses `text_bold()` for
+     stronger brand presence
+
+5. **Active sidebar session name bold** (`ui/sidebar.rs`):
+   - Active session name uses `text_bold()` while inactive sessions use regular
+   - Combined with the existing white-bright color and ambient glow, creates
+     three-layer hierarchy: bold+bright (active) > regular+secondary (hover) >
+     regular+muted (rest)
+
+6. **Welcome screen heading bold** (`main.rs`):
+   - "Godly Terminal" heading on the welcome screen uses `text_bold()` for
+     stronger visual impact
+
+7. **Iced-shell typography** (`iced-shell/src/tab_bar.rs`, `sidebar.rs`, `title_bar.rs`):
+   - Active tab labels use semibold font weight via `font_semibold(font)`
+   - Active workspace names use `SIDEBAR_FONT_SEMIBOLD` for hierarchy
+   - Close button uses codicon icon (`\u{EA76}`) for pixel-hinted crispness
+   - Tab bar background uses subtle vertical gradient (lighter top → base)
+   - Title bar uses matching gradient for depth consistency
+   (Note: Iced shell has pre-existing compilation errors on this branch)
+
+**Technical details**:
+- `GlyphKey::new(ch, font_size, bold, italic)` already supported bold via the
+  glyph rasterizer — we just needed to expose it through the UI text pipeline.
+- Bold glyphs are cached separately in the glyph atlas (different GlyphKey hash),
+  so there's no performance penalty for mixing regular and bold text.
+- The `text_bold()` API keeps the existing `text()` unchanged, avoiding any
+  regression risk for the many callsites using regular weight.
+
+**Result**: Active elements now stand out through font weight in addition to
+color/brightness. The "Godly Terminal" branding has more presence. Active tab
+and session labels are immediately distinguishable from their inactive peers.
+This is a fundamental quality indicator that professional apps use universally.
+
+**Visual comparison with reference**:
+- Font weight hierarchy: ✓ Active elements use bold for clear distinction
+- App branding weight: ✓ "Godly Terminal" rendered in bold for brand presence
+- Active tab distinction: ✓ Bold title + accent color + gradient = clear active
+- Sidebar hierarchy: ✓ Bold name + bright color + indicator = three-layer depth
+- Welcome heading: ✓ Bold heading for visual impact
+
+**Remaining gaps vs reference (iteration 32)**:
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished
 - Multi-pane terminal layout needs daemon content

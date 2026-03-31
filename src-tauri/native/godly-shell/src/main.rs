@@ -740,7 +740,7 @@ impl App {
                 ui::builder::colors::FG_SECONDARY[2] * 0.80 + active_accent[2] * 0.20,
                 0.7,
             ];
-            ui_builder.text(&ui_text_handle, title, title_x, block_y, title_fg, bg);
+            ui_builder.text_bold(&ui_text_handle, title, title_x, block_y, title_fg, bg);
 
             // Subtitle line — "GPU-accelerated terminal" in very muted text
             let subtitle = "GPU-accelerated terminal";

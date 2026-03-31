@@ -11,6 +11,25 @@ use crate::theme::{
     TAB_INACTIVE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 
+/// Codicon font for pixel-hinted icons.
+const CODICON_FONT: Font = Font {
+    family: iced::font::Family::Name("codicon"),
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+/// Codicon: close (×)
+const ICON_CLOSE: &str = "\u{EA76}";
+
+/// Semibold variant of whatever font is passed in — used for the active tab label.
+fn font_semibold(base: Font) -> Font {
+    Font {
+        weight: iced::font::Weight::Semibold,
+        ..base
+    }
+}
+
 /// Height of the tab bar in logical pixels.
 pub const TAB_BAR_HEIGHT: f32 = 36.0;
 /// Duration of tab entry animation in milliseconds.
@@ -183,7 +202,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         };
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
-        let label = text(truncated).size(13).font(font).color(text_color);
+        let tab_font = if is_active { font_semibold(font) } else { font };
+        let label = text(truncated).size(13).font(tab_font).color(text_color);
         let icon_glyph = process_icon_glyph(terminal).map(|glyph| {
             let icon_color = if is_active {
                 ACCENT()
@@ -196,7 +216,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         let close_id = terminal.id.clone();
         // Inactive tabs: close button hidden until directly hovered.
         // Active tab: close button always visible.
-        let close_btn = button(text("\u{00D7}").size(12).color(text_color))
+        // Uses codicon close icon for pixel-hinted crispness.
+        let close_btn = button(text(ICON_CLOSE).size(11).font(CODICON_FONT).color(text_color))
             .on_press(on_close(close_id))
             .padding(0)
             .width(Length::Fixed(CLOSE_BUTTON_SIZE))
@@ -398,12 +419,26 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     ]
     .align_y(iced::Alignment::Center);
 
+    // Subtle vertical gradient: slightly lighter at top → BG_SECONDARY at bottom.
+    // Creates depth without being visually noisy.
     let bar = container(content)
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT))
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY())),
-            ..container::Style::default()
+        .style(|_theme| {
+            let base = BG_SECONDARY();
+            let lighter = Color::from_rgb(
+                (base.r + 0.015).min(1.0),
+                (base.g + 0.015).min(1.0),
+                (base.b + 0.015).min(1.0),
+            );
+            container::Style {
+                background: Some(iced::Background::Gradient(iced::Gradient::Linear(
+                    iced::gradient::Linear::new(std::f32::consts::PI) // top to bottom
+                        .add_stop(0.0, lighter)
+                        .add_stop(1.0, base),
+                ))),
+                ..container::Style::default()
+            }
         });
 
     // Subtle bottom separator — soft enough that the active tab (which shares

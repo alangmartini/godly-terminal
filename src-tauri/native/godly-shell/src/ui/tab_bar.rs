@@ -334,7 +334,7 @@ impl TabBar {
                 colors::FG_SECONDARY[2] * 0.85 + active_accent[2] * 0.15,
                 colors::FG_SECONDARY[3],
             ];
-            ui.text(text, "Godly Terminal", brand_x, brand_y,
+            ui.text_bold(text, "Godly Terminal", brand_x, brand_y,
                     brand_fg, colors::BG_DARK);
             // Right border for sidebar section — groove for embossed depth
             ui.vgroove_fade(self.sidebar_width - 2.0, bar.y, bar.height,
@@ -519,7 +519,11 @@ impl TabBar {
             };
             if !title.is_empty() {
                 let title_x = rect.x + title_x_offset;
-                ui.text(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
+                if tab.active {
+                    ui.text_bold(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
+                } else {
+                    ui.text(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
+                }
             }
 
             // Close button — visible on active tab always, fades in on hover for inactive

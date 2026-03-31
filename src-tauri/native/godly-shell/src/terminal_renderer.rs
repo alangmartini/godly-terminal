@@ -90,7 +90,7 @@ impl TerminalRenderer {
         for cmd in ui_text {
             let mut cx = cmd.x;
             for ch in cmd.text.chars() {
-                let key = GlyphKey::new(ch, phys.font_size, false, false);
+                let key = GlyphKey::new(ch, phys.font_size, cmd.bold, false);
                 let entry = self.glyph_atlas.get_or_insert(key, &mut *self.rasterizer, phys.font_size);
 
                 let px = cx;

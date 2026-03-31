@@ -182,12 +182,26 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
         .align_y(iced::Alignment::Center)
         .height(Length::Fixed(TITLE_BAR_HEIGHT));
 
+    // Subtle vertical gradient: slightly lighter at top → title bar bg at bottom.
+    // Creates a soft depth cue matching the tab bar gradient.
     let bar = container(content)
         .width(Length::Fill)
         .height(Length::Fixed(TITLE_BAR_HEIGHT))
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(TITLE_BAR_BG())),
-            ..container::Style::default()
+        .style(|_theme| {
+            let base = TITLE_BAR_BG();
+            let lighter = Color::from_rgb(
+                (base.r + 0.012).min(1.0),
+                (base.g + 0.012).min(1.0),
+                (base.b + 0.012).min(1.0),
+            );
+            container::Style {
+                background: Some(iced::Background::Gradient(iced::Gradient::Linear(
+                    iced::gradient::Linear::new(std::f32::consts::PI) // top to bottom
+                        .add_stop(0.0, lighter)
+                        .add_stop(1.0, base),
+                ))),
+                ..container::Style::default()
+            }
         });
 
     let title_sep_color = {

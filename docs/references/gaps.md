@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 31)
+Last updated: 2026-03-30 (Iteration 32)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -56,6 +56,7 @@ Last updated: 2026-03-30 (Iteration 31)
 | Circular new-tab button | Done | Proper circular icon button with rest-state border (iteration 31) |
 | Git diff summary pill | Done | Styled pill in status bar for diff summary display (iteration 31) |
 | Welcome vertical balance | Done | Content positioned at 33% from top for better visual balance (iteration 31) |
+| Font weight hierarchy | Done | Bold text for active tabs, active sessions, branding, and welcome heading (iteration 32) |
 
 ## Remaining Gaps (Priority Order)
 
@@ -68,7 +69,6 @@ Last updated: 2026-03-30 (Iteration 31)
 
 ### Low Impact
 4. **Context menu backdrop blur** - Professional apps use backdrop blur for floating menus
-5. **Font weight differentiation** - Active tab labels could use medium/semibold weight
 
 ## Active Theme Color Notes (Zed One Dark)
 - Chrome/sidebar: `#1b1e24` (BG_DARK)
