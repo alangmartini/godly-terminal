@@ -2937,3 +2937,60 @@ rest. The content area has a warmer feel with the accent top-edge glow.
 **Remaining gaps vs reference (iteration 58)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 59 — Empty State Polish & Brand Identity
+
+**Goal**: Polish empty/idle states and reinforce brand identity through
+subtle visual refinements across the status bar, title bar, sidebar
+footer, and active workspace indicator.
+
+**Changes made**:
+
+1. **Empty status bar state** (`iced-shell/src/status_bar.rs`): When no
+   terminal is focused, the status bar now shows a branded "Ready" state
+   instead of being empty. A small accent-colored dot (6px, 55% alpha)
+   followed by "Ready" label sits on the left, and "Godly Terminal"
+   branding (60% muted) sits on the right. This matches how professional
+   apps (VS Code, Zed) always populate the status bar with useful info.
+
+2. **Title bar icon accent tint** (`iced-shell/src/title_bar.rs`): The
+   terminal icon in the title bar now blends 35% accent color with the
+   base TEXT_SECONDARY. This gives the icon a subtle blue tint that
+   reinforces brand identity without being garish. Previously the icon
+   was plain muted gray.
+
+3. **Sidebar footer document icons** (`iced-shell/src/sidebar.rs`): Added
+   codicon file icons (EB60) to "Project CLAUDE.md" and "User CLAUDE.md"
+   footer buttons. The buttons now show `[file icon] Project CLAUDE.md`
+   in a row layout with 6px spacing. This matches the icon-label pattern
+   used throughout the sidebar.
+
+4. **Active workspace accent bar glow** (`iced-shell/src/sidebar.rs`):
+   The active workspace's left accent bar now casts a rightward glow
+   shadow (accent color at 35% alpha, 1px offset, 6px blur). This adds
+   depth to the accent indicator and makes it feel like it's emitting
+   light into the sidebar, similar to how Zed's active indicators glow.
+
+**Technical details**:
+- Status bar empty state uses early return pattern to avoid constructing
+  the full shell/CWD/dims layout when no info is available.
+- Title bar icon color: `base * 0.65 + accent * 0.35` blend ratio chosen
+  to be noticeable but not overpowering.
+- ICON_FILE constant uses codicon `\u{EB60}` (file document icon).
+- Accent bar shadow only renders when `is_active` is true, avoiding
+  unnecessary shadow computation on inactive workspaces.
+
+**Result**: The app now feels more polished in its idle/empty state. The
+status bar communicates readiness rather than emptiness. The title bar
+has stronger brand identity. The sidebar footer buttons are more
+scannable with icons. The active workspace indicator has more depth.
+
+**Visual comparison with reference**:
+- Status bar populated at all times: ✓ Matches VS Code/Zed convention
+- Brand presence in title bar: ✓ Accent-tinted icon for identity
+- Icon-label pattern in sidebar: ✓ Consistent with settings/add buttons
+- Active indicator depth: ✓ Glow matches opensessions active states
+
+**Remaining gaps vs reference (iteration 59)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

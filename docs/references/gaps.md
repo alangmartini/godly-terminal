@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 58)
+Last updated: 2026-03-31 (Iteration 59)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -167,6 +167,10 @@ Last updated: 2026-03-31 (Iteration 58)
 | Close button rest visibility | Done | Inactive tab close buttons at 0.18 alpha rest state for discoverability without hover (iteration 58) |
 | Sidebar dot brightness | Done | Inactive session accent dots 0.62 alpha (was 0.50) for better visibility at rest (iteration 58) |
 | Content area accent frame | Done | Subtle accent-tinted top-edge glow on content area connecting tab bar accent to content (iteration 58) |
+| Empty status bar state | Done | Shows "Ready" dot + label and "Godly Terminal" branding when no terminal is focused (iteration 59) |
+| Title bar icon accent tint | Done | Terminal icon blends 35% accent color for brand identity instead of plain muted (iteration 59) |
+| Sidebar footer document icons | Done | Codicon file icons on "Project CLAUDE.md" and "User CLAUDE.md" buttons (iteration 59) |
+| Active workspace accent bar glow | Done | Rightward accent-colored shadow (0.35 alpha, 6px blur) on active workspace indicator bar (iteration 59) |
 
 ## Remaining Gaps (Priority Order)
 
