@@ -337,18 +337,30 @@ impl Sidebar {
                  sidebar.width - pad_h * 2.0, 1.0,
                  [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15], s(12.0));
 
-        // Layout: [pad][dot][gap][num][gap][name...][gap][branch][pad]
+        // Layout: [pad][dot][gap][num][gap][name...][gap][branch][shell][pad]
         // Two-line items: line 1 = dot + number + name + branch, line 2 = description
         let num_x = sidebar.x + pad_h;
         let dot_space = s(7.0) + s(4.0); // accent dot (7px) + gap (4px)
         let name_x = num_x + dot_space + cw * 2.0;
-        let branch_max_chars: usize = 6;
-        // Use proportional UI font advance for text width estimation (sidebar labels
-        // render with text_ui, not monospace). Proportional chars are ~75% of cell_width.
         let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
-        let branch_reserve = ui_cw * (branch_max_chars as f32) + pad_h + ui_cw;
-        let name_max_w = sidebar.width - (name_x - sidebar.x) - branch_reserve;
-        let name_max_chars = (name_max_w / ui_cw).floor().max(1.0) as usize;
+
+        // Truncate a string to fit within max_w pixels using exact per-glyph widths.
+        // Returns the truncated string with ellipsis if needed.
+        let truncate_to_width = |s: &str, max_w: f32, text: &UiTextRenderer| -> String {
+            let full_w = text.text_width_ui(s);
+            if full_w <= max_w { return s.to_string(); }
+            let ellipsis_w = text.text_width_ui("\u{2026}");
+            let target_w = max_w - ellipsis_w;
+            let mut w = 0.0f32;
+            let mut end = 0;
+            for (i, ch) in s.char_indices() {
+                let ch_w = text.text_width_ui(&s[i..i + ch.len_utf8()]);
+                if w + ch_w > target_w { break; }
+                w += ch_w;
+                end = i + ch.len_utf8();
+            }
+            format!("{}\u{2026}", &s[..end])
+        };
         let line1_y_off = s(8.0); // top padding for first line
         let line2_y_off = line1_y_off + ch + s(2.0); // second line below first
 
@@ -458,15 +470,15 @@ impl Sidebar {
             let fg = lerp_color(inactive_fg, session_accent, active_t);
             ui.text(text, &num_str, num_x_shifted, text_y, fg, item_bg);
 
-            // Session name (truncated to fit) — text brightens on hover and active
-            // Active session name gets full brightness for clear visual hierarchy
+            // Session name (truncated to fit pixel width) — text brightens on hover and active
             let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.6);
             let name_fg = lerp_color(inactive_name, colors::WHITE, active_t);
-            let name = if item.label.len() > name_max_chars {
-                format!("{}\u{2026}", &item.label[..name_max_chars.saturating_sub(1)])
-            } else {
-                item.label.clone()
-            };
+            // Calculate available width: from name_x to right_edge minus reserved space
+            // for branch (~6 chars) + shell pill (~5 chars) + gaps
+            let right_reserved = text.text_width_ui(&item.branch.chars().take(6).collect::<String>())
+                + text.text_width_ui(&item.shell_type) + s(24.0) + pad_h * 2.0;
+            let name_max_w = (rect.right() - name_x - right_reserved).max(s(30.0));
+            let name = truncate_to_width(&item.label, name_max_w, text);
             if item.active {
                 ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
             } else {
@@ -506,11 +518,8 @@ impl Sidebar {
 
             // Branch info (right-aligned, before shell pill)
             if !item.branch.is_empty() && sidebar.width > s(150.0) {
-                let branch = if item.branch.len() > branch_max_chars {
-                    format!("{}\u{2026}", &item.branch[..branch_max_chars - 1])
-                } else {
-                    item.branch.clone()
-                };
+                let branch_max_w = ui_cw * 7.0; // ~7 chars worth of space
+                let branch = truncate_to_width(&item.branch, branch_max_w, text);
                 let branch_w = text.text_width_ui(&branch);
                 // Boost readability: start at 40% toward FG_SECONDARY (up from 25%)
                 let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
@@ -536,12 +545,7 @@ impl Sidebar {
                     0.0
                 };
                 let desc_avail = sidebar.width - pad_h * 2.0 - ui_cw * 2.0 - ts_reserve;
-                let desc_max_chars = (desc_avail / ui_cw).floor().max(1.0) as usize;
-                let desc = if second_line.len() > desc_max_chars {
-                    format!("{}\u{2026}", &second_line[..desc_max_chars.saturating_sub(1)])
-                } else {
-                    second_line
-                };
+                let desc = truncate_to_width(&second_line, desc_avail, text);
                 // Start from a blend between FG_MUTED and FG_SECONDARY for better baseline readability
                 let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40);
                 let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);

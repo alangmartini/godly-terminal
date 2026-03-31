@@ -61,11 +61,15 @@ pub struct UiTextRenderer {
     pub scale: f32,
     /// Average advance width of the proportional UI font (0 if unavailable).
     pub ui_avg_advance: f32,
+    /// Per-character advance widths for printable ASCII (0x20..=0x7E) in the
+    /// proportional UI font. Index 0 = space (0x20), index 94 = '~' (0x7E).
+    /// Empty if UI rasterizer is unavailable — falls back to avg_advance.
+    pub ui_char_advances: Vec<f32>,
 }
 
 impl UiTextRenderer {
     pub fn new(cell_width: f32, cell_height: f32, scale: f32) -> Self {
-        Self { cell_width, cell_height, scale, ui_avg_advance: 0.0 }
+        Self { cell_width, cell_height, scale, ui_avg_advance: 0.0, ui_char_advances: Vec::new() }
     }
 
     /// Scale a logical pixel value to physical pixels.
@@ -78,12 +82,22 @@ impl UiTextRenderer {
         s.chars().count() as f32 * self.cell_width
     }
 
-    /// Estimated width of a string rendered in the proportional UI font.
-    /// Uses average advance width — adequate for layout estimation since
-    /// exact per-glyph positioning is handled by the renderer.
+    /// Exact width of a string rendered in the proportional UI font.
+    /// Uses per-glyph advance widths when available, falls back to average.
     pub fn text_width_ui(&self, s: &str) -> f32 {
-        let adv = if self.ui_avg_advance > 0.0 { self.ui_avg_advance } else { self.cell_width * 0.75 };
-        s.chars().count() as f32 * adv
+        if self.ui_char_advances.is_empty() {
+            let adv = if self.ui_avg_advance > 0.0 { self.ui_avg_advance } else { self.cell_width * 0.75 };
+            return s.chars().count() as f32 * adv;
+        }
+        let fallback = self.ui_avg_advance;
+        s.chars().map(|c| {
+            let code = c as u32;
+            if code >= 0x20 && code <= 0x7E {
+                self.ui_char_advances[(code - 0x20) as usize]
+            } else {
+                fallback
+            }
+        }).sum()
     }
 }
 

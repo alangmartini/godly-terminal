@@ -565,9 +565,25 @@ impl App {
         // Build UI chrome (quads + text commands)
         let phys_metrics = self.renderer.as_ref().map(|r| r.font_metrics().scaled_for_render());
         let ui_avg_advance = self.renderer.as_ref().map_or(0.0, |r| r.ui_avg_advance());
+        let ui_char_advances = self.renderer.as_mut().map_or_else(Vec::new, |r| r.build_ui_char_advances());
         let ui_text_handle = if let Some(m) = phys_metrics {
             let mut tr = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
             tr.ui_avg_advance = ui_avg_advance;
+            tr.ui_char_advances = ui_char_advances.clone();
+            // One-time diagnostic: log per-glyph measurement accuracy
+            if !ui_char_advances.is_empty() {
+                static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    let test_str = "opensessions";
+                    let avg_w = test_str.len() as f32 * ui_avg_advance;
+                    let exact_w = tr.text_width_ui(test_str);
+                    log::info!("[DIAG] char_advances table: {} entries, avg_advance={:.1}, 'opensessions' avg={:.1} exact={:.1}",
+                        ui_char_advances.len(), ui_avg_advance, avg_w, exact_w);
+                    // Also log sidebar width at scale
+                    log::info!("[DIAG] sidebar_width={:.0} (logical {:.0}), cell_width={:.1}, cell_height={:.1}, scale={:.2}",
+                        (self.sidebar_width * self.scale_factor).round(), self.sidebar_width, m.cell_width, m.cell_height, self.scale_factor);
+                }
+            }
             tr
         } else {
             ui::builder::UiTextRenderer::new(8.0, 16.0, self.scale_factor)
@@ -1269,7 +1285,8 @@ impl App {
 
         // Breadcrumb/path bar — thin bar between tab bar and content showing
         // the current working directory as segmented path with chevron separators.
-        {
+        // Skipped when BREADCRUMB_HEIGHT is 0.
+        if layout.breadcrumb.height > 0.0 {
             let bc = &layout.breadcrumb;
             let s = |v: f32| ui_text_handle.s(v);
             let ch = ui_text_handle.cell_height;

@@ -43,8 +43,8 @@ impl TerminalRenderer {
             ui_rasterizer: None,
             font_metrics,
             ui_avg_advance: 0.0,
-            default_fg: Color::new(0.671, 0.698, 0.749, 1.0),  // One Dark Text #abb2bf
-            default_bg: Color::new(0.129, 0.145, 0.169, 1.0), // One Dark Base #21252b
+            default_fg: Color::new(0.788, 0.820, 0.851, 1.0),  // GitHub Dark Text #c9d1d9
+            default_bg: Color::new(0.055, 0.063, 0.090, 1.0), // GitHub Dark Base #0e1017
         }
     }
 
@@ -59,6 +59,22 @@ impl TerminalRenderer {
     /// Average advance width of the UI proportional font.
     pub fn ui_avg_advance(&self) -> f32 {
         self.ui_avg_advance
+    }
+
+    /// Build per-character advance table for printable ASCII (0x20..=0x7E)
+    /// using the proportional UI font. Returns empty vec if no UI rasterizer.
+    pub fn build_ui_char_advances(&mut self) -> Vec<f32> {
+        let phys = self.font_metrics.scaled_for_render();
+        if let Some(ref mut rast) = self.ui_rasterizer {
+            (0x20u8..=0x7Eu8).map(|code| {
+                let ch = code as char;
+                let key = GlyphKey::new_ui(ch, phys.font_size, false);
+                let entry = self.glyph_atlas.get_or_insert(key, &mut **rast, phys.font_size);
+                entry.advance
+            }).collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Prepare GPU resources (atlas texture upload, vertex buffer) BEFORE the render pass.
