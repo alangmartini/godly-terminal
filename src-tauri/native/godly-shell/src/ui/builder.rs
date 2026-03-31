@@ -46,6 +46,9 @@ pub struct TextCommand {
     pub bg: [f32; 4],
     /// When true, renders glyphs with the bold font variant.
     pub bold: bool,
+    /// When true, renders with the proportional UI font (e.g. Segoe UI)
+    /// instead of the terminal monospace font.
+    pub ui_font: bool,
 }
 
 /// Thin handle passed to widget `build()` methods. Carries actual cell
@@ -54,11 +57,13 @@ pub struct UiTextRenderer {
     pub cell_width: f32,
     pub cell_height: f32,
     pub scale: f32,
+    /// Average advance width of the proportional UI font (0 if unavailable).
+    pub ui_avg_advance: f32,
 }
 
 impl UiTextRenderer {
     pub fn new(cell_width: f32, cell_height: f32, scale: f32) -> Self {
-        Self { cell_width, cell_height, scale }
+        Self { cell_width, cell_height, scale, ui_avg_advance: 0.0 }
     }
 
     /// Scale a logical pixel value to physical pixels.
@@ -66,9 +71,17 @@ impl UiTextRenderer {
         (v * self.scale).round()
     }
 
-    /// Width in pixels of a string rendered in the terminal font.
+    /// Width in pixels of a string rendered in the terminal monospace font.
     pub fn text_width(&self, s: &str) -> f32 {
         s.chars().count() as f32 * self.cell_width
+    }
+
+    /// Estimated width of a string rendered in the proportional UI font.
+    /// Uses average advance width — adequate for layout estimation since
+    /// exact per-glyph positioning is handled by the renderer.
+    pub fn text_width_ui(&self, s: &str) -> f32 {
+        let adv = if self.ui_avg_advance > 0.0 { self.ui_avg_advance } else { self.cell_width * 0.75 };
+        s.chars().count() as f32 * adv
     }
 }
 
@@ -447,8 +460,7 @@ impl UiBuilder {
         self.vline(rect.right() - t, rect.y, rect.height, t, color); // right
     }
 
-    /// Record a text draw command. The actual glyph rasterization happens
-    /// later via the atlas pipeline.
+    /// Record a text draw command (monospace terminal font).
     pub fn text(
         &mut self,
         _renderer: &UiTextRenderer,
@@ -460,16 +472,13 @@ impl UiBuilder {
     ) {
         self.text_commands.push(TextCommand {
             text: text.to_string(),
-            x,
-            y,
-            fg,
-            bg,
+            x, y, fg, bg,
             bold: false,
+            ui_font: false,
         });
     }
 
-    /// Record a bold text draw command. Same as `text()` but renders with
-    /// the bold font variant for typographic hierarchy.
+    /// Record a bold text draw command (monospace terminal font).
     pub fn text_bold(
         &mut self,
         _renderer: &UiTextRenderer,
@@ -481,11 +490,45 @@ impl UiBuilder {
     ) {
         self.text_commands.push(TextCommand {
             text: text.to_string(),
-            x,
-            y,
-            fg,
-            bg,
+            x, y, fg, bg,
             bold: true,
+            ui_font: false,
+        });
+    }
+
+    /// Record a UI text draw command (proportional sans-serif font).
+    pub fn text_ui(
+        &mut self,
+        _renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x, y, fg, bg,
+            bold: false,
+            ui_font: true,
+        });
+    }
+
+    /// Record a bold UI text draw command (proportional sans-serif font).
+    pub fn text_ui_bold(
+        &mut self,
+        _renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x, y, fg, bg,
+            bold: true,
+            ui_font: true,
         });
     }
 

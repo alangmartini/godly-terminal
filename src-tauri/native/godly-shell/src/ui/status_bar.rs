@@ -149,7 +149,7 @@ impl StatusBar {
             let pad_h = s(4.0);
             let pad_v = s(2.0);
             let dot_sz = s(4.0);
-            let label_w = text.text_width(label);
+            let label_w = text.text_width_ui(label);
             let pill_inner_w = dot_sz + s(6.0) + label_w;
             let pill_w = pill_inner_w + pad_h * 2.0;
             let pill_h = ch + pad_v * 2.0;
@@ -175,7 +175,7 @@ impl StatusBar {
                 dot_sz / 2.0,
             );
             let label_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.4);
-            ui.text(text, label, sx + pad_h + dot_sz + s(6.0), y_center, label_fg, colors::BG_HOVER);
+            ui.text_ui(text, label, sx + pad_h + dot_sz + s(6.0), y_center, label_fg, colors::BG_HOVER);
         }
 
         // --- Content section: cwd + git branch + dimensions ---
@@ -186,7 +186,7 @@ impl StatusBar {
         if !self.cwd.is_empty() {
             let hints_label = "? for shortcuts";
             let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
-            let right_reserved = text.text_width(&dims) + text.text_width(hints_label)
+            let right_reserved = text.text_width_ui(&dims) + text.text_width_ui(hints_label)
                 + s(4.0) * 4.0
                 + s(8.0)
                 + s(10.0)
@@ -201,7 +201,7 @@ impl StatusBar {
             } else {
                 self.cwd.clone()
             };
-            let cwd_text_w = text.text_width(&display_cwd);
+            let cwd_text_w = text.text_width_ui(&display_cwd);
             let cwd_pill_w = cwd_text_w + cwd_pad_h * 2.0;
             let cwd_pill_h = ch + cwd_pad_v * 2.0;
             let cwd_pill_y = bar.y + (bar.height - cwd_pill_h) / 2.0;
@@ -214,7 +214,7 @@ impl StatusBar {
             ui.fill_rounded_gradient(cwd_pill, top, bot, s(3.0));
             ui.stroke_rounded(cwd_pill, s(3.0), 0.5, border);
             let cwd_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
-            ui.text(text, &display_cwd, x + cwd_pad_h, y_center, cwd_fg, colors::BG_HOVER);
+            ui.text_ui(text, &display_cwd, x + cwd_pad_h, y_center, cwd_fg, colors::BG_HOVER);
             x += cwd_pill_w + cw * 2.0;
         }
 
@@ -224,7 +224,7 @@ impl StatusBar {
             let pad_v = s(2.0);
             let dot_sz = s(4.0);
             let branch_text = format!(" {}", self.git_branch);
-            let branch_w = text.text_width(&branch_text);
+            let branch_w = text.text_width_ui(&branch_text);
             let pill_inner_w = dot_sz + s(4.0) + branch_w;
             let pill_w = pill_inner_w + pad_h * 2.0;
             let pill_h = ch + pad_v * 2.0;
@@ -250,7 +250,7 @@ impl StatusBar {
                 dot_sz / 2.0,
             );
             let branch_fg = lerp_color(colors::ACCENT_PEACH, [1.0, 0.85, 0.72, 1.0], ht * 0.3);
-            ui.text(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, branch_fg, colors::BG_HOVER);
+            ui.text_ui(text, &branch_text, x + pad_h + dot_sz + s(4.0) - cw, y_center, branch_fg, colors::BG_HOVER);
             x += pill_w + cw * 2.0;
         }
 
@@ -258,7 +258,7 @@ impl StatusBar {
         if !self.git_diff_summary.is_empty() {
             let diff_pad_h = s(4.0);
             let diff_pad_v = s(2.0);
-            let diff_w = text.text_width(&self.git_diff_summary);
+            let diff_w = text.text_width_ui(&self.git_diff_summary);
             let diff_pill_w = diff_w + diff_pad_h * 2.0;
             let diff_pill_h = ch + diff_pad_v * 2.0;
             let diff_pill_y = bar.y + (bar.height - diff_pill_h) / 2.0;
@@ -272,7 +272,7 @@ impl StatusBar {
                 ui.stroke_rounded(diff_pill, s(3.0), 0.5, diff_border);
                 // Render diff summary with muted color
                 let diff_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.8];
-                ui.text(text, &self.git_diff_summary, x + diff_pad_h, y_center, diff_fg, colors::BG_HOVER);
+                ui.text_ui(text, &self.git_diff_summary, x + diff_pad_h, y_center, diff_fg, colors::BG_HOVER);
                 x += diff_pill_w + cw;
             }
         }
@@ -285,7 +285,7 @@ impl StatusBar {
 
         // Keyboard hints pill
         let hints_label = "? for shortcuts";
-        let hints_text_w = text.text_width(hints_label);
+        let hints_text_w = text.text_width_ui(hints_label);
         let hints_pill_w = hints_text_w + pad_h * 2.0;
         let hints_pill_x = bar.right() - hints_pill_w - s(10.0);
         let hints_rect = Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h };
@@ -297,12 +297,12 @@ impl StatusBar {
             ui.fill_rounded_gradient(hints_rect, top, bot, s(3.0));
             ui.stroke_rounded(hints_rect, s(3.0), 0.5, border);
             let fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
-            ui.text(text, hints_label, hints_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
+            ui.text_ui(text, hints_label, hints_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
         }
 
         // Terminal dimensions pill
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
-        let dims_text_w = text.text_width(&dims);
+        let dims_text_w = text.text_width_ui(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
         let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
         let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
@@ -314,7 +314,7 @@ impl StatusBar {
             ui.fill_rounded_gradient(dims_rect, top, bot, s(3.0));
             ui.stroke_rounded(dims_rect, s(3.0), 0.5, border);
             let fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
-            ui.text(text, &dims, dims_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
+            ui.text_ui(text, &dims, dims_pill_x + pad_h, y_center, fg, colors::BG_HOVER);
         }
     }
 
@@ -374,7 +374,7 @@ impl StatusBar {
             let sx = bar.x + s(14.0);
             let label = if !self.process_name.is_empty() { &self.process_name } else { "Sessions" };
             let dot_sz = s(4.0);
-            let label_w = text.text_width(label);
+            let label_w = text.text_width_ui(label);
             let pill_w = dot_sz + s(6.0) + label_w + pad_h * 2.0;
             pills.push((Rect { x: sx, y: pill_y, width: pill_w, height: pill_h }, StatusPill::Mode));
         }
@@ -387,7 +387,7 @@ impl StatusBar {
         if !self.cwd.is_empty() {
             let hints_label = "? for shortcuts";
             let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
-            let right_reserved = text.text_width(&dims) + text.text_width(hints_label)
+            let right_reserved = text.text_width_ui(&dims) + text.text_width_ui(hints_label)
                 + s(4.0) * 4.0 + s(8.0) + s(10.0) + cw * 2.0;
             let avail = bar.right() - x - right_reserved - cw * 4.0 - pad_h * 2.0;
             let max_chars = (avail / cw).floor().max(4.0) as usize;
@@ -396,7 +396,7 @@ impl StatusBar {
             } else {
                 self.cwd.clone()
             };
-            let cwd_text_w = text.text_width(&display_cwd);
+            let cwd_text_w = text.text_width_ui(&display_cwd);
             let cwd_pill_w = cwd_text_w + pad_h * 2.0;
             let cwd_pill_h = ch + pad_v * 2.0;
             let cwd_pill_y = bar.y + (bar.height - cwd_pill_h) / 2.0;
@@ -408,20 +408,20 @@ impl StatusBar {
         if !self.git_branch.is_empty() {
             let dot_sz = s(4.0);
             let branch_text = format!(" {}", self.git_branch);
-            let branch_w = text.text_width(&branch_text);
+            let branch_w = text.text_width_ui(&branch_text);
             let pill_w = dot_sz + s(4.0) + branch_w + pad_h * 2.0;
             pills.push((Rect { x, y: pill_y, width: pill_w, height: pill_h }, StatusPill::GitBranch));
         }
 
         // Right-aligned pills
         let hints_label = "? for shortcuts";
-        let hints_text_w = text.text_width(hints_label);
+        let hints_text_w = text.text_width_ui(hints_label);
         let hints_pill_w = hints_text_w + pad_h * 2.0;
         let hints_pill_x = bar.right() - hints_pill_w - s(10.0);
         pills.push((Rect { x: hints_pill_x, y: pill_y, width: hints_pill_w, height: pill_h }, StatusPill::Hints));
 
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
-        let dims_text_w = text.text_width(&dims);
+        let dims_text_w = text.text_width_ui(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
         let dims_pill_x = hints_pill_x - dims_pill_w - s(8.0);
         pills.push((Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h }, StatusPill::Dims));

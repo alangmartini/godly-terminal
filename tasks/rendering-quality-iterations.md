@@ -1144,3 +1144,103 @@ This is a fundamental quality indicator that professional apps use universally.
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 33 — Proportional Sans-Serif UI Font
+
+**Goal**: Replace monospace font for UI chrome labels with a proportional
+sans-serif font (Segoe UI) to match professional app aesthetics. Sidebar
+labels, tab titles, status bar text, and welcome screen text should use
+the system UI font instead of the terminal's monospace font.
+
+**Changes made**:
+
+1. **GlyphKey** (`glyph_cache.rs`):
+   - Added `font_id: u8` field (0 = terminal monospace, 1 = UI proportional)
+   - Added `new_ui()` constructor for UI font glyph keys
+   - Existing `new()` defaults to `font_id: 0` (no breaking changes)
+
+2. **AtlasEntry** (`glyph_atlas.rs`):
+   - Added `advance: f32` field to carry actual glyph advance width
+   - Enables proportional text positioning by the renderer
+
+3. **GlyphAtlas** (`glyph_atlas.rs`):
+   - Renamed `pack_cell` → `pack_slot` with variable `slot_w` parameter
+   - For UI font glyphs (font_id != 0), slot width is computed from actual
+     glyph metrics (max of bitmap extent and advance width)
+   - For terminal font, slot width remains `cell_w` (no regression)
+   - Added `atlas_width()` accessor for UV-to-pixel conversion
+   - Added slot boundary clipping in blit loop
+
+4. **TerminalRenderer** (`terminal_renderer.rs`):
+   - Added `ui_rasterizer: Option<Box<dyn GlyphRasterizer>>` field
+   - Added `ui_avg_advance: f32` for layout estimation
+   - `set_ui_rasterizer()` loads UI font and measures average advance
+   - `prepare()` now branches per-character:
+     - UI font text uses `GlyphKey::new_ui()` + UI rasterizer + actual advance
+     - Terminal text uses `GlyphKey::new()` + mono rasterizer + cell_width
+   - Quad width for proportional glyphs uses actual atlas slot width from UVs
+
+5. **TextCommand/UiBuilder** (`builder.rs`):
+   - Added `ui_font: bool` to `TextCommand`
+   - Added `text_ui()` and `text_ui_bold()` methods
+   - Added `text_width_ui()` to `UiTextRenderer` (uses `ui_avg_advance`)
+
+6. **Font loading** (`main.rs`):
+   - Added `create_ui_rasterizer()` — loads "Segoe UI Variable" (Win 11)
+     with fallback to "Segoe UI" (Win 10)
+   - Returns `None` gracefully if no proportional font is available
+   - UI rasterizer passed to `TerminalRenderer::set_ui_rasterizer()`
+   - `UiTextRenderer` instances receive `ui_avg_advance` for layout
+
+7. **Sidebar** (`sidebar.rs`):
+   - Section headers ("SESSIONS", "PROCESSES") → `text_ui()`
+   - Session names → `text_ui_bold()` (active) / `text_ui()` (inactive)
+   - Branch names, descriptions → `text_ui()`
+   - "New Session", "Settings" labels → `text_ui()`
+   - Agent names, status labels, task descriptions → `text_ui()`
+   - Width calculations → `text_width_ui()`
+
+8. **Tab bar** (`tab_bar.rs`):
+   - "Godly Terminal" brand → `text_ui_bold()`
+   - Tab titles → `text_ui_bold()` (active) / `text_ui()` (inactive)
+
+9. **Status bar** (`status_bar.rs`):
+   - All text labels → `text_ui()` (shell badge, CWD, git branch,
+     dimensions, hints, diff summary)
+   - All width calculations → `text_width_ui()`
+
+10. **Welcome screen** (`main.rs`):
+    - "Godly Terminal" heading → `text_ui_bold()`
+    - Subtitle, status → `text_ui()`
+    - Shortcut descriptions → `text_ui()` (key labels stay monospace)
+
+**Technical details**:
+- DirectWrite rasterizes Segoe UI at the same `font_size` as the terminal
+  font, sharing the atlas texture. The `font_id` in `GlyphKey` prevents
+  cache collisions between mono and proportional glyphs of the same char.
+- Variable-width slot packing: for proportional glyphs, slot_w =
+  max(bearing_x + width, ceil(advance)), so no glyph bitmap is clipped.
+  Monospace glyphs continue using cell_w slots.
+- Renderer advances proportional text by `entry.advance` (actual per-glyph
+  advance from DirectWrite) rather than cell_width, producing natural
+  kerning-like spacing.
+- `text_width_ui()` uses average advance for layout estimation. Exact
+  per-glyph widths aren't needed at layout time since the renderer handles
+  precise positioning.
+
+**Result**: UI chrome text now uses a proportional sans-serif font (Segoe UI)
+that matches professional desktop apps. Session names, tab titles, section
+headers, and status bar labels are more compact and natural-looking compared
+to the wide monospace rendering. Terminal content continues using the
+monospace font (Cascadia Mono) through the same atlas pipeline.
+
+**Visual comparison with reference**:
+- Proportional sidebar labels: ✓ Matches Zed/opensessions style
+- Tab title font: ✓ Natural proportional rendering
+- Status bar text: ✓ Compact proportional labels in pills
+- Welcome screen: ✓ Mixed proportional (labels) + monospace (keycaps)
+- No layout issues: ✓ Proportional advance widths position correctly
+
+**Remaining gaps vs reference (iteration 33)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

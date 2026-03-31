@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 32)
+Last updated: 2026-03-30 (Iteration 33)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -57,18 +57,18 @@ Last updated: 2026-03-30 (Iteration 32)
 | Git diff summary pill | Done | Styled pill in status bar for diff summary display (iteration 31) |
 | Welcome vertical balance | Done | Content positioned at 33% from top for better visual balance (iteration 31) |
 | Font weight hierarchy | Done | Bold text for active tabs, active sessions, branding, and welcome heading (iteration 32) |
+| Proportional UI font | Done | Segoe UI Variable/Segoe UI for sidebar labels, tab titles, status bar, welcome screen (iteration 33) |
 
 ## Remaining Gaps (Priority Order)
 
 ### High Impact
 1. **Terminal content rendering** - Can only verify with active daemon; welcome screen shows when daemon is not running
-2. **Proportional sidebar labels** - Session names use monospace font; references use proportional sans-serif for UI labels
 
 ### Medium Impact
-3. **Multi-pane terminal layout** - opensessions reference shows 2-3 panes side by side; requires daemon
+2. **Multi-pane terminal layout** - opensessions reference shows 2-3 panes side by side; requires daemon
 
 ### Low Impact
-4. **Context menu backdrop blur** - Professional apps use backdrop blur for floating menus
+3. **Context menu backdrop blur** - Professional apps use backdrop blur for floating menus
 
 ## Active Theme Color Notes (Zed One Dark)
 - Chrome/sidebar: `#1b1e24` (BG_DARK)

@@ -32,6 +32,8 @@ pub struct GlyphKey {
     pub size_q4: u16,
     pub bold: bool,
     pub italic: bool,
+    /// Font identifier: 0 = terminal monospace, 1 = UI proportional.
+    pub font_id: u8,
 }
 
 impl GlyphKey {
@@ -41,6 +43,18 @@ impl GlyphKey {
             size_q4: (font_size * 4.0) as u16,
             bold,
             italic,
+            font_id: 0,
+        }
+    }
+
+    /// Create a key for UI font glyphs (proportional sans-serif).
+    pub fn new_ui(ch: char, font_size: f32, bold: bool) -> Self {
+        Self {
+            codepoint: ch,
+            size_q4: (font_size * 4.0) as u16,
+            bold,
+            italic: false,
+            font_id: 1,
         }
     }
 }

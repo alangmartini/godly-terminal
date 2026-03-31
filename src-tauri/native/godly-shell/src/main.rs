@@ -202,14 +202,21 @@ impl App {
         self.scale_factor = scale_factor;
         log::info!("DPI scale factor: {scale_factor}");
         let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
-        let mut rasterizer = create_rasterizer();
+        let rasterizer = create_rasterizer();
         let font_size = 14.0_f32;
         let font_metrics = FontMetrics::from_font_bytes(font_size, font_data)
             .with_scale_factor(scale_factor);
         log::info!("Font metrics: cell={}x{}, font_size={}, baseline={}, scale={}",
             font_metrics.cell_width, font_metrics.cell_height,
             font_metrics.font_size, font_metrics.baseline_offset, font_metrics.scale_factor);
-        let renderer = TerminalRenderer::new(&device, &queue, format, font_metrics, rasterizer);
+        let mut renderer = TerminalRenderer::new(&device, &queue, format, font_metrics, rasterizer);
+
+        // Load proportional sans-serif font for UI chrome labels
+        if let Some(ui_rast) = create_ui_rasterizer() {
+            renderer.set_ui_rasterizer(ui_rast);
+            log::info!("[FONT] UI font loaded, avg advance = {:.1}px", renderer.ui_avg_advance());
+        }
+
         self.renderer = Some(renderer);
         self.quad_pipeline = Some(ui::quad_renderer::QuadPipeline::new(&device, format));
 
@@ -509,8 +516,11 @@ impl App {
 
         // Build UI chrome (quads + text commands)
         let phys_metrics = self.renderer.as_ref().map(|r| r.font_metrics().scaled_for_render());
+        let ui_avg_advance = self.renderer.as_ref().map_or(0.0, |r| r.ui_avg_advance());
         let ui_text_handle = if let Some(m) = phys_metrics {
-            ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor)
+            let mut tr = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+            tr.ui_avg_advance = ui_avg_advance;
+            tr
         } else {
             ui::builder::UiTextRenderer::new(8.0, 16.0, self.scale_factor)
         };
@@ -731,7 +741,7 @@ impl App {
 
             // --- Branded header ---
             let title = "Godly Terminal";
-            let title_w = ui_text_handle.text_width(title);
+            let title_w = ui_text_handle.text_width_ui(title);
             let title_x = center_x - title_w / 2.0;
             // Title text with subtle accent tint
             let title_fg = [
@@ -740,11 +750,11 @@ impl App {
                 ui::builder::colors::FG_SECONDARY[2] * 0.80 + active_accent[2] * 0.20,
                 0.7,
             ];
-            ui_builder.text_bold(&ui_text_handle, title, title_x, block_y, title_fg, bg);
+            ui_builder.text_ui_bold(&ui_text_handle, title, title_x, block_y, title_fg, bg);
 
             // Subtitle line — "GPU-accelerated terminal" in very muted text
             let subtitle = "GPU-accelerated terminal";
-            let subtitle_w = ui_text_handle.text_width(subtitle);
+            let subtitle_w = ui_text_handle.text_width_ui(subtitle);
             let subtitle_y = block_y + ch + s(2.0);
             let subtitle_fg = [
                 ui::builder::colors::FG_MUTED[0],
@@ -752,7 +762,7 @@ impl App {
                 ui::builder::colors::FG_MUTED[2],
                 0.45,
             ];
-            ui_builder.text(&ui_text_handle, subtitle,
+            ui_builder.text_ui(&ui_text_handle, subtitle,
                 center_x - subtitle_w / 2.0, subtitle_y,
                 subtitle_fg, bg);
 
@@ -793,8 +803,8 @@ impl App {
 
             // --- Status message with animated loading indicator ---
             let status_y = underline_y + s(16.0);
-            let status_w = ui_text_handle.text_width(status);
-            ui_builder.text(&ui_text_handle, status,
+            let status_w = ui_text_handle.text_width_ui(status);
+            ui_builder.text_ui(&ui_text_handle, status,
                 center_x - status_w / 2.0, status_y,
                 ui::builder::colors::FG_MUTED, bg);
 
@@ -851,7 +861,7 @@ impl App {
                 .map(|(k, _)| ui_text_handle.text_width(k))
                 .fold(0.0f32, f32::max);
             let max_desc_w = hints.iter()
-                .map(|(_, d)| ui_text_handle.text_width(d))
+                .map(|(_, d)| ui_text_handle.text_width_ui(d))
                 .fold(0.0f32, f32::max);
             let card_inner_w = (max_key_w + key_badge_pad_h * 2.0) + key_desc_gap + max_desc_w;
             let card_w = card_inner_w + card_pad_h * 2.0;
@@ -960,9 +970,9 @@ impl App {
                 ui_builder.text(&ui_text_handle, key, key_text_x, key_text_y,
                     ui::builder::colors::FG_PRIMARY, ui::builder::colors::BG_DARK);
 
-                // Description text (after badge)
+                // Description text (after badge) — proportional for natural reading
                 let desc_x = badge_x + badge_w + key_desc_gap;
-                ui_builder.text(&ui_text_handle, desc, desc_x, key_text_y,
+                ui_builder.text_ui(&ui_text_handle, desc, desc_x, key_text_y,
                     ui::builder::colors::FG_MUTED, bg);
             }
         }
@@ -1630,7 +1640,8 @@ impl ApplicationHandler<AsyncEvent> for App {
                 // Status bar needs UiTextRenderer for pill hit-testing
                 if let Some(renderer) = &self.renderer {
                     let m = renderer.font_metrics().scaled_for_render();
-                    let ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+                    let mut ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+                    ui_text.ui_avg_advance = renderer.ui_avg_advance();
                     self.status_bar.sidebar_width = layout.sidebar.width;
                     self.status_bar.on_mouse(me, layout.status_bar, &ui_text);
                 }
@@ -1878,6 +1889,31 @@ fn create_rasterizer() -> Box<dyn godly_terminal_surface::glyph_rasterizer::Glyp
     let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
     r.load_font(include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf"), 0);
     Box::new(r)
+}
+
+/// Create a proportional sans-serif rasterizer for UI chrome labels.
+/// Falls back gracefully: returns None if no suitable font is available.
+#[cfg(windows)]
+fn create_ui_rasterizer() -> Option<Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>> {
+    use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
+
+    let mut dw = DirectWriteRasterizer::new().ok()?;
+    // Try Segoe UI Variable (Windows 11), fall back to Segoe UI (Windows 10)
+    if dw.load_system_font("Segoe UI Variable").is_ok() {
+        log::info!("[FONT] UI font: Segoe UI Variable (proportional sans-serif)");
+        Some(Box::new(dw))
+    } else if dw.load_system_font("Segoe UI").is_ok() {
+        log::info!("[FONT] UI font: Segoe UI (proportional sans-serif)");
+        Some(Box::new(dw))
+    } else {
+        log::warn!("[FONT] No proportional UI font available, using monospace for all text");
+        None
+    }
+}
+
+#[cfg(not(windows))]
+fn create_ui_rasterizer() -> Option<Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>> {
+    None // Proportional font not yet supported on non-Windows
 }
 
 fn main() {

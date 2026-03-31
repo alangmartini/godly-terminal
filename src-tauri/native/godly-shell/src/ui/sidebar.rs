@@ -261,7 +261,7 @@ impl Sidebar {
             height: header_h,
         };
         // All-caps section header (Zed-style: small, muted, uppercase)
-        ui.text(
+        ui.text_ui(
             text,
             "SESSIONS",
             header_rect.x + pad_h,
@@ -478,9 +478,9 @@ impl Sidebar {
                 item.label.clone()
             };
             if item.active {
-                ui.text_bold(text, &name, name_x, text_y, name_fg, item_bg);
+                ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
             } else {
-                ui.text(text, &name, name_x, text_y, name_fg, item_bg);
+                ui.text_ui(text, &name, name_x, text_y, name_fg, item_bg);
             }
 
             // Branch info (right-aligned, truncated)
@@ -490,10 +490,10 @@ impl Sidebar {
                 } else {
                     item.branch.clone()
                 };
-                let branch_w = text.text_width(&branch);
+                let branch_w = text.text_width_ui(&branch);
                 // Slightly brighter than pure FG_MUTED for better readability
                 let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.25 + hover_t * 0.3);
-                ui.text(text, &branch,
+                ui.text_ui(text, &branch,
                         rect.right() - branch_w - pad_h,
                         text_y,
                         branch_fg, item_bg);
@@ -511,7 +511,7 @@ impl Sidebar {
                 let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.3);
                 let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);
                 let desc_fg = lerp_color(inactive_desc, colors::FG_SECONDARY, active_t * 0.5);
-                ui.text(text, &desc,
+                ui.text_ui(text, &desc,
                         name_x,
                         rect.y + line2_y_off,
                         desc_fg, item_bg);
@@ -604,7 +604,7 @@ impl Sidebar {
             new_t,
         );
         let new_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
-        ui.text(text, "New Session",
+        ui.text_ui(text, "New Session",
                 new_rect.x + s(22.0),
                 new_rect.y + text_y_off(compact_h),
                 new_fg, new_bg);
@@ -667,7 +667,7 @@ impl Sidebar {
             ui.fill_inner_shadow(panel_inset, [0.0, 0.0, 0.0, 0.06], panel_radius, s(4.0));
 
             // "PROCESSES" header (uppercase muted, matching SESSIONS section style)
-            ui.text(text, "PROCESSES",
+            ui.text_ui(text, "PROCESSES",
                     sidebar.x + pad_h,
                     panel_y + (header_section_h - ch) / 2.0,
                     [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
@@ -780,13 +780,13 @@ impl Sidebar {
 
                 // Agent name (brightens on hover)
                 let agent_name_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, agent_hover_t * 0.4);
-                ui.text(text, &agent.name,
+                ui.text_ui(text, &agent.name,
                         sidebar.x + pad_h + cw * 2.0,
                         line1_y,
                         agent_name_fg, panel_bg);
 
                 // Status label (right-aligned, pill-shaped badge)
-                let sw = text.text_width(status_text);
+                let sw = text.text_width_ui(status_text);
                 let status_badge_pad_h = s(4.0);
                 let status_badge_h = ch * 0.85;
                 let status_badge_w = sw + status_badge_pad_h * 2.0;
@@ -804,7 +804,7 @@ impl Sidebar {
                     [status_color[0], status_color[1], status_color[2], 0.25]);
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
-                ui.text(text, status_text,
+                ui.text_ui(text, status_text,
                         status_text_x, status_text_y,
                         status_color, panel_bg);
 
@@ -818,7 +818,7 @@ impl Sidebar {
                         agent.task.clone()
                     };
                     let task_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, agent_hover_t * 0.3);
-                    ui.text(text, &task,
+                    ui.text_ui(text, &task,
                             sidebar.x + pad_h + cw * 2.0,
                             line2_y,
                             task_fg, panel_bg);
@@ -884,7 +884,7 @@ impl Sidebar {
 
             // "Settings" label — brightens on hover
             let settings_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, settings_t);
-            ui.text(text, "Settings",
+            ui.text_ui(text, "Settings",
                     sidebar.x + pad_h + gear_sz + s(8.0),
                     settings_y + (settings_h - ch) / 2.0,
                     settings_fg, settings_bg);
