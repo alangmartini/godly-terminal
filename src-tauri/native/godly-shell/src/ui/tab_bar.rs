@@ -491,7 +491,7 @@ impl TabBar {
                     colors::BG_DARK[0] * 1.03, colors::BG_DARK[1] * 1.03,
                     colors::BG_DARK[2] * 1.03, 0.80,
                 ];
-                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.28];
+                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.22];
                 // Subtle baseline shadow below inactive tab for physical depth
                 let shadow_rect = Rect {
                     x: rect.x + s(4.0),
@@ -654,18 +654,17 @@ impl TabBar {
                 }
             }
 
-            // Right separator between tabs — embossed groove for depth
-            // (matches sidebar groove language: dark edge + light highlight pair)
+            // Right separator between tabs — single thin hairline
+            // Modern approach: surface color difference provides primary separation,
+            // the hairline is just a subtle visual cue that fades on hover.
             if !tab.active && i + 1 < self.tabs.len() {
                 let next_active = self.tabs.get(i + 1).map_or(false, |t| t.active);
                 if !next_active {
-                    // Fade separator out when either adjacent tab is hovered
                     let next_hover = self.tab_hover_anim.get(i + 1);
                     let sep_fade = 1.0 - (hover_t.max(next_hover));
-                    let groove_dark = [0.0, 0.0, 0.0, 0.12 * sep_fade];
-                    let groove_light = [1.0, 1.0, 1.0, 0.04 * sep_fade];
-                    ui.vgroove_fade(rect.right(), rect.y + s(6.0), rect.height - s(12.0),
-                        groove_dark, groove_light, s(6.0));
+                    ui.vline_fade(rect.right(), rect.y + s(8.0), rect.height - s(16.0), 1.0,
+                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15 * sep_fade],
+                        s(8.0));
                 }
             }
         }
@@ -700,13 +699,12 @@ impl TabBar {
         // Window control buttons (minimize, maximize, close) — animated hovers
         let buttons = self.window_button_rects(bar, text.scale);
 
-        // Subtle separator before window controls — visual boundary between
-        // tab content and window chrome buttons, fading at top/bottom for softness
+        // Subtle separator before window controls — softer to match quieter aesthetic
         {
             let sep_x = buttons[0].0.x - s(4.0);
             let sep_pad = s(8.0);
             ui.vline_fade(sep_x, bar.y + sep_pad, bar.height - sep_pad * 2.0, 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.3], s(6.0));
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.20], s(8.0));
         }
         for (rect, btn) in &buttons {
             let btn_t = match btn {

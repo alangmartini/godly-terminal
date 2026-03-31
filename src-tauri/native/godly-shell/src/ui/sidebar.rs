@@ -340,7 +340,7 @@ impl Sidebar {
         // Layout: [pad][dot][gap][num][gap][name...][gap][branch][pad]
         // Two-line items: line 1 = dot + number + name + branch, line 2 = description
         let num_x = sidebar.x + pad_h;
-        let dot_space = s(11.0) + s(3.0); // terminal icon width + gap
+        let dot_space = s(7.0) + s(4.0); // accent dot (7px) + gap (4px)
         let name_x = num_x + dot_space + cw * 2.0;
         let branch_max_chars: usize = 6;
         // Use proportional UI font advance for text width estimation (sidebar labels
@@ -489,7 +489,7 @@ impl Sidebar {
             // Session accent dot — small colored circle matching the tab
             // accent color cycle.  Clean and minimal at sidebar scale.
             let dot_sz = s(7.0);
-            let dot_x = num_x + (s(11.0) - dot_sz) / 2.0; // centered in icon column
+            let dot_x = num_x; // left-aligned in dot column
             let dot_y = text_y + (ch - dot_sz) / 2.0;
             let dot_rect = Rect {
                 x: dot_x, y: dot_y, width: dot_sz, height: dot_sz,
@@ -505,7 +505,7 @@ impl Sidebar {
             }
 
             // Session number (shifted right to make room for accent dot)
-            let num_x_shifted = num_x + s(11.0) + s(3.0);
+            let num_x_shifted = num_x + dot_space;
             let num_str = format!("{}", item.number);
             let inactive_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t);
             let fg = lerp_color(inactive_fg, session_accent, active_t);
@@ -942,9 +942,9 @@ impl Sidebar {
             let settings_h = s(28.0);
             let settings_y = sidebar.bottom() - settings_h;
             let settings_t = self.settings_anim.value();
-            // Top separator — groove for consistency
-            ui.hgroove_fade(sidebar.x + pad_h, settings_y, sidebar.width - pad_h * 2.0,
-                         [0.0, 0.0, 0.0, 0.12], [1.0, 1.0, 1.0, 0.03], s(8.0));
+            // Top separator — single thin hairline (modern, matching session dividers)
+            ui.hline_fade(sidebar.x + pad_h, settings_y, sidebar.width - pad_h * 2.0, 1.0,
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12], s(12.0));
 
             // Hover background (animated rounded rect)
             let settings_inset = Rect {

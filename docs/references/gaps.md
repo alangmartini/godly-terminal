@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 59)
+Last updated: 2026-03-31 (Iteration 60)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -13,7 +13,7 @@ Last updated: 2026-03-31 (Iteration 59)
 | Tab numbered circle badges | Done | Numbers inside colored gradient circles, matching opensessions (iteration 25) |
 | Session/workspace sidebar | Done | Active accent bar, notification dots, count badge pill |
 | Sidebar header with count badge | Done | "Sessions" header with pill-shaped count badge (iteration 25) |
-| Soft panel separators | Done | All borders at reduced opacity, embossed grooves |
+| Soft panel separators | Done | All borders at reduced opacity, uniform single-hairline separators (iteration 60) |
 | Active tab visual treatment | Done | Top-rounded corners, inverse "ear" concave curves, accent glow, shimmer |
 | Window controls | Done | Canvas-drawn icons, animated hover states |
 | Status bar with shell badge | Done | Process badge, CWD, dimensions, animated pill hovers |

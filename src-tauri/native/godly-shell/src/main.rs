@@ -806,7 +806,7 @@ impl App {
             // background. Replaces the raw halo with a more refined treatment
             // that matches professional welcome page icon styling.
             let hero_icon_size = ch * 3.5;
-            let hero_pill_pad = s(12.0);
+            let hero_pill_pad = s(10.0);
             let hero_pill_size = hero_icon_size + hero_pill_pad * 2.0;
             let hero_pill_x = center_x - hero_pill_size / 2.0;
             let hero_pill_y = block_y - hero_pill_size - s(10.0);
@@ -814,7 +814,7 @@ impl App {
                 x: hero_pill_x, y: hero_pill_y,
                 width: hero_pill_size, height: hero_pill_size,
             };
-            let hero_pill_r = s(16.0);
+            let hero_pill_r = s(14.0);
             // Soft drop shadow for floating depth
             let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
             ui_builder.fill_shadow(
