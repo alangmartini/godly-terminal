@@ -129,15 +129,16 @@ impl StatusBar {
             ui.fill_inner_shadow(content_section, [0.0, 0.0, 0.0, 0.02], 0.0, s(2.0));
         }
 
-        // Top separator — single thin line for clean panel junction.
+        // Top separator — thin line, subdued to let color difference do the work.
         ui.hline_fade(bar.x, bar.y, bar.width, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35], s(4.0));
-        // Bottom accent stripe — 1px accent-tinted line at window bottom edge.
-        // Uses the active tab's accent color to match the top accent stripe,
-        // creating a cohesive visual frame around the entire window.
+            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.28], s(4.0));
+        // Bottom accent stripe — 2px accent-tinted bar at window bottom edge.
+        // Matches the 2px top accent stripe for cohesive visual window framing.
         let breath = 0.92 + 0.08 * glow_phase.sin();
-        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
-            [active_accent[0] * 0.5, active_accent[1] * 0.5, active_accent[2] * 0.5, 0.30 * breath]);
+        ui.fill(
+            Rect { x: bar.x, y: bar.bottom() - 2.0, width: bar.width, height: 2.0 },
+            [active_accent[0] * 0.5, active_accent[1] * 0.5, active_accent[2] * 0.5, 0.25 * breath],
+        );
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
 

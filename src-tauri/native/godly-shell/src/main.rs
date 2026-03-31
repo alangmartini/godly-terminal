@@ -639,12 +639,12 @@ impl App {
                     ui_builder.fill_rounded_custom(corner_rect, ui::builder::colors::BG_DARK, [corner_r, 0.0, 0.0, 0.0]);
 
                     // Bottom-left corner — uses sidebar's gradient bottom color
-                    // (BG_DARK * 0.9) instead of flat BG_DARK, so the corner blends
+                    // (BG_DARK * 0.96) instead of flat BG_DARK, so the corner blends
                     // seamlessly with the sidebar's vertical gradient at this y.
                     let sidebar_bottom_color = [
-                        ui::builder::colors::BG_DARK[0] * 0.9,
-                        ui::builder::colors::BG_DARK[1] * 0.9,
-                        ui::builder::colors::BG_DARK[2] * 0.9,
+                        ui::builder::colors::BG_DARK[0] * 0.96,
+                        ui::builder::colors::BG_DARK[1] * 0.96,
+                        ui::builder::colors::BG_DARK[2] * 0.96,
                         1.0,
                     ];
                     let bottom_corner = ui::widget::Rect {
@@ -1343,24 +1343,26 @@ impl App {
 
             // Background: subtle gradient — slightly darker at top (near tab bar)
             // fading to content-adjacent tone at bottom for smooth transition.
+            // Kept very subtle (92%→98%) to avoid visible banding in the compact bar.
             let bc_bg_top = [
-                ui::builder::colors::BG_BASE[0] * 0.88,
-                ui::builder::colors::BG_BASE[1] * 0.88,
-                ui::builder::colors::BG_BASE[2] * 0.88,
+                ui::builder::colors::BG_BASE[0] * 0.92,
+                ui::builder::colors::BG_BASE[1] * 0.92,
+                ui::builder::colors::BG_BASE[2] * 0.92,
                 1.0,
             ];
             let bc_bg = [
-                ui::builder::colors::BG_BASE[0] * 0.96,
-                ui::builder::colors::BG_BASE[1] * 0.96,
-                ui::builder::colors::BG_BASE[2] * 0.96,
+                ui::builder::colors::BG_BASE[0] * 0.98,
+                ui::builder::colors::BG_BASE[1] * 0.98,
+                ui::builder::colors::BG_BASE[2] * 0.98,
                 1.0,
             ];
             ui_builder.fill_gradient(*bc, bc_bg_top, bc_bg);
 
-            // Bottom separator — thin line for content area boundary
+            // Bottom separator — near-invisible hairline; the gradient background
+            // difference between breadcrumb and content area provides primary separation.
             ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
                 [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.30]);
+                 ui::builder::colors::BORDER[2], 0.20]);
             // Left inner shadow for sidebar-cast depth
             ui_builder.fill_gradient_h(
                 ui::widget::Rect { x: bc.x, y: bc.y, width: s(6.0), height: bc.height },

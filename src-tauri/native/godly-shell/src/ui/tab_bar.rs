@@ -363,9 +363,9 @@ impl TabBar {
             );
             ui.text_ui_bold(text, "Godly Terminal", brand_x, brand_y,
                     brand_fg, colors::BG_DARK);
-            // Right border for sidebar section — thin line
+            // Right border for sidebar section — near-invisible hairline
             ui.vline(self.sidebar_width - 1.0, bar.y + s(6.0), bar.height - s(12.0), 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18]);
+                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12]);
         }
 
         // Icon line thickness (used for close buttons in tabs and window controls)

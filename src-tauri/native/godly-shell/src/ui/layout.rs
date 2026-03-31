@@ -4,7 +4,7 @@ use super::widget::Rect;
 
 pub const TAB_BAR_HEIGHT: f32 = 33.0;
 pub const STATUS_BAR_HEIGHT: f32 = 25.0;
-pub const BREADCRUMB_HEIGHT: f32 = 22.0;
+pub const BREADCRUMB_HEIGHT: f32 = 20.0;
 pub const SIDEBAR_WIDTH: f32 = 220.0;
 pub const TERMINAL_PAD_LEFT: f32 = 8.0;
 pub const TERMINAL_PAD_TOP: f32 = 6.0;
