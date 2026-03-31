@@ -218,8 +218,38 @@ impl TabBar {
         ];
         ui.fill_gradient(bar, bar_top, bar_bottom);
 
-        // Top edge bevel highlight (faded at corners for softer window integration)
-        ui.hline_fade(bar.x + s(4.0), bar.y, bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
+        // Window top accent stripe — 2px line at the very top of the window
+        // using the active tab's accent color. Professional brand touch found
+        // in VS Code, JetBrains, and modern editors.
+        let active_accent = self.tabs.iter().enumerate()
+            .find(|(_, t)| t.active)
+            .map(|(i, _)| self.accent_for(i))
+            .unwrap_or(colors::ACCENT_BLUE);
+        {
+            let stripe_h = s(2.0);
+            let stripe_rect = Rect {
+                x: bar.x,
+                y: bar.y,
+                width: bar.width,
+                height: stripe_h,
+            };
+            ui.fill(stripe_rect, active_accent);
+            // Subtle glow spill below the stripe for depth
+            let breath = 0.92 + 0.08 * self.glow_phase.sin();
+            let glow_rect = Rect {
+                x: bar.x,
+                y: bar.y + stripe_h,
+                width: bar.width,
+                height: s(4.0),
+            };
+            ui.fill_gradient(glow_rect,
+                [active_accent[0], active_accent[1], active_accent[2], 0.10 * breath],
+                [active_accent[0], active_accent[1], active_accent[2], 0.0],
+            );
+        }
+
+        // Top edge bevel highlight (below accent stripe, faded at corners for softer window integration)
+        ui.hline_fade(bar.x + s(4.0), bar.y + s(2.0), bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
 
         // Glass sheen band: very subtle horizontal highlight at ~25% from top.
         // Simulates reflective curvature on a polished chrome surface — the

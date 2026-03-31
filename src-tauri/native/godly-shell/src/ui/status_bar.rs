@@ -132,8 +132,11 @@ impl StatusBar {
         // Top inner bevel highlight (matches tab bar for visual consistency).
         // Sits just below the groove pair to read as the inner lit edge of the panel.
         ui.hline_fade(bar.x + s(4.0), bar.y + 2.0, bar.width - s(8.0), 1.0, [1.0, 1.0, 1.0, 0.05], s(16.0));
-        // Bottom edge: subtle dark line for window frame definition
-        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, [0.0, 0.0, 0.0, 0.15]);
+        // Bottom accent stripe — 1px accent-tinted line at window bottom edge.
+        // Bookends with the top accent stripe for visual frame cohesion.
+        let accent = colors::ACCENT_BLUE;
+        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
+            [accent[0] * 0.5, accent[1] * 0.5, accent[2] * 0.5, 0.35]);
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
 

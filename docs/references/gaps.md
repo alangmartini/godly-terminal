@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 42)
+Last updated: 2026-03-31 (Iteration 43)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -101,6 +101,9 @@ Last updated: 2026-03-31 (Iteration 42)
 | Status bar cursor position | Done | "Ln X, Col Y" indicator matching VS Code/Zed IDE convention (iteration 42) |
 | Empty state CTA button | Done | "Create terminal" accent-tinted pill button below shortcut cards and version (iteration 42) |
 | SDF chevron-right icon | Done | New `icon_chevron_right` builder method for breadcrumb/path separators (iteration 42) |
+| Window top accent stripe | Done | 2px dynamic accent line at window top edge, color follows active tab accent (iteration 43) |
+| Accent glow spill | Done | Breathing glow gradient below top accent stripe for depth (iteration 43) |
+| Status bar bottom accent edge | Done | Subtle accent-tinted bottom border for visual window frame bookending (iteration 43) |
 
 ## Remaining Gaps (Priority Order)
 

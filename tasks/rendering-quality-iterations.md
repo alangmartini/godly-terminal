@@ -1929,3 +1929,49 @@ line ending, dimensions).
 **Remaining gaps vs reference (iteration 42)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 43 — Window accent stripe & visual framing
+
+**Changes made**:
+
+1. **Window top accent stripe** (`tab_bar.rs`): Added a 2px accent-colored
+   horizontal line at the very top of the window (y=0). The stripe uses
+   the active tab's accent color from the rotating palette (blue, green,
+   peach, purple, red), creating a dynamic brand element that changes
+   with tab selection. This is a professional touch found in VS Code,
+   JetBrains, and modern editors. A breathing glow gradient (4px) below
+   the stripe adds depth and visual softness.
+
+2. **Status bar bottom accent edge** (`status_bar.rs`): Replaced the plain
+   dark bottom border with a subtle accent-tinted line (50% accent blue
+   at 35% opacity). This creates visual bookending with the top accent
+   stripe — the window is "framed" by accent color at both top and
+   bottom edges, unifying the chrome language.
+
+3. **Tab bar bevel adjustment** (`tab_bar.rs`): Moved the top edge bevel
+   highlight down by 2px to sit below the new accent stripe instead of
+   overlapping it. The bevel now reads as an inner lit edge below the
+   accent stripe rather than competing with it.
+
+**Technical details**:
+- The top accent stripe is rendered as a filled rectangle (`ui.fill()`)
+  overlaid on the tab bar background gradient. Later render calls
+  (back-to-front ordering) ensure it's visible on top of the gradient.
+- The glow spill uses `ui.fill_gradient()` with the active accent color
+  fading from 10% alpha to 0% alpha over 4px, modulated by the
+  breathing phase (0.92 + 0.08 × sin(glow_phase)).
+- The active accent color is computed once at the start of `build()` and
+  reused for both the stripe and glow, avoiding redundant iteration.
+- The status bar bottom line uses `ui.hline_aa()` (anti-aliased) for
+  crisp single-pixel rendering at any DPI scale.
+
+**Visual comparison with reference**:
+- Window framing: ✓ Professional accent frame at top and bottom edges
+- Brand identity: ✓ Dynamic color ties window chrome to active tab
+- Depth language: ✓ Breathing glow adds ambient light-source consistency
+- Bookending: ✓ Top/bottom accent lines create cohesive visual boundary
+- Overall polish: ✓ Window now has the "finished product" feel of VS Code/Zed
+
+**Remaining gaps vs reference (iteration 43)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
