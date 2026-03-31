@@ -321,7 +321,10 @@ impl TabBar {
                 width: self.sidebar_width, height: bar.height,
             };
             ui.fill_gradient(brand_section, brand_bg_top, brand_bg_bot);
-            let brand_x = bar.x + s(12.0);
+            let icon_size = ch * 1.1;
+            let icon_x = bar.x + s(10.0);
+            let icon_y = bar.y + (bar.height - icon_size) / 2.0;
+            let brand_x = icon_x + icon_size + s(6.0);
             let brand_y = text_y(bar.height, bar.y);
             // Branding text with subtle accent tint from active tab color
             let active_accent = self.tabs.iter().enumerate()
@@ -334,6 +337,18 @@ impl TabBar {
                 colors::FG_SECONDARY[2] * 0.85 + active_accent[2] * 0.15,
                 colors::FG_SECONDARY[3],
             ];
+            // Terminal icon with accent tint
+            let icon_fg = [
+                colors::FG_MUTED[0] * 0.7 + active_accent[0] * 0.3,
+                colors::FG_MUTED[1] * 0.7 + active_accent[1] * 0.3,
+                colors::FG_MUTED[2] * 0.7 + active_accent[2] * 0.3,
+                0.6,
+            ];
+            let icon_t = (1.2 * text.scale).max(1.0);
+            ui.icon_terminal(
+                Rect { x: icon_x, y: icon_y, width: icon_size, height: icon_size },
+                icon_t, icon_fg,
+            );
             ui.text_ui_bold(text, "Godly Terminal", brand_x, brand_y,
                     brand_fg, colors::BG_DARK);
             // Right border for sidebar section — groove for embossed depth

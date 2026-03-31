@@ -620,6 +620,45 @@ impl UiBuilder {
         self.stroke_rounded(mid_rect, mid_size / 2.0, ring_width, fg);
     }
 
+    /// Draw a small terminal icon: monitor outline + prompt caret inside.
+    pub fn icon_terminal(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
+        let (cx, cy) = rect.center();
+        let hw = rect.width * 0.36;
+        let hh = rect.height * 0.28;
+        // Monitor outline
+        let monitor = Rect {
+            x: cx - hw, y: cy - hh,
+            width: hw * 2.0, height: hh * 2.0,
+        };
+        self.stroke_rounded(monitor, hw * 0.12, t, color);
+        // Prompt caret ">" — two lines forming a chevron
+        let caret_x = cx - hw * 0.4;
+        let caret_mid_x = cx - hw * 0.05;
+        let caret_top_y = cy - hh * 0.45;
+        let caret_bot_y = cy + hh * 0.45;
+        let caret_mid_y = cy;
+        // Top line of caret
+        self.hline_aa(caret_x, caret_top_y, caret_mid_x - caret_x, t, color);
+        // Diagonal approximation with short horizontal segments
+        let steps = 4;
+        for s in 0..steps {
+            let frac = s as f32 / steps as f32;
+            let x = caret_x + (caret_mid_x - caret_x) * frac;
+            let y = caret_top_y + (caret_mid_y - caret_top_y) * frac;
+            self.fill(Rect { x, y, width: t, height: (caret_mid_y - caret_top_y) / steps as f32 + t }, color);
+        }
+        for s in 0..steps {
+            let frac = s as f32 / steps as f32;
+            let x = caret_mid_x - (caret_mid_x - caret_x) * frac;
+            let y = caret_mid_y + (caret_bot_y - caret_mid_y) * frac;
+            self.fill(Rect { x, y, width: t, height: (caret_bot_y - caret_mid_y) / steps as f32 + t }, color);
+        }
+        // Cursor line (horizontal bar next to the caret)
+        let cursor_x = cx + hw * 0.05;
+        let cursor_y = cy + hh * 0.35;
+        self.hline_aa(cursor_x, cursor_y, hw * 0.5, t, color);
+    }
+
     /// Consume the builder and return quad vertices + text commands.
     pub fn finish(self) -> (Vec<QuadVertex>, Vec<TextCommand>) {
         (self.quads, self.text_commands)

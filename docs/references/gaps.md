@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 33)
+Last updated: 2026-03-31 (Iteration 34)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -58,6 +58,9 @@ Last updated: 2026-03-30 (Iteration 33)
 | Welcome vertical balance | Done | Content positioned at 33% from top for better visual balance (iteration 31) |
 | Font weight hierarchy | Done | Bold text for active tabs, active sessions, branding, and welcome heading (iteration 32) |
 | Proportional UI font | Done | Segoe UI Variable/Segoe UI for sidebar labels, tab titles, status bar, welcome screen (iteration 33) |
+| Sidebar-tab accent color continuity | Done | Active workspace indicator, border, glow uses session's own accent color from rotating palette (iteration 34) |
+| Terminal branding icon | Done | Canvas-drawn terminal monitor + prompt icon next to "Godly Terminal" text in title bar (iteration 34) |
+| Sidebar metadata readability | Done | Branch/description text base luminance boosted (0.25→0.40 blend toward FG_SECONDARY) (iteration 34) |
 
 ## Remaining Gaps (Priority Order)
 

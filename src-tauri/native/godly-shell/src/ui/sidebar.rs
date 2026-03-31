@@ -332,13 +332,13 @@ impl Sidebar {
             };
             let hover_t = self.item_hover_anim.get(i);
             let active_t = self.active_anim.get(i);
+            let session_accent = SESSION_ACCENTS[i % SESSION_ACCENTS.len()];
 
             // Inactive hover state (fades out as active_t increases)
             if active_t < 0.995 {
                 let inv_active = 1.0 - active_t;
                 if hover_t > 0.005 {
                     // Soft glow shadow behind hovered item for "lift" effect
-                    let session_accent = SESSION_ACCENTS[i % SESSION_ACCENTS.len()];
                     let glow_rect = Rect {
                         x: inset_rect.x - s(2.0),
                         y: inset_rect.y - s(1.0),
@@ -365,7 +365,10 @@ impl Sidebar {
             }
 
             // Active state (fades in with active_t)
+            // Uses the session's own accent color from the rotating palette
+            // for visual continuity with the tab bar's colored badges.
             if active_t > 0.005 {
+                let ac = session_accent;
                 let breath = 0.85 + 0.15 * self.glow_phase.sin();
                 let glow_rect = Rect {
                     x: inset_rect.x - s(3.0),
@@ -373,12 +376,12 @@ impl Sidebar {
                     width: inset_rect.width + s(6.0),
                     height: inset_rect.height + s(6.0),
                 };
-                ui.fill_shadow(glow_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.08 * breath * active_t], item_radius + s(3.0), s(10.0));
+                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.08 * breath * active_t], item_radius + s(3.0), s(10.0));
                 ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.12 * active_t], item_radius, s(5.0));
                 let active_border = [
-                    colors::ACCENT_BLUE[0] * 0.35,
-                    colors::ACCENT_BLUE[1] * 0.35,
-                    colors::ACCENT_BLUE[2] * 0.35,
+                    ac[0] * 0.35,
+                    ac[1] * 0.35,
+                    ac[2] * 0.35,
                     0.6 * active_t,
                 ];
                 let active_bg = lerp_color(colors::BG_DARK, colors::BG_ACTIVE, active_t);
@@ -392,14 +395,16 @@ impl Sidebar {
                 };
                 let inner_r = (item_radius - 1.0).max(0.0);
                 ui.fill_rounded_gradient(ambient,
-                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.06 * active_t],
-                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.0],
+                    [ac[0], ac[1], ac[2], 0.06 * active_t],
+                    [ac[0], ac[1], ac[2], 0.0],
                     inner_r,
                 );
             }
 
             // Active indicator (left colored bar, pill shape via SDF + breathing glow)
+            // Uses session's own accent color for sidebar-tab color continuity.
             if active_t > 0.005 {
+                let ac = session_accent;
                 let indicator_rect = Rect {
                     x: rect.x + s(3.0),
                     y: rect.y + s(7.0),
@@ -408,8 +413,8 @@ impl Sidebar {
                 };
                 let breath = 0.85 + 0.15 * self.glow_phase.sin();
                 let glow_alpha = 0.25 * breath * active_t;
-                ui.fill_shadow(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], glow_alpha], indicator_w, s(7.0));
-                ui.fill_rounded(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], active_t], indicator_w / 2.0);
+                ui.fill_shadow(indicator_rect, [ac[0], ac[1], ac[2], glow_alpha], indicator_w, s(7.0));
+                ui.fill_rounded(indicator_rect, [ac[0], ac[1], ac[2], active_t], indicator_w / 2.0);
 
                 let trail_rect = Rect {
                     x: indicator_rect.right(),
@@ -418,7 +423,7 @@ impl Sidebar {
                     height: indicator_rect.height * 0.7,
                 };
                 ui.fill_shadow(trail_rect,
-                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.07 * breath * active_t],
+                    [ac[0], ac[1], ac[2], 0.07 * breath * active_t],
                     0.0, s(12.0));
             }
 
@@ -439,7 +444,6 @@ impl Sidebar {
             // Session accent dot — small colored circle matching the tab accent
             // color cycle. Creates visual continuity between tab bar badges and
             // the sidebar session list.
-            let session_accent = SESSION_ACCENTS[i % SESSION_ACCENTS.len()];
             let dot_sz = s(5.0);
             let dot_x = num_x;
             let dot_y = text_y + (ch - dot_sz) / 2.0;
@@ -491,8 +495,8 @@ impl Sidebar {
                     item.branch.clone()
                 };
                 let branch_w = text.text_width_ui(&branch);
-                // Slightly brighter than pure FG_MUTED for better readability
-                let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.25 + hover_t * 0.3);
+                // Boost readability: start at 40% toward FG_SECONDARY (up from 25%)
+                let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
                 ui.text_ui(text, &branch,
                         rect.right() - branch_w - pad_h,
                         text_y,
@@ -508,7 +512,7 @@ impl Sidebar {
                     item.description.clone()
                 };
                 // Start from a blend between FG_MUTED and FG_SECONDARY for better baseline readability
-                let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.3);
+                let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40);
                 let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);
                 let desc_fg = lerp_color(inactive_desc, colors::FG_SECONDARY, active_t * 0.5);
                 ui.text_ui(text, &desc,

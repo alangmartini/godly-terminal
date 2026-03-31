@@ -1244,3 +1244,56 @@ monospace font (Cascadia Mono) through the same atlas pipeline.
 **Remaining gaps vs reference (iteration 33)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 34 — Sidebar Accent Continuity, Terminal Icon, Text Readability
+
+**Goal**: Improve color continuity between sidebar and tab bar, add branding
+icon, and boost sidebar metadata text readability.
+
+**Changes made**:
+
+1. **Sidebar active indicator uses session's own accent color** (`ui/sidebar.rs`):
+   - Previously all active workspace indicators, glows, borders, and ambient
+     gradients hardcoded `ACCENT_BLUE`. Now uses `SESSION_ACCENTS[i]` — the
+     workspace's own color from the rotating 5-color palette.
+   - Affects: active glow shadow, active border, ambient gradient, indicator
+     bar, indicator glow, and indicator trail.
+   - Creates proper visual continuity: tab bar badge color → sidebar accent
+     dot color → sidebar active indicator color all match for each workspace.
+
+2. **Terminal branding icon** (`ui/tab_bar.rs`, `ui/builder.rs`):
+   - Added `icon_terminal()` method to UiBuilder: draws a small monitor
+     outline with a prompt caret (`>`) and cursor line inside.
+   - Placed to the left of "Godly Terminal" text in the title bar branding
+     section, matching Zed's convention of having an app icon in the top-left.
+   - Icon uses accent-tinted FG_MUTED color for subtle but visible presence.
+
+3. **Sidebar metadata text readability** (`ui/sidebar.rs`):
+   - Branch label base luminance: 0.25 → 0.40 blend toward FG_SECONDARY
+   - Description text base luminance: 0.30 → 0.40 blend toward FG_SECONDARY
+   - Makes branch names and descriptions readable at rest without needing
+     to hover, closing a visibility gap on dark themes.
+
+**Technical details**:
+- Moved `session_accent` definition to the start of the item loop (after
+  `active_t`) so it's available for both hover glow and active state rendering.
+  Removed duplicate definition in the dot rendering section.
+- Terminal icon uses SDF-based `stroke_rounded` for the monitor outline and
+  rasterized line segments for the caret chevron. Not as smooth as true SDF
+  paths, but acceptable at small icon sizes (ch * 1.1 ≈ 15-18px).
+- `icon_terminal()` is generic and reusable for other parts of the UI.
+
+**Result**: Workspace identity is now consistent across all visual elements —
+the same accent color flows from tab badge → sidebar dot → active indicator
+→ active border/glow. The branding icon adds a professional app-icon presence.
+Sidebar metadata text is more comfortable to scan without hovering.
+
+**Visual comparison with reference**:
+- Sidebar-tab color continuity: ✓ Active indicator matches tab badge color
+- App branding icon: ✓ Terminal icon matches Zed-style top-left app icon
+- Metadata readability: ✓ Branch/description text visible at rest
+- Overall polish: ✓ Consistent color language across all UI elements
+
+**Remaining gaps vs reference (iteration 34)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
