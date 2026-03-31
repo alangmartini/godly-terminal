@@ -2692,3 +2692,60 @@ consistent physical depth across the entire bottom chrome.
 **Remaining gaps vs reference (iteration 54)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 55 — Tab Polish & Title Bar Depth
+
+**Goal**: Improve tab bar visual consistency and depth by adding shadows to
+all tabs, making close buttons discoverable on inactive tabs, aligning
+icon/label sizes, adding rest-state borders, and strengthening the title bar
+gradient.
+
+**Changes made**:
+
+1. **Tab depth consistency** (`tab_bar.rs`): Inactive tabs now have a subtle
+   drop shadow (0.08 alpha, 0.5px offset, 2px blur) instead of no shadow at
+   all. Active tabs keep their existing stronger shadow (0.22 alpha). This
+   creates smoother depth transitions when switching tabs — shadows no longer
+   abruptly appear/disappear.
+
+2. **Tab icon/label size alignment** (`tab_bar.rs`): Process icon glyph size
+   reduced from 14px to 13px to match the tab label text size. This fixes a
+   subtle vertical alignment/visual weight imbalance between icon and text.
+
+3. **Inactive tab close button visibility** (`tab_bar.rs`): Close buttons on
+   inactive tabs now render at 25% text_color opacity instead of fully
+   transparent. This provides discoverability (users can see the × exists)
+   while keeping the button unobtrusive at rest. Active tabs and hover states
+   remain unchanged.
+
+4. **Title bar gradient strength** (`title_bar.rs`): Gradient offset increased
+   from 0.012 to 0.020 (closer to tab bar's 0.025). The title bar gradient
+   was nearly invisible; now it has a subtle but perceptible depth cue that
+   better matches the tab bar's gradient language.
+
+5. **Inactive tab rest-state borders** (`tab_bar.rs`): Inactive tabs now show
+   a very faint border (BORDER_VARIANT × 0.15 alpha) at rest, with width 1.0
+   (was 0.0). This gives tabs visible shape definition without hover,
+   improving scanability of the tab bar at a glance.
+
+**Design principle**: This iteration targets **visual continuity** — ensuring
+that tab states transition smoothly (depth, borders, close buttons) rather
+than having binary on/off visual properties. Professional apps like VS Code
+and Zed maintain subtle visual presence for all interactive elements, even
+when inactive.
+
+**Result**: The tab bar reads as a cohesive strip of well-defined tab shapes
+with consistent depth, rather than a collection of invisible regions that
+only become visible on hover or activation. Close buttons are discoverable
+without hovering. The title bar has more perceptible depth gradient.
+
+**Visual comparison with reference**:
+- Tab depth consistency: ✓ All tabs have shadow presence, smooth transitions
+- Close button discoverability: ✓ Faint × visible like VS Code/Zed
+- Icon-label alignment: ✓ Both 13px, no vertical weight mismatch
+- Title bar depth: ✓ Gradient now perceptible, matches tab bar language
+- Tab shape at rest: ✓ Faint borders provide shape without visual noise
+
+**Remaining gaps vs reference (iteration 55)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

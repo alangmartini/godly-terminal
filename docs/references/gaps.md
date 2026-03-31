@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 54)
+Last updated: 2026-03-31 (Iteration 55)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -150,6 +150,11 @@ Last updated: 2026-03-31 (Iteration 54)
 | CTA button prominence | Done | Stronger accent fill (30%, was 18%), brighter label text, inner top highlight, deeper shadow for commanding primary action (iteration 54) |
 | Sidebar active warmth | Done | Active session background 12% accent-tinted, stronger glow (0.10, was 0.08), warmer border (0.40×, was 0.35×) (iteration 54) |
 | Status bar pill shadows | Done | Subtle drop shadows under all interactive pills (mode, CWD, git, dims, hints) for physical depth (iteration 54) |
+| Tab depth consistency | Done | Inactive tabs get subtle shadows (0.08 alpha) for smooth depth transitions across tab states (iteration 55) |
+| Tab icon/label alignment | Done | Process icon glyph matched to label size (both 13px) for vertical balance (iteration 55) |
+| Inactive tab close visibility | Done | Close buttons at 25% text opacity on inactive tabs for discoverability (iteration 55) |
+| Title bar gradient strength | Done | Gradient offset 0.012→0.020 for perceptible depth matching tab bar language (iteration 55) |
+| Inactive tab rest borders | Done | Faint BORDER_VARIANT × 0.15 borders on inactive tabs for shape definition at rest (iteration 55) |
 
 ## Remaining Gaps (Priority Order)
 

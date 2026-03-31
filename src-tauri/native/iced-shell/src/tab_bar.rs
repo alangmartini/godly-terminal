@@ -210,7 +210,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             } else {
                 TEXT_SECONDARY()
             };
-            text(glyph).size(14).color(icon_color)
+            text(glyph).size(13).color(icon_color)
         });
 
         let close_id = terminal.id.clone();
@@ -233,7 +233,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                         (Color::from_rgba(d.r, d.g, d.b, 0.25), d)
                     }
                     _ if is_active => (Color::TRANSPARENT, text_color),
-                    _ => (Color::TRANSPARENT, Color::TRANSPARENT),
+                    // Faintly visible close button on inactive tabs for discoverability
+                    _ => (Color::TRANSPARENT, Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.25)),
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg_color)),
@@ -299,9 +300,11 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                             let bv = BORDER_VARIANT();
                             Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.85)
                         } else {
-                            Color::TRANSPARENT
+                            // Faint rest-state border for tab shape definition
+                            let bv = BORDER_VARIANT();
+                            Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.15)
                         },
-                        width: if is_active { 1.0 } else { 0.0 },
+                        width: 1.0,
                         radius,
                     },
                     shadow: if is_active {
@@ -311,7 +314,12 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                             blur_radius: 4.0,
                         }
                     } else {
-                        iced::Shadow::default()
+                        // Subtle shadow on inactive tabs for consistent depth
+                        iced::Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.08),
+                            offset: iced::Vector::new(0.0, 0.5),
+                            blur_radius: 2.0,
+                        }
                     },
                     ..button::Style::default()
                 }

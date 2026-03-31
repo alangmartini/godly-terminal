@@ -190,9 +190,9 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
         .style(|_theme| {
             let base = TITLE_BAR_BG();
             let lighter = Color::from_rgb(
-                (base.r + 0.012).min(1.0),
-                (base.g + 0.012).min(1.0),
-                (base.b + 0.012).min(1.0),
+                (base.r + 0.020).min(1.0),
+                (base.g + 0.020).min(1.0),
+                (base.b + 0.020).min(1.0),
             );
             container::Style {
                 background: Some(iced::Background::Gradient(iced::Gradient::Linear(
