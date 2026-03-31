@@ -2630,3 +2630,65 @@ responsive with the hover lift. Close buttons transition smoothly.
 **Remaining gaps vs reference (iteration 49)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 54 — CTA Button Prominence, Sidebar Active Warmth, Status Bar Pill Depth
+
+**Goal**: Strengthen the welcome screen's primary action button visibility,
+add warmer accent tinting to the active sidebar session, and give status bar
+pills physical depth through drop shadows.
+
+**Changes made**:
+
+1. **CTA button prominence** (`main.rs`): Increased accent blend from 18%
+   to 30% of the active tab's accent color into the button fill. Alpha
+   raised from 0.9 to 0.95 for more opaque presence. Top gradient boost
+   increased from 1.08× to 1.10× for stronger convexity. Border accent
+   strength raised from 0.35 to 0.45 with alpha 0.55 (was 0.45). Drop
+   shadow deepened: offset 3px (was 2px), blur 8px (was 6px), alpha 0.20
+   (was 0.15). Added inner top highlight (white at 6% alpha, faded at
+   edges) for physical button bevel. Plus icon alpha raised from 0.7 to
+   0.85. Label text now uses FG_PRIMARY × 0.55 + accent × 0.45 at 0.92
+   alpha (was FG_SECONDARY × 0.7 + accent × 0.3 at 0.85).
+
+2. **Sidebar active session warmth** (`sidebar.rs`): Active session
+   background now blends 12% of the session's accent color into BG_ACTIVE
+   (was plain BG_ACTIVE with no accent tint). This creates a warm,
+   color-coded active state that visually connects to the tab bar's accent
+   color for that session. Outer glow alpha raised from 0.08 to 0.10.
+   Border accent multiplier raised from 0.35 to 0.40, alpha from 0.60 to
+   0.65. Inner ambient gradient alpha raised from 0.06 to 0.08. These
+   changes make the active session read as distinctly "selected" with a
+   warmer, more inviting appearance.
+
+3. **Status bar pill drop shadows** (`status_bar.rs`): Added subtle drop
+   shadows (1px offset, 3px blur, 8% base alpha + 4% on hover) behind
+   all five interactive pills: mode pill (sidebar section), CWD pill, git
+   branch pill, dimensions pill, and keyboard hints pill. Shadows render
+   before the pill fill for correct layering. Alpha increases slightly on
+   hover (12%) for tactile "lift" feedback. This adds consistent physical
+   depth to the status bar, matching the shadow language used on keycap
+   badges, tab badges, and the CTA button elsewhere in the UI.
+
+**Design principle**: This iteration targets **visual weight balance** —
+ensuring the most important interactive element (CTA button) commands
+appropriate attention, active states feel warm and connected to their
+accent colors, and the status bar has the same physical depth language
+as the rest of the chrome. Each change is small but collectively they
+strengthen the hierarchy between primary actions, active states, and
+supporting UI elements.
+
+**Result**: The "Create terminal" button is now the clearly most prominent
+element on the welcome screen with strong accent presence. The active
+sidebar session has a warmer, accent-tinted background that visually
+connects to its tab. Status bar pills have subtle drop shadows that add
+consistent physical depth across the entire bottom chrome.
+
+**Visual comparison with reference**:
+- CTA prominence: ✓ Strong accent button matches professional welcome pages
+- Active state warmth: ✓ Accent-tinted active matches Zed/opensessions
+- Status bar depth: ✓ Pill shadows match tab badge/keycap shadow language
+- Visual weight hierarchy: ✓ Primary action > active state > supporting UI
+
+**Remaining gaps vs reference (iteration 54)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

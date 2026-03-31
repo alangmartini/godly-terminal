@@ -1133,41 +1133,48 @@ impl App {
                 x: cta_x, y: cta_y, width: cta_w, height: cta_h,
             };
             let cta_r = cta_h / 2.0;
-            // Filled accent background (matches active tab accent color)
+            // Filled accent background — stronger accent presence (30% blend)
+            // so the CTA reads as the obvious primary action in the welcome screen.
             let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
             let cta_fill = [
-                active_accent[0] * 0.18 + ui::builder::colors::BG_SURFACE[0] * 0.82,
-                active_accent[1] * 0.18 + ui::builder::colors::BG_SURFACE[1] * 0.82,
-                active_accent[2] * 0.18 + ui::builder::colors::BG_SURFACE[2] * 0.82,
-                0.9,
+                active_accent[0] * 0.30 + ui::builder::colors::BG_SURFACE[0] * 0.70,
+                active_accent[1] * 0.30 + ui::builder::colors::BG_SURFACE[1] * 0.70,
+                active_accent[2] * 0.30 + ui::builder::colors::BG_SURFACE[2] * 0.70,
+                0.95,
             ];
-            let cta_fill_top = [cta_fill[0] * 1.08, cta_fill[1] * 1.08, cta_fill[2] * 1.08, cta_fill[3]];
+            let cta_fill_top = [cta_fill[0] * 1.10, cta_fill[1] * 1.10, cta_fill[2] * 1.10, cta_fill[3]];
             let cta_border = [
-                active_accent[0] * 0.35, active_accent[1] * 0.35,
-                active_accent[2] * 0.35, 0.45 * breath,
+                active_accent[0] * 0.45, active_accent[1] * 0.45,
+                active_accent[2] * 0.45, 0.55 * breath,
             ];
-            // Subtle drop shadow for floating depth
+            // Drop shadow for floating depth (slightly stronger)
             ui_builder.fill_shadow(
-                ui::widget::Rect { x: cta_x + s(2.0), y: cta_y + s(2.0), width: cta_w - s(4.0), height: cta_h },
-                [0.0, 0.0, 0.0, 0.15], cta_r, s(6.0),
+                ui::widget::Rect { x: cta_x + s(2.0), y: cta_y + s(3.0), width: cta_w - s(4.0), height: cta_h },
+                [0.0, 0.0, 0.0, 0.20], cta_r, s(8.0),
             );
             ui_builder.fill_rounded_gradient(cta_rect, cta_fill_top, cta_fill, cta_r);
             ui_builder.stroke_rounded(cta_rect, cta_r, 0.5, cta_border);
-            // Plus icon (left side of button)
+            // Inner top highlight for physical button depth
+            ui_builder.hline_fade(
+                cta_x + cta_r, cta_y + 1.0,
+                cta_w - cta_r * 2.0, 1.0,
+                [1.0, 1.0, 1.0, 0.06], s(8.0),
+            );
+            // Plus icon (left side of button) — brighter
             let icon_rect = ui::widget::Rect {
                 x: cta_x + cta_pad_h,
                 y: cta_y + (cta_h - cta_icon_sz) / 2.0,
                 width: cta_icon_sz, height: cta_icon_sz,
             };
             let icon_t = (1.0 * ui_text_handle.scale).max(0.8);
-            let icon_fg = [active_accent[0], active_accent[1], active_accent[2], 0.7];
+            let icon_fg = [active_accent[0], active_accent[1], active_accent[2], 0.85];
             ui_builder.icon_plus(icon_rect, icon_t, cta_icon_sz * 0.3, icon_fg);
-            // Label text
+            // Label text — brighter with more accent tint for readable CTA
             let label_fg = [
-                ui::builder::colors::FG_SECONDARY[0] * 0.7 + active_accent[0] * 0.3,
-                ui::builder::colors::FG_SECONDARY[1] * 0.7 + active_accent[1] * 0.3,
-                ui::builder::colors::FG_SECONDARY[2] * 0.7 + active_accent[2] * 0.3,
-                0.85,
+                ui::builder::colors::FG_PRIMARY[0] * 0.55 + active_accent[0] * 0.45,
+                ui::builder::colors::FG_PRIMARY[1] * 0.55 + active_accent[1] * 0.45,
+                ui::builder::colors::FG_PRIMARY[2] * 0.55 + active_accent[2] * 0.45,
+                0.92,
             ];
             ui_builder.text_ui(&ui_text_handle, cta_label,
                 cta_x + cta_pad_h + cta_icon_sz + cta_icon_gap,

@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 53)
+Last updated: 2026-03-31 (Iteration 54)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -147,6 +147,9 @@ Last updated: 2026-03-31 (Iteration 53)
 | Tab hover accent preview | Done | Faint accent-colored line at top of inactive tabs on hover, previews active state color (iteration 52) |
 | Sidebar compact timestamps | Done | Timestamps on first line for compact items, second line only for items with descriptions (iteration 52) |
 | Secondary text readability pass | Done | Breadcrumb, subtitle, shortcut descriptions, metadata, timestamps all boosted for consistent readability (iteration 53) |
+| CTA button prominence | Done | Stronger accent fill (30%, was 18%), brighter label text, inner top highlight, deeper shadow for commanding primary action (iteration 54) |
+| Sidebar active warmth | Done | Active session background 12% accent-tinted, stronger glow (0.10, was 0.08), warmer border (0.40×, was 0.35×) (iteration 54) |
+| Status bar pill shadows | Done | Subtle drop shadows under all interactive pills (mode, CWD, git, dims, hints) for physical depth (iteration 54) |
 
 ## Remaining Gaps (Priority Order)
 

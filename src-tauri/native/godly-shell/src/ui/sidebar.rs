@@ -412,15 +412,22 @@ impl Sidebar {
                     width: inset_rect.width + s(6.0),
                     height: inset_rect.height + s(6.0),
                 };
-                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.08 * breath * active_t], item_radius + s(3.0), s(8.0));
+                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.10 * breath * active_t], item_radius + s(3.0), s(8.0));
                 ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.08 * active_t], item_radius, s(4.0));
                 let active_border = [
-                    ac[0] * 0.35,
-                    ac[1] * 0.35,
-                    ac[2] * 0.35,
-                    0.6 * active_t,
+                    ac[0] * 0.40,
+                    ac[1] * 0.40,
+                    ac[2] * 0.40,
+                    0.65 * active_t,
                 ];
-                let active_bg = lerp_color(colors::BG_DARK, colors::BG_ACTIVE, active_t);
+                // Warmer active background: blend more toward accent-tinted surface
+                let accent_bg = [
+                    colors::BG_ACTIVE[0] * 0.88 + ac[0] * 0.12,
+                    colors::BG_ACTIVE[1] * 0.88 + ac[1] * 0.12,
+                    colors::BG_ACTIVE[2] * 0.88 + ac[2] * 0.12,
+                    colors::BG_ACTIVE[3],
+                ];
+                let active_bg = lerp_color(colors::BG_DARK, accent_bg, active_t);
                 ui.fill_rounded_bordered(
                     inset_rect, active_bg, item_radius,
                     0.5, active_border,
@@ -431,7 +438,7 @@ impl Sidebar {
                 };
                 let inner_r = (item_radius - 1.0).max(0.0);
                 ui.fill_rounded_gradient(ambient,
-                    [ac[0], ac[1], ac[2], 0.06 * active_t],
+                    [ac[0], ac[1], ac[2], 0.08 * active_t],
                     [ac[0], ac[1], ac[2], 0.0],
                     inner_r,
                 );

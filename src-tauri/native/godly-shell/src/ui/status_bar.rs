@@ -177,6 +177,11 @@ impl StatusBar {
             let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
             let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
             let border = Self::hover_pill_border(ht, 0.5);
+            // Subtle drop shadow for pill depth
+            ui.fill_shadow(
+                Rect { x: sx + s(1.0), y: pill_y + s(1.0), width: pill_w - s(2.0), height: pill_h },
+                [0.0, 0.0, 0.0, 0.08 + 0.04 * ht], s(3.0), s(3.0),
+            );
             ui.fill_rounded_gradient(mode_pill_rect, top, bot, s(3.0));
             ui.stroke_rounded(mode_pill_rect, s(3.0), 0.5, border);
             let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
@@ -231,6 +236,11 @@ impl StatusBar {
             let top = Self::hover_pill_top(pill_base_top, ht, 0.5);
             let bot = Self::hover_pill_bot(pill_base_bot, ht, 0.5);
             let border = Self::hover_pill_border(ht, 0.3);
+            // Subtle drop shadow for pill depth
+            ui.fill_shadow(
+                Rect { x: x + s(1.0), y: cwd_pill_y + s(1.0), width: cwd_pill_w - s(2.0), height: cwd_pill_h },
+                [0.0, 0.0, 0.0, 0.06 + 0.04 * ht], s(3.0), s(3.0),
+            );
             ui.fill_rounded_gradient(cwd_pill, top, bot, s(3.0));
             ui.stroke_rounded(cwd_pill, s(3.0), 0.5, border);
             // Folder icon
@@ -262,6 +272,11 @@ impl StatusBar {
             let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
             let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
             let border = Self::hover_pill_border(ht, 0.5);
+            // Subtle drop shadow for pill depth
+            ui.fill_shadow(
+                Rect { x: x + s(1.0), y: pill_y + s(1.0), width: pill_w - s(2.0), height: pill_h },
+                [0.0, 0.0, 0.0, 0.08 + 0.04 * ht], s(3.0), s(3.0),
+            );
             ui.fill_rounded_gradient(git_pill, top, bot, s(3.0));
             ui.stroke_rounded(git_pill, s(3.0), 0.5, border);
             // Git branch icon (replaces plain dot)
@@ -321,6 +336,11 @@ impl StatusBar {
             let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
             let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
             let border = Self::hover_pill_border(ht, 0.5);
+            // Subtle drop shadow for pill depth
+            ui.fill_shadow(
+                Rect { x: hints_pill_x + s(1.0), y: pill_y + s(1.0), width: hints_pill_w - s(2.0), height: pill_h },
+                [0.0, 0.0, 0.0, 0.08 + 0.04 * ht], s(3.0), s(3.0),
+            );
             ui.fill_rounded_gradient(hints_rect, top, bot, s(3.0));
             ui.stroke_rounded(hints_rect, s(3.0), 0.5, border);
             let fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
@@ -375,6 +395,11 @@ impl StatusBar {
             let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
             let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
             let border = Self::hover_pill_border(ht, 0.5);
+            // Subtle drop shadow for pill depth
+            ui.fill_shadow(
+                Rect { x: dims_pill_x + s(1.0), y: pill_y + s(1.0), width: dims_pill_w - s(2.0), height: pill_h },
+                [0.0, 0.0, 0.0, 0.08 + 0.04 * ht], s(3.0), s(3.0),
+            );
             ui.fill_rounded_gradient(dims_rect, top, bot, s(3.0));
             ui.stroke_rounded(dims_rect, s(3.0), 0.5, border);
             let fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, ht * 0.3);
