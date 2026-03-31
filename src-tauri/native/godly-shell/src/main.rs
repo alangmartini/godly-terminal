@@ -561,7 +561,7 @@ impl App {
                 // content area.  This creates a warm colored light that connects
                 // the tab bar accent to the terminal, enhancing visual continuity.
                 let accent = self.active_accent();
-                let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+                let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
                 let glow_h = ui_text_handle.s(18.0);
                 let glow_color = [accent[0], accent[1], accent[2], 0.03 * breath];
                 let glow_zero = [accent[0], accent[1], accent[2], 0.0];
@@ -781,9 +781,9 @@ impl App {
                     width: spot_w,
                     height: spot_h,
                 };
-                let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+                let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
                 ui_builder.fill_shadow(spot_rect,
-                    [active_accent[0], active_accent[1], active_accent[2], 0.018 * breath],
+                    [active_accent[0], active_accent[1], active_accent[2], 0.012 * breath],
                     spot_w * 0.3, spot_w * 0.4);
             }
 
@@ -799,7 +799,7 @@ impl App {
                 width: hero_icon_size, height: hero_icon_size,
             };
             // Halo glow behind icon (breathing, accent-tinted)
-            let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+            let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
             let halo_expand = s(10.0);
             let halo_rect = ui::widget::Rect {
                 x: hero_x - halo_expand, y: hero_y - halo_expand,
@@ -807,8 +807,8 @@ impl App {
                 height: hero_icon_size + halo_expand * 2.0,
             };
             ui_builder.fill_shadow(halo_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.06 * breath],
-                hero_icon_size * 0.3, s(18.0));
+                [active_accent[0], active_accent[1], active_accent[2], 0.035 * breath],
+                hero_icon_size * 0.3, s(16.0));
             // Icon stroke with accent tint (brighter than tab-bar version)
             let hero_icon_fg = [
                 ui::builder::colors::FG_MUTED[0] * 0.55 + active_accent[0] * 0.45,
@@ -847,7 +847,7 @@ impl App {
                 subtitle_fg, bg);
 
             // Accent underline below subtitle (breathing, matches active tab)
-            let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+            let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
             let underline_w = title_w * 0.6;
             let underline_y = subtitle_y + ch + s(4.0);
             let underline_h = s(1.5);
@@ -1355,8 +1355,8 @@ impl App {
             // 2px height for visibility; stronger alpha when focused for a
             // prominent colored "brand bar" at the top of the window (like VS Code).
             let active_accent = self.active_accent();
-            let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
-            let accent_alpha = if self.window_focused { 0.30 * breath } else { 0.08 };
+            let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
+            let accent_alpha = if self.window_focused { 0.20 * breath } else { 0.06 };
             let accent_fade = ui_text_handle.s(40.0);
             let accent_h = if self.is_maximized { 2.0 } else { 2.0 };
             let accent_full = [active_accent[0], active_accent[1], active_accent[2], accent_alpha];

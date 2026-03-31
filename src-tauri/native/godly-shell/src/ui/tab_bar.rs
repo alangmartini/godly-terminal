@@ -286,16 +286,16 @@ impl TabBar {
                 .find(|(_, t)| t.active)
                 .map(|(i, _)| self.accent_for(i))
                 .unwrap_or(colors::ACCENT_BLUE);
-            let breath = 0.85 + 0.15 * self.glow_phase.sin();
+            let breath = 0.92 + 0.08 * self.glow_phase.sin();
             let glow_rect = Rect {
-                x: ar.x + s(4.0),
+                x: ar.x + s(6.0),
                 y: bar.bottom() - s(1.0),
-                width: ar.width - s(8.0),
-                height: s(4.0),
+                width: ar.width - s(12.0),
+                height: s(3.0),
             };
             ui.fill_shadow(glow_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.12 * breath],
-                s(3.0), s(8.0),
+                [active_accent[0], active_accent[1], active_accent[2], 0.06 * breath],
+                s(2.0), s(5.0),
             );
         } else {
             ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
@@ -394,24 +394,24 @@ impl TabBar {
                 let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
                 ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, active_t, border);
 
-                // Ambient glow from accent color (fades in with active_t)
+                // Ambient glow from accent color (fades in with active_t, reduced)
                 let ambient_rect = Rect {
                     x: rect.x + 1.0, y: rect.y + 1.0,
                     width: rect.width - 2.0, height: rect.height - 1.0,
                 };
                 let inner_r = (tab_radius - 1.0).max(0.0);
                 ui.fill_rounded_custom_gradient(ambient_rect,
-                    [accent[0], accent[1], accent[2], 0.06 * active_t],
+                    [accent[0], accent[1], accent[2], 0.04 * active_t],
                     [accent[0], accent[1], accent[2], 0.0],
                     [inner_r, inner_r, 0.0, 0.0]);
 
-                // Breathing glow (fades in with active_t)
-                let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                // Breathing glow (subtler — 0.92+0.08 range, halved alpha)
+                let breath = 0.92 + 0.08 * self.glow_phase.sin();
                 let glow_rect = Rect {
                     x: rect.x + tab_radius + s(4.0), y: rect.y - s(1.0),
-                    width: rect.width - (tab_radius + s(4.0)) * 2.0, height: s(4.0),
+                    width: rect.width - (tab_radius + s(4.0)) * 2.0, height: s(3.0),
                 };
-                ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], 0.18 * breath * active_t], s(2.0), s(5.0));
+                ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], 0.08 * breath * active_t], s(2.0), s(4.0));
 
                 // Top accent bar (fades in with active_t)
                 let accent_bar = Rect {
@@ -484,26 +484,23 @@ impl TabBar {
             let badge_r = badge_sz / 2.0;
             let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_sz, height: badge_sz };
 
-            // Breathing glow (SDF shadow behind circle)
-            let glow_alpha = if active_t > 0.005 {
-                let breath = 0.85 + 0.15 * self.glow_phase.sin();
-                lerp(0.18, 0.22 * breath, active_t)
-            } else {
-                0.14
-            };
-            let glow_rect = Rect {
-                x: badge_x - s(3.0), y: badge_y - s(3.0),
-                width: badge_sz + s(6.0), height: badge_sz + s(6.0),
-            };
-            ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], glow_alpha], badge_r + s(3.0), s(6.0));
+            // Subtle glow (only on active tab, much reduced)
+            if active_t > 0.005 {
+                let breath = 0.92 + 0.08 * self.glow_phase.sin();
+                let glow_rect = Rect {
+                    x: badge_x - s(2.0), y: badge_y - s(2.0),
+                    width: badge_sz + s(4.0), height: badge_sz + s(4.0),
+                };
+                ui.fill_shadow(glow_rect,
+                    [accent[0], accent[1], accent[2], 0.10 * breath * active_t],
+                    badge_r + s(2.0), s(4.0));
+            }
 
-            // Circle background — gradient for 3D depth
-            let badge_top = [accent[0] * 1.15, accent[1] * 1.15, accent[2] * 1.15, accent[3]];
-            let badge_bot = [accent[0] * 0.85, accent[1] * 0.85, accent[2] * 0.85, accent[3]];
-            ui.fill_rounded_gradient(badge_rect, badge_top, badge_bot, badge_r);
-            // Subtle border for definition
+            // Circle background — flat solid fill (modern, clean)
+            ui.fill_rounded(badge_rect, accent, badge_r);
+            // Thin border for definition against dark background
             ui.stroke_rounded(badge_rect, badge_r, 0.5,
-                [accent[0] * 0.6, accent[1] * 0.6, accent[2] * 0.6, 0.3]);
+                [accent[0] * 0.7, accent[1] * 0.7, accent[2] * 0.7, 0.25]);
 
             // Number text (centered in circle, dark on accent background)
             let num_w = text.text_width(&num_str);
@@ -601,26 +598,22 @@ impl TabBar {
                     let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_w, height: badge_h };
                     let badge_r = badge_h / 2.0;
 
-                    // Breathing glow (shared with active tab accent glow)
-                    let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                    // Subtle glow behind unread badge
+                    let breath = 0.92 + 0.08 * self.glow_phase.sin();
                     let glow_rect = Rect {
-                        x: badge_x - s(3.0), y: badge_y - s(3.0),
-                        width: badge_w + s(6.0), height: badge_h + s(6.0),
+                        x: badge_x - s(2.0), y: badge_y - s(2.0),
+                        width: badge_w + s(4.0), height: badge_h + s(4.0),
                     };
                     ui.fill_shadow(
                         glow_rect,
-                        [accent[0], accent[1], accent[2], 0.20 * breath * badge_fade],
-                        badge_r, s(5.0),
+                        [accent[0], accent[1], accent[2], 0.10 * breath * badge_fade],
+                        badge_r, s(4.0),
                     );
 
-                    // Pill body: gradient top-to-bottom for 3D depth
-                    let badge_top = [
-                        accent[0] * 1.15, accent[1] * 1.15, accent[2] * 1.15,
-                        badge_fade,
-                    ];
-                    let badge_bot = [accent[0] * 0.9, accent[1] * 0.9, accent[2] * 0.9, badge_fade];
-                    let badge_border = [accent[0] * 0.6, accent[1] * 0.6, accent[2] * 0.6, 0.3 * badge_fade];
-                    ui.fill_rounded_gradient(badge_rect, badge_top, badge_bot, badge_r);
+                    // Pill body: flat solid fill (matching flattened tab badges)
+                    let badge_color = [accent[0], accent[1], accent[2], badge_fade];
+                    let badge_border = [accent[0] * 0.7, accent[1] * 0.7, accent[2] * 0.7, 0.25 * badge_fade];
+                    ui.fill_rounded(badge_rect, badge_color, badge_r);
                     ui.stroke_rounded(badge_rect, badge_r, 0.5, badge_border);
 
                     // Count text (centered in pill) — dark text on accent background

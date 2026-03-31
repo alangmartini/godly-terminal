@@ -270,11 +270,20 @@ impl Sidebar {
             [1.0, 1.0, 1.0, 0.0],
         );
 
-        // Right border separator — embossed groove for professional panel junction.
-        // Dark edge + light highlight creates an inset channel effect.
+        // Right border separator — soft gradient shadow for modern panel junction.
+        // Gradient fade from dark (at edge) to transparent replaces old groove.
         let groove_dark = [0.0, 0.0, 0.0, 0.15];
         let groove_light = [1.0, 1.0, 1.0, 0.04];
-        ui.vgroove_fade(sidebar.right() - 2.0, sidebar.y, sidebar.height, groove_dark, groove_light, s(12.0));
+        // 1px hairline border at the right edge
+        ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0,
+            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25]);
+        // Soft inward shadow (gradient from right edge inward)
+        let shadow_w = s(6.0);
+        ui.fill_gradient_h(
+            Rect { x: sidebar.right() - shadow_w - 1.0, y: sidebar.y, width: shadow_w, height: sidebar.height },
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.06],
+        );
         // SDF inner shadow — smooth Gaussian falloff from all edges for recessed depth.
         // Replaces separate gradient overlays with a single, more natural shadow.
         ui.fill_inner_shadow(sidebar, [0.0, 0.0, 0.0, 0.06], 0.0, s(5.0));
@@ -409,15 +418,15 @@ impl Sidebar {
             // for visual continuity with the tab bar's colored badges.
             if active_t > 0.005 {
                 let ac = session_accent;
-                let breath = 0.85 + 0.15 * self.glow_phase.sin();
+                let breath = 0.92 + 0.08 * self.glow_phase.sin();
                 let glow_rect = Rect {
                     x: inset_rect.x - s(3.0),
                     y: inset_rect.y - s(3.0),
                     width: inset_rect.width + s(6.0),
                     height: inset_rect.height + s(6.0),
                 };
-                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.08 * breath * active_t], item_radius + s(3.0), s(10.0));
-                ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.12 * active_t], item_radius, s(5.0));
+                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.05 * breath * active_t], item_radius + s(3.0), s(8.0));
+                ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.08 * active_t], item_radius, s(4.0));
                 let active_border = [
                     ac[0] * 0.35,
                     ac[1] * 0.35,
@@ -451,9 +460,9 @@ impl Sidebar {
                     width: indicator_w,
                     height: rect.height - s(14.0),
                 };
-                let breath = 0.85 + 0.15 * self.glow_phase.sin();
-                let glow_alpha = 0.25 * breath * active_t;
-                ui.fill_shadow(indicator_rect, [ac[0], ac[1], ac[2], glow_alpha], indicator_w, s(7.0));
+                let breath = 0.92 + 0.08 * self.glow_phase.sin();
+                let glow_alpha = 0.14 * breath * active_t;
+                ui.fill_shadow(indicator_rect, [ac[0], ac[1], ac[2], glow_alpha], indicator_w, s(5.0));
                 ui.fill_rounded(indicator_rect, [ac[0], ac[1], ac[2], active_t], indicator_w / 2.0);
 
                 let trail_rect = Rect {
@@ -463,8 +472,8 @@ impl Sidebar {
                     height: indicator_rect.height * 0.7,
                 };
                 ui.fill_shadow(trail_rect,
-                    [ac[0], ac[1], ac[2], 0.07 * breath * active_t],
-                    0.0, s(12.0));
+                    [ac[0], ac[1], ac[2], 0.04 * breath * active_t],
+                    0.0, s(10.0));
             }
 
             // Text y position: centered for compact, top-aligned for two-line
@@ -481,33 +490,26 @@ impl Sidebar {
                 active_t,
             );
 
-            // Session mini terminal icon — small terminal prompt icon matching
-            // the tab accent color cycle.  More informative than a plain dot;
-            // matches Zed's file-type icon convention in the sidebar.
-            let icon_sz = s(11.0);
-            let icon_x = num_x;
-            let icon_y = text_y + (ch - icon_sz) / 2.0;
-            let icon_rect = Rect {
-                x: icon_x, y: icon_y, width: icon_sz, height: icon_sz,
+            // Session accent dot — small colored circle matching the tab
+            // accent color cycle.  Clean and minimal at sidebar scale.
+            let dot_sz = s(7.0);
+            let dot_x = num_x + (s(11.0) - dot_sz) / 2.0; // centered in icon column
+            let dot_y = text_y + (ch - dot_sz) / 2.0;
+            let dot_rect = Rect {
+                x: dot_x, y: dot_y, width: dot_sz, height: dot_sz,
             };
-            let icon_alpha = lerp(0.45, 0.85, active_t.max(hover_t * 0.6));
-            let icon_color = [session_accent[0], session_accent[1], session_accent[2], icon_alpha];
-            let icon_t = (0.7 * text.scale).max(0.5);
-            ui.icon_terminal(icon_rect, icon_t, icon_color);
-            // Subtle glow on active session icon
+            let dot_alpha = lerp(0.50, 0.90, active_t.max(hover_t * 0.5));
+            let dot_color = [session_accent[0], session_accent[1], session_accent[2], dot_alpha];
+            ui.fill_rounded(dot_rect, dot_color, dot_sz / 2.0);
+            // Subtle glow ring on active session dot
             if active_t > 0.005 {
-                let breath = 0.85 + 0.15 * self.glow_phase.sin();
-                let glow_rect = Rect {
-                    x: icon_x - s(2.0), y: icon_y - s(2.0),
-                    width: icon_sz + s(4.0), height: icon_sz + s(4.0),
-                };
-                ui.fill_shadow(glow_rect,
-                    [session_accent[0], session_accent[1], session_accent[2], 0.12 * breath * active_t],
-                    icon_sz / 2.0, s(5.0));
+                let breath = 0.92 + 0.08 * self.glow_phase.sin();
+                ui.stroke_rounded(dot_rect, dot_sz / 2.0, 0.5,
+                    [session_accent[0], session_accent[1], session_accent[2], 0.20 * breath * active_t]);
             }
 
-            // Session number (shifted right to make room for terminal icon)
-            let num_x_shifted = num_x + icon_sz + s(3.0);
+            // Session number (shifted right to make room for accent dot)
+            let num_x_shifted = num_x + s(11.0) + s(3.0);
             let num_str = format!("{}", item.number);
             let inactive_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t);
             let fg = lerp_color(inactive_fg, session_accent, active_t);
@@ -901,7 +903,7 @@ impl Sidebar {
                 };
                 // Running agents get a breathing Gaussian glow + spinning orbit arc
                 if matches!(agent.status, AgentStatus::Running) {
-                    let breath = 0.80 + 0.20 * self.glow_phase.sin();
+                    let breath = 0.92 + 0.08 * self.glow_phase.sin();
                     let glow_rect = Rect {
                         x: dot_rect.x - s(3.0), y: dot_rect.y - s(3.0),
                         width: dot_size + s(6.0), height: dot_size + s(6.0),
