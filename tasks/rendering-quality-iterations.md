@@ -1562,3 +1562,71 @@ with less "empty dark space" in the content area.
 **Remaining gaps vs reference (iteration 37b)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 38 — Session Terminal Icons, Scrollbar Track, Breadcrumb Polish
+
+**Goal**: Replace plain colored dots with informative terminal icons in the
+sidebar, add a professional thin scrollbar track, and polish the breadcrumb
+bar with a last-segment highlight pill and depth shadows.
+
+**Changes made**:
+
+1. **Session mini terminal icons** (`ui/sidebar.rs`): Replaced the 5px
+   colored accent dots before session names with 11px SDF-rendered terminal
+   prompt icons (`icon_terminal()`). Icons use the same accent color from
+   the rotating 5-color palette for visual continuity with tab badges.
+   Active sessions get a breathing glow behind the icon. This matches Zed's
+   convention of using file-type icons in the sidebar tree.
+
+2. **Thin sidebar scrollbar track** (`ui/sidebar.rs`): Added a decorative
+   2px-wide scrollbar rail on the right edge of the session list area.
+   Track rail: very subtle BORDER at 8% alpha. Thumb: FG_MUTED at 14%
+   alpha (25% when hovering a session). Currently shows full-height thumb
+   since all items are visible; ready for real scroll offset when sessions
+   overflow the viewport. Professional apps always show scrollbar tracks.
+
+3. **Breadcrumb last-segment pill** (`main.rs`): The final path segment
+   in the breadcrumb bar now has a subtle rounded pill background
+   (BG_SURFACE at 35% alpha + BORDER stroke at 15%). This highlights the
+   current directory and matches VS Code/Zed breadcrumb conventions where
+   the current item has a subtle selection indicator.
+
+4. **Breadcrumb left depth shadow** (`main.rs`): Added a 6px horizontal
+   gradient shadow at the left edge of the breadcrumb bar (6% → 0%
+   opacity), creating a visual impression that the sidebar casts a shadow
+   onto the breadcrumb. Consistent with the edge vignettes already
+   applied to the terminal content area.
+
+5. **Layout spacing adjustment** (`ui/sidebar.rs`): Updated `dot_space`
+   from 9px (5px dot + 4px gap) to 14px (11px icon + 3px gap) to
+   accommodate the larger terminal icons without overlapping the session
+   number text.
+
+**Technical details**:
+- Terminal icons at 11px use `icon_t = 0.7 * scale` for thin strokes that
+  render cleanly at small sizes. The SDF rotated pill chevron and monitor
+  outline scale correctly even at this compact size.
+- Scrollbar thumb alpha responds to `hovered_index.is_some()` for subtle
+  "session list is interactive" feedback without adding a separate
+  scrollbar hover state.
+- Breadcrumb pill uses `fill_rounded` + `stroke_rounded` with 3px radius
+  for a compact, proportional highlight that doesn't overwhelm the thin
+  22px breadcrumb bar.
+- Left shadow uses `fill_gradient_h()` with premultiplied alpha black —
+  same technique as the content area edge vignettes for consistency.
+
+**Result**: Sidebar sessions now have recognizable terminal icons instead
+of generic colored dots, making each session immediately identifiable as
+a terminal session. The thin scrollbar track adds a subtle professional
+detail. The breadcrumb bar is more informative with the current-directory
+highlight and has better depth integration with the sidebar.
+
+**Visual comparison with reference**:
+- Session icons: ✓ Small terminal icons match Zed's file-type icon convention
+- Scrollbar track: ✓ Professional thin rail like Zed/VS Code sidebars
+- Breadcrumb highlight: ✓ Current directory pill matches breadcrumb conventions
+- Depth integration: ✓ Sidebar shadow on breadcrumb for spatial hierarchy
+
+**Remaining gaps vs reference (iteration 38)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

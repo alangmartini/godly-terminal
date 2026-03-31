@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 37)
+Last updated: 2026-03-31 (Iteration 38)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -78,6 +78,10 @@ Last updated: 2026-03-31 (Iteration 37)
 | Sidebar session timestamps | Done | Relative time labels ("5m", "2h", "1d", "3d") right-aligned on second line (iteration 37) |
 | Breadcrumb/path bar | Done | Thin bar between tab bar and content showing CWD as segmented path with chevrons (iteration 37) |
 | Content area radial spotlight | Done | Soft accent-tinted glow behind welcome screen for visual depth (iteration 37) |
+| Session terminal icons | Done | Mini terminal prompt icons before session names, replacing plain colored dots (iteration 38) |
+| Sidebar scrollbar track | Done | Thin decorative scrollbar rail on session list right edge (iteration 38) |
+| Breadcrumb last-segment pill | Done | Subtle rounded background highlight on current directory in breadcrumb (iteration 38) |
+| Breadcrumb left depth shadow | Done | Inner shadow at breadcrumb left edge for sidebar-cast depth (iteration 38) |
 
 ## Remaining Gaps (Priority Order)
 

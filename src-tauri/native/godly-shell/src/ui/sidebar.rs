@@ -331,7 +331,7 @@ impl Sidebar {
         // Layout: [pad][dot][gap][num][gap][name...][gap][branch][pad]
         // Two-line items: line 1 = dot + number + name + branch, line 2 = description
         let num_x = sidebar.x + pad_h;
-        let dot_space = s(5.0) + s(4.0); // dot width + gap
+        let dot_space = s(11.0) + s(3.0); // terminal icon width + gap
         let name_x = num_x + dot_space + cw * 2.0;
         let branch_max_chars: usize = 6;
         let branch_reserve = cw * (branch_max_chars as f32) + pad_h + cw;
@@ -470,32 +470,33 @@ impl Sidebar {
                 active_t,
             );
 
-            // Session accent dot — small colored circle matching the tab accent
-            // color cycle. Creates visual continuity between tab bar badges and
-            // the sidebar session list.
-            let dot_sz = s(5.0);
-            let dot_x = num_x;
-            let dot_y = text_y + (ch - dot_sz) / 2.0;
-            let dot_rect = Rect {
-                x: dot_x, y: dot_y, width: dot_sz, height: dot_sz,
+            // Session mini terminal icon — small terminal prompt icon matching
+            // the tab accent color cycle.  More informative than a plain dot;
+            // matches Zed's file-type icon convention in the sidebar.
+            let icon_sz = s(11.0);
+            let icon_x = num_x;
+            let icon_y = text_y + (ch - icon_sz) / 2.0;
+            let icon_rect = Rect {
+                x: icon_x, y: icon_y, width: icon_sz, height: icon_sz,
             };
-            let dot_alpha = lerp(0.5, 1.0, active_t.max(hover_t * 0.6));
-            let dot_color = [session_accent[0], session_accent[1], session_accent[2], dot_alpha];
-            ui.fill_rounded(dot_rect, dot_color, dot_sz / 2.0);
-            // Subtle glow on active session dot
+            let icon_alpha = lerp(0.45, 0.85, active_t.max(hover_t * 0.6));
+            let icon_color = [session_accent[0], session_accent[1], session_accent[2], icon_alpha];
+            let icon_t = (0.7 * text.scale).max(0.5);
+            ui.icon_terminal(icon_rect, icon_t, icon_color);
+            // Subtle glow on active session icon
             if active_t > 0.005 {
                 let breath = 0.85 + 0.15 * self.glow_phase.sin();
                 let glow_rect = Rect {
-                    x: dot_x - s(2.0), y: dot_y - s(2.0),
-                    width: dot_sz + s(4.0), height: dot_sz + s(4.0),
+                    x: icon_x - s(2.0), y: icon_y - s(2.0),
+                    width: icon_sz + s(4.0), height: icon_sz + s(4.0),
                 };
                 ui.fill_shadow(glow_rect,
-                    [session_accent[0], session_accent[1], session_accent[2], 0.15 * breath * active_t],
-                    dot_sz / 2.0 + s(2.0), s(4.0));
+                    [session_accent[0], session_accent[1], session_accent[2], 0.12 * breath * active_t],
+                    icon_sz / 2.0, s(5.0));
             }
 
-            // Session number (shifted right to make room for accent dot)
-            let num_x_shifted = num_x + dot_sz + s(4.0);
+            // Session number (shifted right to make room for terminal icon)
+            let num_x_shifted = num_x + icon_sz + s(3.0);
             let num_str = format!("{}", item.number);
             let inactive_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t);
             let fg = lerp_color(inactive_fg, session_accent, active_t);
@@ -629,6 +630,34 @@ impl Sidebar {
                         s(8.0),
                     );
                 }
+            }
+        }
+
+        // Thin scrollbar track — decorative track on the right edge of the
+        // session list area.  Shows a small "thumb" proportional to the visible
+        // items / total items ratio.  Professional sidebars always show this.
+        {
+            let items_total_h = self.items_y_offset(self.items.len(), text.scale);
+            let track_x = sidebar.right() - s(5.0);
+            let track_y = sidebar.y + header_h + s(4.0);
+            let track_h = items_total_h - s(4.0);
+            let track_w = s(2.0);
+            if track_h > s(10.0) {
+                // Track rail — very subtle background
+                let track_rect = Rect { x: track_x, y: track_y, width: track_w, height: track_h };
+                ui.fill_rounded(track_rect,
+                    [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.08],
+                    track_w / 2.0);
+                // Thumb — proportional, accent-tinted when hovered
+                let visible_ratio = 1.0_f32; // all items visible for now
+                let thumb_h = (track_h * visible_ratio).max(s(16.0)).min(track_h);
+                let thumb_y = track_y; // scroll_offset * (track_h - thumb_h) for real scrolling
+                let thumb_rect = Rect { x: track_x, y: thumb_y, width: track_w, height: thumb_h };
+                let any_hover = self.hovered_index.is_some();
+                let thumb_alpha = if any_hover { 0.25 } else { 0.14 };
+                ui.fill_rounded(thumb_rect,
+                    [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], thumb_alpha],
+                    track_w / 2.0);
             }
         }
 

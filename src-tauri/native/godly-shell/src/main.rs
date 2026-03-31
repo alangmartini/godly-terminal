@@ -1251,6 +1251,12 @@ impl App {
             ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
                 [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
                  ui::builder::colors::BORDER[2], 0.3]);
+            // Left inner shadow for sidebar-cast depth
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect { x: bc.x, y: bc.y, width: s(6.0), height: bc.height },
+                [0.0, 0.0, 0.0, 0.06],
+                [0.0, 0.0, 0.0, 0.0],
+            );
 
             // Path segments: show CWD as breadcrumb with "›" separators
             let cwd = &self.status_bar.cwd;
@@ -1297,7 +1303,30 @@ impl App {
                         ui_builder.text_ui(&ui_text_handle, "\u{203A}", x, y_center, chevron_fg, bc_bg);
                         x += ui_text_handle.text_width_ui("\u{203A}") + s(4.0);
                     }
-                    let fg = if i == segments.len() - 1 { last_fg } else { segment_fg };
+                    let is_last = i == segments.len() - 1;
+                    let fg = if is_last { last_fg } else { segment_fg };
+                    // Last segment gets a subtle pill background to highlight
+                    // the current directory — matches VS Code/Zed breadcrumb style
+                    if is_last {
+                        let seg_w = ui_text_handle.text_width_ui(seg);
+                        let pill_pad = s(4.0);
+                        let pill_h = ch * 0.9;
+                        let pill_y = bc.y + (bc.height - pill_h) / 2.0;
+                        let pill_rect = ui::widget::Rect {
+                            x: x - pill_pad, y: pill_y,
+                            width: seg_w + pill_pad * 2.0, height: pill_h,
+                        };
+                        let pill_r = s(3.0);
+                        ui_builder.fill_rounded(pill_rect,
+                            [ui::builder::colors::BG_SURFACE[0],
+                             ui::builder::colors::BG_SURFACE[1],
+                             ui::builder::colors::BG_SURFACE[2], 0.35],
+                            pill_r);
+                        ui_builder.stroke_rounded(pill_rect, pill_r, 0.5,
+                            [ui::builder::colors::BORDER[0],
+                             ui::builder::colors::BORDER[1],
+                             ui::builder::colors::BORDER[2], 0.15]);
+                    }
                     ui_builder.text_ui(&ui_text_handle, seg, x, y_center, fg, bc_bg);
                     x += ui_text_handle.text_width_ui(seg) + s(4.0);
                 }
