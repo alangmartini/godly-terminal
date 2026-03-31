@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 46)
+Last updated: 2026-03-31 (Iteration 47)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -124,6 +124,12 @@ Last updated: 2026-03-31 (Iteration 46)
 | Status bar metadata readability | Done | Text alpha 0.65 (was 0.55), divider alpha 0.35 (was 0.25), diff badge uses FG_SECONDARY (iteration 46) |
 | Agent badge definition | Done | Status badge background 0.18 (was 0.12), stroke 0.35 (was 0.25), hover background full opacity (iteration 46) |
 | Close button red glow | Done | Hover glow alpha 0.15 (was 0.10) for stronger destructive action telegraph (iteration 46) |
+| Welcome shortcut 2×2 grid | Done | Shortcuts in 2-column grid layout for compact professional appearance (iteration 47) |
+| Full-width CTA button | Done | "Create terminal" button spans full card width with gradient fill for visual weight (iteration 47) |
+| CTA button gradient | Done | Subtle top-lighter gradient on accent CTA for physical button depth (iteration 47) |
+| Shortcut-CTA divider | Done | Thin hairline separator between shortcut grid and CTA for visual section clarity (iteration 47) |
+| Keycap gradient styling | Done | Key badges use top-lighter gradient background for raised keycap appearance (iteration 47) |
+| Tab bar codicon plus | Done | New tab "+" button uses codicon icon with hover border instead of text (iteration 47) |
 
 ## Remaining Gaps (Priority Order)
 

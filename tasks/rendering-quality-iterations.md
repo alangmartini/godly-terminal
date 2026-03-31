@@ -2211,3 +2211,45 @@ professional aesthetic while being more readable and accessible.
 **Remaining gaps vs reference (iteration 46)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 47 — Welcome Screen Layout Polish & Tab Bar Icon
+
+**Changes**:
+
+1. **Welcome screen 2×2 shortcut grid** (`app.rs`): Shortcuts now use a
+   two-column grid layout (`row!` with `FillPortion(1)` per shortcut) instead
+   of a single column. "Ctrl+T / Ctrl+W" on one row, "Ctrl+Tab / Ctrl+," on
+   the next. More compact and professional — matches how VS Code and Zed
+   present keyboard hints.
+
+2. **Full-width CTA button** (`app.rs`): "Create terminal" button now spans
+   the full card width (`width(Length::Fill)`) with centered content. Adds
+   a subtle top-lighter gradient fill on the accent color for physical button
+   depth. Shadow increased to 0.25 alpha / 6px blur for stronger float.
+
+3. **Shortcut-CTA divider** (`app.rs`): Thin hairline separator between the
+   shortcut grid and CTA button. Uses BORDER_VARIANT at 50% opacity with
+   2px vertical padding — provides clear visual section boundary without
+   adding heaviness.
+
+4. **Enhanced keycap badges** (`app.rs`): Keyboard shortcut badges now use
+   a top-lighter gradient background (+3% brightness at top) instead of flat
+   color. Padding increased to [3,7] for roomier keycap feel. Shadow
+   strengthened to 0.22 alpha / 1.5px blur / 1.5px offset for more
+   physical raised-key appearance. Border radius increased to 5px.
+
+5. **Tab bar codicon plus icon** (`tab_bar.rs`): New tab "+" button replaced
+   text "+" with codicon plus icon (\u{EA60}) at 14px using CODICON_FONT.
+   Hover state now shows a subtle BORDER_VARIANT border at 50% opacity for
+   visual feedback. Padding adjusted to [3,7] for consistent icon centering.
+
+**Design principle**: This iteration focuses on **layout polish** — restructuring
+the welcome screen for better use of horizontal space and adding physical depth
+cues (gradients, stronger shadows) to interactive elements. The 2×2 grid makes
+the welcome card more compact and professional. The full-width CTA button
+reads as the primary action more clearly. The codicon plus icon in the tab bar
+is consistent with the icon language used throughout the UI.
+
+**Remaining gaps vs reference (iteration 47)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

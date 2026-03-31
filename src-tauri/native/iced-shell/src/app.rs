@@ -10419,25 +10419,35 @@ impl GodlyApp {
             .font(UI_FONT)
             .color(TEXT_SECONDARY());
 
-        // --- Keyboard shortcut hints ---
+        // --- Keyboard shortcut hints (2×2 grid) ---
         let shortcut = |key: &'static str, desc: &'static str| -> Element<'_, Message> {
             let key_badge = container(
                 text(key).size(10).font(Font::MONOSPACE).color(TEXT_ACTIVE()),
             )
-            .padding(Padding::from([2, 6]))
+            .padding(Padding::from([3, 7]))
             .style(|_theme| {
                 let bg = GHOST_HOVER();
+                let bg_top = Color::from_rgba(
+                    (bg.r + 0.03).min(1.0),
+                    (bg.g + 0.03).min(1.0),
+                    (bg.b + 0.03).min(1.0),
+                    bg.a,
+                );
                 container::Style {
-                    background: Some(iced::Background::Color(bg)),
+                    background: Some(iced::Background::Gradient(iced::Gradient::Linear(
+                        iced::gradient::Linear::new(std::f32::consts::PI) // top→bottom
+                            .add_stop(0.0, bg_top)
+                            .add_stop(1.0, bg),
+                    ))),
                     border: iced::Border {
                         color: BORDER_VARIANT(),
                         width: 1.0,
-                        radius: 4.0.into(),
+                        radius: 5.0.into(),
                     },
                     shadow: Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.15),
-                        offset: Vector::new(0.0, 1.0),
-                        blur_radius: 1.0,
+                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+                        offset: Vector::new(0.0, 1.5),
+                        blur_radius: 1.5,
                     },
                     ..container::Style::default()
                 }
@@ -10446,39 +10456,77 @@ impl GodlyApp {
             row![key_badge, desc_text]
                 .spacing(8)
                 .align_y(iced::Alignment::Center)
+                .width(Length::FillPortion(1))
                 .into()
         };
 
         let shortcuts = column![
-            shortcut("Ctrl+T", "New terminal"),
-            shortcut("Ctrl+W", "Close tab"),
-            shortcut("Ctrl+Tab", "Next tab"),
-            shortcut("Ctrl+,", "Settings"),
-        ]
-        .spacing(6);
-
-        // --- CTA button ---
-        let cta_btn = button(
             row![
-                text("\u{EA60}").font(Font {
-                    family: iced::font::Family::Name("codicon"),
-                    weight: iced::font::Weight::Normal,
-                    stretch: iced::font::Stretch::Normal,
-                    style: iced::font::Style::Normal,
-                }).size(13).color(BG_SECONDARY()),
-                text("Create terminal").size(13).font(UI_FONT).color(BG_SECONDARY()),
-            ]
-            .spacing(6)
-            .align_y(iced::Alignment::Center),
+                shortcut("Ctrl+T", "New tab"),
+                shortcut("Ctrl+W", "Close tab"),
+            ].spacing(12),
+            row![
+                shortcut("Ctrl+Tab", "Next tab"),
+                shortcut("Ctrl+,", "Settings"),
+            ].spacing(12),
+        ]
+        .spacing(8)
+        .width(Length::Fill);
+
+        // --- Thin divider between shortcuts and CTA ---
+        let divider = container(
+            iced::widget::rule::horizontal(1).style(|_theme| iced::widget::rule::Style {
+                color: {
+                    let b = BORDER_VARIANT();
+                    Color::from_rgba(b.r, b.g, b.b, 0.5)
+                },
+                radius: 0.0.into(),
+                fill_mode: iced::widget::rule::FillMode::Full,
+                snap: true,
+            }),
+        )
+        .padding(Padding::from([2, 0]));
+
+        // --- CTA button (full-width) ---
+        let cta_btn = button(
+            container(
+                row![
+                    text("\u{EA60}").font(Font {
+                        family: iced::font::Family::Name("codicon"),
+                        weight: iced::font::Weight::Normal,
+                        stretch: iced::font::Stretch::Normal,
+                        style: iced::font::Style::Normal,
+                    }).size(13).color(BG_SECONDARY()),
+                    text("Create terminal").size(13).font(UI_FONT).color(BG_SECONDARY()),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .center_x(Length::Fill),
         )
         .on_press(Message::NewTabRequested)
         .padding(Padding::from([8, 16]))
+        .width(Length::Fill)
         .style(|_theme, status| {
+            let accent = ACCENT();
             let background = match status {
                 button::Status::Hovered | button::Status::Pressed => {
                     iced::Background::Color(PANE_FOCUSED_BORDER())
                 }
-                _ => iced::Background::Color(ACCENT()),
+                _ => {
+                    // Subtle gradient for physical button feel
+                    let top = Color::from_rgb(
+                        (accent.r + 0.04).min(1.0),
+                        (accent.g + 0.04).min(1.0),
+                        (accent.b + 0.04).min(1.0),
+                    );
+                    iced::Background::Gradient(iced::Gradient::Linear(
+                        iced::gradient::Linear::new(std::f32::consts::PI)
+                            .add_stop(0.0, top)
+                            .add_stop(1.0, accent),
+                    ))
+                }
             };
             button::Style {
                 background: Some(background),
@@ -10489,9 +10537,9 @@ impl GodlyApp {
                     radius: 6.0.into(),
                 },
                 shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.20),
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
                     offset: Vector::new(0.0, 2.0),
-                    blur_radius: 4.0,
+                    blur_radius: 6.0,
                 },
                 ..button::Style::default()
             }
@@ -10508,12 +10556,14 @@ impl GodlyApp {
                 container(subtitle)
                     .width(Length::Fill)
                     .center_x(Length::Fill),
-                Space::new().height(Length::Fixed(8.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 shortcuts,
+                Space::new().height(Length::Fixed(4.0)),
+                divider,
                 Space::new().height(Length::Fixed(4.0)),
                 cta_btn,
             ]
-            .spacing(8)
+            .spacing(6)
             .width(Length::Fill)
             .align_x(iced::Alignment::Start),
         )

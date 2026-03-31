@@ -387,10 +387,10 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .height(Length::Fixed(TAB_BAR_HEIGHT)),
     );
 
-    // "+" button to add new terminals (ghost style).
-    let new_btn = button(text("+").size(15).color(TEXT_SECONDARY()))
+    // "+" button to add new terminals (codicon icon, ghost style).
+    let new_btn = button(text("\u{EA60}").size(14).font(CODICON_FONT).color(TEXT_SECONDARY()))
         .on_press(on_new)
-        .padding(Padding::from([3, 10]))
+        .padding(Padding::from([3, 7]))
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(26.0))
         .style(|_theme, status| {
@@ -403,9 +403,15 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                 background: Some(iced::Background::Color(bg_color)),
                 text_color: TEXT_SECONDARY(),
                 border: Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 8.0.into(),
+                    color: match status {
+                        button::Status::Hovered => {
+                            let b = BORDER_VARIANT();
+                            Color::from_rgba(b.r, b.g, b.b, 0.5)
+                        }
+                        _ => Color::TRANSPARENT,
+                    },
+                    width: 1.0,
+                    radius: 6.0.into(),
                 },
                 ..button::Style::default()
             }
