@@ -419,40 +419,23 @@ impl TabBar {
             let tab_radius = s(5.0);
             // Always render the tab background, blending between inactive and active states
             if active_t > 0.005 {
-                // Active state (or transitioning toward it)
-                let tab_top = [bg[0] * 1.18, bg[1] * 1.18, bg[2] * 1.18, 1.0];
-                let border_alpha = lerp(0.0, 1.0, active_t);
-                let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
-                ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, active_t, border);
+                // Active state — flat BG_ACTIVE + rounded top corners + bottom accent underline
+                let active_bg = [
+                    colors::BG_ACTIVE[0], colors::BG_ACTIVE[1],
+                    colors::BG_ACTIVE[2], active_t,
+                ];
+                let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.3 * active_t];
+                ui.fill_rounded_top_gradient(rect, active_bg, active_bg, tab_radius, active_t * 0.5, border);
 
-                // Ambient glow from accent color (fades in with active_t, reduced)
-                let ambient_rect = Rect {
-                    x: rect.x + 1.0, y: rect.y + 1.0,
-                    width: rect.width - 2.0, height: rect.height - 1.0,
-                };
-                let inner_r = (tab_radius - 1.0).max(0.0);
-                ui.fill_rounded_custom_gradient(ambient_rect,
-                    [accent[0], accent[1], accent[2], 0.04 * active_t],
-                    [accent[0], accent[1], accent[2], 0.0],
-                    [inner_r, inner_r, 0.0, 0.0]);
-
-                // Breathing glow (subtler — 0.92+0.08 range, halved alpha)
-                let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                let glow_rect = Rect {
-                    x: rect.x + tab_radius + s(4.0), y: rect.y - s(1.0),
-                    width: rect.width - (tab_radius + s(4.0)) * 2.0, height: s(3.0),
-                };
-                ui.fill_shadow(glow_rect, [accent[0], accent[1], accent[2], 0.08 * breath * active_t], s(2.0), s(4.0));
-
-                // Top accent bar — clean static line (fades in with active_t)
-                let accent_bar = Rect {
+                // Bottom accent underline (2px) — matches web reference active tab indicator
+                let accent_color = [accent[0], accent[1], accent[2], active_t];
+                let bottom_bar = Rect {
                     x: rect.x + tab_radius,
-                    y: rect.y + 1.0,
+                    y: rect.bottom() - s(2.0),
                     width: rect.width - tab_radius * 2.0,
                     height: s(2.0),
                 };
-                let accent_color = [accent[0], accent[1], accent[2], accent[3] * active_t];
-                ui.fill_rounded(accent_bar, accent_color, s(1.0));
+                ui.fill_rounded(bottom_bar, accent_color, s(1.0));
             }
             if active_t < 0.995 && hover_t > 0.005 {
                 // Hover state for non-fully-active tabs
@@ -479,28 +462,8 @@ impl TabBar {
                     s(1.0));
             }
             if active_t < 0.005 && hover_t < 0.005 {
-                // Inactive rest state: clearly tab-shaped but receding.
-                // Gradient (brighter top) gives subtle convex depth, and a
-                // faint border defines the shape without competing with active.
-                // Alpha 0.75 (up from 0.65) for better readability on dark bg.
-                let rest_top = [
-                    colors::BG_DARK[0] * 1.08, colors::BG_DARK[1] * 1.08,
-                    colors::BG_DARK[2] * 1.08, 0.80,
-                ];
-                let rest_bot = [
-                    colors::BG_DARK[0] * 1.03, colors::BG_DARK[1] * 1.03,
-                    colors::BG_DARK[2] * 1.03, 0.80,
-                ];
-                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.22];
-                // Subtle baseline shadow below inactive tab for physical depth
-                let shadow_rect = Rect {
-                    x: rect.x + s(4.0),
-                    y: rect.bottom() - s(2.0),
-                    width: rect.width - s(8.0),
-                    height: s(3.0),
-                };
-                ui.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.08], s(2.0), s(4.0));
-                ui.fill_rounded_top_gradient(rect, rest_top, rest_bot, s(3.0), 0.5, rest_border);
+                // Inactive rest state: transparent — no background drawn.
+                // Text color alone distinguishes inactive tabs (FG_MUTED).
             }
 
             // Numbered circle badge — number rendered inside a colored circle
@@ -512,39 +475,20 @@ impl TabBar {
             let badge_r = badge_sz / 2.0;
             let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_sz, height: badge_sz };
 
-            // Subtle glow (only on active tab, much reduced)
-            if active_t > 0.005 {
-                let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                let glow_rect = Rect {
-                    x: badge_x - s(2.0), y: badge_y - s(2.0),
-                    width: badge_sz + s(4.0), height: badge_sz + s(4.0),
-                };
-                ui.fill_shadow(glow_rect,
-                    [accent[0], accent[1], accent[2], 0.10 * breath * active_t],
-                    badge_r + s(2.0), s(4.0));
-            }
+            // Circle background — semi-transparent accent overlay (matches web ${color}22)
+            let badge_bg = [accent[0], accent[1], accent[2], 0.13];
+            ui.fill_rounded(badge_rect, badge_bg, badge_r);
 
-            // Circle background — flat solid fill (modern, clean)
-            ui.fill_rounded(badge_rect, accent, badge_r);
-            // Thin border for definition against dark background
-            ui.stroke_rounded(badge_rect, badge_r, 0.5,
-                [accent[0] * 0.7, accent[1] * 0.7, accent[2] * 0.7, 0.25]);
-
-            // Number text (centered in circle, white on accent background for contrast)
+            // Number text (centered in circle, accent-colored on transparent bg)
             let num_w = text.text_width(&num_str);
             let num_x = badge_x + (badge_sz - num_w) / 2.0;
             let num_y = badge_y + (badge_sz - ch) / 2.0;
-            ui.text(text, &num_str, num_x, num_y, [1.0, 1.0, 1.0, 1.0], accent);
+            ui.text(text, &num_str, num_x, num_y, accent, badge_bg);
 
             // Tab title (truncated to fit)
-            // Inactive tabs start from a blend between FG_SECONDARY and FG_PRIMARY
-            // for better readability against dark backgrounds
+            // Inactive: FG_MUTED, hover: FG_SECONDARY, active: FG_PRIMARY
             let fg = lerp_color(
-                lerp_color(
-                    lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, 0.2),
-                    colors::FG_PRIMARY,
-                    hover_t * 0.4,
-                ),
+                lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t),
                 colors::FG_PRIMARY,
                 active_t,
             );

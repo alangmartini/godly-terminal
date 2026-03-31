@@ -68,6 +68,20 @@ struct App {
     cursor_blink_timer: f32,
     last_frame_time: Instant,
     is_maximized: bool,
+    /// Progress bar fill percentage (0.0–1.0), animated when streaming.
+    progress_pct: f32,
+    progress_timer: f32,
+    /// Right panel state
+    right_panel: ui::right_panel::RightPanel,
+    sidebar_width: f32,
+    right_panel_width: f32,
+    /// Resize handle state
+    left_resize_dragging: bool,
+    right_resize_dragging: bool,
+    left_resize_hover: bool,
+    right_resize_hover: bool,
+    left_resize_anim: ui::anim::Anim,
+    right_resize_anim: ui::anim::Anim,
 }
 
 impl App {
@@ -112,6 +126,17 @@ impl App {
             cursor_blink_timer: 0.0,
             last_frame_time: Instant::now(),
             is_maximized: false,
+            progress_pct: 0.05,
+            progress_timer: 0.0,
+            right_panel: ui::right_panel::RightPanel::new(),
+            sidebar_width: ui::layout::SIDEBAR_WIDTH,
+            right_panel_width: ui::layout::RIGHT_PANEL_WIDTH,
+            left_resize_dragging: false,
+            right_resize_dragging: false,
+            left_resize_hover: false,
+            right_resize_hover: false,
+            left_resize_anim: ui::anim::Anim::default(),
+            right_resize_anim: ui::anim::Anim::default(),
             sidebar: ui::sidebar::Sidebar::new(),
             status_bar: {
                 let mut sb = ui::status_bar::StatusBar::new();
@@ -281,7 +306,7 @@ impl App {
             let metrics = renderer.font_metrics().scaled_for_render();
             let vw = gpu.config.width as f32;
             let vh = gpu.config.height as f32;
-            let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
+            let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
             let cols = (layout.terminal_content.width / metrics.cell_width).floor() as u16;
             let rows = (layout.terminal_content.height / metrics.cell_height).floor() as u16;
             (rows.max(1), cols.max(1))
@@ -452,7 +477,30 @@ impl App {
         animating |= self.tab_bar.tick_animations(dt);
         animating |= self.sidebar.tick_animations(dt);
         animating |= self.status_bar.tick_animations(dt);
+        animating |= self.right_panel.tick_animations(dt);
+        self.left_resize_anim.set(if self.left_resize_hover || self.left_resize_dragging { 1.0 } else { 0.0 });
+        self.right_resize_anim.set(if self.right_resize_hover || self.right_resize_dragging { 1.0 } else { 0.0 });
+        animating |= self.left_resize_anim.tick(ui::anim::timing::HOVER, dt);
+        animating |= self.right_resize_anim.tick(ui::anim::timing::HOVER, dt);
         animating |= self.focus_dim_anim.tick(ui::anim::timing::SLOW, dt);
+
+        // Progress bar animation (when streaming)
+        if self.status_bar.streaming {
+            self.progress_timer += dt;
+            if self.progress_timer >= 0.3 {
+                self.progress_timer -= 0.3;
+                // Advance by random-ish 1-2% (use frame time as pseudo-random)
+                let inc = 0.01 + (dt * 1000.0).fract() * 0.01;
+                self.progress_pct = (self.progress_pct + inc).min(0.90);
+                if self.progress_pct >= 0.89 {
+                    self.progress_pct = 0.05; // reset cycle
+                }
+            }
+            animating = true;
+        } else {
+            self.progress_pct = 0.05;
+            self.progress_timer = 0.0;
+        }
 
         // Cursor blink: smooth fade between visible/invisible every ~500ms.
         // Only blinks for Blink* cursor styles; Steady* styles stay fully visible.
@@ -509,7 +557,7 @@ impl App {
         // Prepare terminal data BEFORE starting the render pass
         let vw = gpu.config.width as f32;
         let vh = gpu.config.height as f32;
-        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
+        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
 
         // Update status bar with current terminal dimensions
         self.status_bar.terminal_size = self.terminal_size();
@@ -529,57 +577,25 @@ impl App {
         // Terminal area background (BG_BASE) — must come before chrome overlays
         ui_builder.fill(layout.terminal, ui::builder::colors::BG_BASE);
 
-        // Directional panel cast shadows — each chrome panel casts a shadow
-        // onto the terminal content area proportional to its visual weight.
-        // Top-left lighting model: tab bar (top) casts the strongest shadow,
-        // sidebar (left) casts a medium shadow, status bar (bottom) and right
-        // edge cast lighter shadows.  This replaces a single omnidirectional
-        // inner shadow with more realistic directional depth.
+        // Subtle directional shadows — kept minimal to match web reference's flat style.
+        // Only retain lightweight edge shadows for panel depth, no vignettes or glows.
         {
-            // Base inner shadow (reduced — directional shadows add the rest)
-            ui_builder.fill_inner_shadow(
-                layout.terminal,
-                [0.0, 0.0, 0.0, 0.08],
-                0.0,
-                ui_text_handle.s(4.0),
+            // Tab bar cast shadow (subtle top edge darkening)
+            let shadow_h = ui_text_handle.s(6.0);
+            ui_builder.fill_gradient(
+                ui::widget::Rect {
+                    x: layout.terminal.x,
+                    y: layout.terminal.y,
+                    width: layout.terminal.width,
+                    height: shadow_h,
+                },
+                [0.0, 0.0, 0.0, 0.06],
+                [0.0, 0.0, 0.0, 0.0],
             );
 
-            // Tab bar cast shadow (strongest — topmost elevated panel)
-            {
-                let shadow_h = ui_text_handle.s(12.0);
-                ui_builder.fill_gradient(
-                    ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y,
-                        width: layout.terminal.width,
-                        height: shadow_h,
-                    },
-                    [0.0, 0.0, 0.0, 0.10],
-                    [0.0, 0.0, 0.0, 0.0],
-                );
-                // Subtle accent-tinted glow spill from the active tab into the
-                // content area.  This creates a warm colored light that connects
-                // the tab bar accent to the terminal, enhancing visual continuity.
-                let accent = self.active_accent();
-                let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
-                let glow_h = ui_text_handle.s(18.0);
-                let glow_color = [accent[0], accent[1], accent[2], 0.03 * breath];
-                let glow_zero = [accent[0], accent[1], accent[2], 0.0];
-                ui_builder.fill_gradient(
-                    ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y,
-                        width: layout.terminal.width,
-                        height: glow_h,
-                    },
-                    glow_color,
-                    glow_zero,
-                );
-            }
-
-            // Sidebar cast shadow (medium — side panel casting rightward)
+            // Sidebar cast shadow (subtle left edge darkening)
             if layout.sidebar.width > 0.0 {
-                let shadow_w = ui_text_handle.s(10.0);
+                let shadow_w = ui_text_handle.s(4.0);
                 ui_builder.fill_gradient_h(
                     ui::widget::Rect {
                         x: layout.terminal.x,
@@ -587,176 +603,8 @@ impl App {
                         width: shadow_w,
                         height: layout.terminal.height,
                     },
-                    [0.0, 0.0, 0.0, 0.07],
-                    [0.0, 0.0, 0.0, 0.0],
-                );
-            }
-
-            // Status bar cast shadow (subtle — bottom panel casting upward)
-            {
-                let shadow_h = ui_text_handle.s(8.0);
-                ui_builder.fill_gradient(
-                    ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y + layout.terminal.height - shadow_h,
-                        width: layout.terminal.width,
-                        height: shadow_h,
-                    },
-                    [0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.05],
-                );
-            }
-
-            // Right edge shadow (lightest — no heavy panel, just window edge)
-            {
-                let shadow_w = ui_text_handle.s(5.0);
-                ui_builder.fill_gradient_h(
-                    ui::widget::Rect {
-                        x: layout.terminal.x + layout.terminal.width - shadow_w,
-                        y: layout.terminal.y,
-                        width: shadow_w,
-                        height: layout.terminal.height,
-                    },
-                    [0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.03],
-                );
-            }
-
-            // Concave corner fills soften 90° corners where chrome panels meet the
-            // terminal content area, creating a smooth inset feel.
-            {
-                let corner_r = ui_text_handle.s(6.0);
-
-                // Left-side corners (sidebar-terminal junction)
-                if layout.sidebar.width > 0.0 {
-                    // Top-left corner
-                    let corner_rect = ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y,
-                        width: corner_r,
-                        height: corner_r,
-                    };
-                    ui_builder.fill_rounded_custom(corner_rect, ui::builder::colors::BG_DARK, [corner_r, 0.0, 0.0, 0.0]);
-
-                    // Bottom-left corner — uses sidebar's gradient bottom color
-                    // (BG_DARK * 0.96) instead of flat BG_DARK, so the corner blends
-                    // seamlessly with the sidebar's vertical gradient at this y.
-                    let sidebar_bottom_color = [
-                        ui::builder::colors::BG_DARK[0] * 0.96,
-                        ui::builder::colors::BG_DARK[1] * 0.96,
-                        ui::builder::colors::BG_DARK[2] * 0.96,
-                        1.0,
-                    ];
-                    let bottom_corner = ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y + layout.terminal.height - corner_r,
-                        width: corner_r,
-                        height: corner_r,
-                    };
-                    ui_builder.fill_rounded_custom(bottom_corner, sidebar_bottom_color, [0.0, 0.0, 0.0, corner_r]);
-                }
-
-                // Right-side corners (tab-bar/status-bar to window edge)
-                let right_corner_r = ui_text_handle.s(4.0);
-                // Top-right corner — uses tab bar's gradient bottom color
-                // (BG_DARK * 0.92) for seamless junction at the tab bar edge.
-                let tab_bar_bottom_color = [
-                    ui::builder::colors::BG_DARK[0] * 0.92,
-                    ui::builder::colors::BG_DARK[1] * 0.92,
-                    ui::builder::colors::BG_DARK[2] * 0.92,
-                    1.0,
-                ];
-                let tr_corner = ui::widget::Rect {
-                    x: layout.terminal.x + layout.terminal.width - right_corner_r,
-                    y: layout.terminal.y,
-                    width: right_corner_r,
-                    height: right_corner_r,
-                };
-                ui_builder.fill_rounded_custom(tr_corner, tab_bar_bottom_color, [0.0, right_corner_r, 0.0, 0.0]);
-
-                // Bottom-right corner — uses status bar's top gradient color
-                // (BG_SURFACE) so the corner blends with the status bar at the
-                // terminal-to-status-bar junction instead of mismatching.
-                let br_corner = ui::widget::Rect {
-                    x: layout.terminal.x + layout.terminal.width - right_corner_r,
-                    y: layout.terminal.y + layout.terminal.height - right_corner_r,
-                    width: right_corner_r,
-                    height: right_corner_r,
-                };
-                ui_builder.fill_rounded_custom(br_corner, ui::builder::colors::BG_SURFACE, [0.0, 0.0, right_corner_r, 0.0]);
-            }
-
-            // Corner vignette: radial darkening at corners with intensity
-            // weighted by panel junction importance.  Top-left is strongest
-            // (tab bar + sidebar converge), other corners are lighter.
-            {
-                let vig_r = ui_text_handle.s(24.0);
-                let vig_blur = ui_text_handle.s(16.0);
-                // Top-left: strongest (two heavy panels converge)
-                let tl_alpha = if layout.sidebar.width > 0.0 { 0.10 } else { 0.06 };
-                ui_builder.fill_shadow(
-                    ui::widget::Rect { x: layout.terminal.x, y: layout.terminal.y, width: vig_r, height: vig_r },
-                    [0.0, 0.0, 0.0, tl_alpha], vig_r * 0.3, vig_blur,
-                );
-                // Top-right: medium (tab bar edge)
-                ui_builder.fill_shadow(
-                    ui::widget::Rect { x: layout.terminal.x + layout.terminal.width - vig_r, y: layout.terminal.y, width: vig_r, height: vig_r },
-                    [0.0, 0.0, 0.0, 0.06], vig_r * 0.3, vig_blur,
-                );
-                // Bottom-left: medium (sidebar + status bar converge)
-                let bl_alpha = if layout.sidebar.width > 0.0 { 0.08 } else { 0.04 };
-                ui_builder.fill_shadow(
-                    ui::widget::Rect { x: layout.terminal.x, y: layout.terminal.y + layout.terminal.height - vig_r, width: vig_r, height: vig_r },
-                    [0.0, 0.0, 0.0, bl_alpha], vig_r * 0.3, vig_blur,
-                );
-                // Bottom-right: lightest
-                ui_builder.fill_shadow(
-                    ui::widget::Rect { x: layout.terminal.x + layout.terminal.width - vig_r, y: layout.terminal.y + layout.terminal.height - vig_r, width: vig_r, height: vig_r },
-                    [0.0, 0.0, 0.0, 0.04], vig_r * 0.3, vig_blur,
-                );
-            }
-
-            // Edge vignettes — soft gradient darkening along content edges.
-            // Creates cinematic framing that draws attention to the center.
-            // Top edge (below tab bar): subtle drop shadow
-            {
-                let edge_h = ui_text_handle.s(12.0);
-                let tc = &layout.terminal;
-                // Top edge shadow (cast by tab bar)
-                ui_builder.fill_gradient(
-                    ui::widget::Rect { x: tc.x, y: tc.y, width: tc.width, height: edge_h },
-                    [0.0, 0.0, 0.0, 0.06],
-                    [0.0, 0.0, 0.0, 0.0],
-                );
-                // Left edge shadow (cast by sidebar)
-                if layout.sidebar.width > 0.0 {
-                    let side_w = ui_text_handle.s(8.0);
-                    ui_builder.fill_gradient_h(
-                        ui::widget::Rect { x: tc.x, y: tc.y, width: side_w, height: tc.height },
-                        [0.0, 0.0, 0.0, 0.05],
-                        [0.0, 0.0, 0.0, 0.0],
-                    );
-                }
-                // Bottom edge (above status bar): very subtle upward shadow
-                let bot_h = ui_text_handle.s(6.0);
-                ui_builder.fill_gradient(
-                    ui::widget::Rect { x: tc.x, y: tc.y + tc.height - bot_h, width: tc.width, height: bot_h },
-                    [0.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, 0.0, 0.04],
-                );
-            }
-
-            // Subtle accent-tinted inner frame — a very faint top-edge glow
-            // using the active tab's accent color. Creates a warm connection
-            // between the tab bar accent and the content area below it.
-            {
-                let accent = self.active_accent();
-                let frame_h = ui_text_handle.s(2.0);
-                let tc = &layout.terminal;
-                ui_builder.fill_gradient(
-                    ui::widget::Rect { x: tc.x, y: tc.y, width: tc.width, height: frame_h },
-                    [accent[0], accent[1], accent[2], 0.06],
-                    [accent[0], accent[1], accent[2], 0.0],
+                    [0.0, 0.0, 0.0, 0.0],
                 );
             }
         }
@@ -1358,8 +1206,66 @@ impl App {
         self.tab_bar.sidebar_width = layout.sidebar.width;
         self.tab_bar.build(&mut ui_builder, layout.tab_bar, &ui_text_handle);
         self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
+        self.right_panel.build(&mut ui_builder, layout.right_panel, layout.right_panel_status, &ui_text_handle);
+
+        // Resize handles — 3px invisible zones at panel boundaries, visible on hover
+        {
+            let handle_w = 3.0 * self.scale_factor;
+            let handle_y = layout.tab_bar.bottom();
+            let handle_h = layout.status_bar.y - handle_y;
+            let hover_color = ui::builder::colors::BG_HOVER;
+
+            // Left handle (between sidebar and terminal)
+            if layout.sidebar.width > 0.0 {
+                let left_t = self.left_resize_anim.value();
+                if left_t > 0.005 {
+                    let handle_rect = ui::widget::Rect {
+                        x: layout.sidebar.width - handle_w / 2.0,
+                        y: handle_y,
+                        width: handle_w,
+                        height: handle_h,
+                    };
+                    ui_builder.fill(handle_rect, [hover_color[0], hover_color[1], hover_color[2], left_t * 0.8]);
+                }
+            }
+
+            // Right handle (between terminal and right panel)
+            if self.right_panel.visible && layout.right_panel.width > 0.0 {
+                let right_t = self.right_resize_anim.value();
+                if right_t > 0.005 {
+                    let handle_rect = ui::widget::Rect {
+                        x: layout.right_panel.x - handle_w / 2.0,
+                        y: handle_y,
+                        width: handle_w,
+                        height: handle_h,
+                    };
+                    ui_builder.fill(handle_rect, [hover_color[0], hover_color[1], hover_color[2], right_t * 0.8]);
+                }
+            }
+        }
+
         self.status_bar.sidebar_width = layout.sidebar.width;
         self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle, self.tab_bar.glow_phase(), self.active_accent());
+
+        // Progress bar — 2px gradient bar between terminal and status bar (when streaming)
+        if self.status_bar.streaming {
+            let s = |v: f32| ui_text_handle.s(v);
+            let progress_y = layout.status_bar.y - s(2.0);
+            let terminal_x = layout.terminal.x;
+            let terminal_w = layout.terminal.width;
+            // Background track
+            ui_builder.fill(
+                ui::widget::Rect { x: terminal_x, y: progress_y, width: terminal_w, height: s(2.0) },
+                ui::builder::colors::BG_SURFACE,
+            );
+            // Animated fill — width driven by progress_pct (0.05 → 0.90)
+            let fill_w = terminal_w * self.progress_pct;
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect { x: terminal_x, y: progress_y, width: fill_w, height: s(2.0) },
+                ui::builder::colors::ACCENT_BLUE,
+                ui::builder::colors::ACCENT_MAUVE,
+            );
+        }
 
         // Breadcrumb/path bar — thin bar between tab bar and content showing
         // the current working directory as segmented path with chevron separators.
@@ -1577,11 +1483,11 @@ impl App {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // One Dark BG_DARK (#1b1e24) in linear space
+                        // GitHub Dark BG_DARK (#0b0d12) in linear space
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.0094,
-                            g: 0.0118,
-                            b: 0.0170,
+                            r: 0.0015,
+                            g: 0.0021,
+                            b: 0.0042,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -2002,19 +1908,60 @@ impl ApplicationHandler<AsyncEvent> for App {
                 let (px, py) = (position.x as f32, position.y as f32);
                 let gpu = self.gpu.as_ref();
                 let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
+                let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
+
+                // Resize handle dragging
+                if self.left_resize_dragging {
+                    let min_w = 150.0 * self.scale_factor;
+                    let max_w = 320.0 * self.scale_factor;
+                    self.sidebar_width = (px / self.scale_factor).clamp(min_w / self.scale_factor, max_w / self.scale_factor);
+                    if let Some(w) = &self.window { w.request_redraw(); }
+                    return;
+                }
+                if self.right_resize_dragging {
+                    let min_w = 250.0 * self.scale_factor;
+                    let max_w = 550.0 * self.scale_factor;
+                    let new_w = (vw - px) / self.scale_factor;
+                    self.right_panel_width = new_w.clamp(min_w / self.scale_factor, max_w / self.scale_factor);
+                    if let Some(w) = &self.window { w.request_redraw(); }
+                    return;
+                }
+
+                // Resize handle hover detection (3px zones at panel boundaries)
+                let handle_zone = 5.0 * self.scale_factor;
+                let handle_y_min = layout.tab_bar.bottom();
+                let handle_y_max = layout.status_bar.y;
+                let in_handle_y = py >= handle_y_min && py <= handle_y_max;
+
+                let left_edge = layout.sidebar.width;
+                self.left_resize_hover = in_handle_y && layout.sidebar.width > 0.0
+                    && (px - left_edge).abs() < handle_zone;
+
+                let right_edge = layout.right_panel.x;
+                self.right_resize_hover = in_handle_y && self.right_panel.visible
+                    && layout.right_panel.width > 0.0
+                    && (px - right_edge).abs() < handle_zone;
+
+                // Set cursor icon
+                if let Some(w) = &self.window {
+                    if self.left_resize_hover || self.right_resize_hover {
+                        w.set_cursor(winit::window::CursorIcon::EwResize);
+                    } else {
+                        w.set_cursor(winit::window::CursorIcon::Default);
+                    }
+                }
 
                 // Route mouse to UI chrome
                 let me = ui::widget::MouseEvent::Move { x: px, y: py };
                 self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor);
                 self.sidebar.on_mouse(me, layout.sidebar, self.scale_factor);
-                // Status bar needs UiTextRenderer for pill hit-testing
                 if let Some(renderer) = &self.renderer {
                     let m = renderer.font_metrics().scaled_for_render();
                     let mut ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
                     ui_text.ui_avg_advance = renderer.ui_avg_advance();
                     self.status_bar.sidebar_width = layout.sidebar.width;
                     self.status_bar.on_mouse(me, layout.status_bar, &ui_text);
+                    self.right_panel.on_mouse(me, layout.right_panel, &ui_text);
                 }
 
                 // Selection drag in terminal area
@@ -2034,13 +1981,44 @@ impl ApplicationHandler<AsyncEvent> for App {
                         let (px, py) = (x as f32, y as f32);
                         let gpu = self.gpu.as_ref();
                         let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.scale_factor);
+                        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
 
                         if state == ElementState::Pressed {
+                            // Check resize handles first (highest priority for drag start)
+                            if self.left_resize_hover {
+                                self.left_resize_dragging = true;
+                                return;
+                            }
+                            if self.right_resize_hover {
+                                self.right_resize_dragging = true;
+                                return;
+                            }
+
                             // Check tab bar (which includes window buttons + drag)
                             let me = ui::widget::MouseEvent::Press { x: px, y: py };
                             if let Some(action) = self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor) {
                                 self.handle_ui_action(action);
+                                return;
+                            }
+                            // Check right panel close button
+                            if let Some(renderer) = &self.renderer {
+                                let m = renderer.font_metrics().scaled_for_render();
+                                let mut ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+                                ui_text.ui_avg_advance = renderer.ui_avg_advance();
+                                if let Some(ui::right_panel::RightPanelAction::Close) = self.right_panel.on_mouse(me, layout.right_panel, &ui_text) {
+                                    self.right_panel.visible = false;
+                                    if let Some(w) = &self.window { w.request_redraw(); }
+                                    return;
+                                }
+                            }
+                        }
+
+                        // Release resize drag on mouse up
+                        if state == ElementState::Released {
+                            if self.left_resize_dragging || self.right_resize_dragging {
+                                self.left_resize_dragging = false;
+                                self.right_resize_dragging = false;
+                                if let Some(w) = &self.window { w.request_redraw(); }
                                 return;
                             }
                         }

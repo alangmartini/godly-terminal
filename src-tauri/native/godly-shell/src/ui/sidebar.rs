@@ -402,74 +402,21 @@ impl Sidebar {
                 }
             }
 
-            // Active state (fades in with active_t)
-            // Uses the session's own accent color from the rotating palette
-            // for visual continuity with the tab bar's colored badges.
+            // Active state — flat background + 3px left accent bar (matches web reference)
             if active_t > 0.005 {
                 let ac = session_accent;
-                let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                let glow_rect = Rect {
-                    x: inset_rect.x - s(3.0),
-                    y: inset_rect.y - s(3.0),
-                    width: inset_rect.width + s(6.0),
-                    height: inset_rect.height + s(6.0),
-                };
-                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.10 * breath * active_t], item_radius + s(3.0), s(8.0));
-                ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.08 * active_t], item_radius, s(4.0));
-                let active_border = [
-                    ac[0] * 0.40,
-                    ac[1] * 0.40,
-                    ac[2] * 0.40,
-                    0.65 * active_t,
-                ];
-                // Warmer active background: blend more toward accent-tinted surface
-                let accent_bg = [
-                    colors::BG_ACTIVE[0] * 0.88 + ac[0] * 0.12,
-                    colors::BG_ACTIVE[1] * 0.88 + ac[1] * 0.12,
-                    colors::BG_ACTIVE[2] * 0.88 + ac[2] * 0.12,
-                    colors::BG_ACTIVE[3],
-                ];
-                let active_bg = lerp_color(colors::BG_DARK, accent_bg, active_t);
-                ui.fill_rounded_bordered(
-                    inset_rect, active_bg, item_radius,
-                    0.5, active_border,
-                );
-                let ambient = Rect {
-                    x: inset_rect.x + 1.0, y: inset_rect.y + 1.0,
-                    width: inset_rect.width - 2.0, height: inset_rect.height - 1.0,
-                };
-                let inner_r = (item_radius - 1.0).max(0.0);
-                ui.fill_rounded_gradient(ambient,
-                    [ac[0], ac[1], ac[2], 0.08 * active_t],
-                    [ac[0], ac[1], ac[2], 0.0],
-                    inner_r,
-                );
-            }
+                // Flat active background
+                let active_bg = lerp_color(colors::BG_DARK, colors::BG_ACTIVE, active_t);
+                ui.fill_rounded(inset_rect, active_bg, item_radius);
 
-            // Active indicator (left colored bar, pill shape via SDF + breathing glow)
-            // Uses session's own accent color for sidebar-tab color continuity.
-            if active_t > 0.005 {
-                let ac = session_accent;
+                // 3px flat left accent bar
                 let indicator_rect = Rect {
                     x: rect.x + s(3.0),
                     y: rect.y + s(7.0),
-                    width: indicator_w,
+                    width: s(3.0),
                     height: rect.height - s(14.0),
                 };
-                let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                let glow_alpha = 0.14 * breath * active_t;
-                ui.fill_shadow(indicator_rect, [ac[0], ac[1], ac[2], glow_alpha], indicator_w, s(5.0));
-                ui.fill_rounded(indicator_rect, [ac[0], ac[1], ac[2], active_t], indicator_w / 2.0);
-
-                let trail_rect = Rect {
-                    x: indicator_rect.right(),
-                    y: indicator_rect.y + indicator_rect.height * 0.15,
-                    width: s(18.0),
-                    height: indicator_rect.height * 0.7,
-                };
-                ui.fill_shadow(trail_rect,
-                    [ac[0], ac[1], ac[2], 0.04 * breath * active_t],
-                    0.0, s(10.0));
+                ui.fill_rounded(indicator_rect, [ac[0], ac[1], ac[2], active_t], s(1.5));
             }
 
             // Text y position: centered for compact, top-aligned for two-line

@@ -6,32 +6,34 @@
 use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf, quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated, QuadVertex};
 use super::widget::Rect;
 
-/// Zed One Dark–inspired warm neutral palette for all UI chrome.
-/// Warm grays with subtle blue undertone — matches professional editors
-/// (Zed, VS Code One Dark) rather than the cooler Catppuccin Mocha.
+/// GitHub Dark–inspired ultra-dark palette for all UI chrome.
+/// Deep blue-black tones — matches the web reference mockup.
 pub mod colors {
-    // Warm dark base colors (One Dark Pro inspired)
-    pub const BG_DARK: [f32; 4] = [0.106, 0.118, 0.141, 1.0];      // #1b1e24 Chrome/sidebar
-    pub const BG_BASE: [f32; 4] = [0.129, 0.145, 0.169, 1.0];      // #21252b Content/terminal
-    pub const BG_RAISED: [f32; 4] = [0.118, 0.133, 0.157, 1.0];    // #1e2228 Elevated panels
-    pub const BG_SURFACE: [f32; 4] = [0.173, 0.192, 0.227, 1.0];   // #2c313a Surface/hover base
-    pub const BG_HOVER: [f32; 4] = [0.204, 0.224, 0.263, 1.0];     // #343946 Hover states
-    pub const BG_ACTIVE: [f32; 4] = [0.149, 0.169, 0.200, 1.0];    // #262b33 Active selection
-    pub const BG_ACTIVE_ACC: [f32; 4] = [0.157, 0.188, 0.251, 1.0]; // #283040 Blue-tinted active
-    pub const FG_PRIMARY: [f32; 4] = [0.671, 0.698, 0.749, 1.0];   // #abb2bf Text
-    pub const FG_SECONDARY: [f32; 4] = [0.510, 0.537, 0.592, 1.0]; // #828997 Subtext
-    pub const FG_MUTED: [f32; 4] = [0.361, 0.388, 0.439, 1.0];     // #5c6370 Overlay/muted
-    pub const ACCENT_BLUE: [f32; 4] = [0.380, 0.686, 0.937, 1.0];  // #61afef Blue
-    pub const ACCENT_GREEN: [f32; 4] = [0.596, 0.765, 0.475, 1.0]; // #98c379 Green
-    pub const ACCENT_PEACH: [f32; 4] = [0.898, 0.753, 0.482, 1.0]; // #e5c07b Yellow/Peach
-    pub const ACCENT_MAUVE: [f32; 4] = [0.776, 0.471, 0.867, 1.0]; // #c678dd Purple
-    pub const ACCENT_RED: [f32; 4] = [0.878, 0.424, 0.459, 1.0];   // #e06c75 Red
-    pub const RED_HOVER: [f32; 4] = [0.878, 0.424, 0.459, 0.8];
+    // Ultra-dark base colors (GitHub Dark inspired)
+    pub const BG_DARK: [f32; 4] = [0.043, 0.051, 0.071, 1.0];      // #0b0d12 Chrome/sidebar
+    pub const BG_BASE: [f32; 4] = [0.055, 0.063, 0.090, 1.0];      // #0e1017 Content/terminal
+    pub const BG_RAISED: [f32; 4] = [0.059, 0.067, 0.090, 1.0];    // #0f1117 Elevated panels
+    pub const BG_SURFACE: [f32; 4] = [0.102, 0.114, 0.145, 1.0];   // #1a1d25 Surface/hover base
+    pub const BG_HOVER: [f32; 4] = [0.176, 0.200, 0.231, 1.0];     // #2d333b Hover states
+    pub const BG_ACTIVE: [f32; 4] = [0.090, 0.106, 0.141, 1.0];    // #171b24 Active selection
+    pub const BG_ACTIVE_ACC: [f32; 4] = [0.078, 0.090, 0.122, 1.0]; // #14171f Blue-tinted active
+    pub const BG_STATUS: [f32; 4] = [0.047, 0.055, 0.078, 1.0];    // #0c0e14 Status bar
+    pub const FG_PRIMARY: [f32; 4] = [0.788, 0.820, 0.851, 1.0];   // #c9d1d9 Text
+    pub const FG_SECONDARY: [f32; 4] = [0.545, 0.580, 0.620, 1.0]; // #8b949e Subtext
+    pub const FG_MUTED: [f32; 4] = [0.431, 0.463, 0.506, 1.0];     // #6e7681 Overlay/muted
+    pub const ACCENT_BLUE: [f32; 4] = [0.388, 0.400, 0.945, 1.0];  // #6366f1 Indigo
+    pub const ACCENT_GREEN: [f32; 4] = [0.133, 0.773, 0.369, 1.0]; // #22c55e Green
+    pub const ACCENT_PEACH: [f32; 4] = [0.961, 0.620, 0.043, 1.0]; // #f59e0b Amber
+    pub const ACCENT_MAUVE: [f32; 4] = [0.545, 0.361, 0.965, 1.0]; // #8b5cf6 Violet
+    pub const ACCENT_RED: [f32; 4] = [0.937, 0.267, 0.267, 1.0];   // #ef4444 Red
+    pub const RED_HOVER: [f32; 4] = [0.937, 0.267, 0.267, 0.8];
     pub const RED_SUBTLE: [f32; 4] = [0.15, 0.11, 0.11, 1.0];
+    pub const ACCENT_GOLD: [f32; 4] = [0.902, 0.659, 0.333, 1.0];  // #e6a855 Code text
+    pub const ACCENT_SKY: [f32; 4] = [0.345, 0.651, 1.0, 1.0];     // #58a6ff Links
     pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
     pub const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-    // Separator / border color — warm gray
-    pub const BORDER: [f32; 4] = [0.243, 0.267, 0.318, 0.8];       // #3e4451 warm border
+    // Separator / border color — ultra-dark
+    pub const BORDER: [f32; 4] = [0.102, 0.114, 0.145, 1.0];       // #1a1d25 hairline border
 }
 
 /// A deferred text draw command. Characters are rasterized through the
