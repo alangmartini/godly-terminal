@@ -349,9 +349,12 @@ impl Sidebar {
         let dot_space = s(11.0) + s(3.0); // terminal icon width + gap
         let name_x = num_x + dot_space + cw * 2.0;
         let branch_max_chars: usize = 6;
-        let branch_reserve = cw * (branch_max_chars as f32) + pad_h + cw;
+        // Use proportional UI font advance for text width estimation (sidebar labels
+        // render with text_ui, not monospace). Proportional chars are ~75% of cell_width.
+        let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
+        let branch_reserve = ui_cw * (branch_max_chars as f32) + pad_h + ui_cw;
         let name_max_w = sidebar.width - (name_x - sidebar.x) - branch_reserve;
-        let name_max_chars = (name_max_w / cw).floor().max(1.0) as usize;
+        let name_max_chars = (name_max_w / ui_cw).floor().max(1.0) as usize;
         let line1_y_off = s(8.0); // top padding for first line
         let line2_y_off = line1_y_off + ch + s(2.0); // second line below first
 
@@ -584,8 +587,8 @@ impl Sidebar {
                 } else {
                     0.0
                 };
-                let desc_avail = sidebar.width - pad_h * 2.0 - cw * 2.0 - ts_reserve;
-                let desc_max_chars = (desc_avail / cw).floor().max(1.0) as usize;
+                let desc_avail = sidebar.width - pad_h * 2.0 - ui_cw * 2.0 - ts_reserve;
+                let desc_max_chars = (desc_avail / ui_cw).floor().max(1.0) as usize;
                 let desc = if second_line.len() > desc_max_chars {
                     format!("{}\u{2026}", &second_line[..desc_max_chars.saturating_sub(1)])
                 } else {
@@ -974,7 +977,7 @@ impl Sidebar {
                 // Line 2: task description (brightens on hover for readability)
                 if !agent.task.is_empty() && agent.task != status_text {
                     let line2_y = line1_y + ch + s(2.0);
-                    let task_max_chars = ((sidebar.width - pad_h * 2.0 - cw * 2.0) / cw).floor().max(1.0) as usize;
+                    let task_max_chars = ((sidebar.width - pad_h * 2.0 - ui_cw * 2.0) / ui_cw).floor().max(1.0) as usize;
                     let task = if agent.task.len() > task_max_chars {
                         format!("{}\u{2026}", &agent.task[..task_max_chars.saturating_sub(1)])
                     } else {

@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 48)
+Last updated: 2026-03-31 (Iteration 49)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -133,6 +133,9 @@ Last updated: 2026-03-31 (Iteration 48)
 | Compact sidebar sessions | Done | Single-line entries for sessions without descriptions; CWD removed (shown in breadcrumb/status bar) (iteration 48) |
 | 2×2 shortcut grid | Done | Welcome screen shortcuts in 2-column grid for compact professional layout (iteration 48) |
 | Hero icon pill background | Done | Rounded pill with accent-tinted fill replaces raw halo glow for refined icon presentation (iteration 48) |
+| Proportional font width calc | Done | Tab titles, sidebar names, status bar CWD use UI font advance (~25% more visible text) (iteration 49) |
+| Tab hover lift effect | Done | Inactive tabs shift up 1.5px on hover for physical "raise" feel (iteration 49) |
+| Smooth close button fade | Done | Close button uses smooth alpha (max of active_t, hover_t) instead of binary threshold (iteration 49) |
 
 ## Remaining Gaps (Priority Order)
 

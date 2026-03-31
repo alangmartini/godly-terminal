@@ -2321,3 +2321,65 @@ refined, contained presentation inside a rounded pill background.
 **Remaining gaps vs reference (iteration 48)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 49 — Proportional Font Layout, Tab Hover Lift, Close Button Fade
+
+**Goal**: Fix text width calculations across all UI chrome to use proportional
+font advance instead of monospace cell width. Add physical hover feedback
+to tabs. Improve close button visibility transition.
+
+**Changes made**:
+
+1. **Proportional font width for tab titles** (`ui/tab_bar.rs`): Tab title
+   truncation (`title_max_chars`) now uses `ui_avg_advance` (proportional
+   font) instead of `cw` (monospace cell width). Since UI text renders with
+   the proportional Segoe UI font, this gives ~25% more visible characters
+   per tab title (proportional chars are narrower than monospace on average).
+
+2. **Proportional font width for sidebar labels** (`ui/sidebar.rs`): Session
+   name truncation, description truncation, branch reserve width, and agent
+   task truncation all now use `ui_cw` (proportional advance) instead of
+   monospace `cw`. This means sidebar labels show more characters before
+   truncation, especially useful for longer session names.
+
+3. **Proportional font width for status bar** (`ui/status_bar.rs`): CWD path
+   truncation and right-reserved space calculations use proportional advance.
+   Both the `build()` and `pill_rects()` methods updated for consistency.
+
+4. **Tab hover lift effect** (`ui/tab_bar.rs`): Inactive tabs shift up 1.5px
+   (scaled) on hover, creating a physical "raise" effect. The lift amount is
+   `s(1.5) * hover_t * (1.0 - active_t)` — smoothly animated, and active
+   tabs (already visually elevated) stay in place. This micro-interaction
+   adds tactile feedback that professional apps use to signal interactivity.
+
+5. **Smooth close button fade** (`ui/tab_bar.rs`): Replaced the binary
+   threshold check (`active_t > 0.5 || hover_t > 0.005`) with smooth alpha:
+   `close_fade = active_t.max(hover_t)`. The close button icon and its hover
+   effects now fade in/out smoothly with the hover animation instead of
+   popping in at a threshold. This creates a more graceful reveal/hide
+   transition on inactive tabs.
+
+**Technical details**:
+- `ui_cw` defined as: `if text.ui_avg_advance > 0.0 { text.ui_avg_advance }
+  else { cw * 0.75 }`. Falls back to 75% of cell_width if proportional font
+  metrics are unavailable — still more accurate than using full monospace width.
+- Tab hover lift uses `rect.y = bar.y + tab_inset - lift_y` so the tab rises
+  above its normal position. The bar background is painted before tabs, so the
+  lifted tab draws over the chrome correctly.
+- Close button `close_fade` replaces both the visibility check and the icon
+  alpha calculation, eliminating the redundant `icon_alpha` variable.
+
+**Result**: Tab titles show more characters (e.g. "godly-terminal" instead of
+"godly-termi..."). Sidebar session names have more room before truncation.
+Status bar CWD paths are more accurately truncated. Tabs feel physically
+responsive with the hover lift. Close buttons transition smoothly.
+
+**Visual comparison with reference**:
+- Text truncation accuracy: ✓ Proportional widths match rendering font
+- Tab hover feedback: ✓ Physical lift matches professional app interactions
+- Close button transition: ✓ Smooth fade matches Zed/VS Code behavior
+- Overall polish: ✓ Micro-interactions add tactile quality
+
+**Remaining gaps vs reference (iteration 49)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

@@ -82,6 +82,8 @@ impl StatusBar {
         let s = |v: f32| text.s(v);
         let cw = text.cell_width;
         let ch = text.cell_height;
+        // Proportional UI font advance for text width estimation
+        let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
 
         // Background — subtle gradient for depth (raised → slightly darker at bottom)
         let sidebar_bg = colors::BG_DARK;
@@ -205,13 +207,14 @@ impl StatusBar {
                 + s(4.0) * 4.0
                 + s(8.0)
                 + s(10.0)
-                + cw * 2.0;
+                + ui_cw * 2.0;
             let cwd_pad_h = s(4.0);
             let cwd_pad_v = s(2.0);
             let icon_sz = ch * 0.85;
             let icon_gap = s(4.0);
-            let avail_for_cwd = bar.right() - x - right_reserved - cw * 4.0 - cwd_pad_h * 2.0 - icon_sz - icon_gap;
-            let max_chars = (avail_for_cwd / cw).floor().max(4.0) as usize;
+            let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
+            let avail_for_cwd = bar.right() - x - right_reserved - ui_cw * 4.0 - cwd_pad_h * 2.0 - icon_sz - icon_gap;
+            let max_chars = (avail_for_cwd / ui_cw).floor().max(4.0) as usize;
 
             let display_cwd = if self.cwd.len() > max_chars {
                 format!("\u{2026}{}", &self.cwd[self.cwd.len() - (max_chars - 1)..])
@@ -448,10 +451,11 @@ impl StatusBar {
         if !self.cwd.is_empty() {
             let hints_label = "? for shortcuts";
             let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
+            let ui_cw2 = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
             let right_reserved = text.text_width_ui(&dims) + text.text_width_ui(hints_label)
-                + s(4.0) * 4.0 + s(8.0) + s(10.0) + cw * 2.0;
-            let avail = bar.right() - x - right_reserved - cw * 4.0 - pad_h * 2.0;
-            let max_chars = (avail / cw).floor().max(4.0) as usize;
+                + s(4.0) * 4.0 + s(8.0) + s(10.0) + ui_cw2 * 2.0;
+            let avail = bar.right() - x - right_reserved - ui_cw2 * 4.0 - pad_h * 2.0;
+            let max_chars = (avail / ui_cw2).floor().max(4.0) as usize;
             let display_cwd = if self.cwd.len() > max_chars {
                 format!("\u{2026}{}", &self.cwd[self.cwd.len() - (max_chars - 1)..])
             } else {

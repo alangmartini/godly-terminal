@@ -396,25 +396,34 @@ impl TabBar {
         let close_btn_sz = s(16.0);
         let close_btn_pad = s(8.0);
 
+        // Proportional UI font advance for tab title width estimation.
+        // Using ui_avg_advance gives tighter truncation than monospace cell_width
+        // because proportional characters are narrower on average (~75% of cell_width).
+        let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
+
         // Max chars for tab title (dynamic based on effective width, reserves close button space)
         // Badge is ch*0.9 wide circle at x+10, then gap before title
         let badge_sz = ch * 0.9;
         let title_x_offset = s(10.0) + badge_sz + s(6.0);
         let title_max_w = tab_w - title_x_offset - close_btn_sz - close_btn_pad - s(4.0);
-        let title_max_chars = (title_max_w / cw).floor().max(1.0) as usize;
+        let title_max_chars = (title_max_w / ui_cw).floor().max(1.0) as usize;
 
         for (i, tab) in self.tabs.iter().enumerate() {
+            let accent = self.accent_for(i);
+            let hover_t = self.tab_hover_anim.get(i); // 0.0 → 1.0 smooth
+            let active_t = self.active_anim.get(i);
+
+            // Hover lift: inactive tabs shift up 1.5px on hover for physical "raise" feel.
+            // Active tabs stay in place (they're already visually elevated via gradient/border).
+            let lift_y = s(1.5) * hover_t * (1.0 - active_t);
             let rect = Rect {
                 x: origin + i as f32 * (tab_w + tab_gap),
-                y: bar.y + tab_inset,
+                y: bar.y + tab_inset - lift_y,
                 width: tab_w,
                 height: bar.height - tab_inset,
             };
-            let accent = self.accent_for(i);
-            let hover_t = self.tab_hover_anim.get(i); // 0.0 → 1.0 smooth
 
             // Tab background — smoothly blend between inactive and active states
-            let active_t = self.active_anim.get(i);
             let inactive_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, hover_t);
             let bg = lerp_color(inactive_bg, colors::BG_BASE, active_t);
 
@@ -571,9 +580,12 @@ impl TabBar {
                 }
             }
 
-            // Close button — visible on active tab always, fades in on hover for inactive
-            let close_visible = active_t > 0.5 || hover_t > 0.005;
-            if close_visible {
+            // Close button — smoothly fades in based on active/hover state.
+            // On active tabs the button is fully visible; on hovered inactive
+            // tabs it fades in with the hover animation; on untouched inactive
+            // tabs it's hidden. Uses smooth alpha for graceful transition.
+            let close_fade = active_t.max(hover_t);
+            if close_fade > 0.005 {
                 let close_t = self.close_hover_anim.get(i);
                 let close_rect = Rect {
                     x: rect.right() - close_btn_sz - close_btn_pad,
@@ -605,11 +617,11 @@ impl TabBar {
                     let close_border = [colors::ACCENT_RED[0], colors::ACCENT_RED[1], colors::ACCENT_RED[2], 0.15 * close_t];
                     ui.stroke_rounded(close_rect, close_btn_sz / 2.0, 0.5, close_border);
                 }
-                // Icon color: smoothly transition based on close hover + tab hover
+                // Icon color: smoothly transition based on close hover + tab hover.
+                // Uses close_fade for smooth visibility transition.
                 let base_icon = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, active_t);
-                let icon_alpha = active_t.max(hover_t);
                 let icon_color_base = lerp_color(base_icon, colors::FG_PRIMARY, close_t);
-                let icon_color = [icon_color_base[0], icon_color_base[1], icon_color_base[2], icon_color_base[3] * icon_alpha];
+                let icon_color = [icon_color_base[0], icon_color_base[1], icon_color_base[2], icon_color_base[3] * close_fade];
                 ui.icon_x(close_rect, s(7.0), icon_t, icon_color);
             }
 
