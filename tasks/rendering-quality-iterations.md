@@ -2,6 +2,27 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 62 — Text Contrast Hierarchy (Web Parity)
+
+**Analysis**: Side-by-side comparison of web reference JSX and native Rust styling revealed that the
+web reference uses a broader text color hierarchy than the native shell. Specifically:
+- Web uses #e6edf3 (FG_BRIGHT) for active tabs/headings — native only had FG_PRIMARY (#c9d1d9)
+- Web uses #555d6b (FG_DIM) for inactive tab text — native used FG_MUTED (#6e7681)
+- Web uses #c9d1d9 (FG_PRIMARY) for sidebar session names at rest — native used FG_SECONDARY (#8b949e)
+- Web uses border-radius 6px on sidebar items — native used 4px
+
+Net effect: native had less contrast between active/inactive elements.
+
+**Changes**:
+1. **builder.rs**: Added FG_BRIGHT (#e6edf3) and FG_DIM (#555d6b) color constants
+2. **tab_bar.rs**: Active tab text FG_PRIMARY→FG_BRIGHT, inactive tab text FG_MUTED→FG_DIM
+3. **tab_bar.rs**: New tab "+" icon and window control icons use FG_DIM at rest
+4. **sidebar.rs**: Session names use FG_PRIMARY at rest (was FG_SECONDARY), FG_BRIGHT on hover
+5. **sidebar.rs**: Item border radius 4px→6px matching web reference
+
+**Result**: Higher contrast between active/inactive tabs, brighter session names, rounder sidebar
+items — all matching the web reference's text contrast hierarchy.
+
 ## Iteration 1 — Analysis
 
 **Current state**: Text renders but lacks the crispness of Windows Terminal.

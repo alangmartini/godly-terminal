@@ -18,9 +18,11 @@ pub mod colors {
     pub const BG_ACTIVE: [f32; 4] = [0.090, 0.106, 0.141, 1.0];    // #171b24 Active selection
     pub const BG_ACTIVE_ACC: [f32; 4] = [0.078, 0.090, 0.122, 1.0]; // #14171f Blue-tinted active
     pub const BG_STATUS: [f32; 4] = [0.047, 0.055, 0.078, 1.0];    // #0c0e14 Status bar
+    pub const FG_BRIGHT: [f32; 4] = [0.902, 0.929, 0.953, 1.0];    // #e6edf3 Active/heading
     pub const FG_PRIMARY: [f32; 4] = [0.788, 0.820, 0.851, 1.0];   // #c9d1d9 Text
     pub const FG_SECONDARY: [f32; 4] = [0.545, 0.580, 0.620, 1.0]; // #8b949e Subtext
     pub const FG_MUTED: [f32; 4] = [0.431, 0.463, 0.506, 1.0];     // #6e7681 Overlay/muted
+    pub const FG_DIM: [f32; 4] = [0.333, 0.365, 0.420, 1.0];       // #555d6b Dimmed chrome
     pub const ACCENT_BLUE: [f32; 4] = [0.388, 0.400, 0.945, 1.0];  // #6366f1 Indigo
     pub const ACCENT_GREEN: [f32; 4] = [0.133, 0.773, 0.369, 1.0]; // #22c55e Green
     pub const ACCENT_PEACH: [f32; 4] = [0.961, 0.620, 0.043, 1.0]; // #f59e0b Amber

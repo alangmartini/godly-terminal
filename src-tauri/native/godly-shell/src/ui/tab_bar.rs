@@ -463,7 +463,7 @@ impl TabBar {
             }
             if active_t < 0.005 && hover_t < 0.005 {
                 // Inactive rest state: transparent — no background drawn.
-                // Text color alone distinguishes inactive tabs (FG_MUTED).
+                // Text color alone distinguishes inactive tabs (FG_DIM).
             }
 
             // Numbered circle badge — number rendered inside a colored circle
@@ -486,10 +486,10 @@ impl TabBar {
             ui.text(text, &num_str, num_x, num_y, accent, badge_bg);
 
             // Tab title (truncated to fit)
-            // Inactive: FG_MUTED, hover: FG_SECONDARY, active: FG_PRIMARY
+            // Inactive: FG_DIM, hover: FG_SECONDARY, active: FG_BRIGHT
             let fg = lerp_color(
-                lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t),
-                colors::FG_PRIMARY,
+                lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t),
+                colors::FG_BRIGHT,
                 active_t,
             );
             let title = if title_max_chars > 2 {
@@ -637,7 +637,7 @@ impl TabBar {
             let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
             ui.stroke_rounded(new_rect, btn_radius, 0.5, rest_border);
         }
-        let new_tab_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
+        let new_tab_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, new_t);
         ui.icon_plus(new_rect, icon_t, s(5.0), new_tab_fg);
 
         // Window control buttons (minimize, maximize, close) — animated hovers
@@ -675,9 +675,9 @@ impl TabBar {
             }
 
             let icon_color = if *btn == WindowButton::Close {
-                lerp_color(colors::FG_MUTED, colors::WHITE, btn_t)
+                lerp_color(colors::FG_DIM, colors::WHITE, btn_t)
             } else {
-                lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, btn_t)
+                lerp_color(colors::FG_DIM, colors::FG_SECONDARY, btn_t)
             };
             match btn {
                 WindowButton::Minimize => ui.icon_minimize(*rect, s(10.0), icon_t, icon_color),

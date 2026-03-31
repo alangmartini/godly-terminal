@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 61)
+Last updated: 2026-03-31 (Iteration 62)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -174,6 +174,11 @@ Last updated: 2026-03-31 (Iteration 61)
 | Full-width CTA button | Done | "Create terminal" button spans full card container width with 6px rounded corners (iteration 61) |
 | Shortcut-CTA separator | Done | Thin hairline between shortcut grid and version/CTA section for visual clarity (iteration 61) |
 | Sidebar session list fade | Done | Gradient fade at bottom of session list for smooth visual clipping (iteration 61) |
+| Text contrast hierarchy | Done | Added FG_BRIGHT (#e6edf3) and FG_DIM (#555d6b) color levels matching web reference (iteration 62) |
+| Active tab text brightness | Done | Active tab uses FG_BRIGHT (#e6edf3, was FG_PRIMARY #c9d1d9) for stronger active/inactive contrast (iteration 62) |
+| Inactive tab dimming | Done | Inactive tabs use FG_DIM (#555d6b, was FG_MUTED #6e7681) for web-accurate contrast (iteration 62) |
+| Sidebar session name brightness | Done | Session names use FG_PRIMARY at rest (was FG_SECONDARY), FG_BRIGHT on hover, WHITE on active (iteration 62) |
+| Sidebar item border radius | Done | Session items use 6px radius (was 4px) matching web reference border-radius (iteration 62) |
 
 ## Remaining Gaps (Priority Order)
 

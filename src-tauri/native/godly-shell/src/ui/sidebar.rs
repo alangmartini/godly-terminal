@@ -376,7 +376,7 @@ impl Sidebar {
             };
 
             // Hover background (rounded, animated)
-            let item_radius = s(4.0);
+            let item_radius = s(6.0);
             let inset_rect = Rect {
                 x: rect.x + s(6.0),
                 y: rect.y + s(2.0),
@@ -471,7 +471,7 @@ impl Sidebar {
             ui.text(text, &num_str, num_x_shifted, text_y, fg, item_bg);
 
             // Session name (truncated to fit pixel width) — text brightens on hover and active
-            let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.6);
+            let inactive_name = lerp_color(colors::FG_PRIMARY, colors::FG_BRIGHT, hover_t * 0.6);
             let name_fg = lerp_color(inactive_name, colors::WHITE, active_t);
             // Calculate available width: from name_x to right_edge minus reserved space
             // for branch (~6 chars) + shell pill (~5 chars) + gaps
