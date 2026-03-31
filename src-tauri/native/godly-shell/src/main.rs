@@ -807,14 +807,14 @@ impl App {
                 height: hero_icon_size + halo_expand * 2.0,
             };
             ui_builder.fill_shadow(halo_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.035 * breath],
+                [active_accent[0], active_accent[1], active_accent[2], 0.07 * breath],
                 hero_icon_size * 0.3, s(16.0));
-            // Icon stroke with accent tint (brighter than tab-bar version)
+            // Icon stroke with accent tint (prominent for hero element)
             let hero_icon_fg = [
-                ui::builder::colors::FG_MUTED[0] * 0.55 + active_accent[0] * 0.45,
-                ui::builder::colors::FG_MUTED[1] * 0.55 + active_accent[1] * 0.45,
-                ui::builder::colors::FG_MUTED[2] * 0.55 + active_accent[2] * 0.45,
-                0.55,
+                ui::builder::colors::FG_MUTED[0] * 0.30 + active_accent[0] * 0.70,
+                ui::builder::colors::FG_MUTED[1] * 0.30 + active_accent[1] * 0.70,
+                ui::builder::colors::FG_MUTED[2] * 0.30 + active_accent[2] * 0.70,
+                0.75,
             ];
             let hero_t = (1.8 * ui_text_handle.scale).max(1.0);
             ui_builder.icon_terminal(hero_rect, hero_t, hero_icon_fg);
@@ -823,12 +823,12 @@ impl App {
             let title = "Godly Terminal";
             let title_w = ui_text_handle.text_width_ui(title);
             let title_x = center_x - title_w / 2.0;
-            // Title text with subtle accent tint
+            // Title text with accent tint — prominent as hero heading
             let title_fg = [
-                ui::builder::colors::FG_SECONDARY[0] * 0.80 + active_accent[0] * 0.20,
-                ui::builder::colors::FG_SECONDARY[1] * 0.80 + active_accent[1] * 0.20,
-                ui::builder::colors::FG_SECONDARY[2] * 0.80 + active_accent[2] * 0.20,
-                0.7,
+                ui::builder::colors::FG_PRIMARY[0] * 0.80 + active_accent[0] * 0.20,
+                ui::builder::colors::FG_PRIMARY[1] * 0.80 + active_accent[1] * 0.20,
+                ui::builder::colors::FG_PRIMARY[2] * 0.80 + active_accent[2] * 0.20,
+                0.88,
             ];
             ui_builder.text_ui_bold(&ui_text_handle, title, title_x, block_y, title_fg, bg);
 
@@ -1299,9 +1299,9 @@ impl App {
             // Background: subtle gradient — slightly darker at top (near tab bar)
             // fading to content-adjacent tone at bottom for smooth transition.
             let bc_bg_top = [
-                ui::builder::colors::BG_BASE[0] * 0.93,
-                ui::builder::colors::BG_BASE[1] * 0.93,
-                ui::builder::colors::BG_BASE[2] * 0.93,
+                ui::builder::colors::BG_BASE[0] * 0.88,
+                ui::builder::colors::BG_BASE[1] * 0.88,
+                ui::builder::colors::BG_BASE[2] * 0.88,
                 1.0,
             ];
             let bc_bg = [
@@ -1315,7 +1315,7 @@ impl App {
             // Bottom separator — thin line for content area boundary
             ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
                 [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.25]);
+                 ui::builder::colors::BORDER[2], 0.35]);
             // Left inner shadow for sidebar-cast depth
             ui_builder.fill_gradient_h(
                 ui::widget::Rect { x: bc.x, y: bc.y, width: s(6.0), height: bc.height },
@@ -1331,12 +1331,12 @@ impl App {
                 let icon_sz = ch * 0.75;
                 let icon_t = (0.8 * ui_text_handle.scale).max(1.0);
 
-                // Small folder icon at start
+                // Small folder icon at start (secondary color for better presence)
                 ui_builder.icon_folder(
                     ui::widget::Rect { x, y: bc.y + (bc.height - icon_sz) / 2.0, width: icon_sz, height: icon_sz },
                     icon_t,
-                    [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
-                     ui::builder::colors::FG_MUTED[2], 0.6],
+                    [ui::builder::colors::FG_SECONDARY[0], ui::builder::colors::FG_SECONDARY[1],
+                     ui::builder::colors::FG_SECONDARY[2], 0.75],
                 );
                 x += icon_sz + s(6.0);
 

@@ -294,8 +294,8 @@ impl StatusBar {
                 let diff_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25];
                 ui.fill_rounded_gradient(diff_pill, diff_top, diff_bot, s(3.0));
                 ui.stroke_rounded(diff_pill, s(3.0), 0.5, diff_border);
-                // Render diff summary with muted color
-                let diff_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.8];
+                // Render diff summary with secondary color for readability
+                let diff_fg = [colors::FG_SECONDARY[0], colors::FG_SECONDARY[1], colors::FG_SECONDARY[2], 0.8];
                 ui.text_ui(text, &self.git_diff_summary, x + diff_pad_h, y_center, diff_fg, colors::BG_HOVER);
                 x += diff_pill_w + cw;
             }
@@ -325,8 +325,8 @@ impl StatusBar {
         }
 
         // Metadata labels with vertical divider separators (matches VS Code/Zed)
-        let meta_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55];
-        let divider_fg = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25];
+        let meta_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65];
+        let divider_fg = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35];
         let divider_h = ch * 0.6;
         let divider_y = bar.y + (bar.height - divider_h) / 2.0;
         let meta_gap = s(8.0); // gap on each side of a divider

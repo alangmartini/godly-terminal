@@ -496,7 +496,7 @@ impl TabBar {
                     colors::BG_DARK[0] * 1.03, colors::BG_DARK[1] * 1.03,
                     colors::BG_DARK[2] * 1.03, 0.80,
                 ];
-                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
+                let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.28];
                 // Subtle baseline shadow below inactive tab for physical depth
                 let shadow_rect = Rect {
                     x: rect.x + s(4.0),
@@ -535,11 +535,11 @@ impl TabBar {
             ui.stroke_rounded(badge_rect, badge_r, 0.5,
                 [accent[0] * 0.7, accent[1] * 0.7, accent[2] * 0.7, 0.25]);
 
-            // Number text (centered in circle, dark on accent background)
+            // Number text (centered in circle, white on accent background for contrast)
             let num_w = text.text_width(&num_str);
             let num_x = badge_x + (badge_sz - num_w) / 2.0;
             let num_y = badge_y + (badge_sz - ch) / 2.0;
-            ui.text(text, &num_str, num_x, num_y, [0.06, 0.06, 0.08, 1.0], accent);
+            ui.text(text, &num_str, num_x, num_y, [1.0, 1.0, 1.0, 1.0], accent);
 
             // Tab title (truncated to fit)
             // Inactive tabs start from a blend between FG_SECONDARY and FG_PRIMARY
@@ -589,7 +589,7 @@ impl TabBar {
                         width: close_rect.width + s(6.0), height: close_rect.height + s(6.0),
                     };
                     ui.fill_shadow(glow_rect,
-                        [colors::ACCENT_RED[0], colors::ACCENT_RED[1], colors::ACCENT_RED[2], 0.10 * close_t],
+                        [colors::ACCENT_RED[0], colors::ACCENT_RED[1], colors::ACCENT_RED[2], 0.15 * close_t],
                         close_btn_sz / 2.0 + s(3.0), s(6.0));
                     let base = lerp_color(colors::BG_HOVER, colors::RED_SUBTLE, close_t * 0.6);
                     let hover_top = [
@@ -649,10 +649,10 @@ impl TabBar {
                     ui.fill_rounded(badge_rect, badge_color, badge_r);
                     ui.stroke_rounded(badge_rect, badge_r, 0.5, badge_border);
 
-                    // Count text (centered in pill) — dark text on accent background
+                    // Count text (centered in pill) — white on accent background for max contrast
                     let text_x = badge_x + (badge_w - text_w) / 2.0;
                     let text_y = badge_y + (badge_h - ch) / 2.0;
-                    let text_color = [0.05, 0.05, 0.07, badge_fade];
+                    let text_color = [1.0, 1.0, 1.0, badge_fade];
                     ui.text(text, &count_str, text_x, text_y, text_color, accent);
                 }
             }

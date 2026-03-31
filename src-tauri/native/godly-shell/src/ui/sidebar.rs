@@ -416,7 +416,7 @@ impl Sidebar {
                     width: inset_rect.width + s(6.0),
                     height: inset_rect.height + s(6.0),
                 };
-                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.05 * breath * active_t], item_radius + s(3.0), s(8.0));
+                ui.fill_shadow(glow_rect, [ac[0], ac[1], ac[2], 0.08 * breath * active_t], item_radius + s(3.0), s(8.0));
                 ui.fill_shadow(inset_rect, [0.0, 0.0, 0.0, 0.08 * active_t], item_radius, s(4.0));
                 let active_border = [
                     ac[0] * 0.35,
@@ -508,8 +508,8 @@ impl Sidebar {
 
             // Session name (truncated to fit) — text brightens on hover and active
             // Active session name gets full brightness for clear visual hierarchy
-            let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.4);
-            let name_fg = lerp_color(inactive_name, colors::WHITE, active_t * 0.85);
+            let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.6);
+            let name_fg = lerp_color(inactive_name, colors::WHITE, active_t);
             let name = if item.label.len() > name_max_chars {
                 format!("{}\u{2026}", &item.label[..name_max_chars.saturating_sub(1)])
             } else {
@@ -884,7 +884,7 @@ impl Sidebar {
                 if agent_hover_t > 0.005 {
                     let ahover_bg = [
                         colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2],
-                        colors::BG_HOVER[3] * 0.5 * agent_hover_t,
+                        colors::BG_HOVER[3] * agent_hover_t,
                     ];
                     ui.fill_rounded(agent_inset, ahover_bg, s(3.0));
                 }
@@ -960,11 +960,11 @@ impl Sidebar {
                     width: status_badge_w, height: status_badge_h,
                 };
                 let status_badge_r = status_badge_h / 2.0;
-                // Subtle tinted background for the status badge
-                let status_bg = [status_color[0], status_color[1], status_color[2], 0.12];
+                // Tinted background for the status badge (clearer definition)
+                let status_bg = [status_color[0], status_color[1], status_color[2], 0.18];
                 ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
                 ui.stroke_rounded(status_badge_rect, status_badge_r, 0.5,
-                    [status_color[0], status_color[1], status_color[2], 0.25]);
+                    [status_color[0], status_color[1], status_color[2], 0.35]);
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
                 ui.text_ui(text, status_text,

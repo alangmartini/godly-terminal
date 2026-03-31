@@ -2127,3 +2127,87 @@ a smoother chrome-to-content transition.
 **Remaining gaps vs reference (iteration 45)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 46 — Visual Clarity & Contrast Pass
+
+**Goal**: Improve text contrast, element prominence, and visual clarity
+across the entire UI. Focus on readability of badge text, hero element
+visibility, sidebar active state distinction, and metadata legibility.
+
+**Changes made**:
+
+1. **White badge text** (`ui/tab_bar.rs`): Changed tab numbered circle
+   badge text from near-black (`[0.06, 0.06, 0.08]`) to white
+   (`[1.0, 1.0, 1.0]`). Also changed unread count badge text to white.
+   Dark text on colored accent backgrounds had poor contrast especially
+   on lighter accents (peach, green). White provides maximum contrast
+   on all accent colors, matching professional badge conventions.
+
+2. **Inactive tab border visibility** (`ui/tab_bar.rs`): Increased
+   rest-state border alpha from 0.18 to 0.28. At 0.18 the tab shapes
+   were barely visible against the dark background, making it ambiguous
+   where tabs start/end. The stronger border provides clear tab definition
+   without being heavy.
+
+3. **Close button glow** (`ui/tab_bar.rs`): Increased red hover glow
+   alpha from 0.10 to 0.15 for more emphatic destructive action feedback.
+
+4. **Sidebar active glow** (`ui/sidebar.rs`): Increased active session
+   ambient glow from 0.05 to 0.08 alpha (60% stronger). Active sessions
+   now have a clearly visible accent-tinted halo instead of a barely-
+   perceptible one.
+
+5. **Sidebar text contrast** (`ui/sidebar.rs`): Hover text brightening
+   increased from 40% to 60% of FG_PRIMARY. Active session name now
+   lerps fully to white (was 85%). Both changes improve the visual
+   hierarchy between inactive → hover → active states.
+
+6. **Agent hover and badge** (`ui/sidebar.rs`): Agent hover background
+   increased from 50% to 100% opacity for visible hover feedback. Status
+   badge background alpha 0.12→0.18, stroke 0.25→0.35 for clearer
+   badge definition against the dark panel.
+
+7. **Welcome hero icon** (`main.rs`): Halo glow doubled from 0.035 to
+   0.07 alpha for a more welcoming accent presence. Icon color shifted
+   from 55% muted to 70% accent blend, opacity 0.55→0.75. The hero
+   icon is the first thing users see — it should command attention.
+
+8. **Welcome title** (`main.rs`): Base color changed from FG_SECONDARY
+   to FG_PRIMARY, opacity boosted from 0.70 to 0.88. The title "Godly
+   Terminal" is now clearly readable as the hero heading.
+
+9. **Breadcrumb definition** (`main.rs`): Top gradient darkened from
+   93% to 88% BG_BASE for more visible gradient separation. Bottom
+   separator alpha increased 0.25→0.35 for clearer content boundary.
+   Folder icon changed from FG_MUTED at 0.6 to FG_SECONDARY at 0.75
+   for better visual presence.
+
+10. **Status bar metadata** (`ui/status_bar.rs`): Text alpha increased
+    0.55→0.65, divider alpha 0.25→0.35. Git diff badge text changed
+    from FG_MUTED to FG_SECONDARY for readability. All metadata labels
+    are now clearly legible without being distractingly bright.
+
+**Design principle**: This iteration is a **contrast pass** — systematically
+increasing the visibility of elements that were too subtle after the noise-
+reduction pass in iteration 44. The noise reduction was correct (removing
+visual clutter), but went slightly too far on some text/border alpha values.
+This iteration restores readability while keeping the calm aesthetic.
+
+**Result**: All badge numbers are clearly readable on any accent color.
+The welcome screen hero icon and title are prominently visible. Sidebar
+active sessions are distinctly highlighted. Tab boundaries are clear at
+rest. Status bar metadata is legible. The overall UI maintains its calm,
+professional aesthetic while being more readable and accessible.
+
+**Visual comparison with reference**:
+- Badge legibility: ✓ White numbers match professional badge conventions
+- Hero prominence: ✓ Welcome icon draws the eye appropriately
+- Title readability: ✓ "Godly Terminal" heading clearly visible
+- Active state clarity: ✓ Active session distinct from inactive
+- Tab definition: ✓ Tab shapes visible without requiring hover
+- Metadata readability: ✓ Status bar text legible at all sizes
+- Overall contrast: ✓ Balanced clarity without visual noise
+
+**Remaining gaps vs reference (iteration 46)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

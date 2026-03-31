@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 45)
+Last updated: 2026-03-31 (Iteration 46)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -115,6 +115,15 @@ Last updated: 2026-03-31 (Iteration 45)
 | Dynamic bottom accent stripe | Done | Bottom window edge accent follows active tab color (was hardcoded blue), matches top stripe (iteration 45) |
 | Breadcrumb text readability | Done | Path segment text contrast boosted; last segment brighter; chevrons more visible (iteration 45) |
 | Breadcrumb gradient background | Done | Subtle top-down gradient (darker near tab bar → lighter near content) for smooth transition (iteration 45) |
+| White badge text | Done | Tab number badges and unread count badges use white text for maximum contrast on any accent color (iteration 46) |
+| Hero icon prominence | Done | Welcome terminal icon uses 70% accent blend (was 45%) at 75% opacity (was 55%), stronger halo glow (iteration 46) |
+| Welcome title brightness | Done | Title text uses FG_PRIMARY base (was FG_SECONDARY) at 88% opacity (was 70%) for hero heading prominence (iteration 46) |
+| Sidebar active glow strength | Done | Active session ambient glow 0.08 (was 0.05), name brightens to full white on active (iteration 46) |
+| Inactive tab border clarity | Done | Rest-state border alpha 0.28 (was 0.18) for visible tab shapes without hover (iteration 46) |
+| Breadcrumb panel definition | Done | Gradient top darkened to 88% (was 93%), bottom separator 0.35 (was 0.25), folder icon uses FG_SECONDARY (iteration 46) |
+| Status bar metadata readability | Done | Text alpha 0.65 (was 0.55), divider alpha 0.35 (was 0.25), diff badge uses FG_SECONDARY (iteration 46) |
+| Agent badge definition | Done | Status badge background 0.18 (was 0.12), stroke 0.35 (was 0.25), hover background full opacity (iteration 46) |
+| Close button red glow | Done | Hover glow alpha 0.15 (was 0.10) for stronger destructive action telegraph (iteration 46) |
 
 ## Remaining Gaps (Priority Order)
 
