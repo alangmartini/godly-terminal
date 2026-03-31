@@ -262,9 +262,9 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             let base = bg;
             let accent = ACCENT();
             Color::from_rgb(
-                base.r * 0.95 + accent.r * 0.05,
-                base.g * 0.95 + accent.g * 0.05,
-                base.b * 0.95 + accent.b * 0.05,
+                base.r * 0.92 + accent.r * 0.08,
+                base.g * 0.92 + accent.g * 0.08,
+                base.b * 0.92 + accent.b * 0.08,
             )
         } else {
             bg
@@ -297,7 +297,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                     border: Border {
                         color: if is_active {
                             let bv = BORDER_VARIANT();
-                            Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.7)
+                            Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.85)
                         } else {
                             Color::TRANSPARENT
                         },
@@ -343,7 +343,7 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(accent_color)),
                 border: Border {
-                    radius: iced::border::Radius::new(1.0).bottom_left(0.0).bottom_right(0.0),
+                    radius: iced::border::Radius::new(1.5).bottom_left(0.0).bottom_right(0.0),
                     ..Border::default()
                 },
                 ..container::Style::default()
@@ -433,9 +433,9 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         .style(|_theme| {
             let base = BG_SECONDARY();
             let lighter = Color::from_rgb(
-                (base.r + 0.015).min(1.0),
-                (base.g + 0.015).min(1.0),
-                (base.b + 0.015).min(1.0),
+                (base.r + 0.025).min(1.0),
+                (base.g + 0.025).min(1.0),
+                (base.b + 0.025).min(1.0),
             );
             container::Style {
                 background: Some(iced::Background::Gradient(iced::Gradient::Linear(

@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 50)
+Last updated: 2026-03-31 (Iteration 51)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -140,6 +140,10 @@ Last updated: 2026-03-31 (Iteration 50)
 | Flat sidebar surface | Done | Removed convexity gradient overlay for consistent flat surface matching Zed (iteration 50) |
 | Flat agent panel | Done | PROCESSES panel uses inline items (no card container, shadow, inner shadow) matching sessions section style (iteration 50) |
 | Compact agent items | Done | Single-line 36px agents, no task description or orbit animation — clean status dot + name + badge (iteration 50) |
+| Element definition polish | Done | Stronger borders, shadows, gradients across card, icon, tabs, sidebar, status bar (iteration 51) |
+| Hero icon legibility | Done | Monitor/caret strokes 2.0px, stand 1.6px at 65% opacity for confident rendering at 48px (iteration 51) |
+| CTA button elevation | Done | Shadow offset 3px, blur 8px, alpha 0.32 for convincing floating button (iteration 51) |
+| Active tab warmth | Done | 8% accent tint (was 5%), border alpha 0.85× (was 0.7×) for stronger tab-content connection (iteration 51) |
 
 ## Remaining Gaps (Priority Order)
 

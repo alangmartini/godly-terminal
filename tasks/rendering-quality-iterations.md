@@ -1364,6 +1364,76 @@ items are compact single-line entries consistent with session item styling.
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
 
+## Iteration 51 — Definition and Contrast Polish
+
+**Goal**: Strengthen visual boundaries, depth cues, and element definition
+across all chrome. Small but cumulative alpha/size adjustments that make
+the difference between "good" and "professional".
+
+**Changes made**:
+
+1. **Hero icon strokes** (`app.rs`): Monitor outline and caret 1.8px → 2.0px.
+   Stand stroke 1.4px → 1.6px, opacity 0.5 → 0.65. Icon reads more
+   confidently at 48px size without becoming heavy.
+
+2. **Icon container definition** (`app.rs`): Background alpha 0.08 → 0.12,
+   border alpha 0.15 → 0.25. The pill container around the hero icon is
+   now clearly visible rather than ghostly.
+
+3. **Keycap badge gradient** (`app.rs`): Top-edge brightness boost 0.03 →
+   0.06. The "raised key" gradient on shortcut badges is now perceptible,
+   creating a subtle but real physical depth effect.
+
+4. **CTA button shadow** (`app.rs`): Offset 2px → 3px, blur 6px → 8px,
+   opacity 0.25 → 0.32. The "Create terminal" button now casts a
+   convincing shadow that elevates it above the card surface.
+
+5. **Welcome card border** (`app.rs`): Border opacity 0.4 → 0.55. Shadow
+   offset 4px → 5px, shadow blur 16px → 14px, shadow alpha 0.25 → 0.30.
+   The card edge is more defined and the tighter shadow makes it feel
+   more anchored.
+
+6. **Active tab accent tint** (`tab_bar.rs`): 5% → 8% accent blend in
+   active tab background. Creates a warmer, more visible connection
+   between the active tab and the terminal content area below.
+
+7. **Active tab border** (`tab_bar.rs`): Border alpha multiplier 0.7 →
+   0.85. Active tab edges are now more clearly defined.
+
+8. **Tab bar gradient** (`tab_bar.rs`): Top-edge brightness boost 1.5% →
+   2.5%. The vertical gradient is now perceptible, adding subtle depth
+   to the tab bar surface.
+
+9. **Accent indicator radius** (`tab_bar.rs`): Corner radius 1.0 → 1.5.
+   The active tab's colored line has softer top corners.
+
+10. **Sidebar accent bar** (`sidebar.rs`): Width 3.0px → 3.5px for
+    better visibility at scanning speed.
+
+11. **Sidebar depth shadow** (`sidebar.rs`): Alpha 0.18 → 0.22, blur 6px
+    → 8px. Stronger rightward shadow for clearer panel separation.
+
+12. **Status bar separator** (`status_bar.rs`): Alpha 0.45 → 0.52. Firmer
+    baseline anchoring for the bottom of the interface.
+
+**Result**: All chrome elements now have clearly defined edges, visible
+depth cues, and stronger visual hierarchy. The cumulative effect of 12
+small alpha/size adjustments creates a noticeably more polished feel
+without adding any new visual elements or render passes.
+
+**Visual comparison with reference**:
+- Card floating effect: ✓ Stronger shadow + border = convincing elevation
+- Icon legibility: ✓ Thicker strokes read better at 48px
+- Keycap physicality: ✓ Visible gradient = raised key feel
+- CTA prominence: ✓ Deeper shadow = primary action emphasis
+- Active tab warmth: ✓ 8% accent tint bridges tab to content
+- Panel separation: ✓ Stronger sidebar shadow = clear boundaries
+- Status bar grounding: ✓ Firmer separator anchors the layout
+
+**Remaining gaps vs reference (iteration 51)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
+
 ## Iteration 35 — Session Metadata, Shell Type Badges, Filled CTA Button
 
 **Goal**: Enrich sidebar sessions with shell type identification, working

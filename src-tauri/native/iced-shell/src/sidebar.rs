@@ -304,7 +304,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         };
         let accent_bar = container(
             Space::new()
-                .width(Length::Fixed(3.0))
+                .width(Length::Fixed(3.5))
                 .height(Length::Fixed(26.0)),
         )
         .style(move |_theme| container::Style {
@@ -771,9 +771,9 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         background: Some(iced::Background::Color(SURFACE_BG())),
         // Cast a rightward shadow from the sidebar edge for depth separation.
         shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.18),
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
             offset: iced::Vector::new(2.0, 0.0),
-            blur_radius: 6.0,
+            blur_radius: 8.0,
         },
         ..container::Style::default()
     });

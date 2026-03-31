@@ -269,7 +269,7 @@ impl<Message> canvas::Program<Message> for EmptyStateIcon {
         );
         let stroke = canvas::Stroke::default()
             .with_color(self.color)
-            .with_width(1.8);
+            .with_width(2.0);
         frame.stroke(&outline, stroke);
 
         // Prompt caret ">"
@@ -280,7 +280,7 @@ impl<Message> canvas::Program<Message> for EmptyStateIcon {
         });
         let caret_stroke = canvas::Stroke::default()
             .with_color(self.color)
-            .with_width(1.8)
+            .with_width(2.0)
             .with_line_cap(canvas::LineCap::Round)
             .with_line_join(canvas::LineJoin::Round);
         frame.stroke(&caret, caret_stroke);
@@ -298,8 +298,8 @@ impl<Message> canvas::Program<Message> for EmptyStateIcon {
             Point::new(cx + s * 0.25, cy + s * 0.8 + 1.0),
         );
         let stand_stroke = canvas::Stroke::default()
-            .with_color(Color::from_rgba(self.color.r, self.color.g, self.color.b, 0.5))
-            .with_width(1.4)
+            .with_color(Color::from_rgba(self.color.r, self.color.g, self.color.b, 0.65))
+            .with_width(1.6)
             .with_line_cap(canvas::LineCap::Round);
         frame.stroke(&stand, stand_stroke);
 
@@ -10398,10 +10398,10 @@ impl GodlyApp {
                 let accent = ACCENT();
                 container::Style {
                     background: Some(iced::Background::Color(Color::from_rgba(
-                        accent.r, accent.g, accent.b, 0.08,
+                        accent.r, accent.g, accent.b, 0.12,
                     ))),
                     border: iced::Border {
-                        color: Color::from_rgba(accent.r, accent.g, accent.b, 0.15),
+                        color: Color::from_rgba(accent.r, accent.g, accent.b, 0.25),
                         width: 1.0,
                         radius: 14.0.into(),
                     },
@@ -10428,9 +10428,9 @@ impl GodlyApp {
             .style(|_theme| {
                 let bg = GHOST_HOVER();
                 let bg_top = Color::from_rgba(
-                    (bg.r + 0.03).min(1.0),
-                    (bg.g + 0.03).min(1.0),
-                    (bg.b + 0.03).min(1.0),
+                    (bg.r + 0.06).min(1.0),
+                    (bg.g + 0.06).min(1.0),
+                    (bg.b + 0.06).min(1.0),
                     bg.a,
                 );
                 container::Style {
@@ -10537,9 +10537,9 @@ impl GodlyApp {
                     radius: 6.0.into(),
                 },
                 shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
-                    offset: Vector::new(0.0, 2.0),
-                    blur_radius: 6.0,
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.32),
+                    offset: Vector::new(0.0, 3.0),
+                    blur_radius: 8.0,
                 },
                 ..button::Style::default()
             }
@@ -10575,14 +10575,14 @@ impl GodlyApp {
             container::Style {
                 background: Some(iced::Background::Color(bg)),
                 border: iced::Border {
-                    color: Color::from_rgba(border_c.r, border_c.g, border_c.b, 0.4),
+                    color: Color::from_rgba(border_c.r, border_c.g, border_c.b, 0.55),
                     width: 1.0,
                     radius: 12.0.into(),
                 },
                 shadow: Shadow {
-                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
-                    offset: Vector::new(0.0, 4.0),
-                    blur_radius: 16.0,
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
+                    offset: Vector::new(0.0, 5.0),
+                    blur_radius: 14.0,
                 },
                 ..container::Style::default()
             }

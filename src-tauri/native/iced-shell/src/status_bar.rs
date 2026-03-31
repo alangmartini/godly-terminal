@@ -169,7 +169,7 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
     // Soft top separator — less harsh than full-opacity border.
     let status_sep_color = {
         let b = BORDER();
-        Color::from_rgba(b.r, b.g, b.b, 0.45)
+        Color::from_rgba(b.r, b.g, b.b, 0.52)
     };
     let separator = rule::horizontal(1).style(move |_theme| rule::Style {
         color: status_sep_color,
