@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 47)
+Last updated: 2026-03-31 (Iteration 48)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -130,6 +130,9 @@ Last updated: 2026-03-31 (Iteration 47)
 | Shortcut-CTA divider | Done | Thin hairline separator between shortcut grid and CTA for visual section clarity (iteration 47) |
 | Keycap gradient styling | Done | Key badges use top-lighter gradient background for raised keycap appearance (iteration 47) |
 | Tab bar codicon plus | Done | New tab "+" button uses codicon icon with hover border instead of text (iteration 47) |
+| Compact sidebar sessions | Done | Single-line entries for sessions without descriptions; CWD removed (shown in breadcrumb/status bar) (iteration 48) |
+| 2×2 shortcut grid | Done | Welcome screen shortcuts in 2-column grid for compact professional layout (iteration 48) |
+| Hero icon pill background | Done | Rounded pill with accent-tinted fill replaces raw halo glow for refined icon presentation (iteration 48) |
 
 ## Remaining Gaps (Priority Order)
 

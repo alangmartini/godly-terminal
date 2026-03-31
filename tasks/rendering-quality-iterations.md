@@ -2253,3 +2253,71 @@ is consistent with the icon language used throughout the UI.
 **Remaining gaps vs reference (iteration 47)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 48 — Compact Sidebar, 2×2 Grid, Hero Icon Pill
+
+**Goal**: Reduce sidebar density, compact welcome screen shortcuts into a
+2-column grid, and refine the hero icon with a pill background instead
+of a raw halo glow.
+
+**Changes made**:
+
+1. **Sidebar single-line sessions** (`ui/sidebar.rs`): Changed
+   `item_height_for()` to use compact mode for sessions without an
+   explicit description. Previously, sessions with a `cwd` field also
+   triggered two-line mode, showing the working directory on line 2.
+   Since CWD is already displayed in the breadcrumb bar and status bar,
+   this was redundant information. Sessions now show: accent dot + number
+   + name + shell badge + branch on a single compact line (38px). Only
+   sessions with an explicit description (e.g. "fix/pdf-export...") get
+   the two-line treatment (52px). This reduces sidebar visual density by
+   ~25% for typical session lists.
+
+2. **2×2 shortcut grid** (`main.rs`): Replaced the single-column
+   4-row shortcut card layout with a 2-column × 2-row grid:
+   - Row 1: Ctrl+T New tab │ Ctrl+W Close tab
+   - Row 2: Ctrl+Tab Next tab │ Ctrl+, Settings
+   Grid has 8px horizontal gap and 6px vertical gap between cells.
+   Container backdrop resized to fit the grid dimensions. This makes
+   the welcome screen significantly more compact vertically, matching
+   the professional layout used by VS Code and Zed welcome pages.
+
+3. **Hero icon pill background** (`main.rs`): Replaced the raw halo
+   glow (large SDF shadow at 7% alpha, 16px blur) with a structured
+   rounded rectangle pill:
+   - Icon size reduced: ch × 4.0 → ch × 3.5 (less dominant)
+   - 12px padding around icon, 16px corner radius
+   - Accent-tinted fill: 10% accent + 90% BG_SURFACE at 60% alpha
+   - Gradient top: +8% brightness for subtle convexity
+   - Accent-tinted border at 35% alpha with breathing modulation
+   - Drop shadow (15% alpha, 10px blur) for floating depth
+   - Icon stroke tint: 65% accent (was 70%), opacity 70% (was 75%)
+   This creates a more refined, contained icon presentation that
+   matches professional welcome page conventions (VS Code, JetBrains)
+   without the diffuse glow that dominated the dark background.
+
+**Technical details**:
+- `item_height_for()` condition changed from `description.is_empty()
+  && cwd.is_empty()` to just `description.is_empty()`. The `cwd`
+  field still exists on `SidebarItem` for potential future use.
+- Grid layout uses `col = i % 2`, `row = i / 2` addressing. Cell
+  positions: `cell_x = grid_x + col * (cell_w + gap_h)`,
+  `y = start_y + row * (card_h + gap_v)`.
+- Hero pill uses `fill_rounded_gradient` for convexity + `stroke_rounded`
+  for accent border, same techniques as other pill elements in the UI.
+
+**Result**: The sidebar is significantly cleaner — typical session lists
+show single-line compact entries without redundant CWD paths. The welcome
+screen is more compact with the 2×2 grid taking roughly half the vertical
+space of the previous single-column layout. The hero icon has a more
+refined, contained presentation inside a rounded pill background.
+
+**Visual comparison with reference**:
+- Sidebar density: ✓ Clean single-line entries match Zed/opensessions
+- Welcome compactness: ✓ 2×2 grid matches professional welcome layouts
+- Hero icon refinement: ✓ Pill background replaces raw halo glow
+- Overall composition: ✓ More compact, less empty space, more focused
+
+**Remaining gaps vs reference (iteration 48)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

@@ -187,8 +187,9 @@ impl Sidebar {
 
     fn item_height_for(&self, index: usize, scale: f32) -> f32 {
         let item = &self.items[index];
-        // Two-line if there's a description or a working directory to show
-        if item.description.is_empty() && item.cwd.is_empty() {
+        // Two-line only if there's an explicit description (CWD is shown
+        // in the breadcrumb bar and status bar, so it's not repeated here).
+        if item.description.is_empty() {
             (ITEM_HEIGHT_COMPACT * scale).round()
         } else {
             (ITEM_HEIGHT * scale).round()
@@ -568,12 +569,11 @@ impl Sidebar {
                         branch_fg, item_bg);
             }
 
-            // Description/CWD line (second row, brightens on hover for readability)
-            // Show description if available, otherwise show working directory
+            // Description line (second row, only if explicit description exists)
+            // CWD is NOT shown here — it's already in the breadcrumb bar and
+            // status bar. Keeping the sidebar compact and focused on session identity.
             let (second_line, is_cwd) = if !item.description.is_empty() {
                 (item.description.clone(), false)
-            } else if !item.cwd.is_empty() {
-                (item.cwd.clone(), true)
             } else {
                 (String::new(), false)
             };

@@ -788,35 +788,60 @@ impl App {
             }
 
             // --- Hero terminal icon ---
-            // Large branding icon above the title — a stylized monitor with
-            // prompt caret, rendered at ~4× the tab-bar icon size for hero
-            // presence.  Accent-tinted with a soft halo glow behind it.
-            let hero_icon_size = ch * 4.0;
-            let hero_x = center_x - hero_icon_size / 2.0;
-            let hero_y = block_y - hero_icon_size - s(12.0);
+            // Large branding icon above the title inside a subtle rounded pill
+            // background. Replaces the raw halo with a more refined treatment
+            // that matches professional welcome page icon styling.
+            let hero_icon_size = ch * 3.5;
+            let hero_pill_pad = s(12.0);
+            let hero_pill_size = hero_icon_size + hero_pill_pad * 2.0;
+            let hero_pill_x = center_x - hero_pill_size / 2.0;
+            let hero_pill_y = block_y - hero_pill_size - s(10.0);
+            let hero_pill_rect = ui::widget::Rect {
+                x: hero_pill_x, y: hero_pill_y,
+                width: hero_pill_size, height: hero_pill_size,
+            };
+            let hero_pill_r = s(16.0);
+            // Soft drop shadow for floating depth
+            let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
+            ui_builder.fill_shadow(
+                ui::widget::Rect {
+                    x: hero_pill_x + s(2.0), y: hero_pill_y + s(3.0),
+                    width: hero_pill_size - s(4.0), height: hero_pill_size,
+                },
+                [0.0, 0.0, 0.0, 0.15], hero_pill_r, s(10.0),
+            );
+            // Pill background: subtle accent-tinted fill
+            let pill_bg = [
+                active_accent[0] * 0.10 + ui::builder::colors::BG_SURFACE[0] * 0.90,
+                active_accent[1] * 0.10 + ui::builder::colors::BG_SURFACE[1] * 0.90,
+                active_accent[2] * 0.10 + ui::builder::colors::BG_SURFACE[2] * 0.90,
+                0.6,
+            ];
+            let pill_bg_top = [pill_bg[0] * 1.08, pill_bg[1] * 1.08, pill_bg[2] * 1.08, pill_bg[3]];
+            ui_builder.fill_rounded_gradient(hero_pill_rect, pill_bg_top, pill_bg, hero_pill_r);
+            // Accent-tinted border
+            let pill_border = [
+                active_accent[0] * 0.25 + ui::builder::colors::BORDER[0] * 0.75,
+                active_accent[1] * 0.25 + ui::builder::colors::BORDER[1] * 0.75,
+                active_accent[2] * 0.25 + ui::builder::colors::BORDER[2] * 0.75,
+                0.35 * breath,
+            ];
+            ui_builder.stroke_rounded(hero_pill_rect, hero_pill_r, 0.5, pill_border);
+            // Icon centered inside the pill
+            let hero_x = hero_pill_x + hero_pill_pad;
+            let hero_y = hero_pill_y + hero_pill_pad;
             let hero_rect = ui::widget::Rect {
                 x: hero_x, y: hero_y,
                 width: hero_icon_size, height: hero_icon_size,
             };
-            // Halo glow behind icon (breathing, accent-tinted)
-            let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
-            let halo_expand = s(10.0);
-            let halo_rect = ui::widget::Rect {
-                x: hero_x - halo_expand, y: hero_y - halo_expand,
-                width: hero_icon_size + halo_expand * 2.0,
-                height: hero_icon_size + halo_expand * 2.0,
-            };
-            ui_builder.fill_shadow(halo_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.07 * breath],
-                hero_icon_size * 0.3, s(16.0));
-            // Icon stroke with accent tint (prominent for hero element)
+            // Icon stroke with accent tint
             let hero_icon_fg = [
-                ui::builder::colors::FG_MUTED[0] * 0.30 + active_accent[0] * 0.70,
-                ui::builder::colors::FG_MUTED[1] * 0.30 + active_accent[1] * 0.70,
-                ui::builder::colors::FG_MUTED[2] * 0.30 + active_accent[2] * 0.70,
-                0.75,
+                ui::builder::colors::FG_MUTED[0] * 0.35 + active_accent[0] * 0.65,
+                ui::builder::colors::FG_MUTED[1] * 0.35 + active_accent[1] * 0.65,
+                ui::builder::colors::FG_MUTED[2] * 0.35 + active_accent[2] * 0.65,
+                0.70,
             ];
-            let hero_t = (1.8 * ui_text_handle.scale).max(1.0);
+            let hero_t = (1.6 * ui_text_handle.scale).max(1.0);
             ui_builder.icon_terminal(hero_rect, hero_t, hero_icon_fg);
 
             // --- Branded header ---
@@ -918,8 +943,8 @@ impl App {
                 }
             }
 
-            // --- Keyboard shortcut cards ---
-            // Each hint is rendered as a styled card: [key badge] description
+            // --- Keyboard shortcut cards (2×2 grid) ---
+            // Compact two-column layout matching VS Code/Zed welcome pages.
             let hints = [
                 ("Ctrl+T", "New tab"),
                 ("Ctrl+W", "Close tab"),
@@ -929,34 +954,39 @@ impl App {
 
             let card_pad_h = s(8.0);
             let card_pad_v = s(4.0);
-            let card_gap = s(6.0);
+            let card_gap_h = s(8.0);  // horizontal gap between columns
+            let card_gap_v = s(6.0);  // vertical gap between rows
             let key_badge_pad_h = s(5.0);
             let key_badge_pad_v = s(2.0);
             let key_badge_radius = s(3.0);
             let card_radius = s(5.0);
-            let key_desc_gap = s(10.0);
+            let key_desc_gap = s(8.0);
 
-            // Calculate card width (all cards same width for alignment)
+            // Calculate per-cell width (measure longest key+desc in each column)
             let max_key_w = hints.iter()
                 .map(|(k, _)| ui_text_handle.text_width(k))
                 .fold(0.0f32, f32::max);
             let max_desc_w = hints.iter()
                 .map(|(_, d)| ui_text_handle.text_width_ui(d))
                 .fold(0.0f32, f32::max);
-            let card_inner_w = (max_key_w + key_badge_pad_h * 2.0) + key_desc_gap + max_desc_w;
-            let card_w = card_inner_w + card_pad_h * 2.0;
+            let cell_inner_w = (max_key_w + key_badge_pad_h * 2.0) + key_desc_gap + max_desc_w;
+            let cell_w = cell_inner_w + card_pad_h * 2.0;
             let card_h = ch + card_pad_v * 2.0;
 
-            let cards_start_y = status_y + ch + s(20.0);
-            let card_x = center_x - card_w / 2.0;
+            // Grid dimensions: 2 columns, 2 rows
+            let grid_w = cell_w * 2.0 + card_gap_h;
+            let grid_h = card_h * 2.0 + card_gap_v;
 
-            // Card container — subtle rounded backdrop behind all cards
+            let cards_start_y = status_y + ch + s(20.0);
+            let grid_x = center_x - grid_w / 2.0;
+
+            // Card container — subtle rounded backdrop behind the grid
             let container_pad = s(10.0);
             let container_rect = ui::widget::Rect {
-                x: card_x - container_pad,
+                x: grid_x - container_pad,
                 y: cards_start_y - container_pad,
-                width: card_w + container_pad * 2.0,
-                height: hints.len() as f32 * (card_h + card_gap) - card_gap + container_pad * 2.0,
+                width: grid_w + container_pad * 2.0,
+                height: grid_h + container_pad * 2.0,
             };
             let container_bg = [
                 ui::builder::colors::BG_DARK[0],
@@ -981,11 +1011,14 @@ impl App {
                  ui::builder::colors::BORDER[2], 0.25]);
 
             for (i, (key, desc)) in hints.iter().enumerate() {
-                let y = cards_start_y + i as f32 * (card_h + card_gap);
+                let col = i % 2;
+                let row = i / 2;
+                let cell_x = grid_x + col as f32 * (cell_w + card_gap_h);
+                let y = cards_start_y + row as f32 * (card_h + card_gap_v);
 
                 // Card background (subtle gradient)
                 let card_rect = ui::widget::Rect {
-                    x: card_x, y, width: card_w, height: card_h,
+                    x: cell_x, y, width: cell_w, height: card_h,
                 };
                 let card_top = [
                     ui::builder::colors::BG_SURFACE[0] * 0.6,
@@ -1008,12 +1041,11 @@ impl App {
                 let key_w = ui_text_handle.text_width(key);
                 let badge_w = key_w + key_badge_pad_h * 2.0;
                 let badge_h = ch + key_badge_pad_v * 2.0;
-                let badge_x = card_x + card_pad_h;
+                let badge_x = cell_x + card_pad_h;
                 let badge_y = y + (card_h - badge_h) / 2.0;
                 let badge_rect = ui::widget::Rect {
                     x: badge_x, y: badge_y, width: badge_w, height: badge_h,
                 };
-                // Key badge: darker background with subtle border (like a physical keycap)
                 let badge_bg_top = [
                     ui::builder::colors::BG_DARK[0] * 1.1,
                     ui::builder::colors::BG_DARK[1] * 1.1,
@@ -1026,7 +1058,7 @@ impl App {
                     ui::builder::colors::BG_DARK[2] * 0.9,
                     0.9,
                 ];
-                // Drop shadow below keycap for physical "raised key" depth
+                // Drop shadow below keycap
                 let keycap_shadow_rect = ui::widget::Rect {
                     x: badge_x + s(1.0),
                     y: badge_y + s(1.5),
