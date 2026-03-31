@@ -2994,3 +2994,66 @@ scannable with icons. The active workspace indicator has more depth.
 **Remaining gaps vs reference (iteration 59)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 60 — Visual Quieting: Hairline Separators, Compact Sidebar, Hero Refinement
+
+**Goal**: Continue the subtractive refinement toward Zed's "quiet confidence"
+aesthetic. Modernize remaining embossed grooves to single hairlines, tighten
+sidebar item layout, and refine the welcome hero icon pill.
+
+**Changes made**:
+
+1. **Tab separators modernized** (`ui/tab_bar.rs`): Replaced embossed groove
+   separators (`vgroove_fade` with dark+light pair) between inactive tabs
+   with single thin hairline separators (`vline_fade` at 0.15 alpha). Longer
+   fade radius (6→8px) and taller inset (6→8px top/bottom) for softer edges.
+   This is the last embossed groove in the tab bar — all separators now use
+   the modern single-line approach.
+
+2. **Sidebar dot column tightened** (`ui/sidebar.rs`): Reduced `dot_space`
+   from 14px (11px icon + 3px gap, leftover from when items had mini terminal
+   icons) to 11px (7px dot + 4px gap). This matches the actual 7px accent
+   dot size and gives ~3px more room per session for name text. The session
+   number x-offset now uses `dot_space` directly instead of hardcoded offsets.
+
+3. **Inactive tab rest border softened** (`ui/tab_bar.rs`): Reduced rest-state
+   border alpha from 0.28 to 0.22. Tab shapes remain visible but recede
+   further into the background, matching the quieter separator aesthetic.
+
+4. **Window control separator softened** (`ui/tab_bar.rs`): Reduced vertical
+   separator alpha before minimize/maximize/close buttons from 0.30 to 0.20,
+   and extended fade radius from 6→8px. Consistent with the softer separator
+   language across all chrome.
+
+5. **Settings row separator modernized** (`ui/sidebar.rs`): Replaced embossed
+   groove (`hgroove_fade` with dark+light pair) above the Settings row with
+   a single thin hairline (`hline_fade` at 0.12 alpha, 12px fade). This was
+   the last embossed groove in the sidebar — all separators now use the
+   modern single-line approach.
+
+6. **Hero icon pill tightened** (`main.rs`): Reduced pill padding from 12px
+   to 10px and corner radius from 16px to 14px. The tighter composition
+   makes the hero icon feel more confident and less padded.
+
+**Design principle**: This iteration eliminates the last embossed groove
+separators from both the tab bar and sidebar. Every structural separator
+in the UI now uses the single-hairline approach established in iterations
+44 and 56. The cumulative effect is a calmer, more cohesive visual language
+where all panel boundaries speak the same visual dialect.
+
+**Result**: Tab bar separators are cleaner. Sidebar sessions have more room
+for names. The hero icon is more compact and refined. All structural
+separators now use consistent single-hairline styling throughout the entire
+UI chrome.
+
+**Visual comparison with reference**:
+- Tab separators: ✓ Single hairlines match Zed's restrained separator style
+- Sidebar compactness: ✓ Tighter dot column, more name space
+- Inactive tab subtlety: ✓ Softer rest borders reduce visual noise
+- Settings separator: ✓ Modern hairline replaces dated groove emboss
+- Hero icon refinement: ✓ Tighter pill for confident, compact presentation
+- Separator consistency: ✓ All chrome uses identical hairline language
+
+**Remaining gaps vs reference (iteration 60)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
