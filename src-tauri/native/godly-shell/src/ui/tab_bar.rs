@@ -179,14 +179,14 @@ impl TabBar {
     fn new_tab_rect(&self, bar: Rect, scale: f32) -> Rect {
         let tab_w = self.effective_tab_width(bar, scale);
         let tab_gap = (TAB_GAP * scale).round();
-        let tab_inset = (TAB_INSET_V * scale).round();
         let origin = self.tabs_origin_x(bar, scale);
         let new_x = origin + self.tabs.len() as f32 * (tab_w + tab_gap) + (8.0 * scale).round();
+        let btn_sz = (24.0 * scale).round();
         Rect {
             x: new_x,
-            y: bar.y + tab_inset,
-            width: (28.0 * scale).round(),
-            height: bar.height - tab_inset,
+            y: bar.y + (bar.height - btn_sz) / 2.0,
+            width: btn_sz,
+            height: btn_sz,
         }
     }
 
@@ -620,24 +620,29 @@ impl TabBar {
             }
         }
 
-        // "+ New tab" button after last tab (animated)
+        // "+ New tab" button after last tab — subtle pill icon button
         let new_t = self.new_tab_anim.value();
         let new_x = origin + self.tabs.len() as f32 * (tab_w + tab_gap) + s(8.0);
-        let new_y = bar.y + tab_inset;
-        let new_rect = Rect { x: new_x, y: new_y, width: s(28.0), height: bar.height - tab_inset };
+        let btn_sz = s(24.0);
+        let new_btn_y = bar.y + (bar.height - btn_sz) / 2.0;
+        let new_rect = Rect { x: new_x, y: new_btn_y, width: btn_sz, height: btn_sz };
+        let btn_radius = btn_sz / 2.0;
         if new_t > 0.005 {
+            // Hover: brightening circular background
             let new_bg = lerp_color(
-                [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.4],
+                [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.5],
                 colors::BG_SURFACE,
                 new_t,
             );
-            let new_top = [new_bg[0] * lerp(1.0, 1.08, new_t), new_bg[1] * lerp(1.0, 1.08, new_t), new_bg[2] * lerp(1.0, 1.08, new_t), new_bg[3]];
-            let border_alpha = lerp(0.0, 1.0, new_t);
-            let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], colors::BORDER[3] * border_alpha];
-            ui.fill_rounded_top_gradient(new_rect, new_top, new_bg, lerp(s(3.0), s(4.0), new_t), lerp(0.0, 0.5, new_t), border);
+            let new_top = [new_bg[0] * lerp(1.0, 1.10, new_t), new_bg[1] * lerp(1.0, 1.10, new_t), new_bg[2] * lerp(1.0, 1.10, new_t), new_bg[3]];
+            let border_alpha = lerp(0.15, 0.6, new_t);
+            let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
+            ui.fill_rounded_gradient(new_rect, new_top, new_bg, btn_radius);
+            ui.stroke_rounded(new_rect, btn_radius, 0.5, border);
         } else {
-            let rest_bg = [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.4];
-            ui.fill_rounded_top(new_rect, rest_bg, s(3.0));
+            // Rest: subtle circular border for discoverable icon button
+            let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
+            ui.stroke_rounded(new_rect, btn_radius, 0.5, rest_border);
         }
         let new_tab_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
         ui.icon_plus(new_rect, icon_t, s(5.0), new_tab_fg);

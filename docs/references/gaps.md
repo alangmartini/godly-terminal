@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 30)
+Last updated: 2026-03-30 (Iteration 31)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -51,6 +51,11 @@ Last updated: 2026-03-30 (Iteration 30)
 | New Session CTA styling | Done | Green accent-tinted border, label, and hover glow (iteration 30) |
 | Inactive tab readability | Done | Brighter title text, higher rest-state alpha/brightness (iteration 30) |
 | Active tab contrast | Done | Brighter top gradient (1.18×) for clear active/inactive distinction (iteration 30) |
+| Window accent top bar | Done | 2px accent-colored top edge with glow spill, stronger focused alpha (iteration 31) |
+| Sidebar section dividers | Done | Groove separators between sessions, new-session button, and processes (iteration 31) |
+| Circular new-tab button | Done | Proper circular icon button with rest-state border (iteration 31) |
+| Git diff summary pill | Done | Styled pill in status bar for diff summary display (iteration 31) |
+| Welcome vertical balance | Done | Content positioned at 33% from top for better visual balance (iteration 31) |
 
 ## Remaining Gaps (Priority Order)
 

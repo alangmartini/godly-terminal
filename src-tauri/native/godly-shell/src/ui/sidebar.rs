@@ -534,6 +534,14 @@ impl Sidebar {
             }
         }
 
+        // Section divider between session list and new-session button
+        {
+            let items_total_h = self.items_y_offset(self.items.len(), text.scale);
+            let div_y = sidebar.y + header_h + items_total_h + s(1.0);
+            ui.hgroove_fade(sidebar.x + pad_h, div_y,
+                     sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(12.0));
+        }
+
         // "+ New session" button
         let items_total_h = self.items_y_offset(self.items.len(), text.scale);
         let new_y = sidebar.y + header_h + items_total_h + s(4.0);
@@ -599,6 +607,20 @@ impl Sidebar {
                 new_rect.x + s(22.0),
                 new_rect.y + text_y_off(compact_h),
                 new_fg, new_bg);
+
+        // Section divider above processes panel
+        if !self.agents.is_empty() {
+            let settings_row_h = s(28.0);
+            let header_section_h = s(28.0);
+            let agent_item_h = s(44.0);
+            let agent_panel_h_est = header_section_h + self.agents.len() as f32 * agent_item_h + s(8.0);
+            let panel_y_est = sidebar.bottom() - settings_row_h - agent_panel_h_est;
+            let div_y = panel_y_est - s(4.0);
+            if div_y > new_y + compact_h + s(4.0) {
+                ui.hgroove_fade(sidebar.x + pad_h, div_y,
+                         sidebar.width - pad_h * 2.0, groove_dark, groove_light, s(12.0));
+            }
+        }
 
         // Bottom panel: running agents/processes
         if !self.agents.is_empty() {

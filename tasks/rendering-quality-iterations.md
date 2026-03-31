@@ -1009,6 +1009,68 @@ title readability, strengthen active session visual hierarchy, and make the
 distinguishable. Branch/description text readable at rest. "New Session"
 reads as green CTA. Tab titles more readable.
 
+**Remaining gaps vs reference (iteration 30)**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
+
+## Iteration 31 — Window Accent Bar, Section Dividers, Circular New-Tab
+
+**Goal**: Strengthen window identity with a prominent accent bar, improve
+sidebar visual grouping with groove dividers, and refine the new-tab button
+into a proper circular icon button.
+
+**Changes made**:
+
+1. **Window top accent edge** (`main.rs`): Thickened from 1px → 2px.
+   Focused alpha increased from 0.15 → 0.30 for a prominent "brand bar"
+   at the window top (like VS Code's colored title bar edge). Added glow
+   spill gradient below the accent bar (30% of accent alpha, 4px height)
+   for soft light emission into the tab bar.
+
+2. **Status bar git diff pill** (`ui/status_bar.rs`): Upgraded the plain-
+   text `git_diff_summary` rendering into a proper styled pill with
+   gradient background, rounded border, and muted text. Consistent with
+   other status bar pills in styling.
+
+3. **Sidebar section dividers** (`ui/sidebar.rs`): Added horizontal groove
+   dividers (dark edge + light highlight pair, faded at edges) between the
+   sessions list and the "New Session" button, and between the button and
+   the processes panel. Creates cleaner visual grouping and matches the
+   established groove depth language used elsewhere.
+
+4. **Welcome screen positioning** (`main.rs`): Moved content block from
+   30% → 33% from top for better visual balance (closer to golden ratio).
+
+5. **Circular new-tab button** (`ui/tab_bar.rs`): Replaced the tall
+   rectangular new-tab button with a proper circular icon button (24px
+   diameter). Rest state shows a subtle circular border (0.18 alpha) for
+   discoverability. Hover state fills with gradient + border (like the
+   window control buttons). Updated `new_tab_rect()` hit-test to match
+   the new circular dimensions.
+
+**Technical details**:
+- Accent glow spill uses `fill_gradient` below the 2px accent bar for
+  soft downward light emission into the tab bar background.
+- Section dividers use `hgroove_fade()` with same groove_dark/groove_light
+  as the sidebar's right border and header separator for consistency.
+- Processes divider has a guard condition: only renders if there's enough
+  vertical space between the new-session button and the processes panel.
+- Circular button uses `fill_rounded_gradient` with radius = size/2 for
+  a perfect circle, matching the window control button hover style.
+
+**Result**: Window has a stronger identity via the colored top bar. The
+sidebar is better organized with visible section boundaries. The new-tab
+button looks like a proper icon button that users expect from professional
+apps. Status bar can now display git diff information in a styled pill.
+
+**Visual comparison with reference**:
+- Window accent bar: ✓ Prominent colored top edge like VS Code
+- Section dividers: ✓ Clean grouping between sidebar sections
+- Circular icon button: ✓ Proper new-tab button shape
+- Git diff styling: ✓ Consistent pill treatment in status bar
+- Welcome positioning: ✓ Better vertical balance
+
 **Remaining gaps vs reference**:
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished

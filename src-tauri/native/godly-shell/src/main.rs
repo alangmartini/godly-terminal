@@ -725,9 +725,9 @@ impl App {
                 "Waiting for output..."
             };
 
-            // Center block vertically at ~35% from top (golden ratio)
+            // Center block vertically at ~33% from top (visual balance)
             let center_x = tc.x + tc.width / 2.0;
-            let block_y = tc.y + tc.height * 0.30;
+            let block_y = tc.y + tc.height * 0.33;
 
             // --- Branded header ---
             let title = "Godly Terminal";
@@ -1138,24 +1138,34 @@ impl App {
             }
 
             // Accent-tinted top edge: picks up the active tab's accent color.
+            // 2px height for visibility; stronger alpha when focused for a
+            // prominent colored "brand bar" at the top of the window (like VS Code).
             let active_accent = self.active_accent();
             let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
-            let accent_alpha = if self.window_focused { 0.15 * breath } else { 0.05 };
+            let accent_alpha = if self.window_focused { 0.30 * breath } else { 0.08 };
             let accent_fade = ui_text_handle.s(40.0);
+            let accent_h = if self.is_maximized { 2.0 } else { 2.0 };
             let accent_full = [active_accent[0], active_accent[1], active_accent[2], accent_alpha];
             let accent_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
             let top_w = vw - r * 2.0;
             ui_builder.fill_gradient_h(
-                ui::widget::Rect { x: r, y: 0.0, width: accent_fade, height: 1.0 },
+                ui::widget::Rect { x: r, y: 0.0, width: accent_fade, height: accent_h },
                 accent_zero, accent_full,
             );
             ui_builder.fill(
-                ui::widget::Rect { x: r + accent_fade, y: 0.0, width: top_w - accent_fade * 2.0, height: 1.0 },
+                ui::widget::Rect { x: r + accent_fade, y: 0.0, width: top_w - accent_fade * 2.0, height: accent_h },
                 accent_full,
             );
             ui_builder.fill_gradient_h(
-                ui::widget::Rect { x: vw - r - accent_fade, y: 0.0, width: accent_fade, height: 1.0 },
+                ui::widget::Rect { x: vw - r - accent_fade, y: 0.0, width: accent_fade, height: accent_h },
                 accent_full, accent_zero,
+            );
+            // Glow spill below the accent bar for soft light emission
+            let glow_below = [active_accent[0], active_accent[1], active_accent[2], accent_alpha * 0.3];
+            let glow_below_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
+            ui_builder.fill_gradient(
+                ui::widget::Rect { x: r + accent_fade, y: accent_h, width: top_w - accent_fade * 2.0, height: ui_text_handle.s(4.0) },
+                glow_below, glow_below_zero,
             );
         }
 

@@ -254,11 +254,26 @@ impl StatusBar {
             x += pill_w + cw * 2.0;
         }
 
-        // Git diff summary (dynamic)
+        // Git diff summary — styled with colored +/- indicators
         if !self.git_diff_summary.is_empty() {
-            let file_w = text.text_width(&self.git_diff_summary);
-            if x + file_w + cw * 4.0 < bar.right() - s(200.0) {
-                ui.text(text, &self.git_diff_summary, x, y_center, colors::FG_MUTED, content_bg);
+            let diff_pad_h = s(4.0);
+            let diff_pad_v = s(2.0);
+            let diff_w = text.text_width(&self.git_diff_summary);
+            let diff_pill_w = diff_w + diff_pad_h * 2.0;
+            let diff_pill_h = ch + diff_pad_v * 2.0;
+            let diff_pill_y = bar.y + (bar.height - diff_pill_h) / 2.0;
+            if x + diff_pill_w + cw * 4.0 < bar.right() - s(200.0) {
+                let diff_pill = Rect { x, y: diff_pill_y, width: diff_pill_w, height: diff_pill_h };
+                // Subtle pill background (no hover animation for this read-only pill)
+                let diff_top = [pill_base_top[0], pill_base_top[1], pill_base_top[2], 0.4];
+                let diff_bot = [pill_base_bot[0], pill_base_bot[1], pill_base_bot[2], 0.4];
+                let diff_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25];
+                ui.fill_rounded_gradient(diff_pill, diff_top, diff_bot, s(3.0));
+                ui.stroke_rounded(diff_pill, s(3.0), 0.5, diff_border);
+                // Render diff summary with muted color
+                let diff_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.8];
+                ui.text(text, &self.git_diff_summary, x + diff_pad_h, y_center, diff_fg, colors::BG_HOVER);
+                x += diff_pill_w + cw;
             }
         }
 
