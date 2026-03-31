@@ -862,10 +862,10 @@ impl App {
             let subtitle_w = ui_text_handle.text_width_ui(subtitle);
             let subtitle_y = block_y + ch + s(2.0);
             let subtitle_fg = [
-                ui::builder::colors::FG_MUTED[0],
-                ui::builder::colors::FG_MUTED[1],
-                ui::builder::colors::FG_MUTED[2],
-                0.45,
+                ui::builder::colors::FG_MUTED[0] * 0.7 + ui::builder::colors::FG_SECONDARY[0] * 0.3,
+                ui::builder::colors::FG_MUTED[1] * 0.7 + ui::builder::colors::FG_SECONDARY[1] * 0.3,
+                ui::builder::colors::FG_MUTED[2] * 0.7 + ui::builder::colors::FG_SECONDARY[2] * 0.3,
+                0.55,
             ];
             ui_builder.text_ui(&ui_text_handle, subtitle,
                 center_x - subtitle_w / 2.0, subtitle_y,
@@ -1092,8 +1092,14 @@ impl App {
 
                 // Description text (after badge) — proportional for natural reading
                 let desc_x = badge_x + badge_w + key_desc_gap;
+                let desc_fg = [
+                    ui::builder::colors::FG_MUTED[0] * 0.5 + ui::builder::colors::FG_SECONDARY[0] * 0.5,
+                    ui::builder::colors::FG_MUTED[1] * 0.5 + ui::builder::colors::FG_SECONDARY[1] * 0.5,
+                    ui::builder::colors::FG_MUTED[2] * 0.5 + ui::builder::colors::FG_SECONDARY[2] * 0.5,
+                    0.75,
+                ];
                 ui_builder.text_ui(&ui_text_handle, desc, desc_x, key_text_y,
-                    ui::builder::colors::FG_MUTED, bg);
+                    desc_fg, bg);
             }
 
             // Version indicator — very muted, below the card container
@@ -1104,7 +1110,7 @@ impl App {
                 ui::builder::colors::FG_MUTED[0],
                 ui::builder::colors::FG_MUTED[1],
                 ui::builder::colors::FG_MUTED[2],
-                0.3,
+                0.38,
             ];
             ui_builder.text_ui(&ui_text_handle, version_str,
                 center_x - version_w / 2.0, version_y,
@@ -1347,7 +1353,7 @@ impl App {
             // Bottom separator — thin line for content area boundary
             ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
                 [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.35]);
+                 ui::builder::colors::BORDER[2], 0.30]);
             // Left inner shadow for sidebar-cast depth
             ui_builder.fill_gradient_h(
                 ui::widget::Rect { x: bc.x, y: bc.y, width: s(6.0), height: bc.height },
@@ -1383,18 +1389,18 @@ impl App {
                     (false, all_segments.as_slice())
                 };
                 let chevron_fg = [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
-                                  ui::builder::colors::FG_MUTED[2], 0.50];
+                                  ui::builder::colors::FG_MUTED[2], 0.62];
                 let segment_fg = [
-                    ui::builder::colors::FG_MUTED[0] * 0.5 + ui::builder::colors::FG_SECONDARY[0] * 0.5,
-                    ui::builder::colors::FG_MUTED[1] * 0.5 + ui::builder::colors::FG_SECONDARY[1] * 0.5,
-                    ui::builder::colors::FG_MUTED[2] * 0.5 + ui::builder::colors::FG_SECONDARY[2] * 0.5,
-                    0.75,
+                    ui::builder::colors::FG_MUTED[0] * 0.35 + ui::builder::colors::FG_SECONDARY[0] * 0.65,
+                    ui::builder::colors::FG_MUTED[1] * 0.35 + ui::builder::colors::FG_SECONDARY[1] * 0.65,
+                    ui::builder::colors::FG_MUTED[2] * 0.35 + ui::builder::colors::FG_SECONDARY[2] * 0.65,
+                    0.82,
                 ];
                 let last_fg = [
-                    ui::builder::colors::FG_SECONDARY[0] * 0.7 + ui::builder::colors::FG_PRIMARY[0] * 0.3,
-                    ui::builder::colors::FG_SECONDARY[1] * 0.7 + ui::builder::colors::FG_PRIMARY[1] * 0.3,
-                    ui::builder::colors::FG_SECONDARY[2] * 0.7 + ui::builder::colors::FG_PRIMARY[2] * 0.3,
-                    0.9,
+                    ui::builder::colors::FG_SECONDARY[0] * 0.55 + ui::builder::colors::FG_PRIMARY[0] * 0.45,
+                    ui::builder::colors::FG_SECONDARY[1] * 0.55 + ui::builder::colors::FG_PRIMARY[1] * 0.45,
+                    ui::builder::colors::FG_SECONDARY[2] * 0.55 + ui::builder::colors::FG_PRIMARY[2] * 0.45,
+                    0.92,
                 ];
 
                 // SDF chevron icon dimensions — matches text line height for alignment

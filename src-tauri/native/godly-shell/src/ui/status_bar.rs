@@ -328,8 +328,8 @@ impl StatusBar {
         }
 
         // Metadata labels with vertical divider separators (matches VS Code/Zed)
-        let meta_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65];
-        let divider_fg = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35];
+        let meta_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.72];
+        let divider_fg = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.40];
         let divider_h = ch * 0.6;
         let divider_y = bar.y + (bar.height - divider_h) / 2.0;
         let meta_gap = s(8.0); // gap on each side of a divider

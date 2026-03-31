@@ -1480,6 +1480,71 @@ without needing a second line.
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
 
+## Iteration 53 — Secondary Text Readability Pass
+
+**Goal**: Improve readability of all secondary/tertiary text elements across
+the UI. Professional apps like Zed and VS Code keep secondary text muted
+but still clearly readable — our secondary text was slightly too dim in
+several areas, creating a cumulative readability gap.
+
+**Changes made**:
+
+1. **Breadcrumb path segments** (`main.rs`): Non-last segments boosted from
+   50% → 65% blend toward FG_SECONDARY (alpha 0.75 → 0.82). Last segment
+   boosted from 70/30 → 55/45 FG_SECONDARY/FG_PRIMARY blend (alpha 0.90 →
+   0.92). Path segments are now clearly readable without straining.
+
+2. **Breadcrumb chevron icons** (`main.rs`): Chevron separator opacity
+   boosted from 0.50 → 0.62. Chevrons are now visible directional cues
+   rather than near-invisible filler.
+
+3. **Welcome subtitle** (`main.rs`): "GPU-accelerated terminal" color
+   shifted from pure FG_MUTED at 0.45 alpha to 70/30 FG_MUTED/FG_SECONDARY
+   blend at 0.55 alpha. Subtitle is now readable as supporting text.
+
+4. **Welcome shortcut descriptions** (`main.rs`): "New tab", "Close tab"
+   etc. changed from pure FG_MUTED to 50/50 FG_MUTED/FG_SECONDARY blend
+   at 0.75 alpha. Descriptions now pair visually with their keycap badges.
+
+5. **Welcome version indicator** (`main.rs`): Alpha boosted from 0.30 →
+   0.38. Version string visible on closer inspection without competing.
+
+6. **Status bar metadata labels** (`ui/status_bar.rs`): "UTF-8", "LF",
+   "Ln 1, Col 1" text alpha from 0.65 → 0.72. Divider pipe separators
+   from 0.35 → 0.40. IDE metadata now scans quickly.
+
+7. **Sidebar timestamp labels** (`ui/sidebar.rs`): Rest alpha from 0.35 →
+   0.42, hover alpha from 0.55 → 0.60. "5m", "2h" timestamps visible at
+   scanning speed without drawing attention.
+
+8. **Breadcrumb bottom separator** (`main.rs`): Softened from 0.35 → 0.30
+   alpha so the breadcrumb blends more naturally into the content area.
+
+**Technical details**:
+- All changes are alpha/blend ratio adjustments — no new render passes,
+  no layout changes, no new elements.
+- The approach uses a consistent strategy: blend toward the next-higher
+  luminance tier (FG_MUTED → FG_SECONDARY → FG_PRIMARY) rather than
+  just bumping raw alpha, which preserves color temperature.
+- Breadcrumb separator was the one reduction (0.35 → 0.30) because the
+  stronger path text contrast made the old border feel too heavy.
+
+**Result**: Text readability is noticeably improved across all secondary
+and tertiary elements. The UI reads more like Zed/VS Code where even the
+quietest labels are clearly scannable at a glance. The cumulative effect
+of 8 small text adjustments creates a more confident, professional feel.
+
+**Visual comparison with reference**:
+- Breadcrumb readability: ✓ Path segments clearly visible, chevrons serve as cues
+- Welcome screen hierarchy: ✓ Subtitle, descriptions, version all scannable
+- Status bar metadata: ✓ IDE labels readable without squinting
+- Sidebar timestamps: ✓ Visible at scanning speed
+- Overall text hierarchy: ✓ Primary > Secondary > Tertiary = clear
+
+**Remaining gaps vs reference (iteration 53)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
+
 ## Iteration 35 — Session Metadata, Shell Type Badges, Filled CTA Button
 
 **Goal**: Enrich sidebar sessions with shell type identification, working
