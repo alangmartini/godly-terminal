@@ -475,3 +475,54 @@ All phases of the rendering quality roadmap are complete:
 - Phase 3: Shadows and depth ✓
 - Phase 4: Gradients and polish ✓
 - Phase 5: Final polish (inner shadows, bevel highlights, AA icons) ✓
+
+## Iteration 22 — Iced Widget Chrome Polish (Soft Borders, Depth Cues)
+
+**Goal**: Reduce visual harshness of panel separators, improve depth hierarchy,
+and refine interactive element styling to match Zed/opensessions reference quality.
+
+**Context**: The codebase transitioned from custom GPU rendering to Iced's widget
+system. This iteration focuses on the Iced widget chrome styling.
+
+**Changes made**:
+
+1. **Tab bar** (`tab_bar.rs`):
+   - Bottom separator softened: `BORDER()` → 45% opacity (near-invisible, lets
+     active tab visually "open" into content area below)
+   - Active tab shadow reduced: blur 6→4, offset 2→1, opacity 0.35→0.22
+   - Active tab border softened: BORDER_VARIANT at 70% opacity
+
+2. **Title bar** (`title_bar.rs`):
+   - Close button hover: proper Windows-standard red (#c42b1c) instead of
+     theme's DANGER color
+   - Window control icons enlarged: 10px→11px for better visibility
+   - Bottom separator softened: 55% opacity
+
+3. **Sidebar** (`sidebar.rs`):
+   - Active workspace tint strengthened: 12%→14% accent opacity
+   - Active workspace border: accent-tinted (18% accent) instead of neutral
+   - Hover states enhanced: 120% ghost opacity for better feedback
+   - Header shadow added: 12% black, 2px offset, 4px blur (depth cue)
+   - Header divider softened: 45% opacity
+   - Right edge divider softened: 50% opacity
+   - Active shadow reduced: blur 5→4, opacity 0.20→0.15
+
+4. **Status bar** (`status_bar.rs`):
+   - Top separator softened: 45% opacity
+   - Shell badge: added subtle shadow (10% black, 1px offset, 2px blur)
+
+**Design principle**: All separators now use 45-55% border opacity instead of
+full-strength borders. This matches Zed's approach where color difference between
+adjacent surfaces provides primary separation, not border lines.
+
+**Result**: Panel junctions feel cleaner and less boxed-in. The sidebar header
+casts a subtle shadow onto the workspace list. Active workspace items use
+accent-colored borders for visual coherence. The close button uses platform-
+standard red hover. All changes are consistent across tab bar, title bar,
+sidebar, and status bar.
+
+**Remaining gaps** (documented in `docs/references/gaps.md`):
+- Active tab could blend even more seamlessly with content (gap in separator)
+- Sidebar secondary text (branches, paths) could be slightly larger (10→11pt)
+- Tab bar height could be reduced (36→34px) for compactness
+- Animated hover transitions not possible in Iced's immediate-mode rendering

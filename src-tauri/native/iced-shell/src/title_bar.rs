@@ -1,9 +1,9 @@
-use iced::widget::{button, canvas, container, mouse_area, row, text};
+use iced::widget::{button, canvas, column, container, mouse_area, row, rule, text};
 use iced::{
     Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
 };
 
-use crate::theme::{DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
+use crate::theme::{BORDER, DANGER, GHOST_HOVER, TEXT_SECONDARY, TITLE_BAR_BG};
 
 /// Height of the custom title bar in logical pixels.
 pub const TITLE_BAR_HEIGHT: f32 = 34.0;
@@ -182,14 +182,26 @@ pub fn view_title_bar<'a, M: Clone + 'a>(
         .align_y(iced::Alignment::Center)
         .height(Length::Fixed(TITLE_BAR_HEIGHT));
 
-    container(content)
+    let bar = container(content)
         .width(Length::Fill)
         .height(Length::Fixed(TITLE_BAR_HEIGHT))
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(TITLE_BAR_BG())),
             ..container::Style::default()
-        })
-        .into()
+        });
+
+    let title_sep_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.55)
+    };
+    let separator = rule::horizontal(1).style(move |_theme| rule::Style {
+        color: title_sep_color,
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    });
+
+    column![bar, separator].width(Length::Fill).into()
 }
 
 fn window_control_icon_button<'a, M: Clone + 'a>(
@@ -197,13 +209,14 @@ fn window_control_icon_button<'a, M: Clone + 'a>(
     hover_bg: Color,
     on_press: M,
 ) -> Element<'a, M> {
+    let is_close = matches!(kind, WindowControlKind::Close);
     let icon_color = TEXT_SECONDARY();
     let icon = canvas(WindowControlIcon {
         kind,
         color: icon_color,
     })
-    .width(Length::Fixed(10.0))
-    .height(Length::Fixed(10.0));
+    .width(Length::Fixed(11.0))
+    .height(Length::Fixed(11.0));
 
     button(
         container(icon)
@@ -215,14 +228,35 @@ fn window_control_icon_button<'a, M: Clone + 'a>(
     .height(Length::Fixed(TITLE_BAR_HEIGHT))
     .width(Length::Fixed(46.0))
     .style(move |_theme, status| {
-        let bg_color = match status {
-            button::Status::Hovered | button::Status::Pressed => hover_bg,
-            _ => Color::TRANSPARENT,
+        let (bg_color, border) = match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                if is_close {
+                    // Windows-standard red close button hover
+                    (
+                        Color::from_rgb(0.77, 0.17, 0.11),
+                        Border {
+                            color: Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                            width: 1.0,
+                            radius: 5.0.into(),
+                        },
+                    )
+                } else {
+                    (
+                        hover_bg,
+                        Border {
+                            color: Color::from_rgba(1.0, 1.0, 1.0, 0.06),
+                            width: 1.0,
+                            radius: 5.0.into(),
+                        },
+                    )
+                }
+            }
+            _ => (Color::TRANSPARENT, Border::default()),
         };
         button::Style {
             background: Some(iced::Background::Color(bg_color)),
             text_color: icon_color,
-            border: Border::default(),
+            border,
             ..button::Style::default()
         }
     })

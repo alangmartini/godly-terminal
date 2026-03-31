@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use iced::widget::{button, column, container, mouse_area, row, rule, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
+use crate::theme::BORDER;
 
 use crate::horizontal_wheel::horizontal_wheel;
 use crate::terminal_state::TerminalInfo;
@@ -20,7 +21,7 @@ const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 const TAB_BUTTON_HEIGHT: f32 = 30.0;
 const CLOSE_BUTTON_SIZE: f32 = 18.0;
 const SEPARATOR_HEIGHT: f32 = 16.0;
-const ACCENT_INDICATOR_HEIGHT: f32 = 3.0;
+const ACCENT_INDICATOR_HEIGHT: f32 = 2.0;
 
 /// Truncate a label to at most `max_chars` characters, appending "..." if truncated.
 fn truncate_label(s: &str, max_chars: usize) -> String {
@@ -234,14 +235,15 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 
         let ghost_hover_bg = GHOST_HOVER();
         let ghost_active_bg = GHOST_ACTIVE();
-        // Active tab: blend TAB_ACTIVE_BG with a subtle accent tint.
+        // Active tab: very subtle accent tint so it nearly matches the
+        // terminal pane below, creating a seamless visual connection.
         let active_bg = if is_active {
             let base = bg;
             let accent = ACCENT();
             Color::from_rgb(
-                base.r * 0.85 + accent.r * 0.15,
-                base.g * 0.85 + accent.g * 0.15,
-                base.b * 0.85 + accent.b * 0.15,
+                base.r * 0.95 + accent.r * 0.05,
+                base.g * 0.95 + accent.g * 0.05,
+                base.b * 0.95 + accent.b * 0.05,
             )
         } else {
             bg
@@ -272,8 +274,23 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                     background: Some(iced::Background::Color(bg_color)),
                     text_color,
                     border: Border {
+                        color: if is_active {
+                            let bv = BORDER_VARIANT();
+                            Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.7)
+                        } else {
+                            Color::TRANSPARENT
+                        },
+                        width: if is_active { 1.0 } else { 0.0 },
                         radius,
-                        ..Border::default()
+                    },
+                    shadow: if is_active {
+                        iced::Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+                            offset: iced::Vector::new(0.0, 1.0),
+                            blur_radius: 4.0,
+                        }
+                    } else {
+                        iced::Shadow::default()
                     },
                     ..button::Style::default()
                 }
@@ -304,6 +321,10 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .height(Length::Fixed(ACCENT_INDICATOR_HEIGHT))
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(accent_color)),
+                border: Border {
+                    radius: iced::border::Radius::new(1.0).bottom_left(0.0).bottom_right(0.0),
+                    ..Border::default()
+                },
                 ..container::Style::default()
             });
 
@@ -377,14 +398,28 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     ]
     .align_y(iced::Alignment::Center);
 
-    container(content)
+    let bar = container(content)
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT))
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(BG_SECONDARY())),
             ..container::Style::default()
-        })
-        .into()
+        });
+
+    // Subtle bottom separator — soft enough that the active tab (which shares
+    // the content area's pane_bg) visually "opens" into the terminal below.
+    let sep_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.45)
+    };
+    let separator = rule::horizontal(1).style(move |_theme| rule::Style {
+        color: sep_color,
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    });
+
+    column![bar, separator].width(Length::Fill).into()
 }
 
 #[cfg(test)]

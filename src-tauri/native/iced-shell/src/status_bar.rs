@@ -1,7 +1,7 @@
 use iced::widget::{column, container, row, rule, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
 
-use crate::theme::{BORDER, GHOST_HOVER, STATUS_BAR_BG, TEXT_SECONDARY};
+use crate::theme::{BORDER, BORDER_VARIANT, GHOST_HOVER, STATUS_BAR_BG, TEXT_SECONDARY};
 
 /// Height of the status bar in logical pixels.
 /// Includes 1px top separator line.
@@ -60,16 +60,22 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
         .color(TEXT_SECONDARY())
         .font(status_font);
 
-    // Shell label styled as a small pill badge.
+    // Shell label styled as a small pill badge with subtle border and depth.
     let badge_bg = GHOST_HOVER();
+    let badge_border = BORDER_VARIANT();
     let shell_badge = container(shell_text)
         .padding(Padding::from([1, 6]))
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(badge_bg)),
             border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
+                color: badge_border,
+                width: 1.0,
                 radius: 4.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.10),
+                offset: iced::Vector::new(0.0, 1.0),
+                blur_radius: 2.0,
             },
             ..container::Style::default()
         });
@@ -88,18 +94,35 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
     };
     let dims_text = text(dims).size(11).color(dims_color).font(status_font);
 
+    let section_sep = |_theme: &iced::Theme| rule::Style {
+        color: BORDER_VARIANT(),
+        radius: 0.5.into(),
+        fill_mode: rule::FillMode::Padded(2),
+        snap: true,
+    };
+
     let content = row![
         container(shell_badge).padding(Padding::from([0, 8])),
+        container(rule::vertical(1).style(section_sep))
+            .height(Length::Fixed(12.0))
+            .padding(Padding::from([0, 2])),
         container(cwd_text).padding(Padding::from([0, 4])),
         Space::new().width(Length::Fill),
+        container(rule::vertical(1).style(section_sep))
+            .height(Length::Fixed(12.0))
+            .padding(Padding::from([0, 2])),
         container(dims_text).padding(Padding::from([0, 8])),
     ]
     .align_y(iced::Alignment::Center)
     .height(Length::Fixed(STATUS_BAR_HEIGHT));
 
-    // Top separator line to visually close the content area.
-    let separator = rule::horizontal(1).style(|_theme| rule::Style {
-        color: BORDER(),
+    // Soft top separator — less harsh than full-opacity border.
+    let status_sep_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.45)
+    };
+    let separator = rule::horizontal(1).style(move |_theme| rule::Style {
+        color: status_sep_color,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,

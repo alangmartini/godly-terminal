@@ -2,8 +2,8 @@ use iced::widget::{button, column, container, mouse_area, row, rule, scrollable,
 use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::theme::{
-    ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
-    TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER,
+    GHOST_SELECTED, SURFACE_BG, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::workspace_state::WorkspaceInfo;
 
@@ -223,6 +223,11 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             TEXT_SECONDARY()
         };
 
+        let badge_border_color = if is_active {
+            Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.25)
+        } else {
+            Color::from_rgba(1.0, 1.0, 1.0, 0.06)
+        };
         let badge = container(
             text(format!("{}", terminal_count))
                 .size(10)
@@ -232,8 +237,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(badge_bg)),
             border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
+                color: badge_border_color,
+                width: 1.0,
                 radius: 8.0.into(),
             },
             ..container::Style::default()
@@ -351,10 +356,31 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             .width(Length::Fill)
             .style(move |_theme, status| {
                 let bg = if is_active {
-                    Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.08)
+                    // Slightly stronger accent tint for better active visibility
+                    Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.14)
                 } else {
                     match status {
-                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
+                        button::Status::Hovered => {
+                            let gh = GHOST_HOVER();
+                            Color::from_rgba(gh.r, gh.g, gh.b, gh.a * 1.2)
+                        }
+                        button::Status::Pressed => {
+                            let gh = GHOST_HOVER();
+                            Color::from_rgba(gh.r, gh.g, gh.b, gh.a * 1.8)
+                        }
+                        _ => Color::TRANSPARENT,
+                    }
+                };
+
+                let border_color = if is_active {
+                    // Accent-tinted border for active workspace
+                    let a = ACCENT();
+                    Color::from_rgba(a.r, a.g, a.b, 0.18)
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+                        }
                         _ => Color::TRANSPARENT,
                     }
                 };
@@ -363,9 +389,18 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     background: Some(iced::Background::Color(bg)),
                     text_color: row_text,
                     border: Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
+                        color: border_color,
+                        width: if is_active || matches!(status, button::Status::Hovered | button::Status::Pressed) { 1.0 } else { 0.0 },
                         radius: 8.0.into(),
+                    },
+                    shadow: if is_active {
+                        iced::Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.15),
+                            offset: iced::Vector::new(0.0, 1.0),
+                            blur_radius: 4.0,
+                        }
+                    } else {
+                        iced::Shadow::default()
                     },
                     ..button::Style::default()
                 }
@@ -405,7 +440,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     text_color: TEXT_PRIMARY(),
-                    border: Border::default(),
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
@@ -427,7 +465,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     text_color: TEXT_PRIMARY(),
-                    border: Border::default(),
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
@@ -456,7 +497,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     text_color: TEXT_PRIMARY(),
-                    border: Border::default(),
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
@@ -479,7 +523,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
                         text_color: TEXT_PRIMARY(),
-                        border: Border::default(),
+                        border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                         ..button::Style::default()
                     }
                 })
@@ -513,7 +560,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
                         text_color: TEXT_PRIMARY(),
-                        border: Border::default(),
+                        border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                         ..button::Style::default()
                     }
                 })
@@ -543,7 +593,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
                         text_color: DANGER(),
-                        border: Border::default(),
+                        border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                         ..button::Style::default()
                     }
                 });
@@ -562,7 +615,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 border: Border {
                     color: BORDER(),
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 6.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 12.0,
                 },
                 ..container::Style::default()
             });
@@ -593,7 +651,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let header = container(
         row![
-            text("WORKSPACES").size(11).color(TEXT_SECONDARY()),
+            text("WORKSPACES")
+                .size(10)
+                .color(TEXT_SECONDARY())
+                .font(SIDEBAR_FONT_SEMIBOLD),
             Space::new().width(Length::Fill),
             settings_btn,
             new_btn,
@@ -601,13 +662,14 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         .align_y(iced::Alignment::Center)
         .spacing(6),
     )
-    .padding(Padding::from([10, 10]))
+    .padding(Padding::from([10, 12]))
     .style(|_theme| container::Style {
         background: Some(iced::Background::Color(SURFACE_BG())),
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 0.0.into(),
+        // Subtle shadow so the header feels elevated above the scrollable list
+        shadow: iced::Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.12),
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 4.0,
         },
         ..container::Style::default()
     });
@@ -671,8 +733,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .padding(Padding::from([4, 8]))
     .width(Length::Fill);
 
-    let header_divider = container(rule::horizontal(1).style(|_theme| rule::Style {
-        color: BORDER(),
+    let header_div_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.45)
+    };
+    let header_divider = container(rule::horizontal(1).style(move |_theme| rule::Style {
+        color: header_div_color,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -693,8 +759,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         ..container::Style::default()
     });
 
+    let sidebar_div_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.50)
+    };
     let divider = rule::vertical(1).style(move |_theme| rule::Style {
-        color: Color::TRANSPARENT,
+        color: sidebar_div_color,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
