@@ -10,7 +10,6 @@ const TAB_MIN_WIDTH: f32 = 90.0;
 const TAB_GAP: f32 = 1.0;
 const TAB_MARGIN_LEFT: f32 = 6.0;
 const TAB_INSET_V: f32 = 4.0;
-const RIGHT_INDICATORS_WIDTH: f32 = 200.0;
 const BUTTON_WIDTH: f32 = 46.0;
 const ICON_LINE_T: f32 = 1.2;
 
@@ -126,11 +125,13 @@ impl TabBar {
     /// Compute the effective tab width that fits all tabs in the available space.
     fn effective_tab_width(&self, bar: Rect, scale: f32) -> f32 {
         let tab_gap = (TAB_GAP * scale).round();
-        let right_reserve = (RIGHT_INDICATORS_WIDTH * scale).round();
         let btn_reserve = (BUTTON_WIDTH * scale).round() * 3.0;
         let n = self.tabs.len().max(1) as f32;
         let origin = self.tabs_origin_x(bar, scale);
-        let avail = bar.right() - origin - right_reserve - btn_reserve - (40.0 * scale).round();
+        // new-tab button + gap before window controls
+        let new_tab_reserve = (36.0 * scale).round();
+        let sep_reserve = (12.0 * scale).round();
+        let avail = bar.right() - origin - btn_reserve - new_tab_reserve - sep_reserve;
         let per_tab = ((avail - (n - 1.0) * tab_gap) / n).floor();
         per_tab.clamp((TAB_MIN_WIDTH * scale).round(), (TAB_MAX_WIDTH * scale).round())
     }
@@ -280,20 +281,21 @@ impl TabBar {
                 ui.fill_rounded_custom(ear_rect, bar_bottom, [0.0, 0.0, 0.0, ear_r]);
             }
             // Accent glow bleed below active tab — breathing Gaussian emission
+            // Creates a warm light-spill effect from the active tab into content
             let active_accent = self.tabs.iter().enumerate()
                 .find(|(_, t)| t.active)
                 .map(|(i, _)| self.accent_for(i))
                 .unwrap_or(colors::ACCENT_BLUE);
             let breath = 0.85 + 0.15 * self.glow_phase.sin();
             let glow_rect = Rect {
-                x: ar.x + s(8.0),
-                y: bar.bottom() - s(2.0),
-                width: ar.width - s(16.0),
-                height: s(3.0),
+                x: ar.x + s(4.0),
+                y: bar.bottom() - s(1.0),
+                width: ar.width - s(8.0),
+                height: s(4.0),
             };
             ui.fill_shadow(glow_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.08 * breath],
-                s(2.0), s(6.0),
+                [active_accent[0], active_accent[1], active_accent[2], 0.12 * breath],
+                s(3.0), s(8.0),
             );
         } else {
             ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
@@ -622,63 +624,6 @@ impl TabBar {
         }
         let new_tab_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
         ui.icon_plus(new_rect, icon_t, s(5.0), new_tab_fg);
-
-        // Right-aligned indicators (bun icon + session name) — positioned before window buttons
-        // Styled as pills (consistent with status bar design language)
-        let btn_reserve = s(BUTTON_WIDTH) * 3.0 + s(8.0);
-        let right_label = "bun";
-        let right_label2 = "opensessions";
-        let rw2 = text.text_width(right_label2);
-        let rw1 = text.text_width(right_label);
-        let pill_pad_h = s(4.0);
-        let pill_pad_v = s(2.0);
-        let pill_h = ch + pill_pad_v * 2.0;
-        let pill_y = bar.y + (bar.height - pill_h) / 2.0;
-        let pill_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.4];
-        let pill_top = [
-            colors::BG_HOVER[0] * 1.08,
-            colors::BG_HOVER[1] * 1.08,
-            colors::BG_HOVER[2] * 1.08,
-            colors::BG_HOVER[3] * 0.7,
-        ];
-        let pill_bottom = [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * 0.7];
-
-        // Session name pill
-        let session_pill_w = rw2 + pill_pad_h * 2.0;
-        let session_pill_x = bar.right() - session_pill_w - btn_reserve;
-        let session_pill = Rect { x: session_pill_x, y: pill_y, width: session_pill_w, height: pill_h };
-        ui.fill_rounded_gradient(session_pill, pill_top, pill_bottom, s(3.0));
-        ui.stroke_rounded(session_pill, s(3.0), 0.5, pill_border);
-        ui.text(text, right_label2,
-                session_pill_x + pill_pad_h,
-                text_y(bar.height, bar.y),
-                colors::FG_MUTED, colors::BG_HOVER);
-
-        // Bun indicator pill (dot + label)
-        let dot_sz = s(5.0);
-        let bun_pill_inner = dot_sz + s(6.0) + rw1;
-        let bun_pill_w = bun_pill_inner + pill_pad_h * 2.0;
-        let bun_pill_x = session_pill_x - bun_pill_w - s(6.0);
-        let bun_pill = Rect { x: bun_pill_x, y: pill_y, width: bun_pill_w, height: pill_h };
-        ui.fill_rounded_gradient(bun_pill, pill_top, pill_bottom, s(3.0));
-        ui.stroke_rounded(bun_pill, s(3.0), 0.5, pill_border);
-        // Bun dot with Gaussian glow (consistent with other indicator dots)
-        let bun_dot_x = bun_pill_x + pill_pad_h;
-        let dot_y = bar.y + bar.height / 2.0 - dot_sz / 2.0;
-        let glow_rect = Rect {
-            x: bun_dot_x - s(3.0), y: dot_y - s(3.0),
-            width: dot_sz + s(6.0), height: dot_sz + s(6.0),
-        };
-        ui.fill_shadow(glow_rect, [colors::ACCENT_PEACH[0], colors::ACCENT_PEACH[1], colors::ACCENT_PEACH[2], 0.20], dot_sz, s(5.0));
-        ui.fill_rounded(
-            Rect { x: bun_dot_x, y: dot_y, width: dot_sz, height: dot_sz },
-            colors::ACCENT_PEACH,
-            dot_sz / 2.0,
-        );
-        ui.text(text, right_label,
-                bun_dot_x + dot_sz + s(6.0),
-                text_y(bar.height, bar.y),
-                colors::FG_SECONDARY, colors::BG_HOVER);
 
         // Window control buttons (minimize, maximize, close) — animated hovers
         let buttons = self.window_button_rects(bar, text.scale);

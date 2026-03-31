@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 25)
+Last updated: 2026-03-30 (Iteration 26)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -29,6 +29,9 @@ Last updated: 2026-03-30 (Iteration 25)
 | Agent status badges | Done | Pill-shaped tinted badges for running/waiting/stopped (iteration 25) |
 | Window frame border | Done | Multi-layer shadow + border + accent-tinted top edge |
 | Clear color correction | Done | Background clear color matches One Dark palette (iteration 25) |
+| Clean tab bar | Done | Removed hardcoded placeholder pills, tabs use full available width (iteration 26) |
+| Zed-style sidebar header | Done | "SESSIONS" uppercase muted text like Zed section headers (iteration 26) |
+| Accent glow continuity | Done | Active tab accent glow bleeds into content area for visual connection (iteration 26) |
 
 ## Remaining Gaps (Priority Order)
 

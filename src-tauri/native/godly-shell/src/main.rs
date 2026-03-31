@@ -547,6 +547,24 @@ impl App {
                     [0.0, 0.0, 0.0, 0.10],
                     [0.0, 0.0, 0.0, 0.0],
                 );
+                // Subtle accent-tinted glow spill from the active tab into the
+                // content area.  This creates a warm colored light that connects
+                // the tab bar accent to the terminal, enhancing visual continuity.
+                let accent = self.active_accent();
+                let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+                let glow_h = ui_text_handle.s(18.0);
+                let glow_color = [accent[0], accent[1], accent[2], 0.03 * breath];
+                let glow_zero = [accent[0], accent[1], accent[2], 0.0];
+                ui_builder.fill_gradient(
+                    ui::widget::Rect {
+                        x: layout.terminal.x,
+                        y: layout.terminal.y,
+                        width: layout.terminal.width,
+                        height: glow_h,
+                    },
+                    glow_color,
+                    glow_zero,
+                );
             }
 
             // Sidebar cast shadow (medium — side panel casting rightward)

@@ -724,3 +724,61 @@ for counts and agent statuses throughout.
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 26 — Clean Tab Bar, Accent Continuity, Sidebar Refinement
+
+**Goal**: Remove visual clutter from the tab bar, improve accent color
+continuity between tab bar and content area, and refine sidebar header
+styling to match Zed's professional conventions.
+
+**Changes made**:
+
+1. **Tab bar cleanup** (`ui/tab_bar.rs`): Removed hardcoded "bun" and
+   "opensessions" indicator pills from the right side of the tab bar.
+   These were placeholder data taking up ~200px of horizontal space
+   with fake information. Tabs now use the full available width between
+   the new-tab button and window controls. Updated `effective_tab_width()`
+   to reclaim the freed space (removed `RIGHT_INDICATORS_WIDTH` reserve).
+
+2. **Active tab glow bleed** (`ui/tab_bar.rs`): Strengthened the accent
+   glow emission below the active tab — wider spread (8px→4px inset),
+   taller bleed (3px→4px), higher opacity (0.08→0.12), larger blur
+   radius (6px→8px). Creates a more visible warm light-spill from the
+   active tab into the content area below.
+
+3. **Accent-tinted content glow** (`main.rs`): Added a very subtle
+   accent-colored gradient overlay at the top of the terminal content
+   area. This picks up the active tab's accent color (breathing at
+   3% opacity) and fades out over 18px, creating visual continuity
+   between the tab bar and content without being obtrusive.
+
+4. **Sidebar header** (`ui/sidebar.rs`): Changed "Sessions" to "SESSIONS"
+   in uppercase with reduced opacity (0.65× FG_MUTED), matching Zed's
+   convention of small, muted, uppercase section headers.
+
+**Technical details**:
+- Removed `RIGHT_INDICATORS_WIDTH` constant (was 200.0px) and its
+  reservation in `effective_tab_width()`. Tab width calculation now only
+  reserves space for the new-tab button (36px) and window controls
+  separator (12px).
+- Accent glow uses the shared `active_accent()` color and `glow_phase()`
+  breathing cycle, staying in sync with the tab bar and window frame
+  accent animations.
+
+**Result**: The tab bar is significantly cleaner — no more fake data
+pills cluttering the right side. Tabs are wider and show more title
+text. The accent color flows from the tab bar into the content area
+via a subtle glow, creating better visual coherence. The sidebar header
+is more professional with Zed-style uppercase muting.
+
+**Visual comparison with reference**:
+- Clean tab bar: ✓ No placeholder pills, real tab content only
+- Tab width: ✓ Tabs use full available space
+- Accent continuity: ✓ Glow bleed connects tab bar to content
+- Sidebar header: ✓ Uppercase muted style matches Zed
+- Overall clutter: ✓ Reduced — less fake data, more focused UI
+
+**Remaining gaps vs reference**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content

@@ -251,12 +251,13 @@ impl Sidebar {
             width: sidebar.width,
             height: header_h,
         };
+        // All-caps section header (Zed-style: small, muted, uppercase)
         ui.text(
             text,
-            "Sessions",
+            "SESSIONS",
             header_rect.x + pad_h,
             header_rect.y + text_y_off(header_h),
-            colors::FG_MUTED,
+            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
             colors::BG_DARK,
         );
         // Session count badge (right-aligned, pill-shaped)
