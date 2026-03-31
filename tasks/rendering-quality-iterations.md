@@ -1374,3 +1374,78 @@ The status bar shows connection status.
 **Remaining gaps vs reference (iteration 35)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 36 — Welcome Hero Icon, Edge Vignettes, Card Depth, Version Indicator
+
+**Goal**: Elevate the welcome screen with a prominent branding icon,
+add cinematic depth framing to the content area, and improve card
+container depth and professional completeness.
+
+**Changes made**:
+
+1. **Welcome screen hero terminal icon** (`main.rs`):
+   - Added a large (ch × 4.0 ≈ 60–80px) terminal monitor icon above
+     the "Godly Terminal" title, placed at the visual center of the
+     welcome screen.
+   - Icon has a breathing accent-tinted halo glow (soft SDF shadow,
+     expanded 10px in all directions, 6% opacity breathing at 3.5s).
+   - Icon stroke uses 45% accent blend with FG_MUTED for warmth.
+   - Hero line thickness 1.8× scale for visibility at large size.
+
+2. **SDF chevron rendering** (`ui/builder.rs`):
+   - Rewrote `icon_terminal()` to use `quad_vertices_sdf_rotated` for
+     the prompt chevron (">" shape) instead of rasterized horizontal
+     line segments.
+   - Each chevron arm is a rotated SDF pill with correct angle
+     calculated from start/end coordinates — smooth anti-aliased
+     rendering at any icon size, from 15px tab-bar to 80px hero.
+   - Removed the 4-step rasterization loop that produced jagged
+     diagonals at larger sizes.
+
+3. **Content area edge vignettes** (`main.rs`):
+   - Top edge: 12px gradient shadow (6% → 0%) cast by tab bar.
+   - Left edge: 8px gradient shadow (5% → 0%) cast by sidebar
+     (only rendered when sidebar is visible).
+   - Bottom edge: 6px gradient shadow (0% → 4%) above status bar.
+   - Combined with existing corner vignettes, creates cinematic
+     framing that draws the eye to the center content area.
+
+4. **Card container drop shadow** (`main.rs`):
+   - Added SDF shadow below the shortcut card container (offset 2px
+     right + 3px down, 12% alpha, 8px corner radius, 10px blur).
+   - Creates a "floating card" effect that lifts the container off
+     the background, adding physical depth to the welcome screen.
+
+5. **Version indicator** (`main.rs`):
+   - Added `v{CARGO_PKG_VERSION}` text below the card container,
+     centered, at 30% FG_MUTED alpha (very subtle).
+   - Uses `env!("CARGO_PKG_VERSION")` so it auto-updates with
+     Cargo.toml version changes — no hardcoded strings.
+
+**Technical details**:
+- SDF rotated pill chevron: computes arm length via Pythagorean
+  theorem, angle via `atan2(dy, dx)`, and centers the pill at the
+  midpoint of each arm. Both arms share the same rounded cap radius
+  (t × 0.5) for smooth line termination.
+- Edge vignettes use `fill_gradient()` / `fill_gradient_h()` with
+  black at varying alpha → transparent, complementing the existing
+  corner vignettes for full-perimeter depth framing.
+- Version text uses `concat!("v", env!("CARGO_PKG_VERSION"))` which
+  is evaluated at compile time — zero runtime cost.
+
+**Result**: The welcome screen now has a strong branded focal point
+with the hero terminal icon and its accent-tinted halo. The content
+area has cinematic depth framing from all four edges. The card
+container floats above the background with a physical drop shadow.
+The version indicator adds professional completeness.
+
+**Visual comparison with reference**:
+- Branded welcome screen: ✓ Large hero icon matches app-quality welcome pages
+- Depth framing: ✓ Edge vignettes create natural focal point
+- Card container depth: ✓ Drop shadow adds physical floating effect
+- Professional completeness: ✓ Version indicator shows build identity
+- Icon rendering quality: ✓ SDF chevron is smooth at all sizes
+
+**Remaining gaps vs reference (iteration 36)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

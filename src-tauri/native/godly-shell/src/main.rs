@@ -715,6 +715,36 @@ impl App {
                     [0.0, 0.0, 0.0, 0.04], vig_r * 0.3, vig_blur,
                 );
             }
+
+            // Edge vignettes — soft gradient darkening along content edges.
+            // Creates cinematic framing that draws attention to the center.
+            // Top edge (below tab bar): subtle drop shadow
+            {
+                let edge_h = ui_text_handle.s(12.0);
+                let tc = &layout.terminal;
+                // Top edge shadow (cast by tab bar)
+                ui_builder.fill_gradient(
+                    ui::widget::Rect { x: tc.x, y: tc.y, width: tc.width, height: edge_h },
+                    [0.0, 0.0, 0.0, 0.06],
+                    [0.0, 0.0, 0.0, 0.0],
+                );
+                // Left edge shadow (cast by sidebar)
+                if layout.sidebar.width > 0.0 {
+                    let side_w = ui_text_handle.s(8.0);
+                    ui_builder.fill_gradient_h(
+                        ui::widget::Rect { x: tc.x, y: tc.y, width: side_w, height: tc.height },
+                        [0.0, 0.0, 0.0, 0.05],
+                        [0.0, 0.0, 0.0, 0.0],
+                    );
+                }
+                // Bottom edge (above status bar): very subtle upward shadow
+                let bot_h = ui_text_handle.s(6.0);
+                ui_builder.fill_gradient(
+                    ui::widget::Rect { x: tc.x, y: tc.y + tc.height - bot_h, width: tc.width, height: bot_h },
+                    [0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.04],
+                );
+            }
         }
 
         // Empty terminal welcome state — styled welcome screen with branded
@@ -738,6 +768,38 @@ impl App {
             // Center block vertically at ~33% from top (visual balance)
             let center_x = tc.x + tc.width / 2.0;
             let block_y = tc.y + tc.height * 0.33;
+
+            // --- Hero terminal icon ---
+            // Large branding icon above the title — a stylized monitor with
+            // prompt caret, rendered at ~4× the tab-bar icon size for hero
+            // presence.  Accent-tinted with a soft halo glow behind it.
+            let hero_icon_size = ch * 4.0;
+            let hero_x = center_x - hero_icon_size / 2.0;
+            let hero_y = block_y - hero_icon_size - s(12.0);
+            let hero_rect = ui::widget::Rect {
+                x: hero_x, y: hero_y,
+                width: hero_icon_size, height: hero_icon_size,
+            };
+            // Halo glow behind icon (breathing, accent-tinted)
+            let breath = 0.85 + 0.15 * self.tab_bar.glow_phase().sin();
+            let halo_expand = s(10.0);
+            let halo_rect = ui::widget::Rect {
+                x: hero_x - halo_expand, y: hero_y - halo_expand,
+                width: hero_icon_size + halo_expand * 2.0,
+                height: hero_icon_size + halo_expand * 2.0,
+            };
+            ui_builder.fill_shadow(halo_rect,
+                [active_accent[0], active_accent[1], active_accent[2], 0.06 * breath],
+                hero_icon_size * 0.3, s(18.0));
+            // Icon stroke with accent tint (brighter than tab-bar version)
+            let hero_icon_fg = [
+                ui::builder::colors::FG_MUTED[0] * 0.55 + active_accent[0] * 0.45,
+                ui::builder::colors::FG_MUTED[1] * 0.55 + active_accent[1] * 0.45,
+                ui::builder::colors::FG_MUTED[2] * 0.55 + active_accent[2] * 0.45,
+                0.55,
+            ];
+            let hero_t = (1.8 * ui_text_handle.scale).max(1.0);
+            ui_builder.icon_terminal(hero_rect, hero_t, hero_icon_fg);
 
             // --- Branded header ---
             let title = "Godly Terminal";
@@ -884,6 +946,14 @@ impl App {
                 ui::builder::colors::BG_DARK[2],
                 0.3,
             ];
+            // Subtle drop shadow below the card container for floating depth
+            let shadow_rect = ui::widget::Rect {
+                x: container_rect.x + s(2.0),
+                y: container_rect.y + s(3.0),
+                width: container_rect.width - s(4.0),
+                height: container_rect.height,
+            };
+            ui_builder.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.12], s(8.0), s(10.0));
             ui_builder.fill_rounded(container_rect, container_bg, s(8.0));
             // Inner shadow for recessed depth on card container
             ui_builder.fill_inner_shadow_custom(container_rect,
@@ -975,6 +1045,20 @@ impl App {
                 ui_builder.text_ui(&ui_text_handle, desc, desc_x, key_text_y,
                     ui::builder::colors::FG_MUTED, bg);
             }
+
+            // Version indicator — very muted, below the card container
+            let version_str = concat!("v", env!("CARGO_PKG_VERSION"));
+            let version_w = ui_text_handle.text_width_ui(version_str);
+            let version_y = container_rect.y + container_rect.height + s(12.0);
+            let version_fg = [
+                ui::builder::colors::FG_MUTED[0],
+                ui::builder::colors::FG_MUTED[1],
+                ui::builder::colors::FG_MUTED[2],
+                0.3,
+            ];
+            ui_builder.text_ui(&ui_text_handle, version_str,
+                center_x - version_w / 2.0, version_y,
+                version_fg, bg);
         }
 
         // Scrollbar (rendered before chrome so it layers under borders)

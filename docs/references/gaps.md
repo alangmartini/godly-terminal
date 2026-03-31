@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 34)
+Last updated: 2026-03-31 (Iteration 36)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -67,6 +67,11 @@ Last updated: 2026-03-31 (Iteration 34)
 | Tab-session name consistency | Done | Tab titles match sidebar session names (plane, opensessions, quiver, etc.) (iteration 35) |
 | Settings keyboard shortcut | Done | "Ctrl+," hint right-aligned on Settings row for discoverability (iteration 35) |
 | Status bar connection status | Done | "Ready" label with breathing green dot in mode pill (iteration 35) |
+| Welcome screen hero icon | Done | Large SDF terminal icon with accent halo glow above title (iteration 36) |
+| Content area edge vignettes | Done | Top/left/bottom gradient shadows for cinematic framing depth (iteration 36) |
+| Welcome card container depth | Done | Drop shadow below card container for floating effect (iteration 36) |
+| Version indicator | Done | Muted version string below welcome shortcut cards (iteration 36) |
+| SDF chevron icon rendering | Done | Terminal icon chevron uses SDF rotated pills for clean scaling (iteration 36) |
 
 ## Remaining Gaps (Priority Order)
 

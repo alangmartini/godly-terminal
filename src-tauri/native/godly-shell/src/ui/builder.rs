@@ -620,7 +620,8 @@ impl UiBuilder {
         self.stroke_rounded(mid_rect, mid_size / 2.0, ring_width, fg);
     }
 
-    /// Draw a small terminal icon: monitor outline + prompt caret inside.
+    /// Draw a terminal icon: monitor outline + prompt chevron + cursor inside.
+    /// Uses SDF rotated pills for the chevron so it scales cleanly at any size.
     pub fn icon_terminal(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
         let (cx, cy) = rect.center();
         let hw = rect.width * 0.36;
@@ -631,28 +632,42 @@ impl UiBuilder {
             width: hw * 2.0, height: hh * 2.0,
         };
         self.stroke_rounded(monitor, hw * 0.12, t, color);
-        // Prompt caret ">" — two lines forming a chevron
+        // Prompt chevron ">" — two SDF rotated pills forming a clean V-shape.
+        // Each arm runs from the midpoint to a corner of the chevron.
         let caret_x = cx - hw * 0.4;
         let caret_mid_x = cx - hw * 0.05;
         let caret_top_y = cy - hh * 0.45;
         let caret_bot_y = cy + hh * 0.45;
         let caret_mid_y = cy;
-        // Top line of caret
-        self.hline_aa(caret_x, caret_top_y, caret_mid_x - caret_x, t, color);
-        // Diagonal approximation with short horizontal segments
-        let steps = 4;
-        for s in 0..steps {
-            let frac = s as f32 / steps as f32;
-            let x = caret_x + (caret_mid_x - caret_x) * frac;
-            let y = caret_top_y + (caret_mid_y - caret_top_y) * frac;
-            self.fill(Rect { x, y, width: t, height: (caret_mid_y - caret_top_y) / steps as f32 + t }, color);
-        }
-        for s in 0..steps {
-            let frac = s as f32 / steps as f32;
-            let x = caret_mid_x - (caret_mid_x - caret_x) * frac;
-            let y = caret_mid_y + (caret_bot_y - caret_mid_y) * frac;
-            self.fill(Rect { x, y, width: t, height: (caret_bot_y - caret_mid_y) / steps as f32 + t }, color);
-        }
+        // Upper arm: (caret_x, caret_top_y) → (caret_mid_x, caret_mid_y)
+        let dx_top = caret_mid_x - caret_x;
+        let dy_top = caret_mid_y - caret_top_y;
+        let len_top = (dx_top * dx_top + dy_top * dy_top).sqrt();
+        let angle_top = dy_top.atan2(dx_top);
+        let mcx_top = (caret_x + caret_mid_x) / 2.0;
+        let mcy_top = (caret_top_y + caret_mid_y) / 2.0;
+        let r = t * 0.5;
+        let radii = [r; 4];
+        let no_border = [0.0f32; 4];
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            mcx_top, mcy_top, len_top, t,
+            angle_top,
+            self.vw, self.vh, color,
+            radii, 0.0, no_border, 0.0,
+        ));
+        // Lower arm: (caret_mid_x, caret_mid_y) → (caret_x, caret_bot_y)
+        let dx_bot = caret_x - caret_mid_x;
+        let dy_bot = caret_bot_y - caret_mid_y;
+        let len_bot = (dx_bot * dx_bot + dy_bot * dy_bot).sqrt();
+        let angle_bot = dy_bot.atan2(dx_bot);
+        let mcx_bot = (caret_mid_x + caret_x) / 2.0;
+        let mcy_bot = (caret_mid_y + caret_bot_y) / 2.0;
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            mcx_bot, mcy_bot, len_bot, t,
+            angle_bot,
+            self.vw, self.vh, color,
+            radii, 0.0, no_border, 0.0,
+        ));
         // Cursor line (horizontal bar next to the caret)
         let cursor_x = cx + hw * 0.05;
         let cursor_y = cy + hh * 0.35;
