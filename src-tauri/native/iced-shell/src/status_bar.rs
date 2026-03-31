@@ -15,6 +15,8 @@ pub struct StatusBarInfo<'a> {
     pub rows: u16,
     /// Font to use for status bar monospace text.
     pub font: Font,
+    /// Git branch name, if available.
+    pub git_branch: Option<&'a str>,
 }
 
 /// Derive a friendly shell type label from a process name.
@@ -41,7 +43,7 @@ pub fn shell_label(process_name: &str) -> &'static str {
 
 /// Renders the bottom status bar.
 pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> Element<'a, M> {
-    let (shell, cwd, dims, status_font) = match info {
+    let (shell, cwd, dims, status_font, git_branch) = match info {
         Some(info) => (
             info.shell_label.to_string(),
             if info.cwd.is_empty() {
@@ -51,8 +53,9 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
             },
             format!("{}\u{00D7}{}", info.cols, info.rows),
             info.font,
+            info.git_branch.map(|s| s.to_string()),
         ),
-        None => (String::new(), String::new(), String::new(), Font::default()),
+        None => (String::new(), String::new(), String::new(), Font::default(), None),
     };
 
     let shell_text = text(shell)
@@ -101,20 +104,67 @@ pub fn view_status_bar<'a, M: Clone + 'a>(info: Option<StatusBarInfo<'_>>) -> El
         snap: true,
     };
 
-    let content = row![
+    // Git branch (if available)
+    let branch_element: Option<Element<'a, M>> = git_branch.map(|branch| {
+        let muted = TEXT_SECONDARY();
+        let branch_color = Color::from_rgba(
+            (muted.r * 0.8 + 0.2 * 0.9).min(1.0),
+            (muted.g * 0.8 + 0.2 * 0.76).min(1.0),
+            (muted.b * 0.8 + 0.2 * 0.48).min(1.0),
+            muted.a,
+        );
+        row![
+            text("\u{EA68}").font(Font {
+                family: iced::font::Family::Name("codicon"),
+                weight: iced::font::Weight::Normal,
+                stretch: iced::font::Stretch::Normal,
+                style: iced::font::Style::Normal,
+            }).size(10).color(branch_color),
+            text(branch).size(10).color(branch_color).font(status_font),
+        ]
+        .spacing(3)
+        .align_y(iced::Alignment::Center)
+        .into()
+    });
+
+    // Encoding and line-ending labels
+    let label_color = {
+        let s = TEXT_SECONDARY();
+        Color::from_rgba(s.r * 0.85, s.g * 0.85, s.b * 0.85, s.a)
+    };
+    let utf8_text = text("UTF-8").size(10).color(label_color).font(status_font);
+    let lf_text = text("LF").size(10).color(label_color).font(status_font);
+
+    let mut content = row![
         container(shell_badge).padding(Padding::from([0, 8])),
         container(rule::vertical(1).style(section_sep))
             .height(Length::Fixed(12.0))
             .padding(Padding::from([0, 2])),
         container(cwd_text).padding(Padding::from([0, 4])),
-        Space::new().width(Length::Fill),
-        container(rule::vertical(1).style(section_sep))
-            .height(Length::Fixed(12.0))
-            .padding(Padding::from([0, 2])),
-        container(dims_text).padding(Padding::from([0, 8])),
     ]
-    .align_y(iced::Alignment::Center)
-    .height(Length::Fixed(STATUS_BAR_HEIGHT));
+    .align_y(iced::Alignment::Center);
+
+    if let Some(branch_el) = branch_element {
+        content = content
+            .push(container(rule::vertical(1).style(section_sep))
+                .height(Length::Fixed(12.0))
+                .padding(Padding::from([0, 2])))
+            .push(container(branch_el).padding(Padding::from([0, 4])));
+    }
+
+    content = content
+        .push(Space::new().width(Length::Fill))
+        .push(container(utf8_text).padding(Padding::from([0, 4])))
+        .push(container(rule::vertical(1).style(section_sep))
+            .height(Length::Fixed(12.0))
+            .padding(Padding::from([0, 2])))
+        .push(container(lf_text).padding(Padding::from([0, 4])))
+        .push(container(rule::vertical(1).style(section_sep))
+            .height(Length::Fixed(12.0))
+            .padding(Padding::from([0, 2])))
+        .push(container(dims_text).padding(Padding::from([0, 8])));
+
+    let content = content.height(Length::Fixed(STATUS_BAR_HEIGHT));
 
     // Soft top separator — less harsh than full-opacity border.
     let status_sep_color = {
@@ -168,6 +218,7 @@ mod tests {
             cols: 80,
             rows: 24,
             font: Font::default(),
+            git_branch: Some("main"),
         };
         let _el: Element<'_, Msg> = view_status_bar(Some(info));
     }

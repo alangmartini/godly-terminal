@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 40)
+Last updated: 2026-03-31 (Iteration 41)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -91,6 +91,11 @@ Last updated: 2026-03-31 (Iteration 40)
 | Sidebar accent dots | Done | 7px flat accent dots replacing 11px terminal icons for clean readability (iteration 40) |
 | Modern sidebar right edge | Done | Gradient shadow + hairline border replacing embossed groove (iteration 40) |
 | Flat unread badges | Done | Unread count badges use solid fill matching tab badge style (iteration 40) |
+| Sidebar folder icons | Done | Codicon folder icon before workspace folder paths for visual identification (iteration 41) |
+| Branded empty state card | Done | Terminal icon, heading, shortcut keycaps, CTA button in professional welcome card (iteration 41) |
+| Status bar encoding/LF labels | Done | "UTF-8" and "LF" labels right-aligned matching IDE conventions (iteration 41) |
+| Sidebar depth shadow | Done | Rightward drop shadow on sidebar content for panel depth separation (iteration 41) |
+| Status bar git branch field | Done | Git branch icon + name field added (renders when branch is available) (iteration 41) |
 
 ## Remaining Gaps (Priority Order)
 

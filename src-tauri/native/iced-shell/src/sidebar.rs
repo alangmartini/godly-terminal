@@ -345,8 +345,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 0.7,
             )
         };
+        let folder_icon = text(ICON_FOLDER)
+            .font(CODICON_FONT)
+            .size(11)
+            .color(folder_color);
         let folder_label = text(folder_display).size(10).color(folder_color).font(font);
-        let bottom_row = row![worktree_indicator, folder_label]
+        let bottom_row = row![worktree_indicator, folder_icon, folder_label]
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
@@ -765,6 +769,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .clip(true)
     .style(|_theme| container::Style {
         background: Some(iced::Background::Color(SURFACE_BG())),
+        // Cast a rightward shadow from the sidebar edge for depth separation.
+        shadow: iced::Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.18),
+            offset: iced::Vector::new(2.0, 0.0),
+            blur_radius: 6.0,
+        },
         ..container::Style::default()
     });
 

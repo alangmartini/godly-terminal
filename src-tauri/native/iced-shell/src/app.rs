@@ -119,9 +119,9 @@ use crate::tab_bar::{self, TAB_BAR_HEIGHT};
 use crate::terminal_context_menu::{self, TermCtxAction};
 use crate::terminal_state::TerminalCollection;
 use crate::theme::{
-    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, DANGER, EMPTY_STATE_BG, GHOST_HOVER,
-    PANE_BG, PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_LG, RADIUS_MD, RADIUS_SM, SHADOW_COLOR,
-    TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, BACKDROP, BG_SECONDARY, BG_TERTIARY, BORDER, BORDER_VARIANT, DANGER, EMPTY_STATE_BG,
+    GHOST_HOVER, PANE_BG, PANE_BORDER, PANE_FOCUSED_BORDER, RADIUS_LG, RADIUS_MD, RADIUS_SM,
+    SHADOW_COLOR, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::title_bar;
 use crate::url_detector;
@@ -236,7 +236,76 @@ const SIDEBAR_ANIMATION_DURATION_MS: u64 = 200;
 const SIDEBAR_ANIMATION_TICK_MS: u64 = 16;
 const TERMINAL_VIEWPORT_INSET_X: f32 = 4.0;
 const TERMINAL_VIEWPORT_INSET_Y: f32 = 2.0;
-const EMPTY_STATE_CARD_WIDTH: f32 = 400.0;
+const EMPTY_STATE_CARD_WIDTH: f32 = 360.0;
+
+/// Canvas-drawn terminal icon for the empty state welcome card.
+struct EmptyStateIcon {
+    color: Color,
+}
+
+impl<Message> canvas::Program<Message> for EmptyStateIcon {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let w = bounds.size().width;
+        let h = bounds.size().height;
+        let cx = w * 0.5;
+        let cy = h * 0.5;
+        let s = w.min(h) * 0.38;
+
+        // Monitor outline with rounded corners
+        let outline = canvas::Path::rounded_rectangle(
+            Point::new(cx - s, cy - s * 0.8),
+            iced::Size::new(s * 2.0, s * 1.6),
+            iced::border::Radius::new(s * 0.15),
+        );
+        let stroke = canvas::Stroke::default()
+            .with_color(self.color)
+            .with_width(1.8);
+        frame.stroke(&outline, stroke);
+
+        // Prompt caret ">"
+        let caret = canvas::Path::new(|b| {
+            b.move_to(Point::new(cx - s * 0.4, cy - s * 0.25));
+            b.line_to(Point::new(cx - s * 0.05, cy + s * 0.05));
+            b.line_to(Point::new(cx - s * 0.4, cy + s * 0.35));
+        });
+        let caret_stroke = canvas::Stroke::default()
+            .with_color(self.color)
+            .with_width(1.8)
+            .with_line_cap(canvas::LineCap::Round)
+            .with_line_join(canvas::LineJoin::Round);
+        frame.stroke(&caret, caret_stroke);
+
+        // Cursor line
+        let cursor_line = canvas::Path::line(
+            Point::new(cx + s * 0.05, cy + s * 0.35),
+            Point::new(cx + s * 0.5, cy + s * 0.35),
+        );
+        frame.stroke(&cursor_line, stroke);
+
+        // Monitor stand
+        let stand = canvas::Path::line(
+            Point::new(cx - s * 0.25, cy + s * 0.8 + 1.0),
+            Point::new(cx + s * 0.25, cy + s * 0.8 + 1.0),
+        );
+        let stand_stroke = canvas::Stroke::default()
+            .with_color(Color::from_rgba(self.color.r, self.color.g, self.color.b, 0.5))
+            .with_width(1.4)
+            .with_line_cap(canvas::LineCap::Round);
+        frame.stroke(&stand, stand_stroke);
+
+        vec![frame.into_geometry()]
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SidebarAnimation {
@@ -5179,6 +5248,7 @@ impl GodlyApp {
                 cols: term.cols,
                 rows: term.rows,
                 font: UI_FONT,
+                git_branch: None,
             });
         let status_bar_el: Element<'_, Message> = status_bar::view_status_bar(status_info);
 
@@ -10315,53 +10385,157 @@ impl GodlyApp {
     }
 
     fn view_terminal_empty_state(&self) -> Element<'_, Message> {
+        // --- Hero terminal icon ---
+        let icon = canvas(EmptyStateIcon {
+            color: ACCENT(),
+        })
+        .width(Length::Fixed(48.0))
+        .height(Length::Fixed(48.0));
+
+        let icon_container = container(icon)
+            .padding(12)
+            .style(|_theme| {
+                let accent = ACCENT();
+                container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        accent.r, accent.g, accent.b, 0.08,
+                    ))),
+                    border: iced::Border {
+                        color: Color::from_rgba(accent.r, accent.g, accent.b, 0.15),
+                        width: 1.0,
+                        radius: 14.0.into(),
+                    },
+                    ..container::Style::default()
+                }
+            });
+
+        // --- Heading ---
+        let heading = text("Godly Terminal")
+            .size(20)
+            .font(UI_FONT_BOLD)
+            .color(TEXT_ACTIVE());
+        let subtitle = text("GPU-accelerated terminal emulator")
+            .size(12)
+            .font(UI_FONT)
+            .color(TEXT_SECONDARY());
+
+        // --- Keyboard shortcut hints ---
+        let shortcut = |key: &'static str, desc: &'static str| -> Element<'_, Message> {
+            let key_badge = container(
+                text(key).size(10).font(Font::MONOSPACE).color(TEXT_ACTIVE()),
+            )
+            .padding(Padding::from([2, 6]))
+            .style(|_theme| {
+                let bg = GHOST_HOVER();
+                container::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    border: iced::Border {
+                        color: BORDER_VARIANT(),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    shadow: Shadow {
+                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.15),
+                        offset: Vector::new(0.0, 1.0),
+                        blur_radius: 1.0,
+                    },
+                    ..container::Style::default()
+                }
+            });
+            let desc_text = text(desc).size(11).font(UI_FONT).color(TEXT_SECONDARY());
+            row![key_badge, desc_text]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+        };
+
+        let shortcuts = column![
+            shortcut("Ctrl+T", "New terminal"),
+            shortcut("Ctrl+W", "Close tab"),
+            shortcut("Ctrl+Tab", "Next tab"),
+            shortcut("Ctrl+,", "Settings"),
+        ]
+        .spacing(6);
+
+        // --- CTA button ---
+        let cta_btn = button(
+            row![
+                text("\u{EA60}").font(Font {
+                    family: iced::font::Family::Name("codicon"),
+                    weight: iced::font::Weight::Normal,
+                    stretch: iced::font::Stretch::Normal,
+                    style: iced::font::Style::Normal,
+                }).size(13).color(BG_SECONDARY()),
+                text("Create terminal").size(13).font(UI_FONT).color(BG_SECONDARY()),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Center),
+        )
+        .on_press(Message::NewTabRequested)
+        .padding(Padding::from([8, 16]))
+        .style(|_theme, status| {
+            let background = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    iced::Background::Color(PANE_FOCUSED_BORDER())
+                }
+                _ => iced::Background::Color(ACCENT()),
+            };
+            button::Style {
+                background: Some(background),
+                text_color: BG_SECONDARY(),
+                border: iced::Border {
+                    color: iced::Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 6.0.into(),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.20),
+                    offset: Vector::new(0.0, 2.0),
+                    blur_radius: 4.0,
+                },
+                ..button::Style::default()
+            }
+        });
+
         let card = container(
             column![
-                text("No terminals in this workspace")
-                    .size(22)
-                    .color(TEXT_ACTIVE()),
-                text("Create a terminal to start working.")
-                    .size(13)
-                    .color(TEXT_SECONDARY()),
-                text("Press Ctrl+T to create one")
-                    .size(11)
-                    .color(TEXT_SECONDARY()),
-                button(text("Create terminal").size(13).color(BG_SECONDARY()))
-                    .on_press(Message::NewTabRequested)
-                    .padding(Padding::from([8, 14]))
-                    .style(|_theme, status| {
-                        let background = match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                iced::Background::Color(PANE_FOCUSED_BORDER())
-                            }
-                            _ => iced::Background::Color(ACCENT()),
-                        };
-
-                        button::Style {
-                            background: Some(background),
-                            text_color: BG_SECONDARY(),
-                            border: iced::Border {
-                                color: iced::Color::TRANSPARENT,
-                                width: 0.0,
-                                radius: 6.0.into(),
-                            },
-                            ..button::Style::default()
-                        }
-                    }),
+                container(icon_container)
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+                container(heading)
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+                container(subtitle)
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+                Space::new().height(Length::Fixed(8.0)),
+                shortcuts,
+                Space::new().height(Length::Fixed(4.0)),
+                cta_btn,
             ]
-            .spacing(12)
-            .width(Length::Fill),
+            .spacing(8)
+            .width(Length::Fill)
+            .align_x(iced::Alignment::Start),
         )
-        .padding(Padding::from([28, 20]))
+        .padding(Padding::from([32, 28]))
         .width(Length::Fixed(EMPTY_STATE_CARD_WIDTH))
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(EMPTY_STATE_BG())),
-            border: iced::Border {
-                color: Color::from_rgba(PANE_BORDER().r, PANE_BORDER().g, PANE_BORDER().b, 0.5),
-                width: 0.5,
-                radius: 10.0.into(),
-            },
-            ..container::Style::default()
+        .style(|_theme| {
+            let bg = EMPTY_STATE_BG();
+            let border_c = PANE_BORDER();
+            container::Style {
+                background: Some(iced::Background::Color(bg)),
+                border: iced::Border {
+                    color: Color::from_rgba(border_c.r, border_c.g, border_c.b, 0.4),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+                    offset: Vector::new(0.0, 4.0),
+                    blur_radius: 16.0,
+                },
+                ..container::Style::default()
+            }
         });
 
         container(center(card))

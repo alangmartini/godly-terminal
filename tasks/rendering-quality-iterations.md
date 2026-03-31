@@ -1773,3 +1773,85 @@ and Linear's "quiet confidence" design language.
 **Remaining gaps vs reference (iteration 40)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 41 — Sidebar folder icons, branded empty state, status bar labels, sidebar depth
+
+**Goal**: Improve sidebar workspace items with folder icons, create a
+professional branded empty state card, add encoding/line-ending labels
+to the status bar, and enhance sidebar depth with a shadow edge.
+
+**Changes made**:
+
+1. **Sidebar folder icons** (`sidebar.rs`): Added codicon folder icon
+   (`\u{EA83}`) before workspace folder path text on the bottom row of
+   each workspace entry. The icon uses the same color as the folder label
+   (accent when worktree mode, muted secondary otherwise), providing
+   visual identification of the path as a folder.
+
+2. **Branded empty state card** (`app.rs`): Complete redesign of the
+   `view_terminal_empty_state()` method. Replaced the plain text card
+   with a professional welcome-style layout:
+   - Canvas-drawn terminal icon (EmptyStateIcon) with rounded monitor
+     outline, prompt caret, cursor line, and stand — enclosed in an
+     accent-tinted background pill with border (14px radius)
+   - "Godly Terminal" bold heading with "GPU-accelerated terminal
+     emulator" subtitle
+   - Keyboard shortcut hints (Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+,) with
+     styled keycap badges (monospace font, ghost hover background,
+     border variant stroke, drop shadow for physical depth)
+   - "Create terminal" CTA button with codicon add icon (\u{EA60})
+     and drop shadow for visual prominence
+   - Card has 12px rounded corners, subtle border, and 16px blur
+     drop shadow for floating depth
+
+3. **Status bar encoding/line-ending labels** (`status_bar.rs`): Added
+   "UTF-8" encoding label and "LF" line-ending label to the right side
+   of the status bar, separated by vertical rule dividers. These match
+   the convention of VS Code, Zed, and other professional editors.
+   Also added `git_branch` field to `StatusBarInfo` with codicon
+   git-branch icon (\u{EA68}) and peach-tinted text color — renders
+   when a branch name is available.
+
+4. **Sidebar depth shadow** (`sidebar.rs`): Added a rightward drop
+   shadow (2px offset, 6px blur, 0.18 alpha) on the sidebar content
+   container. This creates a subtle depth separation from the content
+   area, replacing the need for strong border colors. The shadow
+   makes the sidebar feel elevated, matching modern panel separation
+   conventions (Zed, Linear, Arc Browser).
+
+**Technical details**:
+- `EmptyStateIcon` is a new `canvas::Program` implementation that
+  draws a terminal monitor outline with rounded corners (via
+  `Path::rounded_rectangle`), a ">" caret prompt, cursor line, and
+  monitor stand. All strokes use accent color at 1.8px width.
+- Keycap badge styling: `Font::MONOSPACE` for key labels, `GHOST_HOVER`
+  background, `BORDER_VARIANT` 1px stroke, 1px blur shadow for
+  physical depth. `UI_FONT` for description text.
+- `EMPTY_STATE_CARD_WIDTH` reduced from 400px to 360px for better
+  proportions with the new content layout.
+- Status bar `git_branch` renders conditionally: a codicon branch
+  icon + branch name in peach-tinted color, with separator divider.
+  Currently wired as `None` since `extract_git_branch()` isn't
+  implemented yet on TerminalInfo.
+- Sidebar shadow uses `iced::Shadow { offset: (2, 0), blur: 6 }` —
+  the rightward offset means the shadow falls onto the content area
+  to the right of the sidebar, creating visual depth.
+
+**Result**: The sidebar now shows folder icons for better visual
+hierarchy. The empty state card is a professional branded welcome
+screen with icon, heading, shortcut hints, and CTA button. The
+status bar has encoding/line-ending metadata labels matching IDE
+conventions. The sidebar right edge has soft depth separation.
+
+**Visual comparison with reference**:
+- Sidebar folder icons: ✓ Visual path identification like file explorers
+- Empty state design: ✓ Professional branded welcome card
+- Status bar completeness: ✓ UTF-8 and LF labels match IDE conventions
+- Sidebar depth: ✓ Shadow-based panel separation
+- Keycap badges: ✓ Physical depth styling on shortcut hints
+- Overall polish: ✓ More complete and professional empty state
+
+**Remaining gaps vs reference (iteration 41)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
+- Git branch display (StatusBarInfo field added but not yet populated)
