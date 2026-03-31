@@ -1694,3 +1694,82 @@ has more physical feedback with the red glow shadow.
 **Remaining gaps vs reference (iteration 39)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 40 — Visual Noise Reduction & Modern Flat Aesthetic
+
+**Goal**: Reduce visual noise from accumulated effects (glows, gradients,
+breathing animations) across 39 iterations. Flatten the aesthetic toward
+modern UI conventions (Material 3, macOS Sequoia) where depth comes from
+subtle shadows rather than 3D gradients.
+
+**Changes made**:
+
+1. **Flat tab numbered badges** (`ui/tab_bar.rs`): Replaced gradient-filled
+   3D circles (accent*1.15 top → accent*0.85 bottom) with solid flat accent
+   fills. Glow only appears on active tab (removed always-on inactive glow).
+   Glow intensity halved (0.10 alpha, down from 0.14–0.22). Border changed
+   from 0.3→0.25 alpha with 0.7× darkening (was 0.6×). Result: badges look
+   clean and modern instead of over-styled.
+
+2. **Global glow breathing reduction** (all files): Changed breathing
+   oscillation from `0.85 + 0.15 * sin()` (±15% swing) to `0.92 + 0.08 *
+   sin()` (±8% swing) everywhere. This makes breathing barely perceptible
+   at rest — you notice it subconsciously but it doesn't distract.
+   - Tab bar: 5 locations updated
+   - Sidebar: 4 locations updated (3 standard + 1 agent orbit)
+   - main.rs: 5 locations updated (welcome, hero, spotlight, accent bar)
+
+3. **Glow alpha reductions**:
+   - Active tab ambient glow: 0.06→0.04
+   - Active tab top breathing glow: 0.18→0.08, height 4→3px, blur 5→4px
+   - Active tab bottom bleed: 0.12→0.06, height 4→3px, blur 8→5px
+   - Unread badge glow: 0.20→0.10, spread 3→2px, blur 5→4px
+   - Sidebar active glow: 0.08→0.05, blur 10→8px
+   - Sidebar active shadow: 0.12→0.08, blur 5→4px
+   - Sidebar indicator glow: 0.25→0.14, blur 7→5px
+   - Sidebar indicator trail: 0.07→0.04, blur 12→10px
+   - Hero icon halo: 0.06→0.035, blur 18→16px
+   - Content spotlight: 0.018→0.012
+   - Window accent bar: focused 0.30→0.20, unfocused 0.08→0.06
+
+4. **Sidebar accent dots** (`ui/sidebar.rs`): Replaced 11px terminal
+   icons (`icon_terminal()`) with 7px flat accent-colored circles.
+   At 11px the terminal monitor+caret icon was illegible — just colored
+   blobs. Clean dots at 7px are clearly circular, read as session
+   indicators, and match the opensessions reference. Active dot gets
+   a subtle stroke ring instead of a glow shadow.
+
+5. **Sidebar right edge** (`ui/sidebar.rs`): Replaced embossed groove
+   (dark+light vgroove_fade) with a modern approach: 1px hairline border
+   (0.25 alpha) + 6px inward gradient shadow (0→0.06 alpha). Creates a
+   softer, more organic panel separation that matches current design
+   trends (Zed, Linear, Arc Browser).
+
+6. **Unread badge styling** (`ui/tab_bar.rs`): Flattened to match the
+   tab numbered badges — solid accent fill instead of gradient. Consistent
+   visual language across all badge-shaped elements.
+
+**Design philosophy**: After 39 iterations of additive polish (adding
+effects, glows, gradients, grooves, shadows), this iteration is
+*subtractive*. Professional apps achieve quality through restraint —
+each effect should be barely noticeable individually but contribute
+to overall cohesion. Reducing every glow by ~50% and flattening
+gradients creates a calmer, more confident aesthetic.
+
+**Result**: The UI feels significantly calmer and more modern. Tab
+badges are clean flat circles. Breathing animations are subliminal
+rather than noticeable. The sidebar right edge is softer. The overall
+visual noise level is reduced, bringing the aesthetic closer to Zed
+and Linear's "quiet confidence" design language.
+
+**Visual comparison with reference**:
+- Badge flatness: ✓ Solid circles match modern flat design trends
+- Glow subtlety: ✓ Effects are present but not attention-grabbing
+- Sidebar indicators: ✓ Clean dots match opensessions dot convention
+- Panel separation: ✓ Soft gradient shadow replaces dated groove emboss
+- Visual calm: ✓ Reduced layering of effects = less visual noise
+- Overall restraint: ✓ Subtractive refinement toward professional apps
+
+**Remaining gaps vs reference (iteration 40)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

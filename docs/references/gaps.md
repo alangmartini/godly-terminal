@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 39)
+Last updated: 2026-03-31 (Iteration 40)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -86,6 +86,11 @@ Last updated: 2026-03-31 (Iteration 39)
 | Sidebar version indicator | Done | Muted version string at bottom of sidebar below Settings row (iteration 39) |
 | Tab close button glow | Done | Red accent glow shadow behind close button on hover (iteration 39) |
 | Status bar encoding/LF labels | Done | "UTF-8" and "LF" muted text labels in status bar for professional completeness (iteration 39) |
+| Flat tab badges | Done | Solid accent fill circles instead of 3D gradient badges (iteration 40) |
+| Reduced glow breathing | Done | Breathing range narrowed to ±8% (was ±15%), all glow alphas halved across UI (iteration 40) |
+| Sidebar accent dots | Done | 7px flat accent dots replacing 11px terminal icons for clean readability (iteration 40) |
+| Modern sidebar right edge | Done | Gradient shadow + hairline border replacing embossed groove (iteration 40) |
+| Flat unread badges | Done | Unread count badges use solid fill matching tab badge style (iteration 40) |
 
 ## Remaining Gaps (Priority Order)
 
