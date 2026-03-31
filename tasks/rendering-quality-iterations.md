@@ -1855,3 +1855,77 @@ conventions. The sidebar right edge has soft depth separation.
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
 - Git branch display (StatusBarInfo field added but not yet populated)
+
+## Iteration 42 — SDF breadcrumb chevrons, CTA button, cursor position, sidebar folder icons
+
+**Goal**: Replace text-based UI glyphs with SDF vector icons for crispness,
+add IDE-standard status bar indicators, and improve the empty state with
+a proper call-to-action button.
+
+**Changes made**:
+
+1. **SDF chevron-right icon** (`builder.rs`): New `icon_chevron_right()`
+   method — draws a right-pointing chevron (›) using two SDF rotated pills.
+   Two arms converge at a central tip point, producing a clean vector shape
+   that scales crisply at any DPI without font rendering artifacts.
+
+2. **Breadcrumb SDF chevrons** (`main.rs`): Replaced text-based `›`
+   (`\u{203A}` single right angle quotation mark) breadcrumb separators
+   with `icon_chevron_right()`. The SDF chevrons are 55% of cell height
+   and vertically centered in the breadcrumb bar. Both the segment
+   separators and the post-ellipsis separator use the new icon.
+
+3. **Sidebar CWD folder icons** (`sidebar.rs`): Replaced the text chevron
+   `›` prefix on working directory lines with an SDF folder icon via
+   `icon_folder()`. The 75%-cell-height icon is vertically centered on
+   the CWD line and uses the same color as the path text. Provides
+   visual consistency with the status bar folder icon and breadcrumb bar.
+
+4. **Status bar cursor position** (`status_bar.rs`): Added "Ln X, Col Y"
+   indicator between the line-ending label and the dimensions pill.
+   New `cursor_line` and `cursor_col` fields on `StatusBar` struct
+   (default: 1, 1). Uses the same muted text style as UTF-8 and LF
+   labels. The dimensions pill `x` position now chains through the
+   cursor label width to prevent overlap.
+
+5. **Empty state CTA button** (`main.rs`): Added a "Create terminal"
+   pill button below the version indicator in the welcome screen. The
+   button features:
+   - Accent-tinted fill (18% active accent + 82% BG_SURFACE)
+   - Gradient top (8% brighter) for dimensional depth
+   - Accent-colored border with breathing animation
+   - Drop shadow for floating depth
+   - Plus icon (left) using `icon_plus()` with accent color
+   - Label text tinted toward accent for color continuity
+   - Full pill shape (radius = height/2) for modern CTA styling
+
+**Technical details**:
+- `icon_chevron_right()` uses the same SDF rotated pill technique as
+  `icon_disclosure_down()` — two arms (top→tip and bottom→tip) rendered
+  as thin SDF rectangles at calculated angles. The tip meets at the
+  center-right of the bounding rect.
+- Breadcrumb chevron size (`ch * 0.55`) chosen to match the visual
+  weight of the surrounding text without being too prominent.
+- Status bar layout chain: hints → encoding → LF → cursor → dims (right
+  to left). Each element's x-position is calculated from its neighbor
+  to prevent overlap as content lengths vary.
+
+**Result**: The breadcrumb bar looks significantly crisper — SDF chevrons
+scale perfectly at any DPI without the font-dependent rendering artifacts
+of the text-based `›` character. The sidebar CWD lines are more visually
+consistent with the status bar and breadcrumb folder patterns. The empty
+state now has a clear primary action button that invites interaction. The
+status bar has complete IDE-standard metadata (cursor position, encoding,
+line ending, dimensions).
+
+**Visual comparison with reference**:
+- Breadcrumb separators: ✓ SDF vector icons match professional app quality
+- Sidebar path icons: ✓ Folder icon provides consistent visual language
+- Status bar completeness: ✓ Ln/Col matches VS Code and Zed conventions
+- Empty state CTA: ✓ Professional action button invites interaction
+- Icon consistency: ✓ All separators and path indicators use SDF rendering
+- Overall polish: ✓ Incremental vector icon refinement across UI
+
+**Remaining gaps vs reference (iteration 42)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

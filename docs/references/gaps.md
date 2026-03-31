@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 41)
+Last updated: 2026-03-31 (Iteration 42)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -96,6 +96,11 @@ Last updated: 2026-03-31 (Iteration 41)
 | Status bar encoding/LF labels | Done | "UTF-8" and "LF" labels right-aligned matching IDE conventions (iteration 41) |
 | Sidebar depth shadow | Done | Rightward drop shadow on sidebar content for panel depth separation (iteration 41) |
 | Status bar git branch field | Done | Git branch icon + name field added (renders when branch is available) (iteration 41) |
+| SDF breadcrumb chevrons | Done | Path separators use SDF vector chevron icon instead of text `›` for crisp scaling (iteration 42) |
+| Sidebar CWD folder icons | Done | Working directory lines show SDF folder icon instead of text chevron prefix (iteration 42) |
+| Status bar cursor position | Done | "Ln X, Col Y" indicator matching VS Code/Zed IDE convention (iteration 42) |
+| Empty state CTA button | Done | "Create terminal" accent-tinted pill button below shortcut cards and version (iteration 42) |
+| SDF chevron-right icon | Done | New `icon_chevron_right` builder method for breadcrumb/path separators (iteration 42) |
 
 ## Remaining Gaps (Priority Order)
 

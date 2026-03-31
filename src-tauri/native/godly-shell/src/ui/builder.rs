@@ -760,6 +760,37 @@ impl UiBuilder {
         ));
     }
 
+    /// Draw a right-pointing chevron (›) using two SDF rotated pills.
+    /// Used for breadcrumb path separators.
+    pub fn icon_chevron_right(&mut self, rect: Rect, t: f32, color: [f32; 4]) {
+        let (cx, cy) = rect.center();
+        let half = rect.height * 0.30;
+        let r = t * 0.5;
+        let radii = [r; 4];
+        let no_border = [0.0f32; 4];
+        // Top arm: center-right ← top-left
+        let top = (cx - half * 0.4, cy - half);
+        let tip = (cx + half * 0.4, cy);
+        let dx = tip.0 - top.0;
+        let dy = tip.1 - top.1;
+        let len = (dx * dx + dy * dy).sqrt();
+        let a = dy.atan2(dx);
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            (top.0 + tip.0) / 2.0, (top.1 + tip.1) / 2.0, len, t,
+            a, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
+        // Bottom arm: center-right → bottom-left
+        let bot = (cx - half * 0.4, cy + half);
+        let dx2 = tip.0 - bot.0;
+        let dy2 = tip.1 - bot.1;
+        let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
+        let a2 = dy2.atan2(dx2);
+        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            (bot.0 + tip.0) / 2.0, (bot.1 + tip.1) / 2.0, len2, t,
+            a2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        ));
+    }
+
     /// Draw a terminal icon: monitor outline + prompt chevron + cursor inside.
     /// Uses SDF rotated pills for the chevron so it scales cleanly at any size.
     pub fn icon_terminal(&mut self, rect: Rect, t: f32, color: [f32; 4]) {

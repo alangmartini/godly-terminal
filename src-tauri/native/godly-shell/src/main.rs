@@ -1077,6 +1077,64 @@ impl App {
             ui_builder.text_ui(&ui_text_handle, version_str,
                 center_x - version_w / 2.0, version_y,
                 version_fg, bg);
+
+            // --- "Create terminal" CTA button ---
+            // Prominent action button below version indicator, styled as a filled
+            // accent pill with hover glow — the obvious primary action.
+            let cta_label = "Create terminal";
+            let cta_text_w = ui_text_handle.text_width_ui(cta_label);
+            let cta_icon_sz = ch * 0.75;
+            let cta_icon_gap = s(6.0);
+            let cta_pad_h = s(16.0);
+            let cta_pad_v = s(6.0);
+            let cta_w = cta_icon_sz + cta_icon_gap + cta_text_w + cta_pad_h * 2.0;
+            let cta_h = ch + cta_pad_v * 2.0;
+            let cta_x = center_x - cta_w / 2.0;
+            let cta_y = version_y + ch + s(14.0);
+            let cta_rect = ui::widget::Rect {
+                x: cta_x, y: cta_y, width: cta_w, height: cta_h,
+            };
+            let cta_r = cta_h / 2.0;
+            // Filled accent background (matches active tab accent color)
+            let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
+            let cta_fill = [
+                active_accent[0] * 0.18 + ui::builder::colors::BG_SURFACE[0] * 0.82,
+                active_accent[1] * 0.18 + ui::builder::colors::BG_SURFACE[1] * 0.82,
+                active_accent[2] * 0.18 + ui::builder::colors::BG_SURFACE[2] * 0.82,
+                0.9,
+            ];
+            let cta_fill_top = [cta_fill[0] * 1.08, cta_fill[1] * 1.08, cta_fill[2] * 1.08, cta_fill[3]];
+            let cta_border = [
+                active_accent[0] * 0.35, active_accent[1] * 0.35,
+                active_accent[2] * 0.35, 0.45 * breath,
+            ];
+            // Subtle drop shadow for floating depth
+            ui_builder.fill_shadow(
+                ui::widget::Rect { x: cta_x + s(2.0), y: cta_y + s(2.0), width: cta_w - s(4.0), height: cta_h },
+                [0.0, 0.0, 0.0, 0.15], cta_r, s(6.0),
+            );
+            ui_builder.fill_rounded_gradient(cta_rect, cta_fill_top, cta_fill, cta_r);
+            ui_builder.stroke_rounded(cta_rect, cta_r, 0.5, cta_border);
+            // Plus icon (left side of button)
+            let icon_rect = ui::widget::Rect {
+                x: cta_x + cta_pad_h,
+                y: cta_y + (cta_h - cta_icon_sz) / 2.0,
+                width: cta_icon_sz, height: cta_icon_sz,
+            };
+            let icon_t = (1.0 * ui_text_handle.scale).max(0.8);
+            let icon_fg = [active_accent[0], active_accent[1], active_accent[2], 0.7];
+            ui_builder.icon_plus(icon_rect, icon_t, cta_icon_sz * 0.3, icon_fg);
+            // Label text
+            let label_fg = [
+                ui::builder::colors::FG_SECONDARY[0] * 0.7 + active_accent[0] * 0.3,
+                ui::builder::colors::FG_SECONDARY[1] * 0.7 + active_accent[1] * 0.3,
+                ui::builder::colors::FG_SECONDARY[2] * 0.7 + active_accent[2] * 0.3,
+                0.85,
+            ];
+            ui_builder.text_ui(&ui_text_handle, cta_label,
+                cta_x + cta_pad_h + cta_icon_sz + cta_icon_gap,
+                cta_y + (cta_h - ch) / 2.0,
+                label_fg, cta_fill);
         }
 
         // Scrollbar (rendered before chrome so it layers under borders)
@@ -1291,17 +1349,29 @@ impl App {
                                   ui::builder::colors::FG_MUTED[2], 0.65];
                 let last_fg = ui::builder::colors::FG_SECONDARY;
 
+                // SDF chevron icon dimensions — matches text line height for alignment
+                let chevron_sz = ch * 0.55;
+                let chevron_t = (0.8 * ui_text_handle.scale).max(0.5);
+
                 if show_ellipsis {
                     ui_builder.text_ui(&ui_text_handle, "\u{2026}", x, y_center, chevron_fg, bc_bg);
                     x += ui_text_handle.text_width_ui("\u{2026}") + s(2.0);
-                    ui_builder.text_ui(&ui_text_handle, "\u{203A}", x, y_center, chevron_fg, bc_bg);
-                    x += ui_text_handle.text_width_ui("\u{203A}") + s(4.0);
+                    let chev_rect = ui::widget::Rect {
+                        x, y: bc.y + (bc.height - chevron_sz) / 2.0,
+                        width: chevron_sz, height: chevron_sz,
+                    };
+                    ui_builder.icon_chevron_right(chev_rect, chevron_t, chevron_fg);
+                    x += chevron_sz + s(4.0);
                 }
                 for (i, seg) in segments.iter().enumerate() {
                     if i > 0 {
-                        // Chevron separator
-                        ui_builder.text_ui(&ui_text_handle, "\u{203A}", x, y_center, chevron_fg, bc_bg);
-                        x += ui_text_handle.text_width_ui("\u{203A}") + s(4.0);
+                        // SDF chevron separator — crisp at any scale
+                        let chev_rect = ui::widget::Rect {
+                            x, y: bc.y + (bc.height - chevron_sz) / 2.0,
+                            width: chevron_sz, height: chevron_sz,
+                        };
+                        ui_builder.icon_chevron_right(chev_rect, chevron_t, chevron_fg);
+                        x += chevron_sz + s(4.0);
                     }
                     let is_last = i == segments.len() - 1;
                     let fg = if is_last { last_fg } else { segment_fg };

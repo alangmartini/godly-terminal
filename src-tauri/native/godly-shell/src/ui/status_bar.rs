@@ -27,6 +27,10 @@ pub struct StatusBar {
     pub git_diff_summary: String,
     /// Connection status label (e.g. "Ready", "Connecting...", "Disconnected").
     pub connection_status: String,
+    /// Cursor line position (1-indexed).
+    pub cursor_line: u32,
+    /// Cursor column position (1-indexed).
+    pub cursor_col: u32,
     // Hover state
     hovered_pill: Option<StatusPill>,
     mode_anim: Anim,
@@ -46,6 +50,8 @@ impl StatusBar {
             sidebar_width: 0.0,
             git_diff_summary: String::new(),
             connection_status: "Ready".into(),
+            cursor_line: 1,
+            cursor_col: 1,
             hovered_pill: None,
             mode_anim: Anim::default(),
             cwd_anim: Anim::default(),
@@ -332,11 +338,19 @@ impl StatusBar {
             [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
             content_bg);
 
+        // Cursor position label — "Ln 1, Col 1" style (matches VS Code/Zed)
+        let cursor_label = format!("Ln {}, Col {}", self.cursor_line, self.cursor_col);
+        let cursor_w = text.text_width_ui(&cursor_label);
+        let cursor_x = le_x - cursor_w - s(10.0);
+        ui.text_ui(text, &cursor_label, cursor_x, y_center,
+            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.55],
+            content_bg);
+
         // Terminal dimensions pill
         let dims = format!("{}x{}", self.terminal_size.1, self.terminal_size.0);
         let dims_text_w = text.text_width_ui(&dims);
         let dims_pill_w = dims_text_w + pad_h * 2.0;
-        let dims_pill_x = le_x - dims_pill_w - s(8.0);
+        let dims_pill_x = cursor_x - dims_pill_w - s(8.0);
         let dims_rect = Rect { x: dims_pill_x, y: pill_y, width: dims_pill_w, height: pill_h };
         {
             let ht = self.dims_anim.value();

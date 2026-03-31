@@ -604,11 +604,19 @@ impl Sidebar {
                 let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40);
                 let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);
                 let desc_fg = lerp_color(inactive_desc, colors::FG_SECONDARY, active_t * 0.5);
-                // Render a small chevron for CWD paths to distinguish from descriptions
+                // Render a small folder icon for CWD paths to distinguish from descriptions
                 let desc_x = if is_cwd {
-                    let icon_fg = [desc_fg[0], desc_fg[1], desc_fg[2], desc_fg[3] * 0.6];
-                    ui.text_ui(text, "\u{203A}", name_x, rect.y + line2_y_off, icon_fg, item_bg);
-                    name_x + text.text_width_ui("\u{203A}") + s(2.0)
+                    let icon_fg = [desc_fg[0], desc_fg[1], desc_fg[2], desc_fg[3] * 0.7];
+                    let icon_sz = ch * 0.75;
+                    let icon_t = (0.8 * text.scale).max(0.5);
+                    let icon_rect = Rect {
+                        x: name_x,
+                        y: rect.y + line2_y_off + (ch - icon_sz) / 2.0,
+                        width: icon_sz,
+                        height: icon_sz,
+                    };
+                    ui.icon_folder(icon_rect, icon_t, icon_fg);
+                    name_x + icon_sz + s(3.0)
                 } else {
                     name_x
                 };
