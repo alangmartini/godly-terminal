@@ -1116,10 +1116,20 @@ impl App {
                     desc_fg, bg);
             }
 
-            // Version indicator — very muted, below the card container
+            // Thin separator between shortcut grid and CTA section
+            let sep_y = container_rect.y + container_rect.height + s(10.0);
+            let sep_w = grid_w * 0.6;
+            let sep_color = [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
+                             ui::builder::colors::BORDER[2], 0.15];
+            ui_builder.hline_fade(
+                center_x - sep_w / 2.0, sep_y, sep_w, 1.0,
+                sep_color, s(12.0),
+            );
+
+            // Version indicator — very muted, below separator
             let version_str = concat!("v", env!("CARGO_PKG_VERSION"));
             let version_w = ui_text_handle.text_width_ui(version_str);
-            let version_y = container_rect.y + container_rect.height + s(12.0);
+            let version_y = sep_y + s(10.0);
             let version_fg = [
                 ui::builder::colors::FG_MUTED[0],
                 ui::builder::colors::FG_MUTED[1],
@@ -1131,22 +1141,23 @@ impl App {
                 version_fg, bg);
 
             // --- "Create terminal" CTA button ---
-            // Prominent action button below version indicator, styled as a filled
-            // accent pill with hover glow — the obvious primary action.
+            // Full-width button spanning the card container for commanding visual
+            // weight. Professional welcome pages use full-width primary actions.
             let cta_label = "Create terminal";
             let cta_text_w = ui_text_handle.text_width_ui(cta_label);
             let cta_icon_sz = ch * 0.75;
             let cta_icon_gap = s(6.0);
-            let cta_pad_h = s(16.0);
+            let _cta_pad_h = s(16.0);
             let cta_pad_v = s(6.0);
-            let cta_w = cta_icon_sz + cta_icon_gap + cta_text_w + cta_pad_h * 2.0;
+            // Full-width: match the card container (with container_pad inset)
+            let cta_w = container_rect.width;
             let cta_h = ch + cta_pad_v * 2.0;
-            let cta_x = center_x - cta_w / 2.0;
+            let cta_x = container_rect.x;
             let cta_y = version_y + ch + s(14.0);
             let cta_rect = ui::widget::Rect {
                 x: cta_x, y: cta_y, width: cta_w, height: cta_h,
             };
-            let cta_r = cta_h / 2.0;
+            let cta_r = s(6.0);
             // Filled accent background — stronger accent presence (30% blend)
             // so the CTA reads as the obvious primary action in the welcome screen.
             let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
@@ -1174,9 +1185,11 @@ impl App {
                 cta_w - cta_r * 2.0, 1.0,
                 [1.0, 1.0, 1.0, 0.06], s(8.0),
             );
-            // Plus icon (left side of button) — brighter
+            // Plus icon + label — centered within the full-width button
+            let content_w = cta_icon_sz + cta_icon_gap + cta_text_w;
+            let content_x = cta_x + (cta_w - content_w) / 2.0;
             let icon_rect = ui::widget::Rect {
-                x: cta_x + cta_pad_h,
+                x: content_x,
                 y: cta_y + (cta_h - cta_icon_sz) / 2.0,
                 width: cta_icon_sz, height: cta_icon_sz,
             };
@@ -1191,7 +1204,7 @@ impl App {
                 0.92,
             ];
             ui_builder.text_ui(&ui_text_handle, cta_label,
-                cta_x + cta_pad_h + cta_icon_sz + cta_icon_gap,
+                content_x + cta_icon_sz + cta_icon_gap,
                 cta_y + (cta_h - ch) / 2.0,
                 label_fg, cta_fill);
         }

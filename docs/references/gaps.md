@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 60)
+Last updated: 2026-03-31 (Iteration 61)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -171,6 +171,9 @@ Last updated: 2026-03-31 (Iteration 60)
 | Title bar icon accent tint | Done | Terminal icon blends 35% accent color for brand identity instead of plain muted (iteration 59) |
 | Sidebar footer document icons | Done | Codicon file icons on "Project CLAUDE.md" and "User CLAUDE.md" buttons (iteration 59) |
 | Active workspace accent bar glow | Done | Rightward accent-colored shadow (0.35 alpha, 6px blur) on active workspace indicator bar (iteration 59) |
+| Full-width CTA button | Done | "Create terminal" button spans full card container width with 6px rounded corners (iteration 61) |
+| Shortcut-CTA separator | Done | Thin hairline between shortcut grid and version/CTA section for visual clarity (iteration 61) |
+| Sidebar session list fade | Done | Gradient fade at bottom of session list for smooth visual clipping (iteration 61) |
 
 ## Remaining Gaps (Priority Order)
 

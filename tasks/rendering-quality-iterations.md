@@ -3057,3 +3057,53 @@ UI chrome.
 **Remaining gaps vs reference (iteration 60)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 61 — Full-width CTA, Shortcut-CTA Separator, Sidebar List Fade
+
+**Goal**: Improve welcome screen CTA visual weight, add visual section clarity
+between shortcuts and action area, and add professional scroll-fade to sidebar.
+
+**Changes made**:
+
+1. **Full-width CTA button** (`main.rs`): The "Create terminal" button now
+   spans the full card container width instead of being sized to content.
+   Corner radius changed from `cta_h / 2.0` (pill shape) to `s(6.0)`
+   (rounded rect) for a more professional full-width button appearance.
+   Plus icon and label text are centered within the wider button. This
+   matches professional welcome pages where the primary CTA uses the
+   full available width for commanding visual weight.
+
+2. **Shortcut-CTA separator** (`main.rs`): Added a thin hairline separator
+   (0.15 alpha, 60% of grid width, 12px edge fade) between the shortcut
+   card container and the version/CTA area. This creates a clear visual
+   break between the informational section (keyboard shortcuts) and the
+   action section (version indicator + CTA button). The separator uses
+   the same hairline styling as all other structural separators in the UI.
+
+3. **Sidebar session list bottom fade** (`sidebar.rs`): Added a 16px
+   gradient fade at the bottom of the session list area (from 0% to 50%
+   alpha BG_DARK overlay). This creates a smooth visual endpoint for the
+   session list before the "New Session" button, matching how professional
+   sidebars (Zed, VS Code) indicate scrollable content areas.
+
+**Technical details**:
+- CTA width: `container_rect.width` (matches card container exactly)
+- CTA x-position: `container_rect.x` (left-aligned with container)
+- Content centering: `content_x = cta_x + (cta_w - content_w) / 2.0`
+- Separator width: `grid_w * 0.6` (proportional to shortcut grid)
+- Fade gradient: 16px tall, positioned at bottom of last session item
+- Fade leaves 6px clearance for scrollbar track on right side
+
+**Result**: The welcome screen has a more commanding CTA button that reads
+as the obvious primary action. The separator creates clear information
+hierarchy: shortcuts → divider → version → CTA. The sidebar session list
+has a polished visual endpoint.
+
+**Visual comparison with reference**:
+- CTA visual weight: ✓ Full-width button matches professional welcome pages
+- Section clarity: ✓ Separator divides info from action cleanly
+- Sidebar polish: ✓ Fade gradient adds professional scroll indication
+
+**Remaining gaps vs reference (iteration 61)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content

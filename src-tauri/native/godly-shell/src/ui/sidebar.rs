@@ -684,6 +684,28 @@ impl Sidebar {
             }
         }
 
+        // Session list bottom fade — gradient overlay for smooth visual clipping
+        // before the New Session button. Professional sidebars (Zed, VS Code) use
+        // this to indicate scrollable content.
+        {
+            let items_total_h = self.items_y_offset(self.items.len(), text.scale);
+            let fade_h = s(16.0);
+            let fade_y = sidebar.y + header_h + items_total_h - fade_h;
+            if fade_y > sidebar.y + header_h {
+                let fade_rect = Rect {
+                    x: sidebar.x,
+                    y: fade_y,
+                    width: sidebar.width - s(6.0), // leave room for scrollbar
+                    height: fade_h,
+                };
+                ui.fill_gradient(
+                    fade_rect,
+                    [colors::BG_DARK[0], colors::BG_DARK[1], colors::BG_DARK[2], 0.0],
+                    [colors::BG_DARK[0], colors::BG_DARK[1], colors::BG_DARK[2], 0.5],
+                );
+            }
+        }
+
         // Section divider between session list and new-session button — thin line
         {
             let items_total_h = self.items_y_offset(self.items.len(), text.scale);
