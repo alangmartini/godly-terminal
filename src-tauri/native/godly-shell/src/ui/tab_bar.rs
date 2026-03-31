@@ -374,7 +374,7 @@ impl TabBar {
             // Always render the tab background, blending between inactive and active states
             if active_t > 0.005 {
                 // Active state (or transitioning toward it)
-                let tab_top = [bg[0] * 1.12, bg[1] * 1.12, bg[2] * 1.12, 1.0];
+                let tab_top = [bg[0] * 1.18, bg[1] * 1.18, bg[2] * 1.18, 1.0];
                 let border_alpha = lerp(0.0, 1.0, active_t);
                 let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
                 ui.fill_rounded_top_gradient(rect, tab_top, bg, tab_radius, active_t, border);
@@ -441,12 +441,12 @@ impl TabBar {
                 // faint border defines the shape without competing with active.
                 // Alpha 0.75 (up from 0.65) for better readability on dark bg.
                 let rest_top = [
-                    colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06,
-                    colors::BG_DARK[2] * 1.06, 0.75,
+                    colors::BG_DARK[0] * 1.08, colors::BG_DARK[1] * 1.08,
+                    colors::BG_DARK[2] * 1.08, 0.80,
                 ];
                 let rest_bot = [
-                    colors::BG_DARK[0] * 1.02, colors::BG_DARK[1] * 1.02,
-                    colors::BG_DARK[2] * 1.02, 0.75,
+                    colors::BG_DARK[0] * 1.03, colors::BG_DARK[1] * 1.03,
+                    colors::BG_DARK[2] * 1.03, 0.80,
                 ];
                 let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
                 // Subtle baseline shadow below inactive tab for physical depth
@@ -497,8 +497,14 @@ impl TabBar {
             ui.text(text, &num_str, num_x, num_y, [0.06, 0.06, 0.08, 1.0], accent);
 
             // Tab title (truncated to fit)
+            // Inactive tabs start from a blend between FG_SECONDARY and FG_PRIMARY
+            // for better readability against dark backgrounds
             let fg = lerp_color(
-                lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.3),
+                lerp_color(
+                    lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, 0.2),
+                    colors::FG_PRIMARY,
+                    hover_t * 0.4,
+                ),
                 colors::FG_PRIMARY,
                 active_t,
             );

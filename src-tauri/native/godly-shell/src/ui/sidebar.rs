@@ -5,10 +5,10 @@ use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
 const HEADER_HEIGHT: f32 = 30.0;
-const ITEM_HEIGHT: f32 = 50.0;
-const ITEM_HEIGHT_COMPACT: f32 = 34.0;
+const ITEM_HEIGHT: f32 = 52.0;
+const ITEM_HEIGHT_COMPACT: f32 = 38.0;
 const ITEM_PADDING_H: f32 = 14.0;
-const ACTIVE_INDICATOR_W: f32 = 3.0;
+const ACTIVE_INDICATOR_W: f32 = 3.5;
 const BOTTOM_PANEL_HEIGHT: f32 = 160.0;
 
 /// Accent colors for each session position (same cycle as tab bar).
@@ -392,7 +392,7 @@ impl Sidebar {
                 };
                 let inner_r = (item_radius - 1.0).max(0.0);
                 ui.fill_rounded_gradient(ambient,
-                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.04 * active_t],
+                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.06 * active_t],
                     [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.0],
                     inner_r,
                 );
@@ -402,24 +402,24 @@ impl Sidebar {
             if active_t > 0.005 {
                 let indicator_rect = Rect {
                     x: rect.x + s(3.0),
-                    y: rect.y + s(8.0),
+                    y: rect.y + s(7.0),
                     width: indicator_w,
-                    height: rect.height - s(16.0),
+                    height: rect.height - s(14.0),
                 };
                 let breath = 0.85 + 0.15 * self.glow_phase.sin();
-                let glow_alpha = 0.20 * breath * active_t;
-                ui.fill_shadow(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], glow_alpha], indicator_w, s(6.0));
+                let glow_alpha = 0.25 * breath * active_t;
+                ui.fill_shadow(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], glow_alpha], indicator_w, s(7.0));
                 ui.fill_rounded(indicator_rect, [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], active_t], indicator_w / 2.0);
 
                 let trail_rect = Rect {
                     x: indicator_rect.right(),
-                    y: indicator_rect.y + indicator_rect.height * 0.2,
-                    width: s(16.0),
-                    height: indicator_rect.height * 0.6,
+                    y: indicator_rect.y + indicator_rect.height * 0.15,
+                    width: s(18.0),
+                    height: indicator_rect.height * 0.7,
                 };
                 ui.fill_shadow(trail_rect,
-                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.06 * breath * active_t],
-                    0.0, s(10.0));
+                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], 0.07 * breath * active_t],
+                    0.0, s(12.0));
             }
 
             // Text y position: centered for compact, top-aligned for two-line
@@ -469,8 +469,9 @@ impl Sidebar {
             ui.text(text, &num_str, num_x_shifted, text_y, fg, item_bg);
 
             // Session name (truncated to fit) — text brightens on hover and active
+            // Active session name gets full brightness for clear visual hierarchy
             let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.4);
-            let name_fg = lerp_color(inactive_name, colors::FG_PRIMARY, active_t);
+            let name_fg = lerp_color(inactive_name, colors::WHITE, active_t * 0.85);
             let name = if item.label.len() > name_max_chars {
                 format!("{}\u{2026}", &item.label[..name_max_chars.saturating_sub(1)])
             } else {
@@ -489,10 +490,12 @@ impl Sidebar {
                     item.branch.clone()
                 };
                 let branch_w = text.text_width(&branch);
+                // Slightly brighter than pure FG_MUTED for better readability
+                let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.25 + hover_t * 0.3);
                 ui.text(text, &branch,
                         rect.right() - branch_w - pad_h,
                         text_y,
-                        colors::FG_MUTED, item_bg);
+                        branch_fg, item_bg);
             }
 
             // Description line (second row, brightens on hover for readability)
@@ -503,8 +506,10 @@ impl Sidebar {
                 } else {
                     item.description.clone()
                 };
-                let inactive_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t * 0.3);
-                let desc_fg = lerp_color(inactive_desc, colors::FG_MUTED, active_t);
+                // Start from a blend between FG_MUTED and FG_SECONDARY for better baseline readability
+                let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.3);
+                let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);
+                let desc_fg = lerp_color(inactive_desc, colors::FG_SECONDARY, active_t * 0.5);
                 ui.text(text, &desc,
                         name_x,
                         rect.y + line2_y_off,
@@ -539,16 +544,35 @@ impl Sidebar {
             height: compact_h,
         };
         let new_t = self.new_btn_anim.value();
+        // Rest state: dashed-looking border with green accent tint to hint at CTA
+        let rest_border = [
+            colors::ACCENT_GREEN[0] * 0.3 + colors::BORDER[0] * 0.7,
+            colors::ACCENT_GREEN[1] * 0.3 + colors::BORDER[1] * 0.7,
+            colors::ACCENT_GREEN[2] * 0.3 + colors::BORDER[2] * 0.7,
+            0.25,
+        ];
         if new_t > 0.005 {
             let bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
             let new_top = [bg[0] * lerp(1.0, 1.08, new_t), bg[1] * lerp(1.0, 1.08, new_t), bg[2] * lerp(1.0, 1.08, new_t), bg[3]];
-            let border_alpha = lerp(0.18, colors::BORDER[3], new_t);
-            let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
-            ui.fill_rounded_gradient(new_rect, new_top, bg, s(4.0));
-            ui.stroke_rounded(new_rect, s(4.0), 0.5, border);
+            let border_alpha = lerp(0.25, 0.6, new_t);
+            let border = [
+                lerp(rest_border[0], colors::ACCENT_GREEN[0] * 0.5, new_t),
+                lerp(rest_border[1], colors::ACCENT_GREEN[1] * 0.5, new_t),
+                lerp(rest_border[2], colors::ACCENT_GREEN[2] * 0.5, new_t),
+                border_alpha,
+            ];
+            ui.fill_rounded_gradient(new_rect, new_top, bg, s(5.0));
+            ui.stroke_rounded(new_rect, s(5.0), 0.5, border);
+            // Subtle green glow on hover
+            let glow_rect = Rect {
+                x: new_rect.x - s(2.0), y: new_rect.y - s(1.0),
+                width: new_rect.width + s(4.0), height: new_rect.height + s(2.0),
+            };
+            ui.fill_shadow(glow_rect,
+                [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.05 * new_t],
+                s(5.0), s(8.0));
         } else {
-            let rest_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.18];
-            ui.stroke_rounded(new_rect, s(4.0), 0.5, rest_border);
+            ui.stroke_rounded(new_rect, s(5.0), 0.5, rest_border);
         }
         // Plus icon + label — icon uses accent green for visual pop
         let icon_t = (1.2 * text.scale).max(1.0);
@@ -557,12 +581,19 @@ impl Sidebar {
             width: s(24.0), height: new_rect.height,
         };
         let icon_fg = lerp_color(
-            [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.5],
+            [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.55],
             colors::ACCENT_GREEN,
             new_t,
         );
         ui.icon_plus(icon_rect, icon_t, s(4.0), icon_fg);
-        let new_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, new_t);
+        let new_fg = lerp_color(
+            [colors::FG_MUTED[0] * 0.7 + colors::ACCENT_GREEN[0] * 0.3,
+             colors::FG_MUTED[1] * 0.7 + colors::ACCENT_GREEN[1] * 0.3,
+             colors::FG_MUTED[2] * 0.7 + colors::ACCENT_GREEN[2] * 0.3,
+             colors::FG_MUTED[3]],
+            colors::FG_SECONDARY,
+            new_t,
+        );
         let new_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, new_t);
         ui.text(text, "New Session",
                 new_rect.x + s(22.0),

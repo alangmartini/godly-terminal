@@ -962,6 +962,53 @@ creates unified depth vocabulary.
 - Sidebar hover feedback: ✓ Accent-colored glow on hover
 - Depth consistency: ✓ Unified shadow/groove vocabulary across all chrome
 
+**Remaining gaps vs reference (iteration 29)**:
+- Terminal content not displaying (needs daemon running)
+- Sidebar labels use monospace; proportional sans-serif would look more polished
+- Multi-pane terminal layout needs daemon content
+
+## Iteration 30 — Sidebar Spacing, Tab Readability, CTA Button Polish
+
+**Goal**: Improve sidebar vertical rhythm for more breathing room, boost tab
+title readability, strengthen active session visual hierarchy, and make the
+"New Session" button more distinctive as a call-to-action.
+
+**Changes made**:
+
+1. **Sidebar item spacing** (`ui/sidebar.rs`):
+   - ITEM_HEIGHT_COMPACT: 34px → 38px (compact session items)
+   - ITEM_HEIGHT: 50px → 52px (two-line session items)
+   - Gives ~4px more vertical breathing room per item.
+
+2. **Active indicator bar** (`ui/sidebar.rs`):
+   - Width: 3px → 3.5px, glow alpha: 0.20 → 0.25
+   - Vertical padding reduced, trail effect wider and taller
+
+3. **Active session name brightness** (`ui/sidebar.rs`):
+   - Active names lerp toward WHITE at 85% (brighter than FG_PRIMARY)
+   - Active ambient gradient alpha: 0.04 → 0.06
+
+4. **Description/branch text readability** (`ui/sidebar.rs`):
+   - Description base raised from FG_MUTED to 30% blend toward FG_SECONDARY
+   - Branch labels start at 25% blend (up from pure FG_MUTED)
+
+5. **"New Session" CTA button** (`ui/sidebar.rs`):
+   - Rest border: green accent tint (30% green + 70% border)
+   - Hover: greener border, subtle green glow shadow
+   - Label text gets 30% green tint at rest for CTA coding
+   - Button radius: 4px → 5px for softer look
+
+6. **Active tab contrast** (`ui/tab_bar.rs`):
+   - Top gradient boost: 1.12 → 1.18
+
+7. **Inactive tab readability** (`ui/tab_bar.rs`):
+   - Title text starts from 20% blend toward FG_PRIMARY
+   - Rest state alpha: 0.75 → 0.80, brightness: 1.06 → 1.08
+
+**Result**: Sidebar more spacious and professional. Active sessions clearly
+distinguishable. Branch/description text readable at rest. "New Session"
+reads as green CTA. Tab titles more readable.
+
 **Remaining gaps vs reference**:
 - Terminal content not displaying (needs daemon running)
 - Sidebar labels use monospace; proportional sans-serif would look more polished

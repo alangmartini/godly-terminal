@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-30 (Iteration 29)
+Last updated: 2026-03-30 (Iteration 30)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -45,6 +45,12 @@ Last updated: 2026-03-30 (Iteration 29)
 | Keycap badge drop shadows | Done | Physical "raised key" shadows on welcome shortcut badges (iteration 29) |
 | Welcome container inner shadow | Done | Recessed inner shadow on shortcut card container (iteration 29) |
 | Sidebar hover glow | Done | Accent-tinted glow shadow on hovered session items (iteration 29) |
+| Sidebar item spacing | Done | Compact items 38px, two-line 52px for better vertical rhythm (iteration 30) |
+| Active session prominence | Done | White-bright name, wider indicator bar, stronger blue ambient (iteration 30) |
+| Metadata text readability | Done | Branch and description text visible at rest via luminance boost (iteration 30) |
+| New Session CTA styling | Done | Green accent-tinted border, label, and hover glow (iteration 30) |
+| Inactive tab readability | Done | Brighter title text, higher rest-state alpha/brightness (iteration 30) |
+| Active tab contrast | Done | Brighter top gradient (1.18×) for clear active/inactive distinction (iteration 30) |
 
 ## Remaining Gaps (Priority Order)
 
