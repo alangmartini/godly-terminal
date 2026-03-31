@@ -31,6 +31,8 @@ pub struct StatusBar {
     pub cursor_line: u32,
     /// Cursor column position (1-indexed).
     pub cursor_col: u32,
+    /// Whether the parent window has input focus (dims accents when false).
+    pub window_focused: bool,
     // Hover state
     hovered_pill: Option<StatusPill>,
     mode_anim: Anim,
@@ -52,6 +54,7 @@ impl StatusBar {
             connection_status: "Ready".into(),
             cursor_line: 1,
             cursor_col: 1,
+            window_focused: true,
             hovered_pill: None,
             mode_anim: Anim::default(),
             cwd_anim: Anim::default(),
@@ -133,11 +136,29 @@ impl StatusBar {
         ui.hline_fade(bar.x, bar.y, bar.width, 1.0,
             [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.28], s(4.0));
         // Bottom accent stripe — 2px accent-tinted bar at window bottom edge.
-        // Matches the 2px top accent stripe for cohesive visual window framing.
+        // Three-part gradient (fade-in | solid | fade-out) matching the top
+        // accent stripe's treatment for visual symmetry.  Dims when unfocused.
         let breath = 0.92 + 0.08 * glow_phase.sin();
+        let bot_accent_alpha = if self.window_focused { 0.20 * breath } else { 0.06 };
+        let bot_accent_fade = s(40.0);
+        let bot_y = bar.bottom() - 2.0;
+        let bot_full = [active_accent[0], active_accent[1], active_accent[2], bot_accent_alpha];
+        let bot_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
+        let bot_w = bar.width;
+        // Fade in from left edge
+        ui.fill_gradient_h(
+            Rect { x: bar.x, y: bot_y, width: bot_accent_fade, height: 2.0 },
+            bot_zero, bot_full,
+        );
+        // Solid center
         ui.fill(
-            Rect { x: bar.x, y: bar.bottom() - 2.0, width: bar.width, height: 2.0 },
-            [active_accent[0] * 0.5, active_accent[1] * 0.5, active_accent[2] * 0.5, 0.25 * breath],
+            Rect { x: bar.x + bot_accent_fade, y: bot_y, width: bot_w - bot_accent_fade * 2.0, height: 2.0 },
+            bot_full,
+        );
+        // Fade out to right edge
+        ui.fill_gradient_h(
+            Rect { x: bar.x + bot_w - bot_accent_fade, y: bot_y, width: bot_accent_fade, height: 2.0 },
+            bot_full, bot_zero,
         );
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
@@ -177,7 +198,16 @@ impl StatusBar {
             let ht = self.mode_anim.value();
             let top = Self::hover_pill_top(pill_base_top, ht, 1.0);
             let bot = Self::hover_pill_bot(pill_base_bot, ht, 1.0);
-            let border = Self::hover_pill_border(ht, 0.5);
+            let base_border = Self::hover_pill_border(ht, 0.5);
+            // Blend a subtle accent tint into the mode pill border for color
+            // continuity with the tab bar and sidebar accent language.
+            let accent_mix = 0.15;
+            let border = [
+                base_border[0] * (1.0 - accent_mix) + active_accent[0] * accent_mix,
+                base_border[1] * (1.0 - accent_mix) + active_accent[1] * accent_mix,
+                base_border[2] * (1.0 - accent_mix) + active_accent[2] * accent_mix,
+                base_border[3],
+            ];
             // Subtle drop shadow for pill depth
             ui.fill_shadow(
                 Rect { x: sx + s(1.0), y: pill_y + s(1.0), width: pill_w - s(2.0), height: pill_h },

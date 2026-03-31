@@ -783,7 +783,7 @@ impl App {
                 };
                 let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
                 ui_builder.fill_shadow(spot_rect,
-                    [active_accent[0], active_accent[1], active_accent[2], 0.012 * breath],
+                    [active_accent[0], active_accent[1], active_accent[2], 0.020 * breath],
                     spot_w * 0.3, spot_w * 0.4);
             }
 
@@ -1340,6 +1340,7 @@ impl App {
             let bc = &layout.breadcrumb;
             let s = |v: f32| ui_text_handle.s(v);
             let ch = ui_text_handle.cell_height;
+            let active_accent = self.active_accent();
 
             // Background: subtle gradient — slightly darker at top (near tab bar)
             // fading to content-adjacent tone at bottom for smooth transition.
@@ -1450,15 +1451,20 @@ impl App {
                             width: seg_w + pill_pad * 2.0, height: pill_h,
                         };
                         let pill_r = s(3.0);
+                        // Faint accent tint in the last-segment pill for color
+                        // continuity with tab bar and sidebar accent language.
+                        let aa = active_accent;
                         ui_builder.fill_rounded(pill_rect,
-                            [ui::builder::colors::BG_SURFACE[0],
-                             ui::builder::colors::BG_SURFACE[1],
-                             ui::builder::colors::BG_SURFACE[2], 0.35],
+                            [ui::builder::colors::BG_SURFACE[0] * 0.92 + aa[0] * 0.08,
+                             ui::builder::colors::BG_SURFACE[1] * 0.92 + aa[1] * 0.08,
+                             ui::builder::colors::BG_SURFACE[2] * 0.92 + aa[2] * 0.08,
+                             0.38],
                             pill_r);
                         ui_builder.stroke_rounded(pill_rect, pill_r, 0.5,
-                            [ui::builder::colors::BORDER[0],
-                             ui::builder::colors::BORDER[1],
-                             ui::builder::colors::BORDER[2], 0.15]);
+                            [ui::builder::colors::BORDER[0] * 0.85 + aa[0] * 0.15,
+                             ui::builder::colors::BORDER[1] * 0.85 + aa[1] * 0.15,
+                             ui::builder::colors::BORDER[2] * 0.85 + aa[2] * 0.15,
+                             0.18]);
                     }
                     ui_builder.text_ui(&ui_text_handle, seg, x, y_center, fg, bc_bg);
                     x += ui_text_handle.text_width_ui(seg) + s(4.0);
@@ -1954,6 +1960,7 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             WindowEvent::Focused(focused) => {
                 self.window_focused = focused;
+                self.status_bar.window_focused = focused;
                 self.focus_dim_anim.set(if focused { 0.0 } else { 1.0 });
                 if let Some(w) = &self.window { w.request_redraw(); }
             }

@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 56)
+Last updated: 2026-03-31 (Iteration 57)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -159,6 +159,10 @@ Last updated: 2026-03-31 (Iteration 56)
 | Softened structural borders | Done | All panel borders reduced to 0.12 alpha — color difference provides primary separation (iteration 56) |
 | Breadcrumb compactness | Done | 20px height (was 22px), subtle gradient (92/98%), softer separator (0.20 alpha) (iteration 56) |
 | Window frame accent symmetry | Done | 2px bottom accent stripe matching top stripe for cohesive framing (iteration 56) |
+| Bottom stripe edge fades | Done | Three-part gradient (fade-in → solid → fade-out) + focus dimming, matching top stripe treatment (iteration 57) |
+| Content area spotlight strength | Done | Radial accent glow behind welcome content 1.2% → 2.0% for warmer ambient lighting (iteration 57) |
+| Breadcrumb accent integration | Done | Last path segment pill uses 8% accent tint in background + 15% accent in border for color continuity (iteration 57) |
+| Mode pill accent border | Done | Status bar mode pill border blends 15% active accent color for consistent accent language (iteration 57) |
 
 ## Remaining Gaps (Priority Order)
 
