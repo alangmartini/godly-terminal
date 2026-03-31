@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 57)
+Last updated: 2026-03-31 (Iteration 58)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -163,6 +163,10 @@ Last updated: 2026-03-31 (Iteration 57)
 | Content area spotlight strength | Done | Radial accent glow behind welcome content 1.2% → 2.0% for warmer ambient lighting (iteration 57) |
 | Breadcrumb accent integration | Done | Last path segment pill uses 8% accent tint in background + 15% accent in border for color continuity (iteration 57) |
 | Mode pill accent border | Done | Status bar mode pill border blends 15% active accent color for consistent accent language (iteration 57) |
+| Top stripe edge fades | Done | Three-part gradient (fade-in → solid → fade-out) matching bottom stripe for symmetrical window framing (iteration 58) |
+| Close button rest visibility | Done | Inactive tab close buttons at 0.18 alpha rest state for discoverability without hover (iteration 58) |
+| Sidebar dot brightness | Done | Inactive session accent dots 0.62 alpha (was 0.50) for better visibility at rest (iteration 58) |
+| Content area accent frame | Done | Subtle accent-tinted top-edge glow on content area connecting tab bar accent to content (iteration 58) |
 
 ## Remaining Gaps (Priority Order)
 

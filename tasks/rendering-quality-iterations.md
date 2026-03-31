@@ -2874,3 +2874,66 @@ the entire interface's accent threading.
 **Remaining gaps vs reference (iteration 57)**:
 - Terminal content not displaying (needs daemon running)
 - Multi-pane terminal layout needs daemon content
+
+## Iteration 58 — Chrome Polish: Stripe Symmetry, Close Button Discovery, Dot Visibility
+
+**Goal**: Close remaining subtle visual gaps: make the top accent stripe
+symmetrical with the bottom's fade treatment, improve inactive tab close
+button discoverability, boost sidebar accent dot visibility, and add a
+warm accent frame to the content area's top edge.
+
+**Changes made**:
+
+1. **Top accent stripe edge fades** (`ui/tab_bar.rs`): Replaced the flat
+   `fill` for the 2px window-top accent stripe with a three-part gradient
+   (fade-in | solid | fade-out), matching the bottom stripe's treatment
+   in `ui/status_bar.rs`. The fade width is `s(40.0)` on each side, and
+   the stripe alpha now modulates with the breathing glow (`0.85 * breath`)
+   for a living window frame. Previously the top stripe was a flat fill
+   while the bottom used faded edges — now both are symmetrical.
+
+2. **Inactive tab close button rest visibility** (`ui/tab_bar.rs`):
+   Changed `close_fade` from `active_t.max(hover_t)` (which was 0.0 for
+   untouched inactive tabs) to `active_t.max(hover_t).max(0.18)`. This
+   means inactive tabs always show a very faint (18% alpha) close button
+   at rest, eliminating the need to hover to discover the close target.
+   Professional apps (Zed, VS Code) always show close buttons on all tabs.
+
+3. **Sidebar accent dot brightness** (`ui/sidebar.rs`): Increased the
+   rest-state alpha of per-session accent dots from 0.50 → 0.62. The
+   dots are now clearly visible at rest without hover, making session
+   color identity immediately apparent in the sidebar. Active/hover peak
+   raised from 0.90 → 0.92 for consistency.
+
+4. **Content area accent frame** (`main.rs`): Added a 2px accent-tinted
+   gradient at the top edge of the terminal content area. Uses the active
+   tab's accent color at 6% → 0% alpha (top → bottom), creating a warm
+   glow that visually connects the tab bar's accent indicator to the
+   content below it. This reduces the hard boundary between tab bar and
+   content, giving the content area a subtle "lit from above" feel.
+
+**Technical details**:
+- Top stripe gradient uses the same `s(40.0)` fade width as the bottom
+  stripe (`bot_accent_fade` in status_bar.rs), ensuring pixel-identical
+  edge treatment on both window edges.
+- Close button `0.18` rest alpha was chosen to be perceivable on both
+  active and inactive tab backgrounds without being visually heavy.
+  The icon alpha is `icon_color_base[3] * close_fade` where `close_fade`
+  now has a floor of 0.18, so the icon is very muted but present.
+- Content accent frame gradient is only 2px tall — just enough to create
+  a subtle glow effect without being a visible colored bar.
+
+**Result**: The window frame is now perfectly symmetrical (both stripes
+have matching edge fades and breathing). Close buttons are discoverable
+on all tabs without hover. Sidebar accent dots are clearly visible at
+rest. The content area has a warmer feel with the accent top-edge glow.
+
+**Visual comparison with reference**:
+- Window frame symmetry: ✓ Top and bottom stripes identical treatment
+- Close button discovery: ✓ Always-visible close matches Zed/VS Code convention
+- Sidebar color coding: ✓ Session dots visible at rest like opensessions
+- Content warmth: ✓ Accent glow reduces tab-content boundary harshness
+
+**Remaining gaps vs reference (iteration 58)**:
+- Terminal content not displaying (needs daemon running)
+- Multi-pane terminal layout needs daemon content
