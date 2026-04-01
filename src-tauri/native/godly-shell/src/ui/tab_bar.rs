@@ -2,7 +2,7 @@
 //! Also serves as the title bar (window drag + min/max/close buttons).
 
 use super::anim::{self, Anim, AnimVec, lerp_color, lerp};
-use super::builder::{colors, UiBuilder, UiTextRenderer};
+use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
 const TAB_MAX_WIDTH: f32 = 170.0;
@@ -346,13 +346,15 @@ impl TabBar {
             ui.fill_rounded(badge_rect, badge_bg, badge_r);
 
             // Number text — proportional font, centered in circle
-            let num_w = text.text_width_ui(&num_str);
+            // Web: fontSize 10, fontWeight 700
+            let num_w = text.text_width_ui_scaled(&num_str, font_scale::PX10);
+            let num_ch = ch * font_scale::PX10;
             let num_x = badge_x + (badge_sz - num_w) / 2.0;
-            let num_y = badge_y + (badge_sz - ch) / 2.0;
-            ui.text_ui(text, &num_str, num_x, num_y, accent, badge_bg);
+            let num_y = badge_y + (badge_sz - num_ch) / 2.0;
+            ui.text_ui_scaled(text, &num_str, num_x, num_y, accent, badge_bg, font_scale::PX10);
 
             // Tab title (truncated to fit)
-            // Inactive: FG_DIM, hover: FG_SECONDARY, active: FG_BRIGHT
+            // Web: fontSize 12, fontWeight active ? 600 : 400
             let fg = lerp_color(
                 lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t),
                 colors::FG_BRIGHT,
@@ -369,10 +371,11 @@ impl TabBar {
             };
             if !title.is_empty() {
                 let title_x = rect.x + title_x_offset;
+                let title_y = text_y(rect.height, rect.y);
                 if tab.active {
-                    ui.text_ui_bold(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
+                    ui.text_ui_bold_scaled(text, &title, title_x, title_y, fg, bg, font_scale::PX12);
                 } else {
-                    ui.text_ui(text, &title, title_x, text_y(rect.height, rect.y), fg, bg);
+                    ui.text_ui_scaled(text, &title, title_x, title_y, fg, bg, font_scale::PX12);
                 }
             }
 
@@ -515,11 +518,12 @@ impl TabBar {
             let indicator_gap = s(10.0);
             let indicator_pad_r = s(14.0);
             let indicators_x_end = buttons[0].0.x - s(8.0); // before separator
-            let iy = bar.y + (bar.height - ch) / 2.0;
+            let ind_ch = ch * font_scale::PX11;
+            let iy = bar.y + (bar.height - ind_ch) / 2.0;
 
-            // "opensessions" with green dot
+            // "opensessions" with green dot — web: fontSize 11, fontWeight 600
             let opensessions_label = "opensessions";
-            let opensessions_w = text.text_width_ui(opensessions_label);
+            let opensessions_w = text.text_width_ui_scaled(opensessions_label, font_scale::PX11);
             let dot_sz = s(8.0);
             let dot_gap = s(4.0);
             let opensessions_total = dot_sz + dot_gap + opensessions_w;
@@ -530,13 +534,13 @@ impl TabBar {
                 Rect { x: opensessions_x, y: dot_y, width: dot_sz, height: dot_sz },
                 colors::ACCENT_GREEN, dot_sz / 2.0,
             );
-            ui.text_ui_bold(text, opensessions_label,
+            ui.text_ui_bold_scaled(text, opensessions_label,
                 opensessions_x + dot_sz + dot_gap, iy,
-                indicator_color, colors::BG_RAISED);
+                indicator_color, colors::BG_RAISED, font_scale::PX11);
 
-            // "bun" with orange emoji dot
+            // "bun" with orange emoji dot — web: fontSize 11, fontWeight 600
             let bun_label = "bun";
-            let bun_w = text.text_width_ui(bun_label);
+            let bun_w = text.text_width_ui_scaled(bun_label, font_scale::PX11);
             let bun_dot_sz = s(8.0);
             let bun_total = bun_dot_sz + dot_gap + bun_w;
             let bun_x = opensessions_x - indicator_gap - bun_total;
@@ -545,9 +549,9 @@ impl TabBar {
                 Rect { x: bun_x, y: dot_y, width: bun_dot_sz, height: bun_dot_sz },
                 colors::ACCENT_PEACH, bun_dot_sz / 2.0,
             );
-            ui.text_ui_bold(text, bun_label,
+            ui.text_ui_bold_scaled(text, bun_label,
                 bun_x + bun_dot_sz + dot_gap, iy,
-                indicator_color, colors::BG_RAISED);
+                indicator_color, colors::BG_RAISED, font_scale::PX11);
         }
 
         // Subtle separator before window controls — softer to match quieter aesthetic

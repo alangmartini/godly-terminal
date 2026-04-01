@@ -140,15 +140,16 @@ impl TerminalRenderer {
 
                 let px = cx;
                 let py = cmd.y;
+                let sc = cmd.scale;
                 // For proportional font, use actual glyph slot width from UV;
                 // for monospace, use cell_width.
                 let pw = if use_ui_font {
                     // Slot width = atlas slot pixel width from UV coords
-                    (entry.u1 - entry.u0) * self.glyph_atlas.atlas_width() as f32
+                    (entry.u1 - entry.u0) * self.glyph_atlas.atlas_width() as f32 * sc
                 } else {
-                    phys.cell_width
+                    phys.cell_width * sc
                 };
-                let ph = phys.cell_height;
+                let ph = phys.cell_height * sc;
 
                 let x0 = px / vw * 2.0 - 1.0;
                 let y0 = 1.0 - py / vh * 2.0;
@@ -179,7 +180,7 @@ impl TerminalRenderer {
                 vertices.push(v(br, uv_br));
 
                 // Advance by actual glyph advance for proportional, cell_width for mono
-                cx += if use_ui_font { entry.advance } else { phys.cell_width };
+                cx += (if use_ui_font { entry.advance } else { phys.cell_width }) * sc;
             }
         }
 

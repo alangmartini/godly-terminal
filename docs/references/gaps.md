@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 75)
+Last updated: 2026-04-01 (Iteration 76)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -54,6 +54,18 @@ Last updated: 2026-04-01 (Iteration 75)
 | Per-tab accent colors | Done | Each tab has its own accent color matching web: indigo, emerald, orange, violet, indigo (iteration 75) |
 | Tab badge shape | Done | borderRadius 7 (rounded rect) instead of full pill, matching web Badge component (iteration 75) |
 | Badge on active tab | Done | Badges shown on active tabs too, matching web where tab 2 shows badge:3 while active (iteration 75) |
+| Per-element font sizing | Done | All UI text now matches web's exact fontSize per element: 10px shortcuts/badges, 11px branch/status, 12px headers/tabs, 13px names/stanzas, 15px poem title (iteration 76) |
+
+## Changes in Iteration 76
+
+1. **Per-element font size scaling** — Added `scale` field to `TextCommand` and `text_ui_scaled()`/`text_ui_bold_scaled()` methods to `UiBuilder`. The renderer now multiplies glyph quad dimensions and advance widths by the scale factor, enabling different text sizes without re-rasterizing glyphs. Scale constants defined in `font_scale` module: PX10 (0.714), PX11 (0.786), PX12 (0.857), PX13 (0.929), PX15 (1.071).
+2. **Sidebar font sizes matched** — Sessions header: 12px, lightning indicator: 10px, session names: 13px bold, "::" indicator: 11px, branch text: 11px, description text: 11px.
+3. **Process panel font sizes matched** — Directory path header: 10px, status icons: 11px, agent names: 12px bold, status badges: 10px, dismiss ×: 13px, task descriptions: 11px.
+4. **Sidebar shortcuts bar: 10px** — Shortcut labels ("~ cycle", "⊘ go", etc.) now render at 10px matching web's `fontSize: 10`. Both measurement and rendering use scaled widths for correct wrap layout.
+5. **Tab bar font sizes matched** — Tab circle badge numbers: 10px, tab titles: 12px (bold when active), right-side process indicators ("bun", "opensessions"): 11px bold.
+6. **Status bar: 11px** — All status bar text (streaming indicator, process name, path, branch, diff stats, separators) renders at 11px matching web's `fontSize: 11`.
+7. **Right panel font sizes matched** — Header title: 12px, poem title: 15px bold, poem stanzas: 13px (with 1.7 line-height on 13px base), footer: 12px, bottom status bar: 11px.
+8. **`text_width_ui_scaled()` helper** — Added to `UiTextRenderer` for correct layout calculations at scaled sizes. Used throughout for centering, truncation, and positioning.
 
 ## Changes in Iteration 75
 

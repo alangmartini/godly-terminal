@@ -44,6 +44,16 @@ pub mod colors {
     pub const BORDER: [f32; 4] = [0.102, 0.114, 0.145, 1.0];       // #1a1d25 hairline border
 }
 
+/// Font size scale factors relative to the 14px base cell height.
+/// Used with `text_ui_scaled`/`text_ui_bold_scaled` to match web reference pixel sizes.
+pub mod font_scale {
+    pub const PX10: f32 = 10.0 / 14.0; // 0.714 — shortcuts, badges, small headers
+    pub const PX11: f32 = 11.0 / 14.0; // 0.786 — branch text, descriptions, status bar
+    pub const PX12: f32 = 12.0 / 14.0; // 0.857 — session header, tab titles, process names
+    pub const PX13: f32 = 13.0 / 14.0; // 0.929 — session names, poem stanzas
+    pub const PX15: f32 = 15.0 / 14.0; // 1.071 — poem title
+}
+
 /// A deferred text draw command. Characters are rasterized through the
 /// glyph atlas at render time so UI chrome gets the same ClearType quality
 /// as terminal content.
@@ -59,6 +69,9 @@ pub struct TextCommand {
     /// When true, renders with the proportional UI font (e.g. Segoe UI)
     /// instead of the terminal monospace font.
     pub ui_font: bool,
+    /// Scale factor for glyph quads (1.0 = normal size, 0.786 = 11/14px).
+    /// Used to render UI text at different pixel sizes without re-rasterizing.
+    pub scale: f32,
 }
 
 /// Thin handle passed to widget `build()` methods. Carries actual cell
@@ -106,6 +119,11 @@ impl UiTextRenderer {
                 fallback
             }
         }).sum()
+    }
+
+    /// Exact width of a string rendered in the proportional UI font at a given scale.
+    pub fn text_width_ui_scaled(&self, s: &str, scale: f32) -> f32 {
+        self.text_width_ui(s) * scale
     }
 }
 
@@ -499,6 +517,7 @@ impl UiBuilder {
             x, y, fg, bg,
             bold: false,
             ui_font: false,
+            scale: 1.0,
         });
     }
 
@@ -517,6 +536,7 @@ impl UiBuilder {
             x, y, fg, bg,
             bold: true,
             ui_font: false,
+            scale: 1.0,
         });
     }
 
@@ -535,6 +555,7 @@ impl UiBuilder {
             x, y, fg, bg,
             bold: false,
             ui_font: true,
+            scale: 1.0,
         });
     }
 
@@ -553,6 +574,48 @@ impl UiBuilder {
             x, y, fg, bg,
             bold: true,
             ui_font: true,
+            scale: 1.0,
+        });
+    }
+
+    /// Record a scaled UI text draw command (proportional sans-serif font).
+    /// `scale` controls glyph quad size: 1.0 = cell_height, 0.786 = 11px at 14px base.
+    pub fn text_ui_scaled(
+        &mut self,
+        _renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x, y, fg, bg,
+            bold: false,
+            ui_font: true,
+            scale,
+        });
+    }
+
+    /// Record a scaled bold UI text draw command (proportional sans-serif font).
+    pub fn text_ui_bold_scaled(
+        &mut self,
+        _renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x, y, fg, bg,
+            bold: true,
+            ui_font: true,
+            scale,
         });
     }
 

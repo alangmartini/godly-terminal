@@ -1,7 +1,7 @@
 //! Left sidebar: session list with names, active indicator, and new session button.
 
 use super::anim::{self, AnimVec, lerp_color, lerp};
-use super::builder::{colors, UiBuilder, UiTextRenderer};
+use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
 const HEADER_HEIGHT: f32 = 30.0;
@@ -229,19 +229,21 @@ impl Sidebar {
         let header_label = format!("Sessions {}", self.items.len());
         let header_text_x = header_rect.x + pad_h;
         let header_text_y = header_rect.y + text_y_off(header_h);
-        ui.text_ui(
+        ui.text_ui_scaled(
             text,
             &header_label,
             header_text_x,
             header_text_y,
             colors::FG_MUTED, // web: color "#6e7681" at full opacity
             colors::BG_DARK,
+            font_scale::PX12, // web: fontSize 12
         );
         // Web: <span style={{ color: "#484f58", fontSize: 10 }}>⚡ 1</span>
-        let lightning_x = header_text_x + text.text_width_ui(&header_label) + s(6.0);
-        ui.text_ui(text, "\u{26A1} 1", lightning_x, header_text_y,
+        let lightning_x = header_text_x + text.text_width_ui_scaled(&header_label, font_scale::PX12) + s(6.0);
+        ui.text_ui_scaled(text, "\u{26A1} 1", lightning_x, header_text_y,
             colors::STATUS_DEFAULT, // #484f58
-            colors::BG_DARK);
+            colors::BG_DARK,
+            font_scale::PX10); // web: fontSize 10
 
         // Layout: [pad][num][gap][name...][pad]
         // Matches web reference: plain text IDs + name, branch on second line
@@ -363,12 +365,12 @@ impl Sidebar {
             let name_fg = lerp_color(inactive_name, colors::FG_BRIGHT, active_t); // web: #e6edf3, not white
             let name_max_w = (rect.right() - name_x - pad_h).max(s(30.0));
             let name = truncate_to_width(&item.label, name_max_w, text);
-            // Web reference: fontWeight 600 for all session names (both active and inactive)
-            ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
+            // Web reference: fontWeight 600, fontSize 13 for all session names
+            ui.text_ui_bold_scaled(text, &name, name_x, text_y, name_fg, item_bg, font_scale::PX13);
             if item.active {
-                // Web reference: "::" indicator right-aligned on active session, color #484f58
-                let indicator_x = inset_rect.right() - text.text_width_ui("::") - s(4.0);
-                ui.text_ui(text, "::", indicator_x, text_y, colors::STATUS_DEFAULT, item_bg); // web: #484f58
+                // Web reference: "::" indicator right-aligned, fontSize 11, color #484f58
+                let indicator_x = inset_rect.right() - text.text_width_ui_scaled("::", font_scale::PX11) - s(4.0);
+                ui.text_ui_scaled(text, "::", indicator_x, text_y, colors::STATUS_DEFAULT, item_bg, font_scale::PX11);
             }
 
             // Second line: branch (web: paddingLeft ~20px, color #484f58)
@@ -381,12 +383,12 @@ impl Sidebar {
                     colors::FG_MUTED,
                     hover_t * 0.4 + active_t * 0.3,
                 );
-                ui.text_ui(text, &item.branch, branch_x, rect.y + line2_y_off, branch_fg, item_bg);
+                ui.text_ui_scaled(text, &item.branch, branch_x, rect.y + line2_y_off, branch_fg, item_bg, font_scale::PX11);
             } else if !item.description.is_empty() {
                 let desc_avail = sidebar.width - pad_h * 2.0 - ui_cw * 2.0;
                 let desc = truncate_to_width(&item.description, desc_avail, text);
                 let desc_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
-                ui.text_ui(text, &desc, name_x, rect.y + line2_y_off, desc_fg, item_bg);
+                ui.text_ui_scaled(text, &desc, name_x, rect.y + line2_y_off, desc_fg, item_bg, font_scale::PX11);
             }
 
             // Web reference: no separator lines between sessions, just marginBottom spacing
@@ -460,11 +462,12 @@ impl Sidebar {
 
             // Directory path header — web: padding "8px 10px 4px", fontSize 10,
             // color "#484f58", letterSpacing 0.5
-            ui.text_ui(text, "\u{2026}ments/work/opensessions",
+            ui.text_ui_scaled(text, "\u{2026}ments/work/opensessions",
                     sidebar.x + s(10.0),
                     panel_y + s(4.0),
                     colors::STATUS_DEFAULT, // #484f58
-                    colors::BG_DARK);
+                    colors::BG_DARK,
+                    font_scale::PX10); // web: fontSize 10
 
             let mut ay = panel_y + header_section_h;
             for (ai, agent) in self.agents.iter().enumerate() {
@@ -504,27 +507,28 @@ impl Sidebar {
                     AgentStatus::Stopped => "\u{26A0}", // ⚠
                     AgentStatus::Waiting => "\u{25CF}", // ●
                 };
-                ui.text_ui(text, icon_str,
+                ui.text_ui_scaled(text, icon_str,
                     sidebar.x + s(10.0), line1_y,
-                    status_color, panel_bg);
+                    status_color, panel_bg,
+                    font_scale::PX11); // web: fontSize 11
 
                 // Agent name — web: color "#9198a1", fontWeight 600
-                let agent_name_x = sidebar.x + s(10.0) + text.text_width_ui(icon_str) + s(6.0);
+                let agent_name_x = sidebar.x + s(10.0) + text.text_width_ui_scaled(icon_str, font_scale::PX11) + s(6.0);
                 let agent_name_fg = lerp_color(
                     [0.569, 0.596, 0.631, 1.0], // #9198a1
                     colors::FG_PRIMARY,
                     agent_hover_t * 0.4,
                 );
-                ui.text_ui_bold(text, &agent.name, agent_name_x, line1_y,
-                    agent_name_fg, panel_bg);
+                ui.text_ui_bold_scaled(text, &agent.name, agent_name_x, line1_y,
+                    agent_name_fg, panel_bg, font_scale::PX12); // web: fontSize 12
 
                 // Status badge — web: fontSize 10, borderRadius 3 (NOT pill),
                 // backgroundColor: color + "18" (~0.094 opacity)
-                let sw = text.text_width_ui(status_text);
+                let sw = text.text_width_ui_scaled(status_text, font_scale::PX10);
                 let status_badge_pad_h = s(6.0);
-                let status_badge_h = ch * 0.75;
+                let status_badge_h = ch * font_scale::PX10;
                 let status_badge_w = sw + status_badge_pad_h * 2.0;
-                let name_end_x = agent_name_x + text.text_width_ui(&agent.name) + s(6.0);
+                let name_end_x = agent_name_x + text.text_width_ui_scaled(&agent.name, font_scale::PX12) + s(6.0);
                 let status_badge_x = name_end_x;
                 let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
                 let status_badge_rect = Rect {
@@ -536,26 +540,29 @@ impl Sidebar {
                 ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
-                ui.text_ui(text, status_text,
+                ui.text_ui_scaled(text, status_text,
                         status_text_x, status_text_y,
-                        status_color, panel_bg);
+                        status_color, panel_bg,
+                        font_scale::PX10); // web: fontSize 10
 
                 // Dismiss × button — web: color "#3b4048", marginLeft auto, fontSize 13
-                let dismiss_x = sidebar.right() - pad_h - text.text_width_ui("\u{00D7}");
-                ui.text_ui(text, "\u{00D7}", dismiss_x, line1_y,
+                let dismiss_x = sidebar.right() - pad_h - text.text_width_ui_scaled("\u{00D7}", font_scale::PX13);
+                ui.text_ui_scaled(text, "\u{00D7}", dismiss_x, line1_y,
                     colors::STATUS_PATH, // #3b4048
-                    panel_bg);
+                    panel_bg,
+                    font_scale::PX13); // web: fontSize 13
 
                 // Second line: task description — web: fontSize 11, color "#484f58",
                 // paddingLeft 20, lineHeight 1.3
                 if !agent.task.is_empty() {
-                    let desc_x = sidebar.x + s(10.0) + text.text_width_ui(icon_str) + s(14.0);
+                    let desc_x = sidebar.x + s(10.0) + text.text_width_ui_scaled(icon_str, font_scale::PX11) + s(14.0);
                     let desc_y = line1_y + ch + s(2.0);
                     let desc_avail = sidebar.width - (desc_x - sidebar.x) - pad_h;
                     let desc = truncate_to_width(&agent.task, desc_avail, text);
-                    ui.text_ui(text, &desc, desc_x, desc_y,
+                    ui.text_ui_scaled(text, &desc, desc_x, desc_y,
                         colors::STATUS_DEFAULT, // #484f58
-                        panel_bg);
+                        panel_bg,
+                        font_scale::PX11); // web: fontSize 11
                 }
 
                 ay += agent_item_h;
@@ -580,10 +587,11 @@ impl Sidebar {
 
             // Measure total height needed (wrap layout)
             let avail_w = sidebar.width - shortcut_pad * 2.0;
+            let sc_scale = font_scale::PX10; // web: fontSize 10
             let mut rows = 1u32;
             let mut row_x = 0.0f32;
             for (i, &sc) in shortcuts.iter().enumerate() {
-                let w = text.text_width_ui(sc);
+                let w = text.text_width_ui_scaled(sc, sc_scale);
                 if i > 0 && row_x + w > avail_w {
                     rows += 1;
                     row_x = w + shortcut_gap_x;
@@ -591,7 +599,7 @@ impl Sidebar {
                     row_x += w + if i > 0 { shortcut_gap_x } else { 0.0 };
                 }
             }
-            let line_h = ch;
+            let line_h = ch * sc_scale;
             let shortcuts_h = shortcut_top_pad * 2.0 + rows as f32 * line_h + (rows - 1) as f32 * shortcut_gap_y;
             let shortcuts_y = sidebar.bottom() - shortcuts_h;
 
@@ -602,13 +610,13 @@ impl Sidebar {
             let mut cx = sidebar.x + shortcut_pad;
             let mut cy = shortcuts_y + shortcut_top_pad;
             for (i, &sc) in shortcuts.iter().enumerate() {
-                let w = text.text_width_ui(sc);
+                let w = text.text_width_ui_scaled(sc, sc_scale);
                 if i > 0 && (cx - sidebar.x - shortcut_pad) + w > avail_w {
                     cx = sidebar.x + shortcut_pad;
                     cy += line_h + shortcut_gap_y;
                 }
                 // Web: color "#3b4048" = STATUS_PATH
-                ui.text_ui(text, sc, cx, cy, colors::STATUS_PATH, colors::BG_DARK);
+                ui.text_ui_scaled(text, sc, cx, cy, colors::STATUS_PATH, colors::BG_DARK, sc_scale);
                 cx += w + shortcut_gap_x;
             }
         }

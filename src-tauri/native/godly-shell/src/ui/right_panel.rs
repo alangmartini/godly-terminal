@@ -4,7 +4,7 @@
 //! scrollable content area with poem, and a small status bar at the bottom.
 
 use super::anim::{self, Anim, lerp_color};
-use super::builder::{colors, UiBuilder, UiTextRenderer};
+use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, MouseEvent};
 
 pub struct RightPanel {
@@ -75,12 +75,13 @@ impl RightPanel {
         // Header bottom border — web: borderBottom "1px solid #1a1d25"
         ui.hline(header.x, header.bottom() - 1.0, header.width, 1.0, colors::BORDER);
 
-        // Title text — web: color "#484f58" (STATUS_DEFAULT)
-        let title_y = header.y + (header_h - ch) / 2.0;
+        // Title text — web: color "#484f58" (STATUS_DEFAULT), fontSize 12
+        let title_y = header.y + (header_h - ch * font_scale::PX12) / 2.0;
         let title = if self.title.is_empty() { "Panel" } else { &self.title };
-        ui.text_ui(text, title, panel.x + s(14.0), title_y,
+        ui.text_ui_scaled(text, title, panel.x + s(14.0), title_y,
             colors::STATUS_DEFAULT, // #484f58
-            colors::BG_DARK);
+            colors::BG_DARK,
+            font_scale::PX12);
 
         // Close button (×) — web: color "#3b4048", fontSize 14
         let close_sz = ch;
@@ -124,27 +125,29 @@ impl RightPanel {
             colors::FG_BRIGHT, // #e6edf3
             dot_sz / 2.0,
         );
-        ui.text_ui_bold(text, &self.poem_title,
+        ui.text_ui_bold_scaled(text, &self.poem_title,
             content_rect.x + dot_sz + s(8.0), y,
             colors::FG_BRIGHT, // #e6edf3
-            colors::BG_DARK);
-        y += ch + s(16.0); // marginBottom 16
+            colors::BG_DARK,
+            font_scale::PX15); // web: fontSize 15
+        y += ch * font_scale::PX15 + s(16.0); // marginBottom 16
 
         // Stanzas — web: marginBottom 18, lineHeight 1.7, fontSize 13,
         //                 color "#9198a1", fontFamily Georgia/serif italic,
         //                 letterSpacing 0.2, whiteSpace pre-wrap
         // NOTE: We use proportional UI font since serif isn't loaded. Color and
         // spacing match web exactly.
-        let stanza_line_h = ch * 1.7; // lineHeight 1.7
+        let stanza_ch = ch * font_scale::PX13; // fontSize 13
+        let stanza_line_h = stanza_ch * 1.7; // lineHeight 1.7
         let stanza_gap = s(18.0);     // marginBottom 18
         let stanza_fg: [f32; 4] = [0.569, 0.596, 0.631, 1.0]; // #9198a1
 
         for stanza in &self.stanzas {
             for line in stanza.split('\n') {
-                if y + ch > content_rect.y + content_rect.height {
+                if y + stanza_ch > content_rect.y + content_rect.height {
                     break;
                 }
-                ui.text_ui(text, line, content_rect.x, y, stanza_fg, colors::BG_DARK);
+                ui.text_ui_scaled(text, line, content_rect.x, y, stanza_fg, colors::BG_DARK, font_scale::PX13);
                 y += stanza_line_h;
             }
             y += stanza_gap - stanza_line_h; // net gap between stanzas
@@ -156,9 +159,10 @@ impl RightPanel {
             y += s(8.0);
             ui.hline(content_rect.x, y, content_rect.width, 1.0, colors::BORDER);
             y += s(12.0);
-            ui.text_ui(text, &self.footer, content_rect.x, y,
+            ui.text_ui_scaled(text, &self.footer, content_rect.x, y,
                 colors::FG_MUTED, // #6e7681
-                colors::BG_DARK);
+                colors::BG_DARK,
+                font_scale::PX12); // web: fontSize 12
         }
 
         // --- Bottom status bar ---
@@ -168,14 +172,15 @@ impl RightPanel {
             ui.fill(status, colors::BG_STATUS);
             ui.hline(status.x, status.y, status.width, 1.0, colors::BORDER);
 
-            let status_y = status.y + (status.height - ch) / 2.0;
+            let status_ch = ch * font_scale::PX11;
+            let status_y = status.y + (status.height - status_ch) / 2.0;
             let status_fg = colors::STATUS_PATH; // #3b4048
             // Left: "}" brace
-            ui.text_ui(text, "}", status.x + s(10.0), status_y, status_fg, colors::BG_STATUS);
+            ui.text_ui_scaled(text, "}", status.x + s(10.0), status_y, status_fg, colors::BG_STATUS, font_scale::PX11);
             // Right: "? for shortcuts"
             let hint = "? for shortcuts";
-            let hint_w = text.text_width_ui(hint);
-            ui.text_ui(text, hint, status.right() - hint_w - s(10.0), status_y, status_fg, colors::BG_STATUS);
+            let hint_w = text.text_width_ui_scaled(hint, font_scale::PX11);
+            ui.text_ui_scaled(text, hint, status.right() - hint_w - s(10.0), status_y, status_fg, colors::BG_STATUS, font_scale::PX11);
         }
     }
 

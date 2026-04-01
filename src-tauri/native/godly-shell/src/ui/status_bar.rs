@@ -3,7 +3,7 @@
 //! Left side: streaming state indicator or process name.
 //! Right side: working directory, git branch (amber), git diff stats.
 
-use super::builder::{colors, UiBuilder, UiTextRenderer};
+use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
 use super::widget::Rect;
 
 pub struct StatusBar {
@@ -71,7 +71,10 @@ impl StatusBar {
         // (borderTop: "1px solid #1a1d25").
         ui.hline(bar.x, bar.y, bar.width, 1.0, colors::BORDER);
 
-        let y_center = bar.y + (bar.height - ch) / 2.0;
+        // Web: fontSize 11 for all status bar text
+        let sc = font_scale::PX11;
+        let sch = ch * sc;
+        let y_center = bar.y + (bar.height - sch) / 2.0;
         let bg = colors::BG_STATUS;
 
         // --- Left side: streaming state or process name ---
@@ -87,16 +90,16 @@ impl StatusBar {
             let pulse = 0.6 + 0.4 * (glow_phase * 0.6).sin().abs(); // ~1.5s period
             let tilde_fg = [colors::FG_SECONDARY[0], colors::FG_SECONDARY[1],
                             colors::FG_SECONDARY[2], pulse];
-            ui.text_ui(text, "~", x, y_center, tilde_fg, bg);
-            x += text.text_width_ui("~") + s(6.0);
+            ui.text_ui_scaled(text, "~", x, y_center, tilde_fg, bg, sc);
+            x += text.text_width_ui_scaled("~", sc) + s(6.0);
 
-            ui.text_ui(text, "Streaming response\u{2026}", x, y_center, colors::FG_SECONDARY, bg);
-            x += text.text_width_ui("Streaming response\u{2026}") + s(12.0);
+            ui.text_ui_scaled(text, "Streaming response\u{2026}", x, y_center, colors::FG_SECONDARY, bg, sc);
+            x += text.text_width_ui_scaled("Streaming response\u{2026}", sc) + s(12.0);
 
             let esc_fg = colors::FG_MUTED;
-            ui.text_ui(text, "Esc to cancel", x, y_center, esc_fg, bg);
+            ui.text_ui_scaled(text, "Esc to cancel", x, y_center, esc_fg, bg, sc);
         } else if !self.process_name.is_empty() {
-            ui.text_ui(text, &self.process_name, x, y_center, colors::FG_SECONDARY, bg);
+            ui.text_ui_scaled(text, &self.process_name, x, y_center, colors::FG_SECONDARY, bg, sc);
         }
 
         // --- Right side: path | branch | git diff ---
@@ -109,7 +112,7 @@ impl StatusBar {
         // Git diff stats (rightmost)
         if !self.git_diff_summary.is_empty() {
             // Parse simple diff format like "+21 ~4 -70" and colorize
-            let diff_w = text.text_width_ui(&self.git_diff_summary);
+            let diff_w = text.text_width_ui_scaled(&self.git_diff_summary, sc);
             rx -= diff_w;
             // Render each token with appropriate color
             let mut dx = rx;
@@ -121,29 +124,29 @@ impl StatusBar {
                 } else {
                     colors::STATUS_DEFAULT // web: #484f58 (inherited status bar color)
                 };
-                ui.text_ui(text, token, dx, y_center, color, bg);
-                dx += text.text_width_ui(token) + text.text_width_ui(" ");
+                ui.text_ui_scaled(text, token, dx, y_center, color, bg, sc);
+                dx += text.text_width_ui_scaled(token, sc) + text.text_width_ui_scaled(" ", sc);
             }
 
-            rx -= text.text_width_ui(sep);
-            ui.text_ui(text, sep, rx, y_center, sep_fg, bg);
+            rx -= text.text_width_ui_scaled(sep, sc);
+            ui.text_ui_scaled(text, sep, rx, y_center, sep_fg, bg, sc);
         }
 
         // Git branch (amber)
         if !self.git_branch.is_empty() {
             let branch_display = format!("({})", self.git_branch);
-            let branch_w = text.text_width_ui(&branch_display);
+            let branch_w = text.text_width_ui_scaled(&branch_display, sc);
             rx -= branch_w;
-            ui.text_ui(text, &branch_display, rx, y_center, colors::ACCENT_PEACH, bg);
+            ui.text_ui_scaled(text, &branch_display, rx, y_center, colors::ACCENT_PEACH, bg, sc);
 
-            rx -= text.text_width_ui(sep);
-            ui.text_ui(text, sep, rx, y_center, sep_fg, bg);
+            rx -= text.text_width_ui_scaled(sep, sc);
+            ui.text_ui_scaled(text, sep, rx, y_center, sep_fg, bg, sc);
         }
 
         // Working directory path (muted)
         if !self.cwd.is_empty() {
             // Truncate from the left if too long
-            let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { text.cell_width * 0.75 };
+            let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance * sc } else { text.cell_width * 0.75 * sc };
             let avail = rx - left_x - s(40.0);
             let max_chars = (avail / ui_cw).floor().max(8.0) as usize;
             let display = if self.cwd.len() > max_chars {
@@ -151,9 +154,9 @@ impl StatusBar {
             } else {
                 self.cwd.clone()
             };
-            let path_w = text.text_width_ui(&display);
+            let path_w = text.text_width_ui_scaled(&display, sc);
             rx -= path_w;
-            ui.text_ui(text, &display, rx, y_center, colors::STATUS_PATH, bg); // web: #3b4048
+            ui.text_ui_scaled(text, &display, rx, y_center, colors::STATUS_PATH, bg, sc); // web: #3b4048
         }
     }
 

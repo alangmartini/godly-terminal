@@ -2,6 +2,45 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 76 — Per-Element Font Size Scaling
+
+**Goal**: Match the web reference's per-element font sizes. The native shell was
+rendering ALL UI text at 14px (cell_height), but the web uses different sizes
+for different elements: 10px for shortcuts/badges, 11px for branch/status bar,
+12px for headers/tab titles, 13px for session names/poem stanzas, 15px for
+the poem title.
+
+**Changes made**:
+
+1. **Font scaling infrastructure** — Added `scale` field to `TextCommand` struct
+   (defaults to 1.0). Added `text_ui_scaled()` and `text_ui_bold_scaled()`
+   methods to `UiBuilder`. The terminal renderer now multiplies glyph quad
+   width/height and advance by the scale factor, enabling per-element font sizes
+   without re-rasterizing glyphs in the atlas.
+
+2. **`font_scale` module** — Defined constants for common web font sizes relative
+   to the 14px base: PX10 (0.714), PX11 (0.786), PX12 (0.857), PX13 (0.929),
+   PX15 (1.071).
+
+3. **Sidebar** — Sessions header: 12px, ⚡ indicator: 10px, session names: 13px,
+   "::" indicator: 11px, branch text: 11px, process header: 10px, agent names:
+   12px, status badges: 10px, dismiss ×: 13px, descriptions: 11px, shortcuts: 10px.
+
+4. **Tab bar** — Badge numbers: 10px, titles: 12px, right-side indicators: 11px.
+
+5. **Status bar** — All text: 11px (streaming, path, branch, diff).
+
+6. **Right panel** — Header: 12px, poem title: 15px, stanzas: 13px, footer: 12px,
+   bottom status: 11px.
+
+7. **Layout helpers** — `text_width_ui_scaled()` added for correct width
+   measurements at scaled sizes, used throughout for centering and truncation.
+
+**Result**: All UI chrome text now renders at the exact pixel size specified in
+the web reference JSX. The visual hierarchy is dramatically improved — small
+labels (shortcuts, badges) are clearly subordinate to names and titles, matching
+the web's information density and visual weight distribution.
+
 ## Iteration 75 — Per-Tab Accent Colors, Demo Data Parity, Badge Shape
 
 **Goal**: Match tab bar demo data and per-tab styling to web reference exactly.
