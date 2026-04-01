@@ -188,7 +188,17 @@ impl App {
     }
 
     fn init_gpu(&mut self, window: Arc<Window>) {
-        let size = window.inner_size();
+        let phys_size = window.inner_size();
+        let scale = window.scale_factor();
+        // Use LOGICAL resolution for the wgpu surface.  On Windows with DPI
+        // scaling, the compositor presents only logical-pixel-width of the
+        // swap chain, clipping anything beyond that boundary.  Rendering at
+        // logical resolution avoids the clipping and lets the compositor
+        // upscale to physical pixels.
+        let logical_w = (phys_size.width as f64 / scale).round() as u32;
+        let logical_h = (phys_size.height as f64 / scale).round() as u32;
+        log::info!("[DPI] physical={}x{}, scale={}, logical surface={}x{}",
+            phys_size.width, phys_size.height, scale, logical_w, logical_h);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12 | wgpu::Backends::VULKAN,
             ..Default::default()
@@ -230,8 +240,8 @@ impl App {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: size.width.max(1),
-            height: size.height.max(1),
+            width: logical_w.max(1),
+            height: logical_h.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
@@ -239,10 +249,11 @@ impl App {
         };
         surface.configure(&device, &config);
 
-        // Initialize terminal renderer with DPI-aware font metrics
-        let scale_factor = window.scale_factor() as f32;
+        // Use scale_factor = 1.0 since we render at logical resolution.
+        // The compositor handles upscaling to physical pixels.
+        let scale_factor = 1.0_f32;
         self.scale_factor = scale_factor;
-        log::info!("DPI scale factor: {scale_factor}");
+        log::info!("[DPI] rendering at logical resolution, scale_factor=1.0");
         let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
         let rasterizer = create_rasterizer();
         let font_size = 14.0_f32;
@@ -1904,9 +1915,13 @@ impl ApplicationHandler<AsyncEvent> for App {
                 if let Some(w) = &self.window {
                     self.is_maximized = w.is_maximized();
                 }
+                // Convert physical size to logical for the surface (matches init_gpu).
+                let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
+                let logical_w = (size.width as f64 / scale).round() as u32;
+                let logical_h = (size.height as f64 / scale).round() as u32;
                 if let Some(gpu) = &mut self.gpu {
-                    gpu.config.width = size.width.max(1);
-                    gpu.config.height = size.height.max(1);
+                    gpu.config.width = logical_w.max(1);
+                    gpu.config.height = logical_h.max(1);
                     gpu.surface.configure(&gpu.device, &gpu.config);
                 }
                 // Resize the terminal session

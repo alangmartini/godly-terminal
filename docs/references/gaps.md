@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 72)
+Last updated: 2026-04-01 (Iteration 73)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -48,6 +48,14 @@ Last updated: 2026-04-01 (Iteration 72)
 | Demo data parity | Done | 3 sessions matching web (plane, opensessions active, quiver) (iteration 71) |
 | New Session button removed | Done | Removed from sidebar to match web reference which has no such button (iteration 72) |
 | Tab bar process indicators | Done | Right-side "bun" + "opensessions" labels with colored dots before window controls (iteration 72) |
+| DPI scaling | Done | Surface at logical resolution, compositor upscales to physical (iteration 73) |
+| Right panel | Done | Poem content panel with header, stanzas, footer, close button (iteration 73) |
+
+## Changes in Iteration 73
+
+1. **DPI scaling fix** — wgpu surface now configured at logical resolution instead of physical resolution. On Windows with 150% DPI scaling, the compositor clips the swap chain at the logical pixel boundary (1707px), making content rendered at physical coordinates >1707 invisible. Fixed by computing `logical_w = physical_w / scale_factor` and configuring the surface at that size. Layout now uses `scale_factor=1.0` since all coordinates are in logical pixels. The compositor handles upscaling to physical resolution.
+2. **Right panel enabled** — The right panel with "The Gardener of Broken Things" poem is now visible. Previously hidden behind `visible: false` due to the DPI clipping issue. Now renders correctly with header, poem stanzas, footer, close button, and bottom status bar matching web reference.
+3. **Resize handler updated** — `WindowEvent::Resized` now converts physical size to logical before reconfiguring the surface, matching the init_gpu approach.
 
 ## Changes in Iteration 72
 
@@ -101,19 +109,15 @@ Last updated: 2026-04-01 (Iteration 72)
 
 ## Remaining Gaps (Priority Order)
 
-### Blocker: DPI Scaling Issue
-The wgpu surface renders at physical resolution (2560px on 150% DPI) but the compositor
-displays only the first 1707 logical pixels without scaling. Content at physical x>1707
-is clipped. This blocks the right panel (at x=1990) and may affect tab bar right-side
-indicators when tabs push them past the visible boundary. Needs investigation into
-winit/wgpu DPI handling on Windows.
-
-### Feature Gaps (Not Styling)
-1. **Right panel** — Rendering code complete with poem content matching web reference.
-   Hidden by default due to DPI clipping issue above.
+### Future: HiDPI Rendering
+The surface currently renders at logical resolution (1707×912) and the compositor
+upscales to physical (2560×1440). This fixes the clipping issue but means text is
+rendered at 1x resolution rather than native HiDPI. A future optimization could
+investigate per-monitor DPI awareness v2 with proper swap chain configuration to
+render at physical resolution without compositor clipping.
 
 ### Low Impact (Polish)
-2. **Context menu backdrop blur** — For future floating menus.
+1. **Context menu backdrop blur** — For future floating menus.
 
 ## Active Theme Color Notes (GitHub Dark)
 - Chrome/sidebar: `#0b0d12` (BG_DARK)

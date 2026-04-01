@@ -2,6 +2,38 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 73 — Fix DPI Scaling & Enable Right Panel
+
+**Goal**: Fix the DPI scaling blocker that prevented the right panel from
+rendering, and enable the right panel with poem content.
+
+**Root cause**: On Windows with 150% DPI scaling (2560×1440 physical,
+1707×960 logical), the wgpu swap chain was configured at physical resolution
+(2560×1368) but the Windows compositor only displays logical-pixel-width
+(1707) of the swap chain buffer. Content rendered at physical x > 1707 was
+simply clipped/invisible. This was confirmed by rendering bright red fills
+and debug stripes at physical coordinates — none appeared.
+
+**Fix**: Configure the wgpu surface at logical resolution (`physical / scale_factor`)
+instead of physical resolution. Layout uses `scale_factor=1.0` since all coordinates
+are now in logical pixels. The compositor handles upscaling to physical resolution.
+
+**Changes made**:
+
+1. **Surface at logical resolution** (`main.rs:init_gpu`): Changed surface
+   configuration from `size.width/height` (physical 2560×1368) to
+   `logical_w/logical_h` (1707×912). Set `scale_factor=1.0`.
+
+2. **Resize handler** (`main.rs:WindowEvent::Resized`): Convert physical
+   size to logical before reconfiguring the surface.
+
+3. **Right panel enabled** (`right_panel.rs`): Changed `visible: false` to
+   `visible: true`. Removed the explanatory comment about the DPI issue.
+
+**Remaining gaps**:
+- HiDPI rendering quality (surface at 1x, compositor upscales)
+- Context menu backdrop blur (polish)
+
 ## Iteration 72 — Remove New Session Button & Add Tab Bar Indicators
 
 **Goal**: Remove the "+ New Session" button (not in web reference) and add

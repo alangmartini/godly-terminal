@@ -26,10 +26,7 @@ pub struct RightPanel {
 impl RightPanel {
     pub fn new() -> Self {
         Self {
-            // Hidden by default — right panel renders correctly but the wgpu surface
-            // at physical resolution (2560px) exceeds the visible logical area (1707px),
-            // placing the panel off-screen. Enable once DPI handling is fixed.
-            visible: false,
+            visible: true,
             title: "one more".into(),
             poem_title: "The Gardener of Broken Things".into(),
             stanzas: vec![
