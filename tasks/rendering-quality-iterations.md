@@ -2,6 +2,27 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 69 — Status Bar & Sidebar Text Color Precision (Web Parity)
+
+**Analysis**: Compared web reference CSS values character-by-character with native rendering code.
+Found 8 text color mismatches where native used generic palette colors instead of the web's precise
+values. Most impactful: status bar right-side text (path, separators, diff labels) used FG_MUTED
+(#6e7681) and FG_SECONDARY (#8b949e) but web uses much darker #3b4048, #2d333b, and #484f58.
+
+**Changes**:
+1. **Status bar path color**: FG_MUTED (#6e7681) → new STATUS_PATH (#3b4048)
+2. **Status bar separator "|"**: FG_MUTED (#6e7681) → BG_HOVER (#2d333b)
+3. **Status bar diff text**: FG_SECONDARY (#8b949e) → new STATUS_DEFAULT (#484f58)
+4. **Active session name**: WHITE (#ffffff) → FG_BRIGHT (#e6edf3)
+5. **Session header text**: FG_MUTED at 0.65 alpha (~#4b515a) → full FG_MUTED (#6e7681)
+6. **Branch text base**: FG_MUTED*0.7 (~#4d535a) → STATUS_DEFAULT (#484f58)
+7. **"::" indicator**: FG_MUTED*0.7 at 0.65 alpha (~#363a41) → STATUS_DEFAULT (#484f58)
+8. **New palette entries**: STATUS_PATH (#3b4048) and STATUS_DEFAULT (#484f58) added
+
+**Status**: All styling-level parity is achieved. Final audit confirms remaining deltas are
+invisible (<4 channel difference on progress bar track) or feature-level (process list, right
+panel, tab indicators, keybinding hints).
+
 ## Iteration 68 — Active Tab Background & Sidebar Scrollbar (Web Parity)
 
 **Analysis**: Compared web reference CSS values with native rendering code. Found two remaining styling
