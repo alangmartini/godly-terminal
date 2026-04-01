@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 68)
+Last updated: 2026-03-31 (Iteration 69)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -36,6 +36,16 @@ Last updated: 2026-03-31 (Iteration 68)
 | Breathing glow animations | Done | ~3.5s ambient cycle on active elements |
 | Tab active background | Done | #161920 (BG_TAB_ACTIVE), distinct from session active #171b24 (iteration 68) |
 | Sidebar scrollbar | Done | 6px width, #2d333b thumb, 3px radius, hidden when no overflow (iteration 68) |
+| Status bar text colors | Done | Path #3b4048, separators #2d333b, diff text #484f58 matching web exactly (iteration 69) |
+| Session active name | Done | FG_BRIGHT (#e6edf3) not WHITE, matching web exactly (iteration 69) |
+
+## Changes in Iteration 69
+
+1. **Status bar path color fixed** — Changed from FG_MUTED (#6e7681) to new STATUS_PATH (#3b4048), matching web's `color: "#3b4048"` for directory paths.
+2. **Status bar separator color fixed** — Changed from FG_MUTED (#6e7681) to BG_HOVER (#2d333b), matching web's `color: "#2d333b"` for "|" separators.
+3. **Status bar diff text color fixed** — Non-colored diff tokens (e.g. "1 file changed") changed from FG_SECONDARY (#8b949e) to new STATUS_DEFAULT (#484f58), matching web's inherited `color: "#484f58"`.
+4. **Active session name capped at FG_BRIGHT** — Was lerping to pure WHITE (#ffffff), now lerps to FG_BRIGHT (#e6edf3) matching web's `color: isActive ? "#e6edf3" : "#9198a1"`.
+5. **New palette entries** — Added STATUS_PATH (#3b4048) and STATUS_DEFAULT (#484f58) to `colors` module for precise status bar text hierarchy.
 
 ## Changes in Iteration 68
 

@@ -399,7 +399,7 @@ impl Sidebar {
 
             // Session name (truncated to fit) — web: #e6edf3 active, #9198a1 inactive
             let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_BRIGHT, hover_t * 0.6);
-            let name_fg = lerp_color(inactive_name, colors::WHITE, active_t);
+            let name_fg = lerp_color(inactive_name, colors::FG_BRIGHT, active_t); // web: #e6edf3, not white
             let name_max_w = (rect.right() - name_x - pad_h).max(s(30.0));
             let name = truncate_to_width(&item.label, name_max_w, text);
             // Web reference: fontWeight 600 for all session names (both active and inactive)

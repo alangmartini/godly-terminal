@@ -100,9 +100,11 @@ impl StatusBar {
         }
 
         // --- Right side: path | branch | git diff ---
+        // Web reference uses much darker text here than the main UI:
+        //   path: #3b4048, separators: #2d333b, diff text: #484f58
         let mut rx = bar.right() - s(14.0);
         let sep = " | ";
-        let sep_fg = colors::FG_MUTED;
+        let sep_fg = colors::BG_HOVER; // web: #2d333b
 
         // Git diff stats (rightmost)
         if !self.git_diff_summary.is_empty() {
@@ -117,7 +119,7 @@ impl StatusBar {
                 } else if token.starts_with('-') {
                     colors::ACCENT_RED
                 } else {
-                    colors::FG_SECONDARY
+                    colors::STATUS_DEFAULT // web: #484f58 (inherited status bar color)
                 };
                 ui.text_ui(text, token, dx, y_center, color, bg);
                 dx += text.text_width_ui(token) + text.text_width_ui(" ");
@@ -151,7 +153,7 @@ impl StatusBar {
             };
             let path_w = text.text_width_ui(&display);
             rx -= path_w;
-            ui.text_ui(text, &display, rx, y_center, colors::FG_MUTED, bg);
+            ui.text_ui(text, &display, rx, y_center, colors::STATUS_PATH, bg); // web: #3b4048
         }
     }
 

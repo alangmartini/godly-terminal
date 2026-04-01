@@ -35,6 +35,9 @@ pub mod colors {
     pub const ACCENT_SKY: [f32; 4] = [0.345, 0.651, 1.0, 1.0];     // #58a6ff Links
     pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
     pub const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+    // Status bar text tones — web uses much darker text than general UI
+    pub const STATUS_PATH: [f32; 4] = [0.231, 0.251, 0.282, 1.0];  // #3b4048 path/muted info
+    pub const STATUS_DEFAULT: [f32; 4] = [0.282, 0.310, 0.345, 1.0]; // #484f58 default status text
     // Separator / border color — ultra-dark
     pub const BORDER: [f32; 4] = [0.102, 0.114, 0.145, 1.0];       // #1a1d25 hairline border
 }
