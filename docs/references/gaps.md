@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 63)
+Last updated: 2026-03-31 (Iteration 64)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -182,6 +182,11 @@ Last updated: 2026-03-31 (Iteration 63)
 | Tab gap spacing | Done | Tab gap 1px→6px matching web reference tab gap for proper breathing room (iteration 63) |
 | Tab bar background contrast | Done | Tab bar uses BG_RAISED (#0f1117) instead of BG_DARK (#0b0d12), lighter than sidebar matching web (iteration 63) |
 | Inactive session name dimming | Done | Session names at rest use FG_SECONDARY (#8b949e, was FG_PRIMARY #c9d1d9), matching web's #9198a1 (iteration 63) |
+| Flat tab bar | Done | Removed gradient background, now flat fill matching web's `background: #0f1117` (iteration 64) |
+| Flat tab shapes | Done | Removed rounded-top gradients, hover lift, ear cutouts — tabs are flat rects matching web reference (iteration 64) |
+| Tab bottom color indicator | Done | Active tab uses full-width 2px colored bottom bar matching web's `borderBottom: 2px solid ${color}` (iteration 64) |
+| Removed tab glow bleed | Done | Removed accent glow emission below active tab — web has no such effect (iteration 64) |
+| Simplified tab hover | Done | Hover shows subtle flat background tint only, no gradient/lift/accent preview (iteration 64) |
 
 ## Remaining Gaps (Priority Order)
 

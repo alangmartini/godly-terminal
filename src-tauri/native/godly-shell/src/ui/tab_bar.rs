@@ -208,16 +208,8 @@ impl TabBar {
         let tab_inset = s(TAB_INSET_V);
         let origin = self.tabs_origin_x(bar, text.scale);
 
-        // Background — tab bar uses BG_RAISED (#0f1117) to be slightly lighter than
-        // sidebar (BG_DARK #0b0d12), matching web reference contrast hierarchy.
-        let bar_top = colors::BG_RAISED;
-        let bar_bottom = [
-            colors::BG_RAISED[0] * 0.94,
-            colors::BG_RAISED[1] * 0.94,
-            colors::BG_RAISED[2] * 0.94,
-            1.0,
-        ];
-        ui.fill_gradient(bar, bar_top, bar_bottom);
+        // Background — flat fill matching web reference (background: #0f1117)
+        ui.fill(bar, colors::BG_RAISED);
 
         // Window top accent stripe — 2px line at the very top of the window
         // using the active tab's accent color. Professional brand touch found
@@ -261,68 +253,10 @@ impl TabBar {
 
         // (Glass sheen and bevel removed — clean flat bar matches Zed/VS Code restraint)
 
-        // Bottom separator line — break under the active tab for seamless join
-        let active_rect = self.tabs.iter().enumerate()
-            .find(|(_, t)| t.active)
-            .map(|(i, _)| self.tab_rect(i, bar, text.scale));
-        if let Some(ar) = active_rect {
-            let ear_r = s(5.0); // radius of the inverse corner "ear" shapes
-            // Left segment (bar start to active tab left edge, shortened for ear)
-            if ar.x > bar.x {
-                let seg_end = ar.x - ear_r;
-                if seg_end > bar.x {
-                    ui.hline_aa(bar.x, bar.bottom() - 1.0, seg_end - bar.x, 1.0,
-                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
-                }
-                // Left ear: small rounded corner that creates concave curve
-                // Only bottom-right corner is rounded to form the inverse curve
-                // Uses bar_bottom color (not BG_DARK) to match gradient at this y-position
-                let ear_rect = Rect {
-                    x: ar.x - ear_r,
-                    y: bar.bottom() - ear_r,
-                    width: ear_r,
-                    height: ear_r,
-                };
-                ui.fill_rounded_custom(ear_rect, bar_bottom, [0.0, 0.0, ear_r, 0.0]);
-            }
-            // Right segment (active tab right edge to bar end, shortened for ear)
-            if ar.right() < bar.right() {
-                let seg_start = ar.right() + ear_r;
-                if seg_start < bar.right() {
-                    ui.hline_aa(seg_start, bar.bottom() - 1.0, bar.right() - seg_start, 1.0,
-                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
-                }
-                // Right ear: concave curve on the other side
-                // Uses bar_bottom color to match gradient at this y-position
-                let ear_rect = Rect {
-                    x: ar.right(),
-                    y: bar.bottom() - ear_r,
-                    width: ear_r,
-                    height: ear_r,
-                };
-                ui.fill_rounded_custom(ear_rect, bar_bottom, [0.0, 0.0, 0.0, ear_r]);
-            }
-            // Accent glow bleed below active tab — breathing Gaussian emission
-            // Creates a warm light-spill effect from the active tab into content
-            let active_accent = self.tabs.iter().enumerate()
-                .find(|(_, t)| t.active)
-                .map(|(i, _)| self.accent_for(i))
-                .unwrap_or(colors::ACCENT_BLUE);
-            let breath = 0.92 + 0.08 * self.glow_phase.sin();
-            let glow_rect = Rect {
-                x: ar.x + s(6.0),
-                y: bar.bottom() - s(1.0),
-                width: ar.width - s(12.0),
-                height: s(3.0),
-            };
-            ui.fill_shadow(glow_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.06 * breath],
-                s(2.0), s(5.0),
-            );
-        } else {
-            ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
-        }
+        // Bottom separator — simple full-width hairline matching web reference
+        // (borderBottom: 1px solid #1a1d25). No ear shapes or glow bleed.
+        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
+            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
 
         // Sidebar section: "Godly Terminal" branding with subtle differentiation
         if self.sidebar_width > 0.0 {
@@ -403,68 +337,47 @@ impl TabBar {
             let hover_t = self.tab_hover_anim.get(i); // 0.0 → 1.0 smooth
             let active_t = self.active_anim.get(i);
 
-            // Hover lift: inactive tabs shift up 1.5px on hover for physical "raise" feel.
-            // Active tabs stay in place (they're already visually elevated via gradient/border).
-            let lift_y = s(1.5) * hover_t * (1.0 - active_t);
+            // Flat tabs — no hover lift (matching web reference)
             let rect = Rect {
                 x: origin + i as f32 * (tab_w + tab_gap),
-                y: bar.y + tab_inset - lift_y,
+                y: bar.y + tab_inset,
                 width: tab_w,
                 height: bar.height - tab_inset,
             };
 
-            // Tab background — smoothly blend between inactive and active states
-            let inactive_bg = lerp_color(colors::BG_RAISED, colors::BG_SURFACE, hover_t);
-            let bg = lerp_color(inactive_bg, colors::BG_BASE, active_t);
+            // Tab background — web reference style: flat rects, no rounded-top gradients.
+            // Active: #161920 background + 2px colored bottom border
+            // Hover: subtle background lift
+            // Inactive: transparent
+            let bg = lerp_color(
+                lerp_color(colors::BG_RAISED, colors::BG_SURFACE, hover_t),
+                colors::BG_ACTIVE,
+                active_t,
+            );
 
-            let tab_radius = s(5.0);
-            // Always render the tab background, blending between inactive and active states
             if active_t > 0.005 {
-                // Active state — flat BG_ACTIVE + rounded top corners + bottom accent underline
-                let active_bg = [
-                    colors::BG_ACTIVE[0], colors::BG_ACTIVE[1],
-                    colors::BG_ACTIVE[2], active_t,
-                ];
-                let border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.3 * active_t];
-                ui.fill_rounded_top_gradient(rect, active_bg, active_bg, tab_radius, active_t * 0.5, border);
+                // Active: flat background matching web (#161920 = BG_ACTIVE)
+                let active_bg = [colors::BG_ACTIVE[0], colors::BG_ACTIVE[1], colors::BG_ACTIVE[2], active_t];
+                ui.fill(rect, active_bg);
 
-                // Bottom accent underline (2px) — matches web reference active tab indicator
+                // Bottom accent indicator (2px colored bar) — web: borderBottom: 2px solid ${color}
                 let accent_color = [accent[0], accent[1], accent[2], active_t];
                 let bottom_bar = Rect {
-                    x: rect.x + tab_radius,
+                    x: rect.x,
                     y: rect.bottom() - s(2.0),
-                    width: rect.width - tab_radius * 2.0,
+                    width: rect.width,
                     height: s(2.0),
                 };
-                ui.fill_rounded(bottom_bar, accent_color, s(1.0));
+                ui.fill(bottom_bar, accent_color);
             }
             if active_t < 0.995 && hover_t > 0.005 {
-                // Hover state for non-fully-active tabs
+                // Hover: subtle flat background
                 let inv_active = 1.0 - active_t;
-                let border_alpha = lerp(0.0, 0.6, hover_t) * inv_active;
-                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], border_alpha];
-                let top_boost = lerp(1.0, 1.06, hover_t);
-                let hover_top = [bg[0] * top_boost, bg[1] * top_boost, bg[2] * top_boost, lerp(0.5, 1.0, hover_t) * inv_active];
-                let hover_bottom = [bg[0], bg[1], bg[2], lerp(0.5, 1.0, hover_t) * inv_active];
-                let radius = lerp(s(3.0), s(4.0), hover_t);
-                let border_w = lerp(0.0, 0.5, hover_t) * inv_active;
-                ui.fill_rounded_top_gradient(rect, hover_top, hover_bottom, radius, border_w, hover_border);
-                // Faint accent preview line at the top of the hovered tab —
-                // previews the active tab's accent color for this position.
-                let preview_alpha = lerp(0.0, 0.35, hover_t) * inv_active;
-                let preview_bar = Rect {
-                    x: rect.x + radius + s(2.0),
-                    y: rect.y + 1.0,
-                    width: rect.width - (radius + s(2.0)) * 2.0,
-                    height: s(2.0),
-                };
-                ui.fill_rounded(preview_bar,
-                    [accent[0], accent[1], accent[2], preview_alpha],
-                    s(1.0));
-            }
-            if active_t < 0.005 && hover_t < 0.005 {
-                // Inactive rest state: transparent — no background drawn.
-                // Text color alone distinguishes inactive tabs (FG_DIM).
+                let hover_bg = [
+                    colors::BG_SURFACE[0], colors::BG_SURFACE[1],
+                    colors::BG_SURFACE[2], hover_t * 0.5 * inv_active,
+                ];
+                ui.fill(rect, hover_bg);
             }
 
             // Numbered circle badge — number rendered inside a colored circle

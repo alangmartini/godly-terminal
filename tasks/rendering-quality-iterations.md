@@ -2,6 +2,26 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 64 — Flat Tab Bar (Web Reference Parity)
+
+**Analysis**: Side-by-side comparison revealed the tab bar was the biggest remaining visual
+divergence from the web reference. The native used complex 3D tab shapes (rounded-top gradients,
+concave "ear" cutouts on the bottom separator, hover lift effects, accent glow bleed) while the
+web uses simple flat rectangles with a colored bottom border indicator.
+
+**Changes** (tab_bar.rs):
+1. Tab bar background: gradient → flat fill (BG_RAISED)
+2. Active tab: rounded-top gradient + border → flat fill (BG_ACTIVE) with full-width 2px colored bottom bar
+3. Bottom separator: segmented line with SDF ear cutouts → simple full-width hairline
+4. Removed accent glow bleed below active tab
+5. Removed hover lift (1.5px vertical shift on inactive tabs)
+6. Hover: complex gradient+border+accent-preview → subtle flat background tint
+7. Inactive tabs at rest: no change (already transparent, matching web)
+
+**Result**: Tab bar is now flat and minimal, matching web reference's simple
+`borderBottom: 2px solid ${color}` active indicator pattern. Removed ~60 lines of
+SDF ear rendering and gradient code.
+
 ## Iteration 63 — Tab Spacing, Bar Contrast, Session Name Dimming
 
 **Analysis**: Side-by-side comparison of web reference screenshot and native shell revealed three
