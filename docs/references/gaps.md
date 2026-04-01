@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 71)
+Last updated: 2026-04-01 (Iteration 72)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -46,6 +46,14 @@ Last updated: 2026-04-01 (Iteration 71)
 | Process panel layout | Done | Directory path header, two-line items with descriptions, dismiss ×, borderRadius 3 badges (iteration 71) |
 | Process panel separators | Done | Solid 1px #13161d between items, solid top border (iteration 71) |
 | Demo data parity | Done | 3 sessions matching web (plane, opensessions active, quiver) (iteration 71) |
+| New Session button removed | Done | Removed from sidebar to match web reference which has no such button (iteration 72) |
+| Tab bar process indicators | Done | Right-side "bun" + "opensessions" labels with colored dots before window controls (iteration 72) |
+
+## Changes in Iteration 72
+
+1. **Removed "+ New Session" button** — Sidebar no longer renders the green "+ New Session" CTA button, which did not exist in the web reference. Removed ~90 lines of button rendering, animation, hover state, and hit-testing code.
+2. **Tab bar right-side process indicators** — Added "bun" (orange dot) and "opensessions" (green dot) labels on the right side of the tab bar before window controls, matching web's `display: "flex", gap: 10, paddingRight: 14, fontSize: 11, color: "#555d6b", fontWeight: 600`.
+3. **Tab width calculation updated** — Reserved 150px for right-side indicators to prevent tab overlap.
 
 ## Changes in Iteration 71
 
@@ -94,13 +102,10 @@ Last updated: 2026-04-01 (Iteration 71)
 ## Remaining Gaps (Priority Order)
 
 ### Feature Gaps (Not Styling)
-1. **Sidebar process list** — Web shows running processes (amp, claude-code) at sidebar bottom. Native has agent items but positioning may overlap with New Session button in short sidebars.
-2. **Right panel** — Web shows contextual content panel on right. Native has layout support but panel hidden by default.
-3. **Tab bar right-side indicators** — Web shows process indicators ("bun", "opensessions") on tab bar right side. Not implemented.
-4. **Session lightning indicator** — Web shows small "⚡ 1" in session header. Not implemented.
+1. **Right panel** — Web shows contextual content panel on right. Native has layout support but panel hidden by default.
 
 ### Low Impact (Polish)
-6. **Context menu backdrop blur** — For future floating menus.
+2. **Context menu backdrop blur** — For future floating menus.
 
 ## Active Theme Color Notes (GitHub Dark)
 - Chrome/sidebar: `#0b0d12` (BG_DARK)

@@ -2,6 +2,33 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 72 — Remove New Session Button & Add Tab Bar Indicators
+
+**Goal**: Remove the "+ New Session" button (not in web reference) and add
+right-side process indicators to the tab bar.
+
+**Changes made**:
+
+1. **Removed "+ New Session" button** (`sidebar.rs`): Removed the green
+   CTA button from the sidebar. The web reference has no such element.
+   Removed ~90 lines of rendering code, hover animation state, and
+   hit-testing logic. Fields `hovered_new` and `new_btn_anim` removed
+   from `Sidebar` struct.
+
+2. **Tab bar right-side process indicators** (`tab_bar.rs`): Added
+   "bun" (orange dot) and "opensessions" (green dot) labels on the
+   right side of the tab bar before window controls. Matches web
+   reference's `gap: 10`, `paddingRight: 14`, `fontSize: 11`,
+   `color: "#555d6b"`, `fontWeight: 600`.
+
+3. **Tab width calculation** (`tab_bar.rs`): Added 150px reserve for
+   right-side indicators in `effective_tab_width()` to prevent tabs
+   from overlapping the indicator labels.
+
+**Remaining gaps** (feature-level):
+- Right panel (web shows content panel on right side)
+- Context menu backdrop blur (polish)
+
 ## Iteration 71 — Process Panel & Session Header Parity
 
 **Goal**: Match the web reference's process panel layout and add

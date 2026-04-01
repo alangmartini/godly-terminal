@@ -128,10 +128,11 @@ impl TabBar {
         let btn_reserve = (BUTTON_WIDTH * scale).round() * 3.0;
         let n = self.tabs.len().max(1) as f32;
         let origin = self.tabs_origin_x(bar, scale);
-        // new-tab button + gap before window controls
+        // new-tab button + gap before window controls + right-side process indicators
         let new_tab_reserve = (36.0 * scale).round();
         let sep_reserve = (12.0 * scale).round();
-        let avail = bar.right() - origin - btn_reserve - new_tab_reserve - sep_reserve;
+        let indicators_reserve = (150.0 * scale).round(); // space for right-side process labels
+        let avail = bar.right() - origin - btn_reserve - new_tab_reserve - sep_reserve - indicators_reserve;
         let per_tab = ((avail - (n - 1.0) * tab_gap) / n).floor();
         per_tab.clamp((TAB_MIN_WIDTH * scale).round(), (TAB_MAX_WIDTH * scale).round())
     }
@@ -500,8 +501,49 @@ impl TabBar {
         let new_tab_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, new_t);
         ui.icon_plus(new_rect, icon_t, s(5.0), new_tab_fg);
 
-        // Window control buttons (minimize, maximize, close) — animated hovers
+        // Right-side process indicators — web: display flex, gap 10, paddingRight 14,
+        // fontSize 11, color "#555d6b", fontWeight 600
+        // Shows active processes: 🟠 bun, ● opensessions
         let buttons = self.window_button_rects(bar, text.scale);
+        {
+            let indicator_color = colors::FG_DIM; // #555d6b
+            let indicator_gap = s(10.0);
+            let indicator_pad_r = s(14.0);
+            let indicators_x_end = buttons[0].0.x - s(8.0); // before separator
+            let iy = bar.y + (bar.height - ch) / 2.0;
+
+            // "opensessions" with green dot
+            let opensessions_label = "opensessions";
+            let opensessions_w = text.text_width_ui(opensessions_label);
+            let dot_sz = s(8.0);
+            let dot_gap = s(4.0);
+            let opensessions_total = dot_sz + dot_gap + opensessions_w;
+            let opensessions_x = indicators_x_end - indicator_pad_r - opensessions_total;
+            // Green dot (8x8, borderRadius 50%, #22c55e)
+            let dot_y = bar.y + (bar.height - dot_sz) / 2.0;
+            ui.fill_rounded(
+                Rect { x: opensessions_x, y: dot_y, width: dot_sz, height: dot_sz },
+                colors::ACCENT_GREEN, dot_sz / 2.0,
+            );
+            ui.text_ui_bold(text, opensessions_label,
+                opensessions_x + dot_sz + dot_gap, iy,
+                indicator_color, colors::BG_RAISED);
+
+            // "bun" with orange emoji dot
+            let bun_label = "bun";
+            let bun_w = text.text_width_ui(bun_label);
+            let bun_dot_sz = s(8.0);
+            let bun_total = bun_dot_sz + dot_gap + bun_w;
+            let bun_x = opensessions_x - indicator_gap - bun_total;
+            // Orange dot (approximating 🟠 emoji with orange circle)
+            ui.fill_rounded(
+                Rect { x: bun_x, y: dot_y, width: bun_dot_sz, height: bun_dot_sz },
+                colors::ACCENT_PEACH, bun_dot_sz / 2.0,
+            );
+            ui.text_ui_bold(text, bun_label,
+                bun_x + bun_dot_sz + dot_gap, iy,
+                indicator_color, colors::BG_RAISED);
+        }
 
         // Subtle separator before window controls — softer to match quieter aesthetic
         {

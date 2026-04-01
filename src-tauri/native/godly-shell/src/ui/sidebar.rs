@@ -1,6 +1,6 @@
 //! Left sidebar: session list with names, active indicator, and new session button.
 
-use super::anim::{self, Anim, AnimVec, lerp_color, lerp};
+use super::anim::{self, AnimVec, lerp_color, lerp};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
@@ -56,12 +56,10 @@ pub struct Sidebar {
     pub agents: Vec<AgentItem>,
     pub hovered_index: Option<usize>,
     pub hovered_agent: Option<usize>,
-    pub hovered_new: bool,
     // Smooth animation state
     item_hover_anim: AnimVec,
     active_anim: AnimVec,
     agent_hover_anim: AnimVec,
-    new_btn_anim: Anim,
     /// Continuous phase for ambient breathing glow on active elements.
     /// Incremented each frame; `sin(glow_phase)` modulates glow intensity.
     glow_phase: f32,
@@ -108,7 +106,6 @@ impl Sidebar {
             item_hover_anim: AnimVec::default(),
             active_anim: AnimVec::default(),
             agent_hover_anim: AnimVec::default(),
-            new_btn_anim: Anim::default(),
             agents: vec![
                 AgentItem {
                     icon: "\u{2191}",
@@ -131,7 +128,6 @@ impl Sidebar {
             ],
             hovered_index: None,
             hovered_agent: None,
-            hovered_new: false,
             glow_phase: 0.0,
         }
     }
@@ -147,7 +143,6 @@ impl Sidebar {
         for i in 0..self.agents.len() {
             self.agent_hover_anim.set(i, if self.hovered_agent == Some(i) { 1.0 } else { 0.0 });
         }
-        self.new_btn_anim.set(if self.hovered_new { 1.0 } else { 0.0 });
         self.active_anim.ensure_len(self.items.len());
         for i in 0..self.items.len() {
             self.active_anim.set(i, if self.items[i].active { 1.0 } else { 0.0 });
@@ -156,7 +151,6 @@ impl Sidebar {
         animating |= self.active_anim.tick(hl, dt);
         animating |= self.item_hover_anim.tick(hl, dt);
         animating |= self.agent_hover_anim.tick(hl, dt);
-        animating |= self.new_btn_anim.tick(hl, dt);
 
         // Ambient breathing glow: ~3.5s period, frame-rate independent.
         let has_active = self.items.iter().any(|i| i.active)
@@ -197,19 +191,6 @@ impl Sidebar {
             y: sidebar.y + header_h + self.items_y_offset(index, scale),
             width: sidebar.width,
             height: h,
-        }
-    }
-
-    fn new_button_rect(&self, sidebar: Rect, scale: f32) -> Rect {
-        let header_h = (HEADER_HEIGHT * scale).round();
-        let pad_h = (ITEM_PADDING_H * scale).round();
-        let compact_h = (ITEM_HEIGHT_COMPACT * scale).round();
-        let y = sidebar.y + header_h + self.items_y_offset(self.items.len(), scale) + (4.0 * scale).round();
-        Rect {
-            x: sidebar.x + pad_h,
-            y,
-            width: sidebar.width - pad_h * 2.0,
-            height: compact_h,
         }
     }
 
@@ -462,93 +443,6 @@ impl Sidebar {
             }
         }
 
-        // Section divider between session list and new-session button — thin line
-        {
-            let items_total_h = self.items_y_offset(self.items.len(), text.scale);
-            let div_y = sidebar.y + header_h + items_total_h + s(1.0);
-            ui.hline_fade(sidebar.x + pad_h * 1.5, div_y,
-                     sidebar.width - pad_h * 3.0, 1.0,
-                     [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12], s(16.0));
-        }
-
-        // "+ New session" button
-        let items_total_h = self.items_y_offset(self.items.len(), text.scale);
-        let new_y = sidebar.y + header_h + items_total_h + s(4.0);
-        let new_rect = Rect {
-            x: sidebar.x + pad_h,
-            y: new_y,
-            width: sidebar.width - pad_h * 2.0,
-            height: compact_h,
-        };
-        let new_t = self.new_btn_anim.value();
-        let btn_r = s(6.0);
-        // Filled CTA button: subtle green-tinted fill at rest, brighter on hover.
-        // Rest state has a green wash so it reads as an action button.
-        let rest_fill = [
-            colors::ACCENT_GREEN[0] * 0.15 + colors::BG_DARK[0] * 0.85,
-            colors::ACCENT_GREEN[1] * 0.15 + colors::BG_DARK[1] * 0.85,
-            colors::ACCENT_GREEN[2] * 0.15 + colors::BG_DARK[2] * 0.85,
-            1.0,
-        ];
-        let rest_border = [
-            colors::ACCENT_GREEN[0] * 0.30 + colors::BORDER[0] * 0.70,
-            colors::ACCENT_GREEN[1] * 0.30 + colors::BORDER[1] * 0.70,
-            colors::ACCENT_GREEN[2] * 0.30 + colors::BORDER[2] * 0.70,
-            0.40,
-        ];
-        let hover_fill = [
-            colors::ACCENT_GREEN[0] * 0.22 + colors::BG_SURFACE[0] * 0.78,
-            colors::ACCENT_GREEN[1] * 0.22 + colors::BG_SURFACE[1] * 0.78,
-            colors::ACCENT_GREEN[2] * 0.22 + colors::BG_SURFACE[2] * 0.78,
-            1.0,
-        ];
-        let hover_border = [
-            colors::ACCENT_GREEN[0] * 0.45 + colors::BORDER[0] * 0.55,
-            colors::ACCENT_GREEN[1] * 0.45 + colors::BORDER[1] * 0.55,
-            colors::ACCENT_GREEN[2] * 0.45 + colors::BORDER[2] * 0.55,
-            0.60,
-        ];
-        let btn_fill = lerp_color(rest_fill, hover_fill, new_t);
-        let btn_fill_top = [btn_fill[0] * 1.06, btn_fill[1] * 1.06, btn_fill[2] * 1.06, btn_fill[3]];
-        let btn_border = lerp_color(rest_border, hover_border, new_t);
-        ui.fill_rounded_gradient(new_rect, btn_fill_top, btn_fill, btn_r);
-        ui.stroke_rounded(new_rect, btn_r, 0.5, btn_border);
-        // Green glow on hover
-        if new_t > 0.005 {
-            let glow_rect = Rect {
-                x: new_rect.x - s(2.0), y: new_rect.y - s(1.0),
-                width: new_rect.width + s(4.0), height: new_rect.height + s(2.0),
-            };
-            ui.fill_shadow(glow_rect,
-                [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.06 * new_t],
-                btn_r, s(8.0));
-        }
-        // Plus icon + label — icon uses accent green for visual pop
-        let icon_t = (1.2 * text.scale).max(1.0);
-        let icon_rect = Rect {
-            x: new_rect.x, y: new_rect.y,
-            width: s(24.0), height: new_rect.height,
-        };
-        let icon_fg = lerp_color(
-            [colors::ACCENT_GREEN[0], colors::ACCENT_GREEN[1], colors::ACCENT_GREEN[2], 0.65],
-            colors::ACCENT_GREEN,
-            new_t,
-        );
-        ui.icon_plus(icon_rect, icon_t, s(4.0), icon_fg);
-        let new_fg = lerp_color(
-            [colors::FG_MUTED[0] * 0.6 + colors::ACCENT_GREEN[0] * 0.4,
-             colors::FG_MUTED[1] * 0.6 + colors::ACCENT_GREEN[1] * 0.4,
-             colors::FG_MUTED[2] * 0.6 + colors::ACCENT_GREEN[2] * 0.4,
-             colors::FG_MUTED[3]],
-            colors::FG_PRIMARY,
-            new_t,
-        );
-        let new_bg = btn_fill;
-        ui.text_ui(text, "New Session",
-                new_rect.x + s(22.0),
-                new_rect.y + text_y_off(compact_h),
-                new_fg, new_bg);
-
         // Bottom panel: running agents/processes — matches web reference layout:
         // borderTop "1px solid #1a1d25", directory path header, two-line items
         // with icon + name + status badge + description.
@@ -726,7 +620,6 @@ impl Sidebar {
             MouseEvent::Move { x, y } => {
                 self.hovered_index = None;
                 self.hovered_agent = None;
-                self.hovered_new = false;
                 for (i, _) in self.items.iter().enumerate() {
                     if self.item_rect(i, sidebar, scale).contains(x, y) { self.hovered_index = Some(i); }
                 }
@@ -751,7 +644,6 @@ impl Sidebar {
                         ay += agent_item_h;
                     }
                 }
-                if self.new_button_rect(sidebar, scale).contains(x, y) { self.hovered_new = true; }
                 None
             }
             MouseEvent::Press { x, y } => {
