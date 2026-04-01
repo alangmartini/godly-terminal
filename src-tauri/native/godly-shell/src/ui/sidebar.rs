@@ -355,10 +355,10 @@ impl Sidebar {
                 active_t,
             );
 
-            // Session number — plain dim text matching web (#555d6b = FG_DIM)
+            // Session number — web: fontSize 12, fontWeight 500, color #555d6b (FG_DIM)
             let num_str = format!("{}", item.number);
             let num_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t * 0.5);
-            ui.text(text, &num_str, num_x, text_y, num_fg, item_bg);
+            ui.text_ui_scaled(text, &num_str, num_x, text_y, num_fg, item_bg, font_scale::PX12);
 
             // Session name (truncated to fit) — web: #e6edf3 active, #9198a1 inactive
             let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_BRIGHT, hover_t * 0.6);

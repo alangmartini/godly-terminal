@@ -432,7 +432,7 @@ impl TabBar {
                 let badge_fade = 1.0 - close_hover;
                 if badge_fade > 0.01 {
                     let count_str = if tab.unread_count > 99 { "99+".to_string() } else { tab.unread_count.to_string() };
-                    let text_w = text.text_width(&count_str);
+                    let text_w = text.text_width_ui_scaled(&count_str, font_scale::PX9); // web: fontSize 9
                     let badge_h = s(16.0); // web: height 16
                     let badge_pad = s(5.0); // web: padding "1px 5px"
                     let badge_w = (text_w + badge_pad * 2.0).max(s(16.0)); // web: minWidth 16
@@ -459,11 +459,12 @@ impl TabBar {
                     ui.fill_rounded(badge_rect, badge_color, badge_r);
                     ui.stroke_rounded(badge_rect, badge_r, 0.5, badge_border);
 
-                    // Count text (centered in pill) — white on accent background for max contrast
+                    // Count text (centered in pill) — web: fontSize 9, fontWeight 700, color #fff
+                    let badge_ch = ch * font_scale::PX9;
                     let text_x = badge_x + (badge_w - text_w) / 2.0;
-                    let text_y = badge_y + (badge_h - ch) / 2.0;
+                    let text_y = badge_y + (badge_h - badge_ch) / 2.0;
                     let text_color = [1.0, 1.0, 1.0, badge_fade];
-                    ui.text(text, &count_str, text_x, text_y, text_color, accent);
+                    ui.text_ui_bold_scaled(text, &count_str, text_x, text_y, text_color, accent, font_scale::PX9);
                 }
             }
 

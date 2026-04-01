@@ -2,6 +2,34 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 77 — Fix Monospace/Proportional Font Mismatches
+
+**Goal**: Fix remaining places where UI chrome text was still using the monospace
+terminal font at full 14px instead of the proportional UI font at the correct
+scaled size from the web reference.
+
+**Changes made**:
+
+1. **Tab badge count text** — Badge count numbers ("3", "12") on tabs were
+   rendered using `ui.text()` (monospace, 14px) instead of proportional bold
+   at 9px. Changed to `ui.text_ui_bold_scaled()` with `font_scale::PX9`,
+   matching web's `fontSize: 9, fontWeight: 700`. Also fixed text width
+   measurement (`text_width_ui_scaled`) and vertical centering calculation.
+
+2. **PX9 font scale constant** — Added `PX9 = 9.0 / 14.0` (0.643) to the
+   `font_scale` module for badge count text.
+
+3. **Session ID numbers** — Numbers (1, 2, 3) before session names in the
+   sidebar were rendered using `ui.text()` (monospace, 14px) but web uses
+   `fontSize: 12, fontWeight: 500`. Changed to `ui.text_ui_scaled()` with
+   `font_scale::PX12`.
+
+**Result**: All remaining monospace-font-in-UI-chrome text has been eliminated.
+Tab badge counts are now correctly sized at 9px proportional bold (matching
+web's Badge component), and session numbers use 12px proportional (matching
+web's session list styling). These were the last places using monospace text
+for UI chrome elements.
+
 ## Iteration 76 — Per-Element Font Size Scaling
 
 **Goal**: Match the web reference's per-element font sizes. The native shell was

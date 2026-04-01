@@ -47,11 +47,12 @@ pub mod colors {
 /// Font size scale factors relative to the 14px base cell height.
 /// Used with `text_ui_scaled`/`text_ui_bold_scaled` to match web reference pixel sizes.
 pub mod font_scale {
-    pub const PX10: f32 = 10.0 / 14.0; // 0.714 — shortcuts, badges, small headers
-    pub const PX11: f32 = 11.0 / 14.0; // 0.786 — branch text, descriptions, status bar
-    pub const PX12: f32 = 12.0 / 14.0; // 0.857 — session header, tab titles, process names
-    pub const PX13: f32 = 13.0 / 14.0; // 0.929 — session names, poem stanzas
-    pub const PX15: f32 = 15.0 / 14.0; // 1.071 — poem title
+    pub const PX9: f32 = 9.0 / 14.0;   // 0.643 — tab count badges
+    pub const PX10: f32 = 10.0 / 14.0;  // 0.714 — shortcuts, badges, small headers
+    pub const PX11: f32 = 11.0 / 14.0;  // 0.786 — branch text, descriptions, status bar
+    pub const PX12: f32 = 12.0 / 14.0;  // 0.857 — session header, tab titles, process names
+    pub const PX13: f32 = 13.0 / 14.0;  // 0.929 — session names, poem stanzas
+    pub const PX15: f32 = 15.0 / 14.0;  // 1.071 — poem title
 }
 
 /// A deferred text draw command. Characters are rasterized through the

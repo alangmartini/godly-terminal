@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 76)
+Last updated: 2026-04-01 (Iteration 77)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -55,6 +55,14 @@ Last updated: 2026-04-01 (Iteration 76)
 | Tab badge shape | Done | borderRadius 7 (rounded rect) instead of full pill, matching web Badge component (iteration 75) |
 | Badge on active tab | Done | Badges shown on active tabs too, matching web where tab 2 shows badge:3 while active (iteration 75) |
 | Per-element font sizing | Done | All UI text now matches web's exact fontSize per element: 10px shortcuts/badges, 11px branch/status, 12px headers/tabs, 13px names/stanzas, 15px poem title (iteration 76) |
+| Tab badge count font | Done | Badge count text ("3", "12") now renders at 9px proportional bold (fontWeight 700), matching web's Badge component fontSize: 9, was incorrectly using 14px monospace (iteration 77) |
+| Session number font | Done | Session ID numbers (1, 2, 3) now render at 12px proportional font matching web's fontSize: 12, fontWeight: 500, was incorrectly using 14px monospace (iteration 77) |
+
+## Changes in Iteration 77
+
+1. **Tab badge count font fixed** — Badge count text on tabs (e.g., "3", "12") was rendering using `ui.text()` (monospace font at 14px) instead of `ui.text_ui_bold_scaled()` (proportional font at 9px). Changed to match web's Badge component: `fontSize: 9, fontWeight: 700, color: "#fff"`. Text width measurement also updated to use `text_width_ui_scaled` with PX9 scale for correct badge width calculation. Vertical centering updated to use scaled glyph height.
+2. **PX9 font scale constant** — Added `PX9 = 9.0 / 14.0` (0.643) to `font_scale` module for the tab badge count text size.
+3. **Session number font fixed** — Session ID numbers in sidebar (1, 2, 3) were rendering using `ui.text()` (monospace at 14px) but web uses `fontSize: 12, fontWeight: 500, color: "#555d6b"`. Changed to `ui.text_ui_scaled()` with PX12 scale, matching the proportional font and correct size.
 
 ## Changes in Iteration 76
 
