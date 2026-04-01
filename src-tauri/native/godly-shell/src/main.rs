@@ -157,8 +157,8 @@ impl App {
                         sb.git_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     }
                 }
-                // Detect git diff summary — parse --shortstat into "+N -M" format
-                // for colorized rendering in the status bar.
+                // Detect git diff summary — parse --shortstat into
+                // "N file(s) changed +M -K" format matching web reference.
                 if let Ok(output) = std::process::Command::new("git")
                     .args(["diff", "--shortstat"])
                     .output()
@@ -167,10 +167,14 @@ impl App {
                         let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
                         if !stat.is_empty() {
                             // Parse "N file(s) changed, M insertion(s)(+), K deletion(s)(-)"
+                            let mut file_count = String::new();
                             let mut parts = Vec::new();
                             for segment in stat.split(',') {
                                 let seg = segment.trim();
-                                if seg.contains("insertion") {
+                                if seg.contains("changed") {
+                                    // Extract "N file(s) changed"
+                                    file_count = seg.to_string();
+                                } else if seg.contains("insertion") {
                                     if let Some(n) = seg.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()) {
                                         parts.push(format!("+{}", n));
                                     }
@@ -180,8 +184,13 @@ impl App {
                                     }
                                 }
                             }
-                            if !parts.is_empty() {
-                                sb.git_diff_summary = parts.join(" ");
+                            if !file_count.is_empty() || !parts.is_empty() {
+                                let mut summary = Vec::new();
+                                if !file_count.is_empty() {
+                                    summary.push(file_count);
+                                }
+                                summary.extend(parts);
+                                sb.git_diff_summary = summary.join(" ");
                             }
                         }
                     }

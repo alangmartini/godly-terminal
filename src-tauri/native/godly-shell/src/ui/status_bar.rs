@@ -119,8 +119,8 @@ impl StatusBar {
             for token in self.git_diff_summary.split_whitespace() {
                 let color = if token.starts_with('+') {
                     colors::ACCENT_GREEN
-                } else if token.starts_with('-') {
-                    colors::ACCENT_RED
+                } else if token.starts_with('-') || token.starts_with('~') {
+                    colors::ACCENT_RED // web: ~N (modifications) also red
                 } else {
                     colors::STATUS_DEFAULT // web: #484f58 (inherited status bar color)
                 };
