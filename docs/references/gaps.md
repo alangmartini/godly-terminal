@@ -38,6 +38,9 @@ Last updated: 2026-03-31 (Iteration 69)
 | Sidebar scrollbar | Done | 6px width, #2d333b thumb, 3px radius, hidden when no overflow (iteration 68) |
 | Status bar text colors | Done | Path #3b4048, separators #2d333b, diff text #484f58 matching web exactly (iteration 69) |
 | Session active name | Done | FG_BRIGHT (#e6edf3) not WHITE, matching web exactly (iteration 69) |
+| Sidebar header opacity | Done | Full FG_MUTED (#6e7681), removed 0.65 alpha (iteration 69) |
+| Branch text color | Done | STATUS_DEFAULT (#484f58) base, matching web exactly (iteration 69) |
+| "::" indicator color | Done | STATUS_DEFAULT (#484f58), matching web exactly (iteration 69) |
 
 ## Changes in Iteration 69
 
@@ -46,6 +49,9 @@ Last updated: 2026-03-31 (Iteration 69)
 3. **Status bar diff text color fixed** — Non-colored diff tokens (e.g. "1 file changed") changed from FG_SECONDARY (#8b949e) to new STATUS_DEFAULT (#484f58), matching web's inherited `color: "#484f58"`.
 4. **Active session name capped at FG_BRIGHT** — Was lerping to pure WHITE (#ffffff), now lerps to FG_BRIGHT (#e6edf3) matching web's `color: isActive ? "#e6edf3" : "#9198a1"`.
 5. **New palette entries** — Added STATUS_PATH (#3b4048) and STATUS_DEFAULT (#484f58) to `colors` module for precise status bar text hierarchy.
+6. **Sidebar header opacity fixed** — "Sessions N" text was at 0.65 alpha (effectively ~#4b515a), now at full FG_MUTED (#6e7681) matching web's `color: "#6e7681"`.
+7. **Branch text corrected** — Changed from approximated `FG_MUTED*0.7` (~#4d535a) to exact STATUS_DEFAULT (#484f58) matching web's `color: "#484f58"`.
+8. **"::" indicator corrected** — Changed from `FG_MUTED*0.7` at 0.65 alpha (~#363a41) to STATUS_DEFAULT (#484f58) matching web.
 
 ## Changes in Iteration 68
 
