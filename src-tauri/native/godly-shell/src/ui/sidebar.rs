@@ -278,7 +278,7 @@ impl Sidebar {
             &header_label,
             header_text_x,
             header_rect.y + text_y_off(header_h),
-            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
+            colors::FG_MUTED, // web: color "#6e7681" at full opacity
             colors::BG_DARK,
         );
 
@@ -405,19 +405,18 @@ impl Sidebar {
             // Web reference: fontWeight 600 for all session names (both active and inactive)
             ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
             if item.active {
-                // Web reference: "::" indicator right-aligned on active session
-                let indicator_fg = [colors::FG_MUTED[0] * 0.7, colors::FG_MUTED[1] * 0.7, colors::FG_MUTED[2] * 0.7, 0.65];
+                // Web reference: "::" indicator right-aligned on active session, color #484f58
                 let indicator_x = inset_rect.right() - text.text_width_ui("::") - s(4.0);
-                ui.text_ui(text, "::", indicator_x, text_y, indicator_fg, item_bg);
+                ui.text_ui(text, "::", indicator_x, text_y, colors::STATUS_DEFAULT, item_bg); // web: #484f58
             }
 
             // Second line: branch (web: paddingLeft ~20px, color #484f58)
             // Web always shows branch below the session name.
             if !item.branch.is_empty() {
                 let branch_x = name_x; // indented to align with name
-                // Web uses #484f58 which is between FG_MUTED and a darker shade
+                // Web: color #484f58 (STATUS_DEFAULT), brightens slightly on hover/active
                 let branch_fg = lerp_color(
-                    [colors::FG_MUTED[0] * 0.7, colors::FG_MUTED[1] * 0.7, colors::FG_MUTED[2] * 0.7, 1.0],
+                    colors::STATUS_DEFAULT, // #484f58
                     colors::FG_MUTED,
                     hover_t * 0.4 + active_t * 0.3,
                 );
