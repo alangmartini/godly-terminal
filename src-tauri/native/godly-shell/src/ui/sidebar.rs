@@ -432,32 +432,32 @@ impl Sidebar {
             // Web reference: no separator lines between sessions, just marginBottom spacing
         }
 
-        // Thin scrollbar track — decorative track on the right edge of the
-        // session list area.  Shows a small "thumb" proportional to the visible
-        // items / total items ratio.  Professional sidebars always show this.
+        // Scrollbar — matches web CSS: ::-webkit-scrollbar { width: 6px }
+        // Track: transparent, Thumb: #2d333b (BG_HOVER), hover: #3b4048, radius: 3px
         {
             let items_total_h = self.items_y_offset(self.items.len(), text.scale);
-            let track_x = sidebar.right() - s(5.0);
+            let track_w = s(6.0);
+            let track_x = sidebar.right() - track_w - s(2.0);
             let track_y = sidebar.y + header_h + s(4.0);
             let track_h = items_total_h - s(4.0);
-            let track_w = s(2.0);
+            let radius = s(3.0);
             if track_h > s(10.0) {
-                // Track rail — nearly invisible at rest
-                let track_rect = Rect { x: track_x, y: track_y, width: track_w, height: track_h };
+                // Track: transparent (web: background: transparent) — no fill
+                // Thumb — only shown when content overflows (matches web CSS behavior)
                 let any_hover = self.hovered_index.is_some();
-                let track_alpha = if any_hover { 0.06 } else { 0.03 };
-                ui.fill_rounded(track_rect,
-                    [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], track_alpha],
-                    track_w / 2.0);
-                // Thumb — proportional, fades in on hover
                 let visible_ratio = 1.0_f32; // all items visible for now
-                let thumb_h = (track_h * visible_ratio).max(s(16.0)).min(track_h);
-                let thumb_y = track_y; // scroll_offset * (track_h - thumb_h) for real scrolling
-                let thumb_rect = Rect { x: track_x, y: thumb_y, width: track_w, height: thumb_h };
-                let thumb_alpha = if any_hover { 0.18 } else { 0.08 };
-                ui.fill_rounded(thumb_rect,
-                    [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], thumb_alpha],
-                    track_w / 2.0);
+                if visible_ratio < 1.0 {
+                    let thumb_h = (track_h * visible_ratio).max(s(16.0)).min(track_h);
+                    let thumb_y = track_y; // scroll_offset * (track_h - thumb_h) for real scrolling
+                    let thumb_rect = Rect { x: track_x, y: thumb_y, width: track_w, height: thumb_h };
+                    // Web: thumb #2d333b, hover #3b4048
+                    let thumb_color = if any_hover {
+                        [0.231, 0.251, 0.282, 1.0] // #3b4048
+                    } else {
+                        [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], 1.0] // #2d333b
+                    };
+                    ui.fill_rounded(thumb_rect, thumb_color, radius);
+                }
             }
         }
 

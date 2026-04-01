@@ -297,13 +297,13 @@ impl TabBar {
             // Inactive: transparent
             let bg = lerp_color(
                 lerp_color(colors::BG_RAISED, colors::BG_SURFACE, hover_t),
-                colors::BG_ACTIVE,
+                colors::BG_TAB_ACTIVE,
                 active_t,
             );
 
             if active_t > 0.005 {
-                // Active: flat background matching web (#161920 = BG_ACTIVE)
-                let active_bg = [colors::BG_ACTIVE[0], colors::BG_ACTIVE[1], colors::BG_ACTIVE[2], active_t];
+                // Active: flat background matching web (#161920)
+                let active_bg = [colors::BG_TAB_ACTIVE[0], colors::BG_TAB_ACTIVE[1], colors::BG_TAB_ACTIVE[2], active_t];
                 ui.fill(rect, active_bg);
 
                 // Bottom accent indicator (2px colored bar) — web: borderBottom: 2px solid ${color}

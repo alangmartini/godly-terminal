@@ -2,6 +2,24 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 68 — Active Tab Background & Sidebar Scrollbar (Web Parity)
+
+**Analysis**: Compared web reference CSS values with native rendering code. Found two remaining styling
+discrepancies: (1) active tab background used BG_ACTIVE #171b24 but web uses #161920, and (2) sidebar
+scrollbar was 2px thin with FG_MUTED at 0.08 alpha while web CSS specifies 6px width with solid #2d333b
+thumb and 3px border-radius.
+
+**Changes**:
+1. **Active tab background** (builder.rs, tab_bar.rs): Added BG_TAB_ACTIVE constant (#161920) matching
+   web's `backgroundColor: '#161920'` for active tabs. Session active background stays at #171b24 since
+   web uses different colors for tabs vs sessions.
+2. **Sidebar scrollbar** (sidebar.rs): Width 2px→6px, thumb color from FG_MUTED at 0.08 alpha to solid
+   #2d333b (BG_HOVER), hover color #3b4048, border-radius 3px, track made transparent. Added overflow
+   guard: scrollbar only renders when visible_ratio < 1.0 (matching web CSS behavior).
+
+**Status**: All known styling gaps are now resolved. Remaining gaps are feature-level (process list,
+right panel, tab indicators, keybinding hints).
+
 ## Iteration 67 — Border Opacity & Surface Flatness (Web Reference Parity)
 
 **Analysis**: Side-by-side comparison of web reference screenshot and native shell revealed that

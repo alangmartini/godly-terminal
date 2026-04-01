@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 67)
+Last updated: 2026-03-31 (Iteration 68)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -34,6 +34,13 @@ Last updated: 2026-03-31 (Iteration 67)
 | Proportional UI font | Done | Segoe UI for chrome labels, tab titles, status bar (iteration 33) |
 | Window controls | Done | Canvas-drawn minimize/maximize/close with hover animations |
 | Breathing glow animations | Done | ~3.5s ambient cycle on active elements |
+| Tab active background | Done | #161920 (BG_TAB_ACTIVE), distinct from session active #171b24 (iteration 68) |
+| Sidebar scrollbar | Done | 6px width, #2d333b thumb, 3px radius, hidden when no overflow (iteration 68) |
+
+## Changes in Iteration 68
+
+1. **Active tab background corrected** — Tab active background changed from BG_ACTIVE (#171b24) to new BG_TAB_ACTIVE (#161920), matching web's exact `backgroundColor: '#161920'` for active tabs. Session active background remains #171b24 as web uses different colors for tabs vs sessions.
+2. **Sidebar scrollbar matches web CSS** — Scrollbar width changed from 2px to 6px, thumb color from FG_MUTED at 0.08 alpha to solid #2d333b (BG_HOVER), hover color #3b4048, border-radius 3px. Track made transparent. Scrollbar now hidden when all items fit (matching web CSS overflow behavior).
 
 ## Changes in Iteration 67
 
@@ -55,7 +62,6 @@ Last updated: 2026-03-31 (Iteration 67)
 
 ### Low Impact (Polish)
 6. **Context menu backdrop blur** — For future floating menus.
-7. **Custom scrollbar refinement** — Web has custom thin scrollbars.
 
 ## Active Theme Color Notes (GitHub Dark)
 - Chrome/sidebar: `#0b0d12` (BG_DARK)

@@ -16,6 +16,7 @@ pub mod colors {
     pub const BG_SURFACE: [f32; 4] = [0.102, 0.114, 0.145, 1.0];   // #1a1d25 Surface/hover base
     pub const BG_HOVER: [f32; 4] = [0.176, 0.200, 0.231, 1.0];     // #2d333b Hover states
     pub const BG_ACTIVE: [f32; 4] = [0.090, 0.106, 0.141, 1.0];    // #171b24 Active selection
+    pub const BG_TAB_ACTIVE: [f32; 4] = [0.086, 0.098, 0.125, 1.0]; // #161920 Active tab (web)
     pub const BG_ACTIVE_ACC: [f32; 4] = [0.078, 0.090, 0.122, 1.0]; // #14171f Blue-tinted active
     pub const BG_STATUS: [f32; 4] = [0.047, 0.055, 0.078, 1.0];    // #0c0e14 Status bar
     pub const FG_BRIGHT: [f32; 4] = [0.902, 0.929, 0.953, 1.0];    // #e6edf3 Active/heading
