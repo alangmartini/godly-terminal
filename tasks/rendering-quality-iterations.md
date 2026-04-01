@@ -2,6 +2,28 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 66 — Sidebar Header & Item Styling (Web Reference Parity)
+
+**Analysis**: Side-by-side comparison of web reference and native shell revealed several sidebar
+styling differences: uppercase section headers with disclosure triangles and pill badges vs web's
+simple inline mixed-case text, separator lines between items (web has none), font weight only on
+active names (web uses 600 for all), taller item heights (52/38px vs web's ~45/30px), and missing
+"::" indicator on active session.
+
+**Changes** (sidebar.rs):
+1. Changed "SESSIONS" → "Sessions {count}" inline mixed-case header matching web
+2. Changed "PROCESSES" → "Processes {count}" inline matching web
+3. Removed disclosure triangles (▾) from section headers — web has none
+4. Removed pill-shaped count badges — count is now inline in header text
+5. Removed separator lines between session items — web uses only margin spacing
+6. Made all session names bold (fontWeight 600), not just active ones
+7. Added "::" indicator right-aligned on active session matching web
+8. Reduced item heights: 52→46px (two-line), 38→32px (compact) matching web dimensions
+9. Adjusted top padding from 8px to 7px matching web's padding
+
+**Result**: Sidebar chrome now closely matches web reference layout and proportions.
+Remaining differences are feature-level (New Session button, processes/settings sections).
+
 ## Iteration 65 — Sidebar Session Items (Web Reference Parity)
 
 **Analysis**: Web reference sidebar uses plain text session IDs ("1", "2", "3") with dim color,

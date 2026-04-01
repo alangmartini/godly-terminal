@@ -5,8 +5,8 @@ use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::widget::{Rect, UiAction, MouseEvent};
 
 const HEADER_HEIGHT: f32 = 30.0;
-const ITEM_HEIGHT: f32 = 52.0;
-const ITEM_HEIGHT_COMPACT: f32 = 38.0;
+const ITEM_HEIGHT: f32 = 46.0;       // web: padding 7+7 + name 16 + gap 2 + branch 13 = ~45px
+const ITEM_HEIGHT_COMPACT: f32 = 32.0; // web: padding 7+7 + name 16 = ~30px
 const ITEM_PADDING_H: f32 = 14.0;
 const ACTIVE_INDICATOR_W: f32 = 3.5;
 const BOTTOM_PANEL_HEIGHT: f32 = 160.0;
@@ -279,63 +279,24 @@ impl Sidebar {
         // SDF inner shadow — minimal Gaussian falloff for gentle recessed depth.
         ui.fill_inner_shadow(sidebar, [0.0, 0.0, 0.0, 0.02], 0.0, s(3.0));
 
-        // "Sessions" header with count badge
+        // "Sessions {count}" header — inline mixed-case matching web reference
         let header_rect = Rect {
             x: sidebar.x,
             y: sidebar.y,
             width: sidebar.width,
             height: header_h,
         };
-        // Disclosure triangle + all-caps section header (Zed/VS Code pattern)
-        let disclosure_sz = ch * 0.55;
-        let disclosure_t = (0.8 * text.scale).max(0.5);
-        let disclosure_rect = Rect {
-            x: header_rect.x + pad_h,
-            y: header_rect.y + (header_h - disclosure_sz) / 2.0,
-            width: disclosure_sz,
-            height: disclosure_sz,
-        };
-        ui.icon_disclosure_down(disclosure_rect, disclosure_sz, disclosure_t,
-            [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.45]);
-        let header_text_x = header_rect.x + pad_h + disclosure_sz + s(4.0);
+        // Web reference: "Sessions 3" inline, no disclosure triangle, no pill badge
+        let header_label = format!("Sessions {}", self.items.len());
+        let header_text_x = header_rect.x + pad_h;
         ui.text_ui(
             text,
-            "SESSIONS",
+            &header_label,
             header_text_x,
             header_rect.y + text_y_off(header_h),
             [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
             colors::BG_DARK,
         );
-        // Session count badge (right-aligned, pill-shaped)
-        let count_str = format!("{}", self.items.len());
-        let count_w = text.text_width(&count_str);
-        let badge_pad_h = s(4.0);
-        let badge_h = ch * 0.85;
-        let badge_w = (count_w + badge_pad_h * 2.0).max(badge_h);
-        let badge_x = header_rect.right() - badge_w - pad_h;
-        let badge_y = header_rect.y + (header_h - badge_h) / 2.0;
-        let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_w, height: badge_h };
-        let badge_radius = badge_h / 2.0;
-        ui.fill_rounded(badge_rect, [
-            colors::BG_SURFACE[0], colors::BG_SURFACE[1],
-            colors::BG_SURFACE[2], 0.5,
-        ], badge_radius);
-        ui.stroke_rounded(badge_rect, badge_radius, 0.5,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.2]);
-        let count_text_x = badge_x + (badge_w - count_w) / 2.0;
-        let count_text_y = badge_y + (badge_h - ch) / 2.0;
-        ui.text(
-            text,
-            &count_str,
-            count_text_x,
-            count_text_y,
-            colors::FG_MUTED,
-            colors::BG_SURFACE,
-        );
-        // Header bottom separator — single thin line (modern, clean)
-        ui.hline_fade(sidebar.x + pad_h, header_rect.bottom() - 1.0,
-                 sidebar.width - pad_h * 2.0, 1.0,
-                 [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15], s(12.0));
 
         // Layout: [pad][num][gap][name...][pad]
         // Matches web reference: plain text IDs + name, branch on second line
@@ -360,8 +321,8 @@ impl Sidebar {
             }
             format!("{}\u{2026}", &s[..end])
         };
-        let line1_y_off = s(8.0); // top padding for first line
-        let line2_y_off = line1_y_off + ch + s(2.0); // second line below first
+        let line1_y_off = s(7.0); // web: padding-top 7px
+        let line2_y_off = line1_y_off + ch + s(2.0); // web: marginTop 2px below name
 
         // Session items (dynamic height per item)
         let compact_h = s(ITEM_HEIGHT_COMPACT);
@@ -457,10 +418,13 @@ impl Sidebar {
             let name_fg = lerp_color(inactive_name, colors::WHITE, active_t);
             let name_max_w = (rect.right() - name_x - pad_h).max(s(30.0));
             let name = truncate_to_width(&item.label, name_max_w, text);
+            // Web reference: fontWeight 600 for all session names (both active and inactive)
+            ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
             if item.active {
-                ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
-            } else {
-                ui.text_ui(text, &name, name_x, text_y, name_fg, item_bg);
+                // Web reference: "::" indicator right-aligned on active session
+                let indicator_fg = [colors::FG_MUTED[0] * 0.7, colors::FG_MUTED[1] * 0.7, colors::FG_MUTED[2] * 0.7, 0.65];
+                let indicator_x = inset_rect.right() - text.text_width_ui("::") - s(4.0);
+                ui.text_ui(text, "::", indicator_x, text_y, indicator_fg, item_bg);
             }
 
             // Second line: branch (web: paddingLeft ~20px, color #484f58)
@@ -481,22 +445,7 @@ impl Sidebar {
                 ui.text_ui(text, &desc, name_x, rect.y + line2_y_off, desc_fg, item_bg);
             }
 
-            // Subtle separator between items (faded, skip for last item)
-            if i + 1 < self.items.len() {
-                let next_active = self.items[i + 1].active;
-                if !item.active && !next_active {
-                    let sep_fade = 1.0 - hover_t.max(self.item_hover_anim.get(i + 1));
-                    let sep_color = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.2 * sep_fade];
-                    ui.hline_fade(
-                        sidebar.x + pad_h + cw * 2.0,
-                        rect.bottom() - 1.0,
-                        sidebar.width - pad_h * 2.0 - cw * 2.0,
-                        1.0,
-                        sep_color,
-                        s(8.0),
-                    );
-                }
-            }
+            // Web reference: no separator lines between sessions, just marginBottom spacing
         }
 
         // Thin scrollbar track — decorative track on the right edge of the
@@ -661,46 +610,13 @@ impl Sidebar {
             let settings_row_h = s(28.0);
             let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
 
-            // "PROCESSES" header (disclosure triangle + uppercase muted, matching SESSIONS style)
-            let proc_disc_sz = ch * 0.55;
-            let proc_disc_t = (0.8 * text.scale).max(0.5);
-            let proc_disc_rect = Rect {
-                x: sidebar.x + pad_h,
-                y: panel_y + (header_section_h - proc_disc_sz) / 2.0,
-                width: proc_disc_sz,
-                height: proc_disc_sz,
-            };
-            ui.icon_disclosure_down(proc_disc_rect, proc_disc_sz, proc_disc_t,
-                [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.45]);
-            ui.text_ui(text, "PROCESSES",
-                    sidebar.x + pad_h + proc_disc_sz + s(4.0),
+            // "Processes" header — inline mixed-case matching web reference
+            // (no disclosure triangle, no pill badge)
+            ui.text_ui(text, &format!("Processes {}", self.agents.len()),
+                    sidebar.x + pad_h,
                     panel_y + (header_section_h - ch) / 2.0,
                     [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
                     colors::BG_DARK);
-            // Agent count badge (right-aligned, pill-shaped — matches session count badge)
-            let agent_count_str = format!("{}", self.agents.len());
-            let agent_count_w = text.text_width(&agent_count_str);
-            let agent_badge_pad_h = s(4.0);
-            let agent_badge_h = ch * 0.85;
-            let agent_badge_w = (agent_count_w + agent_badge_pad_h * 2.0).max(agent_badge_h);
-            let agent_badge_x = sidebar.right() - pad_h - agent_badge_w;
-            let agent_badge_y = panel_y + (header_section_h - agent_badge_h) / 2.0;
-            let agent_badge_rect = Rect {
-                x: agent_badge_x, y: agent_badge_y,
-                width: agent_badge_w, height: agent_badge_h,
-            };
-            let agent_badge_radius = agent_badge_h / 2.0;
-            ui.fill_rounded(agent_badge_rect, [
-                colors::BG_SURFACE[0], colors::BG_SURFACE[1],
-                colors::BG_SURFACE[2], 0.4,
-            ], agent_badge_radius);
-            ui.stroke_rounded(agent_badge_rect, agent_badge_radius, 0.5,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15]);
-            let agent_count_text_x = agent_badge_x + (agent_badge_w - agent_count_w) / 2.0;
-            let agent_count_text_y = agent_badge_y + (agent_badge_h - ch) / 2.0;
-            ui.text(text, &agent_count_str,
-                    agent_count_text_x, agent_count_text_y,
-                    colors::FG_MUTED, colors::BG_SURFACE);
             // Thin separator below header
             ui.hline_fade(sidebar.x + pad_h, panel_y + header_section_h - 1.0,
                      sidebar.width - pad_h * 2.0, 1.0,

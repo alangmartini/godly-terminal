@@ -192,6 +192,13 @@ Last updated: 2026-03-31 (Iteration 65)
 | Branch on second line | Done | Branch shown below session name (indented, muted color) matching web layout, all items now two-line (iteration 65) |
 | Removed shell type pills | Done | Shell type pill badges removed from sidebar items — web reference doesn't show them (iteration 65) |
 | Removed sidebar timestamps | Done | Relative time labels removed from sidebar — web reference doesn't show them (iteration 65) |
+| Mixed-case section headers | Done | "Sessions {count}" and "Processes {count}" in mixed case matching web's inline format (iteration 66) |
+| Removed disclosure triangles | Done | Section headers no longer show ▾ chevrons — web reference has none (iteration 66) |
+| Inline session count | Done | Count shown inline in header text, not as separate pill badge (iteration 66) |
+| Active session "::" indicator | Done | Right-aligned "::" on active session matching web's `{isActive && "::"}` (iteration 66) |
+| Session name font weight | Done | All session names use bold (fontWeight 600) matching web, not just active ones (iteration 66) |
+| Removed session item separators | Done | No hairline dividers between session items — web uses only marginBottom spacing (iteration 66) |
+| Compact session items | Done | Item heights 46px/32px (was 52px/38px), padding 7px top (was 8px) matching web dimensions (iteration 66) |
 
 ## Remaining Gaps (Priority Order)
 
