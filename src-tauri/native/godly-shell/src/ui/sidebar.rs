@@ -10,6 +10,8 @@ const ITEM_HEIGHT_COMPACT: f32 = 32.0; // web: padding 7+7 + name 16 = ~30px
 const ITEM_PADDING_H: f32 = 14.0;
 const ACTIVE_INDICATOR_W: f32 = 3.5;
 const BOTTOM_PANEL_HEIGHT: f32 = 160.0;
+/// Estimated height of the bottom action-shortcuts bar (2 rows + padding).
+const SHORTCUTS_BAR_HEIGHT: f32 = 42.0;
 
 /// Accent colors for each session position (same cycle as tab bar).
 const SESSION_ACCENTS: &[[f32; 4]] = &[
@@ -55,13 +57,11 @@ pub struct Sidebar {
     pub hovered_index: Option<usize>,
     pub hovered_agent: Option<usize>,
     pub hovered_new: bool,
-    pub hovered_settings: bool,
     // Smooth animation state
     item_hover_anim: AnimVec,
     active_anim: AnimVec,
     agent_hover_anim: AnimVec,
     new_btn_anim: Anim,
-    settings_anim: Anim,
     /// Continuous phase for ambient breathing glow on active elements.
     /// Incremented each frame; `sin(glow_phase)` modulates glow intensity.
     glow_phase: f32,
@@ -120,7 +120,6 @@ impl Sidebar {
             active_anim: AnimVec::default(),
             agent_hover_anim: AnimVec::default(),
             new_btn_anim: Anim::default(),
-            settings_anim: Anim::default(),
             agents: vec![
                 AgentItem {
                     icon: "\u{2191}",
@@ -144,7 +143,6 @@ impl Sidebar {
             hovered_index: None,
             hovered_agent: None,
             hovered_new: false,
-            hovered_settings: false,
             glow_phase: 0.0,
         }
     }
@@ -161,7 +159,6 @@ impl Sidebar {
             self.agent_hover_anim.set(i, if self.hovered_agent == Some(i) { 1.0 } else { 0.0 });
         }
         self.new_btn_anim.set(if self.hovered_new { 1.0 } else { 0.0 });
-        self.settings_anim.set(if self.hovered_settings { 1.0 } else { 0.0 });
         self.active_anim.ensure_len(self.items.len());
         for i in 0..self.items.len() {
             self.active_anim.set(i, if self.items[i].active { 1.0 } else { 0.0 });
@@ -171,7 +168,6 @@ impl Sidebar {
         animating |= self.item_hover_anim.tick(hl, dt);
         animating |= self.agent_hover_anim.tick(hl, dt);
         animating |= self.new_btn_anim.tick(hl, dt);
-        animating |= self.settings_anim.tick(hl, dt);
 
         // Ambient breathing glow: ~3.5s period, frame-rate independent.
         let has_active = self.items.iter().any(|i| i.active)
@@ -212,17 +208,6 @@ impl Sidebar {
             y: sidebar.y + header_h + self.items_y_offset(index, scale),
             width: sidebar.width,
             height: h,
-        }
-    }
-
-    fn settings_rect(&self, sidebar: Rect, scale: f32) -> Rect {
-        let pad_h = (ITEM_PADDING_H * scale).round();
-        let settings_h = (28.0 * scale).round();
-        Rect {
-            x: sidebar.x + pad_h,
-            y: sidebar.bottom() - settings_h,
-            width: sidebar.width - pad_h * 2.0,
-            height: settings_h,
         }
     }
 
@@ -571,11 +556,11 @@ impl Sidebar {
 
         // Section divider above processes panel — thin line
         if !self.agents.is_empty() {
-            let settings_row_h = s(28.0);
+            let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
             let header_section_h = s(28.0);
             let agent_item_h = s(36.0);
             let agent_panel_h_est = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
-            let panel_y_est = sidebar.bottom() - settings_row_h - agent_panel_h_est;
+            let panel_y_est = sidebar.bottom() - shortcuts_h - agent_panel_h_est;
             let div_y = panel_y_est - s(4.0);
             if div_y > new_y + compact_h + s(4.0) {
                 ui.hline_fade(sidebar.x + pad_h * 1.5, div_y,
@@ -590,8 +575,8 @@ impl Sidebar {
             let agent_item_h = s(36.0);
             let header_section_h = s(28.0);
             let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
-            let settings_row_h = s(28.0);
-            let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
+            let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
+            let panel_y = sidebar.bottom() - shortcuts_h - agent_panel_h;
 
             // "Processes" header — inline mixed-case matching web reference
             // (no disclosure triangle, no pill badge)
@@ -702,81 +687,48 @@ impl Sidebar {
             }
         }
 
-        // Bottom settings row — gear icon + "Settings" label (anchored to very bottom, animated hover)
+        // Action shortcuts bar — anchored to very bottom, matching web reference
+        // Web: borderTop "1px solid #1a1d25", padding "6px 10px",
+        //      flexWrap "wrap", gap "4px 10px", fontSize 10, color "#3b4048"
         {
-            let settings_h = s(28.0);
-            let settings_y = sidebar.bottom() - settings_h;
-            let settings_t = self.settings_anim.value();
-            // Top separator — single thin hairline (modern, matching session dividers)
-            ui.hline_fade(sidebar.x + pad_h, settings_y, sidebar.width - pad_h * 2.0, 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12], s(12.0));
+            let shortcuts: &[&str] = &["~ cycle", "\u{2298} go", "d remove", "u restore", "x kill", "t theme"];
+            let shortcut_gap_x = s(10.0);
+            let shortcut_gap_y = s(4.0);
+            let shortcut_pad = s(10.0);
+            let shortcut_top_pad = s(6.0);
 
-            // Hover background (animated rounded rect)
-            let settings_inset = Rect {
-                x: sidebar.x + s(6.0),
-                y: settings_y + s(2.0),
-                width: sidebar.width - s(12.0),
-                height: settings_h - s(4.0),
-            };
-            if settings_t > 0.005 {
-                let hover_border = [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], lerp(0.0, 0.4, settings_t)];
-                let hover_top = [
-                    colors::BG_HOVER[0] * lerp(1.0, 1.08, settings_t),
-                    colors::BG_HOVER[1] * lerp(1.0, 1.08, settings_t),
-                    colors::BG_HOVER[2] * lerp(1.0, 1.08, settings_t),
-                    colors::BG_HOVER[3] * settings_t,
-                ];
-                let hover_bot = [colors::BG_HOVER[0], colors::BG_HOVER[1], colors::BG_HOVER[2], colors::BG_HOVER[3] * settings_t];
-                ui.fill_rounded_gradient(settings_inset, hover_top, hover_bot, s(4.0));
-                ui.stroke_rounded(settings_inset, s(4.0), 0.5, hover_border);
+            // Measure total height needed (wrap layout)
+            let avail_w = sidebar.width - shortcut_pad * 2.0;
+            let mut rows = 1u32;
+            let mut row_x = 0.0f32;
+            for (i, &sc) in shortcuts.iter().enumerate() {
+                let w = text.text_width_ui(sc);
+                if i > 0 && row_x + w > avail_w {
+                    rows += 1;
+                    row_x = w + shortcut_gap_x;
+                } else {
+                    row_x += w + if i > 0 { shortcut_gap_x } else { 0.0 };
+                }
             }
+            let line_h = ch;
+            let shortcuts_h = shortcut_top_pad * 2.0 + rows as f32 * line_h + (rows - 1) as f32 * shortcut_gap_y;
+            let shortcuts_y = sidebar.bottom() - shortcuts_h;
 
-            let settings_bg = lerp_color(colors::BG_DARK, colors::BG_HOVER, settings_t);
+            // Top border — solid 1px matching web borderTop
+            ui.hline(sidebar.x, shortcuts_y, sidebar.width, 1.0, colors::BORDER);
 
-            // Gear icon (circle ring) — brightens on hover
-            let gear_sz = s(14.0);
-            let gear_rect = Rect {
-                x: sidebar.x + pad_h,
-                y: settings_y + (settings_h - gear_sz) / 2.0,
-                width: gear_sz,
-                height: gear_sz,
-            };
-            let gear_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, settings_t);
-            ui.icon_gear(gear_rect, gear_sz, gear_sz * 0.5, gear_fg, settings_bg);
-
-            // "Settings" label — brightens on hover
-            let settings_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, settings_t);
-            ui.text_ui(text, "Settings",
-                    sidebar.x + pad_h + gear_sz + s(8.0),
-                    settings_y + (settings_h - ch) / 2.0,
-                    settings_fg, settings_bg);
-
-            // Keyboard shortcut hint (right-aligned, very muted)
-            let hint = "Ctrl+,";
-            let hint_w = text.text_width_ui(hint);
-            let hint_fg = lerp_color(
-                [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.4],
-                [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.7],
-                settings_t,
-            );
-            ui.text_ui(text, hint,
-                    sidebar.right() - hint_w - pad_h,
-                    settings_y + (settings_h - ch) / 2.0,
-                    hint_fg, settings_bg);
-
-            // Version indicator — very muted, right-aligned below Settings row
-            let version_str = concat!("v", env!("CARGO_PKG_VERSION"));
-            let version_w = text.text_width_ui(version_str);
-            let version_y = settings_y + settings_h + s(2.0);
-            if version_y + ch < sidebar.bottom() {
-                let version_fg = [
-                    colors::FG_MUTED[0], colors::FG_MUTED[1],
-                    colors::FG_MUTED[2], 0.25,
-                ];
-                ui.text_ui(text, version_str,
-                    sidebar.right() - version_w - pad_h,
-                    version_y,
-                    version_fg, colors::BG_DARK);
+            // Render shortcuts in wrapping row layout
+            let mut cx = sidebar.x + shortcut_pad;
+            let mut cy = shortcuts_y + shortcut_top_pad;
+            for (i, &sc) in shortcuts.iter().enumerate() {
+                let w = text.text_width_ui(sc);
+                if i > 0 && (cx - sidebar.x - shortcut_pad) + w > avail_w {
+                    cx = sidebar.x + shortcut_pad;
+                    cy += line_h + shortcut_gap_y;
+                }
+                // Web: color "#3b4048" = STATUS_PATH
+                ui.text_ui(text, sc, cx, cy, colors::STATUS_PATH, colors::BG_DARK);
+                cx += w + shortcut_gap_x;
             }
         }
     }
@@ -788,7 +740,6 @@ impl Sidebar {
                 self.hovered_index = None;
                 self.hovered_agent = None;
                 self.hovered_new = false;
-                self.hovered_settings = false;
                 for (i, _) in self.items.iter().enumerate() {
                     if self.item_rect(i, sidebar, scale).contains(x, y) { self.hovered_index = Some(i); }
                 }
@@ -796,9 +747,9 @@ impl Sidebar {
                 if !self.agents.is_empty() {
                     let agent_item_h = (44.0 * scale).round();
                     let header_section_h = (28.0 * scale).round();
-                    let settings_row_h = (28.0 * scale).round();
+                    let shortcuts_h = (SHORTCUTS_BAR_HEIGHT * scale).round();
                     let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + (8.0 * scale).round();
-                    let panel_y = sidebar.bottom() - settings_row_h - agent_panel_h;
+                    let panel_y = sidebar.bottom() - shortcuts_h - agent_panel_h;
                     let mut ay = panel_y + header_section_h;
                     for i in 0..self.agents.len() {
                         let agent_rect = Rect {
@@ -814,7 +765,6 @@ impl Sidebar {
                     }
                 }
                 if self.new_button_rect(sidebar, scale).contains(x, y) { self.hovered_new = true; }
-                if self.settings_rect(sidebar, scale).contains(x, y) { self.hovered_settings = true; }
                 None
             }
             MouseEvent::Press { x, y } => {

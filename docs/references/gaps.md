@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 69)
+Last updated: 2026-03-31 (Iteration 70)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -41,6 +41,13 @@ Last updated: 2026-03-31 (Iteration 69)
 | Sidebar header opacity | Done | Full FG_MUTED (#6e7681), removed 0.65 alpha (iteration 69) |
 | Branch text color | Done | STATUS_DEFAULT (#484f58) base, matching web exactly (iteration 69) |
 | "::" indicator color | Done | STATUS_DEFAULT (#484f58), matching web exactly (iteration 69) |
+| Sidebar action shortcuts | Done | Bottom bar with "~ cycle", "⊘ go", etc. matching web layout (iteration 70) |
+
+## Changes in Iteration 70
+
+1. **Sidebar action shortcuts bar** — Added wrapping shortcut labels ("~ cycle", "⊘ go", "d remove", "u restore", "x kill", "t theme") at the very bottom of the sidebar, matching web reference's `borderTop: "1px solid #1a1d25"`, `padding: "6px 10px"`, `color: "#3b4048"`, and `gap: "4px 10px"` flex-wrap layout.
+2. **Removed Settings row** — Replaced bottom Settings gear + "Ctrl+," row with the action shortcuts bar to match web reference, which shows shortcuts rather than settings in this position.
+3. **Agent panel positioning updated** — Bottom agent/process panel now accounts for shortcuts bar height instead of old settings row height.
 
 ## Changes in Iteration 69
 
@@ -70,11 +77,10 @@ Last updated: 2026-03-31 (Iteration 69)
 ## Remaining Gaps (Priority Order)
 
 ### Feature Gaps (Not Styling)
-1. **Sidebar process list** — Web shows running processes (amp, claude-code) at sidebar bottom. Native shows "+ New Session" button. Requires daemon process tracking.
-2. **Sidebar action shortcuts** — Web shows keybinding hints ("~ cycle", "d remove") at sidebar bottom. Not yet implemented.
-3. **Right panel** — Web shows contextual content panel on right. Native has layout support but panel hidden by default.
-4. **Tab bar right-side indicators** — Web shows process indicators ("bun", "opensessions") on tab bar right side. Not implemented.
-5. **Session lightning indicator** — Web shows small "⚡ 1" in session header. Not implemented.
+1. **Sidebar process list** — Web shows running processes (amp, claude-code) at sidebar bottom. Native has agent items but positioning may overlap with New Session button in short sidebars.
+2. **Right panel** — Web shows contextual content panel on right. Native has layout support but panel hidden by default.
+3. **Tab bar right-side indicators** — Web shows process indicators ("bun", "opensessions") on tab bar right side. Not implemented.
+4. **Session lightning indicator** — Web shows small "⚡ 1" in session header. Not implemented.
 
 ### Low Impact (Polish)
 6. **Context menu backdrop blur** — For future floating menus.

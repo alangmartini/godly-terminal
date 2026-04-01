@@ -2,6 +2,44 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 70 — Sidebar Action Shortcuts Bar (Web Parity)
+
+**Goal**: Add the action shortcuts bar at the bottom of the sidebar,
+matching the web reference's layout where keybinding hints are shown.
+
+**Changes made**:
+
+1. **Action shortcuts bar** (`sidebar.rs`): Added a wrapping row of
+   shortcut labels ("~ cycle", "⊘ go", "d remove", "u restore",
+   "x kill", "t theme") anchored to the very bottom of the sidebar.
+   Uses web reference styling: `borderTop: "1px solid #1a1d25"`,
+   `padding: "6px 10px"`, `gap: "4px 10px"`, `color: "#3b4048"`.
+   Text wraps across multiple rows when sidebar is narrow.
+
+2. **Removed Settings row** — The gear icon + "Settings" + "Ctrl+,"
+   row was replaced with the shortcuts bar to match the web reference,
+   which shows action shortcuts in this position, not a settings link.
+
+3. **Agent panel positioning** — Updated bottom agent/process panel
+   to use `SHORTCUTS_BAR_HEIGHT` (42px) instead of the old 28px
+   settings row height for correct vertical positioning.
+
+**Technical details**:
+- Shortcuts use `text_width_ui()` for per-glyph width measurement
+- Wrap detection: tracks accumulated row width, wraps when exceeding
+  `sidebar.width - padding * 2`
+- Border: solid `hline()` at shortcuts top (not faded)
+- Color: STATUS_PATH (#3b4048) matching web exactly
+
+**Result**: Sidebar bottom now matches web reference with action hints
+instead of a settings row. Provides visual weight and functional hints
+at the sidebar footer.
+
+**Remaining gaps vs reference (iteration 70)**:
+- Process list overlap needs layout guards for short sidebars
+- Right panel hidden by default
+- Tab bar right-side indicators not implemented
+
 ## Iteration 69 — Status Bar & Sidebar Text Color Precision (Web Parity)
 
 **Analysis**: Compared web reference CSS values character-by-character with native rendering code.
