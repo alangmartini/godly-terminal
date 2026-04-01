@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 62)
+Last updated: 2026-03-31 (Iteration 63)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -179,6 +179,9 @@ Last updated: 2026-03-31 (Iteration 62)
 | Inactive tab dimming | Done | Inactive tabs use FG_DIM (#555d6b, was FG_MUTED #6e7681) for web-accurate contrast (iteration 62) |
 | Sidebar session name brightness | Done | Session names use FG_PRIMARY at rest (was FG_SECONDARY), FG_BRIGHT on hover, WHITE on active (iteration 62) |
 | Sidebar item border radius | Done | Session items use 6px radius (was 4px) matching web reference border-radius (iteration 62) |
+| Tab gap spacing | Done | Tab gap 1px→6px matching web reference tab gap for proper breathing room (iteration 63) |
+| Tab bar background contrast | Done | Tab bar uses BG_RAISED (#0f1117) instead of BG_DARK (#0b0d12), lighter than sidebar matching web (iteration 63) |
+| Inactive session name dimming | Done | Session names at rest use FG_SECONDARY (#8b949e, was FG_PRIMARY #c9d1d9), matching web's #9198a1 (iteration 63) |
 
 ## Remaining Gaps (Priority Order)
 

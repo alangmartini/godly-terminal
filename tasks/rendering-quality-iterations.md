@@ -2,6 +2,23 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 63 — Tab Spacing, Bar Contrast, Session Name Dimming
+
+**Analysis**: Side-by-side comparison of web reference screenshot and native shell revealed three
+discrepancies in the tab bar and sidebar chrome:
+- Web uses 6px tab gap, native used 1px — tabs looked too tightly packed in native
+- Web tab bar background is #0f1117 (BG_RAISED), native used #0b0d12 (BG_DARK) — same as sidebar, losing contrast hierarchy
+- Web inactive session names are #9198a1 (~FG_SECONDARY), native used FG_PRIMARY (#c9d1d9) — too bright
+
+**Changes**:
+1. **tab_bar.rs**: `TAB_GAP` 1.0→6.0 matching web reference spacing
+2. **tab_bar.rs**: Tab bar background gradient uses BG_RAISED (not BG_DARK), creating lighter bar vs darker sidebar
+3. **tab_bar.rs**: Inactive tab hover base and new-tab button base updated to BG_RAISED
+4. **sidebar.rs**: Inactive session name color FG_PRIMARY→FG_SECONDARY matching web's #9198a1
+
+**Result**: Tabs have proper breathing room, tab bar is visually distinct from sidebar,
+inactive session names are appropriately dimmed — all matching web reference.
+
 ## Iteration 62 — Text Contrast Hierarchy (Web Parity)
 
 **Analysis**: Side-by-side comparison of web reference JSX and native Rust styling revealed that the

@@ -7,7 +7,7 @@ use super::widget::{Rect, UiAction, MouseEvent};
 
 const TAB_MAX_WIDTH: f32 = 170.0;
 const TAB_MIN_WIDTH: f32 = 90.0;
-const TAB_GAP: f32 = 1.0;
+const TAB_GAP: f32 = 6.0;
 const TAB_MARGIN_LEFT: f32 = 6.0;
 const TAB_INSET_V: f32 = 3.0;
 const BUTTON_WIDTH: f32 = 46.0;
@@ -208,12 +208,13 @@ impl TabBar {
         let tab_inset = s(TAB_INSET_V);
         let origin = self.tabs_origin_x(bar, text.scale);
 
-        // Background — subtle top-to-bottom gradient for depth
-        let bar_top = colors::BG_DARK;
+        // Background — tab bar uses BG_RAISED (#0f1117) to be slightly lighter than
+        // sidebar (BG_DARK #0b0d12), matching web reference contrast hierarchy.
+        let bar_top = colors::BG_RAISED;
         let bar_bottom = [
-            colors::BG_DARK[0] * 0.92,
-            colors::BG_DARK[1] * 0.92,
-            colors::BG_DARK[2] * 0.92,
+            colors::BG_RAISED[0] * 0.94,
+            colors::BG_RAISED[1] * 0.94,
+            colors::BG_RAISED[2] * 0.94,
             1.0,
         ];
         ui.fill_gradient(bar, bar_top, bar_bottom);
@@ -413,7 +414,7 @@ impl TabBar {
             };
 
             // Tab background — smoothly blend between inactive and active states
-            let inactive_bg = lerp_color(colors::BG_DARK, colors::BG_SURFACE, hover_t);
+            let inactive_bg = lerp_color(colors::BG_RAISED, colors::BG_SURFACE, hover_t);
             let bg = lerp_color(inactive_bg, colors::BG_BASE, active_t);
 
             let tab_radius = s(5.0);
@@ -623,7 +624,7 @@ impl TabBar {
         if new_t > 0.005 {
             // Hover: brightening circular background
             let new_bg = lerp_color(
-                [colors::BG_DARK[0] * 1.06, colors::BG_DARK[1] * 1.06, colors::BG_DARK[2] * 1.06, 0.5],
+                [colors::BG_RAISED[0] * 1.06, colors::BG_RAISED[1] * 1.06, colors::BG_RAISED[2] * 1.06, 0.5],
                 colors::BG_SURFACE,
                 new_t,
             );
