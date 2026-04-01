@@ -25,8 +25,19 @@ right-side process indicators to the tab bar.
    right-side indicators in `effective_tab_width()` to prevent tabs
    from overlapping the indicator labels.
 
-**Remaining gaps** (feature-level):
-- Right panel (web shows content panel on right side)
+4. **Right panel rendering code** (`right_panel.rs`): Populated with
+   demo content matching web reference — poem "The Gardener of Broken
+   Things" (8 stanzas), header "one more", footer, and correct styling
+   (colors, padding, borders). Hidden by default due to DPI issue.
+
+5. **DPI scaling investigation**: Discovered that the wgpu surface at
+   physical resolution (2560px) exceeds the visible logical area
+   (1707px) — the compositor does not scale the surface, so content
+   at physical x>1707 is clipped. This blocks the right panel and
+   potentially tab bar right-side indicators.
+
+**Remaining gaps**:
+- DPI scaling fix (blocker for right panel visibility)
 - Context menu backdrop blur (polish)
 
 ## Iteration 71 — Process Panel & Session Header Parity

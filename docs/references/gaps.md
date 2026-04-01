@@ -101,8 +101,16 @@ Last updated: 2026-04-01 (Iteration 72)
 
 ## Remaining Gaps (Priority Order)
 
+### Blocker: DPI Scaling Issue
+The wgpu surface renders at physical resolution (2560px on 150% DPI) but the compositor
+displays only the first 1707 logical pixels without scaling. Content at physical x>1707
+is clipped. This blocks the right panel (at x=1990) and may affect tab bar right-side
+indicators when tabs push them past the visible boundary. Needs investigation into
+winit/wgpu DPI handling on Windows.
+
 ### Feature Gaps (Not Styling)
-1. **Right panel** — Web shows contextual content panel on right. Native has layout support but panel hidden by default.
+1. **Right panel** — Rendering code complete with poem content matching web reference.
+   Hidden by default due to DPI clipping issue above.
 
 ### Low Impact (Polish)
 2. **Context menu backdrop blur** — For future floating menus.

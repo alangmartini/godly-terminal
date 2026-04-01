@@ -1,7 +1,7 @@
 //! Right panel: contextual detail/content panel.
 //!
 //! Follows the web reference layout: header with title + close button,
-//! scrollable content area, and a small status bar at the bottom.
+//! scrollable content area with poem, and a small status bar at the bottom.
 
 use super::anim::{self, Anim, lerp_color};
 use super::builder::{colors, UiBuilder, UiTextRenderer};
@@ -10,10 +10,14 @@ use super::widget::{Rect, MouseEvent};
 pub struct RightPanel {
     /// Whether the right panel is currently shown.
     pub visible: bool,
-    /// Header title text.
+    /// Header title text (web: "one more").
     pub title: String,
-    /// Content lines to display in the panel body.
-    pub content_lines: Vec<String>,
+    /// Poem title (web: "The Gardener of Broken Things").
+    pub poem_title: String,
+    /// Poem stanzas — each entry is a multi-line stanza.
+    pub stanzas: Vec<String>,
+    /// Footer text below the poem.
+    pub footer: String,
     // Close button hover animation
     close_hover_anim: Anim,
     close_hovered: bool,
@@ -22,9 +26,23 @@ pub struct RightPanel {
 impl RightPanel {
     pub fn new() -> Self {
         Self {
+            // Hidden by default — right panel renders correctly but the wgpu surface
+            // at physical resolution (2560px) exceeds the visible logical area (1707px),
+            // placing the panel off-screen. Enable once DPI handling is fixed.
             visible: false,
-            title: String::new(),
-            content_lines: Vec::new(),
+            title: "one more".into(),
+            poem_title: "The Gardener of Broken Things".into(),
+            stanzas: vec![
+                "I keep a workshop in my chest\nwhere bent and rusted hours collect,\nwhere Mondays that did not go well\nsit next to plans I didn\u{2019}t protect.".into(),
+                "There\u{2019}s a drawer of almost-good-enough,\na shelf of words I should have said,\na box of mornings lost to doubt,\na jar of thoughts I overfed.".into(),
+                "But I have learned \u{2014} not all at once,\nnot in a flash of brilliant light,\nbut slowly, like a vine that climbs\na wall it cannot see at night \u{2014}".into(),
+                "that broken things still hold their shape.\nA cracked cup knows what it can pour.\nA fraying rope still understands\nthe weight it used to carry before.".into(),
+                "So I sit down with careful hands\nand turn each piece against the light,\nnot asking it to be brand new,\nbut asking it to feel less tight.".into(),
+                "I oil the hinge of an old regret.\nI sand the edge of a clumsy year.\nI don\u{2019}t rebuild \u{2014} I just make room\nfor what was always living here.".into(),
+                "Some people throw their damage out,\nreplace it all with polished chrome.\nBut I prefer the dents and scuffs \u{2014}\nthey\u{2019}re how I recognize my home.".into(),
+                "The workshop hums. The lantern sways.\nI mend what I can mend, and then\nI set the broken clock to now\nand let the whole thing start again.".into(),
+            ],
+            footer: "Hope you enjoyed that one too.".into(),
             close_hover_anim: Anim::default(),
             close_hovered: false,
         }
@@ -45,75 +63,122 @@ impl RightPanel {
         let s = |v: f32| text.s(v);
         let ch = text.cell_height;
 
-        // Panel background
+        // Panel background — web: backgroundColor "#0b0d12"
         ui.fill(panel, colors::BG_DARK);
 
-        // Left border
-        ui.vline(panel.x, panel.y, panel.height, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35]);
+        // Left border — web: borderLeft "1px solid #1a1d25"
+        ui.vline(panel.x, panel.y, panel.height, 1.0, colors::BORDER);
 
         // --- Header ---
+        // Web: padding "10px 14px", borderBottom "1px solid #1a1d25",
+        //      display flex, gap 8, fontSize 12
         let header_h = s(36.0);
         let header = Rect { x: panel.x, y: panel.y, width: panel.width, height: header_h };
 
-        // Header bottom border
-        ui.hline(header.x, header.bottom() - 1.0, header.width, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25]);
+        // Header bottom border — web: borderBottom "1px solid #1a1d25"
+        ui.hline(header.x, header.bottom() - 1.0, header.width, 1.0, colors::BORDER);
 
-        // Title text
+        // Title text — web: color "#484f58" (STATUS_DEFAULT)
         let title_y = header.y + (header_h - ch) / 2.0;
         let title = if self.title.is_empty() { "Panel" } else { &self.title };
-        ui.text_ui(text, title, panel.x + s(14.0), title_y, colors::FG_PRIMARY, colors::BG_DARK);
+        ui.text_ui(text, title, panel.x + s(14.0), title_y,
+            colors::STATUS_DEFAULT, // #484f58
+            colors::BG_DARK);
 
-        // Close button (x)
+        // Close button (×) — web: color "#3b4048", fontSize 14
         let close_sz = ch;
         let close_x = panel.right() - close_sz - s(10.0);
         let close_y = header.y + (header_h - close_sz) / 2.0;
         let close_rect = Rect { x: close_x, y: close_y, width: close_sz, height: close_sz };
         let close_t = self.close_hover_anim.value();
-        let close_fg = lerp_color(colors::FG_MUTED, colors::FG_PRIMARY, close_t);
+        let close_fg = lerp_color(
+            colors::STATUS_PATH, // #3b4048
+            colors::FG_SECONDARY,
+            close_t,
+        );
         let icon_t = (0.8 * text.scale).max(1.0);
         ui.icon_x(close_rect, s(7.0), icon_t, close_fg);
 
         // --- Content area ---
+        // Web: flex 1, overflowY auto, padding "16px 20px"
         let content_y = header.bottom();
         let content_h = if status.height > 0.0 {
             (status.y - content_y).max(0.0)
         } else {
             (panel.bottom() - content_y).max(0.0)
         };
+        let content_pad_x = s(20.0);
+        let content_pad_y = s(16.0);
         let content_rect = Rect {
-            x: panel.x + s(16.0),
-            y: content_y + s(12.0),
-            width: panel.width - s(32.0),
-            height: content_h - s(12.0),
+            x: panel.x + content_pad_x,
+            y: content_y + content_pad_y,
+            width: panel.width - content_pad_x * 2.0,
+            height: content_h - content_pad_y,
         };
 
-        // Render content lines (simple text, no scroll yet)
-        let line_height = ch * 1.6;
         let mut y = content_rect.y;
-        for line in &self.content_lines {
-            if y + ch > content_rect.y + content_rect.height {
-                break; // clip
+
+        // Poem title — web: display flex, gap 8, marginBottom 16
+        // White dot (8px) + bold 15px text, color "#e6edf3", letterSpacing 0.3
+        let dot_sz = s(8.0);
+        let dot_y = y + (ch - dot_sz) / 2.0;
+        ui.fill_rounded(
+            Rect { x: content_rect.x, y: dot_y, width: dot_sz, height: dot_sz },
+            colors::FG_BRIGHT, // #e6edf3
+            dot_sz / 2.0,
+        );
+        ui.text_ui_bold(text, &self.poem_title,
+            content_rect.x + dot_sz + s(8.0), y,
+            colors::FG_BRIGHT, // #e6edf3
+            colors::BG_DARK);
+        y += ch + s(16.0); // marginBottom 16
+
+        // Stanzas — web: marginBottom 18, lineHeight 1.7, fontSize 13,
+        //                 color "#9198a1", fontFamily Georgia/serif italic,
+        //                 letterSpacing 0.2, whiteSpace pre-wrap
+        // NOTE: We use proportional UI font since serif isn't loaded. Color and
+        // spacing match web exactly.
+        let stanza_line_h = ch * 1.7; // lineHeight 1.7
+        let stanza_gap = s(18.0);     // marginBottom 18
+        let stanza_fg: [f32; 4] = [0.569, 0.596, 0.631, 1.0]; // #9198a1
+
+        for stanza in &self.stanzas {
+            for line in stanza.split('\n') {
+                if y + ch > content_rect.y + content_rect.height {
+                    break;
+                }
+                ui.text_ui(text, line, content_rect.x, y, stanza_fg, colors::BG_DARK);
+                y += stanza_line_h;
             }
-            let fg = colors::FG_SECONDARY;
-            ui.text_ui(text, line, content_rect.x, y, fg, colors::BG_DARK);
-            y += line_height;
+            y += stanza_gap - stanza_line_h; // net gap between stanzas
+        }
+
+        // Footer divider + text — web: borderTop "1px solid #1a1d25",
+        //     paddingTop 12, marginTop 8, color "#6e7681", fontSize 12
+        if y + s(24.0) < content_rect.y + content_rect.height {
+            y += s(8.0);
+            ui.hline(content_rect.x, y, content_rect.width, 1.0, colors::BORDER);
+            y += s(12.0);
+            ui.text_ui(text, &self.footer, content_rect.x, y,
+                colors::FG_MUTED, // #6e7681
+                colors::BG_DARK);
         }
 
         // --- Bottom status bar ---
+        // Web: height 26, backgroundColor "#0c0e14", borderTop "1px solid #1a1d25",
+        //      fontSize 11, color "#3b4048"
         if status.height > 0.0 {
             ui.fill(status, colors::BG_STATUS);
-            ui.hline(status.x, status.y, status.width, 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25]);
+            ui.hline(status.x, status.y, status.width, 1.0, colors::BORDER);
 
             let status_y = status.y + (status.height - ch) / 2.0;
+            let status_fg = colors::STATUS_PATH; // #3b4048
             // Left: "}" brace
-            ui.text_ui(text, "}", status.x + s(10.0), status_y, colors::FG_MUTED, colors::BG_STATUS);
+            ui.text_ui(text, "}", status.x + s(10.0), status_y, status_fg, colors::BG_STATUS);
             // Right: "? for shortcuts"
             let hint = "? for shortcuts";
             let hint_w = text.text_width_ui(hint);
-            ui.text_ui(text, hint, status.right() - hint_w - s(10.0), status_y, colors::FG_MUTED, colors::BG_STATUS);
+            ui.text_ui(text, hint, status.right() - hint_w - s(10.0), status_y, status_fg, colors::BG_STATUS);
         }
     }
 

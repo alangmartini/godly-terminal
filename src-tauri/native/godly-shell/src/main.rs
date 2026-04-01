@@ -1806,6 +1806,7 @@ impl App {
                     quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &dim_verts);
                 }
             }
+
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
