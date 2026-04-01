@@ -191,14 +191,15 @@ impl App {
         let phys_size = window.inner_size();
         let scale = window.scale_factor();
         // Use LOGICAL resolution for the wgpu surface.  On Windows with DPI
-        // scaling, the compositor presents only logical-pixel-width of the
-        // swap chain, clipping anything beyond that boundary.  Rendering at
-        // logical resolution avoids the clipping and lets the compositor
-        // upscale to physical pixels.
+        // scaling, the DWM compositor clips the swap chain at logical-pixel
+        // boundaries regardless of GPU backend or DPI awareness settings.
+        // Rendering at logical resolution avoids the clipping; the compositor
+        // upscales to physical pixels.
         let logical_w = (phys_size.width as f64 / scale).round() as u32;
         let logical_h = (phys_size.height as f64 / scale).round() as u32;
         log::info!("[DPI] physical={}x{}, scale={}, logical surface={}x{}",
             phys_size.width, phys_size.height, scale, logical_w, logical_h);
+        // DX12 preferred — cleaner shader compilation and better Windows integration.
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12 | wgpu::Backends::VULKAN,
             ..Default::default()

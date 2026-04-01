@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 73)
+Last updated: 2026-04-01 (Iteration 74)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -10,7 +10,7 @@ Last updated: 2026-04-01 (Iteration 73)
 
 | Element | Status | Notes |
 |---------|--------|-------|
-| Tab numbered circle badges | Done | Numbers inside colored circles with accent bg, matching web (iteration 25+) |
+| Tab numbered circle badges | Done | 18×18px circles with proportional font numbers, accent bg at 13% (iteration 74) |
 | Tab flat shapes | Done | Flat rects with 2px colored bottom indicators, no rounded tops (iteration 64) |
 | Tab active/inactive colors | Done | Active: #e6edf3, Inactive: #555d6b, matching web exactly (iteration 62) |
 | Tab gap spacing | Done | 6px gaps between tabs matching web reference (iteration 63) |
@@ -50,6 +50,12 @@ Last updated: 2026-04-01 (Iteration 73)
 | Tab bar process indicators | Done | Right-side "bun" + "opensessions" labels with colored dots before window controls (iteration 72) |
 | DPI scaling | Done | Surface at logical resolution, compositor upscales to physical (iteration 73) |
 | Right panel | Done | Poem content panel with header, stanzas, footer, close button (iteration 73) |
+
+## Changes in Iteration 74
+
+1. **Tab number circle sizing** — Changed from `ch * 0.9` (~16.4px) to `s(18.0)` matching web reference's exact `width: 18, height: 18` circle dimensions.
+2. **Tab number proportional font** — Switched from monospace font (`ui.text`) to proportional UI font (`ui.text_ui`) for the number inside each tab's circle badge, matching web reference's proportional rendering. Numbers now center better in the circle.
+3. **DWM clipping investigation** — Tested DX12 backend + physical resolution surface with explicit Per-Monitor DPI Awareness v2. Confirmed that the Windows DWM compositor clips swap chains at logical pixel boundaries regardless of GPU backend (DX12 or Vulkan) or DPI awareness settings. Surface remains at logical resolution.
 
 ## Changes in Iteration 73
 
@@ -110,11 +116,17 @@ Last updated: 2026-04-01 (Iteration 73)
 ## Remaining Gaps (Priority Order)
 
 ### Future: HiDPI Rendering
-The surface currently renders at logical resolution (1707×912) and the compositor
-upscales to physical (2560×1440). This fixes the clipping issue but means text is
-rendered at 1x resolution rather than native HiDPI. A future optimization could
-investigate per-monitor DPI awareness v2 with proper swap chain configuration to
-render at physical resolution without compositor clipping.
+The surface renders at logical resolution (1707×912) and the compositor upscales to
+physical (2560×1440). Text is rendered at 1x resolution rather than native HiDPI.
+
+**Investigation (iteration 74):** Tested DX12 backend with physical resolution surface
+(2560×1368) and explicit `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`. The DWM
+compositor still clips swap chain content at the logical pixel boundary (1707px),
+confirmed via pixel analysis. This is a Windows DWM limitation — the compositor
+presents only logical-width pixels of the swap chain regardless of GPU backend or DPI
+awareness. Fixing this likely requires a different surface presentation strategy
+(e.g., off-screen render target + blit, or Win32 API-level DXGI swap chain control
+bypassing wgpu's abstraction).
 
 ### Low Impact (Polish)
 1. **Context menu backdrop blur** — For future floating menus.

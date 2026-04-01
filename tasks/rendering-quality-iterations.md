@@ -2,6 +2,29 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 74 — Tab Circle Sizing & DWM HiDPI Investigation
+
+**Goal**: Fix tab numbered circle badge sizing/font, investigate HiDPI rendering.
+
+**Changes made**:
+
+1. **Tab circle size** — Changed from `ch * 0.9` (~16.4px) to `s(18.0)` matching
+   web's exact `width: 18, height: 18` circle dimensions.
+
+2. **Tab number font** — Switched from monospace (`ui.text`) to proportional UI
+   font (`ui.text_ui`) for the tab circle number, matching web's proportional
+   rendering. Numbers now center better in the circle.
+
+3. **DWM HiDPI investigation** — Tested DX12 backend with physical resolution
+   surface and explicit Per-Monitor DPI Awareness v2. The Windows DWM compositor
+   clips swap chains at logical pixel boundaries regardless of GPU backend or DPI
+   awareness settings. Confirmed via pixel analysis: all pixels at physical x > 1707
+   (= logical width) are invisible. HiDPI rendering remains blocked by DWM.
+
+**Remaining gaps**:
+- HiDPI rendering quality (DWM compositor clips at logical resolution)
+- Context menu backdrop blur (polish)
+
 ## Iteration 73 — Fix DPI Scaling & Enable Right Panel
 
 **Goal**: Fix the DPI scaling blocker that prevented the right panel from

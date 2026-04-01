@@ -273,8 +273,8 @@ impl TabBar {
         let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
 
         // Max chars for tab title (dynamic based on effective width, reserves close button space)
-        // Badge is ch*0.9 wide circle at x+10, then gap before title
-        let badge_sz = ch * 0.9;
+        // Badge is 18px circle at x+10, then gap before title — web: width 18, height 18
+        let badge_sz = s(18.0);
         let title_x_offset = s(10.0) + badge_sz + s(6.0);
         let title_max_w = tab_w - title_x_offset - close_btn_sz - close_btn_pad - s(4.0);
         let title_max_chars = (title_max_w / ui_cw).floor().max(1.0) as usize;
@@ -327,24 +327,24 @@ impl TabBar {
                 ui.fill(rect, hover_bg);
             }
 
-            // Numbered circle badge — number rendered inside a colored circle
-            // (matches opensessions reference where tabs show "1", "2", etc in colored circles)
+            // Numbered circle badge — web: width 18, height 18, borderRadius "50%",
+            //   background "${color}22", color: tab.color, fontSize 10, fontWeight 700
             let num_str = format!("{}", i + 1);
-            let badge_sz = ch * 0.9; // slightly smaller than line height
+            let badge_sz = s(18.0);
             let badge_x = rect.x + s(10.0);
             let badge_y = rect.y + (rect.height - badge_sz) / 2.0;
             let badge_r = badge_sz / 2.0;
             let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_sz, height: badge_sz };
 
-            // Circle background — semi-transparent accent overlay (matches web ${color}22)
+            // Circle background — semi-transparent accent overlay (web: ${color}22 = 13%)
             let badge_bg = [accent[0], accent[1], accent[2], 0.13];
             ui.fill_rounded(badge_rect, badge_bg, badge_r);
 
-            // Number text (centered in circle, accent-colored on transparent bg)
-            let num_w = text.text_width(&num_str);
+            // Number text — proportional font, centered in circle
+            let num_w = text.text_width_ui(&num_str);
             let num_x = badge_x + (badge_sz - num_w) / 2.0;
             let num_y = badge_y + (badge_sz - ch) / 2.0;
-            ui.text(text, &num_str, num_x, num_y, accent, badge_bg);
+            ui.text_ui(text, &num_str, num_x, num_y, accent, badge_bg);
 
             // Tab title (truncated to fit)
             // Inactive: FG_DIM, hover: FG_SECONDARY, active: FG_BRIGHT
