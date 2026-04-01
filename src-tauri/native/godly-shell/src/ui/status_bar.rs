@@ -63,14 +63,13 @@ impl StatusBar {
                 height: bar.height,
             };
             ui.fill(sidebar_status, colors::BG_DARK);
-            // Right border on sidebar section
-            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.25]);
+            // Right border on sidebar section — solid, matching other separators
+            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
         }
 
-        // Top separator — thin hairline
-        ui.hline(bar.x, bar.y, bar.width, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.35]);
+        // Top separator — solid 1px hairline matching web reference
+        // (borderTop: "1px solid #1a1d25").
+        ui.hline(bar.x, bar.y, bar.width, 1.0, colors::BORDER);
 
         let y_center = bar.y + (bar.height - ch) / 2.0;
         let bg = colors::BG_STATUS;

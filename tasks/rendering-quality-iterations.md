@@ -2,6 +2,32 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 67 — Border Opacity & Surface Flatness (Web Reference Parity)
+
+**Analysis**: Side-by-side comparison of web reference screenshot and native shell revealed that
+all major border separators (sidebar right, tab bar bottom, status bar top) were rendered at
+ultra-low opacity (0.12-0.50) while the web reference uses solid `1px solid #1a1d25`. This made
+the visual structure much less defined in the native shell. Additionally, the native had a 2px
+accent-colored gradient stripe at the top of the tab bar with glow spill, sidebar background
+gradient, and sidebar inner shadow effects — none of which exist in the web reference.
+
+**Changes**:
+1. **Border opacities** (sidebar.rs, tab_bar.rs, status_bar.rs): Changed all panel separator
+   borders from low-opacity (0.12-0.50) to full BORDER color (#1a1d25), matching web's solid
+   `1px solid #1a1d25` borders.
+2. **Removed top accent stripe** (tab_bar.rs): Removed 2px gradient accent line + glow spill
+   at window top — web reference has no such element.
+3. **Flattened sidebar** (sidebar.rs): Removed 4% top-to-bottom gradient, inward shadow
+   gradient, and SDF inner shadow. Now solid #0b0d12 matching web.
+4. **Flattened branding section** (tab_bar.rs): Sidebar branding in tab bar uses flat fill
+   instead of gradient.
+5. **Git diff parsing** (main.rs): `--shortstat` output now parsed into "+N -M" format for
+   proper green/red colorized rendering in status bar.
+
+**Result**: Visual structure now clearly delineated with solid borders between all regions,
+matching the web reference's clean flat design. The sidebar, tab bar, and status bar all use
+consistent 1px solid separators instead of nearly-invisible low-opacity borders.
+
 ## Iteration 66 — Sidebar Header & Item Styling (Web Reference Parity)
 
 **Analysis**: Side-by-side comparison of web reference and native shell revealed several sidebar

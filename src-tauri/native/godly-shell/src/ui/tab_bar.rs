@@ -211,73 +211,20 @@ impl TabBar {
         // Background — flat fill matching web reference (background: #0f1117)
         ui.fill(bar, colors::BG_RAISED);
 
-        // Window top accent stripe — 2px line at the very top of the window
-        // using the active tab's accent color. Professional brand touch found
-        // in VS Code, JetBrains, and modern editors.
-        let active_accent = self.tabs.iter().enumerate()
-            .find(|(_, t)| t.active)
-            .map(|(i, _)| self.accent_for(i))
-            .unwrap_or(colors::ACCENT_BLUE);
-        {
-            let stripe_h = s(2.0);
-            let breath = 0.92 + 0.08 * self.glow_phase.sin();
-            let stripe_alpha = 0.85 * breath;
-            let fade_w = s(40.0);
-            let stripe_full = [active_accent[0], active_accent[1], active_accent[2], stripe_alpha];
-            let stripe_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
-            // Three-part gradient: fade-in | solid | fade-out (matches bottom stripe)
-            ui.fill_gradient_h(
-                Rect { x: bar.x, y: bar.y, width: fade_w, height: stripe_h },
-                stripe_zero, stripe_full,
-            );
-            ui.fill(
-                Rect { x: bar.x + fade_w, y: bar.y, width: bar.width - fade_w * 2.0, height: stripe_h },
-                stripe_full,
-            );
-            ui.fill_gradient_h(
-                Rect { x: bar.x + bar.width - fade_w, y: bar.y, width: fade_w, height: stripe_h },
-                stripe_full, stripe_zero,
-            );
-            // Subtle glow spill below the stripe for depth
-            let glow_rect = Rect {
-                x: bar.x,
-                y: bar.y + stripe_h,
-                width: bar.width,
-                height: s(4.0),
-            };
-            ui.fill_gradient(glow_rect,
-                [active_accent[0], active_accent[1], active_accent[2], 0.10 * breath],
-                [active_accent[0], active_accent[1], active_accent[2], 0.0],
-            );
-        }
+        // (No top accent stripe — clean flat bar matching web reference)
 
-        // (Glass sheen and bevel removed — clean flat bar matches Zed/VS Code restraint)
+        // Bottom separator — solid 1px hairline matching web reference
+        // (borderBottom: "1px solid #1a1d25").
+        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0, colors::BORDER);
 
-        // Bottom separator — simple full-width hairline matching web reference
-        // (borderBottom: 1px solid #1a1d25). No ear shapes or glow bleed.
-        ui.hline_aa(bar.x, bar.bottom() - 1.0, bar.width, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.5]);
-
-        // Sidebar section: "Godly Terminal" branding with subtle differentiation
+        // Sidebar section: "Godly Terminal" branding
         if self.sidebar_width > 0.0 {
-            // Slightly darker background for branding section (matches sidebar tone)
-            let brand_bg_top = [
-                colors::BG_DARK[0] * 1.02,
-                colors::BG_DARK[1] * 1.02,
-                colors::BG_DARK[2] * 1.02,
-                1.0,
-            ];
-            let brand_bg_bot = [
-                colors::BG_DARK[0] * 0.96,
-                colors::BG_DARK[1] * 0.96,
-                colors::BG_DARK[2] * 0.96,
-                1.0,
-            ];
+            // Flat background matching sidebar tone (web reference: same #0b0d12)
             let brand_section = Rect {
                 x: bar.x, y: bar.y,
                 width: self.sidebar_width, height: bar.height,
             };
-            ui.fill_gradient(brand_section, brand_bg_top, brand_bg_bot);
+            ui.fill(brand_section, colors::BG_DARK);
             let icon_size = ch * 1.1;
             let icon_x = bar.x + s(10.0);
             let icon_y = bar.y + (bar.height - icon_size) / 2.0;
@@ -308,9 +255,8 @@ impl TabBar {
             );
             ui.text_ui_bold(text, "Godly Terminal", brand_x, brand_y,
                     brand_fg, colors::BG_DARK);
-            // Right border for sidebar section — near-invisible hairline
-            ui.vline(self.sidebar_width - 1.0, bar.y + s(6.0), bar.height - s(12.0), 1.0,
-                [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12]);
+            // Right border for sidebar section — solid hairline matching web
+            ui.vline(self.sidebar_width - 1.0, bar.y, bar.height, 1.0, colors::BORDER);
         }
 
         // Icon line thickness (used for close buttons in tabs and window controls)

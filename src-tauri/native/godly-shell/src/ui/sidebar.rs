@@ -252,32 +252,16 @@ impl Sidebar {
         let _bottom_panel_h = s(BOTTOM_PANEL_HEIGHT);
         let text_y_off = |area_h: f32| (area_h - ch) / 2.0;
 
-        // Sidebar background — nearly flat with very subtle darkening at bottom.
-        // Zed/VS Code use flat sidebar backgrounds; a 4% gradient is just enough
-        // to hint at depth without visible banding.
-        let sidebar_bottom_color = [
-            colors::BG_DARK[0] * 0.96,
-            colors::BG_DARK[1] * 0.96,
-            colors::BG_DARK[2] * 0.96,
-            colors::BG_DARK[3],
-        ];
-        ui.fill_gradient(sidebar, colors::BG_DARK, sidebar_bottom_color);
+        // Sidebar background — flat fill matching web reference
+        // (backgroundColor: "#0b0d12").
+        ui.fill(sidebar, colors::BG_DARK);
 
         // (Convexity gradient removed — flat surface matches Zed/VS Code restraint)
 
-        // Right border separator — near-invisible hairline; the color difference
-        // between BG_DARK sidebar and BG_BASE content does the heavy lifting.
-        ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0,
-            [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12]);
-        // Soft inward shadow (gradient from right edge inward)
-        let shadow_w = s(3.0);
-        ui.fill_gradient_h(
-            Rect { x: sidebar.right() - shadow_w - 1.0, y: sidebar.y, width: shadow_w, height: sidebar.height },
-            [0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0, 0.03],
-        );
-        // SDF inner shadow — minimal Gaussian falloff for gentle recessed depth.
-        ui.fill_inner_shadow(sidebar, [0.0, 0.0, 0.0, 0.02], 0.0, s(3.0));
+        // Right border separator — solid 1px hairline matching web reference
+        // (borderRight: "1px solid #1a1d25").
+        ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0, colors::BORDER);
+        // (Web reference uses clean flat sidebar with no shadow effects)
 
         // "Sessions {count}" header — inline mixed-case matching web reference
         let header_rect = Rect {
