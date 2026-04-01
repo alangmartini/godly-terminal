@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 74)
+Last updated: 2026-04-01 (Iteration 75)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -50,6 +50,18 @@ Last updated: 2026-04-01 (Iteration 74)
 | Tab bar process indicators | Done | Right-side "bun" + "opensessions" labels with colored dots before window controls (iteration 72) |
 | DPI scaling | Done | Surface at logical resolution, compositor upscales to physical (iteration 73) |
 | Right panel | Done | Poem content panel with header, stanzas, footer, close button (iteration 73) |
+| Tab demo data parity | Done | Tab names, active tab, badge counts matching web reference exactly (iteration 75) |
+| Per-tab accent colors | Done | Each tab has its own accent color matching web: indigo, emerald, orange, violet, indigo (iteration 75) |
+| Tab badge shape | Done | borderRadius 7 (rounded rect) instead of full pill, matching web Badge component (iteration 75) |
+| Badge on active tab | Done | Badges shown on active tabs too, matching web where tab 2 shows badge:3 while active (iteration 75) |
+
+## Changes in Iteration 75
+
+1. **Per-tab accent color support** — Added optional `accent` field to `TabInfo` struct. Each tab can now override the index-based color rotation with a specific accent color. Demo tabs use exact web reference colors: #6366f1 (indigo), #10b981 (emerald), #f97316 (orange), #8b5cf6 (violet), #6366f1 (indigo).
+2. **Demo tab data matched to web** — Tab names changed from (plane, opensessions, quiver, godly-terminal, notes) to (opensessions, opensessions, work, opensessions, opensessions). Active tab moved from index 0 to index 1 (2nd tab). Badge counts: tab 2 has 3, tab 4 has 12, matching web exactly.
+3. **Tab badge shape fixed** — Changed from full pill (`badge_r = badge_h / 2.0`) to `borderRadius: 7` (`badge_r = s(7.0)`), matching web's Badge component. Also updated badge dimensions: height 16px, padding 5px, minWidth 16px.
+4. **Badge visible on active tabs** — Removed the `active_t < 0.5` guard that hid badges on active tabs. Web reference shows badges on all tabs regardless of active state (tab 2 is active and has badge:3).
+5. **New color constants** — Added `ACCENT_EMERALD` (#10b981) and `ACCENT_ORANGE` (#f97316) to match web tab colors that differed from existing palette entries.
 
 ## Changes in Iteration 74
 

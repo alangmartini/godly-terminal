@@ -103,13 +103,16 @@ impl App {
             quad_pipeline: None,
             tab_bar: {
                 let mut tb = ui::tab_bar::TabBar::new();
-                // Pre-populate demo tabs to match the reference UI
+                // Pre-populate demo tabs to match the web reference exactly:
+                // Web: opensessions(#6366f1), opensessions(#10b981, badge 3, ACTIVE),
+                //      work(#f97316), opensessions(#8b5cf6, badge 12), opensessions(#6366f1)
+                use ui::builder::colors;
                 tb.tabs = vec![
-                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "plane".into(), active: true, unread_count: 0 },
-                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "opensessions".into(), active: false, unread_count: 3 },
-                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "quiver".into(), active: false, unread_count: 0 },
-                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "godly-terminal".into(), active: false, unread_count: 12 },
-                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "notes".into(), active: false, unread_count: 0 },
+                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "opensessions".into(), active: false, unread_count: 0, accent: Some(colors::ACCENT_BLUE) },
+                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "opensessions".into(), active: true, unread_count: 3, accent: Some(colors::ACCENT_EMERALD) },
+                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "work".into(), active: false, unread_count: 0, accent: Some(colors::ACCENT_ORANGE) },
+                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "opensessions".into(), active: false, unread_count: 12, accent: Some(colors::ACCENT_MAUVE) },
+                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "opensessions".into(), active: false, unread_count: 0, accent: Some(colors::ACCENT_BLUE) },
                 ];
                 tb
             },
@@ -480,18 +483,12 @@ impl App {
         });
     }
 
-    /// The accent color of the currently active tab (cycles through palette).
+    /// The accent color of the currently active tab.
+    /// Uses per-tab color if set, otherwise falls back to index-based rotation.
     fn active_accent(&self) -> [f32; 4] {
-        const ACCENTS: &[[f32; 4]] = &[
-            ui::builder::colors::ACCENT_BLUE,
-            ui::builder::colors::ACCENT_GREEN,
-            ui::builder::colors::ACCENT_PEACH,
-            ui::builder::colors::ACCENT_MAUVE,
-            ui::builder::colors::ACCENT_RED,
-        ];
         self.tab_bar.tabs.iter().enumerate()
             .find(|(_, t)| t.active)
-            .map(|(i, _)| ACCENTS[i % ACCENTS.len()])
+            .map(|(i, t)| t.accent.unwrap_or_else(|| self.tab_bar.accent_for(i)))
             .unwrap_or(ui::builder::colors::ACCENT_BLUE)
     }
 

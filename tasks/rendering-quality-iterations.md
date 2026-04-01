@@ -2,6 +2,37 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 75 — Per-Tab Accent Colors, Demo Data Parity, Badge Shape
+
+**Goal**: Match tab bar demo data and per-tab styling to web reference exactly.
+
+**Changes made**:
+
+1. **Per-tab accent color** (`tab_bar.rs`, `builder.rs`): Added optional `accent`
+   field to `TabInfo`. Each tab can override index-based rotation with a specific
+   color. `accent_for()` checks per-tab color first, falls back to TAB_ACCENTS.
+
+2. **Demo tab data matched** (`main.rs`): Tab names changed from
+   (plane, opensessions, quiver, godly-terminal, notes) to
+   (opensessions, opensessions, work, opensessions, opensessions).
+   Active tab moved from index 0 to index 1.
+   Per-tab accents: ACCENT_BLUE, ACCENT_EMERALD, ACCENT_ORANGE, ACCENT_MAUVE, ACCENT_BLUE.
+
+3. **New palette colors** (`builder.rs`): Added ACCENT_EMERALD (#10b981) and
+   ACCENT_ORANGE (#f97316). Existing ACCENT_GREEN (#22c55e) and ACCENT_PEACH
+   (#f59e0b) are used for session dots; tabs need different greens/oranges.
+
+4. **Badge shape** (`tab_bar.rs`): Changed from full pill (badge_r = badge_h/2)
+   to borderRadius 7 (badge_r = s(7.0)). Updated badge dimensions: height=16px,
+   padding=5px, minWidth=16px, matching web's Badge component exactly.
+
+5. **Badge on active tabs** (`tab_bar.rs`): Removed `active_t < 0.5` guard.
+   Web shows badges on all tabs regardless of active state.
+
+**Result**: Tab bar now matches web reference in names, active state, per-tab
+colors, badge shape, and badge visibility. The emerald green active accent
+correctly tints the welcome screen elements.
+
 ## Iteration 74 — Tab Circle Sizing & DWM HiDPI Investigation
 
 **Goal**: Fix tab numbered circle badge sizing/font, investigate HiDPI rendering.

@@ -29,6 +29,9 @@ pub struct TabInfo {
     /// Number of unread lines of output since this tab was last active.
     /// Rendered as a small badge on inactive tabs.
     pub unread_count: u32,
+    /// Optional per-tab accent color override. When `Some`, used instead of
+    /// the index-based rotation from `TAB_ACCENTS`.
+    pub accent: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -194,8 +197,10 @@ impl TabBar {
     /// Current breathing glow phase (for sharing with other components).
     pub fn glow_phase(&self) -> f32 { self.glow_phase }
 
-    fn accent_for(&self, index: usize) -> [f32; 4] {
-        TAB_ACCENTS[index % TAB_ACCENTS.len()]
+    pub fn accent_for(&self, index: usize) -> [f32; 4] {
+        self.tabs.get(index)
+            .and_then(|t| t.accent)
+            .unwrap_or_else(|| TAB_ACCENTS[index % TAB_ACCENTS.len()])
     }
 
     pub fn build(&self, ui: &mut UiBuilder, bar: Rect, text: &UiTextRenderer) {
@@ -415,23 +420,23 @@ impl TabBar {
                 ui.icon_x(close_rect, s(7.0), icon_t, icon_color);
             }
 
-            // Activity badge — pill-shaped notification with count, shown on
+            // Activity badge — rounded notification with count, shown on
             // inactive tabs that have unread output.  Fades out when the tab
             // becomes active or when the close button is being hovered (avoids overlap).
-            if tab.unread_count > 0 && active_t < 0.5 {
+            // Web reference: height 16, borderRadius 7, fontSize 9, padding "1px 5px", minWidth 16
+            if tab.unread_count > 0 {
                 let close_hover = self.close_hover_anim.get(i);
-                let badge_fade = 1.0 - close_hover.max(active_t * 2.0);
+                let badge_fade = 1.0 - close_hover;
                 if badge_fade > 0.01 {
                     let count_str = if tab.unread_count > 99 { "99+".to_string() } else { tab.unread_count.to_string() };
                     let text_w = text.text_width(&count_str);
-                    let badge_h = ch * 0.75;
-                    let badge_pad = s(3.0);
-                    // Pill width: at least a circle (for single digits), wider for multi-char
-                    let badge_w = (text_w + badge_pad * 2.0).max(badge_h);
+                    let badge_h = s(16.0); // web: height 16
+                    let badge_pad = s(5.0); // web: padding "1px 5px"
+                    let badge_w = (text_w + badge_pad * 2.0).max(s(16.0)); // web: minWidth 16
                     let badge_x = rect.right() - close_btn_pad - badge_w;
                     let badge_y = rect.y + s(5.0);
                     let badge_rect = Rect { x: badge_x, y: badge_y, width: badge_w, height: badge_h };
-                    let badge_r = badge_h / 2.0;
+                    let badge_r = s(7.0); // web: borderRadius 7 (not full pill)
 
                     // Subtle glow behind unread badge
                     let breath = 0.92 + 0.08 * self.glow_phase.sin();

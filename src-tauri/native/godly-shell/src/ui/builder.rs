@@ -29,6 +29,8 @@ pub mod colors {
     pub const ACCENT_PEACH: [f32; 4] = [0.961, 0.620, 0.043, 1.0]; // #f59e0b Amber
     pub const ACCENT_MAUVE: [f32; 4] = [0.545, 0.361, 0.965, 1.0]; // #8b5cf6 Violet
     pub const ACCENT_RED: [f32; 4] = [0.937, 0.267, 0.267, 1.0];   // #ef4444 Red
+    pub const ACCENT_EMERALD: [f32; 4] = [0.063, 0.725, 0.506, 1.0]; // #10b981 Emerald
+    pub const ACCENT_ORANGE: [f32; 4] = [0.976, 0.451, 0.086, 1.0];  // #f97316 Orange
     pub const RED_HOVER: [f32; 4] = [0.937, 0.267, 0.267, 0.8];
     pub const RED_SUBTLE: [f32; 4] = [0.15, 0.11, 0.11, 1.0];
     pub const ACCENT_GOLD: [f32; 4] = [0.902, 0.659, 0.333, 1.0];  // #e6a855 Code text
