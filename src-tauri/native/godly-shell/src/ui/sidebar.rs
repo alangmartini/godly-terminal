@@ -75,9 +75,9 @@ impl Sidebar {
                     id: "default".into(),
                     label: "plane".into(),
                     number: 1,
-                    branch: "fix/pd".into(),
-                    description: "fix/pdf-export...".into(),
-                    active: true,
+                    branch: "fix/pdf-export_".into(),
+                    description: "".into(),
+                    active: false,
                     shell_type: "pwsh".into(),
                     cwd: "~/dev/plane".into(),
                     timestamp: "5m".into(),
@@ -88,7 +88,7 @@ impl Sidebar {
                     number: 2,
                     branch: "main".into(),
                     description: "".into(),
-                    active: false,
+                    active: true,
                     shell_type: "pwsh".into(),
                     cwd: "~/work/opensessions".into(),
                     timestamp: "2h".into(),
@@ -103,17 +103,6 @@ impl Sidebar {
                     shell_type: "bash".into(),
                     cwd: "~/dev/quiver".into(),
                     timestamp: "1d".into(),
-                },
-                SidebarItem {
-                    id: "session-4".into(),
-                    label: "godly-terminal".into(),
-                    number: 4,
-                    branch: "feat/sh".into(),
-                    description: "".into(),
-                    active: false,
-                    shell_type: "pwsh".into(),
-                    cwd: "~/dev/godly-terminal".into(),
-                    timestamp: "3d".into(),
                 },
             ],
             item_hover_anim: AnimVec::default(),
@@ -248,24 +237,30 @@ impl Sidebar {
         ui.vline(sidebar.right() - 1.0, sidebar.y, sidebar.height, 1.0, colors::BORDER);
         // (Web reference uses clean flat sidebar with no shadow effects)
 
-        // "Sessions {count}" header — inline mixed-case matching web reference
+        // "Sessions {count} ⚡ 1" header — inline mixed-case matching web reference
+        // Web: padding "12px 14px 4px", display "flex", gap 6, fontSize 12, color "#6e7681"
         let header_rect = Rect {
             x: sidebar.x,
             y: sidebar.y,
             width: sidebar.width,
             height: header_h,
         };
-        // Web reference: "Sessions 3" inline, no disclosure triangle, no pill badge
         let header_label = format!("Sessions {}", self.items.len());
         let header_text_x = header_rect.x + pad_h;
+        let header_text_y = header_rect.y + text_y_off(header_h);
         ui.text_ui(
             text,
             &header_label,
             header_text_x,
-            header_rect.y + text_y_off(header_h),
+            header_text_y,
             colors::FG_MUTED, // web: color "#6e7681" at full opacity
             colors::BG_DARK,
         );
+        // Web: <span style={{ color: "#484f58", fontSize: 10 }}>⚡ 1</span>
+        let lightning_x = header_text_x + text.text_width_ui(&header_label) + s(6.0);
+        ui.text_ui(text, "\u{26A1} 1", lightning_x, header_text_y,
+            colors::STATUS_DEFAULT, // #484f58
+            colors::BG_DARK);
 
         // Layout: [pad][num][gap][name...][pad]
         // Matches web reference: plain text IDs + name, branch on second line
@@ -554,41 +549,28 @@ impl Sidebar {
                 new_rect.y + text_y_off(compact_h),
                 new_fg, new_bg);
 
-        // Section divider above processes panel — thin line
+        // Bottom panel: running agents/processes — matches web reference layout:
+        // borderTop "1px solid #1a1d25", directory path header, two-line items
+        // with icon + name + status badge + description.
         if !self.agents.is_empty() {
-            let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
-            let header_section_h = s(28.0);
-            let agent_item_h = s(36.0);
-            let agent_panel_h_est = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
-            let panel_y_est = sidebar.bottom() - shortcuts_h - agent_panel_h_est;
-            let div_y = panel_y_est - s(4.0);
-            if div_y > new_y + compact_h + s(4.0) {
-                ui.hline_fade(sidebar.x + pad_h * 1.5, div_y,
-                         sidebar.width - pad_h * 3.0, 1.0,
-                         [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12], s(16.0));
-            }
-        }
-
-        // Bottom panel: running agents/processes — flat inline layout matching
-        // SESSIONS section style (no card container, just header + items).
-        if !self.agents.is_empty() {
-            let agent_item_h = s(36.0);
-            let header_section_h = s(28.0);
+            // Web: each process item is ~48px (two lines: name+badge ~24px + desc ~24px)
+            // plus 5px top/bottom padding and 1px separator
+            let agent_item_h = s(48.0);
+            let header_section_h = s(24.0); // directory path header
             let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
             let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
             let panel_y = sidebar.bottom() - shortcuts_h - agent_panel_h;
 
-            // "Processes" header — inline mixed-case matching web reference
-            // (no disclosure triangle, no pill badge)
-            ui.text_ui(text, &format!("Processes {}", self.agents.len()),
-                    sidebar.x + pad_h,
-                    panel_y + (header_section_h - ch) / 2.0,
-                    [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.65],
+            // Solid top border — web: borderTop "1px solid #1a1d25"
+            ui.hline(sidebar.x, panel_y, sidebar.width, 1.0, colors::BORDER);
+
+            // Directory path header — web: padding "8px 10px 4px", fontSize 10,
+            // color "#484f58", letterSpacing 0.5
+            ui.text_ui(text, "\u{2026}ments/work/opensessions",
+                    sidebar.x + s(10.0),
+                    panel_y + s(4.0),
+                    colors::STATUS_DEFAULT, // #484f58
                     colors::BG_DARK);
-            // Thin separator below header
-            ui.hline_fade(sidebar.x + pad_h, panel_y + header_section_h - 1.0,
-                     sidebar.width - pad_h * 2.0, 1.0,
-                     [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15], s(12.0));
 
             let mut ay = panel_y + header_section_h;
             for (ai, agent) in self.agents.iter().enumerate() {
@@ -603,7 +585,6 @@ impl Sidebar {
                     AgentStatus::Stopped => "stopped",
                 };
 
-                // Single-line agent item: dot + name + status badge
                 let agent_hover_t = self.agent_hover_anim.get(ai);
                 let agent_inset = Rect {
                     x: sidebar.x + s(6.0),
@@ -619,70 +600,76 @@ impl Sidebar {
                     ui.fill_rounded(agent_inset, ahover_bg, s(3.0));
                 }
 
-                let text_y = ay + (agent_item_h - ch) / 2.0;
+                // First line: icon + name + status badge + dismiss ×
+                let line1_y = ay + s(5.0);
                 let panel_bg = colors::BG_DARK;
 
-                // Status indicator dot — clean, no orbit animation
-                let dot_r = s(2.5);
-                let dot_size = dot_r * 2.0;
-                let dot_rect = Rect {
-                    x: sidebar.x + pad_h + (cw - dot_size) / 2.0,
-                    y: text_y + (ch - dot_size) / 2.0,
-                    width: dot_size,
-                    height: dot_size,
+                // Status icon — web uses text symbols: ⓘ (running), ⚠ (stopped), ● (waiting)
+                let icon_str = match agent.status {
+                    AgentStatus::Running => "\u{24D8}", // ⓘ
+                    AgentStatus::Stopped => "\u{26A0}", // ⚠
+                    AgentStatus::Waiting => "\u{25CF}", // ●
                 };
-                // Running dots get subtle breathing glow only
-                if matches!(agent.status, AgentStatus::Running) {
-                    let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                    let glow_rect = Rect {
-                        x: dot_rect.x - s(2.0), y: dot_rect.y - s(2.0),
-                        width: dot_size + s(4.0), height: dot_size + s(4.0),
-                    };
-                    ui.fill_shadow(glow_rect, [status_color[0], status_color[1], status_color[2], 0.15 * breath], dot_r + s(2.0), s(4.0));
-                }
-                ui.fill_rounded(dot_rect, status_color, dot_r);
+                ui.text_ui(text, icon_str,
+                    sidebar.x + s(10.0), line1_y,
+                    status_color, panel_bg);
 
-                // Agent name (brightens on hover)
-                let agent_name_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, agent_hover_t * 0.4);
-                ui.text_ui(text, &agent.name,
-                        sidebar.x + pad_h + cw * 2.0,
-                        text_y,
-                        agent_name_fg, panel_bg);
+                // Agent name — web: color "#9198a1", fontWeight 600
+                let agent_name_x = sidebar.x + s(10.0) + text.text_width_ui(icon_str) + s(6.0);
+                let agent_name_fg = lerp_color(
+                    [0.569, 0.596, 0.631, 1.0], // #9198a1
+                    colors::FG_PRIMARY,
+                    agent_hover_t * 0.4,
+                );
+                ui.text_ui_bold(text, &agent.name, agent_name_x, line1_y,
+                    agent_name_fg, panel_bg);
 
-                // Status label (right-aligned, pill-shaped badge)
+                // Status badge — web: fontSize 10, borderRadius 3 (NOT pill),
+                // backgroundColor: color + "18" (~0.094 opacity)
                 let sw = text.text_width_ui(status_text);
-                let status_badge_pad_h = s(4.0);
+                let status_badge_pad_h = s(6.0);
                 let status_badge_h = ch * 0.75;
                 let status_badge_w = sw + status_badge_pad_h * 2.0;
-                let status_badge_x = sidebar.right() - status_badge_w - pad_h;
-                let status_badge_y = text_y + (ch - status_badge_h) / 2.0;
+                let name_end_x = agent_name_x + text.text_width_ui(&agent.name) + s(6.0);
+                let status_badge_x = name_end_x;
+                let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
                 let status_badge_rect = Rect {
                     x: status_badge_x, y: status_badge_y,
                     width: status_badge_w, height: status_badge_h,
                 };
-                let status_badge_r = status_badge_h / 2.0;
-                let status_bg = [status_color[0], status_color[1], status_color[2], 0.12];
+                let status_badge_r = s(3.0); // web: borderRadius 3, not pill
+                let status_bg = [status_color[0], status_color[1], status_color[2], 0.094]; // web: "18" hex = ~9.4%
                 ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
-                ui.stroke_rounded(status_badge_rect, status_badge_r, 0.5,
-                    [status_color[0], status_color[1], status_color[2], 0.25]);
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
                 ui.text_ui(text, status_text,
                         status_text_x, status_text_y,
                         status_color, panel_bg);
 
+                // Dismiss × button — web: color "#3b4048", marginLeft auto, fontSize 13
+                let dismiss_x = sidebar.right() - pad_h - text.text_width_ui("\u{00D7}");
+                ui.text_ui(text, "\u{00D7}", dismiss_x, line1_y,
+                    colors::STATUS_PATH, // #3b4048
+                    panel_bg);
+
+                // Second line: task description — web: fontSize 11, color "#484f58",
+                // paddingLeft 20, lineHeight 1.3
+                if !agent.task.is_empty() {
+                    let desc_x = sidebar.x + s(10.0) + text.text_width_ui(icon_str) + s(14.0);
+                    let desc_y = line1_y + ch + s(2.0);
+                    let desc_avail = sidebar.width - (desc_x - sidebar.x) - pad_h;
+                    let desc = truncate_to_width(&agent.task, desc_avail, text);
+                    ui.text_ui(text, &desc, desc_x, desc_y,
+                        colors::STATUS_DEFAULT, // #484f58
+                        panel_bg);
+                }
+
                 ay += agent_item_h;
 
-                // Subtle separator between agent items
+                // Separator between items — web: borderBottom "1px solid #13161d"
                 if !std::ptr::eq(agent, self.agents.last().unwrap()) {
-                    ui.hline_fade(
-                        sidebar.x + pad_h + cw * 2.0,
-                        ay - 1.0,
-                        sidebar.width - pad_h * 2.0 - cw * 2.0,
-                        1.0,
-                        [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12],
-                        s(8.0),
-                    );
+                    let sep_color = [0.075, 0.086, 0.114, 1.0]; // #13161d
+                    ui.hline(sidebar.x, ay - 1.0, sidebar.width, 1.0, sep_color);
                 }
             }
         }
@@ -745,10 +732,10 @@ impl Sidebar {
                 }
                 // Agent item hover detection
                 if !self.agents.is_empty() {
-                    let agent_item_h = (44.0 * scale).round();
-                    let header_section_h = (28.0 * scale).round();
+                    let agent_item_h = (48.0 * scale).round();
+                    let header_section_h = (24.0 * scale).round();
                     let shortcuts_h = (SHORTCUTS_BAR_HEIGHT * scale).round();
-                    let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + (8.0 * scale).round();
+                    let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + (4.0 * scale).round();
                     let panel_y = sidebar.bottom() - shortcuts_h - agent_panel_h;
                     let mut ay = panel_y + header_section_h;
                     for i in 0..self.agents.len() {

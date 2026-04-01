@@ -2,6 +2,49 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 71 — Process Panel & Session Header Parity
+
+**Goal**: Match the web reference's process panel layout and add
+lightning indicator to session header.
+
+**Changes made**:
+
+1. **Session header lightning indicator** (`sidebar.rs`): Added "⚡ 1"
+   text inline after "Sessions N", matching web's `color: "#484f58"`.
+
+2. **Process panel header** (`sidebar.rs`): Changed from "Processes N"
+   to truncated directory path ("…ments/work/opensessions"), matching
+   web's `fontSize: 10`, `color: "#484f58"`, `letterSpacing: 0.5`.
+
+3. **Two-line process items** (`sidebar.rs`): Each process now shows
+   icon + name + status badge + dismiss × on line 1, and task
+   description text on line 2. Item height increased from 36px to 48px.
+
+4. **Process icons** (`sidebar.rs`): Changed from plain colored dots
+   to text symbols (ⓘ running, ⚠ stopped, ● waiting) matching web.
+
+5. **Status badge shape** (`sidebar.rs`): Changed from pill (full
+   radius) to `borderRadius: 3` matching web. Background opacity
+   changed from 0.12 to 0.094 (web's hex "18").
+
+6. **Agent name bold** (`sidebar.rs`): Changed to `text_ui_bold` to
+   match web's `fontWeight: 600`.
+
+7. **Dismiss × button** (`sidebar.rs`): Added right-aligned dismiss
+   button on each process item (`color: "#3b4048"`).
+
+8. **Solid separators** (`sidebar.rs`): Changed from faded divider
+   lines to solid 1px `#13161d` between items and solid 1px `#1a1d25`
+   top border, matching web's `borderBottom`/`borderTop`.
+
+9. **Demo data** (`sidebar.rs`): Matched to web reference — 3 sessions
+   (plane, opensessions active, quiver) instead of 4.
+
+**Remaining gaps** (all feature-level, not styling):
+- New Session button (not in web reference)
+- Right panel (web shows content panel)
+- Tab bar right-side indicators ("bun", "opensessions")
+
 ## Iteration 70 — Sidebar Action Shortcuts Bar (Web Parity)
 
 **Goal**: Add the action shortcuts bar at the bottom of the sidebar,

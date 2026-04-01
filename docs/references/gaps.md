@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 70)
+Last updated: 2026-04-01 (Iteration 71)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -42,6 +42,23 @@ Last updated: 2026-03-31 (Iteration 70)
 | Branch text color | Done | STATUS_DEFAULT (#484f58) base, matching web exactly (iteration 69) |
 | "::" indicator color | Done | STATUS_DEFAULT (#484f58), matching web exactly (iteration 69) |
 | Sidebar action shortcuts | Done | Bottom bar with "~ cycle", "⊘ go", etc. matching web layout (iteration 70) |
+| Session header lightning | Done | "⚡ 1" indicator after session count, color #484f58 (iteration 71) |
+| Process panel layout | Done | Directory path header, two-line items with descriptions, dismiss ×, borderRadius 3 badges (iteration 71) |
+| Process panel separators | Done | Solid 1px #13161d between items, solid top border (iteration 71) |
+| Demo data parity | Done | 3 sessions matching web (plane, opensessions active, quiver) (iteration 71) |
+
+## Changes in Iteration 71
+
+1. **Session header lightning indicator** — Added "⚡ 1" text after "Sessions N" header, matching web's `color: "#484f58"` (STATUS_DEFAULT) and inline positioning.
+2. **Process panel header** — Changed from "Processes N" to truncated directory path ("…ments/work/opensessions"), matching web's `padding: "8px 10px 4px"`, `fontSize: 10`, `color: "#484f58"`.
+3. **Process item descriptions** — Added second line with task text below each agent name, matching web's `fontSize: 11`, `color: "#484f58"`, `paddingLeft: 20`.
+4. **Process status badges** — Changed from pill shape (full radius) to `borderRadius: 3` matching web. Opacity changed from 0.12 to 0.094 (web's "18" hex).
+5. **Process icons** — Changed from plain dots to text symbols (ⓘ running, ⚠ stopped, ● waiting) matching web reference.
+6. **Agent name weight** — Changed to bold (`text_ui_bold`) matching web's `fontWeight: 600`.
+7. **Process dismiss button** — Added × button right-aligned on each process item, matching web's `color: "#3b4048"`.
+8. **Process separators** — Changed from faded lines to solid 1px `#13161d`, matching web's `borderBottom`.
+9. **Process panel top border** — Changed from faded divider to solid 1px `#1a1d25`, matching web's `borderTop`.
+10. **Demo data** — Matched to web reference: 3 sessions (plane, opensessions active, quiver), removing 4th "godly-terminal" session.
 
 ## Changes in Iteration 70
 
