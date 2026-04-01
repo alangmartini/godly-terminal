@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-03-31 (Iteration 64)
+Last updated: 2026-03-31 (Iteration 65)
 
 ## Reference Targets
 - **Zed** (`reference-zed.png`): Minimal, clean dark theme with subtle separators and warm palette
@@ -187,6 +187,11 @@ Last updated: 2026-03-31 (Iteration 64)
 | Tab bottom color indicator | Done | Active tab uses full-width 2px colored bottom bar matching web's `borderBottom: 2px solid ${color}` (iteration 64) |
 | Removed tab glow bleed | Done | Removed accent glow emission below active tab — web has no such effect (iteration 64) |
 | Simplified tab hover | Done | Hover shows subtle flat background tint only, no gradient/lift/accent preview (iteration 64) |
+| Plain text session IDs | Done | Removed colored accent dots, replaced with dim text numbers (#555d6b) matching web's `{s.id}` (iteration 65) |
+| Indigo-only active border | Done | Active session left border always uses ACCENT_BLUE (#6366f1), not rotating accent colors (iteration 65) |
+| Branch on second line | Done | Branch shown below session name (indented, muted color) matching web layout, all items now two-line (iteration 65) |
+| Removed shell type pills | Done | Shell type pill badges removed from sidebar items — web reference doesn't show them (iteration 65) |
+| Removed sidebar timestamps | Done | Relative time labels removed from sidebar — web reference doesn't show them (iteration 65) |
 
 ## Remaining Gaps (Priority Order)
 

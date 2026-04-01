@@ -187,9 +187,9 @@ impl Sidebar {
 
     fn item_height_for(&self, index: usize, scale: f32) -> f32 {
         let item = &self.items[index];
-        // Two-line only if there's an explicit description (CWD is shown
-        // in the breadcrumb bar and status bar, so it's not repeated here).
-        if item.description.is_empty() {
+        // Web reference shows branch on second line for all items.
+        // Two-line if there's a branch or description.
+        if item.branch.is_empty() && item.description.is_empty() {
             (ITEM_HEIGHT_COMPACT * scale).round()
         } else {
             (ITEM_HEIGHT * scale).round()
@@ -337,11 +337,10 @@ impl Sidebar {
                  sidebar.width - pad_h * 2.0, 1.0,
                  [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.15], s(12.0));
 
-        // Layout: [pad][dot][gap][num][gap][name...][gap][branch][shell][pad]
-        // Two-line items: line 1 = dot + number + name + branch, line 2 = description
+        // Layout: [pad][num][gap][name...][pad]
+        // Matches web reference: plain text IDs + name, branch on second line
         let num_x = sidebar.x + pad_h;
-        let dot_space = s(7.0) + s(4.0); // accent dot (7px) + gap (4px)
-        let name_x = num_x + dot_space + cw * 2.0;
+        let name_x = num_x + cw * 2.0 + s(4.0);
         let ui_cw = if text.ui_avg_advance > 0.0 { text.ui_avg_advance } else { cw * 0.75 };
 
         // Truncate a string to fit within max_w pixels using exact per-glyph widths.
@@ -414,28 +413,31 @@ impl Sidebar {
                 }
             }
 
-            // Active state — flat background + 3px left accent bar (matches web reference)
+            // Active state — flat background + 3px left accent bar
+            // Web reference always uses #6366f1 (indigo/ACCENT_BLUE) for active border
             if active_t > 0.005 {
-                let ac = session_accent;
-                // Flat active background
+                // Flat active background (#171b24)
                 let active_bg = lerp_color(colors::BG_DARK, colors::BG_ACTIVE, active_t);
                 ui.fill_rounded(inset_rect, active_bg, item_radius);
 
-                // 3px flat left accent bar
+                // 3px flat left accent bar — always indigo, matching web
                 let indicator_rect = Rect {
                     x: rect.x + s(3.0),
                     y: rect.y + s(7.0),
                     width: s(3.0),
                     height: rect.height - s(14.0),
                 };
-                ui.fill_rounded(indicator_rect, [ac[0], ac[1], ac[2], active_t], s(1.5));
+                ui.fill_rounded(indicator_rect,
+                    [colors::ACCENT_BLUE[0], colors::ACCENT_BLUE[1], colors::ACCENT_BLUE[2], active_t],
+                    s(1.5));
             }
 
             // Text y position: centered for compact, top-aligned for two-line
-            let text_y = if item.description.is_empty() {
-                rect.y + text_y_off(this_item_h)
-            } else {
+            let is_two_line = !item.branch.is_empty() || !item.description.is_empty();
+            let text_y = if is_two_line {
                 rect.y + line1_y_off
+            } else {
+                rect.y + text_y_off(this_item_h)
             };
 
             // Session number — text bg smoothly blends with hover and active
@@ -445,40 +447,15 @@ impl Sidebar {
                 active_t,
             );
 
-            // Session accent dot — small colored circle matching the tab
-            // accent color cycle.  Clean and minimal at sidebar scale.
-            let dot_sz = s(7.0);
-            let dot_x = num_x; // left-aligned in dot column
-            let dot_y = text_y + (ch - dot_sz) / 2.0;
-            let dot_rect = Rect {
-                x: dot_x, y: dot_y, width: dot_sz, height: dot_sz,
-            };
-            let dot_alpha = lerp(0.62, 0.92, active_t.max(hover_t * 0.5));
-            let dot_color = [session_accent[0], session_accent[1], session_accent[2], dot_alpha];
-            ui.fill_rounded(dot_rect, dot_color, dot_sz / 2.0);
-            // Subtle glow ring on active session dot
-            if active_t > 0.005 {
-                let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                ui.stroke_rounded(dot_rect, dot_sz / 2.0, 0.5,
-                    [session_accent[0], session_accent[1], session_accent[2], 0.20 * breath * active_t]);
-            }
-
-            // Session number (shifted right to make room for accent dot)
-            let num_x_shifted = num_x + dot_space;
+            // Session number — plain dim text matching web (#555d6b = FG_DIM)
             let num_str = format!("{}", item.number);
-            let inactive_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, hover_t);
-            let fg = lerp_color(inactive_fg, session_accent, active_t);
-            ui.text(text, &num_str, num_x_shifted, text_y, fg, item_bg);
+            let num_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t * 0.5);
+            ui.text(text, &num_str, num_x, text_y, num_fg, item_bg);
 
-            // Session name (truncated to fit pixel width) — text brightens on hover and active
-            // Web reference uses #9198a1 for inactive names (~FG_SECONDARY), not FG_PRIMARY
+            // Session name (truncated to fit) — web: #e6edf3 active, #9198a1 inactive
             let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_BRIGHT, hover_t * 0.6);
             let name_fg = lerp_color(inactive_name, colors::WHITE, active_t);
-            // Calculate available width: from name_x to right_edge minus reserved space
-            // for branch (~6 chars) + shell pill (~5 chars) + gaps
-            let right_reserved = text.text_width_ui(&item.branch.chars().take(6).collect::<String>())
-                + text.text_width_ui(&item.shell_type) + s(24.0) + pad_h * 2.0;
-            let name_max_w = (rect.right() - name_x - right_reserved).max(s(30.0));
+            let name_max_w = (rect.right() - name_x - pad_h).max(s(30.0));
             let name = truncate_to_width(&item.label, name_max_w, text);
             if item.active {
                 ui.text_ui_bold(text, &name, name_x, text_y, name_fg, item_bg);
@@ -486,107 +463,22 @@ impl Sidebar {
                 ui.text_ui(text, &name, name_x, text_y, name_fg, item_bg);
             }
 
-            // Shell type pill badge (right-aligned, next to branch)
-            // Small pill showing "pwsh", "bash", etc. for at-a-glance shell identification
-            let mut right_edge = rect.right() - pad_h;
-            if !item.shell_type.is_empty() && sidebar.width > s(130.0) {
-                let shell_w = text.text_width_ui(&item.shell_type);
-                let pill_pad_h = s(4.0);
-                let pill_h = ch * 0.75;
-                let pill_w = shell_w + pill_pad_h * 2.0;
-                let pill_x = right_edge - pill_w;
-                let pill_y = text_y + (ch - pill_h) / 2.0;
-                let pill_rect = Rect { x: pill_x, y: pill_y, width: pill_w, height: pill_h };
-                let pill_r = pill_h / 2.0;
-                // Muted pill background — very subtle, doesn't compete with session name
-                let pill_bg_alpha = lerp(0.25, 0.40, hover_t.max(active_t * 0.5));
-                ui.fill_rounded(pill_rect, [
-                    colors::BG_SURFACE[0], colors::BG_SURFACE[1],
-                    colors::BG_SURFACE[2], pill_bg_alpha,
-                ], pill_r);
-                ui.stroke_rounded(pill_rect, pill_r, 0.5,
-                    [colors::BORDER[0], colors::BORDER[1], colors::BORDER[2], 0.12]);
-                let pill_fg = lerp_color(
-                    [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], 0.7],
+            // Second line: branch (web: paddingLeft ~20px, color #484f58)
+            // Web always shows branch below the session name.
+            if !item.branch.is_empty() {
+                let branch_x = name_x; // indented to align with name
+                // Web uses #484f58 which is between FG_MUTED and a darker shade
+                let branch_fg = lerp_color(
+                    [colors::FG_MUTED[0] * 0.7, colors::FG_MUTED[1] * 0.7, colors::FG_MUTED[2] * 0.7, 1.0],
                     colors::FG_MUTED,
-                    hover_t * 0.3,
+                    hover_t * 0.4 + active_t * 0.3,
                 );
-                let pill_text_x = pill_x + pill_pad_h;
-                let pill_text_y = pill_y + (pill_h - ch) / 2.0;
-                ui.text_ui(text, &item.shell_type, pill_text_x, pill_text_y, pill_fg, item_bg);
-                right_edge = pill_x - s(4.0);
-            }
-
-            // Branch info (right-aligned, before shell pill)
-            if !item.branch.is_empty() && sidebar.width > s(150.0) {
-                let branch_max_w = ui_cw * 7.0; // ~7 chars worth of space
-                let branch = truncate_to_width(&item.branch, branch_max_w, text);
-                let branch_w = text.text_width_ui(&branch);
-                // Boost readability: start at 40% toward FG_SECONDARY (up from 25%)
-                let branch_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
-                ui.text_ui(text, &branch,
-                        right_edge - branch_w,
-                        text_y,
-                        branch_fg, item_bg);
-            }
-
-            // Description line (second row, only if explicit description exists)
-            // CWD is NOT shown here — it's already in the breadcrumb bar and
-            // status bar. Keeping the sidebar compact and focused on session identity.
-            let (second_line, is_cwd) = if !item.description.is_empty() {
-                (item.description.clone(), false)
-            } else {
-                (String::new(), false)
-            };
-            if !second_line.is_empty() {
-                // Reserve space for timestamp if present
-                let ts_reserve = if !item.timestamp.is_empty() {
-                    text.text_width_ui(&item.timestamp) + s(8.0)
-                } else {
-                    0.0
-                };
-                let desc_avail = sidebar.width - pad_h * 2.0 - ui_cw * 2.0 - ts_reserve;
-                let desc = truncate_to_width(&second_line, desc_avail, text);
-                // Start from a blend between FG_MUTED and FG_SECONDARY for better baseline readability
-                let base_desc = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40);
-                let inactive_desc = lerp_color(base_desc, colors::FG_SECONDARY, hover_t * 0.4);
-                let desc_fg = lerp_color(inactive_desc, colors::FG_SECONDARY, active_t * 0.5);
-                // Render a small folder icon for CWD paths to distinguish from descriptions
-                let desc_x = if is_cwd {
-                    let icon_fg = [desc_fg[0], desc_fg[1], desc_fg[2], desc_fg[3] * 0.7];
-                    let icon_sz = ch * 0.75;
-                    let icon_t = (0.8 * text.scale).max(0.5);
-                    let icon_rect = Rect {
-                        x: name_x,
-                        y: rect.y + line2_y_off + (ch - icon_sz) / 2.0,
-                        width: icon_sz,
-                        height: icon_sz,
-                    };
-                    ui.icon_folder(icon_rect, icon_t, icon_fg);
-                    name_x + icon_sz + s(3.0)
-                } else {
-                    name_x
-                };
-                ui.text_ui(text, &desc,
-                        desc_x,
-                        rect.y + line2_y_off,
-                        desc_fg, item_bg);
-            }
-
-            // Timestamp label — right-aligned, very muted.
-            // On two-line items (with description): second line.
-            // On compact items (no description): first line, after branch.
-            if !item.timestamp.is_empty() {
-                let ts_w = text.text_width_ui(&item.timestamp);
-                let ts_x = rect.right() - pad_h - ts_w;
-                let ts_y = if item.description.is_empty() {
-                    text_y  // first line for compact items
-                } else {
-                    rect.y + line2_y_off  // second line for two-line items
-                };
-                let ts_alpha = lerp(0.42, 0.60, hover_t.max(active_t * 0.3));
-                let ts_fg = [colors::FG_MUTED[0], colors::FG_MUTED[1], colors::FG_MUTED[2], ts_alpha];
-                ui.text_ui(text, &item.timestamp, ts_x, ts_y, ts_fg, item_bg);
+                ui.text_ui(text, &item.branch, branch_x, rect.y + line2_y_off, branch_fg, item_bg);
+            } else if !item.description.is_empty() {
+                let desc_avail = sidebar.width - pad_h * 2.0 - ui_cw * 2.0;
+                let desc = truncate_to_width(&item.description, desc_avail, text);
+                let desc_fg = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
+                ui.text_ui(text, &desc, name_x, rect.y + line2_y_off, desc_fg, item_bg);
             }
 
             // Subtle separator between items (faded, skip for last item)

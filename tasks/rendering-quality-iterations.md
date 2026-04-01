@@ -2,6 +2,24 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 65 — Sidebar Session Items (Web Reference Parity)
+
+**Analysis**: Web reference sidebar uses plain text session IDs ("1", "2", "3") with dim color,
+branch on second line, and always-indigo active left border. Native had colored accent dots,
+shell type pills, timestamps, right-aligned branch, and rotating accent colors.
+
+**Changes** (sidebar.rs):
+1. Removed colored accent dot circles — replaced with plain text number IDs in FG_DIM
+2. Active border always uses ACCENT_BLUE (indigo) instead of rotating session accent colors
+3. Branch moved from right-aligned on first line to second line (below name), matching web
+4. Removed shell type pill badges (pwsh/bash) — web doesn't show them
+5. Removed timestamp labels (5m/2h/3d) — web doesn't show them
+6. Items with branch now always two-line (was compact when no description)
+7. Name gets full width without right-reserved space for branch/shell
+
+**Result**: Sidebar session items now match web reference layout: ID + name on line 1,
+branch on line 2, active item has indigo left border + darker background.
+
 ## Iteration 64 — Flat Tab Bar (Web Reference Parity)
 
 **Analysis**: Side-by-side comparison revealed the tab bar was the biggest remaining visual
