@@ -147,6 +147,7 @@ impl App {
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
                 sb.process_name = "pwsh".into();
+                sb.streaming = true; // match web reference demo state
                 // Detect git branch
                 if let Ok(output) = std::process::Command::new("git")
                     .args(["rev-parse", "--abbrev-ref", "HEAD"])

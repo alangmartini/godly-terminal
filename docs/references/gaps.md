@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-01 (Iteration 77)
+Last updated: 2026-04-01 (Iteration 78)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -57,6 +57,19 @@ Last updated: 2026-04-01 (Iteration 77)
 | Per-element font sizing | Done | All UI text now matches web's exact fontSize per element: 10px shortcuts/badges, 11px branch/status, 12px headers/tabs, 13px names/stanzas, 15px poem title (iteration 76) |
 | Tab badge count font | Done | Badge count text ("3", "12") now renders at 9px proportional bold (fontWeight 700), matching web's Badge component fontSize: 9, was incorrectly using 14px monospace (iteration 77) |
 | Session number font | Done | Session ID numbers (1, 2, 3) now render at 12px proportional font matching web's fontSize: 12, fontWeight: 500, was incorrectly using 14px monospace (iteration 77) |
+| Inactive name color | Done | Session names and agent names now use exact #9198a1 (FG_INACTIVE), was #8b949e (FG_SECONDARY) (iteration 78) |
+| Synthetic italic poem | Done | Poem stanzas now render with synthetic italic (skew ~12°) approximating web's Georgia serif italic (iteration 78) |
+| Streaming status bar | Done | Status bar shows "~ Streaming response..." matching web reference demo state (iteration 78) |
+| Agent demo data parity | Done | Agent 2 name "anu" → "amp", descriptions matched to web, claude-code has no description (iteration 78) |
+
+## Changes in Iteration 78
+
+1. **FG_INACTIVE color constant** — Added `#9198a1` ([0.569, 0.596, 0.631]) as `FG_INACTIVE` to the color palette. Web uses this for inactive session names, agent names, and poem stanzas. Previously these elements used `FG_SECONDARY` (#8b949e) which was slightly too dark.
+2. **Inactive session name color fixed** — Session names when not active now lerp from `FG_INACTIVE` (#9198a1) instead of `FG_SECONDARY` (#8b949e), matching web's exact `color: isActive ? "#e6edf3" : "#9198a1"`.
+3. **Agent name color fixed** — Agent/process names in sidebar now use `FG_INACTIVE` base color matching web's `color: "#9198a1"`.
+4. **Synthetic italic for poem stanzas** — Added `skew` field to `TextCommand` and `text_ui_italic_scaled()` method to `UiBuilder`. The terminal renderer shifts top vertices of glyph quads rightward by `skew * height` to simulate italic. Poem stanzas now render with ~12° slant approximating web's `fontStyle: italic`.
+5. **Agent demo data matched** — Agent 2 name changed from "anu" to "amp", agent descriptions updated to match web reference exactly ("Verify and clean README documentation", "Verify README against codebase"), claude-code agent has empty description matching web.
+6. **Streaming status bar** — Set `streaming = true` in demo status bar initialization to match web reference which shows "~ Streaming response... Esc to cancel" in the status bar.
 
 ## Changes in Iteration 77
 

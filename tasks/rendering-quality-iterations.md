@@ -2,6 +2,32 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 78 — Synthetic Italic, Color Accuracy, Demo Parity
+
+**Goal**: Fix remaining color mismatches, add synthetic italic for poem
+stanzas, and match demo data/state to web reference exactly.
+
+**Changes made**:
+
+1. **FG_INACTIVE color (#9198a1)** — Web uses #9198a1 for inactive session
+   names and agent names, but native was using FG_SECONDARY (#8b949e). Added
+   FG_INACTIVE constant and updated sidebar session names + agent names.
+
+2. **Synthetic italic for poem stanzas** — Added `skew` field to TextCommand
+   and `text_ui_italic_scaled()` to UiBuilder. Renderer shifts top vertices
+   of glyph quads rightward by `skew * height` (~12° slant). Poem stanzas
+   now render with synthetic italic, approximating web's Georgia serif italic.
+
+3. **Agent demo data matched** — Agent 2 name "anu" → "amp", descriptions
+   matched to web ("Verify and clean README documentation", "Verify README
+   against codebase"), claude-code agent has no description.
+
+4. **Streaming status bar** — Set streaming=true in demo init to match web
+   reference which shows "~ Streaming response... Esc to cancel".
+
+**Result**: Inactive text colors now match web exactly. Poem has visible
+italic styling. Status bar matches web demo state. Agent panel data matches.
+
 ## Iteration 77 — Fix Monospace/Proportional Font Mismatches
 
 **Goal**: Fix remaining places where UI chrome text was still using the monospace

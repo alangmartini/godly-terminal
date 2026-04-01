@@ -108,21 +108,21 @@ impl Sidebar {
             agent_hover_anim: AnimVec::default(),
             agents: vec![
                 AgentItem {
-                    icon: "\u{2191}",
+                    icon: "!",
                     name: "amp".into(),
-                    task: "Verify and clean README".into(),
+                    task: "Verify and clean README documentation".into(),
                     status: AgentStatus::Running,
                 },
                 AgentItem {
-                    icon: "\u{2193}",
-                    name: "anu".into(),
-                    task: "Verify README against...".into(),
+                    icon: "\u{26A0}",
+                    name: "amp".into(),
+                    task: "Verify README against codebase".into(),
                     status: AgentStatus::Stopped,
                 },
                 AgentItem {
-                    icon: "\u{25CB}",
+                    icon: "\u{25CF}",
                     name: "claude-code".into(),
-                    task: "cycle # gol d remov...".into(),
+                    task: String::new(),
                     status: AgentStatus::Waiting,
                 },
             ],
@@ -361,7 +361,7 @@ impl Sidebar {
             ui.text_ui_scaled(text, &num_str, num_x, text_y, num_fg, item_bg, font_scale::PX12);
 
             // Session name (truncated to fit) — web: #e6edf3 active, #9198a1 inactive
-            let inactive_name = lerp_color(colors::FG_SECONDARY, colors::FG_BRIGHT, hover_t * 0.6);
+            let inactive_name = lerp_color(colors::FG_INACTIVE, colors::FG_BRIGHT, hover_t * 0.6);
             let name_fg = lerp_color(inactive_name, colors::FG_BRIGHT, active_t); // web: #e6edf3, not white
             let name_max_w = (rect.right() - name_x - pad_h).max(s(30.0));
             let name = truncate_to_width(&item.label, name_max_w, text);
@@ -515,7 +515,7 @@ impl Sidebar {
                 // Agent name — web: color "#9198a1", fontWeight 600
                 let agent_name_x = sidebar.x + s(10.0) + text.text_width_ui_scaled(icon_str, font_scale::PX11) + s(6.0);
                 let agent_name_fg = lerp_color(
-                    [0.569, 0.596, 0.631, 1.0], // #9198a1
+                    colors::FG_INACTIVE, // #9198a1
                     colors::FG_PRIMARY,
                     agent_hover_t * 0.4,
                 );

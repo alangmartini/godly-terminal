@@ -156,6 +156,13 @@ impl TerminalRenderer {
                 let x1 = (px + pw) / vw * 2.0 - 1.0;
                 let y1 = 1.0 - (py + ph) / vh * 2.0;
 
+                // Synthetic italic: shift top vertices rightward by skew * height
+                let skew_ndc = if cmd.skew != 0.0 {
+                    cmd.skew * ph / vw * 2.0
+                } else {
+                    0.0
+                };
+
                 // 6 vertices (2 triangles)
                 let v = |pos: [f32; 2], uv: [f32; 2]| CellVertex {
                     position: pos,
@@ -163,10 +170,10 @@ impl TerminalRenderer {
                     fg_color: cmd.fg,
                     bg_color: transparent_bg,
                 };
-                let tl = [x0, y0];
-                let br = [x1, y1];
-                let tr = [br[0], tl[1]];
-                let bl = [tl[0], br[1]];
+                let tl = [x0 + skew_ndc, y0];       // top shifts right
+                let tr = [x1 + skew_ndc, y0];       // top shifts right
+                let bl = [x0, y1];                    // bottom stays
+                let br = [x1, y1];                    // bottom stays
                 let uv_tl = [entry.u0, entry.v0];
                 let uv_br = [entry.u1, entry.v1];
                 let uv_tr = [uv_br[0], uv_tl[1]];

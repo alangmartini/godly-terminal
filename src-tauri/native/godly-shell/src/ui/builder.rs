@@ -22,6 +22,7 @@ pub mod colors {
     pub const FG_BRIGHT: [f32; 4] = [0.902, 0.929, 0.953, 1.0];    // #e6edf3 Active/heading
     pub const FG_PRIMARY: [f32; 4] = [0.788, 0.820, 0.851, 1.0];   // #c9d1d9 Text
     pub const FG_SECONDARY: [f32; 4] = [0.545, 0.580, 0.620, 1.0]; // #8b949e Subtext
+    pub const FG_INACTIVE: [f32; 4] = [0.569, 0.596, 0.631, 1.0]; // #9198a1 Inactive names (web)
     pub const FG_MUTED: [f32; 4] = [0.431, 0.463, 0.506, 1.0];     // #6e7681 Overlay/muted
     pub const FG_DIM: [f32; 4] = [0.333, 0.365, 0.420, 1.0];       // #555d6b Dimmed chrome
     pub const ACCENT_BLUE: [f32; 4] = [0.388, 0.400, 0.945, 1.0];  // #6366f1 Indigo
@@ -73,6 +74,9 @@ pub struct TextCommand {
     /// Scale factor for glyph quads (1.0 = normal size, 0.786 = 11/14px).
     /// Used to render UI text at different pixel sizes without re-rasterizing.
     pub scale: f32,
+    /// Horizontal skew for synthetic italic (0.0 = upright, ~0.2 = italic).
+    /// Shifts top vertices of each glyph quad rightward by `skew * height`.
+    pub skew: f32,
 }
 
 /// Thin handle passed to widget `build()` methods. Carries actual cell
@@ -519,6 +523,7 @@ impl UiBuilder {
             bold: false,
             ui_font: false,
             scale: 1.0,
+            skew: 0.0,
         });
     }
 
@@ -538,6 +543,7 @@ impl UiBuilder {
             bold: true,
             ui_font: false,
             scale: 1.0,
+            skew: 0.0,
         });
     }
 
@@ -557,6 +563,7 @@ impl UiBuilder {
             bold: false,
             ui_font: true,
             scale: 1.0,
+            skew: 0.0,
         });
     }
 
@@ -576,6 +583,7 @@ impl UiBuilder {
             bold: true,
             ui_font: true,
             scale: 1.0,
+            skew: 0.0,
         });
     }
 
@@ -597,6 +605,7 @@ impl UiBuilder {
             bold: false,
             ui_font: true,
             scale,
+            skew: 0.0,
         });
     }
 
@@ -617,6 +626,29 @@ impl UiBuilder {
             bold: true,
             ui_font: true,
             scale,
+            skew: 0.0,
+        });
+    }
+
+    /// Record a scaled italic UI text draw command (synthetic italic via skew).
+    /// Simulates italic by applying a horizontal shear to glyph quads.
+    pub fn text_ui_italic_scaled(
+        &mut self,
+        _renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x, y, fg, bg,
+            bold: false,
+            ui_font: true,
+            scale,
+            skew: 0.20, // ~12° slant, typical for synthetic italic
         });
     }
 

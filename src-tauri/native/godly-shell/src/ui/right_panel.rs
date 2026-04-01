@@ -135,19 +135,19 @@ impl RightPanel {
         // Stanzas — web: marginBottom 18, lineHeight 1.7, fontSize 13,
         //                 color "#9198a1", fontFamily Georgia/serif italic,
         //                 letterSpacing 0.2, whiteSpace pre-wrap
-        // NOTE: We use proportional UI font since serif isn't loaded. Color and
-        // spacing match web exactly.
+        // Serif font not loaded — synthetic italic (skew) approximates the
+        // italic styling from the web reference.
         let stanza_ch = ch * font_scale::PX13; // fontSize 13
         let stanza_line_h = stanza_ch * 1.7; // lineHeight 1.7
         let stanza_gap = s(18.0);     // marginBottom 18
-        let stanza_fg: [f32; 4] = [0.569, 0.596, 0.631, 1.0]; // #9198a1
+        let stanza_fg: [f32; 4] = colors::FG_INACTIVE; // #9198a1
 
         for stanza in &self.stanzas {
             for line in stanza.split('\n') {
                 if y + stanza_ch > content_rect.y + content_rect.height {
                     break;
                 }
-                ui.text_ui_scaled(text, line, content_rect.x, y, stanza_fg, colors::BG_DARK, font_scale::PX13);
+                ui.text_ui_italic_scaled(text, line, content_rect.x, y, stanza_fg, colors::BG_DARK, font_scale::PX13);
                 y += stanza_line_h;
             }
             y += stanza_gap - stanza_line_h; // net gap between stanzas
