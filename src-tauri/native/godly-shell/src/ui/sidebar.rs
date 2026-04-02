@@ -335,8 +335,8 @@ impl Sidebar {
             let name_x = num_x + number_col_w + s(ROW_GAP_X);
             let name_y = layout_item.first_row.y + (layout_item.first_row.height - name_h) / 2.0;
 
-            // Session number — web: fontSize 12, fontWeight 500, color #8b949e (FG_SECONDARY)
-            let num_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.5);
+            // Session number — web: fontSize 12, fontWeight 500, color #555d6b (FG_DIM)
+            let num_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t * 0.5);
             ui.text_ui_scaled(
                 text,
                 &num_str,
@@ -515,7 +515,7 @@ impl Sidebar {
                         let lines = wrap_ui_text(&agent.task, desc_avail, text, desc_sc);
                         lines.max(1) as f32 * desc_line_h
                     };
-                    s(9.0) * 2.0 + main_row_h + desc_h // top/bottom padding + content
+                    s(5.0) * 2.0 + main_row_h + desc_h // top/bottom padding + content
                 })
                 .collect();
             let agent_panel_h: f32 =
@@ -569,7 +569,7 @@ impl Sidebar {
                 }
 
                 // First line: icon + name ... status badge (right-aligned) + ×
-                let line1_y = ay + s(9.0);
+                let line1_y = ay + s(5.0);
 
                 // Status icon — web uses text symbols: ⓘ (running), ⚠ (stopped), ● (waiting)
                 let icon_str = match agent.status {
