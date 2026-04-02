@@ -1,6 +1,6 @@
 //! Left sidebar: session list with names, active indicator, and new session button.
 
-use super::anim::{self, lerp, lerp_color, AnimVec};
+use super::anim::{self, lerp_color, AnimVec};
 use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
 use super::sidebar_layout::{
     compute_sidebar_session_layout, SessionStackItemSpec, SidebarSessionLayout, ACTIVE_BORDER_W,
@@ -13,15 +13,6 @@ use super::widget::{MouseEvent, Rect, UiAction};
 const BOTTOM_PANEL_HEIGHT: f32 = 160.0;
 /// Estimated height of the bottom action-shortcuts bar (2 rows + padding).
 const SHORTCUTS_BAR_HEIGHT: f32 = 42.0;
-
-/// Accent colors for each session position (same cycle as tab bar).
-const SESSION_ACCENTS: &[[f32; 4]] = &[
-    colors::ACCENT_BLUE,
-    colors::ACCENT_GREEN,
-    colors::ACCENT_PEACH,
-    colors::ACCENT_MAUVE,
-    colors::ACCENT_RED,
-];
 
 pub struct SidebarItem {
     pub id: String,
@@ -232,8 +223,8 @@ impl Sidebar {
         let header_label_h = s(HEADER_LABEL_FONT_PX);
         let header_lightning_h = s(HEADER_LIGHTNING_FONT_PX);
         let header_text_x = session_layout.header_content.x;
-        let header_text_y =
-            session_layout.header_content.y + (session_layout.header_content.height - header_label_h) / 2.0;
+        let header_text_y = session_layout.header_content.y
+            + (session_layout.header_content.height - header_label_h) / 2.0;
         ui.text_ui_scaled(
             text,
             &header_label,
@@ -287,51 +278,17 @@ impl Sidebar {
             let item_radius = s(6.0);
             let hover_t = self.item_hover_anim.get(i);
             let active_t = self.active_anim.get(i);
-            let session_accent = SESSION_ACCENTS[i % SESSION_ACCENTS.len()];
-
-            // Inactive hover state (fades out as active_t increases)
-            if active_t < 0.995 {
+            // Inactive hover state — flat fill, no glow/gradient/border
+            // Web: backgroundColor transitions to a subtle surface tone on hover
+            if active_t < 0.995 && hover_t > 0.005 {
                 let inv_active = 1.0 - active_t;
-                if hover_t > 0.005 {
-                    // Soft glow shadow behind hovered item for "lift" effect
-                    let glow_rect = Rect {
-                        x: layout_item.outer.x - s(2.0),
-                        y: layout_item.outer.y - s(1.0),
-                        width: layout_item.outer.width + s(4.0),
-                        height: layout_item.outer.height + s(2.0),
-                    };
-                    ui.fill_shadow(
-                        glow_rect,
-                        [
-                            session_accent[0],
-                            session_accent[1],
-                            session_accent[2],
-                            0.06 * hover_t * inv_active,
-                        ],
-                        item_radius + s(2.0),
-                        s(8.0),
-                    );
-                    let hover_border = [
-                        colors::BORDER[0],
-                        colors::BORDER[1],
-                        colors::BORDER[2],
-                        lerp(0.12, 0.4, hover_t) * inv_active,
-                    ];
-                    let hover_top = [
-                        colors::BG_HOVER[0] * lerp(1.0, 1.08, hover_t),
-                        colors::BG_HOVER[1] * lerp(1.0, 1.08, hover_t),
-                        colors::BG_HOVER[2] * lerp(1.0, 1.08, hover_t),
-                        colors::BG_HOVER[3] * hover_t * inv_active,
-                    ];
-                    let hover_bot = [
-                        colors::BG_HOVER[0],
-                        colors::BG_HOVER[1],
-                        colors::BG_HOVER[2],
-                        colors::BG_HOVER[3] * hover_t * inv_active,
-                    ];
-                    ui.fill_rounded_gradient(layout_item.outer, hover_top, hover_bot, item_radius);
-                    ui.stroke_rounded(layout_item.outer, item_radius, 0.5, hover_border);
-                }
+                let hover_bg = [
+                    colors::BG_SURFACE[0],
+                    colors::BG_SURFACE[1],
+                    colors::BG_SURFACE[2],
+                    hover_t * inv_active,
+                ];
+                ui.fill_rounded(layout_item.outer, hover_bg, item_radius);
             }
 
             // Active state — flat background + 3px left accent bar
@@ -360,9 +317,10 @@ impl Sidebar {
                 );
             }
 
-            // Session number — text bg smoothly blends with hover and active
+            // Session number — text bg must exactly match the drawn background
+            // so ClearType subpixel compositing has no visible color fringing.
             let item_bg = lerp_color(
-                lerp_color(colors::BG_DARK, colors::BG_HOVER, hover_t),
+                lerp_color(colors::BG_DARK, colors::BG_SURFACE, hover_t),
                 colors::BG_ACTIVE,
                 active_t,
             );
@@ -377,8 +335,8 @@ impl Sidebar {
             let name_x = num_x + number_col_w + s(ROW_GAP_X);
             let name_y = layout_item.first_row.y + (layout_item.first_row.height - name_h) / 2.0;
 
-            // Session number — web: fontSize 12, fontWeight 500, color #555d6b (FG_DIM)
-            let num_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t * 0.5);
+            // Session number — web: fontSize 12, fontWeight 500, color #8b949e (FG_SECONDARY)
+            let num_fg = lerp_color(colors::FG_SECONDARY, colors::FG_PRIMARY, hover_t * 0.5);
             ui.text_ui_scaled(
                 text,
                 &num_str,
@@ -389,8 +347,8 @@ impl Sidebar {
                 font_scale::PX12,
             );
 
-            // Session name (truncated to fit) — web: #e6edf3 active, #9198a1 inactive
-            let inactive_name = lerp_color(colors::FG_INACTIVE, colors::FG_BRIGHT, hover_t * 0.6);
+            // Session name (truncated to fit) — web: #e6edf3 active, #c9d1d9 inactive
+            let inactive_name = lerp_color(colors::FG_PRIMARY, colors::FG_BRIGHT, hover_t * 0.6);
             let name_fg = lerp_color(inactive_name, colors::FG_BRIGHT, active_t); // web: #e6edf3, not white
             let indicator_text_w = if item.active {
                 text.text_width_ui_scaled("::", font_scale::PX11)
@@ -414,14 +372,12 @@ impl Sidebar {
             );
             if item.active {
                 // Web reference: "::" indicator right-aligned, fontSize 11, color #484f58
-                let indicator_x =
-                    layout_item.first_row.right() - indicator_text_w;
+                let indicator_x = layout_item.first_row.right() - indicator_text_w;
                 ui.text_ui_scaled(
                     text,
                     "::",
                     indicator_x,
-                    layout_item.first_row.y
-                        + (layout_item.first_row.height - secondary_h) / 2.0,
+                    layout_item.first_row.y + (layout_item.first_row.height - secondary_h) / 2.0,
                     colors::STATUS_DEFAULT,
                     item_bg,
                     font_scale::PX11,
@@ -433,7 +389,7 @@ impl Sidebar {
             if !item.branch.is_empty() {
                 let branch_rect = layout_item.secondary_row.unwrap_or(layout_item.first_row);
                 let branch_fg = lerp_color(
-                    colors::STATUS_DEFAULT, // #484f58
+                    colors::FG_DIM, // #555d6b — brighter than #484f58 for readability
                     colors::FG_MUTED,
                     hover_t * 0.4 + active_t * 0.3,
                 );
@@ -537,14 +493,33 @@ impl Sidebar {
 
         // Bottom panel: running agents/processes — matches web reference layout:
         // borderTop "1px solid #1a1d25", directory path header, two-line items
-        // with icon + name + status badge + description.
+        // with icon + name + status badge (right-aligned) + × + wrapped description.
         if self.show_footer_sections && !self.agents.is_empty() {
-            // Web: each process item is ~48px (two lines: name+badge ~24px + desc ~24px)
-            // plus 5px top/bottom padding and 1px separator
-            let agent_item_h = s(48.0);
             let header_section_h = s(24.0); // directory path header
-            let agent_panel_h = header_section_h + self.agents.len() as f32 * agent_item_h + s(4.0);
             let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
+            let panel_bg = colors::BG_DARK;
+            let desc_sc = font_scale::PX11;
+            let desc_line_h = ch * desc_sc * 1.3; // web: lineHeight 1.3
+
+            // Pre-compute per-agent heights (dynamic based on description wrapping)
+            let desc_indent = s(20.0); // web: paddingLeft 20px
+            let desc_avail = sidebar.width - desc_indent - pad_h;
+            let agent_heights: Vec<f32> = self
+                .agents
+                .iter()
+                .map(|agent| {
+                    let main_row_h = ch + s(2.0); // icon line + gap
+                    let desc_h = if agent.task.is_empty() {
+                        0.0
+                    } else {
+                        let lines = wrap_ui_text(&agent.task, desc_avail, text, desc_sc);
+                        lines.max(1) as f32 * desc_line_h
+                    };
+                    s(9.0) * 2.0 + main_row_h + desc_h // top/bottom padding + content
+                })
+                .collect();
+            let agent_panel_h: f32 =
+                header_section_h + agent_heights.iter().sum::<f32>() + s(4.0);
             let panel_y = sidebar.bottom() - shortcuts_h - agent_panel_h;
 
             // Solid top border — web: borderTop "1px solid #1a1d25"
@@ -558,7 +533,7 @@ impl Sidebar {
                 sidebar.x + s(10.0),
                 panel_y + s(4.0),
                 colors::STATUS_DEFAULT, // #484f58
-                colors::BG_DARK,
+                panel_bg,
                 font_scale::PX10,
             ); // web: fontSize 10
 
@@ -575,26 +550,26 @@ impl Sidebar {
                     AgentStatus::Stopped => "stopped",
                 };
 
+                let item_h = agent_heights[ai];
                 let agent_hover_t = self.agent_hover_anim.get(ai);
                 let agent_inset = Rect {
                     x: sidebar.x + s(6.0),
                     y: ay + s(1.0),
                     width: sidebar.width - s(12.0),
-                    height: agent_item_h - s(2.0),
+                    height: item_h - s(2.0),
                 };
                 if agent_hover_t > 0.005 {
                     let ahover_bg = [
-                        colors::BG_HOVER[0],
-                        colors::BG_HOVER[1],
-                        colors::BG_HOVER[2],
-                        colors::BG_HOVER[3] * agent_hover_t,
+                        colors::BG_SURFACE[0],
+                        colors::BG_SURFACE[1],
+                        colors::BG_SURFACE[2],
+                        agent_hover_t,
                     ];
                     ui.fill_rounded(agent_inset, ahover_bg, s(3.0));
                 }
 
-                // First line: icon + name + status badge + dismiss ×
-                let line1_y = ay + s(5.0);
-                let panel_bg = colors::BG_DARK;
+                // First line: icon + name ... status badge (right-aligned) + ×
+                let line1_y = ay + s(9.0);
 
                 // Status icon — web uses text symbols: ⓘ (running), ⚠ (stopped), ● (waiting)
                 let icon_str = match agent.status {
@@ -632,42 +607,9 @@ impl Sidebar {
                     font_scale::PX12,
                 ); // web: fontSize 12
 
-                // Status badge — web: fontSize 10, borderRadius 3 (NOT pill),
-                // backgroundColor: color + "18" (~0.094 opacity)
-                let sw = text.text_width_ui_scaled(status_text, font_scale::PX10);
-                let status_badge_pad_h = s(6.0);
-                let status_badge_h = ch * font_scale::PX10;
-                let status_badge_w = sw + status_badge_pad_h * 2.0;
-                let name_end_x = agent_name_x
-                    + text.text_width_ui_scaled(&agent.name, font_scale::PX12)
-                    + s(6.0);
-                let status_badge_x = name_end_x;
-                let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
-                let status_badge_rect = Rect {
-                    x: status_badge_x,
-                    y: status_badge_y,
-                    width: status_badge_w,
-                    height: status_badge_h,
-                };
-                let status_badge_r = s(3.0); // web: borderRadius 3, not pill
-                let status_bg = [status_color[0], status_color[1], status_color[2], 0.094]; // web: "18" hex = ~9.4%
-                ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
-                let status_text_x = status_badge_x + status_badge_pad_h;
-                let status_text_y = status_badge_y + (status_badge_h - ch) / 2.0;
-                ui.text_ui_scaled(
-                    text,
-                    status_text,
-                    status_text_x,
-                    status_text_y,
-                    status_color,
-                    panel_bg,
-                    font_scale::PX10,
-                ); // web: fontSize 10
-
-                // Dismiss × button — web: color "#3b4048", marginLeft auto, fontSize 13
-                let dismiss_x = sidebar.right()
-                    - pad_h
-                    - text.text_width_ui_scaled("\u{00D7}", font_scale::PX13);
+                // Dismiss × — web: color "#3b4048", fontSize 13, placed at far right
+                let dismiss_w = text.text_width_ui_scaled("\u{00D7}", font_scale::PX13);
+                let dismiss_x = sidebar.right() - pad_h - dismiss_w;
                 ui.text_ui_scaled(
                     text,
                     "\u{00D7}",
@@ -678,31 +620,70 @@ impl Sidebar {
                     font_scale::PX13,
                 ); // web: fontSize 13
 
-                // Second line: task description — web: fontSize 11, color "#484f58",
-                // paddingLeft 20, lineHeight 1.3
+                // Status badge — right-aligned before ×
+                // Web: fontSize 10, borderRadius 3, backgroundColor: color+"18",
+                //       marginLeft "auto" pushes badge to the right
+                let sw = text.text_width_ui_scaled(status_text, font_scale::PX10);
+                let status_badge_pad_h = s(6.0);
+                let status_badge_h = ch * font_scale::PX10 + s(4.0);
+                let status_badge_w = sw + status_badge_pad_h * 2.0;
+                let status_badge_x = dismiss_x - s(6.0) - status_badge_w;
+                let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
+                let status_badge_rect = Rect {
+                    x: status_badge_x,
+                    y: status_badge_y,
+                    width: status_badge_w,
+                    height: status_badge_h,
+                };
+                let status_badge_r = status_badge_h / 2.0; // full pill shape
+                let status_bg =
+                    [status_color[0], status_color[1], status_color[2], 0.18];
+                ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
+                // Subtle 1px border for crisper pill edge matching reference
+                ui.fill_rounded_bordered(
+                    status_badge_rect,
+                    [0.0, 0.0, 0.0, 0.0], // transparent fill (already filled above)
+                    status_badge_r,
+                    1.0,
+                    [status_color[0], status_color[1], status_color[2], 0.25],
+                );
+                let status_text_x = status_badge_x + status_badge_pad_h;
+                let status_text_y =
+                    status_badge_y + (status_badge_h - ch * font_scale::PX10) / 2.0;
+                ui.text_ui_scaled(
+                    text,
+                    status_text,
+                    status_text_x,
+                    status_text_y,
+                    status_color,
+                    panel_bg,
+                    font_scale::PX10,
+                ); // web: fontSize 10
+
+                // Description lines — web: fontSize 11, color "#555d6b",
+                // paddingLeft 20, lineHeight 1.3, word-wrapped
                 if !agent.task.is_empty() {
-                    let desc_x = sidebar.x
-                        + s(10.0)
-                        + text.text_width_ui_scaled(icon_str, font_scale::PX11)
-                        + s(14.0);
-                    let desc_y = line1_y + ch + s(2.0);
-                    let desc_avail = sidebar.width - (desc_x - sidebar.x) - pad_h;
-                    let desc = truncate_to_width(&agent.task, desc_avail, text);
-                    ui.text_ui_scaled(
-                        text,
-                        &desc,
-                        desc_x,
-                        desc_y,
-                        colors::STATUS_DEFAULT, // #484f58
-                        panel_bg,
-                        font_scale::PX11,
-                    ); // web: fontSize 11
+                    let desc_x = sidebar.x + desc_indent;
+                    let mut desc_y = line1_y + ch + s(2.0);
+                    let lines = wrap_ui_text_lines(&agent.task, desc_avail, text, desc_sc);
+                    for line in &lines {
+                        ui.text_ui_scaled(
+                            text,
+                            line,
+                            desc_x,
+                            desc_y,
+                            colors::FG_DIM, // #555d6b — brighter for readability
+                            panel_bg,
+                            desc_sc,
+                        );
+                        desc_y += desc_line_h;
+                    }
                 }
 
-                ay += agent_item_h;
+                ay += item_h;
 
                 // Separator between items — web: borderBottom "1px solid #13161d"
-                if !std::ptr::eq(agent, self.agents.last().unwrap()) {
+                if ai + 1 < self.agents.len() {
                     let sep_color = [0.075, 0.086, 0.114, 1.0]; // #13161d
                     ui.hline(sidebar.x, ay - 1.0, sidebar.width, 1.0, sep_color);
                 }
@@ -789,14 +770,15 @@ impl Sidebar {
                         self.hovered_index = Some(i);
                     }
                 }
-                // Agent item hover detection
+                // Agent item hover detection — approximate heights (no text renderer here)
                 if self.show_footer_sections && !self.agents.is_empty() {
-                    let agent_item_h = (48.0 * scale).round();
-                    let header_section_h = (24.0 * scale).round();
-                    let shortcuts_h = (SHORTCUTS_BAR_HEIGHT * scale).round();
-                    let agent_panel_h = header_section_h
-                        + self.agents.len() as f32 * agent_item_h
-                        + (4.0 * scale).round();
+                    let s = |v: f32| (v * scale).round();
+                    // Approximate: each agent item ~44px base + ~14px per extra desc line
+                    let header_section_h = s(24.0);
+                    let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
+                    let base_item_h = s(44.0);
+                    let total_h: f32 = self.agents.len() as f32 * base_item_h;
+                    let agent_panel_h = header_section_h + total_h + s(4.0);
                     let panel_y = sidebar.bottom() - shortcuts_h - agent_panel_h;
                     let mut ay = panel_y + header_section_h;
                     for i in 0..self.agents.len() {
@@ -804,12 +786,12 @@ impl Sidebar {
                             x: sidebar.x,
                             y: ay,
                             width: sidebar.width,
-                            height: agent_item_h,
+                            height: base_item_h,
                         };
                         if agent_rect.contains(x, y) {
                             self.hovered_agent = Some(i);
                         }
-                        ay += agent_item_h;
+                        ay += base_item_h;
                     }
                 }
                 None
@@ -829,4 +811,54 @@ impl Sidebar {
             _ => None,
         }
     }
+}
+
+/// Count how many lines a proportional-font string wraps to within `avail` pixels.
+fn wrap_ui_text(s: &str, avail: f32, text: &UiTextRenderer, scale: f32) -> usize {
+    if s.is_empty() || avail <= 0.0 {
+        return 0;
+    }
+    let mut lines = 1usize;
+    let mut line_w = 0.0f32;
+    for word in s.split_whitespace() {
+        let w = text.text_width_ui_scaled(word, scale);
+        let sp = text.text_width_ui_scaled(" ", scale);
+        if line_w > 0.0 && line_w + sp + w > avail {
+            lines += 1;
+            line_w = w;
+        } else {
+            line_w += if line_w > 0.0 { sp } else { 0.0 } + w;
+        }
+    }
+    lines
+}
+
+/// Word-wrap a proportional-font string and return the resulting lines.
+fn wrap_ui_text_lines<'a>(s: &'a str, avail: f32, text: &UiTextRenderer, scale: f32) -> Vec<String> {
+    if s.is_empty() || avail <= 0.0 {
+        return vec![];
+    }
+    let sp_w = text.text_width_ui_scaled(" ", scale);
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0.0f32;
+    for word in s.split_whitespace() {
+        let w = text.text_width_ui_scaled(word, scale);
+        if cur_w > 0.0 && cur_w + sp_w + w > avail {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+            cur_w = w;
+        } else {
+            if !cur.is_empty() {
+                cur.push(' ');
+                cur_w += sp_w;
+            }
+            cur.push_str(word);
+            cur_w += w;
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
 }

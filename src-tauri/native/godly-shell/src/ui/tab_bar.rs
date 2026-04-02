@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 
-use super::anim::{self, lerp, lerp_color, Anim, AnimVec};
+use super::anim::{self, lerp_color, Anim, AnimVec};
 use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
 use super::tab_bar_layout::{TabBarLayout, TabBarLayoutConfig, TabBarLayoutEngine};
 use super::widget::{MouseEvent, Rect, UiAction};
@@ -15,6 +15,10 @@ pub(super) const TAB_MARGIN_LEFT: f32 = 6.0;
 pub(super) const TAB_INSET_V: f32 = 3.0;
 pub(super) const BUTTON_WIDTH: f32 = 46.0;
 const ICON_LINE_T: f32 = 1.2;
+const CROP_TAB_TITLE_SCALE: f32 = 12.8 / 14.0;
+const CROP_TAB_BADGE_TEXT_SCALE: f32 = 9.5 / 14.0;
+const CROP_TAB_BADGE_SIZE: f32 = 19.0;
+const CROP_TAB_PAD_X: f32 = 15.0;
 
 /// Accent colors for each tab position (cycles if more tabs).
 const TAB_ACCENTS: &[[f32; 4]] = &[
@@ -203,6 +207,26 @@ impl TabBar {
 
     fn intrinsic_tab_widths(&self, scale: f32, text: Option<&UiTextRenderer>) -> Vec<f32> {
         let s = |v: f32| (v * scale).round();
+        let title_scale = if self.content_sized_tabs {
+            CROP_TAB_TITLE_SCALE
+        } else {
+            font_scale::PX12
+        };
+        let badge_text_scale = if self.content_sized_tabs {
+            CROP_TAB_BADGE_TEXT_SCALE
+        } else {
+            font_scale::PX9
+        };
+        let badge_size = if self.content_sized_tabs {
+            CROP_TAB_BADGE_SIZE
+        } else {
+            16.0
+        };
+        let leading_pad = if self.content_sized_tabs {
+            CROP_TAB_PAD_X
+        } else {
+            14.0
+        };
         let text_width = |value: &str, text: Option<&UiTextRenderer>, font_scale: f32| {
             if let Some(renderer) = text {
                 renderer.text_width_ui_scaled(value, font_scale)
@@ -214,20 +238,20 @@ impl TabBar {
         self.tabs
             .iter()
             .map(|tab| {
-                let title_w = text_width(&tab.title, text, font_scale::PX12);
+                let title_w = text_width(&tab.title, text, title_scale);
                 let badge_w = if tab.unread_count > 0 {
                     let badge_text = if tab.unread_count > 99 {
                         "99+".to_string()
                     } else {
                         tab.unread_count.to_string()
                     };
-                    let text_w = text_width(&badge_text, text, font_scale::PX9);
-                    (text_w + s(5.0) * 2.0).max(s(16.0)) + s(6.0)
+                    let text_w = text_width(&badge_text, text, badge_text_scale);
+                    (text_w + s(5.0) * 2.0).max(s(badge_size)) + s(6.0)
                 } else {
                     0.0
                 };
 
-                s(14.0) + s(18.0) + s(6.0) + title_w + badge_w + s(14.0)
+                s(leading_pad) + s(CROP_TAB_BADGE_SIZE) + s(6.0) + title_w + badge_w + s(14.0)
             })
             .collect()
     }
@@ -335,7 +359,7 @@ impl TabBar {
             0.0
         };
         let tab_pad_x = if self.content_sized_tabs {
-            s(14.0)
+            s(CROP_TAB_PAD_X)
         } else {
             s(10.0)
         };
@@ -350,7 +374,11 @@ impl TabBar {
         };
 
         // Title metrics within each retained-layout tab slot.
-        let badge_sz = s(18.0);
+        let badge_sz = if self.content_sized_tabs {
+            s(CROP_TAB_BADGE_SIZE)
+        } else {
+            s(18.0)
+        };
         let title_x_offset = tab_pad_x + badge_sz + s(6.0);
 
         for (i, tab) in self.tabs.iter().enumerate() {
@@ -407,7 +435,11 @@ impl TabBar {
             // Numbered circle badge — web: width 18, height 18, borderRadius "50%",
             //   background "${color}22", color: tab.color, fontSize 10, fontWeight 700
             let num_str = format!("{}", i + 1);
-            let badge_sz = s(18.0);
+            let badge_sz = if self.content_sized_tabs {
+                s(CROP_TAB_BADGE_SIZE)
+            } else {
+                s(18.0)
+            };
             let badge_x = rect.x + tab_pad_x;
             let badge_y = rect.y + (rect.height - badge_sz) / 2.0;
             let badge_r = badge_sz / 2.0;
@@ -424,8 +456,13 @@ impl TabBar {
 
             // Number text — proportional font, centered in circle
             // Web: fontSize 10, fontWeight 700
-            let num_w = text.text_width_ui_scaled(&num_str, font_scale::PX10);
-            let num_ch = ch * font_scale::PX10;
+            let badge_num_scale = if self.content_sized_tabs {
+                10.5 / 14.0
+            } else {
+                font_scale::PX10
+            };
+            let num_w = text.text_width_ui_scaled(&num_str, badge_num_scale);
+            let num_ch = ch * badge_num_scale;
             let num_x = badge_x + (badge_sz - num_w) / 2.0;
             let num_y = badge_y + (badge_sz - num_ch) / 2.0;
             ui.text_ui_scaled(
@@ -435,7 +472,7 @@ impl TabBar {
                 num_y,
                 accent,
                 badge_bg,
-                font_scale::PX10,
+                badge_num_scale,
             );
 
             // Tab title (truncated to fit)
@@ -462,19 +499,16 @@ impl TabBar {
             if !title.is_empty() {
                 let title_x = rect.x + title_x_offset;
                 let title_y = text_y(rect.height, rect.y);
-                let title_w = text.text_width_ui_scaled(&title, font_scale::PX12);
-                if tab.active {
-                    ui.text_ui_bold_scaled(
-                        text,
-                        &title,
-                        title_x,
-                        title_y,
-                        fg,
-                        bg,
-                        font_scale::PX12,
-                    );
+                let title_scale = if self.content_sized_tabs {
+                    CROP_TAB_TITLE_SCALE
                 } else {
-                    ui.text_ui_scaled(text, &title, title_x, title_y, fg, bg, font_scale::PX12);
+                    font_scale::PX12
+                };
+                let title_w = text.text_width_ui_scaled(&title, title_scale);
+                if tab.active {
+                    ui.text_ui_bold_scaled(text, &title, title_x, title_y, fg, bg, title_scale);
+                } else {
+                    ui.text_ui_scaled(text, &title, title_x, title_y, fg, bg, title_scale);
                 }
 
                 // Activity badge — inline in the crop/reference layout, right-aligned in the
@@ -492,8 +526,17 @@ impl TabBar {
                         } else {
                             tab.unread_count.to_string()
                         };
-                        let text_w = text.text_width_ui_scaled(&count_str, font_scale::PX9);
-                        let badge_h = s(16.0);
+                        let badge_text_scale = if self.content_sized_tabs {
+                            CROP_TAB_BADGE_TEXT_SCALE
+                        } else {
+                            font_scale::PX9
+                        };
+                        let text_w = text.text_width_ui_scaled(&count_str, badge_text_scale);
+                        let badge_h = if self.content_sized_tabs {
+                            s(17.0)
+                        } else {
+                            s(16.0)
+                        };
                         let badge_pad = s(5.0);
                         let badge_w = (text_w + badge_pad * 2.0).max(s(16.0));
                         let badge_x = if self.content_sized_tabs {
@@ -514,20 +557,6 @@ impl TabBar {
                         };
                         let badge_r = s(7.0);
 
-                        let breath = 0.92 + 0.08 * self.glow_phase.sin();
-                        let glow_rect = Rect {
-                            x: badge_x - s(2.0),
-                            y: badge_y - s(2.0),
-                            width: badge_w + s(4.0),
-                            height: badge_h + s(4.0),
-                        };
-                        ui.fill_shadow(
-                            glow_rect,
-                            [accent[0], accent[1], accent[2], 0.10 * breath * badge_fade],
-                            badge_r,
-                            s(4.0),
-                        );
-
                         let badge_color = [accent[0], accent[1], accent[2], badge_fade];
                         let badge_border = [
                             accent[0] * 0.7,
@@ -538,7 +567,7 @@ impl TabBar {
                         ui.fill_rounded(badge_rect, badge_color, badge_r);
                         ui.stroke_rounded(badge_rect, badge_r, 0.5, badge_border);
 
-                        let badge_ch = ch * font_scale::PX9;
+                        let badge_ch = ch * badge_text_scale;
                         let text_x = badge_x + (badge_w - text_w) / 2.0;
                         let text_y = badge_y + (badge_h - badge_ch) / 2.0;
                         let text_color = [1.0, 1.0, 1.0, badge_fade];
@@ -549,7 +578,7 @@ impl TabBar {
                             text_y,
                             text_color,
                             accent,
-                            font_scale::PX9,
+                            badge_text_scale,
                         );
                     }
                 }
@@ -568,39 +597,10 @@ impl TabBar {
                     height: close_btn_sz,
                 };
                 if close_t > 0.005 {
-                    let glow_rect = Rect {
-                        x: close_rect.x - s(3.0),
-                        y: close_rect.y - s(3.0),
-                        width: close_rect.width + s(6.0),
-                        height: close_rect.height + s(6.0),
-                    };
-                    ui.fill_shadow(
-                        glow_rect,
-                        [
-                            colors::ACCENT_RED[0],
-                            colors::ACCENT_RED[1],
-                            colors::ACCENT_RED[2],
-                            0.15 * close_t,
-                        ],
-                        close_btn_sz / 2.0 + s(3.0),
-                        s(6.0),
-                    );
-                    let base = lerp_color(colors::BG_HOVER, colors::RED_SUBTLE, close_t * 0.6);
-                    let hover_top = [
-                        base[0] * 1.1,
-                        base[1] * 1.1,
-                        base[2] * 1.1,
-                        base[3] * close_t,
-                    ];
-                    let hover_bot = [base[0], base[1], base[2], base[3] * close_t];
-                    ui.fill_rounded_gradient(close_rect, hover_top, hover_bot, close_btn_sz / 2.0);
-                    let close_border = [
-                        colors::ACCENT_RED[0],
-                        colors::ACCENT_RED[1],
-                        colors::ACCENT_RED[2],
-                        0.15 * close_t,
-                    ];
-                    ui.stroke_rounded(close_rect, close_btn_sz / 2.0, 0.5, close_border);
+                    // Flat hover fill — no glow, no gradient, no border
+                    let close_bg = lerp_color(colors::BG_HOVER, colors::RED_SUBTLE, close_t * 0.6);
+                    let close_hover = [close_bg[0], close_bg[1], close_bg[2], close_bg[3] * close_t];
+                    ui.fill_rounded(close_rect, close_hover, close_btn_sz / 2.0);
                 }
                 let base_icon = lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, active_t);
                 let icon_color_base = lerp_color(base_icon, colors::FG_PRIMARY, close_t);
@@ -655,21 +655,8 @@ impl TabBar {
                     colors::BG_SURFACE,
                     new_t,
                 );
-                let new_top = [
-                    new_bg[0] * lerp(1.0, 1.10, new_t),
-                    new_bg[1] * lerp(1.0, 1.10, new_t),
-                    new_bg[2] * lerp(1.0, 1.10, new_t),
-                    new_bg[3],
-                ];
-                let border_alpha = lerp(0.15, 0.6, new_t);
-                let border = [
-                    colors::BORDER[0],
-                    colors::BORDER[1],
-                    colors::BORDER[2],
-                    border_alpha,
-                ];
-                ui.fill_rounded_gradient(new_rect, new_top, new_bg, btn_radius);
-                ui.stroke_rounded(new_rect, btn_radius, 0.5, border);
+                // Flat hover fill — no gradient, no border
+                ui.fill_rounded(new_rect, new_bg, btn_radius);
             } else {
                 // Rest: subtle circular border for discoverable icon button
                 let rest_border = [
@@ -785,45 +772,23 @@ impl TabBar {
                 };
 
                 if btn_t > 0.005 {
-                    let (base_color, border_color) = if *btn == WindowButton::Close {
-                        (
-                            [
-                                colors::ACCENT_RED[0],
-                                colors::ACCENT_RED[1],
-                                colors::ACCENT_RED[2],
-                                colors::ACCENT_RED[3] * btn_t,
-                            ],
-                            [
-                                colors::ACCENT_RED[0] * 0.7,
-                                colors::ACCENT_RED[1] * 0.7,
-                                colors::ACCENT_RED[2] * 0.7,
-                                0.6 * btn_t,
-                            ],
-                        )
+                    let base_color = if *btn == WindowButton::Close {
+                        [
+                            colors::ACCENT_RED[0],
+                            colors::ACCENT_RED[1],
+                            colors::ACCENT_RED[2],
+                            colors::ACCENT_RED[3] * btn_t,
+                        ]
                     } else {
-                        (
-                            [
-                                colors::BG_HOVER[0],
-                                colors::BG_HOVER[1],
-                                colors::BG_HOVER[2],
-                                colors::BG_HOVER[3] * btn_t,
-                            ],
-                            [
-                                colors::BORDER[0],
-                                colors::BORDER[1],
-                                colors::BORDER[2],
-                                0.4 * btn_t,
-                            ],
-                        )
+                        [
+                            colors::BG_HOVER[0],
+                            colors::BG_HOVER[1],
+                            colors::BG_HOVER[2],
+                            colors::BG_HOVER[3] * btn_t,
+                        ]
                     };
-                    let hover_top = [
-                        base_color[0] * 1.12,
-                        base_color[1] * 1.12,
-                        base_color[2] * 1.12,
-                        base_color[3],
-                    ];
-                    ui.fill_rounded_gradient(*rect, hover_top, base_color, s(3.0));
-                    ui.stroke_rounded(*rect, s(3.0), 0.5, border_color);
+                    // Flat hover fill — no gradient, no border
+                    ui.fill_rounded(*rect, base_color, s(3.0));
                 }
 
                 let icon_color = if *btn == WindowButton::Close {

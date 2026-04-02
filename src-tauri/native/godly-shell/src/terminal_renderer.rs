@@ -19,6 +19,9 @@ pub struct TerminalRenderer {
     ui_rasterizer: Option<Box<dyn GlyphRasterizer>>,
     /// Optional serif rasterizer for rich UI copy (e.g. poem panel italics).
     ui_serif_rasterizer: Option<Box<dyn GlyphRasterizer>>,
+    /// Optional monospace rasterizer for screenshot-parity UI text. When unset,
+    /// UI monospace text falls back to the main terminal rasterizer.
+    ui_mono_rasterizer: Option<Box<dyn GlyphRasterizer>>,
     font_metrics: FontMetrics,
     /// Average advance width of the UI font (for layout estimation).
     ui_avg_advance: f32,
@@ -44,6 +47,7 @@ impl TerminalRenderer {
             rasterizer,
             ui_rasterizer: None,
             ui_serif_rasterizer: None,
+            ui_mono_rasterizer: None,
             font_metrics,
             ui_avg_advance: 0.0,
             default_fg: Color::new(0.788, 0.820, 0.851, 1.0), // GitHub Dark Text #c9d1d9
@@ -61,6 +65,10 @@ impl TerminalRenderer {
 
     pub fn set_ui_serif_rasterizer(&mut self, rasterizer: Box<dyn GlyphRasterizer>) {
         self.ui_serif_rasterizer = Some(rasterizer);
+    }
+
+    pub fn set_ui_mono_rasterizer(&mut self, rasterizer: Box<dyn GlyphRasterizer>) {
+        self.ui_mono_rasterizer = Some(rasterizer);
     }
 
     /// Average advance width of the UI proportional font.
@@ -129,8 +137,12 @@ impl TerminalRenderer {
                     }
                     TextFontKind::UiMono => {
                         let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 3);
-                        self.glyph_atlas
-                            .get_or_insert(key, &mut *self.rasterizer, font_size)
+                        if let Some(rast) = self.ui_mono_rasterizer.as_mut() {
+                            self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
+                        } else {
+                            self.glyph_atlas
+                                .get_or_insert(key, &mut *self.rasterizer, font_size)
+                        }
                     }
                     TextFontKind::UiSans => {
                         let Some(rast) = self.ui_rasterizer.as_mut() else {

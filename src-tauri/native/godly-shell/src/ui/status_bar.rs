@@ -99,7 +99,7 @@ impl StatusBar {
         let mut x = left_x;
 
         if self.streaming {
-            // Pulsing ~ indicator (1.5s cycle)
+            // Pulsing ~ indicator — web: fontSize 9, animation pulse 1.5s
             let pulse = 0.6 + 0.4 * (glow_phase * 0.6).sin().abs(); // ~1.5s period
             let tilde_fg = [
                 colors::FG_SECONDARY[0],
@@ -107,8 +107,11 @@ impl StatusBar {
                 colors::FG_SECONDARY[2],
                 pulse,
             ];
-            ui.text_ui_scaled(text, "~", x, y_center, tilde_fg, bg, sc);
-            x += text.text_width_ui_scaled("~", sc) + s(6.0);
+            let tilde_sc = font_scale::PX9; // web: fontSize 9 (smaller than surrounding text)
+            let tilde_ch = ch * tilde_sc;
+            let tilde_y = bar.y + (bar.height - tilde_ch) / 2.0;
+            ui.text_ui_scaled(text, "~", x, tilde_y, tilde_fg, bg, tilde_sc);
+            x += text.text_width_ui_scaled("~", tilde_sc) + s(5.0); // web: gap 5
 
             ui.text_ui_scaled(
                 text,

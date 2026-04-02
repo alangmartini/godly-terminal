@@ -391,6 +391,15 @@ impl App {
             renderer.set_ui_serif_rasterizer(ui_font.rasterizer);
             log::info!("[FONT] UI serif font loaded: {}", ui_families.serif);
         }
+        if self.is_web_reference_crop() {
+            if let Some(ui_font) = create_ui_mono_font(&terminal_font.family) {
+                renderer.set_ui_mono_rasterizer(ui_font.rasterizer);
+                log::info!(
+                    "[FONT] UI mono screenshot font loaded (grayscale): {}",
+                    ui_font.family
+                );
+            }
+        }
         self.ui_text_layout = create_ui_text_layout_engine(ui_families).map(Rc::new);
 
         self.renderer = Some(renderer);
@@ -1678,7 +1687,7 @@ impl App {
             let progress_y = layout.status_bar.y - s(2.0);
             let terminal_x = layout.terminal.x;
             let terminal_w = layout.terminal.width;
-            // Background track
+            // Background track — web: backgroundColor "#1e2128"
             ui_builder.fill(
                 ui::widget::Rect {
                     x: terminal_x,
@@ -1686,19 +1695,33 @@ impl App {
                     width: terminal_w,
                     height: s(2.0),
                 },
-                ui::builder::colors::BG_SURFACE,
+                [0.118, 0.129, 0.157, 1.0], // #1e2128
             );
             // Animated fill — width driven by progress_pct (0.05 → 0.90)
+            // Web: linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1) — 3-stop gradient
             let fill_w = terminal_w * self.progress_pct;
+            let half_w = fill_w / 2.0;
+            // Left half: ACCENT_BLUE → ACCENT_MAUVE
             ui_builder.fill_gradient_h(
                 ui::widget::Rect {
                     x: terminal_x,
                     y: progress_y,
-                    width: fill_w,
+                    width: half_w,
                     height: s(2.0),
                 },
                 ui::builder::colors::ACCENT_BLUE,
                 ui::builder::colors::ACCENT_MAUVE,
+            );
+            // Right half: ACCENT_MAUVE → ACCENT_BLUE
+            ui_builder.fill_gradient_h(
+                ui::widget::Rect {
+                    x: terminal_x + half_w,
+                    y: progress_y,
+                    width: fill_w - half_w,
+                    height: s(2.0),
+                },
+                ui::builder::colors::ACCENT_MAUVE,
+                ui::builder::colors::ACCENT_BLUE,
             );
         }
 
@@ -2987,6 +3010,48 @@ struct UiFontBundle {
     rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
 }
 
+/// Composite rasterizer that falls back to a secondary font when the primary
+/// font does not contain a glyph. Used to supplement Segoe UI Variable with
+/// Segoe UI Symbol for emoji/symbol characters like ⚡.
+struct FallbackRasterizer {
+    primary: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
+    fallback: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
+}
+
+impl godly_terminal_surface::glyph_rasterizer::GlyphRasterizer for FallbackRasterizer {
+    fn rasterize(
+        &mut self,
+        ch: char,
+        font_size_px: f32,
+        bold: bool,
+        italic: bool,
+    ) -> Option<godly_terminal_surface::glyph_rasterizer::RasterizedGlyph> {
+        self.primary
+            .rasterize(ch, font_size_px, bold, italic)
+            .or_else(|| self.fallback.rasterize(ch, font_size_px, bold, italic))
+    }
+
+    fn measure(
+        &mut self,
+        font_size_px: f32,
+    ) -> godly_terminal_surface::glyph_rasterizer::MeasuredFontMetrics {
+        self.primary.measure(font_size_px)
+    }
+
+    fn has_glyph(&self, ch: char) -> bool {
+        self.primary.has_glyph(ch) || self.fallback.has_glyph(ch)
+    }
+
+    fn load_font(&mut self, data: &[u8], index: u32) -> bool {
+        self.primary.load_font(data, index)
+    }
+
+    fn set_scale_factor(&mut self, scale: f32) {
+        self.primary.set_scale_factor(scale);
+        self.fallback.set_scale_factor(scale);
+    }
+}
+
 #[cfg(windows)]
 fn create_ui_font_bundle(candidates: &[&str], label: &str) -> Option<UiFontBundle> {
     use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
@@ -3010,12 +3075,54 @@ fn create_ui_font_bundle(candidates: &[&str], label: &str) -> Option<UiFontBundl
 
 #[cfg(windows)]
 fn create_ui_sans_font() -> Option<UiFontBundle> {
-    create_ui_font_bundle(&["Segoe UI Variable", "Segoe UI"], "UI sans font")
+    use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
+
+    let primary =
+        create_ui_font_bundle(&["Segoe UI Variable", "Segoe UI"], "UI sans font (primary)")?;
+
+    // Try to load a symbol font as fallback for emoji/symbol glyphs (e.g. ⚡)
+    // that are missing from the primary UI font.
+    let fallback_families = ["Segoe UI Symbol", "Segoe UI Emoji"];
+    for family in fallback_families {
+        let mut dw = match DirectWriteRasterizer::new() {
+            Ok(dw) => dw,
+            Err(_) => continue,
+        };
+        if dw.load_system_font(family).is_ok() {
+            log::info!("[FONT] UI sans fallback: {family}");
+            return Some(UiFontBundle {
+                family: primary.family,
+                rasterizer: Box::new(FallbackRasterizer {
+                    primary: primary.rasterizer,
+                    fallback: Box::new(dw),
+                }),
+            });
+        }
+    }
+
+    // No fallback available — use primary alone.
+    Some(primary)
 }
 
 #[cfg(windows)]
 fn create_ui_serif_font() -> Option<UiFontBundle> {
     create_ui_font_bundle(&["Georgia", "Cambria", "Times New Roman"], "UI serif font")
+}
+
+#[cfg(windows)]
+fn create_ui_mono_font(family: &str) -> Option<UiFontBundle> {
+    use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
+
+    let mut dw = DirectWriteRasterizer::new_grayscale().ok()?;
+    if dw.load_system_font(family).is_ok() {
+        Some(UiFontBundle {
+            family: family.to_string(),
+            rasterizer: Box::new(dw),
+        })
+    } else {
+        log::warn!("[FONT] No UI mono font available for {}", family);
+        None
+    }
 }
 
 #[cfg(not(windows))]
@@ -3025,6 +3132,11 @@ fn create_ui_sans_font() -> Option<UiFontBundle> {
 
 #[cfg(not(windows))]
 fn create_ui_serif_font() -> Option<UiFontBundle> {
+    None
+}
+
+#[cfg(not(windows))]
+fn create_ui_mono_font(_family: &str) -> Option<UiFontBundle> {
     None
 }
 

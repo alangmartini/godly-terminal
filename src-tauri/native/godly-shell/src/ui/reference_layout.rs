@@ -24,8 +24,8 @@ pub const BLOCK_CURSOR: usize = 15;
 const CONTENT_PAD_X: f32 = 20.0;
 const CONTENT_PAD_TOP: f32 = 12.0;
 const CONTENT_PAD_BOTTOM: f32 = 20.0;
-const BODY_LINE_HEIGHT: f32 = 13.0 * 1.55;
-const PARAGRAPH_LINE_HEIGHT: f32 = 13.0 * 1.6;
+const BODY_LINE_HEIGHT: f32 = 13.6 * 1.55;
+const PARAGRAPH_LINE_HEIGHT: f32 = 13.6 * 1.6;
 const SUB_ROW_HEIGHT: f32 = 14.0;
 const HEADING_HEIGHT: f32 = 14.0;
 const USER_MESSAGE_HEIGHT: f32 = 25.0;
@@ -66,7 +66,28 @@ impl ReferencePaneLayoutEngine {
         Self { tree, root, blocks }
     }
 
+    /// Compute layout with optional per-block line counts for text wrapping.
+    /// `line_counts` maps block index → number of text lines. Blocks not in
+    /// the map default to 1 line.
+    pub fn compute_wrapped(
+        &mut self,
+        pane: Rect,
+        text: &UiTextRenderer,
+        line_counts: &[usize; BLOCK_COUNT],
+    ) -> ReferencePaneLayout {
+        self.compute_inner(pane, text, Some(line_counts))
+    }
+
     pub fn compute(&mut self, pane: Rect, text: &UiTextRenderer) -> ReferencePaneLayout {
+        self.compute_inner(pane, text, None)
+    }
+
+    fn compute_inner(
+        &mut self,
+        pane: Rect,
+        text: &UiTextRenderer,
+        line_counts: Option<&[usize; BLOCK_COUNT]>,
+    ) -> ReferencePaneLayout {
         let s = |v: f32| text.s(v);
         let content = Rect {
             x: pane.x + s(CONTENT_PAD_X),
@@ -88,8 +109,12 @@ impl ReferencePaneLayoutEngine {
             },
         );
 
+        let lc = |idx: usize| -> usize {
+            line_counts.map_or(1, |lc| lc[idx].max(1))
+        };
+
         let styles = [
-            block_style(s(BODY_LINE_HEIGHT), 4.0, 4.0, text),
+            block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_INTRO) as f32, 4.0, 4.0, text),
             block_style(s(HEADING_HEIGHT), 18.0, 8.0, text),
             block_style(
                 s(BODY_LINE_HEIGHT + 2.0 + SUB_ROW_HEIGHT * 4.0),
@@ -97,17 +122,17 @@ impl ReferencePaneLayoutEngine {
                 4.0,
                 text,
             ),
-            block_style(s(BODY_LINE_HEIGHT), 4.0, 4.0, text),
+            block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_SMOKE_BULLET) as f32, 4.0, 4.0, text),
             block_style(s(HEADING_HEIGHT), 18.0, 8.0, text),
-            block_style(s(PARAGRAPH_LINE_HEIGHT), 8.0, 8.0, text),
-            block_style(s(BODY_LINE_HEIGHT), 4.0, 4.0, text),
+            block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_PARAGRAPH) as f32, 8.0, 8.0, text),
+            block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_NUMBERED) as f32, 4.0, 4.0, text),
             block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
             block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
             block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text),
-            block_style(s(PARAGRAPH_LINE_HEIGHT), 8.0, 8.0, text),
+            block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_TONE) as f32, 8.0, 8.0, text),
             block_style(s(COMMAND_HEIGHT), 8.0, 8.0, text),
             block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text),
-            block_style(s(PARAGRAPH_LINE_HEIGHT), 8.0, 8.0, text),
+            block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_COLLAPSE) as f32, 8.0, 8.0, text),
             block_style(s(EDITING_HEIGHT), 6.0, 6.0, text),
             block_style(s(CURSOR_HEIGHT), 8.0, 0.0, text),
         ];

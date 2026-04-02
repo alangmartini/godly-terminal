@@ -6,23 +6,23 @@
 
 use std::cell::RefCell;
 
-use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
+use super::builder::{colors, UiBuilder, UiTextRenderer};
 use super::reference_layout::{
-    ReferencePaneLayoutEngine, BLOCK_COMMAND, BLOCK_CURSOR, BLOCK_EDITING, BLOCK_INTRO,
-    BLOCK_PARAGRAPH_COLLAPSE, BLOCK_PARAGRAPH_TONE, BLOCK_RESIDUAL_HEADING,
+    ReferencePaneLayoutEngine, BLOCK_COMMAND, BLOCK_COUNT, BLOCK_CURSOR, BLOCK_EDITING,
+    BLOCK_INTRO, BLOCK_PARAGRAPH_COLLAPSE, BLOCK_PARAGRAPH_TONE, BLOCK_RESIDUAL_HEADING,
     BLOCK_RESIDUAL_NUMBERED, BLOCK_RESIDUAL_PARAGRAPH, BLOCK_SMOKE_BULLET, BLOCK_THOUGHTS_ONE,
     BLOCK_THOUGHTS_TWO, BLOCK_USER_COMPACT, BLOCK_USER_FUN, BLOCK_VERIFICATION_BULLET,
     BLOCK_VERIFICATION_HEADING,
 };
 use super::widget::Rect;
 
-const BODY_SCALE: f32 = font_scale::PX13;
-const SMALL_SCALE: f32 = font_scale::PX12;
-const HEADING_SCALE: f32 = 1.0;
+const BODY_SCALE: f32 = 13.6 / 14.0;
+const SMALL_SCALE: f32 = 12.6 / 14.0;
+const HEADING_SCALE: f32 = 1.05;
 const LINK_COLOR: [f32; 4] = colors::ACCENT_SKY;
 const CODE_BG: [f32; 4] = [0.110, 0.125, 0.188, 1.0]; // #1c2030
-const BODY_LINE_HEIGHT: f32 = 13.0 * 1.55;
-const PARAGRAPH_LINE_HEIGHT: f32 = 13.0 * 1.6;
+const BODY_LINE_HEIGHT: f32 = 13.6 * 1.55;
+const PARAGRAPH_LINE_HEIGHT: f32 = 13.6 * 1.6;
 const INLINE_GAP: f32 = 8.0;
 const THOUGHTS_GAP: f32 = 6.0;
 const SUB_BULLET_INDENT: f32 = 12.0;
@@ -41,15 +41,38 @@ impl ReferencePane {
     pub fn build(&self, ui: &mut UiBuilder, pane: Rect, text: &UiTextRenderer) {
         let bg = colors::BG_BASE;
         let s = |v: f32| text.s(v);
-        let layout = self.layout_engine.borrow_mut().compute(pane, text);
+
+        // Pre-compute line counts for blocks that may wrap.
+        // Content width available for text (pane - 2*padding).
+        let content_w = (pane.width - s(20.0) * 2.0).max(0.0);
+        let bullet_lead = self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP);
+        let para_avail = content_w;
+        let bullet_avail = content_w - bullet_lead;
+
+        let mut line_counts = [1usize; BLOCK_COUNT];
+        line_counts[BLOCK_INTRO] = wrap_mono_line_count(
+            "Tightened the support story so the README stays clearly tmux-first while still acknowledging the experimental zellij code in-repo.",
+            bullet_avail, text, BODY_SCALE);
+        line_counts[BLOCK_RESIDUAL_PARAGRAPH] = wrap_mono_line_count(
+            "I only changed the README. While auditing, I noticed some secondary docs still have minor drift from the current UI behavior, especially the feature/keybinding docs.",
+            para_avail, text, BODY_SCALE);
+        line_counts[BLOCK_PARAGRAPH_TONE] = wrap_mono_line_count(
+            "I\u{2019}m tightening the README again, this time for tone and density: shorter sections, less repetition, and a little more personality without getting cute enough to obscure what the project does.",
+            para_avail, text, BODY_SCALE);
+        line_counts[BLOCK_PARAGRAPH_COLLAPSE] = wrap_mono_line_count(
+            "I\u{2019}m collapsing the README structure now: fewer headings, less \"verification report\" tone, and more \"here\u{2019}s why this is useful\" energy. The goal is that the first screen reads fast and still feels grounded in the actual code.",
+            para_avail, text, BODY_SCALE);
+
+        let layout = self.layout_engine.borrow_mut().compute_wrapped(pane, text, &line_counts);
         let body_x = layout.content.x;
-        let bullet_text_x = body_x + self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP);
+        let bullet_text_x = body_x + bullet_lead;
 
         self.draw_bullet_text(
             ui,
             text,
             layout.blocks[BLOCK_INTRO].x,
             layout.blocks[BLOCK_INTRO].y,
+            layout.blocks[BLOCK_INTRO].width,
             "Tightened the support story so the README stays clearly tmux-first while still acknowledging the experimental zellij code in-repo.",
             bg,
         );
@@ -116,6 +139,7 @@ impl ReferencePane {
             text,
             layout.blocks[BLOCK_RESIDUAL_PARAGRAPH].x,
             layout.blocks[BLOCK_RESIDUAL_PARAGRAPH].y,
+            layout.blocks[BLOCK_RESIDUAL_PARAGRAPH].width,
             "I only changed the README. While auditing, I noticed some secondary docs still have minor drift from the current UI behavior, especially the feature/keybinding docs.",
             bg,
         );
@@ -165,7 +189,8 @@ impl ReferencePane {
             text,
             layout.blocks[BLOCK_PARAGRAPH_TONE].x,
             layout.blocks[BLOCK_PARAGRAPH_TONE].y,
-            "I'm tightening the README again, this time for tone and density: shorter sections, less repetition, and a little more personality without getting cute enough to obscure what the project does.",
+            layout.blocks[BLOCK_PARAGRAPH_TONE].width,
+            "I\u{2019}m tightening the README again, this time for tone and density: shorter sections, less repetition, and a little more personality without getting cute enough to obscure what the project does.",
             bg,
         );
 
@@ -192,7 +217,8 @@ impl ReferencePane {
             text,
             layout.blocks[BLOCK_PARAGRAPH_COLLAPSE].x,
             layout.blocks[BLOCK_PARAGRAPH_COLLAPSE].y,
-            "I'm collapsing the README structure now: fewer headings, less \"verification report\" tone, and more \"here's why this is useful\" energy. The goal is that the first screen reads fast and still feels grounded in the actual code.",
+            layout.blocks[BLOCK_PARAGRAPH_COLLAPSE].width,
+            "I\u{2019}m collapsing the README structure now: fewer headings, less \"verification report\" tone, and more \"here\u{2019}s why this is useful\" energy. The goal is that the first screen reads fast and still feels grounded in the actual code.",
             bg,
         );
 
@@ -230,11 +256,18 @@ impl ReferencePane {
         text: &UiTextRenderer,
         x: f32,
         y: f32,
+        width: f32,
         label: &str,
         bg: [f32; 4],
     ) -> f32 {
-        ui.text_mono_scaled_mixed(text, label, x, y, colors::FG_PRIMARY, bg, BODY_SCALE);
-        y + text.s(PARAGRAPH_LINE_HEIGHT)
+        let lines = wrap_mono_text(label, width, text, BODY_SCALE);
+        let line_h = text.s(PARAGRAPH_LINE_HEIGHT);
+        let mut cy = y;
+        for line in &lines {
+            ui.text_mono_scaled_mixed(text, line, x, cy, colors::FG_PRIMARY, bg, BODY_SCALE);
+            cy += line_h;
+        }
+        cy
     }
 
     fn draw_bullet_text(
@@ -243,20 +276,21 @@ impl ReferencePane {
         text: &UiTextRenderer,
         x: f32,
         y: f32,
+        width: f32,
         label: &str,
         bg: [f32; 4],
     ) -> f32 {
+        let lead = self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP);
         ui.text_mono_scaled_mixed(text, "\u{2022}", x, y, colors::FG_MUTED, bg, BODY_SCALE);
-        ui.text_mono_scaled_mixed(
-            text,
-            label,
-            x + self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP),
-            y,
-            colors::FG_PRIMARY,
-            bg,
-            BODY_SCALE,
-        );
-        y + text.s(BODY_LINE_HEIGHT)
+        let text_avail = width - lead;
+        let lines = wrap_mono_text(label, text_avail, text, BODY_SCALE);
+        let line_h = text.s(BODY_LINE_HEIGHT);
+        let mut cy = y;
+        for line in &lines {
+            ui.text_mono_scaled_mixed(text, line, x + lead, cy, colors::FG_PRIMARY, bg, BODY_SCALE);
+            cy += line_h;
+        }
+        cy
     }
 
     fn draw_bullet_runs(
@@ -433,7 +467,7 @@ impl ReferencePane {
             height: s(24.0),
         };
         ui.fill_rounded(rect, [0.039, 0.047, 0.063, 1.0], s(5.0)); // #0a0c10
-        ui.stroke_rounded(rect, s(5.0), 1.0, [0.118, 0.129, 0.157, 1.0]); // #1e2128
+        ui.stroke_rounded(rect, s(5.0), 1.0, [0.118, 0.129, 0.157, 0.45]); // softened #1e2128
         ui.text_mono_scaled_mixed(
             text,
             command,
@@ -495,10 +529,15 @@ impl ReferencePane {
             Rect {
                 x,
                 y,
-                width: text.s(8.0),
-                height: text.s(16.0),
+                width: text.s(7.0),
+                height: text.s(15.0),
             },
-            colors::ACCENT_BLUE,
+            [
+                colors::ACCENT_BLUE[0],
+                colors::ACCENT_BLUE[1],
+                colors::ACCENT_BLUE[2],
+                0.88,
+            ],
             text.s(1.0),
         );
     }
@@ -568,4 +607,59 @@ enum InlineRun<'a> {
     Text(&'a str),
     Link(&'a str),
     Code(&'a str),
+}
+
+/// Compute how many wrapped lines a monospace text block occupies at the given
+/// scale within `avail_width` pixels.
+fn wrap_mono_line_count(text_str: &str, avail_width: f32, text: &UiTextRenderer, scale: f32) -> usize {
+    wrap_mono_text(text_str, avail_width, text, scale).len().max(1)
+}
+
+/// Word-wrap a monospace text string into lines that fit within `avail_width`.
+/// Breaks at word boundaries (spaces). Falls back to character-break for very
+/// long words.
+fn wrap_mono_text<'a>(text_str: &'a str, avail_width: f32, text: &UiTextRenderer, scale: f32) -> Vec<&'a str> {
+    let char_w = text.text_width_mono_scaled("M", scale);
+    if char_w <= 0.0 || avail_width <= 0.0 {
+        return vec![text_str];
+    }
+    let chars_per_line = (avail_width / char_w).floor().max(1.0) as usize;
+
+    if text_str.chars().count() <= chars_per_line {
+        return vec![text_str];
+    }
+
+    let mut lines = Vec::new();
+    let mut line_start = 0;
+    let mut line_chars = 0;
+    let mut last_space_byte = None;
+    let mut last_space_chars = 0;
+
+    for (byte_idx, ch) in text_str.char_indices() {
+        if ch == ' ' {
+            last_space_byte = Some(byte_idx);
+            last_space_chars = line_chars;
+        }
+        line_chars += 1;
+        if line_chars > chars_per_line {
+            if let Some(space_byte) = last_space_byte {
+                if space_byte > line_start {
+                    lines.push(&text_str[line_start..space_byte]);
+                    line_start = space_byte + 1; // skip the space
+                    line_chars = line_chars - last_space_chars - 1;
+                    last_space_byte = None;
+                    continue;
+                }
+            }
+            // No space found — break at character boundary
+            lines.push(&text_str[line_start..byte_idx]);
+            line_start = byte_idx;
+            line_chars = 1;
+            last_space_byte = None;
+        }
+    }
+    if line_start < text_str.len() {
+        lines.push(&text_str[line_start..]);
+    }
+    lines
 }

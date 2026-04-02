@@ -4,13 +4,13 @@ pub const HEADER_PAD_X: f32 = 14.0;
 pub const HEADER_PAD_TOP: f32 = 12.0;
 pub const HEADER_PAD_BOTTOM: f32 = 4.0;
 pub const LIST_PAD_X: f32 = 6.0;
-pub const LIST_PAD_Y: f32 = 4.0;
+pub const LIST_PAD_Y: f32 = 6.0;
 pub const ITEM_PAD_X: f32 = 8.0;
-pub const ITEM_PAD_Y: f32 = 7.0;
-pub const ITEM_MARGIN_BOTTOM: f32 = 2.0;
+pub const ITEM_PAD_Y: f32 = 10.0;
+pub const ITEM_MARGIN_BOTTOM: f32 = 6.0;
 pub const ROW_GAP_X: f32 = 8.0;
 pub const SECONDARY_PAD_LEFT: f32 = 20.0;
-pub const SECONDARY_MARGIN_TOP: f32 = 2.0;
+pub const SECONDARY_MARGIN_TOP: f32 = 4.0;
 pub const SESSION_NUMBER_MIN_WIDTH: f32 = 10.0;
 pub const ACTIVE_BORDER_W: f32 = 3.0;
 pub const HEADER_LABEL_FONT_PX: f32 = 12.0;
@@ -80,7 +80,8 @@ pub fn compute_sidebar_session_layout(
         height: (sidebar.height - header_h - s(LIST_PAD_Y * 2.0)).max(0.0),
     };
 
-    let first_row_h = s(SESSION_NAME_FONT_PX.max(SESSION_NUMBER_FONT_PX.max(SESSION_SECONDARY_FONT_PX)));
+    let first_row_h =
+        s(SESSION_NAME_FONT_PX.max(SESSION_NUMBER_FONT_PX.max(SESSION_SECONDARY_FONT_PX)));
     let secondary_row_h = s(SESSION_SECONDARY_FONT_PX);
     let mut item_y = list.y;
     let item_w = list.width;
@@ -159,18 +160,18 @@ mod tests {
         assert_eq!(layout.header_content.x, 14.0);
         assert_eq!(layout.header_content.y, 48.0);
         assert_eq!(layout.items[0].outer.x, 6.0);
-        assert_eq!(layout.items[0].outer.y, 68.0);
+        assert_eq!(layout.items[0].outer.y, 70.0);
         assert_eq!(layout.items[0].outer.width, 188.0);
-        assert_eq!(layout.items[0].outer.height, 40.0);
-        assert_eq!(layout.items[1].outer.y, 110.0);
-        assert_eq!(layout.items[0].first_row.y, 75.0);
+        assert_eq!(layout.items[0].outer.height, 48.0);
+        assert_eq!(layout.items[1].outer.y, 124.0);
+        assert_eq!(layout.items[0].first_row.y, 80.0);
         assert_eq!(
             layout.items[0].secondary_row.expect("secondary row").x,
             34.0
         );
         assert_eq!(
             layout.items[0].secondary_row.expect("secondary row").y,
-            90.0
+            97.0
         );
     }
 
@@ -189,7 +190,7 @@ mod tests {
             }],
         );
 
-        assert_eq!(layout.items[0].outer.height, 27.0);
+        assert_eq!(layout.items[0].outer.height, 33.0);
         assert!(layout.items[0].secondary_row.is_none());
     }
 }
