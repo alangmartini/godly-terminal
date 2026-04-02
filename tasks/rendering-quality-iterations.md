@@ -2,6 +2,377 @@
 
 Target: Match Windows Terminal / Zed quality (pixel-perfect, crisp text)
 
+## Iteration 85 — Sidebar Session-Stack CSS Layout + Transcript AA Probe
+
+**Goal**: Close the highest-leverage remaining sidebar mismatch honestly before
+spending more time on transcript polish, and then test whether transcript AA
+mode was the dominant remaining blocker or only a small contributor.
+
+**Changes made**:
+
+1. **Shared sidebar session-stack layout helper**
+   (`src-tauri/native/godly-shell/src/ui/sidebar_layout.rs`,
+   `src-tauri/native/godly-shell/src/ui/sidebar.rs`) — Added a dedicated
+   helper for the cropped sidebar header + session list that uses the same
+   constants as the web JSX (`12/14/4` header padding, `4/6` list inset,
+   `7/8` item padding, `2px` row gaps, `20px` branch indent). The render path
+   and hit-testing path now read from the same geometry instead of carrying
+   slightly different copies of the session-stack math.
+
+2. **Branch-row height mismatch fixed**
+   (`src-tauri/native/godly-shell/src/ui/sidebar.rs`) — The old code treated
+   branch-bearing rows as two-line items for hit-testing but collapsed them to
+   compact height when `description` was empty during drawing. That was
+   compressing the visible stack and misaligning the active card in the crop.
+   The shared layout helper removed that split-brain behavior.
+
+3. **Full-height active border now matches the web CSS**
+   (`src-tauri/native/godly-shell/src/ui/sidebar.rs`) — Active session cards now
+   render a full-height 3px indigo left border like the browser reference
+   instead of the old shortened floating bar inset from the top and bottom.
+
+4. **Transcript grayscale-AA experiment added**
+   (`src-tauri/native/godly-shell/src/ui/builder.rs`,
+   `src-tauri/native/godly-shell/src/ui/reference_pane.rs`) — Added
+   `text_mono_scaled_mixed()` / `text_mono_bold_scaled_mixed()` and routed the
+   deterministic crop transcript through that grayscale-AA path to test whether
+   browser-screenshot text capture was the main reason the remaining diff was
+   concentrated in the transcript.
+
+5. **Measured baseline after the sidebar pass + transcript probe** — Fresh
+   `1920x1080` parity runs now report:
+   - changed: `2,073,596 px (99.9998%)`
+   - over 10: `230,188 px (11.1009%)`
+   - MAE: `0.049211`
+   - RMSE: `0.108136`
+   - max channel diff: `255`
+
+**Result**: The sidebar stack is materially closer and the honest diff improved
+from `11.5366%` to `11.1009%` pixels over threshold. The grayscale transcript
+probe barely moved the metric, which means the dominant remaining blocker is
+still transcript typography/compositing more broadly rather than a single
+obvious AA-mode switch.
+
+**Verification**:
+
+- `cargo check -p godly-shell`
+- `cargo test -p godly-shell ui::sidebar_layout -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1`
+
+## Iteration 84 — Reference-Scale Fix + Intrinsic Crop Tabs
+
+**Goal**: Eliminate the biggest honest remaining mismatch after the scene-mode
+pass: the crop was still being laid out at Windows DPI scale, which made the
+entire reference scene too large before any finer typography gaps were even
+measurable. While fixing that, switch the cropped tab strip to the same
+content-width layout model as the web reference.
+
+**Changes made**:
+
+1. **Reference-mode layout/text now render at fixed CSS-pixel sizes**
+   (`src-tauri/native/godly-shell/src/main.rs`,
+   `src-tauri/native/godly-shell/src/ui/builder.rs`,
+   `src-tauri/native/godly-shell/src/terminal_renderer.rs`) — Added a crop-only
+   `ui_scale()` / `ui_raster_scale()` split. The shell still renders to a
+   physical-pixel swap chain, but the cropped parity scene now lays itself out
+   at `1.0` CSS-pixel scale and compensates at glyph rasterization time instead
+   of multiplying the whole scene by the monitor DPI. This removed the
+   global “everything is too big” error from the parity crop.
+
+2. **Crop tab strip now uses intrinsic widths**
+   (`src-tauri/native/godly-shell/src/ui/tab_bar.rs`,
+   `src-tauri/native/godly-shell/src/ui/tab_bar_layout.rs`) — Added a
+   content-sized tab mode to the retained tab-bar layout engine. In crop mode,
+   tabs no longer `flex-grow` across the strip; they use the web-style content
+   width model with 2px left padding, full-height 36px tabs, and inline unread
+   badges after the title instead of right-pinned badges.
+
+3. **Regression coverage for the new tab mode**
+   (`src-tauri/native/godly-shell/src/ui/tab_bar_layout.rs`) — Added a unit test
+   that verifies the content-sized tab layout produces the expected x positions,
+   widths, and full-height geometry.
+
+4. **Measured baseline after the scale/layout correction** — Fresh `1920x1080`
+   parity runs now report:
+   - changed: `2,073,344 px (99.9877%)`
+   - over 10: `239,223 px (11.5366%)`
+   - MAE: `0.047128`
+   - RMSE: `0.101986`
+   - max channel diff: `249`
+
+**Result**: The honest parity gap dropped from `22.0102%` to `11.5366%` pixels
+over threshold. The crop is no longer globally oversized, and the remaining
+diff is concentrated in transcript glyph weight/line rhythm, sidebar spacing,
+and smaller chrome-text placement drift.
+
+**Verification**:
+
+- `cargo check -p godly-shell`
+- `cargo test -p godly-shell ui::tab_bar_layout -- --nocapture`
+- `cargo build -p godly-shell`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1`
+
+## Iteration 83 — Cropped Reference Scene Mode + Auto-Launch Harness
+
+**Goal**: Stop diffing the wrong scene. The target screenshot is a cropped web
+reference, so the native shell needed a deterministic mode that matches that
+visible composition instead of rendering a live PTY, full sidebar footer, right
+panel, and status chrome.
+
+**Changes made**:
+
+1. **Added a deterministic web-reference crop mode**
+   (`src-tauri/native/godly-shell/src/main.rs`,
+   `src-tauri/native/godly-shell/src/ui/reference_pane.rs`) — The shell now
+   supports `--web-reference-crop` / `GODLY_SHELL_REFERENCE_MODE=web_reference_crop`.
+   In that mode it skips the daemon-backed live terminal path and renders the
+   visible transcript from `web-reference.png` directly through the native text
+   pipeline, so the harness no longer compares against a PowerShell prompt or
+   the branded empty-state hero.
+
+2. **Retained layout now supports the cropped screenshot composition**
+   (`ui/layout.rs`, `ui/tab_bar_layout.rs`, `ui/tab_bar.rs`) — The shell layout
+   can now hide the bottom status bar, and the retained tab-bar layout can
+   independently hide branding, right-side indicators, controls, and the new-tab
+   slot. This makes the native scene match the cropped web capture instead of
+   the full shell viewport.
+
+3. **Sidebar footer chrome can be removed for parity capture**
+   (`ui/sidebar.rs`) — Added a footer-visibility toggle so the lower process list
+   and shortcuts strip do not appear in the cropped reference mode. The sidebar
+   now leaves the same large empty lower region visible in `web-reference.png`.
+
+4. **Parity harness now launches the reference scene automatically**
+   (`scripts/measure-godly-shell-parity.ps1`) — When no PID is supplied, the
+   measurement script launches the built `godly-native.exe` in
+   `--web-reference-crop` mode, waits for the window, captures it, and shuts it
+   down again. The parity loop no longer depends on a manually staged process.
+
+5. **Measured baseline after the scene-mode fix** — Fresh `1920x1080` runs now
+   report:
+   - changed: `2,073,598 px (99.9999%)`
+   - over 10: `456,403 px (22.0102%)`
+   - MAE: `0.061262`
+   - RMSE: `0.139698`
+   - max channel diff: `249`
+
+**Result**: The parity harness now compares the right scene, and the remaining
+gap is visibly concentrated in transcript typography/spacing and tab geometry
+rather than whole missing panels or live terminal state.
+
+**Verification**:
+
+- `cargo check -p godly-shell`
+- `cargo build -p godly-shell`
+- `cargo test -p godly-shell ui::layout -- --nocapture`
+- `cargo test -p godly-shell ui::tab_bar_layout -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1`
+
+## Iteration 82 — Physical Client Sizing + Stable Parity Refresh
+
+**Goal**: Close the real presentation blocker before doing more layout polish,
+and make the one-command parity loop reliable again after the web capture path
+started failing.
+
+**Changes made**:
+
+1. **Physical client sizing on Windows** (`src-tauri/native/godly-shell/src/main.rs`)
+   — Added a Windows-only `GetClientRect` surface-size path and used it for
+   both startup and resize configuration. The previous physical-surface attempt
+   was still sizing from stale logical `winit` dimensions on this setup, which
+   left the lower/right portion of a `1920x1080` client black while only the
+   top-left logical region rendered. The shell now fills the full client again.
+
+2. **Resize handling now re-queries the HWND client rect**
+   (`src-tauri/native/godly-shell/src/main.rs`) — The resize handler no longer
+   trusts `WindowEvent::Resized` as the final surface size under DPI scaling.
+   It re-queries the actual client rect before reconfiguring the surface.
+
+3. **Deterministic client capture by default**
+   (`scripts/take-screenshot-now.ps1`) — `-ClientOnly` and `-WindowOnly`
+   now default to `PrintWindow` unless `-UsePrintWindow:$false` is supplied.
+   This aligns the helper with the docs and keeps native parity captures from
+   depending on desktop-focus screen grabs.
+
+4. **Web reference refresh no longer depends on Python base64 output**
+   (`scripts/capture-web-reference.ps1`) — Kept the `browser-use` viewport and
+   DOM-token verification, but switched the actual PNG write step to
+   `browser-use screenshot`. This fixed the failure mode where the script said
+   the browser run succeeded but never materialized `web-reference.raw.png`.
+
+5. **Measured baseline after the presentation fix** — Fresh
+   `scripts/measure-godly-shell-parity.ps1` runs now report:
+   - changed: `2,071,780 px (99.9122%)`
+   - over 10: `1,132,168 px (54.5992%)`
+   - MAE: `0.062596`
+   - RMSE: `0.123352`
+   - max channel diff: `253`
+
+**Result**: The native shell now presents across the full physical client at
+`1920x1080` instead of leaving a large black unused region, and the one-command
+parity path works again end to end. The next biggest measured gap is no longer
+presentation failure; it is the fact that the native main pane is still showing
+live PowerShell content instead of the web reference transcript.
+
+**Verification**:
+
+- `cargo check -p godly-shell`
+- `cargo build -p godly-shell`
+- `cargo test -p godly-shell ui::layout -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/capture-web-reference.ps1`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1 -ProcessId <pid>`
+
+## Iteration 81 — Retained Tab Bar Layout + Normalized 1920x1080 Harness
+
+**Goal**: Convert one real chrome section from reserve math to retained layout,
+and close the screenshot normalization gap so parity work can be measured at the
+same target size instead of comparing mismatched captures.
+
+**Changes made**:
+
+1. **Retained tab-bar layout engine** (`ui/tab_bar_layout.rs`, `ui/tab_bar.rs`,
+   `ui/mod.rs`) — Added a persistent `taffy` tree for the tab bar’s main
+   horizontal structure. The sidebar brand block, tab strip, new-tab slot,
+   process-indicator reserve, controls gap, and window controls now come from
+   retained layout instead of `tabs_origin_x()` / `effective_tab_width()` /
+   manual button-rectangle math.
+
+2. **Tab-bar hit testing now shares the retained geometry** (`ui/tab_bar.rs`)
+   — Render and hover/click handling now query the same retained layout output.
+   This removes duplicate bar geometry, and the `+` button now emits
+   `UiAction::NewTab` instead of being a paint-only affordance.
+
+3. **Deterministic 1920x1080 web capture script** (`scripts/capture-web-reference.ps1`)
+   — Added a repo-native browser capture path that:
+   - starts the local Vite reference server when needed
+   - uses `browser-use` to access the real browser session
+   - sets the page viewport to `1920x1080`
+   - saves a deterministic screenshot to `docs/references/web-reference.png`
+
+4. **Deterministic 1920x1080 native client capture** (`scripts/take-screenshot-now.ps1`)
+   — Added `-ClientOnly -ClientWidth <w> -ClientHeight <h>`. The helper now
+   restores/resizes the shell window to an exact client area, captures with
+   `PrintWindow`, and crops to the client rect so window shadows and invisible
+   frame bounds stop polluting the comparison image.
+
+5. **One-command parity measurement** (`scripts/measure-godly-shell-parity.ps1`)
+   — Added an orchestration script that refreshes both captures and then runs
+   `scripts/check-pixels.ps1`. This closes the tooling gap from iteration 80.
+
+6. **Measured normalized baseline** — Fresh `1920x1080` captures currently diff at:
+   - changed: `2,073,600 px (100%)`
+   - over 10: `2,071,289 px (99.8886%)`
+   - MAE: `0.124377`
+   - RMSE: `0.132828`
+   - max channel diff: `241`
+
+**Verification**:
+
+- `cargo check -p godly-shell`
+- `cargo test -p godly-shell ui::tab_bar_layout -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/capture-web-reference.ps1`
+- `powershell -ExecutionPolicy Bypass -File scripts/take-screenshot-now.ps1 -ProcessId <pid> -ClientOnly -ClientWidth 1920 -ClientHeight 1080`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1 -ProcessId <pid>`
+
+**Result**: The repo now has a real same-size parity harness and the first
+retained inner-chrome layout beyond the outer shell regions. The remaining
+hard blockers are still physical-pixel presentation and the rest of the manual
+chrome layout/rendering inside sidebar/status/right-panel content.
+
+## Iteration 80 — DirectWrite UI Layout + Background-Aware Compositing
+
+**Goal**: Replace the remaining faux chrome-text path with a real Windows
+measurement/compositing path instead of spending another loop on spacing polish.
+
+**Changes made**:
+
+1. **DirectWrite UI layout cache** (`ui/text_layout.rs`, `ui/builder.rs`) —
+   Added a cached DirectWrite text layout engine for sans and serif UI runs.
+   `UiTextRenderer` now asks that engine for widths and per-glyph x offsets,
+   replacing the old `ui_char_advances` / average-advance fallback path for
+   real UI text measurement and placement.
+
+2. **Real font roles and italics** (`ui/builder.rs`, `terminal_renderer.rs`,
+   `ui/right_panel.rs`) — `TextCommand` now carries a real font role
+   (`terminal`, `ui sans`, `ui serif`) plus italic state. The renderer picks
+   the matching rasterizer, and the poem panel now renders through a real
+   serif italic face instead of synthetic skew.
+
+3. **Background-aware compositing** (`ui/builder.rs`, `terminal_renderer.rs`,
+   `main.rs`) — Text commands now choose between flat-background subpixel
+   blending and mixed-background grayscale AA. Flat chrome surfaces (status
+   bar, sidebar, tabs, right panel chrome) can use ClearType-style subpixel
+   blending, while mixed surfaces such as the welcome hero and breadcrumb
+   explicitly opt into grayscale AA.
+
+4. **Screenshot helper improved for real shell capture**
+   (`scripts/take-screenshot-now.ps1`) — Added `-WindowOnly`, which uses
+   `PrintWindow` to capture the godly-shell window directly when full-desktop
+   capture is contaminated by some other foreground app. This gives a
+   deterministic native artifact even though the full-frame diff flow still
+   needs size normalization.
+
+**Verification**:
+
+- `cargo check -p godly-shell`
+- `cargo test -p godly-shell ui::layout -- --nocapture`
+- `cargo test -p godly-shell ui::builder -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/take-screenshot-now.ps1 -ProcessId <pid> -WindowOnly -OutPath docs/references/current-godly-shell.png`
+- `powershell -ExecutionPolicy Bypass -File scripts/check-pixels.ps1 ...`
+  currently fails with `Image size mismatch: reference=2560x1440, actual=2582x1390`, which is now the explicit normalization gap instead of a hidden capture failure.
+
+**Result**: The text path is materially better aligned with the non-negotiable
+parity gates. The shell now has a real DirectWrite measurement path, a real
+italic face, and a real compositing decision per text run. The remaining hard
+blockers are still physical-pixel presentation, inner-shell retained layout,
+and a deterministic same-size screenshot compare path.
+
+## Iteration 79 — Retained Shell Layout + Real Diff Harness
+
+**Goal**: Stop spending iterations on top-level hand-authored rectangle math,
+and make the screenshot comparison path measurable instead of anecdotal.
+
+**Changes made**:
+
+1. **Retained `taffy` shell layout** (`ui/layout.rs`, `main.rs`) — Replaced
+   the top-level manual `ShellLayout::compute()` region solver with a retained
+   `ShellLayoutEngine` backed by `taffy::TaffyTree`. The shell regions
+   (tab bar, body, sidebar, center column, right panel, status bar) now come
+   from flex layout, and `main.rs` routes render/input/resize queries through
+   the retained engine.
+
+2. **Layout regression tests** (`ui/layout.rs`) — Added focused tests for
+   visible, hidden, and scaled configurations. Verified with:
+   `cargo test -p godly-shell ui::layout -- --nocapture`
+
+3. **Screenshot diff harness** (`scripts/check-pixels.ps1`) — Replaced the
+   previous fixed-coordinate probe script with full-image comparison that
+   outputs:
+   - changed-pixel counts
+   - pixels-over-threshold counts
+   - max channel delta
+   - MAE / RMSE
+   - `current-godly-shell.diff.png`
+
+4. **DPI-aware native screenshot capture** (`scripts/take-screenshot-now.ps1`)
+   — The helper now opts into `PER_MONITOR_AWARE_V2` before querying screen
+   bounds, so native captures use physical pixels instead of logical pixels.
+   This fixed the old `1707x960` vs `2560x1440` mismatch on the native side.
+
+5. **Fresh measured baseline** — Captured a new web reference from the local
+   Vite app and a fresh native screenshot, then ran the new harness:
+   - size: `2560x1440`
+   - changed: `3,686,400 px (100%)`
+   - pixels over 10: `3,684,752 px (99.9553%)`
+   - MAE: `0.350239`
+   - RMSE: `0.500536`
+   - max channel diff: `245`
+
+**Result**: The repo now has a retained top-level layout layer and a real
+visual-parity harness. The numbers confirm the remaining gap is still large,
+and that the next blockers are physical-pixel presentation, real UI text
+layout, and background-aware text compositing — not palette polish.
+
 ## Iteration 78 — Synthetic Italic, Color Accuracy, Demo Parity
 
 **Goal**: Fix remaining color mismatches, add synthetic italic for poem

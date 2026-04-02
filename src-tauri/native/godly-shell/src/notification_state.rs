@@ -49,7 +49,8 @@ impl NotificationTracker {
                 return true;
             }
         }
-        self.last_mcp_message.insert(terminal_id.to_string(), message.to_string());
+        self.last_mcp_message
+            .insert(terminal_id.to_string(), message.to_string());
         false
     }
 }

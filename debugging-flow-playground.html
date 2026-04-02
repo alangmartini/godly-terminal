@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Debugging Flow Explorer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d; --bg4: #30363d;
+    --fg: #c9d1d9; --fg2: #8b949e; --fg3: #484f58;
+    --accent: #58a6ff; --accent2: #388bfd;
+    --red: #f85149; --orange: #d29922; --green: #3fb950; --purple: #bc8cff;
+    --yellow: #e3b341;
+    --phase1: #58a6ff; --phase2: #bc8cff; --phase3: #d29922; --phase4: #3fb950;
+    --radius: 8px; --radius-sm: 5px;
+  }
+  html { font-size: 14px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--fg);
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+
+  /* Header */
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--bg4);
+    display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+  }
+  header h1 { font-size: 1.15rem; font-weight: 600; color: var(--fg); }
+  header .iron-law {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.75rem; color: var(--red); background: rgba(248,81,73,0.1);
+    padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid rgba(248,81,73,0.25);
+    letter-spacing: 0.02em;
+  }
+  header .presets { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  header .presets button {
+    font-size: 0.75rem; padding: 4px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--bg4); background: var(--bg2); color: var(--fg2);
+    cursor: pointer; transition: all 0.15s;
+  }
+  header .presets button:hover { border-color: var(--accent); color: var(--accent); }
+  header .presets button.active { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,0.08); }
+
+  /* Main layout */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* Left: Controls */
+  .controls {
+    width: 300px; min-width: 280px; border-right: 1px solid var(--bg4);
+    overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px;
+    flex-shrink: 0;
+  }
+  .control-section h3 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg3); margin-bottom: 8px; font-weight: 600;
+  }
+  .control-group { margin-bottom: 10px; }
+  .control-group label {
+    display: block; font-size: 0.8rem; color: var(--fg2); margin-bottom: 4px;
+  }
+  select, input[type="text"], input[type="number"] {
+    width: 100%; padding: 6px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--bg4); background: var(--bg3); color: var(--fg);
+    font-size: 0.85rem; font-family: inherit; outline: none;
+  }
+  select:focus, input:focus { border-color: var(--accent); }
+  input[type="number"] { width: 70px; }
+
+  .checkbox-group { display: flex; flex-direction: column; gap: 5px; }
+  .checkbox-group label {
+    display: flex; align-items: center; gap: 8px; font-size: 0.8rem;
+    color: var(--fg); cursor: pointer; margin-bottom: 0;
+  }
+  .checkbox-group input[type="checkbox"] {
+    width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;
+  }
+
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0;
+  }
+  .toggle-row span { font-size: 0.8rem; color: var(--fg); }
+  .toggle {
+    width: 36px; height: 20px; border-radius: 10px; background: var(--bg4);
+    cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: white;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(16px); }
+
+  .counter-row { display: flex; align-items: center; gap: 8px; }
+  .counter-row button {
+    width: 26px; height: 26px; border-radius: var(--radius-sm);
+    border: 1px solid var(--bg4); background: var(--bg3); color: var(--fg);
+    font-size: 1rem; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; line-height: 1;
+  }
+  .counter-row button:hover { border-color: var(--accent); }
+  .counter-row .count {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 1rem; min-width: 20px; text-align: center;
+    color: var(--fg);
+  }
+  .counter-row .count.danger { color: var(--red); font-weight: 700; }
+
+  /* Center: Flow diagram */
+  .flow-panel {
+    flex: 1; overflow-y: auto; padding: 24px; display: flex;
+    flex-direction: column; align-items: center; gap: 0;
+  }
+  .phase-card {
+    width: 100%; max-width: 560px; border: 1px solid var(--bg4);
+    border-radius: var(--radius); background: var(--bg2); padding: 16px;
+    position: relative; transition: all 0.3s;
+  }
+  .phase-card.active {
+    border-color: var(--accent); box-shadow: 0 0 20px rgba(88,166,255,0.12);
+  }
+  .phase-card.complete { opacity: 0.5; }
+  .phase-card.complete .phase-header .status { color: var(--green); }
+  .phase-card.locked { opacity: 0.35; }
+
+  .phase-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .phase-num {
+    width: 28px; height: 28px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 0.8rem;
+    font-weight: 700; flex-shrink: 0; border: 2px solid;
+  }
+  .phase-card[data-phase="1"] .phase-num { border-color: var(--phase1); color: var(--phase1); }
+  .phase-card[data-phase="2"] .phase-num { border-color: var(--phase2); color: var(--phase2); }
+  .phase-card[data-phase="3"] .phase-num { border-color: var(--phase3); color: var(--phase3); }
+  .phase-card[data-phase="4"] .phase-num { border-color: var(--phase4); color: var(--phase4); }
+  .phase-card.active[data-phase="1"] .phase-num { background: var(--phase1); color: var(--bg); }
+  .phase-card.active[data-phase="2"] .phase-num { background: var(--phase2); color: var(--bg); }
+  .phase-card.active[data-phase="3"] .phase-num { background: var(--phase3); color: var(--bg); }
+  .phase-card.active[data-phase="4"] .phase-num { background: var(--phase4); color: var(--bg); }
+  .phase-card.complete .phase-num { background: var(--green); border-color: var(--green); color: var(--bg); }
+
+  .phase-title { font-weight: 600; font-size: 0.95rem; }
+  .phase-header .status { margin-left: auto; font-size: 0.75rem; color: var(--fg3); }
+
+  .phase-steps { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+  .phase-steps li {
+    font-size: 0.8rem; color: var(--fg2); padding: 3px 0 3px 20px;
+    position: relative;
+  }
+  .phase-steps li::before {
+    content: ''; position: absolute; left: 4px; top: 10px;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--bg4);
+  }
+  .phase-card.active .phase-steps li::before { background: var(--fg3); }
+  .phase-steps li.highlight {
+    color: var(--fg); background: rgba(88,166,255,0.06);
+    border-radius: var(--radius-sm); padding-left: 20px;
+  }
+  .phase-steps li.highlight::before { background: var(--accent); }
+
+  .connector {
+    width: 2px; height: 20px; background: var(--bg4); flex-shrink: 0;
+  }
+  .connector.active { background: var(--accent); }
+
+  /* Decision diamond */
+  .decision {
+    width: 100%; max-width: 560px; display: flex; align-items: center;
+    justify-content: center; padding: 8px 0; position: relative;
+  }
+  .decision-box {
+    background: var(--bg3); border: 1px solid var(--bg4); border-radius: var(--radius-sm);
+    padding: 8px 16px; font-size: 0.78rem; color: var(--fg2);
+    font-style: italic; text-align: center;
+  }
+  .decision-box.warning {
+    border-color: var(--red); color: var(--red);
+    background: rgba(248,81,73,0.08);
+  }
+  .decision-box.caution {
+    border-color: var(--orange); color: var(--orange);
+    background: rgba(210,153,34,0.08);
+  }
+
+  /* Red flags panel */
+  .red-flags {
+    width: 100%; max-width: 560px; margin-top: 8px;
+    border: 1px solid rgba(248,81,73,0.3); border-radius: var(--radius);
+    background: rgba(248,81,73,0.05); padding: 12px 16px;
+  }
+  .red-flags h4 {
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--red); margin-bottom: 8px;
+  }
+  .red-flags ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+  .red-flags li { font-size: 0.78rem; color: var(--fg2); padding-left: 16px; position: relative; }
+  .red-flags li::before { content: '!'; position: absolute; left: 0; color: var(--red); font-weight: 700; }
+  .red-flags.hidden { display: none; }
+
+  /* Prompt output */
+  .prompt-section {
+    border-top: 1px solid var(--bg4); padding: 16px 24px; flex-shrink: 0;
+  }
+  .prompt-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .prompt-header h3 {
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg3); font-weight: 600;
+  }
+  .copy-btn {
+    padding: 4px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--bg4); background: var(--bg3); color: var(--fg2);
+    font-size: 0.75rem; cursor: pointer; transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { border-color: var(--green); color: var(--green); }
+  .prompt-output {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.8rem; line-height: 1.6; color: var(--fg);
+    background: var(--bg2); border: 1px solid var(--bg4); border-radius: var(--radius);
+    padding: 14px 16px; max-height: 260px; overflow-y: auto; white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--fg3); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Debugging Flow Explorer</h1>
+  <span class="iron-law">NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST</span>
+  <div class="presets">
+    <button onclick="applyPreset('fresh')">Fresh Bug</button>
+    <button onclick="applyPreset('crash')">Crash + Stack</button>
+    <button onclick="applyPreset('regression')">Regression</button>
+    <button onclick="applyPreset('perf')">Perf Issue</button>
+    <button onclick="applyPreset('stuck')">Stuck (3+ fixes)</button>
+  </div>
+</header>
+
+<div class="main">
+  <!-- Controls -->
+  <div class="controls">
+    <div class="control-section">
+      <h3>Bug Context</h3>
+      <div class="control-group">
+        <label>Bug Type</label>
+        <select id="bugType" onchange="updateAll()">
+          <option value="crash">Crash / Panic</option>
+          <option value="wrong-behavior">Wrong Behavior</option>
+          <option value="performance">Performance Problem</option>
+          <option value="build-failure">Build Failure</option>
+          <option value="test-failure">Test Failure</option>
+          <option value="integration">Integration Issue</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Severity</label>
+        <select id="severity" onchange="updateAll()">
+          <option value="critical">Critical</option>
+          <option value="major">Major</option>
+          <option value="minor">Minor</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Affected Component</label>
+        <input type="text" id="component" placeholder="e.g. daemon, frontend, MCP" oninput="updateAll()">
+      </div>
+    </div>
+
+    <div class="control-section">
+      <h3>Available Evidence</h3>
+      <div class="checkbox-group">
+        <label><input type="checkbox" id="hasError" onchange="updateAll()"> Error message</label>
+        <label><input type="checkbox" id="hasStack" onchange="updateAll()"> Stack trace</label>
+        <label><input type="checkbox" id="hasRepro" onchange="updateAll()"> Reproduction steps</label>
+        <label><input type="checkbox" id="hasChanges" onchange="updateAll()"> Recent changes (git)</label>
+        <label><input type="checkbox" id="hasLogs" onchange="updateAll()"> Logs available</label>
+        <label><input type="checkbox" id="hasScreenshot" onchange="updateAll()"> Screenshots / recording</label>
+      </div>
+    </div>
+
+    <div class="control-section">
+      <h3>Investigation State</h3>
+      <div class="control-group">
+        <label>Current Phase</label>
+        <select id="currentPhase" onchange="updateAll()">
+          <option value="1">Phase 1 — Root Cause Investigation</option>
+          <option value="2">Phase 2 — Pattern Analysis</option>
+          <option value="3">Phase 3 — Hypothesis & Testing</option>
+          <option value="4">Phase 4 — Implementation</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Fix Attempts So Far</label>
+        <div class="counter-row">
+          <button onclick="adjustCounter(-1)">-</button>
+          <span class="count" id="fixCount">0</span>
+          <button onclick="adjustCounter(1)">+</button>
+        </div>
+      </div>
+
+      <div class="toggle-row">
+        <span>Root cause identified</span>
+        <div class="toggle" id="rootCauseToggle" onclick="toggleSwitch(this)"></div>
+      </div>
+      <div class="toggle-row">
+        <span>Failing test exists</span>
+        <div class="toggle" id="failingTestToggle" onclick="toggleSwitch(this)"></div>
+      </div>
+      <div class="toggle-row">
+        <span>Multi-component system</span>
+        <div class="toggle" id="multiComponentToggle" onclick="toggleSwitch(this)"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Flow diagram -->
+  <div class="flow-panel" id="flowPanel">
+    <!-- Populated by JS -->
+  </div>
+</div>
+
+<div class="prompt-section">
+  <div class="prompt-header">
+    <h3>Generated Prompt — paste into Claude</h3>
+    <button class="copy-btn" onclick="copyPrompt()">Copy</button>
+  </div>
+  <div class="prompt-output" id="promptOutput"></div>
+</div>
+
+<script>
+const DEFAULTS = {
+  bugType: 'crash', severity: 'critical', component: '',
+  hasError: false, hasStack: false, hasRepro: false,
+  hasChanges: false, hasLogs: false, hasScreenshot: false,
+  currentPhase: '1', fixAttempts: 0,
+  rootCauseFound: false, failingTestExists: false, multiComponent: false,
+};
+
+const state = { ...DEFAULTS };
+
+const PHASES = [
+  {
+    num: 1, title: 'Root Cause Investigation', steps: [
+      { id: 'read-errors', text: 'Read error messages and stack traces carefully', when: s => s.hasError || s.hasStack },
+      { id: 'reproduce', text: 'Reproduce the issue consistently', when: () => true },
+      { id: 'check-changes', text: 'Check recent changes (git diff, commits)', when: () => true },
+      { id: 'gather-evidence', text: 'Add diagnostic instrumentation at component boundaries', when: s => s.multiComponent },
+      { id: 'trace-flow', text: 'Trace data flow backward to find origin of bad value', when: s => s.bugType === 'wrong-behavior' || s.bugType === 'crash' },
+      { id: 'check-env', text: 'Check environment differences (config, deps, OS)', when: s => s.bugType === 'build-failure' || s.bugType === 'integration' },
+    ]
+  },
+  {
+    num: 2, title: 'Pattern Analysis', steps: [
+      { id: 'find-working', text: 'Find similar working code in the codebase', when: () => true },
+      { id: 'read-reference', text: 'Read reference implementation completely (no skimming)', when: () => true },
+      { id: 'identify-diffs', text: 'List every difference between working and broken', when: () => true },
+      { id: 'understand-deps', text: 'Map dependencies: settings, config, environment', when: () => true },
+    ]
+  },
+  {
+    num: 3, title: 'Hypothesis & Testing', steps: [
+      { id: 'form-hypothesis', text: 'State hypothesis: "X is the root cause because Y"', when: () => true },
+      { id: 'test-minimal', text: 'Make the SMALLEST possible change to test hypothesis', when: () => true },
+      { id: 'one-variable', text: 'Change ONE variable at a time', when: () => true },
+      { id: 'verify-result', text: 'Verify: Did it work? If not, form NEW hypothesis', when: () => true },
+    ]
+  },
+  {
+    num: 4, title: 'Implementation (Red-Green-Refactor)', steps: [
+      { id: 'red', text: 'RED: Write a failing test that reproduces the bug', when: () => true },
+      { id: 'green', text: 'GREEN: Fix with the simplest change possible', when: () => true },
+      { id: 'verify-fix', text: 'Verify: test passes, no other tests broken', when: () => true },
+      { id: 'refactor', text: 'REFACTOR: Clean up. Tests must stay green', when: () => true },
+      { id: 'issue-tracking', text: 'Reference fix in PR with "fixes #N"', when: () => true },
+    ]
+  },
+];
+
+const BUG_TYPE_LABELS = {
+  'crash': 'Crash / Panic',
+  'wrong-behavior': 'Wrong Behavior',
+  'performance': 'Performance Problem',
+  'build-failure': 'Build Failure',
+  'test-failure': 'Test Failure',
+  'integration': 'Integration Issue',
+};
+
+function readState() {
+  state.bugType = document.getElementById('bugType').value;
+  state.severity = document.getElementById('severity').value;
+  state.component = document.getElementById('component').value.trim();
+  state.hasError = document.getElementById('hasError').checked;
+  state.hasStack = document.getElementById('hasStack').checked;
+  state.hasRepro = document.getElementById('hasRepro').checked;
+  state.hasChanges = document.getElementById('hasChanges').checked;
+  state.hasLogs = document.getElementById('hasLogs').checked;
+  state.hasScreenshot = document.getElementById('hasScreenshot').checked;
+  state.currentPhase = document.getElementById('currentPhase').value;
+  state.fixAttempts = parseInt(document.getElementById('fixCount').textContent) || 0;
+  state.rootCauseFound = document.getElementById('rootCauseToggle').classList.contains('on');
+  state.failingTestExists = document.getElementById('failingTestToggle').classList.contains('on');
+  state.multiComponent = document.getElementById('multiComponentToggle').classList.contains('on');
+}
+
+function toggleSwitch(el) {
+  el.classList.toggle('on');
+  updateAll();
+}
+
+function adjustCounter(delta) {
+  const el = document.getElementById('fixCount');
+  const v = Math.max(0, Math.min(9, (parseInt(el.textContent) || 0) + delta));
+  el.textContent = v;
+  el.className = 'count' + (v >= 3 ? ' danger' : '');
+  updateAll();
+}
+
+function renderFlow() {
+  const panel = document.getElementById('flowPanel');
+  const phase = parseInt(state.currentPhase);
+  let html = '';
+
+  PHASES.forEach((p, i) => {
+    const isActive = p.num === phase;
+    const isComplete = p.num < phase;
+    const isLocked = p.num > phase;
+    const cls = isActive ? 'active' : isComplete ? 'complete' : 'locked';
+
+    html += `<div class="phase-card ${cls}" data-phase="${p.num}">
+      <div class="phase-header">
+        <div class="phase-num">${isComplete ? '&#10003;' : p.num}</div>
+        <span class="phase-title">${p.title}</span>
+        <span class="status">${isActive ? 'IN PROGRESS' : isComplete ? 'DONE' : 'PENDING'}</span>
+      </div>
+      <ul class="phase-steps">
+        ${p.steps.map(s => {
+          const relevant = s.when(state);
+          return `<li class="${relevant && isActive ? 'highlight' : ''}">${s.text}</li>`;
+        }).join('')}
+      </ul>
+    </div>`;
+
+    // Connectors and decision points between phases
+    if (i < PHASES.length - 1) {
+      html += `<div class="connector ${p.num < phase ? 'active' : ''}"></div>`;
+
+      if (p.num === 1) {
+        if (!state.rootCauseFound && phase > 1) {
+          html += `<div class="decision"><div class="decision-box caution">Root cause not confirmed — proceed with caution</div></div>`;
+          html += `<div class="connector"></div>`;
+        }
+      }
+      if (p.num === 3 && state.fixAttempts >= 3) {
+        html += `<div class="decision"><div class="decision-box warning">3+ fix attempts failed — STOP and question the architecture</div></div>`;
+        html += `<div class="connector"></div>`;
+      }
+    }
+  });
+
+  // Red flags
+  const flags = getRedFlags();
+  html += `<div class="red-flags ${flags.length === 0 ? 'hidden' : ''}">
+    <h4>Red Flags</h4>
+    <ul>${flags.map(f => `<li>${f}</li>`).join('')}</ul>
+  </div>`;
+
+  panel.innerHTML = html;
+}
+
+function getRedFlags() {
+  const flags = [];
+  const phase = parseInt(state.currentPhase);
+
+  if (phase > 1 && !state.rootCauseFound) {
+    flags.push('Moving past Phase 1 without confirmed root cause. Return to investigation.');
+  }
+  if (phase === 4 && !state.failingTestExists) {
+    flags.push('Phase 4 requires a failing test BEFORE implementing fixes.');
+  }
+  if (state.fixAttempts >= 3) {
+    flags.push(`${state.fixAttempts} fix attempts — this signals an architectural problem, not a simple bug. Question fundamentals.`);
+  }
+  if (state.fixAttempts >= 1 && phase < 3) {
+    flags.push('Fix attempts made during investigation phase. Stop fixing, keep investigating.');
+  }
+  if (!state.hasError && !state.hasStack && !state.hasLogs && !state.hasRepro && phase >= 2) {
+    flags.push('No evidence gathered. Cannot analyze patterns without data.');
+  }
+  if (state.multiComponent && !state.hasLogs && phase >= 2) {
+    flags.push('Multi-component system without diagnostic logs. Add instrumentation at each boundary first.');
+  }
+  return flags;
+}
+
+function generatePrompt() {
+  const phase = parseInt(state.currentPhase);
+  const parts = [];
+
+  // Opening context
+  const typeLabel = BUG_TYPE_LABELS[state.bugType] || state.bugType;
+  let opener = `I'm reporting a ${typeLabel.toLowerCase()}`;
+  if (state.component) opener += ` in the ${state.component} component`;
+  opener += `. Severity: ${state.severity}.`;
+  parts.push(opener);
+
+  // Evidence context
+  const evidence = [];
+  if (state.hasError) evidence.push('error message');
+  if (state.hasStack) evidence.push('stack trace');
+  if (state.hasRepro) evidence.push('reproduction steps');
+  if (state.hasChanges) evidence.push('recent git changes');
+  if (state.hasLogs) evidence.push('logs');
+  if (state.hasScreenshot) evidence.push('screenshots');
+  if (evidence.length > 0) {
+    parts.push(`I have: ${evidence.join(', ')}.`);
+  } else {
+    parts.push('I have no evidence gathered yet — start from scratch.');
+  }
+
+  // Phase-specific instructions
+  parts.push('');
+  if (phase === 1) {
+    parts.push('== Phase 1: Root Cause Investigation ==');
+    parts.push('Do NOT propose any fixes yet. Investigate only.');
+    parts.push('');
+    if (state.hasError || state.hasStack) {
+      parts.push('1. Read the error message and stack trace I provide below. Note exact line numbers, file paths, and error codes.');
+    }
+    parts.push(`${state.hasError || state.hasStack ? '2' : '1'}. Identify what changed recently — check git diff and recent commits.`);
+    if (state.multiComponent) {
+      parts.push('3. This is a multi-component system. Add diagnostic logging at EACH component boundary to trace where the failure occurs. Run once to gather evidence BEFORE analyzing.');
+    }
+    if (state.bugType === 'wrong-behavior' || state.bugType === 'crash') {
+      parts.push(`${state.multiComponent ? '4' : '3'}. Trace the data flow backward from the symptom to find the original source of the bad value.`);
+    }
+    if (state.bugType === 'performance') {
+      parts.push('3. Profile first. Identify the hotspot with data, not intuition. Check for N+1 queries, unnecessary allocations, blocking I/O.');
+    }
+    parts.push('');
+    parts.push('State your findings as: "The root cause is X because Y" — or say "I need more data" and explain what to gather next.');
+  }
+  else if (phase === 2) {
+    parts.push('== Phase 2: Pattern Analysis ==');
+    if (!state.rootCauseFound) {
+      parts.push('WARNING: Root cause not yet confirmed. Verify your Phase 1 findings before proceeding.');
+      parts.push('');
+    }
+    parts.push('1. Find working code in this codebase that does something similar to the broken code.');
+    parts.push('2. Read the reference implementation COMPLETELY — do not skim.');
+    parts.push('3. List every difference between the working version and the broken version, no matter how small.');
+    parts.push('4. Map the dependencies: what config, environment, or state does the broken code assume?');
+  }
+  else if (phase === 3) {
+    parts.push('== Phase 3: Hypothesis & Testing ==');
+    parts.push('1. State a single, specific hypothesis: "I believe X is the root cause because Y."');
+    parts.push('2. Propose the SMALLEST possible change to test this hypothesis — one variable only.');
+    parts.push('3. Do NOT bundle multiple changes. If the test fails, form a new hypothesis; do NOT stack fixes.');
+    if (state.fixAttempts >= 2) {
+      parts.push('');
+      parts.push(`You have ${state.fixAttempts} failed fix attempts. If this hypothesis also fails, STOP and question whether the architecture is fundamentally sound.`);
+    }
+  }
+  else if (phase === 4) {
+    parts.push('== Phase 4: Implementation (Red-Green-Refactor) ==');
+    if (state.fixAttempts >= 3) {
+      parts.push(`STOP. ${state.fixAttempts} fix attempts have failed. Before attempting another fix:`);
+      parts.push('- Is this pattern fundamentally sound?');
+      parts.push('- Are we sticking with it through inertia?');
+      parts.push('- Should we refactor the architecture instead?');
+      parts.push('Discuss before proceeding.');
+    } else {
+      if (!state.failingTestExists) {
+        parts.push('1. RED: Write a failing test that reproduces this exact bug. The test must assert the expected behavior and include the bug trigger as a comment.');
+      }
+      parts.push(`${state.failingTestExists ? '1' : '2'}. GREEN: Fix with the simplest possible change. No "while I'm here" improvements.`);
+      parts.push(`${state.failingTestExists ? '2' : '3'}. Verify the fix: test passes, no other tests broken.`);
+      parts.push(`${state.failingTestExists ? '3' : '4'}. REFACTOR: Clean up only if needed. Tests must stay green.`);
+      parts.push('');
+      parts.push('Track this as a GitHub Issue. Reference with "fixes #N" in the PR.');
+    }
+  }
+
+  // Rules that always apply
+  parts.push('');
+  parts.push('Rules:');
+  parts.push('- Never mask errors with retry loops or fallback handlers.');
+  parts.push('- Preserve crash evidence — logs must survive restarts.');
+  parts.push('- One change at a time. No bundled fixes.');
+  if (state.fixAttempts >= 3) {
+    parts.push('- 3+ failures = architectural problem. Question the pattern, not just the code.');
+  }
+
+  return parts.join('\n');
+}
+
+function updateAll() {
+  readState();
+  renderFlow();
+  document.getElementById('promptOutput').textContent = generatePrompt();
+
+  // Update preset highlights
+  document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+}
+
+function copyPrompt() {
+  const text = document.getElementById('promptOutput').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+function applyPreset(name) {
+  const presets = {
+    fresh: {
+      bugType: 'crash', severity: 'critical', component: '',
+      hasError: false, hasStack: false, hasRepro: false, hasChanges: false, hasLogs: false, hasScreenshot: false,
+      currentPhase: '1', fixAttempts: 0, rootCauseFound: false, failingTestExists: false, multiComponent: false,
+    },
+    crash: {
+      bugType: 'crash', severity: 'critical', component: '',
+      hasError: true, hasStack: true, hasRepro: true, hasChanges: false, hasLogs: true, hasScreenshot: false,
+      currentPhase: '1', fixAttempts: 0, rootCauseFound: false, failingTestExists: false, multiComponent: false,
+    },
+    regression: {
+      bugType: 'wrong-behavior', severity: 'major', component: '',
+      hasError: false, hasStack: false, hasRepro: true, hasChanges: true, hasLogs: false, hasScreenshot: false,
+      currentPhase: '1', fixAttempts: 0, rootCauseFound: false, failingTestExists: false, multiComponent: false,
+    },
+    perf: {
+      bugType: 'performance', severity: 'major', component: '',
+      hasError: false, hasStack: false, hasRepro: true, hasChanges: false, hasLogs: true, hasScreenshot: false,
+      currentPhase: '1', fixAttempts: 0, rootCauseFound: false, failingTestExists: false, multiComponent: false,
+    },
+    stuck: {
+      bugType: 'wrong-behavior', severity: 'major', component: '',
+      hasError: true, hasStack: true, hasRepro: true, hasChanges: true, hasLogs: true, hasScreenshot: false,
+      currentPhase: '4', fixAttempts: 3, rootCauseFound: true, failingTestExists: true, multiComponent: true,
+    },
+  };
+  const p = presets[name];
+  if (!p) return;
+
+  document.getElementById('bugType').value = p.bugType;
+  document.getElementById('severity').value = p.severity;
+  document.getElementById('component').value = p.component;
+  document.getElementById('hasError').checked = p.hasError;
+  document.getElementById('hasStack').checked = p.hasStack;
+  document.getElementById('hasRepro').checked = p.hasRepro;
+  document.getElementById('hasChanges').checked = p.hasChanges;
+  document.getElementById('hasLogs').checked = p.hasLogs;
+  document.getElementById('hasScreenshot').checked = p.hasScreenshot;
+  document.getElementById('currentPhase').value = p.currentPhase;
+  document.getElementById('fixCount').textContent = p.fixAttempts;
+  document.getElementById('fixCount').className = 'count' + (p.fixAttempts >= 3 ? ' danger' : '');
+  document.getElementById('rootCauseToggle').classList.toggle('on', p.rootCauseFound);
+  document.getElementById('failingTestToggle').classList.toggle('on', p.failingTestExists);
+  document.getElementById('multiComponentToggle').classList.toggle('on', p.multiComponent);
+
+  document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.presets button[onclick="applyPreset('${name}')"]`)?.classList.add('active');
+
+  updateAll();
+}
+
+// Init
+updateAll();
+</script>
+</body>
+</html>

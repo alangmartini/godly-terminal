@@ -1,0 +1,22 @@
+Implemented two substantive parity moves.
+
+The tab bar’s horizontal structure now comes from a retained `taffy` tree instead of reserve/origin math. I added [tab_bar_layout.rs](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\native\godly-shell\src\ui\tab_bar_layout.rs), wired [tab_bar.rs](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\native\godly-shell\src\ui\tab_bar.rs) to use it for both render and hit testing, and exposed the module in [mod.rs](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\src-tauri\native\godly-shell\src\ui\mod.rs). That also made the `+` button emit `UiAction::NewTab` instead of being paint-only.
+
+I also closed the harness normalization gap. [capture-web-reference.ps1](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\scripts\capture-web-reference.ps1) now produces a browser-driven `1920x1080` web reference, [take-screenshot-now.ps1](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\scripts\take-screenshot-now.ps1) can resize/capture an exact native client area with `-ClientOnly -ClientWidth 1920 -ClientHeight 1080`, and [measure-godly-shell-parity.ps1](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\scripts\measure-godly-shell-parity.ps1) runs the full pair-capture plus diff. I updated [gaps.md](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\docs\references\gaps.md) and [rendering-quality-iterations.md](C:\Users\alanm\Documents\dev\godly-claude\godly-terminal\tasks\rendering-quality-iterations.md) with the new state and measurements.
+
+Verification:
+- `cargo check -p godly-shell`
+- `cargo test -p godly-shell ui::tab_bar_layout -- --nocapture`
+- `cargo test -p godly-shell ui::layout -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1 -ProcessId <capture pid>`
+
+Current normalized baseline at `1920x1080`:
+- Changed: `2,073,600 px (100%)`
+- Over-10: `2,071,289 px (99.8886%)`
+- MAE: `0.124377`
+- RMSE: `0.132828`
+- Max channel diff: `241`
+
+I did not commit because the worktree already contains unrelated in-flight changes. If you want, I can run `/manual-testing godly-shell parity` after the next rendering-path pass.
+
+RALPH_CONTINUE: Prototype and verify a real physical-pixel presentation path (or objectively equivalent Win32/DXGI present path) and remeasure it with the new 1920x1080 parity harness.

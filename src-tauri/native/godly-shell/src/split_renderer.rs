@@ -1,10 +1,10 @@
 //! Recursive split pane rendering from LayoutNode tree.
 
-use std::collections::HashMap;
-use godly_layout_core::{LayoutNode, SplitDirection};
-use godly_protocol::types::RichGridData;
 use crate::terminal_renderer::TerminalRenderer;
 use crate::ui::widget::Rect;
+use godly_layout_core::{LayoutNode, SplitDirection};
+use godly_protocol::types::RichGridData;
+use std::collections::HashMap;
 
 /// Render a layout tree into the given render pass.
 ///
@@ -21,12 +21,30 @@ pub fn render_layout(
 ) {
     match node {
         LayoutNode::Leaf { terminal_id } => {
-            if let (Some(grid), Some(renderer)) = (grids.get(terminal_id), renderers.get_mut(terminal_id)) {
-                renderer.prepare(device, queue, Some(grid), rect.width as u32, rect.height as u32, rect.x, rect.y, rect.width, rect.height, &[]);
+            if let (Some(grid), Some(renderer)) =
+                (grids.get(terminal_id), renderers.get_mut(terminal_id))
+            {
+                renderer.prepare(
+                    device,
+                    queue,
+                    Some(grid),
+                    rect.width as u32,
+                    rect.height as u32,
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                    &[],
+                );
                 renderer.draw(render_pass);
             }
         }
-        LayoutNode::Split { direction, ratio, first, second } => {
+        LayoutNode::Split {
+            direction,
+            ratio,
+            first,
+            second,
+        } => {
             let (r1, r2) = split_rect(rect, *direction, *ratio);
             render_layout(first, r1, renderers, grids, device, queue, render_pass);
             render_layout(second, r2, renderers, grids, device, queue, render_pass);
@@ -44,16 +62,36 @@ fn split_rect(rect: Rect, direction: SplitDirection, ratio: f32) -> (Rect, Rect)
             let w1 = (rect.width * ratio - DIVIDER / 2.0).max(0.0);
             let w2 = (rect.width * (1.0 - ratio) - DIVIDER / 2.0).max(0.0);
             (
-                Rect { x: rect.x, y: rect.y, width: w1, height: rect.height },
-                Rect { x: rect.x + w1 + DIVIDER, y: rect.y, width: w2, height: rect.height },
+                Rect {
+                    x: rect.x,
+                    y: rect.y,
+                    width: w1,
+                    height: rect.height,
+                },
+                Rect {
+                    x: rect.x + w1 + DIVIDER,
+                    y: rect.y,
+                    width: w2,
+                    height: rect.height,
+                },
             )
         }
         SplitDirection::Vertical => {
             let h1 = (rect.height * ratio - DIVIDER / 2.0).max(0.0);
             let h2 = (rect.height * (1.0 - ratio) - DIVIDER / 2.0).max(0.0);
             (
-                Rect { x: rect.x, y: rect.y, width: rect.width, height: h1 },
-                Rect { x: rect.x, y: rect.y + h1 + DIVIDER, width: rect.width, height: h2 },
+                Rect {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: h1,
+                },
+                Rect {
+                    x: rect.x,
+                    y: rect.y + h1 + DIVIDER,
+                    width: rect.width,
+                    height: h2,
+                },
             )
         }
     }

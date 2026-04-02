@@ -1,15 +1,15 @@
+use godly_protocol::types::RichGridData;
 use godly_terminal_surface::{
     atlas_shader::{AtlasPipeline, AtlasShaderProgram},
     atlas_vertex_builder::{self, CellVertex},
+    font_metrics::FontMetrics,
     glyph_atlas::GlyphAtlas,
     glyph_cache::GlyphKey,
     glyph_rasterizer::GlyphRasterizer,
-    font_metrics::FontMetrics,
     Color,
 };
-use godly_protocol::types::RichGridData;
 
-use crate::ui::builder::TextCommand;
+use crate::ui::builder::{TextCommand, TextCompositeMode, TextFontKind};
 
 pub struct TerminalRenderer {
     pipeline: AtlasPipeline,
@@ -17,6 +17,8 @@ pub struct TerminalRenderer {
     rasterizer: Box<dyn GlyphRasterizer>,
     /// Optional proportional sans-serif rasterizer for UI chrome labels.
     ui_rasterizer: Option<Box<dyn GlyphRasterizer>>,
+    /// Optional serif rasterizer for rich UI copy (e.g. poem panel italics).
+    ui_serif_rasterizer: Option<Box<dyn GlyphRasterizer>>,
     font_metrics: FontMetrics,
     /// Average advance width of the UI font (for layout estimation).
     ui_avg_advance: f32,
@@ -41,9 +43,10 @@ impl TerminalRenderer {
             glyph_atlas,
             rasterizer,
             ui_rasterizer: None,
+            ui_serif_rasterizer: None,
             font_metrics,
             ui_avg_advance: 0.0,
-            default_fg: Color::new(0.788, 0.820, 0.851, 1.0),  // GitHub Dark Text #c9d1d9
+            default_fg: Color::new(0.788, 0.820, 0.851, 1.0), // GitHub Dark Text #c9d1d9
             default_bg: Color::new(0.055, 0.063, 0.090, 1.0), // GitHub Dark Base #0e1017
         }
     }
@@ -56,25 +59,13 @@ impl TerminalRenderer {
         self.ui_rasterizer = Some(rasterizer);
     }
 
+    pub fn set_ui_serif_rasterizer(&mut self, rasterizer: Box<dyn GlyphRasterizer>) {
+        self.ui_serif_rasterizer = Some(rasterizer);
+    }
+
     /// Average advance width of the UI proportional font.
     pub fn ui_avg_advance(&self) -> f32 {
         self.ui_avg_advance
-    }
-
-    /// Build per-character advance table for printable ASCII (0x20..=0x7E)
-    /// using the proportional UI font. Returns empty vec if no UI rasterizer.
-    pub fn build_ui_char_advances(&mut self) -> Vec<f32> {
-        let phys = self.font_metrics.scaled_for_render();
-        if let Some(ref mut rast) = self.ui_rasterizer {
-            (0x20u8..=0x7Eu8).map(|code| {
-                let ch = code as char;
-                let key = GlyphKey::new_ui(ch, phys.font_size, false);
-                let entry = self.glyph_atlas.get_or_insert(key, &mut **rast, phys.font_size);
-                entry.advance
-            }).collect()
-        } else {
-            Vec::new()
-        }
     }
 
     /// Prepare GPU resources (atlas texture upload, vertex buffer) BEFORE the render pass.
@@ -123,57 +114,78 @@ impl TerminalRenderer {
         let transparent_bg = [0.0f32, 0.0, 0.0, 0.0];
 
         for cmd in ui_text {
-            let mut cx = cmd.x;
-            let use_ui_font = cmd.ui_font && self.ui_rasterizer.is_some();
+            let draw_scale = cmd.scale * cmd.raster_scale;
+            let font_size = phys.font_size * draw_scale;
+            let use_variable_advance = !matches!(cmd.font_kind, TextFontKind::TerminalMono);
+            let use_serif = matches!(cmd.font_kind, TextFontKind::UiSerif);
+            let mut fallback_x = cmd.x;
 
-            for ch in cmd.text.chars() {
-                let (_key, entry) = if use_ui_font {
-                    let key = GlyphKey::new_ui(ch, phys.font_size, cmd.bold);
-                    let rast = self.ui_rasterizer.as_mut().unwrap();
-                    let entry = self.glyph_atlas.get_or_insert(key, &mut **rast, phys.font_size);
-                    (key, entry)
-                } else {
-                    let key = GlyphKey::new(ch, phys.font_size, cmd.bold, false);
-                    let entry = self.glyph_atlas.get_or_insert(key, &mut *self.rasterizer, phys.font_size);
-                    (key, entry)
+            for (index, ch) in cmd.text.chars().enumerate() {
+                let entry = match cmd.font_kind {
+                    TextFontKind::TerminalMono => {
+                        let key = GlyphKey::new(ch, font_size, cmd.bold, cmd.italic);
+                        self.glyph_atlas
+                            .get_or_insert(key, &mut *self.rasterizer, font_size)
+                    }
+                    TextFontKind::UiMono => {
+                        let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 3);
+                        self.glyph_atlas
+                            .get_or_insert(key, &mut *self.rasterizer, font_size)
+                    }
+                    TextFontKind::UiSans => {
+                        let Some(rast) = self.ui_rasterizer.as_mut() else {
+                            continue;
+                        };
+                        let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 1);
+                        self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
+                    }
+                    TextFontKind::UiSerif => {
+                        let Some(rast) = self
+                            .ui_serif_rasterizer
+                            .as_mut()
+                            .or(self.ui_rasterizer.as_mut())
+                        else {
+                            continue;
+                        };
+                        let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 2);
+                        self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
+                    }
                 };
 
-                let px = cx;
+                let px = cmd
+                    .glyph_offsets
+                    .get(index)
+                    .map_or(fallback_x, |offset| cmd.x + *offset);
                 let py = cmd.y;
-                let sc = cmd.scale;
                 // For proportional font, use actual glyph slot width from UV;
                 // for monospace, use cell_width.
-                let pw = if use_ui_font {
+                let pw = if use_variable_advance {
                     // Slot width = atlas slot pixel width from UV coords
-                    (entry.u1 - entry.u0) * self.glyph_atlas.atlas_width() as f32 * sc
+                    (entry.u1 - entry.u0) * self.glyph_atlas.atlas_width() as f32
                 } else {
-                    phys.cell_width * sc
+                    phys.cell_width * draw_scale
                 };
-                let ph = phys.cell_height * sc;
+                let ph = phys.cell_height * draw_scale;
 
                 let x0 = px / vw * 2.0 - 1.0;
                 let y0 = 1.0 - py / vh * 2.0;
                 let x1 = (px + pw) / vw * 2.0 - 1.0;
                 let y1 = 1.0 - (py + ph) / vh * 2.0;
 
-                // Synthetic italic: shift top vertices rightward by skew * height
-                let skew_ndc = if cmd.skew != 0.0 {
-                    cmd.skew * ph / vw * 2.0
-                } else {
-                    0.0
-                };
-
                 // 6 vertices (2 triangles)
                 let v = |pos: [f32; 2], uv: [f32; 2]| CellVertex {
                     position: pos,
                     uv,
                     fg_color: cmd.fg,
-                    bg_color: transparent_bg,
+                    bg_color: match cmd.composite {
+                        TextCompositeMode::FlatBackground => [cmd.bg[0], cmd.bg[1], cmd.bg[2], 1.0],
+                        TextCompositeMode::MixedBackground => transparent_bg,
+                    },
                 };
-                let tl = [x0 + skew_ndc, y0];       // top shifts right
-                let tr = [x1 + skew_ndc, y0];       // top shifts right
-                let bl = [x0, y1];                    // bottom stays
-                let br = [x1, y1];                    // bottom stays
+                let tl = [x0, y0];
+                let tr = [x1, y0];
+                let bl = [x0, y1];
+                let br = [x1, y1];
                 let uv_tl = [entry.u0, entry.v0];
                 let uv_br = [entry.u1, entry.v1];
                 let uv_tr = [uv_br[0], uv_tl[1]];
@@ -186,12 +198,19 @@ impl TerminalRenderer {
                 vertices.push(v(bl, uv_bl));
                 vertices.push(v(br, uv_br));
 
-                // Advance by actual glyph advance for proportional, cell_width for mono
-                cx += (if use_ui_font { entry.advance } else { phys.cell_width }) * sc;
+                if cmd.glyph_offsets.is_empty() {
+                    fallback_x += (if use_variable_advance || use_serif {
+                        entry.advance
+                    } else {
+                        phys.cell_width
+                    }) * draw_scale;
+                }
             }
         }
 
-        if vertices.is_empty() { return; }
+        if vertices.is_empty() {
+            return;
+        }
 
         let atlas_update = self.glyph_atlas.take_dirty_data();
         let program = AtlasShaderProgram {
@@ -211,7 +230,8 @@ impl TerminalRenderer {
             vertices: vec![],
             atlas_update: None,
             viewport_size: (0, 0),
-        }.build_primitive();
+        }
+        .build_primitive();
         primitive.draw(&self.pipeline, render_pass);
     }
 

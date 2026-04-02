@@ -72,7 +72,11 @@ impl SearchState {
 
     pub fn match_info(&self) -> String {
         if self.matches.is_empty() {
-            if self.query.is_empty() { String::new() } else { "No matches".to_string() }
+            if self.query.is_empty() {
+                String::new()
+            } else {
+                "No matches".to_string()
+            }
         } else {
             format!("{}/{}", self.current_index + 1, self.matches.len())
         }
@@ -96,7 +100,11 @@ pub fn find_matches(query: &str, grid: &RichGridData, regex_mode: bool) -> Vec<S
             while let Some(pos) = line[start..].find(query) {
                 let col_start = start + pos;
                 let col_end = col_start + query.len() - 1;
-                matches.push(SearchMatch { row: row_idx, col_start, col_end });
+                matches.push(SearchMatch {
+                    row: row_idx,
+                    col_start,
+                    col_end,
+                });
                 start = col_start + 1;
             }
         } else {
@@ -105,7 +113,11 @@ pub fn find_matches(query: &str, grid: &RichGridData, regex_mode: bool) -> Vec<S
             while let Some(pos) = line_lower[start..].find(&query_lower) {
                 let col_start = start + pos;
                 let col_end = col_start + query.len() - 1;
-                matches.push(SearchMatch { row: row_idx, col_start, col_end });
+                matches.push(SearchMatch {
+                    row: row_idx,
+                    col_start,
+                    col_end,
+                });
                 start = col_start + 1;
             }
         }

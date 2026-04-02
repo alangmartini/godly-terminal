@@ -3,9 +3,9 @@
 //! Follows the web reference layout: header with title + close button,
 //! scrollable content area with poem, and a small status bar at the bottom.
 
-use super::anim::{self, Anim, lerp_color};
+use super::anim::{self, lerp_color, Anim};
 use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
-use super::widget::{Rect, MouseEvent};
+use super::widget::{MouseEvent, Rect};
 
 pub struct RightPanel {
     /// Whether the right panel is currently shown.
@@ -48,7 +48,8 @@ impl RightPanel {
     /// Advance hover animations. Returns `true` if still animating.
     pub fn tick_animations(&mut self, dt: f32) -> bool {
         let hl = anim::timing::HOVER;
-        self.close_hover_anim.set(if self.close_hovered { 1.0 } else { 0.0 });
+        self.close_hover_anim
+            .set(if self.close_hovered { 1.0 } else { 0.0 });
         self.close_hover_anim.tick(hl, dt)
     }
 
@@ -70,24 +71,49 @@ impl RightPanel {
         // Web: padding "10px 14px", borderBottom "1px solid #1a1d25",
         //      display flex, gap 8, fontSize 12
         let header_h = s(36.0);
-        let header = Rect { x: panel.x, y: panel.y, width: panel.width, height: header_h };
+        let header = Rect {
+            x: panel.x,
+            y: panel.y,
+            width: panel.width,
+            height: header_h,
+        };
 
         // Header bottom border — web: borderBottom "1px solid #1a1d25"
-        ui.hline(header.x, header.bottom() - 1.0, header.width, 1.0, colors::BORDER);
+        ui.hline(
+            header.x,
+            header.bottom() - 1.0,
+            header.width,
+            1.0,
+            colors::BORDER,
+        );
 
         // Title text — web: color "#484f58" (STATUS_DEFAULT), fontSize 12
         let title_y = header.y + (header_h - ch * font_scale::PX12) / 2.0;
-        let title = if self.title.is_empty() { "Panel" } else { &self.title };
-        ui.text_ui_scaled(text, title, panel.x + s(14.0), title_y,
+        let title = if self.title.is_empty() {
+            "Panel"
+        } else {
+            &self.title
+        };
+        ui.text_ui_scaled(
+            text,
+            title,
+            panel.x + s(14.0),
+            title_y,
             colors::STATUS_DEFAULT, // #484f58
             colors::BG_DARK,
-            font_scale::PX12);
+            font_scale::PX12,
+        );
 
         // Close button (×) — web: color "#3b4048", fontSize 14
         let close_sz = ch;
         let close_x = panel.right() - close_sz - s(10.0);
         let close_y = header.y + (header_h - close_sz) / 2.0;
-        let close_rect = Rect { x: close_x, y: close_y, width: close_sz, height: close_sz };
+        let close_rect = Rect {
+            x: close_x,
+            y: close_y,
+            width: close_sz,
+            height: close_sz,
+        };
         let close_t = self.close_hover_anim.value();
         let close_fg = lerp_color(
             colors::STATUS_PATH, // #3b4048
@@ -121,25 +147,32 @@ impl RightPanel {
         let dot_sz = s(8.0);
         let dot_y = y + (ch - dot_sz) / 2.0;
         ui.fill_rounded(
-            Rect { x: content_rect.x, y: dot_y, width: dot_sz, height: dot_sz },
+            Rect {
+                x: content_rect.x,
+                y: dot_y,
+                width: dot_sz,
+                height: dot_sz,
+            },
             colors::FG_BRIGHT, // #e6edf3
             dot_sz / 2.0,
         );
-        ui.text_ui_bold_scaled(text, &self.poem_title,
-            content_rect.x + dot_sz + s(8.0), y,
+        ui.text_ui_bold_scaled(
+            text,
+            &self.poem_title,
+            content_rect.x + dot_sz + s(8.0),
+            y,
             colors::FG_BRIGHT, // #e6edf3
             colors::BG_DARK,
-            font_scale::PX15); // web: fontSize 15
+            font_scale::PX15,
+        ); // web: fontSize 15
         y += ch * font_scale::PX15 + s(16.0); // marginBottom 16
 
         // Stanzas — web: marginBottom 18, lineHeight 1.7, fontSize 13,
         //                 color "#9198a1", fontFamily Georgia/serif italic,
         //                 letterSpacing 0.2, whiteSpace pre-wrap
-        // Serif font not loaded — synthetic italic (skew) approximates the
-        // italic styling from the web reference.
         let stanza_ch = ch * font_scale::PX13; // fontSize 13
         let stanza_line_h = stanza_ch * 1.7; // lineHeight 1.7
-        let stanza_gap = s(18.0);     // marginBottom 18
+        let stanza_gap = s(18.0); // marginBottom 18
         let stanza_fg: [f32; 4] = colors::FG_INACTIVE; // #9198a1
 
         for stanza in &self.stanzas {
@@ -147,7 +180,15 @@ impl RightPanel {
                 if y + stanza_ch > content_rect.y + content_rect.height {
                     break;
                 }
-                ui.text_ui_italic_scaled(text, line, content_rect.x, y, stanza_fg, colors::BG_DARK, font_scale::PX13);
+                ui.text_serif_italic_scaled(
+                    text,
+                    line,
+                    content_rect.x,
+                    y,
+                    stanza_fg,
+                    colors::BG_DARK,
+                    font_scale::PX13,
+                );
                 y += stanza_line_h;
             }
             y += stanza_gap - stanza_line_h; // net gap between stanzas
@@ -159,10 +200,15 @@ impl RightPanel {
             y += s(8.0);
             ui.hline(content_rect.x, y, content_rect.width, 1.0, colors::BORDER);
             y += s(12.0);
-            ui.text_ui_scaled(text, &self.footer, content_rect.x, y,
+            ui.text_ui_scaled(
+                text,
+                &self.footer,
+                content_rect.x,
+                y,
                 colors::FG_MUTED, // #6e7681
                 colors::BG_DARK,
-                font_scale::PX12); // web: fontSize 12
+                font_scale::PX12,
+            ); // web: fontSize 12
         }
 
         // --- Bottom status bar ---
@@ -175,16 +221,37 @@ impl RightPanel {
             let status_ch = ch * font_scale::PX11;
             let status_y = status.y + (status.height - status_ch) / 2.0;
             let status_fg = colors::STATUS_PATH; // #3b4048
-            // Left: "}" brace
-            ui.text_ui_scaled(text, "}", status.x + s(10.0), status_y, status_fg, colors::BG_STATUS, font_scale::PX11);
+                                                 // Left: "}" brace
+            ui.text_ui_scaled(
+                text,
+                "}",
+                status.x + s(10.0),
+                status_y,
+                status_fg,
+                colors::BG_STATUS,
+                font_scale::PX11,
+            );
             // Right: "? for shortcuts"
             let hint = "? for shortcuts";
             let hint_w = text.text_width_ui_scaled(hint, font_scale::PX11);
-            ui.text_ui_scaled(text, hint, status.right() - hint_w - s(10.0), status_y, status_fg, colors::BG_STATUS, font_scale::PX11);
+            ui.text_ui_scaled(
+                text,
+                hint,
+                status.right() - hint_w - s(10.0),
+                status_y,
+                status_fg,
+                colors::BG_STATUS,
+                font_scale::PX11,
+            );
         }
     }
 
-    pub fn on_mouse(&mut self, event: MouseEvent, panel: Rect, text: &UiTextRenderer) -> Option<RightPanelAction> {
+    pub fn on_mouse(
+        &mut self,
+        event: MouseEvent,
+        panel: Rect,
+        text: &UiTextRenderer,
+    ) -> Option<RightPanelAction> {
         if !self.visible || panel.width < 1.0 {
             return None;
         }
@@ -197,7 +264,12 @@ impl RightPanel {
         let close_sz = ch;
         let close_x = panel.right() - close_sz - s(10.0);
         let close_y = panel.y + (header_h - close_sz) / 2.0;
-        let close_rect = Rect { x: close_x, y: close_y, width: close_sz, height: close_sz };
+        let close_rect = Rect {
+            x: close_x,
+            y: close_y,
+            width: close_sz,
+            height: close_sz,
+        };
 
         match event {
             MouseEvent::Move { x, y } => {

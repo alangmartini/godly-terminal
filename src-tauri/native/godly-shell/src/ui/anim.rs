@@ -30,7 +30,10 @@ pub struct Anim {
 
 impl Default for Anim {
     fn default() -> Self {
-        Self { current: 0.0, target: 0.0 }
+        Self {
+            current: 0.0,
+            target: 0.0,
+        }
     }
 }
 
@@ -82,17 +85,25 @@ pub struct AnimArray<const N: usize> {
 
 impl<const N: usize> Default for AnimArray<N> {
     fn default() -> Self {
-        Self { anims: [Anim::default(); N] }
+        Self {
+            anims: [Anim::default(); N],
+        }
     }
 }
 
 impl<const N: usize> AnimArray<N> {
     pub fn get(&self, i: usize) -> f32 {
-        if i < N { self.anims[i].value() } else { 0.0 }
+        if i < N {
+            self.anims[i].value()
+        } else {
+            0.0
+        }
     }
 
     pub fn set(&mut self, i: usize, target: f32) {
-        if i < N { self.anims[i].set(target); }
+        if i < N {
+            self.anims[i].set(target);
+        }
     }
 
     /// Tick all animations. Returns `true` if any are still animating.

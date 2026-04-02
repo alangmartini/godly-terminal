@@ -3,57 +3,63 @@
 //! `UiBuilder` collects quad and text vertices during the build phase,
 //! then returns them in `finish()` for the GPU render pass.
 
-use super::quad_renderer::{quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf, quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated, QuadVertex};
+use super::quad_renderer::{
+    quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf,
+    quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated,
+    QuadVertex,
+};
+use super::text_layout::{UiFontKind, UiTextLayout, UiTextLayoutEngine};
 use super::widget::Rect;
+use std::rc::Rc;
 
 /// GitHub Dark–inspired ultra-dark palette for all UI chrome.
 /// Deep blue-black tones — matches the web reference mockup.
 pub mod colors {
     // Ultra-dark base colors (GitHub Dark inspired)
-    pub const BG_DARK: [f32; 4] = [0.043, 0.051, 0.071, 1.0];      // #0b0d12 Chrome/sidebar
-    pub const BG_BASE: [f32; 4] = [0.055, 0.063, 0.090, 1.0];      // #0e1017 Content/terminal
-    pub const BG_RAISED: [f32; 4] = [0.059, 0.067, 0.090, 1.0];    // #0f1117 Elevated panels
-    pub const BG_SURFACE: [f32; 4] = [0.102, 0.114, 0.145, 1.0];   // #1a1d25 Surface/hover base
-    pub const BG_HOVER: [f32; 4] = [0.176, 0.200, 0.231, 1.0];     // #2d333b Hover states
-    pub const BG_ACTIVE: [f32; 4] = [0.090, 0.106, 0.141, 1.0];    // #171b24 Active selection
+    pub const BG_DARK: [f32; 4] = [0.043, 0.051, 0.071, 1.0]; // #0b0d12 Chrome/sidebar
+    pub const BG_BASE: [f32; 4] = [0.055, 0.063, 0.090, 1.0]; // #0e1017 Content/terminal
+    pub const BG_RAISED: [f32; 4] = [0.059, 0.067, 0.090, 1.0]; // #0f1117 Elevated panels
+    pub const BG_SURFACE: [f32; 4] = [0.102, 0.114, 0.145, 1.0]; // #1a1d25 Surface/hover base
+    pub const BG_HOVER: [f32; 4] = [0.176, 0.200, 0.231, 1.0]; // #2d333b Hover states
+    pub const BG_ACTIVE: [f32; 4] = [0.090, 0.106, 0.141, 1.0]; // #171b24 Active selection
     pub const BG_TAB_ACTIVE: [f32; 4] = [0.086, 0.098, 0.125, 1.0]; // #161920 Active tab (web)
     pub const BG_ACTIVE_ACC: [f32; 4] = [0.078, 0.090, 0.122, 1.0]; // #14171f Blue-tinted active
-    pub const BG_STATUS: [f32; 4] = [0.047, 0.055, 0.078, 1.0];    // #0c0e14 Status bar
-    pub const FG_BRIGHT: [f32; 4] = [0.902, 0.929, 0.953, 1.0];    // #e6edf3 Active/heading
-    pub const FG_PRIMARY: [f32; 4] = [0.788, 0.820, 0.851, 1.0];   // #c9d1d9 Text
+    pub const BG_STATUS: [f32; 4] = [0.047, 0.055, 0.078, 1.0]; // #0c0e14 Status bar
+    pub const FG_BRIGHT: [f32; 4] = [0.902, 0.929, 0.953, 1.0]; // #e6edf3 Active/heading
+    pub const FG_PRIMARY: [f32; 4] = [0.788, 0.820, 0.851, 1.0]; // #c9d1d9 Text
     pub const FG_SECONDARY: [f32; 4] = [0.545, 0.580, 0.620, 1.0]; // #8b949e Subtext
     pub const FG_INACTIVE: [f32; 4] = [0.569, 0.596, 0.631, 1.0]; // #9198a1 Inactive names (web)
-    pub const FG_MUTED: [f32; 4] = [0.431, 0.463, 0.506, 1.0];     // #6e7681 Overlay/muted
-    pub const FG_DIM: [f32; 4] = [0.333, 0.365, 0.420, 1.0];       // #555d6b Dimmed chrome
-    pub const ACCENT_BLUE: [f32; 4] = [0.388, 0.400, 0.945, 1.0];  // #6366f1 Indigo
+    pub const FG_MUTED: [f32; 4] = [0.431, 0.463, 0.506, 1.0]; // #6e7681 Overlay/muted
+    pub const FG_DIM: [f32; 4] = [0.333, 0.365, 0.420, 1.0]; // #555d6b Dimmed chrome
+    pub const ACCENT_BLUE: [f32; 4] = [0.388, 0.400, 0.945, 1.0]; // #6366f1 Indigo
     pub const ACCENT_GREEN: [f32; 4] = [0.133, 0.773, 0.369, 1.0]; // #22c55e Green
     pub const ACCENT_PEACH: [f32; 4] = [0.961, 0.620, 0.043, 1.0]; // #f59e0b Amber
     pub const ACCENT_MAUVE: [f32; 4] = [0.545, 0.361, 0.965, 1.0]; // #8b5cf6 Violet
-    pub const ACCENT_RED: [f32; 4] = [0.937, 0.267, 0.267, 1.0];   // #ef4444 Red
+    pub const ACCENT_RED: [f32; 4] = [0.937, 0.267, 0.267, 1.0]; // #ef4444 Red
     pub const ACCENT_EMERALD: [f32; 4] = [0.063, 0.725, 0.506, 1.0]; // #10b981 Emerald
-    pub const ACCENT_ORANGE: [f32; 4] = [0.976, 0.451, 0.086, 1.0];  // #f97316 Orange
+    pub const ACCENT_ORANGE: [f32; 4] = [0.976, 0.451, 0.086, 1.0]; // #f97316 Orange
     pub const RED_HOVER: [f32; 4] = [0.937, 0.267, 0.267, 0.8];
     pub const RED_SUBTLE: [f32; 4] = [0.15, 0.11, 0.11, 1.0];
-    pub const ACCENT_GOLD: [f32; 4] = [0.902, 0.659, 0.333, 1.0];  // #e6a855 Code text
-    pub const ACCENT_SKY: [f32; 4] = [0.345, 0.651, 1.0, 1.0];     // #58a6ff Links
+    pub const ACCENT_GOLD: [f32; 4] = [0.902, 0.659, 0.333, 1.0]; // #e6a855 Code text
+    pub const ACCENT_SKY: [f32; 4] = [0.345, 0.651, 1.0, 1.0]; // #58a6ff Links
     pub const TRANSPARENT: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
     pub const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
     // Status bar text tones — web uses much darker text than general UI
-    pub const STATUS_PATH: [f32; 4] = [0.231, 0.251, 0.282, 1.0];  // #3b4048 path/muted info
+    pub const STATUS_PATH: [f32; 4] = [0.231, 0.251, 0.282, 1.0]; // #3b4048 path/muted info
     pub const STATUS_DEFAULT: [f32; 4] = [0.282, 0.310, 0.345, 1.0]; // #484f58 default status text
-    // Separator / border color — ultra-dark
-    pub const BORDER: [f32; 4] = [0.102, 0.114, 0.145, 1.0];       // #1a1d25 hairline border
+                                                                     // Separator / border color — ultra-dark
+    pub const BORDER: [f32; 4] = [0.102, 0.114, 0.145, 1.0]; // #1a1d25 hairline border
 }
 
 /// Font size scale factors relative to the 14px base cell height.
 /// Used with `text_ui_scaled`/`text_ui_bold_scaled` to match web reference pixel sizes.
 pub mod font_scale {
-    pub const PX9: f32 = 9.0 / 14.0;   // 0.643 — tab count badges
-    pub const PX10: f32 = 10.0 / 14.0;  // 0.714 — shortcuts, badges, small headers
-    pub const PX11: f32 = 11.0 / 14.0;  // 0.786 — branch text, descriptions, status bar
-    pub const PX12: f32 = 12.0 / 14.0;  // 0.857 — session header, tab titles, process names
-    pub const PX13: f32 = 13.0 / 14.0;  // 0.929 — session names, poem stanzas
-    pub const PX15: f32 = 15.0 / 14.0;  // 1.071 — poem title
+    pub const PX9: f32 = 9.0 / 14.0; // 0.643 — tab count badges
+    pub const PX10: f32 = 10.0 / 14.0; // 0.714 — shortcuts, badges, small headers
+    pub const PX11: f32 = 11.0 / 14.0; // 0.786 — branch text, descriptions, status bar
+    pub const PX12: f32 = 12.0 / 14.0; // 0.857 — session header, tab titles, process names
+    pub const PX13: f32 = 13.0 / 14.0; // 0.929 — session names, poem stanzas
+    pub const PX15: f32 = 15.0 / 14.0; // 1.071 — poem title
 }
 
 /// A deferred text draw command. Characters are rasterized through the
@@ -68,15 +74,35 @@ pub struct TextCommand {
     pub bg: [f32; 4],
     /// When true, renders glyphs with the bold font variant.
     pub bold: bool,
-    /// When true, renders with the proportional UI font (e.g. Segoe UI)
-    /// instead of the terminal monospace font.
-    pub ui_font: bool,
+    /// Which rasterizer/layout path should be used for this text run.
+    pub font_kind: TextFontKind,
+    /// When true, renders with the italic font face instead of a synthetic skew.
+    pub italic: bool,
     /// Scale factor for glyph quads (1.0 = normal size, 0.786 = 11/14px).
-    /// Used to render UI text at different pixel sizes without re-rasterizing.
     pub scale: f32,
-    /// Horizontal skew for synthetic italic (0.0 = upright, ~0.2 = italic).
-    /// Shifts top vertices of each glyph quad rightward by `skew * height`.
-    pub skew: f32,
+    /// Glyph x offsets from a real text layout pass. Empty for monospace runs.
+    pub glyph_offsets: Vec<f32>,
+    /// Whether the renderer can use subpixel blending against `bg`, or must
+    /// fall back to grayscale AA because the backdrop is mixed/unknown.
+    pub composite: TextCompositeMode,
+    /// Extra multiplier applied when rasterizing/drawing against a physical
+    /// surface. Crop/reference scenes can set this below 1.0 to render at
+    /// fixed pixel sizes instead of OS-DPI-scaled sizes.
+    pub raster_scale: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextFontKind {
+    TerminalMono,
+    UiSans,
+    UiSerif,
+    UiMono,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextCompositeMode {
+    FlatBackground,
+    MixedBackground,
 }
 
 /// Thin handle passed to widget `build()` methods. Carries actual cell
@@ -84,18 +110,29 @@ pub struct TextCommand {
 pub struct UiTextRenderer {
     pub cell_width: f32,
     pub cell_height: f32,
+    pub font_size_px: f32,
     pub scale: f32,
     /// Average advance width of the proportional UI font (0 if unavailable).
     pub ui_avg_advance: f32,
-    /// Per-character advance widths for printable ASCII (0x20..=0x7E) in the
-    /// proportional UI font. Index 0 = space (0x20), index 94 = '~' (0x7E).
-    /// Empty if UI rasterizer is unavailable — falls back to avg_advance.
-    pub ui_char_advances: Vec<f32>,
+    /// Optional real UI text layout path. When present, widths and glyph
+    /// positions come from DirectWrite instead of hand-tuned advance math.
+    pub layout_engine: Option<Rc<UiTextLayoutEngine>>,
+    /// Extra multiplier applied by the atlas renderer when converting the
+    /// logical font metrics here into physical glyph sizes on the surface.
+    pub raster_scale: f32,
 }
 
 impl UiTextRenderer {
-    pub fn new(cell_width: f32, cell_height: f32, scale: f32) -> Self {
-        Self { cell_width, cell_height, scale, ui_avg_advance: 0.0, ui_char_advances: Vec::new() }
+    pub fn new(cell_width: f32, cell_height: f32, font_size_px: f32, scale: f32) -> Self {
+        Self {
+            cell_width,
+            cell_height,
+            font_size_px,
+            scale,
+            ui_avg_advance: 0.0,
+            layout_engine: None,
+            raster_scale: 1.0,
+        }
     }
 
     /// Scale a logical pixel value to physical pixels.
@@ -108,27 +145,109 @@ impl UiTextRenderer {
         s.chars().count() as f32 * self.cell_width
     }
 
+    /// Width in pixels of a string rendered in the terminal monospace font at a given scale.
+    pub fn text_width_scaled(&self, s: &str, scale: f32) -> f32 {
+        self.text_width(s) * scale
+    }
+
     /// Exact width of a string rendered in the proportional UI font.
-    /// Uses per-glyph advance widths when available, falls back to average.
     pub fn text_width_ui(&self, s: &str) -> f32 {
-        if self.ui_char_advances.is_empty() {
-            let adv = if self.ui_avg_advance > 0.0 { self.ui_avg_advance } else { self.cell_width * 0.75 };
-            return s.chars().count() as f32 * adv;
-        }
-        let fallback = self.ui_avg_advance;
-        s.chars().map(|c| {
-            let code = c as u32;
-            if code >= 0x20 && code <= 0x7E {
-                self.ui_char_advances[(code - 0x20) as usize]
-            } else {
-                fallback
-            }
-        }).sum()
+        self.layout_text(UiFontKind::Sans, s, 1.0, false, false)
+            .width
     }
 
     /// Exact width of a string rendered in the proportional UI font at a given scale.
     pub fn text_width_ui_scaled(&self, s: &str, scale: f32) -> f32 {
-        self.text_width_ui(s) * scale
+        self.layout_text(UiFontKind::Sans, s, scale, false, false)
+            .width
+    }
+
+    /// Exact width of a string rendered in the serif UI font at a given scale.
+    pub fn text_width_serif_scaled(&self, s: &str, scale: f32, bold: bool, italic: bool) -> f32 {
+        self.layout_text(UiFontKind::Serif, s, scale, bold, italic)
+            .width
+    }
+
+    pub fn text_width_mono_scaled(&self, s: &str, scale: f32) -> f32 {
+        self.layout_text(UiFontKind::Mono, s, scale, false, false)
+            .width
+    }
+
+    pub fn mono_layout_scaled(
+        &self,
+        s: &str,
+        scale: f32,
+        bold: bool,
+        italic: bool,
+    ) -> UiTextLayout {
+        self.layout_text(UiFontKind::Mono, s, scale, bold, italic)
+    }
+
+    pub fn glyph_offsets_for(
+        &self,
+        s: &str,
+        scale: f32,
+        bold: bool,
+        italic: bool,
+        font_kind: TextFontKind,
+    ) -> Vec<f32> {
+        match font_kind {
+            TextFontKind::TerminalMono => Vec::new(),
+            TextFontKind::UiSans => {
+                self.layout_text(UiFontKind::Sans, s, scale, bold, italic)
+                    .glyph_offsets
+            }
+            TextFontKind::UiSerif => {
+                self.layout_text(UiFontKind::Serif, s, scale, bold, italic)
+                    .glyph_offsets
+            }
+            TextFontKind::UiMono => {
+                self.layout_text(UiFontKind::Mono, s, scale, bold, italic)
+                    .glyph_offsets
+            }
+        }
+    }
+
+    fn layout_text(
+        &self,
+        font_kind: UiFontKind,
+        s: &str,
+        scale: f32,
+        bold: bool,
+        italic: bool,
+    ) -> UiTextLayout {
+        if let Some(engine) = &self.layout_engine {
+            if let Some(layout) =
+                engine.layout(font_kind, s, self.font_size_px * scale, bold, italic)
+            {
+                return layout;
+            }
+        }
+
+        let advance = match font_kind {
+            UiFontKind::Mono => self.cell_width * scale,
+            UiFontKind::Sans | UiFontKind::Serif => {
+                if self.ui_avg_advance > 0.0 {
+                    self.ui_avg_advance * scale
+                } else {
+                    self.cell_width * 0.75 * scale
+                }
+            }
+        };
+        let mut glyph_offsets = Vec::with_capacity(s.chars().count());
+        let mut x = 0.0;
+        for _ in s.chars() {
+            glyph_offsets.push(x);
+            x += advance;
+        }
+        UiTextLayout {
+            width: x,
+            line_height: match font_kind {
+                UiFontKind::Mono => self.cell_height * scale,
+                UiFontKind::Sans | UiFontKind::Serif => self.font_size_px * scale,
+            },
+            glyph_offsets,
+        }
     }
 }
 
@@ -159,24 +278,41 @@ impl UiBuilder {
     /// Solid filled rectangle (flat, no rounding).
     pub fn fill(&mut self, rect: Rect, color: [f32; 4]) {
         self.quads.extend_from_slice(&quad_vertices(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, color,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            color,
         ));
     }
 
     /// Flat rectangle with vertical gradient (no rounding).
     pub fn fill_gradient(&mut self, rect: Rect, top_color: [f32; 4], bottom_color: [f32; 4]) {
         self.quads.extend_from_slice(&quad_vertices_gradient(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, top_color, bottom_color,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            top_color,
+            bottom_color,
         ));
     }
 
     /// Flat rectangle with horizontal gradient (no rounding).
     pub fn fill_gradient_h(&mut self, rect: Rect, left_color: [f32; 4], right_color: [f32; 4]) {
         self.quads.extend_from_slice(&quad_vertices_gradient_h(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, left_color, right_color,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            left_color,
+            right_color,
         ));
     }
 
@@ -193,9 +329,17 @@ impl UiBuilder {
         blur_radius: f32,
     ) {
         self.quads.extend_from_slice(&quad_vertices_sdf(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, color,
-            radii, border_width, border_color, blur_radius,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            border_width,
+            border_color,
+            blur_radius,
         ));
     }
 
@@ -230,7 +374,14 @@ impl UiBuilder {
         border_width: f32,
         border_color: [f32; 4],
     ) {
-        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], border_width, border_color, 0.0);
+        self.fill_sdf(
+            rect,
+            color,
+            [radius, radius, 0.0, 0.0],
+            border_width,
+            border_color,
+            0.0,
+        );
     }
 
     /// Rounded rectangle with per-corner radii [TL, TR, BR, BL].
@@ -249,9 +400,17 @@ impl UiBuilder {
         border_color: [f32; 4],
     ) {
         self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, top_color, bottom_color,
-            [radius, radius, 0.0, 0.0], border_width, border_color,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            top_color,
+            bottom_color,
+            [radius, radius, 0.0, 0.0],
+            border_width,
+            border_color,
         ));
     }
 
@@ -264,9 +423,17 @@ impl UiBuilder {
         radius: f32,
     ) {
         self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, top_color, bottom_color,
-            [radius; 4], 0.0, [0.0; 4],
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            top_color,
+            bottom_color,
+            [radius; 4],
+            0.0,
+            [0.0; 4],
         ));
     }
 
@@ -279,9 +446,17 @@ impl UiBuilder {
         radius: f32,
     ) {
         self.quads.extend_from_slice(&quad_vertices_sdf_gradient_h(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, left_color, right_color,
-            [radius; 4], 0.0, [0.0; 4],
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            left_color,
+            right_color,
+            [radius; 4],
+            0.0,
+            [0.0; 4],
         ));
     }
 
@@ -294,9 +469,17 @@ impl UiBuilder {
         radii: [f32; 4],
     ) {
         self.quads.extend_from_slice(&quad_vertices_sdf_gradient_h(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, left_color, right_color,
-            radii, 0.0, [0.0; 4],
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            left_color,
+            right_color,
+            radii,
+            0.0,
+            [0.0; 4],
         ));
     }
 
@@ -310,22 +493,31 @@ impl UiBuilder {
         radii: [f32; 4],
     ) {
         self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
-            rect.x, rect.y, rect.width, rect.height,
-            self.vw, self.vh, top_color, bottom_color,
-            radii, 0.0, [0.0; 4],
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            top_color,
+            bottom_color,
+            radii,
+            0.0,
+            [0.0; 4],
         ));
     }
 
     /// SDF rounded rectangle outline (border only, transparent fill).
     /// Produces smooth anti-aliased edges — use instead of stroke_rect for polish.
-    pub fn stroke_rounded(
-        &mut self,
-        rect: Rect,
-        radius: f32,
-        stroke_width: f32,
-        color: [f32; 4],
-    ) {
-        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], [radius; 4], stroke_width, color, 0.0);
+    pub fn stroke_rounded(&mut self, rect: Rect, radius: f32, stroke_width: f32, color: [f32; 4]) {
+        self.fill_sdf(
+            rect,
+            [0.0, 0.0, 0.0, 0.0],
+            [radius; 4],
+            stroke_width,
+            color,
+            0.0,
+        );
     }
 
     /// SDF rounded rectangle outline with per-corner radii.
@@ -340,13 +532,7 @@ impl UiBuilder {
     }
 
     /// Soft shadow/glow behind an element (SDF with wide blur).
-    pub fn fill_shadow(
-        &mut self,
-        rect: Rect,
-        color: [f32; 4],
-        radius: f32,
-        blur: f32,
-    ) {
+    pub fn fill_shadow(&mut self, rect: Rect, color: [f32; 4], radius: f32, blur: f32) {
         self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur);
     }
 
@@ -375,13 +561,7 @@ impl UiBuilder {
     /// than gradient overlay approximations.
     ///
     /// Uses negative `blur_radius` to signal inner shadow mode to the SDF shader.
-    pub fn fill_inner_shadow(
-        &mut self,
-        rect: Rect,
-        color: [f32; 4],
-        radius: f32,
-        blur: f32,
-    ) {
+    pub fn fill_inner_shadow(&mut self, rect: Rect, color: [f32; 4], radius: f32, blur: f32) {
         self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], -blur);
     }
 
@@ -398,16 +578,14 @@ impl UiBuilder {
 
     /// Horizontal line of thickness `t`.
     pub fn hline(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4]) {
-        self.quads.extend_from_slice(&quad_vertices(
-            x, y, w, t, self.vw, self.vh, color,
-        ));
+        self.quads
+            .extend_from_slice(&quad_vertices(x, y, w, t, self.vw, self.vh, color));
     }
 
     /// Vertical line of thickness `t`.
     pub fn vline(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4]) {
-        self.quads.extend_from_slice(&quad_vertices(
-            x, y, t, h, self.vw, self.vh, color,
-        ));
+        self.quads
+            .extend_from_slice(&quad_vertices(x, y, t, h, self.vw, self.vh, color));
     }
 
     /// Anti-aliased horizontal line via SDF.  Produces crisp sub-pixel edges
@@ -415,8 +593,7 @@ impl UiBuilder {
     pub fn hline_aa(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4]) {
         let r = (t * 0.5).min(1.0);
         self.quads.extend_from_slice(&quad_vertices_sdf(
-            x, y, w, t, self.vw, self.vh, color,
-            [r; 4], 0.0, [0.0; 4], 0.0,
+            x, y, w, t, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0,
         ));
     }
 
@@ -424,8 +601,7 @@ impl UiBuilder {
     pub fn vline_aa(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4]) {
         let r = (t * 0.5).min(1.0);
         self.quads.extend_from_slice(&quad_vertices_sdf(
-            x, y, t, h, self.vw, self.vh, color,
-            [r; 4], 0.0, [0.0; 4], 0.0,
+            x, y, t, h, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0,
         ));
     }
 
@@ -436,15 +612,35 @@ impl UiBuilder {
         if fade > 0.0 && h > fade * 2.0 {
             // Top fade segment
             self.quads.extend_from_slice(&quad_vertices_gradient(
-                x, y, t, fade, self.vw, self.vh, transparent, color,
+                x,
+                y,
+                t,
+                fade,
+                self.vw,
+                self.vh,
+                transparent,
+                color,
             ));
             // Solid middle
             self.quads.extend_from_slice(&quad_vertices(
-                x, y + fade, t, h - fade * 2.0, self.vw, self.vh, color,
+                x,
+                y + fade,
+                t,
+                h - fade * 2.0,
+                self.vw,
+                self.vh,
+                color,
             ));
             // Bottom fade segment
             self.quads.extend_from_slice(&quad_vertices_gradient(
-                x, y + h - fade, t, fade, self.vw, self.vh, color, transparent,
+                x,
+                y + h - fade,
+                t,
+                fade,
+                self.vw,
+                self.vh,
+                color,
+                transparent,
             ));
         } else {
             self.vline(x, y, h, t, color);
@@ -457,15 +653,35 @@ impl UiBuilder {
         if fade > 0.0 && w > fade * 2.0 {
             // Left fade segment
             self.quads.extend_from_slice(&quad_vertices_gradient_h(
-                x, y, fade, t, self.vw, self.vh, transparent, color,
+                x,
+                y,
+                fade,
+                t,
+                self.vw,
+                self.vh,
+                transparent,
+                color,
             ));
             // Solid middle
             self.quads.extend_from_slice(&quad_vertices(
-                x + fade, y, w - fade * 2.0, t, self.vw, self.vh, color,
+                x + fade,
+                y,
+                w - fade * 2.0,
+                t,
+                self.vw,
+                self.vh,
+                color,
             ));
             // Right fade segment
             self.quads.extend_from_slice(&quad_vertices_gradient_h(
-                x + w - fade, y, fade, t, self.vw, self.vh, color, transparent,
+                x + w - fade,
+                y,
+                fade,
+                t,
+                self.vw,
+                self.vh,
+                color,
+                transparent,
             ));
         } else {
             self.hline(x, y, w, t, color);
@@ -488,13 +704,29 @@ impl UiBuilder {
     }
 
     /// Horizontal groove with faded ends (combines groove + fade for softer look).
-    pub fn hgroove_fade(&mut self, x: f32, y: f32, w: f32, dark: [f32; 4], light: [f32; 4], fade: f32) {
+    pub fn hgroove_fade(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        dark: [f32; 4],
+        light: [f32; 4],
+        fade: f32,
+    ) {
         self.hline_fade(x, y, w, 1.0, dark, fade);
         self.hline_fade(x, y + 1.0, w, 1.0, light, fade);
     }
 
     /// Vertical groove with faded ends.
-    pub fn vgroove_fade(&mut self, x: f32, y: f32, h: f32, dark: [f32; 4], light: [f32; 4], fade: f32) {
+    pub fn vgroove_fade(
+        &mut self,
+        x: f32,
+        y: f32,
+        h: f32,
+        dark: [f32; 4],
+        light: [f32; 4],
+        fade: f32,
+    ) {
         self.vline_fade(x, y, h, 1.0, dark, fade);
         self.vline_fade(x + 1.0, y, h, 1.0, light, fade);
     }
@@ -507,91 +739,396 @@ impl UiBuilder {
         self.vline(rect.right() - t, rect.y, rect.height, t, color); // right
     }
 
+    fn push_text_command(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        bold: bool,
+        italic: bool,
+        scale: f32,
+        font_kind: TextFontKind,
+        composite: TextCompositeMode,
+    ) {
+        let glyph_offsets = renderer.glyph_offsets_for(text, scale, bold, italic, font_kind);
+        self.text_commands.push(TextCommand {
+            text: text.to_string(),
+            x,
+            y,
+            fg,
+            bg,
+            bold,
+            font_kind,
+            italic,
+            scale,
+            glyph_offsets,
+            composite,
+            raster_scale: renderer.raster_scale,
+        });
+    }
+
     /// Record a text draw command (monospace terminal font).
     pub fn text(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
         fg: [f32; 4],
         bg: [f32; 4],
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: false,
-            ui_font: false,
-            scale: 1.0,
-            skew: 0.0,
-        });
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            1.0,
+            TextFontKind::TerminalMono,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    pub fn text_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            1.0,
+            TextFontKind::TerminalMono,
+            TextCompositeMode::MixedBackground,
+        );
     }
 
     /// Record a bold text draw command (monospace terminal font).
     pub fn text_bold(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
         fg: [f32; 4],
         bg: [f32; 4],
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: true,
-            ui_font: false,
-            scale: 1.0,
-            skew: 0.0,
-        });
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            1.0,
+            TextFontKind::TerminalMono,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    pub fn text_bold_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            1.0,
+            TextFontKind::TerminalMono,
+            TextCompositeMode::MixedBackground,
+        );
+    }
+
+    /// Record a scaled monospace text draw command.
+    pub fn text_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            scale,
+            TextFontKind::TerminalMono,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled bold monospace text draw command.
+    pub fn text_bold_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            scale,
+            TextFontKind::TerminalMono,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled UI-monospace text draw command with real glyph layout.
+    pub fn text_mono_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            scale,
+            TextFontKind::UiMono,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled UI-monospace text draw command that should fall back to
+    /// grayscale AA instead of background-specific subpixel composition.
+    pub fn text_mono_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            scale,
+            TextFontKind::UiMono,
+            TextCompositeMode::MixedBackground,
+        );
+    }
+
+    /// Record a scaled bold UI-monospace text draw command with real glyph layout.
+    pub fn text_mono_bold_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            scale,
+            TextFontKind::UiMono,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled bold UI-monospace text draw command that should stay in
+    /// grayscale AA.
+    pub fn text_mono_bold_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            scale,
+            TextFontKind::UiMono,
+            TextCompositeMode::MixedBackground,
+        );
     }
 
     /// Record a UI text draw command (proportional sans-serif font).
     pub fn text_ui(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
         fg: [f32; 4],
         bg: [f32; 4],
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: false,
-            ui_font: true,
-            scale: 1.0,
-            skew: 0.0,
-        });
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            1.0,
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    pub fn text_ui_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
+            1.0,
+            TextFontKind::UiSans,
+            TextCompositeMode::MixedBackground,
+        );
     }
 
     /// Record a bold UI text draw command (proportional sans-serif font).
     pub fn text_ui_bold(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
         fg: [f32; 4],
         bg: [f32; 4],
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: true,
-            ui_font: true,
-            scale: 1.0,
-            skew: 0.0,
-        });
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            1.0,
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    pub fn text_ui_bold_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            1.0,
+            TextFontKind::UiSans,
+            TextCompositeMode::MixedBackground,
+        );
     }
 
     /// Record a scaled UI text draw command (proportional sans-serif font).
-    /// `scale` controls glyph quad size: 1.0 = cell_height, 0.786 = 11px at 14px base.
+    /// `scale` controls glyph size relative to the 14px base font size.
     pub fn text_ui_scaled(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
@@ -599,20 +1136,25 @@ impl UiBuilder {
         bg: [f32; 4],
         scale: f32,
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: false,
-            ui_font: true,
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
             scale,
-            skew: 0.0,
-        });
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
     }
 
     /// Record a scaled bold UI text draw command (proportional sans-serif font).
     pub fn text_ui_bold_scaled(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
@@ -620,21 +1162,26 @@ impl UiBuilder {
         bg: [f32; 4],
         scale: f32,
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: true,
-            ui_font: true,
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
             scale,
-            skew: 0.0,
-        });
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
     }
 
-    /// Record a scaled italic UI text draw command (synthetic italic via skew).
-    /// Simulates italic by applying a horizontal shear to glyph quads.
-    pub fn text_ui_italic_scaled(
+    /// Record a scaled UI text draw command that must stay in grayscale AA
+    /// because the background under the text is not a single flat color.
+    pub fn text_ui_scaled_mixed(
         &mut self,
-        _renderer: &UiTextRenderer,
+        renderer: &UiTextRenderer,
         text: &str,
         x: f32,
         y: f32,
@@ -642,14 +1189,96 @@ impl UiBuilder {
         bg: [f32; 4],
         scale: f32,
     ) {
-        self.text_commands.push(TextCommand {
-            text: text.to_string(),
-            x, y, fg, bg,
-            bold: false,
-            ui_font: true,
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            false,
             scale,
-            skew: 0.20, // ~12° slant, typical for synthetic italic
-        });
+            TextFontKind::UiSans,
+            TextCompositeMode::MixedBackground,
+        );
+    }
+
+    pub fn text_ui_bold_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            true,
+            false,
+            scale,
+            TextFontKind::UiSans,
+            TextCompositeMode::MixedBackground,
+        );
+    }
+
+    /// Record a scaled italic serif text draw command using a real italic font
+    /// face instead of synthetic skew.
+    pub fn text_serif_italic_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            true,
+            scale,
+            TextFontKind::UiSerif,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    pub fn text_serif_italic_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            false,
+            true,
+            scale,
+            TextFontKind::UiSerif,
+            TextCompositeMode::MixedBackground,
+        );
     }
 
     // -- Icon helpers ---------------------------------------------------------
@@ -663,15 +1292,31 @@ impl UiBuilder {
         let no_border = [0.0f32; 4];
         // Horizontal bar
         self.quads.extend_from_slice(&quad_vertices_sdf(
-            cx - arm, cy - t / 2.0, arm * 2.0, t,
-            self.vw, self.vh, color,
-            radii, 0.0, no_border, 0.0,
+            cx - arm,
+            cy - t / 2.0,
+            arm * 2.0,
+            t,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
         // Vertical bar
         self.quads.extend_from_slice(&quad_vertices_sdf(
-            cx - t / 2.0, cy - arm, t, arm * 2.0,
-            self.vw, self.vh, color,
-            radii, 0.0, no_border, 0.0,
+            cx - t / 2.0,
+            cy - arm,
+            t,
+            arm * 2.0,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
     }
 
@@ -687,17 +1332,33 @@ impl UiBuilder {
 
         // Diagonal 1: top-left to bottom-right (π/4 clockwise)
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            cx, cy, line_len, t,
+            cx,
+            cy,
+            line_len,
+            t,
             std::f32::consts::FRAC_PI_4,
-            self.vw, self.vh, color,
-            radii, 0.0, no_border, 0.0,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
         // Diagonal 2: top-right to bottom-left (-π/4)
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            cx, cy, line_len, t,
+            cx,
+            cy,
+            line_len,
+            t,
             -std::f32::consts::FRAC_PI_4,
-            self.vw, self.vh, color,
-            radii, 0.0, no_border, 0.0,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
     }
 
@@ -707,9 +1368,17 @@ impl UiBuilder {
         let (cx, cy) = rect.center();
         let r = t * 0.5; // pill-shaped rounded caps
         self.quads.extend_from_slice(&quad_vertices_sdf(
-            cx - bar_w / 2.0, cy - t / 2.0, bar_w, t,
-            self.vw, self.vh, color,
-            [r; 4], 0.0, [0.0; 4], 0.0,
+            cx - bar_w / 2.0,
+            cy - t / 2.0,
+            bar_w,
+            t,
+            self.vw,
+            self.vh,
+            color,
+            [r; 4],
+            0.0,
+            [0.0; 4],
+            0.0,
         ));
     }
 
@@ -729,8 +1398,8 @@ impl UiBuilder {
     /// perimeter and a small center dot.  Each tooth is a rotated SDF pill.
     pub fn icon_gear(&mut self, rect: Rect, outer: f32, _inner: f32, fg: [f32; 4], _bg: [f32; 4]) {
         let (cx, cy) = rect.center();
-        let radius = outer * 0.38;       // ring mid-radius
-        let ring_t = outer * 0.12;       // ring stroke thickness
+        let radius = outer * 0.38; // ring mid-radius
+        let ring_t = outer * 0.12; // ring stroke thickness
         let mid_size = radius * 2.0;
         let mid_rect = Rect {
             x: cx - mid_size / 2.0,
@@ -742,8 +1411,10 @@ impl UiBuilder {
         // Center dot
         let dot_r = outer * 0.10;
         let dot_rect = Rect {
-            x: cx - dot_r, y: cy - dot_r,
-            width: dot_r * 2.0, height: dot_r * 2.0,
+            x: cx - dot_r,
+            y: cy - dot_r,
+            width: dot_r * 2.0,
+            height: dot_r * 2.0,
         };
         self.fill_rounded(dot_rect, fg, dot_r);
         // 6 teeth — short rounded rects pointing outward from the ring
@@ -757,10 +1428,18 @@ impl UiBuilder {
             let tx = cx + tooth_center_r * angle.cos();
             let ty = cy + tooth_center_r * angle.sin();
             self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-                tx, ty, tooth_len, tooth_w,
+                tx,
+                ty,
+                tooth_len,
+                tooth_w,
                 angle,
-                self.vw, self.vh, fg,
-                [tooth_r; 4], 0.0, no_border, 0.0,
+                self.vw,
+                self.vh,
+                fg,
+                [tooth_r; 4],
+                0.0,
+                no_border,
+                0.0,
             ));
         }
     }
@@ -774,16 +1453,20 @@ impl UiBuilder {
         let r = hw * 0.15;
         // Main body
         let body = Rect {
-            x: cx - hw, y: cy - hh * 0.6,
-            width: hw * 2.0, height: hh * 2.0 * 0.8,
+            x: cx - hw,
+            y: cy - hh * 0.6,
+            width: hw * 2.0,
+            height: hh * 2.0 * 0.8,
         };
         self.stroke_rounded(body, r, t, color);
         // Tab on top-left
         let tab_w = hw * 0.7;
         let tab_h = hh * 0.5;
         let tab = Rect {
-            x: cx - hw, y: cy - hh * 0.6 - tab_h + t * 0.5,
-            width: tab_w, height: tab_h + t * 0.5,
+            x: cx - hw,
+            y: cy - hh * 0.6 - tab_h + t * 0.5,
+            width: tab_w,
+            height: tab_h + t * 0.5,
         };
         self.fill_rounded_custom(tab, color, [r, r * 0.6, 0.0, 0.0]);
     }
@@ -802,8 +1485,10 @@ impl UiBuilder {
         // Bottom node (trunk)
         let bottom = (cx, cy + hh);
         let node_rect = |x: f32, y: f32| Rect {
-            x: x - node_r, y: y - node_r,
-            width: node_r * 2.0, height: node_r * 2.0,
+            x: x - node_r,
+            y: y - node_r,
+            width: node_r * 2.0,
+            height: node_r * 2.0,
         };
         self.fill_rounded(node_rect(bottom.0, bottom.1), color, node_r);
         // Top-left node (branch)
@@ -820,8 +1505,7 @@ impl UiBuilder {
         let mcx = (bottom.0 + top_right.0) / 2.0;
         let mcy = (bottom.1 + top_right.1) / 2.0;
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            mcx, mcy, len, t, angle,
-            self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            mcx, mcy, len, t, angle, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
         ));
         // Branch line: mid-trunk → top-left
         let fork_y = cy + hh * 0.1;
@@ -833,8 +1517,7 @@ impl UiBuilder {
         let mcx2 = (fork_x + top_left.0) / 2.0;
         let mcy2 = (fork_y + top_left.1) / 2.0;
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            mcx2, mcy2, len2, t, angle2,
-            self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            mcx2, mcy2, len2, t, angle2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
         ));
     }
 
@@ -857,8 +1540,18 @@ impl UiBuilder {
         let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
         let a1 = dy1.atan2(dx1);
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            (tl.0 + bc.0) / 2.0, (tl.1 + bc.1) / 2.0, len1, t,
-            a1, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            (tl.0 + bc.0) / 2.0,
+            (tl.1 + bc.1) / 2.0,
+            len1,
+            t,
+            a1,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
         // Arm: top-right → bottom-center
         let dx2 = bc.0 - tr.0;
@@ -866,8 +1559,18 @@ impl UiBuilder {
         let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
         let a2 = dy2.atan2(dx2);
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            (tr.0 + bc.0) / 2.0, (tr.1 + bc.1) / 2.0, len2, t,
-            a2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            (tr.0 + bc.0) / 2.0,
+            (tr.1 + bc.1) / 2.0,
+            len2,
+            t,
+            a2,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
         // Arm: top-left → top-right (closes the top edge)
         let dx3 = tr.0 - tl.0;
@@ -875,8 +1578,18 @@ impl UiBuilder {
         let len3 = (dx3 * dx3 + dy3 * dy3).sqrt();
         let a3 = dy3.atan2(dx3);
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            (tl.0 + tr.0) / 2.0, (tl.1 + tr.1) / 2.0, len3, t,
-            a3, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            (tl.0 + tr.0) / 2.0,
+            (tl.1 + tr.1) / 2.0,
+            len3,
+            t,
+            a3,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
     }
 
@@ -896,8 +1609,18 @@ impl UiBuilder {
         let len = (dx * dx + dy * dy).sqrt();
         let a = dy.atan2(dx);
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            (top.0 + tip.0) / 2.0, (top.1 + tip.1) / 2.0, len, t,
-            a, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            (top.0 + tip.0) / 2.0,
+            (top.1 + tip.1) / 2.0,
+            len,
+            t,
+            a,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
         // Bottom arm: center-right → bottom-left
         let bot = (cx - half * 0.4, cy + half);
@@ -906,8 +1629,18 @@ impl UiBuilder {
         let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
         let a2 = dy2.atan2(dx2);
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            (bot.0 + tip.0) / 2.0, (bot.1 + tip.1) / 2.0, len2, t,
-            a2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+            (bot.0 + tip.0) / 2.0,
+            (bot.1 + tip.1) / 2.0,
+            len2,
+            t,
+            a2,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            0.0,
+            no_border,
+            0.0,
         ));
     }
 
@@ -919,8 +1652,10 @@ impl UiBuilder {
         let hh = rect.height * 0.28;
         // Monitor outline
         let monitor = Rect {
-            x: cx - hw, y: cy - hh,
-            width: hw * 2.0, height: hh * 2.0,
+            x: cx - hw,
+            y: cy - hh,
+            width: hw * 2.0,
+            height: hh * 2.0,
         };
         self.stroke_rounded(monitor, hw * 0.12, t, color);
         // Prompt chevron ">" — two SDF rotated pills forming a clean V-shape.
@@ -941,10 +1676,8 @@ impl UiBuilder {
         let radii = [r; 4];
         let no_border = [0.0f32; 4];
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            mcx_top, mcy_top, len_top, t,
-            angle_top,
-            self.vw, self.vh, color,
-            radii, 0.0, no_border, 0.0,
+            mcx_top, mcy_top, len_top, t, angle_top, self.vw, self.vh, color, radii, 0.0,
+            no_border, 0.0,
         ));
         // Lower arm: (caret_mid_x, caret_mid_y) → (caret_x, caret_bot_y)
         let dx_bot = caret_x - caret_mid_x;
@@ -954,10 +1687,8 @@ impl UiBuilder {
         let mcx_bot = (caret_mid_x + caret_x) / 2.0;
         let mcy_bot = (caret_mid_y + caret_bot_y) / 2.0;
         self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            mcx_bot, mcy_bot, len_bot, t,
-            angle_bot,
-            self.vw, self.vh, color,
-            radii, 0.0, no_border, 0.0,
+            mcx_bot, mcy_bot, len_bot, t, angle_bot, self.vw, self.vh, color, radii, 0.0,
+            no_border, 0.0,
         ));
         // Cursor line (horizontal bar next to the caret)
         let cursor_x = cx + hw * 0.05;
@@ -978,7 +1709,15 @@ mod tests {
     #[test]
     fn builder_fill_produces_six_vertices() {
         let mut ui = UiBuilder::new(100.0, 100.0);
-        ui.fill(Rect { x: 0.0, y: 0.0, width: 50.0, height: 50.0 }, colors::BG_BASE);
+        ui.fill(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 50.0,
+                height: 50.0,
+            },
+            colors::BG_BASE,
+        );
         let (quads, _) = ui.finish();
         assert_eq!(quads.len(), 6);
     }
@@ -987,7 +1726,12 @@ mod tests {
     fn builder_stroke_rect_produces_24_vertices() {
         let mut ui = UiBuilder::new(100.0, 100.0);
         ui.stroke_rect(
-            Rect { x: 10.0, y: 10.0, width: 40.0, height: 40.0 },
+            Rect {
+                x: 10.0,
+                y: 10.0,
+                width: 40.0,
+                height: 40.0,
+            },
             1.0,
             colors::WHITE,
         );
@@ -999,7 +1743,7 @@ mod tests {
     #[test]
     fn builder_text_produces_commands() {
         let mut ui = UiBuilder::new(800.0, 600.0);
-        let tr = UiTextRenderer::new(8.0, 16.0, 1.0);
+        let tr = UiTextRenderer::new(8.0, 16.0, 14.0, 1.0);
         ui.text(&tr, "Hi", 10.0, 10.0, colors::FG_PRIMARY, colors::BG_BASE);
         let (_, text_cmds) = ui.finish();
         assert_eq!(text_cmds.len(), 1);
@@ -1024,8 +1768,15 @@ mod tests {
     fn icon_plus_produces_vertices() {
         let mut ui = UiBuilder::new(100.0, 100.0);
         ui.icon_plus(
-            Rect { x: 10.0, y: 10.0, width: 20.0, height: 20.0 },
-            2.0, 6.0, colors::WHITE,
+            Rect {
+                x: 10.0,
+                y: 10.0,
+                width: 20.0,
+                height: 20.0,
+            },
+            2.0,
+            6.0,
+            colors::WHITE,
         );
         let (quads, _) = ui.finish();
         // hline (6) + vline (6) = 12
@@ -1036,8 +1787,15 @@ mod tests {
     fn icon_minimize_produces_vertices() {
         let mut ui = UiBuilder::new(100.0, 100.0);
         ui.icon_minimize(
-            Rect { x: 0.0, y: 0.0, width: 46.0, height: 32.0 },
-            10.0, 1.0, colors::FG_PRIMARY,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 46.0,
+                height: 32.0,
+            },
+            10.0,
+            1.0,
+            colors::FG_PRIMARY,
         );
         let (quads, _) = ui.finish();
         assert_eq!(quads.len(), 6);
@@ -1047,8 +1805,15 @@ mod tests {
     fn icon_maximize_produces_sdf_quad() {
         let mut ui = UiBuilder::new(100.0, 100.0);
         ui.icon_maximize(
-            Rect { x: 0.0, y: 0.0, width: 46.0, height: 32.0 },
-            10.0, 1.0, colors::FG_PRIMARY,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 46.0,
+                height: 32.0,
+            },
+            10.0,
+            1.0,
+            colors::FG_PRIMARY,
         );
         let (quads, _) = ui.finish();
         // Single SDF rounded rect outline = 6 vertices

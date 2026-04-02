@@ -19,7 +19,7 @@ pub struct QuadVertex {
     pub fill_color: [f32; 4],
     pub local_pos: [f32; 2],
     pub rect_half_ext: [f32; 2],
-    pub corner_radii: [f32; 4],   // TL, TR, BR, BL
+    pub corner_radii: [f32; 4], // TL, TR, BR, BL
     pub border_width: f32,
     pub border_color: [f32; 4],
     pub blur_radius: f32,
@@ -442,7 +442,9 @@ impl QuadPipeline {
         render_pass: &mut wgpu::RenderPass<'_>,
         vertices: &[QuadVertex],
     ) {
-        if vertices.is_empty() { return; }
+        if vertices.is_empty() {
+            return;
+        }
 
         let byte_data = bytemuck::cast_slice::<QuadVertex, u8>(vertices);
         if byte_data.len() > self.vertex_capacity {
@@ -471,8 +473,12 @@ impl QuadPipeline {
 
 /// Build 6 vertices for a flat solid-color rectangle (no SDF, no rounding).
 pub fn quad_vertices(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     color: [f32; 4],
 ) -> [QuadVertex; 6] {
     let x0 = x / viewport_w * 2.0 - 1.0;
@@ -493,37 +499,73 @@ pub fn quad_vertices(
     };
 
     [
-        v([x0, y0]), v([x1, y0]), v([x0, y1]),
-        v([x0, y1]), v([x1, y0]), v([x1, y1]),
+        v([x0, y0]),
+        v([x1, y0]),
+        v([x0, y1]),
+        v([x0, y1]),
+        v([x1, y0]),
+        v([x1, y1]),
     ]
 }
 
 /// Build 6 vertices for a flat gradient rectangle (no SDF).
 /// Top vertices get `top_color`, bottom vertices get `bottom_color`.
 pub fn quad_vertices_gradient(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     top_color: [f32; 4],
     bottom_color: [f32; 4],
 ) -> [QuadVertex; 6] {
-    quad_vertices_gradient_dir(x, y, w, h, viewport_w, viewport_h, top_color, bottom_color, false)
+    quad_vertices_gradient_dir(
+        x,
+        y,
+        w,
+        h,
+        viewport_w,
+        viewport_h,
+        top_color,
+        bottom_color,
+        false,
+    )
 }
 
 /// Build 6 vertices for a flat horizontal gradient rectangle (no SDF).
 /// Left vertices get `left_color`, right vertices get `right_color`.
 pub fn quad_vertices_gradient_h(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     left_color: [f32; 4],
     right_color: [f32; 4],
 ) -> [QuadVertex; 6] {
-    quad_vertices_gradient_dir(x, y, w, h, viewport_w, viewport_h, left_color, right_color, true)
+    quad_vertices_gradient_dir(
+        x,
+        y,
+        w,
+        h,
+        viewport_w,
+        viewport_h,
+        left_color,
+        right_color,
+        true,
+    )
 }
 
 /// Internal: vertical or horizontal gradient.
 fn quad_vertices_gradient_dir(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     color_a: [f32; 4],
     color_b: [f32; 4],
     horizontal: bool,
@@ -569,8 +611,12 @@ fn quad_vertices_gradient_dir(
 /// `blur_radius` controls the AA transition band (0 = default 0.75px crisp).
 /// The geometry is expanded to accommodate AA/blur at the edges.
 pub fn quad_vertices_sdf(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     fill_color: [f32; 4],
     corner_radii: [f32; 4],
     border_width: f32,
@@ -589,7 +635,11 @@ pub fn quad_vertices_sdf(
 
     // Expand geometry for AA (more expansion for outer blur/shadow).
     // Inner shadows (negative blur_radius) don't need expansion — they render inside.
-    let pad = if blur_radius > 0.0 { blur_radius + 1.0 } else { 1.0 };
+    let pad = if blur_radius > 0.0 {
+        blur_radius + 1.0
+    } else {
+        1.0
+    };
     let ex = x - pad;
     let ey = y - pad;
     let ew = w + pad * 2.0;
@@ -635,8 +685,12 @@ pub fn quad_vertices_sdf(
 /// Top vertices get `fill_color_top`, bottom get `fill_color_bottom`.
 /// The GPU interpolates the color smoothly across the shape.
 pub fn quad_vertices_sdf_gradient(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     fill_color_top: [f32; 4],
     fill_color_bottom: [f32; 4],
     corner_radii: [f32; 4],
@@ -697,8 +751,12 @@ pub fn quad_vertices_sdf_gradient(
 /// Left vertices get `fill_color_left`, right get `fill_color_right`.
 /// The GPU interpolates the color smoothly across the shape.
 pub fn quad_vertices_sdf_gradient_h(
-    x: f32, y: f32, w: f32, h: f32,
-    viewport_w: f32, viewport_h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     fill_color_left: [f32; 4],
     fill_color_right: [f32; 4],
     corner_radii: [f32; 4],
@@ -763,9 +821,13 @@ pub fn quad_vertices_sdf_gradient_h(
 /// `rotation` = rotation angle in radians (positive = clockwise in screen coords).
 /// The geometry is expanded to the axis-aligned bounding box of the rotated shape.
 pub fn quad_vertices_sdf_rotated(
-    cx: f32, cy: f32, w: f32, h: f32,
+    cx: f32,
+    cy: f32,
+    w: f32,
+    h: f32,
     rotation: f32,
-    viewport_w: f32, viewport_h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
     fill_color: [f32; 4],
     corner_radii: [f32; 4],
     border_width: f32,
@@ -789,7 +851,11 @@ pub fn quad_vertices_sdf_rotated(
     let aabb_hy = half_w * sin_r + half_h * cos_r;
 
     // Expand for AA
-    let pad = if blur_radius > 0.0 { blur_radius + 1.0 } else { 1.0 };
+    let pad = if blur_radius > 0.0 {
+        blur_radius + 1.0
+    } else {
+        1.0
+    };
     let ex = cx - aabb_hx - pad;
     let ey = cy - aabb_hy - pad;
     let ew = (aabb_hx + pad) * 2.0;

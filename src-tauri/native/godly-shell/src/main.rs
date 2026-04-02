@@ -10,6 +10,8 @@ mod split_renderer;
 mod terminal_renderer;
 mod ui;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -31,7 +33,19 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-const DEFAULT_FONT_FAMILY: &str = "Cascadia Mono";
+const TERMINAL_FONT_CANDIDATES: &[&str] = &[
+    "JetBrains Mono",
+    "Cascadia Code",
+    "Fira Code",
+    "Consolas",
+    "Cascadia Mono",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SceneMode {
+    LiveShell,
+    WebReferenceCrop,
+}
 
 struct GpuState {
     surface: wgpu::Surface<'static>,
@@ -42,6 +56,7 @@ struct GpuState {
 }
 
 struct App {
+    scene_mode: SceneMode,
     window: Option<Arc<Window>>,
     gpu: Option<GpuState>,
     proxy: EventLoopProxy<AsyncEvent>,
@@ -56,6 +71,8 @@ struct App {
     scrollback_offset: usize,
     mouse_position: Option<(f64, f64)>,
     quad_pipeline: Option<ui::quad_renderer::QuadPipeline>,
+    layout_engine: RefCell<ui::layout::ShellLayoutEngine>,
+    ui_text_layout: Option<Rc<ui::text_layout::UiTextLayoutEngine>>,
     tab_bar: ui::tab_bar::TabBar,
     sidebar: ui::sidebar::Sidebar,
     status_bar: ui::status_bar::StatusBar,
@@ -73,6 +90,7 @@ struct App {
     progress_timer: f32,
     /// Right panel state
     right_panel: ui::right_panel::RightPanel,
+    reference_pane: ui::reference_pane::ReferencePane,
     sidebar_width: f32,
     right_panel_width: f32,
     /// Resize handle state
@@ -85,8 +103,67 @@ struct App {
 }
 
 impl App {
-    fn new(proxy: EventLoopProxy<AsyncEvent>) -> Self {
+    fn new(proxy: EventLoopProxy<AsyncEvent>, scene_mode: SceneMode) -> Self {
+        let mut tab_bar = ui::tab_bar::TabBar::new();
+        // Pre-populate demo tabs to match the web reference exactly:
+        // Web: opensessions(#6366f1), opensessions(#10b981, badge 3, ACTIVE),
+        //      work(#f97316), opensessions(#8b5cf6, badge 12), opensessions(#6366f1)
+        use ui::builder::colors;
+        tab_bar.tabs = vec![
+            ui::tab_bar::TabInfo {
+                id: "demo-1".into(),
+                title: "opensessions".into(),
+                active: false,
+                unread_count: 0,
+                accent: Some(colors::ACCENT_BLUE),
+            },
+            ui::tab_bar::TabInfo {
+                id: "demo-2".into(),
+                title: "opensessions".into(),
+                active: true,
+                unread_count: 3,
+                accent: Some(colors::ACCENT_EMERALD),
+            },
+            ui::tab_bar::TabInfo {
+                id: "demo-3".into(),
+                title: "work".into(),
+                active: false,
+                unread_count: 0,
+                accent: Some(colors::ACCENT_ORANGE),
+            },
+            ui::tab_bar::TabInfo {
+                id: "demo-4".into(),
+                title: "opensessions".into(),
+                active: false,
+                unread_count: 12,
+                accent: Some(colors::ACCENT_MAUVE),
+            },
+            ui::tab_bar::TabInfo {
+                id: "demo-5".into(),
+                title: "opensessions".into(),
+                active: false,
+                unread_count: 0,
+                accent: Some(colors::ACCENT_BLUE),
+            },
+        ];
+
+        let mut sidebar = ui::sidebar::Sidebar::new();
+        let mut right_panel = ui::right_panel::RightPanel::new();
+        let mut status_bar = ui::status_bar::StatusBar::new();
+
+        if scene_mode == SceneMode::WebReferenceCrop {
+            tab_bar.content_sized_tabs = true;
+            tab_bar.show_brand = false;
+            tab_bar.show_indicators = false;
+            tab_bar.show_window_controls = false;
+            tab_bar.show_new_tab_button = false;
+            tab_bar.show_tab_close_buttons = false;
+            sidebar.show_footer_sections = false;
+            right_panel.visible = false;
+        }
+
         Self {
+            scene_mode,
             window: None,
             gpu: None,
             proxy,
@@ -101,21 +178,9 @@ impl App {
             scrollback_offset: 0,
             mouse_position: None,
             quad_pipeline: None,
-            tab_bar: {
-                let mut tb = ui::tab_bar::TabBar::new();
-                // Pre-populate demo tabs to match the web reference exactly:
-                // Web: opensessions(#6366f1), opensessions(#10b981, badge 3, ACTIVE),
-                //      work(#f97316), opensessions(#8b5cf6, badge 12), opensessions(#6366f1)
-                use ui::builder::colors;
-                tb.tabs = vec![
-                    ui::tab_bar::TabInfo { id: "demo-1".into(), title: "opensessions".into(), active: false, unread_count: 0, accent: Some(colors::ACCENT_BLUE) },
-                    ui::tab_bar::TabInfo { id: "demo-2".into(), title: "opensessions".into(), active: true, unread_count: 3, accent: Some(colors::ACCENT_EMERALD) },
-                    ui::tab_bar::TabInfo { id: "demo-3".into(), title: "work".into(), active: false, unread_count: 0, accent: Some(colors::ACCENT_ORANGE) },
-                    ui::tab_bar::TabInfo { id: "demo-4".into(), title: "opensessions".into(), active: false, unread_count: 12, accent: Some(colors::ACCENT_MAUVE) },
-                    ui::tab_bar::TabInfo { id: "demo-5".into(), title: "opensessions".into(), active: false, unread_count: 0, accent: Some(colors::ACCENT_BLUE) },
-                ];
-                tb
-            },
+            layout_engine: RefCell::new(ui::layout::ShellLayoutEngine::new()),
+            ui_text_layout: None,
+            tab_bar,
             scale_factor: 1.0,
             window_focused: true,
             scrollbar_hover_anim: ui::anim::Anim::default(),
@@ -131,7 +196,8 @@ impl App {
             is_maximized: false,
             progress_pct: 0.05,
             progress_timer: 0.0,
-            right_panel: ui::right_panel::RightPanel::new(),
+            right_panel,
+            reference_pane: ui::reference_pane::ReferencePane::new(),
             sidebar_width: ui::layout::SIDEBAR_WIDTH,
             right_panel_width: ui::layout::RIGHT_PANEL_WIDTH,
             left_resize_dragging: false,
@@ -140,21 +206,21 @@ impl App {
             right_resize_hover: false,
             left_resize_anim: ui::anim::Anim::default(),
             right_resize_anim: ui::anim::Anim::default(),
-            sidebar: ui::sidebar::Sidebar::new(),
+            sidebar,
             status_bar: {
-                let mut sb = ui::status_bar::StatusBar::new();
-                sb.cwd = std::env::current_dir()
+                status_bar.cwd = std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
-                sb.process_name = "pwsh".into();
-                sb.streaming = true; // match web reference demo state
-                // Detect git branch
+                status_bar.process_name = "pwsh".into();
+                status_bar.streaming = true; // match web reference demo state
+                                             // Detect git branch
                 if let Ok(output) = std::process::Command::new("git")
                     .args(["rev-parse", "--abbrev-ref", "HEAD"])
                     .output()
                 {
                     if output.status.success() {
-                        sb.git_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        status_bar.git_branch =
+                            String::from_utf8_lossy(&output.stdout).trim().to_string();
                     }
                 }
                 // Detect git diff summary — parse --shortstat into
@@ -166,20 +232,26 @@ impl App {
                     if output.status.success() {
                         let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
                         if !stat.is_empty() {
-                            // Parse "N file(s) changed, M insertion(s)(+), K deletion(s)(-)"
                             let mut file_count = String::new();
                             let mut parts = Vec::new();
                             for segment in stat.split(',') {
                                 let seg = segment.trim();
                                 if seg.contains("changed") {
-                                    // Extract "N file(s) changed"
                                     file_count = seg.to_string();
                                 } else if seg.contains("insertion") {
-                                    if let Some(n) = seg.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()) {
+                                    if let Some(n) = seg
+                                        .split_whitespace()
+                                        .next()
+                                        .and_then(|s| s.parse::<u32>().ok())
+                                    {
                                         parts.push(format!("+{}", n));
                                     }
                                 } else if seg.contains("deletion") {
-                                    if let Some(n) = seg.split_whitespace().next().and_then(|s| s.parse::<u32>().ok()) {
+                                    if let Some(n) = seg
+                                        .split_whitespace()
+                                        .next()
+                                        .and_then(|s| s.parse::<u32>().ok())
+                                    {
                                         parts.push(format!("-{}", n));
                                     }
                                 }
@@ -190,28 +262,45 @@ impl App {
                                     summary.push(file_count);
                                 }
                                 summary.extend(parts);
-                                sb.git_diff_summary = summary.join(" ");
+                                status_bar.git_diff_summary = summary.join(" ");
                             }
                         }
                     }
                 }
-                sb
+                status_bar
             },
         }
     }
 
+    fn is_web_reference_crop(&self) -> bool {
+        self.scene_mode == SceneMode::WebReferenceCrop
+    }
+
+    fn ui_scale(&self) -> f32 {
+        if self.is_web_reference_crop() {
+            1.0
+        } else {
+            self.scale_factor
+        }
+    }
+
+    fn ui_raster_scale(&self) -> f32 {
+        let surface_scale = self.scale_factor.max(1.0);
+        self.ui_scale() / surface_scale
+    }
+
     fn init_gpu(&mut self, window: Arc<Window>) {
-        let phys_size = window.inner_size();
+        let winit_size = window.inner_size();
+        let phys_size = window_surface_size(&window);
         let scale = window.scale_factor();
-        // Use LOGICAL resolution for the wgpu surface.  On Windows with DPI
-        // scaling, the DWM compositor clips the swap chain at logical-pixel
-        // boundaries regardless of GPU backend or DPI awareness settings.
-        // Rendering at logical resolution avoids the clipping; the compositor
-        // upscales to physical pixels.
-        let logical_w = (phys_size.width as f64 / scale).round() as u32;
-        let logical_h = (phys_size.height as f64 / scale).round() as u32;
-        log::info!("[DPI] physical={}x{}, scale={}, logical surface={}x{}",
-            phys_size.width, phys_size.height, scale, logical_w, logical_h);
+        log::info!(
+            "[DPI] init surface: winit={}x{}, hwnd-client={}x{}, scale={}",
+            winit_size.width,
+            winit_size.height,
+            phys_size.width,
+            phys_size.height,
+            scale,
+        );
         // DX12 preferred — cleaner shader compilation and better Windows integration.
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12 | wgpu::Backends::VULKAN,
@@ -231,16 +320,14 @@ impl App {
         }))
         .expect("No suitable GPU adapter found");
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("godly-shell"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("godly-shell"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::Performance,
+            trace: wgpu::Trace::Off,
+            experimental_features: wgpu::ExperimentalFeatures::default(),
+        }))
         .expect("Failed to create device");
 
         let caps = surface.get_capabilities(&adapter);
@@ -254,8 +341,8 @@ impl App {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: logical_w.max(1),
-            height: logical_h.max(1),
+            width: phys_size.width.max(1),
+            height: phys_size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
@@ -263,26 +350,48 @@ impl App {
         };
         surface.configure(&device, &config);
 
-        // Use scale_factor = 1.0 since we render at logical resolution.
-        // The compositor handles upscaling to physical pixels.
-        let scale_factor = 1.0_f32;
+        let scale_factor = scale as f32;
         self.scale_factor = scale_factor;
-        log::info!("[DPI] rendering at logical resolution, scale_factor=1.0");
-        let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
-        let rasterizer = create_rasterizer();
+        log::info!("[DPI] rendering at physical resolution, scale_factor={scale_factor}");
         let font_size = 14.0_f32;
-        let font_metrics = FontMetrics::from_font_bytes(font_size, font_data)
-            .with_scale_factor(scale_factor);
-        log::info!("Font metrics: cell={}x{}, font_size={}, baseline={}, scale={}",
-            font_metrics.cell_width, font_metrics.cell_height,
-            font_metrics.font_size, font_metrics.baseline_offset, font_metrics.scale_factor);
-        let mut renderer = TerminalRenderer::new(&device, &queue, format, font_metrics, rasterizer);
+        let terminal_font = create_terminal_font_setup(font_size, scale_factor);
+        let font_metrics = terminal_font.font_metrics;
+        log::info!(
+            "Font metrics: cell={}x{}, font_size={}, baseline={}, scale={}",
+            font_metrics.cell_width,
+            font_metrics.cell_height,
+            font_metrics.font_size,
+            font_metrics.baseline_offset,
+            font_metrics.scale_factor
+        );
+        log::info!("[FONT] Terminal mono font: {}", terminal_font.family);
+        let mut renderer = TerminalRenderer::new(
+            &device,
+            &queue,
+            format,
+            font_metrics,
+            terminal_font.rasterizer,
+        );
+        let mut ui_families = ui::text_layout::UiFontFamilies {
+            sans: "Segoe UI".into(),
+            serif: "Georgia".into(),
+            mono: terminal_font.family.clone(),
+        };
 
-        // Load proportional sans-serif font for UI chrome labels
-        if let Some(ui_rast) = create_ui_rasterizer() {
-            renderer.set_ui_rasterizer(ui_rast);
-            log::info!("[FONT] UI font loaded, avg advance = {:.1}px", renderer.ui_avg_advance());
+        if let Some(ui_font) = create_ui_sans_font() {
+            ui_families.sans = ui_font.family.clone();
+            renderer.set_ui_rasterizer(ui_font.rasterizer);
+            log::info!(
+                "[FONT] UI sans font loaded, avg advance = {:.1}px",
+                renderer.ui_avg_advance()
+            );
         }
+        if let Some(ui_font) = create_ui_serif_font() {
+            ui_families.serif = ui_font.family.clone();
+            renderer.set_ui_serif_rasterizer(ui_font.rasterizer);
+            log::info!("[FONT] UI serif font loaded: {}", ui_families.serif);
+        }
+        self.ui_text_layout = create_ui_text_layout_engine(ui_families).map(Rc::new);
 
         self.renderer = Some(renderer);
         self.quad_pipeline = Some(ui::quad_renderer::QuadPipeline::new(&device, format));
@@ -298,7 +407,10 @@ impl App {
     }
 
     fn connect_daemon(&mut self) {
-        let sender = self.sender.as_ref().expect("sender must be set before connecting daemon");
+        let sender = self
+            .sender
+            .as_ref()
+            .expect("sender must be set before connecting daemon");
 
         match NativeDaemonClient::connect_or_launch() {
             Ok(client) => {
@@ -348,7 +460,7 @@ impl App {
             let metrics = renderer.font_metrics().scaled_for_render();
             let vw = gpu.config.width as f32;
             let vh = gpu.config.height as f32;
-            let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
+            let layout = self.shell_layout(vw, vh);
             let cols = (layout.terminal_content.width / metrics.cell_width).floor() as u16;
             let rows = (layout.terminal_content.height / metrics.cell_height).floor() as u16;
             (rows.max(1), cols.max(1))
@@ -357,9 +469,24 @@ impl App {
         }
     }
 
+    fn shell_layout(&self, viewport_w: f32, viewport_h: f32) -> ui::layout::ShellLayout {
+        self.layout_engine.borrow_mut().compute(
+            viewport_w,
+            viewport_h,
+            true,
+            self.right_panel.visible && !self.is_web_reference_crop(),
+            !self.is_web_reference_crop(),
+            self.sidebar_width,
+            self.right_panel_width,
+            self.ui_scale(),
+        )
+    }
+
     fn fetch_grid(&self) {
         let Some(daemon) = &self.daemon else { return };
-        let Some(session_id) = &self.active_session else { return };
+        let Some(session_id) = &self.active_session else {
+            return;
+        };
         let Some(sender) = &self.sender else { return };
 
         let daemon = Arc::clone(daemon);
@@ -396,12 +523,19 @@ impl App {
     }
 
     fn scroll(&mut self, delta: isize) {
+        if self.is_web_reference_crop() {
+            return;
+        }
         let new_offset = (self.scrollback_offset as isize + delta).max(0) as usize;
-        if new_offset == self.scrollback_offset { return; }
+        if new_offset == self.scrollback_offset {
+            return;
+        }
         self.scrollback_offset = new_offset;
 
         let Some(daemon) = &self.daemon else { return };
-        let Some(session_id) = &self.active_session else { return };
+        let Some(session_id) = &self.active_session else {
+            return;
+        };
         let Some(sender) = &self.sender else { return };
 
         let daemon = Arc::clone(daemon);
@@ -426,10 +560,16 @@ impl App {
     }
 
     fn copy_selection(&mut self) {
-        if !self.selection.has_selection() { return; }
-        let Some(grid) = &self.current_grid else { return };
+        if !self.selection.has_selection() {
+            return;
+        }
+        let Some(grid) = &self.current_grid else {
+            return;
+        };
         let text = self.selection.selected_text(grid);
-        if text.is_empty() { return; }
+        if text.is_empty() {
+            return;
+        }
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
             let _ = clipboard.set_text(&text);
         }
@@ -479,7 +619,11 @@ impl App {
             return;
         };
 
-        log::debug!("Sending {} bytes to PTY: {:?}", bytes.len(), String::from_utf8_lossy(&bytes));
+        log::debug!(
+            "Sending {} bytes to PTY: {:?}",
+            bytes.len(),
+            String::from_utf8_lossy(&bytes)
+        );
         let daemon = Arc::clone(daemon);
         let session_id = session_id.clone();
         std::thread::spawn(move || {
@@ -496,7 +640,10 @@ impl App {
     /// The accent color of the currently active tab.
     /// Uses per-tab color if set, otherwise falls back to index-based rotation.
     fn active_accent(&self) -> [f32; 4] {
-        self.tab_bar.tabs.iter().enumerate()
+        self.tab_bar
+            .tabs
+            .iter()
+            .enumerate()
             .find(|(_, t)| t.active)
             .map(|(i, t)| t.accent.unwrap_or_else(|| self.tab_bar.accent_for(i)))
             .unwrap_or(ui::builder::colors::ACCENT_BLUE)
@@ -505,7 +652,10 @@ impl App {
     fn render(&mut self) {
         // Frame-rate independent delta time (clamped to avoid spiral-of-death)
         let now = Instant::now();
-        let dt = now.duration_since(self.last_frame_time).as_secs_f32().min(0.1);
+        let dt = now
+            .duration_since(self.last_frame_time)
+            .as_secs_f32()
+            .min(0.1);
         self.last_frame_time = now;
 
         // Tick all hover animations and request another frame if any are active
@@ -514,8 +664,18 @@ impl App {
         animating |= self.sidebar.tick_animations(dt);
         animating |= self.status_bar.tick_animations(dt);
         animating |= self.right_panel.tick_animations(dt);
-        self.left_resize_anim.set(if self.left_resize_hover || self.left_resize_dragging { 1.0 } else { 0.0 });
-        self.right_resize_anim.set(if self.right_resize_hover || self.right_resize_dragging { 1.0 } else { 0.0 });
+        self.left_resize_anim
+            .set(if self.left_resize_hover || self.left_resize_dragging {
+                1.0
+            } else {
+                0.0
+            });
+        self.right_resize_anim
+            .set(if self.right_resize_hover || self.right_resize_dragging {
+                1.0
+            } else {
+                0.0
+            });
         animating |= self.left_resize_anim.tick(ui::anim::timing::HOVER, dt);
         animating |= self.right_resize_anim.tick(ui::anim::timing::HOVER, dt);
         animating |= self.focus_dim_anim.tick(ui::anim::timing::SLOW, dt);
@@ -543,15 +703,18 @@ impl App {
         {
             let is_blink_style = self.current_grid.as_ref().map_or(false, |g| {
                 use godly_protocol::types::CursorShape;
-                matches!(g.cursor.cursor_style,
-                    CursorShape::BlinkBlock | CursorShape::BlinkUnderline | CursorShape::BlinkBar)
+                matches!(
+                    g.cursor.cursor_style,
+                    CursorShape::BlinkBlock | CursorShape::BlinkUnderline | CursorShape::BlinkBar
+                )
             });
             if is_blink_style && self.window_focused {
                 self.cursor_blink_timer += dt;
                 if self.cursor_blink_timer >= 0.5 {
                     self.cursor_blink_timer = 0.0;
                     self.cursor_blink_phase = !self.cursor_blink_phase;
-                    self.cursor_blink_anim.set(if self.cursor_blink_phase { 1.0 } else { 0.0 });
+                    self.cursor_blink_anim
+                        .set(if self.cursor_blink_phase { 1.0 } else { 0.0 });
                 }
                 animating |= self.cursor_blink_anim.tick(ui::anim::timing::BLINK, dt);
             } else {
@@ -584,45 +747,46 @@ impl App {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder =
-            gpu.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("render"),
-                });
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("render"),
+            });
 
         // Prepare terminal data BEFORE starting the render pass
         let vw = gpu.config.width as f32;
         let vh = gpu.config.height as f32;
-        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
+        let layout = self.shell_layout(vw, vh);
+        let reference_crop = self.is_web_reference_crop();
+        let ui_scale = self.ui_scale();
 
         // Update status bar with current terminal dimensions
         self.status_bar.terminal_size = self.terminal_size();
 
         // Build UI chrome (quads + text commands)
-        let phys_metrics = self.renderer.as_ref().map(|r| r.font_metrics().scaled_for_render());
-        let ui_avg_advance = self.renderer.as_ref().map_or(0.0, |r| r.ui_avg_advance());
-        let ui_char_advances = self.renderer.as_mut().map_or_else(Vec::new, |r| r.build_ui_char_advances());
-        let ui_text_handle = if let Some(m) = phys_metrics {
-            let mut tr = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
-            tr.ui_avg_advance = ui_avg_advance;
-            tr.ui_char_advances = ui_char_advances.clone();
-            // One-time diagnostic: log per-glyph measurement accuracy
-            if !ui_char_advances.is_empty() {
-                static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    let test_str = "opensessions";
-                    let avg_w = test_str.len() as f32 * ui_avg_advance;
-                    let exact_w = tr.text_width_ui(test_str);
-                    log::info!("[DIAG] char_advances table: {} entries, avg_advance={:.1}, 'opensessions' avg={:.1} exact={:.1}",
-                        ui_char_advances.len(), ui_avg_advance, avg_w, exact_w);
-                    // Also log sidebar width at scale
-                    log::info!("[DIAG] sidebar_width={:.0} (logical {:.0}), cell_width={:.1}, cell_height={:.1}, scale={:.2}",
-                        (self.sidebar_width * self.scale_factor).round(), self.sidebar_width, m.cell_width, m.cell_height, self.scale_factor);
-                }
+        let ui_metrics = self.renderer.as_ref().map(|r| {
+            if reference_crop {
+                *r.font_metrics()
+            } else {
+                r.font_metrics().scaled_for_render()
             }
+        });
+        let ui_avg_advance = self.renderer.as_ref().map_or(0.0, |r| r.ui_avg_advance());
+        let ui_text_handle = if let Some(m) = ui_metrics {
+            let mut tr = ui::builder::UiTextRenderer::new(
+                m.cell_width,
+                m.cell_height,
+                m.font_size,
+                ui_scale,
+            );
+            tr.ui_avg_advance = ui_avg_advance;
+            tr.layout_engine = self.ui_text_layout.clone();
+            tr.raster_scale = self.ui_raster_scale();
             tr
         } else {
-            ui::builder::UiTextRenderer::new(8.0, 16.0, self.scale_factor)
+            let mut tr = ui::builder::UiTextRenderer::new(8.0, 16.0, 14.0, ui_scale);
+            tr.raster_scale = self.ui_raster_scale();
+            tr
         };
         let mut ui_builder = ui::builder::UiBuilder::new(vw, vh);
 
@@ -631,7 +795,7 @@ impl App {
 
         // Subtle directional shadows — kept minimal to match web reference's flat style.
         // Only retain lightweight edge shadows for panel depth, no vignettes or glows.
-        {
+        if !reference_crop {
             // Tab bar cast shadow (subtle top edge darkening)
             let shadow_h = ui_text_handle.s(6.0);
             ui_builder.fill_gradient(
@@ -663,7 +827,10 @@ impl App {
 
         // Empty terminal welcome state — styled welcome screen with branded
         // header, status indicator, and keyboard shortcut cards.
-        if self.current_grid.is_none() {
+        if reference_crop {
+            self.reference_pane
+                .build(&mut ui_builder, layout.terminal_content, &ui_text_handle);
+        } else if self.current_grid.is_none() {
             let s = |v: f32| ui_text_handle.s(v);
             let _cw = ui_text_handle.cell_width;
             let ch = ui_text_handle.cell_height;
@@ -696,9 +863,17 @@ impl App {
                     height: spot_h,
                 };
                 let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
-                ui_builder.fill_shadow(spot_rect,
-                    [active_accent[0], active_accent[1], active_accent[2], 0.020 * breath],
-                    spot_w * 0.3, spot_w * 0.4);
+                ui_builder.fill_shadow(
+                    spot_rect,
+                    [
+                        active_accent[0],
+                        active_accent[1],
+                        active_accent[2],
+                        0.020 * breath,
+                    ],
+                    spot_w * 0.3,
+                    spot_w * 0.4,
+                );
             }
 
             // --- Hero terminal icon ---
@@ -711,18 +886,24 @@ impl App {
             let hero_pill_x = center_x - hero_pill_size / 2.0;
             let hero_pill_y = block_y - hero_pill_size - s(10.0);
             let hero_pill_rect = ui::widget::Rect {
-                x: hero_pill_x, y: hero_pill_y,
-                width: hero_pill_size, height: hero_pill_size,
+                x: hero_pill_x,
+                y: hero_pill_y,
+                width: hero_pill_size,
+                height: hero_pill_size,
             };
             let hero_pill_r = s(14.0);
             // Soft drop shadow for floating depth
             let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
             ui_builder.fill_shadow(
                 ui::widget::Rect {
-                    x: hero_pill_x + s(2.0), y: hero_pill_y + s(3.0),
-                    width: hero_pill_size - s(4.0), height: hero_pill_size,
+                    x: hero_pill_x + s(2.0),
+                    y: hero_pill_y + s(3.0),
+                    width: hero_pill_size - s(4.0),
+                    height: hero_pill_size,
                 },
-                [0.0, 0.0, 0.0, 0.15], hero_pill_r, s(10.0),
+                [0.0, 0.0, 0.0, 0.15],
+                hero_pill_r,
+                s(10.0),
             );
             // Pill background: subtle accent-tinted fill
             let pill_bg = [
@@ -731,7 +912,12 @@ impl App {
                 active_accent[2] * 0.10 + ui::builder::colors::BG_SURFACE[2] * 0.90,
                 0.6,
             ];
-            let pill_bg_top = [pill_bg[0] * 1.08, pill_bg[1] * 1.08, pill_bg[2] * 1.08, pill_bg[3]];
+            let pill_bg_top = [
+                pill_bg[0] * 1.08,
+                pill_bg[1] * 1.08,
+                pill_bg[2] * 1.08,
+                pill_bg[3],
+            ];
             ui_builder.fill_rounded_gradient(hero_pill_rect, pill_bg_top, pill_bg, hero_pill_r);
             // Accent-tinted border
             let pill_border = [
@@ -745,8 +931,10 @@ impl App {
             let hero_x = hero_pill_x + hero_pill_pad;
             let hero_y = hero_pill_y + hero_pill_pad;
             let hero_rect = ui::widget::Rect {
-                x: hero_x, y: hero_y,
-                width: hero_icon_size, height: hero_icon_size,
+                x: hero_x,
+                y: hero_y,
+                width: hero_icon_size,
+                height: hero_icon_size,
             };
             // Icon stroke with accent tint
             let hero_icon_fg = [
@@ -769,7 +957,7 @@ impl App {
                 ui::builder::colors::FG_PRIMARY[2] * 0.80 + active_accent[2] * 0.20,
                 0.88,
             ];
-            ui_builder.text_ui_bold(&ui_text_handle, title, title_x, block_y, title_fg, bg);
+            ui_builder.text_ui_bold_mixed(&ui_text_handle, title, title_x, block_y, title_fg, bg);
 
             // Subtitle line — "GPU-accelerated terminal" in very muted text
             let subtitle = "GPU-accelerated terminal";
@@ -781,16 +969,26 @@ impl App {
                 ui::builder::colors::FG_MUTED[2] * 0.7 + ui::builder::colors::FG_SECONDARY[2] * 0.3,
                 0.55,
             ];
-            ui_builder.text_ui(&ui_text_handle, subtitle,
-                center_x - subtitle_w / 2.0, subtitle_y,
-                subtitle_fg, bg);
+            ui_builder.text_ui_mixed(
+                &ui_text_handle,
+                subtitle,
+                center_x - subtitle_w / 2.0,
+                subtitle_y,
+                subtitle_fg,
+                bg,
+            );
 
             // Accent underline below subtitle (breathing, matches active tab)
             let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
             let underline_w = title_w * 0.6;
             let underline_y = subtitle_y + ch + s(4.0);
             let underline_h = s(1.5);
-            let underline_color = [active_accent[0], active_accent[1], active_accent[2], 0.25 * breath];
+            let underline_color = [
+                active_accent[0],
+                active_accent[1],
+                active_accent[2],
+                0.25 * breath,
+            ];
             let underline_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
             ui_builder.fill_gradient_h(
                 ui::widget::Rect {
@@ -799,7 +997,8 @@ impl App {
                     width: underline_w * 0.25,
                     height: underline_h,
                 },
-                underline_zero, underline_color,
+                underline_zero,
+                underline_color,
             );
             ui_builder.fill(
                 ui::widget::Rect {
@@ -817,15 +1016,21 @@ impl App {
                     width: underline_w * 0.25,
                     height: underline_h,
                 },
-                underline_color, underline_zero,
+                underline_color,
+                underline_zero,
             );
 
             // --- Status message with animated loading indicator ---
             let status_y = underline_y + s(16.0);
             let status_w = ui_text_handle.text_width_ui(status);
-            ui_builder.text_ui(&ui_text_handle, status,
-                center_x - status_w / 2.0, status_y,
-                ui::builder::colors::FG_MUTED, bg);
+            ui_builder.text_ui_mixed(
+                &ui_text_handle,
+                status,
+                center_x - status_w / 2.0,
+                status_y,
+                ui::builder::colors::FG_MUTED,
+                bg,
+            );
 
             // Spinning arc indicator — small ring with a moving bright segment
             // that suggests "loading" without being distracting.
@@ -836,11 +1041,17 @@ impl App {
                 let arc_cy = status_y + ch / 2.0;
                 // Background ring (very faint)
                 let ring_rect = ui::widget::Rect {
-                    x: arc_cx - arc_r, y: arc_cy - arc_r,
-                    width: arc_r * 2.0, height: arc_r * 2.0,
+                    x: arc_cx - arc_r,
+                    y: arc_cy - arc_r,
+                    width: arc_r * 2.0,
+                    height: arc_r * 2.0,
                 };
-                ui_builder.stroke_rounded(ring_rect, arc_r, 0.8,
-                    [active_accent[0], active_accent[1], active_accent[2], 0.08]);
+                ui_builder.stroke_rounded(
+                    ring_rect,
+                    arc_r,
+                    0.8,
+                    [active_accent[0], active_accent[1], active_accent[2], 0.08],
+                );
                 // Bright arc segment — 3 dots positioned along the ring at
                 // the leading edge of a rotating sweep
                 let dot_sz = s(2.0);
@@ -850,8 +1061,18 @@ impl App {
                     let dx = arc_cx + arc_r * angle.cos() - dot_sz / 2.0;
                     let dy = arc_cy + arc_r * angle.sin() - dot_sz / 2.0;
                     ui_builder.fill_rounded(
-                        ui::widget::Rect { x: dx, y: dy, width: dot_sz, height: dot_sz },
-                        [active_accent[0], active_accent[1], active_accent[2], 0.5 * fade],
+                        ui::widget::Rect {
+                            x: dx,
+                            y: dy,
+                            width: dot_sz,
+                            height: dot_sz,
+                        },
+                        [
+                            active_accent[0],
+                            active_accent[1],
+                            active_accent[2],
+                            0.5 * fade,
+                        ],
                         dot_sz / 2.0,
                     );
                 }
@@ -868,8 +1089,8 @@ impl App {
 
             let card_pad_h = s(8.0);
             let card_pad_v = s(4.0);
-            let card_gap_h = s(8.0);  // horizontal gap between columns
-            let card_gap_v = s(6.0);  // vertical gap between rows
+            let card_gap_h = s(8.0); // horizontal gap between columns
+            let card_gap_v = s(6.0); // vertical gap between rows
             let key_badge_pad_h = s(5.0);
             let key_badge_pad_v = s(2.0);
             let key_badge_radius = s(3.0);
@@ -877,10 +1098,12 @@ impl App {
             let key_desc_gap = s(8.0);
 
             // Calculate per-cell width (measure longest key+desc in each column)
-            let max_key_w = hints.iter()
+            let max_key_w = hints
+                .iter()
                 .map(|(k, _)| ui_text_handle.text_width(k))
                 .fold(0.0f32, f32::max);
-            let max_desc_w = hints.iter()
+            let max_desc_w = hints
+                .iter()
                 .map(|(_, d)| ui_text_handle.text_width_ui(d))
                 .fold(0.0f32, f32::max);
             let cell_inner_w = (max_key_w + key_badge_pad_h * 2.0) + key_desc_gap + max_desc_w;
@@ -918,11 +1141,23 @@ impl App {
             ui_builder.fill_shadow(shadow_rect, [0.0, 0.0, 0.0, 0.12], s(8.0), s(10.0));
             ui_builder.fill_rounded(container_rect, container_bg, s(8.0));
             // Inner shadow for recessed depth on card container
-            ui_builder.fill_inner_shadow_custom(container_rect,
-                [0.0, 0.0, 0.0, 0.08], [s(8.0); 4], s(4.0));
-            ui_builder.stroke_rounded(container_rect, s(8.0), 0.5,
-                [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.25]);
+            ui_builder.fill_inner_shadow_custom(
+                container_rect,
+                [0.0, 0.0, 0.0, 0.08],
+                [s(8.0); 4],
+                s(4.0),
+            );
+            ui_builder.stroke_rounded(
+                container_rect,
+                s(8.0),
+                0.5,
+                [
+                    ui::builder::colors::BORDER[0],
+                    ui::builder::colors::BORDER[1],
+                    ui::builder::colors::BORDER[2],
+                    0.25,
+                ],
+            );
 
             for (i, (key, desc)) in hints.iter().enumerate() {
                 let col = i % 2;
@@ -932,7 +1167,10 @@ impl App {
 
                 // Card background (subtle gradient)
                 let card_rect = ui::widget::Rect {
-                    x: cell_x, y, width: cell_w, height: card_h,
+                    x: cell_x,
+                    y,
+                    width: cell_w,
+                    height: card_h,
                 };
                 let card_top = [
                     ui::builder::colors::BG_SURFACE[0] * 0.6,
@@ -947,9 +1185,17 @@ impl App {
                     0.35,
                 ];
                 ui_builder.fill_rounded_gradient(card_rect, card_top, card_bot, card_radius);
-                ui_builder.stroke_rounded(card_rect, card_radius, 0.5,
-                    [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                     ui::builder::colors::BORDER[2], 0.15]);
+                ui_builder.stroke_rounded(
+                    card_rect,
+                    card_radius,
+                    0.5,
+                    [
+                        ui::builder::colors::BORDER[0],
+                        ui::builder::colors::BORDER[1],
+                        ui::builder::colors::BORDER[2],
+                        0.15,
+                    ],
+                );
 
                 // Key badge (darker inset pill)
                 let key_w = ui_text_handle.text_width(key);
@@ -958,7 +1204,10 @@ impl App {
                 let badge_x = cell_x + card_pad_h;
                 let badge_y = y + (card_h - badge_h) / 2.0;
                 let badge_rect = ui::widget::Rect {
-                    x: badge_x, y: badge_y, width: badge_w, height: badge_h,
+                    x: badge_x,
+                    y: badge_y,
+                    width: badge_w,
+                    height: badge_h,
                 };
                 let badge_bg_top = [
                     ui::builder::colors::BG_DARK[0] * 1.1,
@@ -979,51 +1228,90 @@ impl App {
                     width: badge_w - s(2.0),
                     height: badge_h,
                 };
-                ui_builder.fill_shadow(keycap_shadow_rect,
-                    [0.0, 0.0, 0.0, 0.2], key_badge_radius, s(3.0));
-                ui_builder.fill_rounded_gradient(badge_rect, badge_bg_top, badge_bg_bot, key_badge_radius);
+                ui_builder.fill_shadow(
+                    keycap_shadow_rect,
+                    [0.0, 0.0, 0.0, 0.2],
+                    key_badge_radius,
+                    s(3.0),
+                );
+                ui_builder.fill_rounded_gradient(
+                    badge_rect,
+                    badge_bg_top,
+                    badge_bg_bot,
+                    key_badge_radius,
+                );
                 // Top highlight (keycap bevel)
                 ui_builder.hline_fade(
-                    badge_x + key_badge_radius, badge_y + 1.0,
-                    badge_w - key_badge_radius * 2.0, 1.0,
-                    [1.0, 1.0, 1.0, 0.10], s(4.0),
+                    badge_x + key_badge_radius,
+                    badge_y + 1.0,
+                    badge_w - key_badge_radius * 2.0,
+                    1.0,
+                    [1.0, 1.0, 1.0, 0.10],
+                    s(4.0),
                 );
                 // Bottom shadow (keycap depth)
                 ui_builder.hline_fade(
-                    badge_x + key_badge_radius, badge_y + badge_h - 1.0,
-                    badge_w - key_badge_radius * 2.0, 1.0,
-                    [0.0, 0.0, 0.0, 0.20], s(4.0),
+                    badge_x + key_badge_radius,
+                    badge_y + badge_h - 1.0,
+                    badge_w - key_badge_radius * 2.0,
+                    1.0,
+                    [0.0, 0.0, 0.0, 0.20],
+                    s(4.0),
                 );
-                ui_builder.stroke_rounded(badge_rect, key_badge_radius, 0.5,
-                    [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                     ui::builder::colors::BORDER[2], 0.5]);
+                ui_builder.stroke_rounded(
+                    badge_rect,
+                    key_badge_radius,
+                    0.5,
+                    [
+                        ui::builder::colors::BORDER[0],
+                        ui::builder::colors::BORDER[1],
+                        ui::builder::colors::BORDER[2],
+                        0.5,
+                    ],
+                );
 
                 // Key text (centered in badge)
                 let key_text_x = badge_x + key_badge_pad_h;
                 let key_text_y = y + (card_h - ch) / 2.0;
-                ui_builder.text(&ui_text_handle, key, key_text_x, key_text_y,
-                    ui::builder::colors::FG_PRIMARY, ui::builder::colors::BG_DARK);
+                ui_builder.text_mixed(
+                    &ui_text_handle,
+                    key,
+                    key_text_x,
+                    key_text_y,
+                    ui::builder::colors::FG_PRIMARY,
+                    ui::builder::colors::BG_DARK,
+                );
 
                 // Description text (after badge) — proportional for natural reading
                 let desc_x = badge_x + badge_w + key_desc_gap;
                 let desc_fg = [
-                    ui::builder::colors::FG_MUTED[0] * 0.5 + ui::builder::colors::FG_SECONDARY[0] * 0.5,
-                    ui::builder::colors::FG_MUTED[1] * 0.5 + ui::builder::colors::FG_SECONDARY[1] * 0.5,
-                    ui::builder::colors::FG_MUTED[2] * 0.5 + ui::builder::colors::FG_SECONDARY[2] * 0.5,
+                    ui::builder::colors::FG_MUTED[0] * 0.5
+                        + ui::builder::colors::FG_SECONDARY[0] * 0.5,
+                    ui::builder::colors::FG_MUTED[1] * 0.5
+                        + ui::builder::colors::FG_SECONDARY[1] * 0.5,
+                    ui::builder::colors::FG_MUTED[2] * 0.5
+                        + ui::builder::colors::FG_SECONDARY[2] * 0.5,
                     0.75,
                 ];
-                ui_builder.text_ui(&ui_text_handle, desc, desc_x, key_text_y,
-                    desc_fg, bg);
+                ui_builder.text_ui_mixed(&ui_text_handle, desc, desc_x, key_text_y, desc_fg, bg);
             }
 
             // Thin separator between shortcut grid and CTA section
             let sep_y = container_rect.y + container_rect.height + s(10.0);
             let sep_w = grid_w * 0.6;
-            let sep_color = [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                             ui::builder::colors::BORDER[2], 0.15];
+            let sep_color = [
+                ui::builder::colors::BORDER[0],
+                ui::builder::colors::BORDER[1],
+                ui::builder::colors::BORDER[2],
+                0.15,
+            ];
             ui_builder.hline_fade(
-                center_x - sep_w / 2.0, sep_y, sep_w, 1.0,
-                sep_color, s(12.0),
+                center_x - sep_w / 2.0,
+                sep_y,
+                sep_w,
+                1.0,
+                sep_color,
+                s(12.0),
             );
 
             // Version indicator — very muted, below separator
@@ -1036,9 +1324,14 @@ impl App {
                 ui::builder::colors::FG_MUTED[2],
                 0.38,
             ];
-            ui_builder.text_ui(&ui_text_handle, version_str,
-                center_x - version_w / 2.0, version_y,
-                version_fg, bg);
+            ui_builder.text_ui_mixed(
+                &ui_text_handle,
+                version_str,
+                center_x - version_w / 2.0,
+                version_y,
+                version_fg,
+                bg,
+            );
 
             // --- "Create terminal" CTA button ---
             // Full-width button spanning the card container for commanding visual
@@ -1055,7 +1348,10 @@ impl App {
             let cta_x = container_rect.x;
             let cta_y = version_y + ch + s(14.0);
             let cta_rect = ui::widget::Rect {
-                x: cta_x, y: cta_y, width: cta_w, height: cta_h,
+                x: cta_x,
+                y: cta_y,
+                width: cta_w,
+                height: cta_h,
             };
             let cta_r = s(6.0);
             // Filled accent background — stronger accent presence (30% blend)
@@ -1067,23 +1363,40 @@ impl App {
                 active_accent[2] * 0.30 + ui::builder::colors::BG_SURFACE[2] * 0.70,
                 0.95,
             ];
-            let cta_fill_top = [cta_fill[0] * 1.10, cta_fill[1] * 1.10, cta_fill[2] * 1.10, cta_fill[3]];
+            let cta_fill_top = [
+                cta_fill[0] * 1.10,
+                cta_fill[1] * 1.10,
+                cta_fill[2] * 1.10,
+                cta_fill[3],
+            ];
             let cta_border = [
-                active_accent[0] * 0.45, active_accent[1] * 0.45,
-                active_accent[2] * 0.45, 0.55 * breath,
+                active_accent[0] * 0.45,
+                active_accent[1] * 0.45,
+                active_accent[2] * 0.45,
+                0.55 * breath,
             ];
             // Drop shadow for floating depth (slightly stronger)
             ui_builder.fill_shadow(
-                ui::widget::Rect { x: cta_x + s(2.0), y: cta_y + s(3.0), width: cta_w - s(4.0), height: cta_h },
-                [0.0, 0.0, 0.0, 0.20], cta_r, s(8.0),
+                ui::widget::Rect {
+                    x: cta_x + s(2.0),
+                    y: cta_y + s(3.0),
+                    width: cta_w - s(4.0),
+                    height: cta_h,
+                },
+                [0.0, 0.0, 0.0, 0.20],
+                cta_r,
+                s(8.0),
             );
             ui_builder.fill_rounded_gradient(cta_rect, cta_fill_top, cta_fill, cta_r);
             ui_builder.stroke_rounded(cta_rect, cta_r, 0.5, cta_border);
             // Inner top highlight for physical button depth
             ui_builder.hline_fade(
-                cta_x + cta_r, cta_y + 1.0,
-                cta_w - cta_r * 2.0, 1.0,
-                [1.0, 1.0, 1.0, 0.06], s(8.0),
+                cta_x + cta_r,
+                cta_y + 1.0,
+                cta_w - cta_r * 2.0,
+                1.0,
+                [1.0, 1.0, 1.0, 0.06],
+                s(8.0),
             );
             // Plus icon + label — centered within the full-width button
             let content_w = cta_icon_sz + cta_icon_gap + cta_text_w;
@@ -1091,7 +1404,8 @@ impl App {
             let icon_rect = ui::widget::Rect {
                 x: content_x,
                 y: cta_y + (cta_h - cta_icon_sz) / 2.0,
-                width: cta_icon_sz, height: cta_icon_sz,
+                width: cta_icon_sz,
+                height: cta_icon_sz,
             };
             let icon_t = (1.0 * ui_text_handle.scale).max(0.8);
             let icon_fg = [active_accent[0], active_accent[1], active_accent[2], 0.85];
@@ -1103,168 +1417,208 @@ impl App {
                 ui::builder::colors::FG_PRIMARY[2] * 0.55 + active_accent[2] * 0.45,
                 0.92,
             ];
-            ui_builder.text_ui(&ui_text_handle, cta_label,
+            ui_builder.text_ui_scaled_mixed(
+                &ui_text_handle,
+                cta_label,
                 content_x + cta_icon_sz + cta_icon_gap,
                 cta_y + (cta_h - ch) / 2.0,
-                label_fg, cta_fill);
+                label_fg,
+                cta_fill,
+                1.0,
+            );
         }
 
         // Scrollbar (rendered before chrome so it layers under borders)
         // Hover proximity: scrollbar widens and brightens when mouse is near.
-        if let Some(grid) = &self.current_grid {
-            let visible_rows = self.terminal_size().0 as usize;
-            let total = grid.total_scrollback + visible_rows;
-            if total > visible_rows && visible_rows > 0 {
-                let s = |v: f32| ui_text_handle.s(v);
-                let track_margin = s(2.0);
+        if !reference_crop {
+            if let Some(grid) = &self.current_grid {
+                let visible_rows = self.terminal_size().0 as usize;
+                let total = grid.total_scrollback + visible_rows;
+                if total > visible_rows && visible_rows > 0 {
+                    let s = |v: f32| ui_text_handle.s(v);
+                    let track_margin = s(2.0);
 
-                // Mouse proximity calculation — how close is cursor to scrollbar edge?
-                // The Anim smoothly interpolates so width/opacity transitions are buttery.
-                let scrollbar_edge_x = layout.terminal.x + layout.terminal.width - track_margin;
-                let proximity_zone = s(40.0); // pixels within which scrollbar reacts
-                let raw_proximity = if let Some((mx, _my)) = self.mouse_position {
-                    let mx = mx as f32;
-                    let dist = (scrollbar_edge_x - mx).abs();
-                    if dist < proximity_zone {
-                        let t = 1.0 - (dist / proximity_zone);
-                        t * t // quadratic ease-in for snappier feel near the edge
+                    // Mouse proximity calculation — how close is cursor to scrollbar edge?
+                    // The Anim smoothly interpolates so width/opacity transitions are buttery.
+                    let scrollbar_edge_x = layout.terminal.x + layout.terminal.width - track_margin;
+                    let proximity_zone = s(40.0); // pixels within which scrollbar reacts
+                    let raw_proximity = if let Some((mx, _my)) = self.mouse_position {
+                        let mx = mx as f32;
+                        let dist = (scrollbar_edge_x - mx).abs();
+                        if dist < proximity_zone {
+                            let t = 1.0 - (dist / proximity_zone);
+                            t * t // quadratic ease-in for snappier feel near the edge
+                        } else {
+                            0.0
+                        }
                     } else {
                         0.0
-                    }
-                } else {
-                    0.0
-                };
-                self.scrollbar_hover_anim.set(raw_proximity);
-                let sb_animating = self.scrollbar_hover_anim.tick(ui::anim::timing::MEDIUM, dt);
-                if sb_animating {
-                    if let Some(w) = &self.window { w.request_redraw(); }
-                }
-                let hover_t = self.scrollbar_hover_anim.value();
-
-                // Interpolate bar width: thin (6px) when far, wide (10px) when close
-                let bar_w_min = s(6.0);
-                let bar_w_max = s(10.0);
-                let bar_w = bar_w_min + (bar_w_max - bar_w_min) * hover_t;
-
-                let track_rect = ui::widget::Rect {
-                    x: layout.terminal.x + layout.terminal.width - bar_w - track_margin,
-                    y: layout.terminal.y + track_margin,
-                    width: bar_w,
-                    height: layout.terminal.height - track_margin * 2.0,
-                };
-
-                // Thumb size and position
-                let ratio = visible_rows as f32 / total as f32;
-                let thumb_h = (track_rect.height * ratio).max(s(20.0));
-                // scrollback_offset=0 means at bottom (live), higher = scrolled up
-                let scroll_frac = if grid.total_scrollback > 0 {
-                    1.0 - (self.scrollback_offset as f32 / grid.total_scrollback as f32)
-                } else {
-                    1.0
-                };
-                let thumb_y = track_rect.y + (track_rect.height - thumb_h) * scroll_frac;
-
-                let thumb_rect = ui::widget::Rect {
-                    x: track_rect.x,
-                    y: thumb_y,
-                    width: bar_w,
-                    height: thumb_h,
-                };
-
-                // Track background: more visible on hover
-                let track_alpha = 0.03 + 0.04 * hover_t;
-                ui_builder.fill_rounded(track_rect, [1.0, 1.0, 1.0, track_alpha], bar_w / 2.0);
-
-                // Thumb shadow for depth (subtle, only visible on hover proximity)
-                if hover_t > 0.1 {
-                    let shadow_alpha = 0.12 * hover_t;
-                    ui_builder.fill_shadow(thumb_rect, [0.0, 0.0, 0.0, shadow_alpha], bar_w / 2.0, s(3.0));
-                }
-
-                // Thumb: SDF gradient for 3D cylinder feel (brighter top → darker bottom).
-                // When actively scrolled, the thumb picks up a subtle accent tint
-                // matching the active tab — visual coherence with cursor and selection.
-                let is_scrolled = self.scrollback_offset > 0;
-                let accent = self.active_accent();
-                let base_alpha = if is_scrolled { 0.28 } else { 0.15 };
-                let scroll_alpha = base_alpha + 0.20 * hover_t;
-                // Blend toward accent color when scrolled + hovering
-                let accent_blend = if is_scrolled { hover_t * 0.3 } else { 0.0 };
-                let thumb_r = 1.0 * (1.0 - accent_blend) + accent[0] * accent_blend;
-                let thumb_g = 1.0 * (1.0 - accent_blend) + accent[1] * accent_blend;
-                let thumb_b = 1.0 * (1.0 - accent_blend) + accent[2] * accent_blend;
-                let thumb_top = [thumb_r, thumb_g, thumb_b, scroll_alpha * (1.0 + 0.15 * hover_t)];
-                let thumb_bottom = [thumb_r, thumb_g, thumb_b, scroll_alpha * (1.0 - 0.1 * hover_t)];
-                let base_border = if is_scrolled { 0.12 } else { 0.08 };
-                let border_alpha = base_border + 0.10 * hover_t;
-                let thumb_border = [thumb_r, thumb_g, thumb_b, border_alpha];
-                ui_builder.fill_rounded_gradient(thumb_rect, thumb_top, thumb_bottom, bar_w / 2.0);
-                ui_builder.stroke_rounded(thumb_rect, bar_w / 2.0, 0.5, thumb_border);
-
-                // Grip marks: three small etched horizontal lines in the center
-                // of the thumb.  These provide visual affordance (signals "you can
-                // drag me") and appear only when the mouse is close enough.  Each
-                // line is a dark-light pair for a subtle inset/emboss effect.
-                if hover_t > 0.15 && thumb_h > s(28.0) {
-                    let grip_alpha = (hover_t - 0.15) / 0.85; // 0→1 over the hover range
-                    let grip_w = (bar_w * 0.45).round().max(2.0);
-                    let grip_x = thumb_rect.x + (bar_w - grip_w) / 2.0;
-                    let grip_cy = thumb_y + thumb_h / 2.0;
-                    let grip_spacing = s(3.0);
-                    let grip_dark = [0.0, 0.0, 0.0, 0.20 * grip_alpha];
-                    let grip_light = [1.0, 1.0, 1.0, 0.08 * grip_alpha];
-                    for gi in -1i32..=1 {
-                        let gy = grip_cy + gi as f32 * grip_spacing - 0.5;
-                        ui_builder.hline_aa(grip_x, gy, grip_w, 1.0, grip_dark);
-                        ui_builder.hline_aa(grip_x, gy + 1.0, grip_w, 1.0, grip_light);
-                    }
-                }
-
-                // Scroll-away fog: subtle gradients at edges when scrolled,
-                // hinting that there's content beyond the visible viewport.
-                if self.scrollback_offset > 0 {
-                    // Bottom fog — newer content below
-                    let fog_h = s(8.0);
-                    let fog_rect = ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y + layout.terminal.height - fog_h,
-                        width: layout.terminal.width,
-                        height: fog_h,
                     };
-                    ui_builder.fill_gradient(fog_rect,
-                        [0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.15],
-                    );
-                }
-                // Top fog — older scrollback content above (always present when
-                // there's scrollback history, regardless of current scroll position)
-                if grid.total_scrollback > 0 && self.scrollback_offset < grid.total_scrollback {
-                    let fog_h = s(6.0);
-                    let fog_rect = ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y,
-                        width: layout.terminal.width,
-                        height: fog_h,
+                    self.scrollbar_hover_anim.set(raw_proximity);
+                    let sb_animating = self.scrollbar_hover_anim.tick(ui::anim::timing::MEDIUM, dt);
+                    if sb_animating {
+                        if let Some(w) = &self.window {
+                            w.request_redraw();
+                        }
+                    }
+                    let hover_t = self.scrollbar_hover_anim.value();
+
+                    // Interpolate bar width: thin (6px) when far, wide (10px) when close
+                    let bar_w_min = s(6.0);
+                    let bar_w_max = s(10.0);
+                    let bar_w = bar_w_min + (bar_w_max - bar_w_min) * hover_t;
+
+                    let track_rect = ui::widget::Rect {
+                        x: layout.terminal.x + layout.terminal.width - bar_w - track_margin,
+                        y: layout.terminal.y + track_margin,
+                        width: bar_w,
+                        height: layout.terminal.height - track_margin * 2.0,
                     };
-                    ui_builder.fill_gradient(fog_rect,
-                        [0.0, 0.0, 0.0, 0.10],
-                        [0.0, 0.0, 0.0, 0.0],
+
+                    // Thumb size and position
+                    let ratio = visible_rows as f32 / total as f32;
+                    let thumb_h = (track_rect.height * ratio).max(s(20.0));
+                    // scrollback_offset=0 means at bottom (live), higher = scrolled up
+                    let scroll_frac = if grid.total_scrollback > 0 {
+                        1.0 - (self.scrollback_offset as f32 / grid.total_scrollback as f32)
+                    } else {
+                        1.0
+                    };
+                    let thumb_y = track_rect.y + (track_rect.height - thumb_h) * scroll_frac;
+
+                    let thumb_rect = ui::widget::Rect {
+                        x: track_rect.x,
+                        y: thumb_y,
+                        width: bar_w,
+                        height: thumb_h,
+                    };
+
+                    // Track background: more visible on hover
+                    let track_alpha = 0.03 + 0.04 * hover_t;
+                    ui_builder.fill_rounded(track_rect, [1.0, 1.0, 1.0, track_alpha], bar_w / 2.0);
+
+                    // Thumb shadow for depth (subtle, only visible on hover proximity)
+                    if hover_t > 0.1 {
+                        let shadow_alpha = 0.12 * hover_t;
+                        ui_builder.fill_shadow(
+                            thumb_rect,
+                            [0.0, 0.0, 0.0, shadow_alpha],
+                            bar_w / 2.0,
+                            s(3.0),
+                        );
+                    }
+
+                    // Thumb: SDF gradient for 3D cylinder feel (brighter top → darker bottom).
+                    // When actively scrolled, the thumb picks up a subtle accent tint
+                    // matching the active tab — visual coherence with cursor and selection.
+                    let is_scrolled = self.scrollback_offset > 0;
+                    let accent = self.active_accent();
+                    let base_alpha = if is_scrolled { 0.28 } else { 0.15 };
+                    let scroll_alpha = base_alpha + 0.20 * hover_t;
+                    // Blend toward accent color when scrolled + hovering
+                    let accent_blend = if is_scrolled { hover_t * 0.3 } else { 0.0 };
+                    let thumb_r = 1.0 * (1.0 - accent_blend) + accent[0] * accent_blend;
+                    let thumb_g = 1.0 * (1.0 - accent_blend) + accent[1] * accent_blend;
+                    let thumb_b = 1.0 * (1.0 - accent_blend) + accent[2] * accent_blend;
+                    let thumb_top = [
+                        thumb_r,
+                        thumb_g,
+                        thumb_b,
+                        scroll_alpha * (1.0 + 0.15 * hover_t),
+                    ];
+                    let thumb_bottom = [
+                        thumb_r,
+                        thumb_g,
+                        thumb_b,
+                        scroll_alpha * (1.0 - 0.1 * hover_t),
+                    ];
+                    let base_border = if is_scrolled { 0.12 } else { 0.08 };
+                    let border_alpha = base_border + 0.10 * hover_t;
+                    let thumb_border = [thumb_r, thumb_g, thumb_b, border_alpha];
+                    ui_builder.fill_rounded_gradient(
+                        thumb_rect,
+                        thumb_top,
+                        thumb_bottom,
+                        bar_w / 2.0,
                     );
+                    ui_builder.stroke_rounded(thumb_rect, bar_w / 2.0, 0.5, thumb_border);
+
+                    // Grip marks: three small etched horizontal lines in the center
+                    // of the thumb.  These provide visual affordance (signals "you can
+                    // drag me") and appear only when the mouse is close enough.  Each
+                    // line is a dark-light pair for a subtle inset/emboss effect.
+                    if hover_t > 0.15 && thumb_h > s(28.0) {
+                        let grip_alpha = (hover_t - 0.15) / 0.85; // 0→1 over the hover range
+                        let grip_w = (bar_w * 0.45).round().max(2.0);
+                        let grip_x = thumb_rect.x + (bar_w - grip_w) / 2.0;
+                        let grip_cy = thumb_y + thumb_h / 2.0;
+                        let grip_spacing = s(3.0);
+                        let grip_dark = [0.0, 0.0, 0.0, 0.20 * grip_alpha];
+                        let grip_light = [1.0, 1.0, 1.0, 0.08 * grip_alpha];
+                        for gi in -1i32..=1 {
+                            let gy = grip_cy + gi as f32 * grip_spacing - 0.5;
+                            ui_builder.hline_aa(grip_x, gy, grip_w, 1.0, grip_dark);
+                            ui_builder.hline_aa(grip_x, gy + 1.0, grip_w, 1.0, grip_light);
+                        }
+                    }
+
+                    // Scroll-away fog: subtle gradients at edges when scrolled,
+                    // hinting that there's content beyond the visible viewport.
+                    if self.scrollback_offset > 0 {
+                        // Bottom fog — newer content below
+                        let fog_h = s(8.0);
+                        let fog_rect = ui::widget::Rect {
+                            x: layout.terminal.x,
+                            y: layout.terminal.y + layout.terminal.height - fog_h,
+                            width: layout.terminal.width,
+                            height: fog_h,
+                        };
+                        ui_builder.fill_gradient(
+                            fog_rect,
+                            [0.0, 0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0, 0.15],
+                        );
+                    }
+                    // Top fog — older scrollback content above (always present when
+                    // there's scrollback history, regardless of current scroll position)
+                    if grid.total_scrollback > 0 && self.scrollback_offset < grid.total_scrollback {
+                        let fog_h = s(6.0);
+                        let fog_rect = ui::widget::Rect {
+                            x: layout.terminal.x,
+                            y: layout.terminal.y,
+                            width: layout.terminal.width,
+                            height: fog_h,
+                        };
+                        ui_builder.fill_gradient(
+                            fog_rect,
+                            [0.0, 0.0, 0.0, 0.10],
+                            [0.0, 0.0, 0.0, 0.0],
+                        );
+                    }
                 }
             }
         }
 
         // Tab bar now serves as title bar (full width at top, includes window buttons)
         self.tab_bar.sidebar_width = layout.sidebar.width;
-        self.tab_bar.build(&mut ui_builder, layout.tab_bar, &ui_text_handle);
-        self.sidebar.build(&mut ui_builder, layout.sidebar, &ui_text_handle);
-        self.right_panel.build(&mut ui_builder, layout.right_panel, layout.right_panel_status, &ui_text_handle);
+        self.tab_bar
+            .build(&mut ui_builder, layout.tab_bar, &ui_text_handle);
+        self.sidebar
+            .build(&mut ui_builder, layout.sidebar, &ui_text_handle);
+        if !reference_crop {
+            self.right_panel.build(
+                &mut ui_builder,
+                layout.right_panel,
+                layout.right_panel_status,
+                &ui_text_handle,
+            );
+        }
 
         // Resize handles — 3px invisible zones at panel boundaries, visible on hover
-        {
+        if !reference_crop {
             let handle_w = 3.0 * self.scale_factor;
             let handle_y = layout.tab_bar.bottom();
-            let handle_h = layout.status_bar.y - handle_y;
+            let handle_h = layout.terminal.bottom() - handle_y;
             let hover_color = ui::builder::colors::BG_HOVER;
 
             // Left handle (between sidebar and terminal)
@@ -1277,7 +1631,10 @@ impl App {
                         width: handle_w,
                         height: handle_h,
                     };
-                    ui_builder.fill(handle_rect, [hover_color[0], hover_color[1], hover_color[2], left_t * 0.8]);
+                    ui_builder.fill(
+                        handle_rect,
+                        [hover_color[0], hover_color[1], hover_color[2], left_t * 0.8],
+                    );
                 }
             }
 
@@ -1291,29 +1648,55 @@ impl App {
                         width: handle_w,
                         height: handle_h,
                     };
-                    ui_builder.fill(handle_rect, [hover_color[0], hover_color[1], hover_color[2], right_t * 0.8]);
+                    ui_builder.fill(
+                        handle_rect,
+                        [
+                            hover_color[0],
+                            hover_color[1],
+                            hover_color[2],
+                            right_t * 0.8,
+                        ],
+                    );
                 }
             }
         }
 
-        self.status_bar.sidebar_width = layout.sidebar.width;
-        self.status_bar.build(&mut ui_builder, layout.status_bar, &ui_text_handle, self.tab_bar.glow_phase(), self.active_accent());
+        if !reference_crop {
+            self.status_bar.sidebar_width = layout.sidebar.width;
+            self.status_bar.build(
+                &mut ui_builder,
+                layout.status_bar,
+                &ui_text_handle,
+                self.tab_bar.glow_phase(),
+                self.active_accent(),
+            );
+        }
 
         // Progress bar — 2px gradient bar between terminal and status bar (when streaming)
-        if self.status_bar.streaming {
+        if !reference_crop && self.status_bar.streaming {
             let s = |v: f32| ui_text_handle.s(v);
             let progress_y = layout.status_bar.y - s(2.0);
             let terminal_x = layout.terminal.x;
             let terminal_w = layout.terminal.width;
             // Background track
             ui_builder.fill(
-                ui::widget::Rect { x: terminal_x, y: progress_y, width: terminal_w, height: s(2.0) },
+                ui::widget::Rect {
+                    x: terminal_x,
+                    y: progress_y,
+                    width: terminal_w,
+                    height: s(2.0),
+                },
                 ui::builder::colors::BG_SURFACE,
             );
             // Animated fill — width driven by progress_pct (0.05 → 0.90)
             let fill_w = terminal_w * self.progress_pct;
             ui_builder.fill_gradient_h(
-                ui::widget::Rect { x: terminal_x, y: progress_y, width: fill_w, height: s(2.0) },
+                ui::widget::Rect {
+                    x: terminal_x,
+                    y: progress_y,
+                    width: fill_w,
+                    height: s(2.0),
+                },
                 ui::builder::colors::ACCENT_BLUE,
                 ui::builder::colors::ACCENT_MAUVE,
             );
@@ -1322,7 +1705,7 @@ impl App {
         // Breadcrumb/path bar — thin bar between tab bar and content showing
         // the current working directory as segmented path with chevron separators.
         // Skipped when BREADCRUMB_HEIGHT is 0.
-        if layout.breadcrumb.height > 0.0 {
+        if !reference_crop && layout.breadcrumb.height > 0.0 {
             let bc = &layout.breadcrumb;
             let s = |v: f32| ui_text_handle.s(v);
             let ch = ui_text_handle.cell_height;
@@ -1347,12 +1730,26 @@ impl App {
 
             // Bottom separator — near-invisible hairline; the gradient background
             // difference between breadcrumb and content area provides primary separation.
-            ui_builder.hline_aa(bc.x, bc.bottom() - 1.0, bc.width, 1.0,
-                [ui::builder::colors::BORDER[0], ui::builder::colors::BORDER[1],
-                 ui::builder::colors::BORDER[2], 0.20]);
+            ui_builder.hline_aa(
+                bc.x,
+                bc.bottom() - 1.0,
+                bc.width,
+                1.0,
+                [
+                    ui::builder::colors::BORDER[0],
+                    ui::builder::colors::BORDER[1],
+                    ui::builder::colors::BORDER[2],
+                    0.20,
+                ],
+            );
             // Left inner shadow for sidebar-cast depth
             ui_builder.fill_gradient_h(
-                ui::widget::Rect { x: bc.x, y: bc.y, width: s(6.0), height: bc.height },
+                ui::widget::Rect {
+                    x: bc.x,
+                    y: bc.y,
+                    width: s(6.0),
+                    height: bc.height,
+                },
                 [0.0, 0.0, 0.0, 0.06],
                 [0.0, 0.0, 0.0, 0.0],
             );
@@ -1367,10 +1764,19 @@ impl App {
 
                 // Small folder icon at start (secondary color for better presence)
                 ui_builder.icon_folder(
-                    ui::widget::Rect { x, y: bc.y + (bc.height - icon_sz) / 2.0, width: icon_sz, height: icon_sz },
+                    ui::widget::Rect {
+                        x,
+                        y: bc.y + (bc.height - icon_sz) / 2.0,
+                        width: icon_sz,
+                        height: icon_sz,
+                    },
                     icon_t,
-                    [ui::builder::colors::FG_SECONDARY[0], ui::builder::colors::FG_SECONDARY[1],
-                     ui::builder::colors::FG_SECONDARY[2], 0.75],
+                    [
+                        ui::builder::colors::FG_SECONDARY[0],
+                        ui::builder::colors::FG_SECONDARY[1],
+                        ui::builder::colors::FG_SECONDARY[2],
+                        0.75,
+                    ],
                 );
                 x += icon_sz + s(6.0);
 
@@ -1384,18 +1790,28 @@ impl App {
                 } else {
                     (false, all_segments.as_slice())
                 };
-                let chevron_fg = [ui::builder::colors::FG_MUTED[0], ui::builder::colors::FG_MUTED[1],
-                                  ui::builder::colors::FG_MUTED[2], 0.62];
+                let chevron_fg = [
+                    ui::builder::colors::FG_MUTED[0],
+                    ui::builder::colors::FG_MUTED[1],
+                    ui::builder::colors::FG_MUTED[2],
+                    0.62,
+                ];
                 let segment_fg = [
-                    ui::builder::colors::FG_MUTED[0] * 0.35 + ui::builder::colors::FG_SECONDARY[0] * 0.65,
-                    ui::builder::colors::FG_MUTED[1] * 0.35 + ui::builder::colors::FG_SECONDARY[1] * 0.65,
-                    ui::builder::colors::FG_MUTED[2] * 0.35 + ui::builder::colors::FG_SECONDARY[2] * 0.65,
+                    ui::builder::colors::FG_MUTED[0] * 0.35
+                        + ui::builder::colors::FG_SECONDARY[0] * 0.65,
+                    ui::builder::colors::FG_MUTED[1] * 0.35
+                        + ui::builder::colors::FG_SECONDARY[1] * 0.65,
+                    ui::builder::colors::FG_MUTED[2] * 0.35
+                        + ui::builder::colors::FG_SECONDARY[2] * 0.65,
                     0.82,
                 ];
                 let last_fg = [
-                    ui::builder::colors::FG_SECONDARY[0] * 0.55 + ui::builder::colors::FG_PRIMARY[0] * 0.45,
-                    ui::builder::colors::FG_SECONDARY[1] * 0.55 + ui::builder::colors::FG_PRIMARY[1] * 0.45,
-                    ui::builder::colors::FG_SECONDARY[2] * 0.55 + ui::builder::colors::FG_PRIMARY[2] * 0.45,
+                    ui::builder::colors::FG_SECONDARY[0] * 0.55
+                        + ui::builder::colors::FG_PRIMARY[0] * 0.45,
+                    ui::builder::colors::FG_SECONDARY[1] * 0.55
+                        + ui::builder::colors::FG_PRIMARY[1] * 0.45,
+                    ui::builder::colors::FG_SECONDARY[2] * 0.55
+                        + ui::builder::colors::FG_PRIMARY[2] * 0.45,
                     0.92,
                 ];
 
@@ -1404,11 +1820,20 @@ impl App {
                 let chevron_t = (0.8 * ui_text_handle.scale).max(0.5);
 
                 if show_ellipsis {
-                    ui_builder.text_ui(&ui_text_handle, "\u{2026}", x, y_center, chevron_fg, bc_bg);
+                    ui_builder.text_ui_mixed(
+                        &ui_text_handle,
+                        "\u{2026}",
+                        x,
+                        y_center,
+                        chevron_fg,
+                        bc_bg,
+                    );
                     x += ui_text_handle.text_width_ui("\u{2026}") + s(2.0);
                     let chev_rect = ui::widget::Rect {
-                        x, y: bc.y + (bc.height - chevron_sz) / 2.0,
-                        width: chevron_sz, height: chevron_sz,
+                        x,
+                        y: bc.y + (bc.height - chevron_sz) / 2.0,
+                        width: chevron_sz,
+                        height: chevron_sz,
                     };
                     ui_builder.icon_chevron_right(chev_rect, chevron_t, chevron_fg);
                     x += chevron_sz + s(4.0);
@@ -1417,8 +1842,10 @@ impl App {
                     if i > 0 {
                         // SDF chevron separator — crisp at any scale
                         let chev_rect = ui::widget::Rect {
-                            x, y: bc.y + (bc.height - chevron_sz) / 2.0,
-                            width: chevron_sz, height: chevron_sz,
+                            x,
+                            y: bc.y + (bc.height - chevron_sz) / 2.0,
+                            width: chevron_sz,
+                            height: chevron_sz,
                         };
                         ui_builder.icon_chevron_right(chev_rect, chevron_t, chevron_fg);
                         x += chevron_sz + s(4.0);
@@ -1433,26 +1860,38 @@ impl App {
                         let pill_h = ch * 0.9;
                         let pill_y = bc.y + (bc.height - pill_h) / 2.0;
                         let pill_rect = ui::widget::Rect {
-                            x: x - pill_pad, y: pill_y,
-                            width: seg_w + pill_pad * 2.0, height: pill_h,
+                            x: x - pill_pad,
+                            y: pill_y,
+                            width: seg_w + pill_pad * 2.0,
+                            height: pill_h,
                         };
                         let pill_r = s(3.0);
                         // Faint accent tint in the last-segment pill for color
                         // continuity with tab bar and sidebar accent language.
                         let aa = active_accent;
-                        ui_builder.fill_rounded(pill_rect,
-                            [ui::builder::colors::BG_SURFACE[0] * 0.92 + aa[0] * 0.08,
-                             ui::builder::colors::BG_SURFACE[1] * 0.92 + aa[1] * 0.08,
-                             ui::builder::colors::BG_SURFACE[2] * 0.92 + aa[2] * 0.08,
-                             0.38],
-                            pill_r);
-                        ui_builder.stroke_rounded(pill_rect, pill_r, 0.5,
-                            [ui::builder::colors::BORDER[0] * 0.85 + aa[0] * 0.15,
-                             ui::builder::colors::BORDER[1] * 0.85 + aa[1] * 0.15,
-                             ui::builder::colors::BORDER[2] * 0.85 + aa[2] * 0.15,
-                             0.18]);
+                        ui_builder.fill_rounded(
+                            pill_rect,
+                            [
+                                ui::builder::colors::BG_SURFACE[0] * 0.92 + aa[0] * 0.08,
+                                ui::builder::colors::BG_SURFACE[1] * 0.92 + aa[1] * 0.08,
+                                ui::builder::colors::BG_SURFACE[2] * 0.92 + aa[2] * 0.08,
+                                0.38,
+                            ],
+                            pill_r,
+                        );
+                        ui_builder.stroke_rounded(
+                            pill_rect,
+                            pill_r,
+                            0.5,
+                            [
+                                ui::builder::colors::BORDER[0] * 0.85 + aa[0] * 0.15,
+                                ui::builder::colors::BORDER[1] * 0.85 + aa[1] * 0.15,
+                                ui::builder::colors::BORDER[2] * 0.85 + aa[2] * 0.15,
+                                0.18,
+                            ],
+                        );
                     }
-                    ui_builder.text_ui(&ui_text_handle, seg, x, y_center, fg, bc_bg);
+                    ui_builder.text_ui_mixed(&ui_text_handle, seg, x, y_center, fg, bc_bg);
                     x += ui_text_handle.text_width_ui(seg) + s(4.0);
                 }
             }
@@ -1460,19 +1899,43 @@ impl App {
         // Window outer border — multi-layer shadow + border for professional depth.
         // When maximized, shadows are invisible (window fills screen) so skip them
         // to save GPU work.  Borders and accent top edge still render for polish.
-        {
-            let r = if self.is_maximized { 0.0 } else { ui_text_handle.s(3.0) };
-            let full = ui::widget::Rect { x: 0.0, y: 0.0, width: vw, height: vh };
+        if !reference_crop {
+            let r = if self.is_maximized {
+                0.0
+            } else {
+                ui_text_handle.s(3.0)
+            };
+            let full = ui::widget::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: vw,
+                height: vh,
+            };
 
             if !self.is_maximized {
                 // Two-layer shadow: far shadow (wide, faint) + near shadow (tight, darker).
-                let far_shadow = ui::widget::Rect { x: -2.0, y: 0.0, width: vw + 4.0, height: vh + 4.0 };
-                ui_builder.fill_shadow(far_shadow, [0.0, 0.0, 0.0, 0.12], r + 2.0, ui_text_handle.s(10.0));
+                let far_shadow = ui::widget::Rect {
+                    x: -2.0,
+                    y: 0.0,
+                    width: vw + 4.0,
+                    height: vh + 4.0,
+                };
+                ui_builder.fill_shadow(
+                    far_shadow,
+                    [0.0, 0.0, 0.0, 0.12],
+                    r + 2.0,
+                    ui_text_handle.s(10.0),
+                );
                 ui_builder.fill_shadow(full, [0.0, 0.0, 0.0, 0.30], r, ui_text_handle.s(3.0));
                 // Outer border: darker edge against desktop
                 ui_builder.stroke_rounded(full, r, 1.0, [0.05, 0.05, 0.08, 0.9]);
                 // Inner highlight: subtle bright edge just inside for depth
-                let inner = ui::widget::Rect { x: 1.0, y: 1.0, width: vw - 2.0, height: vh - 2.0 };
+                let inner = ui::widget::Rect {
+                    x: 1.0,
+                    y: 1.0,
+                    width: vw - 2.0,
+                    height: vh - 2.0,
+                };
                 ui_builder.stroke_rounded(inner, r.max(1.0) - 1.0, 1.0, [1.0, 1.0, 1.0, 0.04]);
             }
 
@@ -1481,30 +1944,67 @@ impl App {
             // prominent colored "brand bar" at the top of the window (like VS Code).
             let active_accent = self.active_accent();
             let breath = 0.92 + 0.08 * self.tab_bar.glow_phase().sin();
-            let accent_alpha = if self.window_focused { 0.20 * breath } else { 0.06 };
+            let accent_alpha = if self.window_focused {
+                0.20 * breath
+            } else {
+                0.06
+            };
             let accent_fade = ui_text_handle.s(40.0);
             let accent_h = if self.is_maximized { 2.0 } else { 2.0 };
-            let accent_full = [active_accent[0], active_accent[1], active_accent[2], accent_alpha];
+            let accent_full = [
+                active_accent[0],
+                active_accent[1],
+                active_accent[2],
+                accent_alpha,
+            ];
             let accent_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
             let top_w = vw - r * 2.0;
             ui_builder.fill_gradient_h(
-                ui::widget::Rect { x: r, y: 0.0, width: accent_fade, height: accent_h },
-                accent_zero, accent_full,
+                ui::widget::Rect {
+                    x: r,
+                    y: 0.0,
+                    width: accent_fade,
+                    height: accent_h,
+                },
+                accent_zero,
+                accent_full,
             );
             ui_builder.fill(
-                ui::widget::Rect { x: r + accent_fade, y: 0.0, width: top_w - accent_fade * 2.0, height: accent_h },
+                ui::widget::Rect {
+                    x: r + accent_fade,
+                    y: 0.0,
+                    width: top_w - accent_fade * 2.0,
+                    height: accent_h,
+                },
                 accent_full,
             );
             ui_builder.fill_gradient_h(
-                ui::widget::Rect { x: vw - r - accent_fade, y: 0.0, width: accent_fade, height: accent_h },
-                accent_full, accent_zero,
+                ui::widget::Rect {
+                    x: vw - r - accent_fade,
+                    y: 0.0,
+                    width: accent_fade,
+                    height: accent_h,
+                },
+                accent_full,
+                accent_zero,
             );
             // Glow spill below the accent bar for soft light emission
-            let glow_below = [active_accent[0], active_accent[1], active_accent[2], accent_alpha * 0.3];
+            let glow_below = [
+                active_accent[0],
+                active_accent[1],
+                active_accent[2],
+                accent_alpha * 0.3,
+            ];
             let glow_below_zero = [active_accent[0], active_accent[1], active_accent[2], 0.0];
             ui_builder.fill_gradient(
-                ui::widget::Rect { x: r + accent_fade, y: accent_h, width: top_w - accent_fade * 2.0, height: ui_text_handle.s(4.0) },
-                glow_below, glow_below_zero,
+                ui::widget::Rect {
+                    x: r + accent_fade,
+                    y: accent_h,
+                    width: top_w - accent_fade * 2.0,
+                    height: ui_text_handle.s(4.0),
+                },
+                glow_below,
+                glow_below_zero,
             );
         }
 
@@ -1515,7 +2015,11 @@ impl App {
             renderer.prepare(
                 &gpu.device,
                 &gpu.queue,
-                self.current_grid.as_ref(),
+                if reference_crop {
+                    None
+                } else {
+                    self.current_grid.as_ref()
+                },
                 gpu.config.width,
                 gpu.config.height,
                 layout.terminal_content.x,
@@ -1584,35 +2088,49 @@ impl App {
                         // draws the eye to selected content — matching the accent glow
                         // language used on active tabs and sidebar indicators.
                         {
-                            let first_row_px = (sel_start.row as f32 * ch).round() + layout.terminal_content.y;
-                            let last_row_py = ((sel_end.row + 1) as f32 * ch).round() + layout.terminal_content.y;
+                            let first_row_px =
+                                (sel_start.row as f32 * ch).round() + layout.terminal_content.y;
+                            let last_row_py =
+                                ((sel_end.row + 1) as f32 * ch).round() + layout.terminal_content.y;
                             let bbox_x = layout.terminal_content.x;
                             let bbox_w = layout.terminal_content.width;
                             let bbox_h = last_row_py - first_row_px;
                             if bbox_h > 0.0 {
-                                sel_verts.extend_from_slice(
-                                    &ui::quad_renderer::quad_vertices_sdf(
-                                        bbox_x, first_row_px, bbox_w, bbox_h,
-                                        vw, vh,
-                                        [accent[0], accent[1], accent[2], 0.04],
-                                        [radius; 4], 0.0, [0.0; 4],
-                                        6.0 * self.scale_factor,
-                                    ),
-                                );
+                                sel_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_sdf(
+                                    bbox_x,
+                                    first_row_px,
+                                    bbox_w,
+                                    bbox_h,
+                                    vw,
+                                    vh,
+                                    [accent[0], accent[1], accent[2], 0.04],
+                                    [radius; 4],
+                                    0.0,
+                                    [0.0; 4],
+                                    6.0 * self.scale_factor,
+                                ));
                             }
                         }
 
                         for row in sel_start.row..=sel_end.row {
-                            if row >= grid.rows.len() { break; }
+                            if row >= grid.rows.len() {
+                                break;
+                            }
 
                             // Determine column range for this row
-                            let col_start = if row == sel_start.row { sel_start.col } else { 0 };
+                            let col_start = if row == sel_start.row {
+                                sel_start.col
+                            } else {
+                                0
+                            };
                             let col_end = if row == sel_end.row {
                                 sel_end.col
                             } else {
                                 cols.saturating_sub(1)
                             };
-                            if col_start > col_end { continue; }
+                            if col_start > col_end {
+                                continue;
+                            }
 
                             let px = (col_start as f32 * cw).round() + layout.terminal_content.x;
                             let py = (row as f32 * ch).round() + layout.terminal_content.y;
@@ -1640,13 +2158,9 @@ impl App {
                                 [0.0; 4]
                             };
 
-                            sel_verts.extend_from_slice(
-                                &ui::quad_renderer::quad_vertices_sdf(
-                                    px, py, pw, ph,
-                                    vw, vh, sel_color,
-                                    radii, 0.5, sel_border, 0.0,
-                                ),
-                            );
+                            sel_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_sdf(
+                                px, py, pw, ph, vw, vh, sel_color, radii, 0.5, sel_border, 0.0,
+                            ));
                         }
 
                         if !sel_verts.is_empty() {
@@ -1665,8 +2179,10 @@ impl App {
                             let m = r.font_metrics().scaled_for_render();
                             let cw = m.cell_width;
                             let ch = m.cell_height;
-                            let cpx = (grid.cursor.col as f32 * cw).round() + layout.terminal_content.x;
-                            let cpy = (grid.cursor.row as f32 * ch).round() + layout.terminal_content.y;
+                            let cpx =
+                                (grid.cursor.col as f32 * cw).round() + layout.terminal_content.x;
+                            let cpy =
+                                (grid.cursor.row as f32 * ch).round() + layout.terminal_content.y;
 
                             // Clip cursor to terminal area
                             let clip_r = layout.terminal_content.x + layout.terminal_content.width;
@@ -1692,8 +2208,10 @@ impl App {
                                     }
                                 };
 
-                                let is_block = matches!(grid.cursor.cursor_style,
-                                    CursorShape::BlinkBlock | CursorShape::SteadyBlock);
+                                let is_block = matches!(
+                                    grid.cursor.cursor_style,
+                                    CursorShape::BlinkBlock | CursorShape::SteadyBlock
+                                );
 
                                 let mut cursor_verts = Vec::new();
 
@@ -1702,18 +2220,29 @@ impl App {
                                     // Blends white toward the active tab accent for visual coherence
                                     // with selection highlights, glow, and tab chrome.
                                     let accent_blend = 0.15;
-                                    let base_r = 1.0 * (1.0 - accent_blend) + accent[0] * accent_blend;
-                                    let base_g = 1.0 * (1.0 - accent_blend) + accent[1] * accent_blend;
-                                    let base_b = 1.0 * (1.0 - accent_blend) + accent[2] * accent_blend;
+                                    let base_r =
+                                        1.0 * (1.0 - accent_blend) + accent[0] * accent_blend;
+                                    let base_g =
+                                        1.0 * (1.0 - accent_blend) + accent[1] * accent_blend;
+                                    let base_b =
+                                        1.0 * (1.0 - accent_blend) + accent[2] * accent_blend;
                                     let base_a = 0.85 * blink_t;
 
                                     // Glow behind cursor (accent-colored Gaussian emission)
-                                    let glow_color = [accent[0], accent[1], accent[2], 0.14 * blink_t];
+                                    let glow_color =
+                                        [accent[0], accent[1], accent[2], 0.14 * blink_t];
                                     cursor_verts.extend_from_slice(
                                         &ui::quad_renderer::quad_vertices_sdf(
-                                            cx, cy, cwidth, cheight,
-                                            vw, vh, glow_color,
-                                            [radius; 4], 0.0, [0.0; 4],
+                                            cx,
+                                            cy,
+                                            cwidth,
+                                            cheight,
+                                            vw,
+                                            vh,
+                                            glow_color,
+                                            [radius; 4],
+                                            0.0,
+                                            [0.0; 4],
                                             4.0 * self.scale_factor,
                                         ),
                                     );
@@ -1721,12 +2250,21 @@ impl App {
                                     // Cursor body: SDF gradient (brighter top → slightly darker bottom)
                                     // for consistent 3D depth with the rest of the UI chrome.
                                     let cursor_top = [base_r, base_g, base_b, base_a];
-                                    let cursor_bot = [base_r * 0.92, base_g * 0.92, base_b * 0.92, base_a];
+                                    let cursor_bot =
+                                        [base_r * 0.92, base_g * 0.92, base_b * 0.92, base_a];
                                     cursor_verts.extend_from_slice(
                                         &ui::quad_renderer::quad_vertices_sdf_gradient(
-                                            cx, cy, cwidth, cheight,
-                                            vw, vh, cursor_top, cursor_bot,
-                                            [radius; 4], 0.0, [0.0; 4],
+                                            cx,
+                                            cy,
+                                            cwidth,
+                                            cheight,
+                                            vw,
+                                            vh,
+                                            cursor_top,
+                                            cursor_bot,
+                                            [radius; 4],
+                                            0.0,
+                                            [0.0; 4],
                                         ),
                                     );
                                 } else if is_block {
@@ -1742,21 +2280,37 @@ impl App {
                                         0.5 * blink_t,
                                     ];
                                     // Faint glow (dimmer than focused)
-                                    let glow_color = [accent[0], accent[1], accent[2], 0.06 * blink_t];
+                                    let glow_color =
+                                        [accent[0], accent[1], accent[2], 0.06 * blink_t];
                                     cursor_verts.extend_from_slice(
                                         &ui::quad_renderer::quad_vertices_sdf(
-                                            cx, cy, cwidth, cheight,
-                                            vw, vh, glow_color,
-                                            [radius; 4], 0.0, [0.0; 4],
+                                            cx,
+                                            cy,
+                                            cwidth,
+                                            cheight,
+                                            vw,
+                                            vh,
+                                            glow_color,
+                                            [radius; 4],
+                                            0.0,
+                                            [0.0; 4],
                                             3.0 * self.scale_factor,
                                         ),
                                     );
                                     // Hollow outline (transparent fill + border)
                                     cursor_verts.extend_from_slice(
                                         &ui::quad_renderer::quad_vertices_sdf(
-                                            cx, cy, cwidth, cheight,
-                                            vw, vh, [0.0, 0.0, 0.0, 0.0],
-                                            [radius; 4], outline_w, outline_color, 0.0,
+                                            cx,
+                                            cy,
+                                            cwidth,
+                                            cheight,
+                                            vw,
+                                            vh,
+                                            [0.0, 0.0, 0.0, 0.0],
+                                            [radius; 4],
+                                            outline_w,
+                                            outline_color,
+                                            0.0,
                                         ),
                                     );
                                 } else {
@@ -1770,9 +2324,17 @@ impl App {
                                     ];
                                     cursor_verts.extend_from_slice(
                                         &ui::quad_renderer::quad_vertices_sdf(
-                                            cx, cy, cwidth, cheight,
-                                            vw, vh, dim_color,
-                                            [radius; 4], 0.0, [0.0; 4], 0.0,
+                                            cx,
+                                            cy,
+                                            cwidth,
+                                            cheight,
+                                            vw,
+                                            vh,
+                                            dim_color,
+                                            [radius; 4],
+                                            0.0,
+                                            [0.0; 4],
+                                            0.0,
                                         ),
                                     );
                                 }
@@ -1796,7 +2358,12 @@ impl App {
                     let mut dim_verts = Vec::new();
                     // Base uniform dim (lighter than before — vignette adds the rest)
                     dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices(
-                        0.0, 0.0, vw, vh, vw, vh,
+                        0.0,
+                        0.0,
+                        vw,
+                        vh,
+                        vw,
+                        vh,
                         [dim_color[0], dim_color[1], dim_color[2], 0.10 * dim_t],
                     ));
                     // Edge vignette: darker bands at all four edges that add to the
@@ -1812,7 +2379,14 @@ impl App {
                     ));
                     // Right edge
                     dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient_h(
-                        vw - vig_w, 0.0, vig_w, vh, vw, vh, vig_zero, vig_full,
+                        vw - vig_w,
+                        0.0,
+                        vig_w,
+                        vh,
+                        vw,
+                        vh,
+                        vig_zero,
+                        vig_full,
                     ));
                     // Top edge
                     dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient(
@@ -1820,12 +2394,18 @@ impl App {
                     ));
                     // Bottom edge
                     dim_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_gradient(
-                        0.0, vh - vig_h, vw, vig_h, vw, vh, vig_zero, vig_full,
+                        0.0,
+                        vh - vig_h,
+                        vw,
+                        vig_h,
+                        vw,
+                        vh,
+                        vig_zero,
+                        vig_full,
                     ));
                     quad_pipe.draw(&gpu.device, &gpu.queue, &mut pass, &dim_verts);
                 }
             }
-
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
@@ -1862,15 +2442,16 @@ impl ApplicationHandler<AsyncEvent> for App {
             });
         }
 
-        // Connect to daemon
-        self.connect_daemon();
+        if !self.is_web_reference_crop() {
+            self.connect_daemon();
+        }
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AsyncEvent) {
         match event {
             AsyncEvent::Heartbeat => {
                 // Re-fetch grid periodically to catch output we missed
-                if self.active_session.is_some() {
+                if !self.is_web_reference_crop() && self.active_session.is_some() {
                     self.fetch_grid();
                 }
                 if let Some(w) = &self.window {
@@ -1879,7 +2460,9 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             AsyncEvent::TerminalOutput { .. } => {
                 log::debug!("TerminalOutput event — fetching grid");
-                self.fetch_grid();
+                if !self.is_web_reference_crop() {
+                    self.fetch_grid();
+                }
             }
             AsyncEvent::GridFetched { grid, .. } => {
                 // Log first row content for debugging
@@ -1887,15 +2470,25 @@ impl ApplicationHandler<AsyncEvent> for App {
                     let text: String = row.cells.iter().map(|c| c.content.as_str()).collect();
                     let trimmed = text.trim_end();
                     if !trimmed.is_empty() {
-                        log::info!("GridFetched: {}x{}, first row: {:?}",
-                            grid.dimensions.cols, grid.dimensions.rows, &trimmed[..trimmed.len().min(80)]);
+                        log::info!(
+                            "GridFetched: {}x{}, first row: {:?}",
+                            grid.dimensions.cols,
+                            grid.dimensions.rows,
+                            &trimmed[..trimmed.len().min(80)]
+                        );
                     } else {
-                        log::info!("GridFetched: {}x{}, first row empty", grid.dimensions.cols, grid.dimensions.rows);
+                        log::info!(
+                            "GridFetched: {}x{}, first row empty",
+                            grid.dimensions.cols,
+                            grid.dimensions.rows
+                        );
                     }
                 }
-                self.current_grid = Some(*grid);
-                if let Some(w) = &self.window {
-                    w.request_redraw();
+                if !self.is_web_reference_crop() {
+                    self.current_grid = Some(*grid);
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
                 }
             }
             AsyncEvent::SessionClosed {
@@ -1910,26 +2503,32 @@ impl ApplicationHandler<AsyncEvent> for App {
         }
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _id: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 // Track maximized state to skip outer shadow rendering
                 if let Some(w) = &self.window {
                     self.is_maximized = w.is_maximized();
+                    self.scale_factor = w.scale_factor() as f32;
                 }
-                // Convert physical size to logical for the surface (matches init_gpu).
-                let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
-                let logical_w = (size.width as f64 / scale).round() as u32;
-                let logical_h = (size.height as f64 / scale).round() as u32;
                 if let Some(gpu) = &mut self.gpu {
-                    gpu.config.width = logical_w.max(1);
-                    gpu.config.height = logical_h.max(1);
+                    let surface_size = self
+                        .window
+                        .as_ref()
+                        .map_or(size, |window| window_surface_size(window));
+                    if surface_size != size {
+                        log::info!(
+                            "[DPI] resize surface: winit={}x{}, hwnd-client={}x{}, scale={}",
+                            size.width,
+                            size.height,
+                            surface_size.width,
+                            surface_size.height,
+                            self.scale_factor,
+                        );
+                    }
+                    gpu.config.width = surface_size.width.max(1);
+                    gpu.config.height = surface_size.height.max(1);
                     gpu.surface.configure(&gpu.device, &gpu.config);
                 }
                 // Resize the terminal session
@@ -1953,7 +2552,9 @@ impl ApplicationHandler<AsyncEvent> for App {
                 self.window_focused = focused;
                 self.status_bar.window_focused = focused;
                 self.focus_dim_anim.set(if focused { 0.0 } else { 1.0 });
-                if let Some(w) = &self.window { w.request_redraw(); }
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
             }
             WindowEvent::RedrawRequested => {
                 self.render();
@@ -1964,39 +2565,48 @@ impl ApplicationHandler<AsyncEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_position = Some((position.x, position.y));
                 let (px, py) = (position.x as f32, position.y as f32);
+                let ui_scale = self.ui_scale();
                 let gpu = self.gpu.as_ref();
-                let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
+                let (vw, vh) = gpu
+                    .map(|g| (g.config.width as f32, g.config.height as f32))
+                    .unwrap_or((1200.0, 800.0));
+                let layout = self.shell_layout(vw, vh);
 
                 // Resize handle dragging
                 if self.left_resize_dragging {
-                    let min_w = 150.0 * self.scale_factor;
-                    let max_w = 320.0 * self.scale_factor;
-                    self.sidebar_width = (px / self.scale_factor).clamp(min_w / self.scale_factor, max_w / self.scale_factor);
-                    if let Some(w) = &self.window { w.request_redraw(); }
+                    let min_w = 150.0 * ui_scale;
+                    let max_w = 320.0 * ui_scale;
+                    self.sidebar_width = (px / ui_scale).clamp(min_w / ui_scale, max_w / ui_scale);
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
                     return;
                 }
                 if self.right_resize_dragging {
-                    let min_w = 250.0 * self.scale_factor;
-                    let max_w = 550.0 * self.scale_factor;
-                    let new_w = (vw - px) / self.scale_factor;
-                    self.right_panel_width = new_w.clamp(min_w / self.scale_factor, max_w / self.scale_factor);
-                    if let Some(w) = &self.window { w.request_redraw(); }
+                    let min_w = 250.0 * ui_scale;
+                    let max_w = 550.0 * ui_scale;
+                    let new_w = (vw - px) / ui_scale;
+                    self.right_panel_width = new_w.clamp(min_w / ui_scale, max_w / ui_scale);
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
                     return;
                 }
 
                 // Resize handle hover detection (3px zones at panel boundaries)
-                let handle_zone = 5.0 * self.scale_factor;
+                let handle_zone = 5.0 * ui_scale;
                 let handle_y_min = layout.tab_bar.bottom();
                 let handle_y_max = layout.status_bar.y;
                 let in_handle_y = py >= handle_y_min && py <= handle_y_max;
 
                 let left_edge = layout.sidebar.width;
-                self.left_resize_hover = in_handle_y && layout.sidebar.width > 0.0
+                self.left_resize_hover = in_handle_y
+                    && layout.sidebar.width > 0.0
                     && (px - left_edge).abs() < handle_zone;
 
                 let right_edge = layout.right_panel.x;
-                self.right_resize_hover = in_handle_y && self.right_panel.visible
+                self.right_resize_hover = in_handle_y
+                    && self.right_panel.visible
                     && layout.right_panel.width > 0.0
                     && (px - right_edge).abs() < handle_zone;
 
@@ -2011,12 +2621,23 @@ impl ApplicationHandler<AsyncEvent> for App {
 
                 // Route mouse to UI chrome
                 let me = ui::widget::MouseEvent::Move { x: px, y: py };
-                self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor);
-                self.sidebar.on_mouse(me, layout.sidebar, self.scale_factor);
+                self.tab_bar.on_mouse(me, layout.tab_bar, ui_scale);
+                self.sidebar.on_mouse(me, layout.sidebar, ui_scale);
                 if let Some(renderer) = &self.renderer {
-                    let m = renderer.font_metrics().scaled_for_render();
-                    let mut ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+                    let m = if self.is_web_reference_crop() {
+                        *renderer.font_metrics()
+                    } else {
+                        renderer.font_metrics().scaled_for_render()
+                    };
+                    let mut ui_text = ui::builder::UiTextRenderer::new(
+                        m.cell_width,
+                        m.cell_height,
+                        m.font_size,
+                        ui_scale,
+                    );
                     ui_text.ui_avg_advance = renderer.ui_avg_advance();
+                    ui_text.layout_engine = self.ui_text_layout.clone();
+                    ui_text.raster_scale = self.ui_raster_scale();
                     self.status_bar.sidebar_width = layout.sidebar.width;
                     self.status_bar.on_mouse(me, layout.status_bar, &ui_text);
                     self.right_panel.on_mouse(me, layout.right_panel, &ui_text);
@@ -2030,16 +2651,21 @@ impl ApplicationHandler<AsyncEvent> for App {
                     );
                     self.selection.update(pos);
                 }
-                if let Some(w) = &self.window { w.request_redraw(); }
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 use winit::event::MouseButton;
                 if button == MouseButton::Left {
                     if let Some((x, y)) = self.mouse_position {
                         let (px, py) = (x as f32, y as f32);
+                        let ui_scale = self.ui_scale();
                         let gpu = self.gpu.as_ref();
-                        let (vw, vh) = gpu.map(|g| (g.config.width as f32, g.config.height as f32)).unwrap_or((1200.0, 800.0));
-                        let layout = ui::layout::ShellLayout::compute(vw, vh, true, self.right_panel.visible, self.sidebar_width, self.right_panel_width, self.scale_factor);
+                        let (vw, vh) = gpu
+                            .map(|g| (g.config.width as f32, g.config.height as f32))
+                            .unwrap_or((1200.0, 800.0));
+                        let layout = self.shell_layout(vw, vh);
 
                         if state == ElementState::Pressed {
                             // Check resize handles first (highest priority for drag start)
@@ -2054,18 +2680,35 @@ impl ApplicationHandler<AsyncEvent> for App {
 
                             // Check tab bar (which includes window buttons + drag)
                             let me = ui::widget::MouseEvent::Press { x: px, y: py };
-                            if let Some(action) = self.tab_bar.on_mouse(me, layout.tab_bar, self.scale_factor) {
+                            if let Some(action) =
+                                self.tab_bar.on_mouse(me, layout.tab_bar, ui_scale)
+                            {
                                 self.handle_ui_action(action);
                                 return;
                             }
                             // Check right panel close button
                             if let Some(renderer) = &self.renderer {
-                                let m = renderer.font_metrics().scaled_for_render();
-                                let mut ui_text = ui::builder::UiTextRenderer::new(m.cell_width, m.cell_height, self.scale_factor);
+                                let m = if self.is_web_reference_crop() {
+                                    *renderer.font_metrics()
+                                } else {
+                                    renderer.font_metrics().scaled_for_render()
+                                };
+                                let mut ui_text = ui::builder::UiTextRenderer::new(
+                                    m.cell_width,
+                                    m.cell_height,
+                                    m.font_size,
+                                    ui_scale,
+                                );
                                 ui_text.ui_avg_advance = renderer.ui_avg_advance();
-                                if let Some(ui::right_panel::RightPanelAction::Close) = self.right_panel.on_mouse(me, layout.right_panel, &ui_text) {
+                                ui_text.layout_engine = self.ui_text_layout.clone();
+                                ui_text.raster_scale = self.ui_raster_scale();
+                                if let Some(ui::right_panel::RightPanelAction::Close) =
+                                    self.right_panel.on_mouse(me, layout.right_panel, &ui_text)
+                                {
                                     self.right_panel.visible = false;
-                                    if let Some(w) = &self.window { w.request_redraw(); }
+                                    if let Some(w) = &self.window {
+                                        w.request_redraw();
+                                    }
                                     return;
                                 }
                             }
@@ -2076,7 +2719,9 @@ impl ApplicationHandler<AsyncEvent> for App {
                             if self.left_resize_dragging || self.right_resize_dragging {
                                 self.left_resize_dragging = false;
                                 self.right_resize_dragging = false;
-                                if let Some(w) = &self.window { w.request_redraw(); }
+                                if let Some(w) = &self.window {
+                                    w.request_redraw();
+                                }
                                 return;
                             }
                         }
@@ -2090,7 +2735,9 @@ impl ApplicationHandler<AsyncEvent> for App {
                             match state {
                                 ElementState::Pressed => {
                                     self.selection.start(pos);
-                                    if let Some(w) = &self.window { w.request_redraw(); }
+                                    if let Some(w) = &self.window {
+                                        w.request_redraw();
+                                    }
                                 }
                                 ElementState::Released => {
                                     self.selection.finish();
@@ -2112,13 +2759,19 @@ impl ApplicationHandler<AsyncEvent> for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
-                    log::info!("KEY: {:?} mods={:?}", event.logical_key, self.modifiers.state());
+                    log::info!(
+                        "KEY: {:?} mods={:?}",
+                        event.logical_key,
+                        self.modifiers.state()
+                    );
                     let mods = self.modifiers.state();
                     let adapter_mods = convert_modifiers(mods);
                     let adapter_key = convert_key(&event.logical_key);
 
                     // Check app shortcuts first
-                    if let Some(action) = godly_app_adapter::shortcuts::check_app_shortcut(&adapter_key, adapter_mods) {
+                    if let Some(action) =
+                        godly_app_adapter::shortcuts::check_app_shortcut(&adapter_key, adapter_mods)
+                    {
                         use godly_app_adapter::shortcuts::AppAction;
                         match action {
                             AppAction::NewTab => {
@@ -2147,7 +2800,9 @@ impl ApplicationHandler<AsyncEvent> for App {
                                     let id = session_id.clone();
                                     if let Some(daemon) = daemon {
                                         std::thread::spawn(move || {
-                                            let _ = daemon.send_request(&Request::CloseSession { session_id: id });
+                                            let _ = daemon.send_request(&Request::CloseSession {
+                                                session_id: id,
+                                            });
                                         });
                                     }
                                 }
@@ -2204,11 +2859,15 @@ impl ApplicationHandler<AsyncEvent> for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(w) = &self.window { w.request_redraw(); }
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
     }
 }
 
-fn convert_modifiers(state: winit::keyboard::ModifiersState) -> godly_app_adapter::keyboard::Modifiers {
+fn convert_modifiers(
+    state: winit::keyboard::ModifiersState,
+) -> godly_app_adapter::keyboard::Modifiers {
     let mut m = godly_app_adapter::keyboard::Modifiers::empty();
     if state.shift_key() {
         m = m | godly_app_adapter::keyboard::Modifiers::SHIFT;
@@ -2263,64 +2922,157 @@ fn convert_key(key: &Key) -> godly_app_adapter::keyboard::Key {
     }
 }
 
+struct TerminalFontSetup {
+    family: String,
+    font_metrics: FontMetrics,
+    rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
+}
+
 #[cfg(windows)]
-fn create_rasterizer() -> Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer> {
+fn create_terminal_font_setup(font_size: f32, scale_factor: f32) -> TerminalFontSetup {
     use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
     use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer;
     use godly_terminal_surface::swash_rasterizer::SwashRasterizer;
 
-    match DirectWriteRasterizer::new() {
-        Ok(mut dw) => {
-            if dw.load_system_font(DEFAULT_FONT_FAMILY).is_ok() {
-                log::info!("[FONT] Using DirectWrite ClearType rasterizer with {DEFAULT_FONT_FAMILY}");
-                Box::new(dw)
-            } else {
-                log::warn!("[FONT] DirectWrite: {DEFAULT_FONT_FAMILY} not found, falling back to swash");
-                let mut r = SwashRasterizer::new();
-                r.load_font(include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf"), 0);
-                Box::new(r)
+    for family in TERMINAL_FONT_CANDIDATES {
+        match DirectWriteRasterizer::new() {
+            Ok(mut dw) => {
+                if dw.load_system_font(family).is_ok() {
+                    return TerminalFontSetup {
+                        family: (*family).to_string(),
+                        font_metrics: FontMetrics::from_system_font(font_size, family)
+                            .with_scale_factor(scale_factor),
+                        rasterizer: Box::new(dw),
+                    };
+                }
+            }
+            Err(e) => {
+                log::warn!("[FONT] DirectWrite init failed for terminal font {family} ({e:?})");
+                break;
             }
         }
-        Err(e) => {
-            log::warn!("[FONT] DirectWrite init failed ({e:?}), using swash rasterizer");
-            let mut r = SwashRasterizer::new();
-            r.load_font(include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf"), 0);
-            Box::new(r)
-        }
+    }
+
+    log::warn!(
+        "[FONT] No browser-matching terminal font available from candidates: {}. Falling back to bundled Geist Mono.",
+        TERMINAL_FONT_CANDIDATES.join(", ")
+    );
+    let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
+    let mut rasterizer = SwashRasterizer::new();
+    rasterizer.load_font(font_data, 0);
+    TerminalFontSetup {
+        family: "Geist Mono".into(),
+        font_metrics: FontMetrics::from_font_bytes(font_size, font_data)
+            .with_scale_factor(scale_factor),
+        rasterizer: Box::new(rasterizer),
     }
 }
 
 #[cfg(not(windows))]
-fn create_rasterizer() -> Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer> {
+fn create_terminal_font_setup(font_size: f32, scale_factor: f32) -> TerminalFontSetup {
     use godly_terminal_surface::glyph_rasterizer::GlyphRasterizer;
+    let font_data: &[u8] = include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf");
     let mut r = godly_terminal_surface::swash_rasterizer::SwashRasterizer::new();
-    r.load_font(include_bytes!("../../iced-shell/fonts/GeistMono-Regular.ttf"), 0);
-    Box::new(r)
+    r.load_font(font_data, 0);
+    TerminalFontSetup {
+        family: "Geist Mono".into(),
+        font_metrics: FontMetrics::from_font_bytes(font_size, font_data)
+            .with_scale_factor(scale_factor),
+        rasterizer: Box::new(r),
+    }
 }
 
-/// Create a proportional sans-serif rasterizer for UI chrome labels.
-/// Falls back gracefully: returns None if no suitable font is available.
+struct UiFontBundle {
+    family: String,
+    rasterizer: Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>,
+}
+
 #[cfg(windows)]
-fn create_ui_rasterizer() -> Option<Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>> {
+fn create_ui_font_bundle(candidates: &[&str], label: &str) -> Option<UiFontBundle> {
     use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
 
-    let mut dw = DirectWriteRasterizer::new().ok()?;
-    // Try Segoe UI Variable (Windows 11), fall back to Segoe UI (Windows 10)
-    if dw.load_system_font("Segoe UI Variable").is_ok() {
-        log::info!("[FONT] UI font: Segoe UI Variable (proportional sans-serif)");
-        Some(Box::new(dw))
-    } else if dw.load_system_font("Segoe UI").is_ok() {
-        log::info!("[FONT] UI font: Segoe UI (proportional sans-serif)");
-        Some(Box::new(dw))
-    } else {
-        log::warn!("[FONT] No proportional UI font available, using monospace for all text");
-        None
+    for family in candidates {
+        let mut dw = DirectWriteRasterizer::new().ok()?;
+        if dw.load_system_font(family).is_ok() {
+            log::info!("[FONT] {label}: {family}");
+            return Some(UiFontBundle {
+                family: (*family).to_string(),
+                rasterizer: Box::new(dw),
+            });
+        }
     }
+    log::warn!(
+        "[FONT] No {label} font available from candidates: {}",
+        candidates.join(", ")
+    );
+    None
+}
+
+#[cfg(windows)]
+fn create_ui_sans_font() -> Option<UiFontBundle> {
+    create_ui_font_bundle(&["Segoe UI Variable", "Segoe UI"], "UI sans font")
+}
+
+#[cfg(windows)]
+fn create_ui_serif_font() -> Option<UiFontBundle> {
+    create_ui_font_bundle(&["Georgia", "Cambria", "Times New Roman"], "UI serif font")
 }
 
 #[cfg(not(windows))]
-fn create_ui_rasterizer() -> Option<Box<dyn godly_terminal_surface::glyph_rasterizer::GlyphRasterizer>> {
-    None // Proportional font not yet supported on non-Windows
+fn create_ui_sans_font() -> Option<UiFontBundle> {
+    None
+}
+
+#[cfg(not(windows))]
+fn create_ui_serif_font() -> Option<UiFontBundle> {
+    None
+}
+
+#[cfg(windows)]
+fn create_ui_text_layout_engine(
+    families: ui::text_layout::UiFontFamilies,
+) -> Option<ui::text_layout::UiTextLayoutEngine> {
+    ui::text_layout::UiTextLayoutEngine::new(families).ok()
+}
+
+#[cfg(not(windows))]
+fn create_ui_text_layout_engine(
+    _families: ui::text_layout::UiFontFamilies,
+) -> Option<ui::text_layout::UiTextLayoutEngine> {
+    None
+}
+
+fn window_surface_size(window: &Window) -> winit::dpi::PhysicalSize<u32> {
+    #[cfg(windows)]
+    if let Some(size) = win32_client_size(window) {
+        return size;
+    }
+
+    window.inner_size()
+}
+
+#[cfg(windows)]
+fn win32_client_size(window: &Window) -> Option<winit::dpi::PhysicalSize<u32>> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    let handle = window.window_handle().ok()?;
+    let hwnd = match handle.as_raw() {
+        RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut core::ffi::c_void),
+        _ => return None,
+    };
+
+    let mut rect = RECT::default();
+    unsafe {
+        if GetClientRect(hwnd, &mut rect).is_err() {
+            return None;
+        }
+    }
+
+    let width = (rect.right - rect.left).max(0) as u32;
+    let height = (rect.bottom - rect.top).max(0) as u32;
+    Some(winit::dpi::PhysicalSize::new(width.max(1), height.max(1)))
 }
 
 fn main() {
@@ -2328,6 +3080,20 @@ fn main() {
     let event_loop = EventLoop::<AsyncEvent>::with_user_event().build().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
-    let mut app = App::new(proxy);
+    let mut app = App::new(proxy, scene_mode_from_env_and_args());
     event_loop.run_app(&mut app).unwrap();
+}
+
+fn scene_mode_from_env_and_args() -> SceneMode {
+    let cli_reference = std::env::args().any(|arg| arg == "--web-reference-crop");
+    let env_reference = matches!(
+        std::env::var("GODLY_SHELL_REFERENCE_MODE").as_deref(),
+        Ok("web_reference_crop") | Ok("web-reference-crop") | Ok("1") | Ok("true")
+    );
+
+    if cli_reference || env_reference {
+        SceneMode::WebReferenceCrop
+    } else {
+        SceneMode::LiveShell
+    }
 }

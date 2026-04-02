@@ -1,7 +1,7 @@
 //! Session persistence: save/restore workspace layout on exit/startup.
 
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 const PERSISTENCE_FILE: &str = "godly-shell-session.json";
 
@@ -56,7 +56,9 @@ pub fn load() -> PersistedState {
 }
 
 pub fn save(state: &PersistedState) {
-    let Some(path) = persistence_path() else { return };
+    let Some(path) = persistence_path() else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

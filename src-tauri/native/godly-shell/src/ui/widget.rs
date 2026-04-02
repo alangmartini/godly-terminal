@@ -44,21 +44,46 @@ impl Rect {
 
     /// Split horizontally at `offset` pixels from the left.
     pub fn split_h(&self, offset: f32) -> (Rect, Rect) {
-        let left = Rect { x: self.x, y: self.y, width: offset, height: self.height };
-        let right = Rect { x: self.x + offset, y: self.y, width: (self.width - offset).max(0.0), height: self.height };
+        let left = Rect {
+            x: self.x,
+            y: self.y,
+            width: offset,
+            height: self.height,
+        };
+        let right = Rect {
+            x: self.x + offset,
+            y: self.y,
+            width: (self.width - offset).max(0.0),
+            height: self.height,
+        };
         (left, right)
     }
 
     /// Split vertically at `offset` pixels from the top.
     pub fn split_v(&self, offset: f32) -> (Rect, Rect) {
-        let top = Rect { x: self.x, y: self.y, width: self.width, height: offset };
-        let bottom = Rect { x: self.x, y: self.y + offset, width: self.width, height: (self.height - offset).max(0.0) };
+        let top = Rect {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: offset,
+        };
+        let bottom = Rect {
+            x: self.x,
+            y: self.y + offset,
+            width: self.width,
+            height: (self.height - offset).max(0.0),
+        };
         (top, bottom)
     }
 
     /// Sub-rectangle at a pixel offset within this rect.
     pub fn sub(&self, x_off: f32, y_off: f32, w: f32, h: f32) -> Rect {
-        Rect { x: self.x + x_off, y: self.y + y_off, width: w, height: h }
+        Rect {
+            x: self.x + x_off,
+            y: self.y + y_off,
+            width: w,
+            height: h,
+        }
     }
 
     /// Right edge (x + width).

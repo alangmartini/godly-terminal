@@ -1,0 +1,10 @@
+[2m15:04:09[22m [33m[1m[vite][22m[39m [33m[2m(client)[22m[39m [33mwarning: [33mThe character "}" is not valid inside a JSX element[33m
+747|              flexShrink: 0
+748|            }}>
+749|                <span>}</span>
+   |                      ^
+750|                <div style={{ flex: 1 }} />
+751|                <span>? for shortcuts</span>
+[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/alanm/Documents/dev/godly-claude/godly-terminal/web/godly-terminal.jsx[39m

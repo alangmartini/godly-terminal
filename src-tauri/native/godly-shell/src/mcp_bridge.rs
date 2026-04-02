@@ -1,8 +1,8 @@
 //! Bridges the MCP pipe server events into the godly-shell async event bus.
 
-use futures_channel::mpsc;
-use godly_app_adapter::mcp_pipe::{McpEvent, start_mcp_server};
 use crate::event_bus::{AsyncEvent, EventSender};
+use futures_channel::mpsc;
+use godly_app_adapter::mcp_pipe::{start_mcp_server, McpEvent};
 
 /// Start the MCP server and forward events to the shell event bus.
 pub fn start(sender: EventSender) {

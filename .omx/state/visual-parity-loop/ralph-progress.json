@@ -1,0 +1,22 @@
+{
+  "score": 78,
+  "verdict": "revise",
+  "category_match": true,
+  "differences": [
+    "Sidebar session stack is materially closer: row spacing, active-card width, and the full-height indigo border now align much better with the reference, but the header/session column is still a little tighter than the browser capture.",
+    "Transcript typography is now the dominant mismatch. The native mono text still reads thinner and slightly off-rhythm across headings, bullets, and paragraphs, which keeps the diff concentrated in the main text block.",
+    "Tab-strip labels and unread badges remain slightly lighter and less anchored than the browser reference, but they are now a secondary issue behind transcript text rendering."
+  ],
+  "suggestions": [
+    "Treat transcript typography/compositing as the next edit gate: verify whether the crop transcript should stay on flat-background ClearType or switch to a browser-like grayscale path for screenshot parity, then remeasure.",
+    "Keep the shared sidebar session-layout helper and use it as the basis for any remaining sidebar spacing cleanup instead of adding new ad-hoc coordinates.",
+    "Leave tab micro-polish until the transcript rendering path is closer, because the screenshot diff is still dominated by main-pane text."
+  ],
+  "reasoning": "The sidebar/layout pass improved the measurable diff and fixed a real row-height mismatch, so the biggest remaining blocker is no longer the left column geometry. The screenshots now point primarily at transcript text rendering and spacing rather than shell-wide layout.",
+  "threshold": 90,
+  "passes_threshold": false,
+  "next_actions": [
+    "Investigate transcript text compositing/rasterization parity against the browser capture and test the highest-leverage rendering-path adjustment.",
+    "Re-run cargo check/tests and the parity harness after that transcript experiment."
+  ]
+}

@@ -1,6 +1,8 @@
-//! Layout constants and computation for the shell chrome.
+//! Layout constants and retained taffy-based computation for the shell chrome.
 
 use super::widget::Rect;
+use taffy::prelude::{AvailableSpace, Dimension, Display, FlexDirection, Size, Style};
+use taffy::{NodeId, TaffyTree};
 
 pub const TAB_BAR_HEIGHT: f32 = 36.0;
 pub const STATUS_BAR_HEIGHT: f32 = 26.0;
@@ -27,85 +29,323 @@ pub struct ShellLayout {
     pub right_panel_status: Rect,
 }
 
-impl ShellLayout {
-    /// Compute layout regions. `scale` is the DPI scale factor (e.g. 1.5).
-    /// Layout constants are defined in logical pixels and scaled up for physical rendering.
+#[derive(Debug, Clone, Copy)]
+struct ShellNodes {
+    root: NodeId,
+    tab_bar: NodeId,
+    body: NodeId,
+    sidebar: NodeId,
+    center: NodeId,
+    breadcrumb: NodeId,
+    terminal: NodeId,
+    right_panel: NodeId,
+    right_panel_content: NodeId,
+    right_panel_status: NodeId,
+    status_bar: NodeId,
+}
+
+/// Retained flexbox tree for shell chrome.
+///
+/// The old shell layout path was a pile of manual rectangle math. Keeping the
+/// top-level regions in a persistent taffy tree gives us a real layout layer we
+/// can extend incrementally instead of continuing to hand-solve geometry.
+pub struct ShellLayoutEngine {
+    tree: TaffyTree<()>,
+    nodes: ShellNodes,
+}
+
+impl ShellLayoutEngine {
+    pub fn new() -> Self {
+        let mut tree = TaffyTree::new();
+
+        let tab_bar = tree.new_leaf(Style::default()).expect("tab_bar node");
+        let sidebar = tree.new_leaf(Style::default()).expect("sidebar node");
+        let breadcrumb = tree.new_leaf(Style::default()).expect("breadcrumb node");
+        let terminal = tree.new_leaf(Style::default()).expect("terminal node");
+        let center = tree
+            .new_with_children(
+                Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    ..Default::default()
+                },
+                &[breadcrumb, terminal],
+            )
+            .expect("center node");
+
+        let right_panel_content = tree
+            .new_leaf(Style::default())
+            .expect("right_panel_content node");
+        let right_panel_status = tree
+            .new_leaf(Style::default())
+            .expect("right_panel_status node");
+        let right_panel = tree
+            .new_with_children(
+                Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
+                    ..Default::default()
+                },
+                &[right_panel_content, right_panel_status],
+            )
+            .expect("right_panel node");
+
+        let body = tree
+            .new_with_children(
+                Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    ..Default::default()
+                },
+                &[sidebar, center, right_panel],
+            )
+            .expect("body node");
+
+        let status_bar = tree.new_leaf(Style::default()).expect("status_bar node");
+
+        let root = tree
+            .new_with_children(
+                Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    ..Default::default()
+                },
+                &[tab_bar, body, status_bar],
+            )
+            .expect("root node");
+
+        Self {
+            tree,
+            nodes: ShellNodes {
+                root,
+                tab_bar,
+                body,
+                sidebar,
+                center,
+                breadcrumb,
+                terminal,
+                right_panel,
+                right_panel_content,
+                right_panel_status,
+                status_bar,
+            },
+        }
+    }
+
     pub fn compute(
+        &mut self,
         viewport_w: f32,
         viewport_h: f32,
         sidebar_visible: bool,
         right_panel_visible: bool,
+        status_bar_visible: bool,
         sidebar_width: f32,
         right_panel_width: f32,
         scale: f32,
-    ) -> Self {
+    ) -> ShellLayout {
+        let viewport_w = viewport_w.max(0.0);
+        let viewport_h = viewport_h.max(0.0);
         let tab_h = (TAB_BAR_HEIGHT * scale).round();
-        let status_h = (STATUS_BAR_HEIGHT * scale).round();
+        let status_h = if status_bar_visible {
+            (STATUS_BAR_HEIGHT * scale).round()
+        } else {
+            0.0
+        };
         let breadcrumb_h = (BREADCRUMB_HEIGHT * scale).round();
-        let sidebar_w = if sidebar_visible { (sidebar_width * scale).round() } else { 0.0 };
-        let right_w = if right_panel_visible { (right_panel_width * scale).round() } else { 0.0 };
-
-        // Status bar spans full width at the very bottom
-        let status_bar = Rect {
-            x: 0.0,
-            y: viewport_h - status_h,
-            width: viewport_w,
-            height: status_h,
+        let sidebar_w = if sidebar_visible {
+            (sidebar_width * scale).round()
+        } else {
+            0.0
+        };
+        let right_w = if right_panel_visible {
+            (right_panel_width * scale).round()
+        } else {
+            0.0
         };
 
-        // Sidebar starts below the tab bar and stops above the status bar
-        let sidebar = Rect {
-            x: 0.0,
-            y: tab_h,
-            width: sidebar_w,
-            height: (viewport_h - tab_h - status_h).max(0.0),
-        };
+        self.set_style(
+            self.nodes.root,
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                size: Size {
+                    width: px(viewport_w),
+                    height: px(viewport_h),
+                },
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.tab_bar,
+            Style {
+                display: Display::Flex,
+                size: Size {
+                    width: px(viewport_w),
+                    height: px(tab_h),
+                },
+                flex_shrink: 0.0,
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.body,
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                size: Size {
+                    width: px(viewport_w),
+                    height: Dimension::Auto,
+                },
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.sidebar,
+            if sidebar_visible {
+                Style {
+                    display: Display::Flex,
+                    size: Size {
+                        width: px(sidebar_w),
+                        height: Dimension::Auto,
+                    },
+                    flex_shrink: 0.0,
+                    ..Default::default()
+                }
+            } else {
+                hidden_style()
+            },
+        );
+        self.set_style(
+            self.nodes.center,
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.breadcrumb,
+            Style {
+                display: Display::Flex,
+                size: Size {
+                    width: Dimension::Percent(1.0),
+                    height: px(breadcrumb_h),
+                },
+                flex_shrink: 0.0,
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.terminal,
+            Style {
+                display: Display::Flex,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.right_panel,
+            if right_panel_visible {
+                Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    size: Size {
+                        width: px(right_w),
+                        height: Dimension::Auto,
+                    },
+                    flex_shrink: 0.0,
+                    ..Default::default()
+                }
+            } else {
+                hidden_style()
+            },
+        );
+        self.set_style(
+            self.nodes.right_panel_content,
+            Style {
+                display: Display::Flex,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                ..Default::default()
+            },
+        );
+        self.set_style(
+            self.nodes.right_panel_status,
+            if right_panel_visible {
+                Style {
+                    display: Display::Flex,
+                    size: Size {
+                        width: Dimension::Percent(1.0),
+                        height: px(status_h),
+                    },
+                    flex_shrink: 0.0,
+                    ..Default::default()
+                }
+            } else {
+                hidden_style()
+            },
+        );
+        self.set_style(
+            self.nodes.status_bar,
+            if status_bar_visible {
+                Style {
+                    display: Display::Flex,
+                    size: Size {
+                        width: px(viewport_w),
+                        height: px(status_h),
+                    },
+                    flex_shrink: 0.0,
+                    ..Default::default()
+                }
+            } else {
+                hidden_style()
+            },
+        );
 
-        // Right panel occupies right edge, below tab bar, above status bar
-        let content_height = (viewport_h - tab_h - status_h).max(0.0);
-        let right_panel = Rect {
-            x: viewport_w - right_w,
-            y: tab_h,
-            width: right_w,
-            height: content_height,
+        self.tree
+            .compute_layout(
+                self.nodes.root,
+                Size {
+                    width: AvailableSpace::Definite(viewport_w),
+                    height: AvailableSpace::Definite(viewport_h),
+                },
+            )
+            .expect("shell layout should compute");
+
+        let tab_bar = self.absolute_rect_for(&[self.nodes.tab_bar]);
+        let status_bar = self.absolute_rect_for(&[self.nodes.status_bar]);
+        let sidebar = if sidebar_visible {
+            self.absolute_rect_for(&[self.nodes.body, self.nodes.sidebar])
+        } else {
+            zero_rect()
+        };
+        let breadcrumb =
+            self.absolute_rect_for(&[self.nodes.body, self.nodes.center, self.nodes.breadcrumb]);
+        let terminal =
+            self.absolute_rect_for(&[self.nodes.body, self.nodes.center, self.nodes.terminal]);
+        let right_panel = if right_panel_visible {
+            self.absolute_rect_for(&[self.nodes.body, self.nodes.right_panel])
+        } else {
+            zero_rect()
         };
         let right_panel_status = if right_panel_visible {
-            Rect {
-                x: right_panel.x,
-                y: right_panel.y + right_panel.height - status_h,
-                width: right_w,
-                height: status_h,
-            }
+            self.absolute_rect_for(&[
+                self.nodes.body,
+                self.nodes.right_panel,
+                self.nodes.right_panel_status,
+            ])
         } else {
-            Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 }
-        };
-
-        let content_x = sidebar_w;
-        let content_w = (viewport_w - sidebar_w - right_w).max(0.0);
-
-        // Tab bar spans full width at the very top (no separate title bar)
-        let tab_bar = Rect {
-            x: 0.0,
-            y: 0.0,
-            width: viewport_w,
-            height: tab_h,
-        };
-
-        // Breadcrumb bar between tab bar and content (only in content area)
-        let breadcrumb = Rect {
-            x: content_x,
-            y: tab_h,
-            width: content_w,
-            height: breadcrumb_h,
-        };
-
-        let terminal_y = tab_h + breadcrumb_h;
-        let terminal_h = (viewport_h - terminal_y - status_h).max(0.0);
-        let terminal = Rect {
-            x: content_x,
-            y: terminal_y,
-            width: content_w,
-            height: terminal_h,
+            zero_rect()
         };
 
         let pad_left = (TERMINAL_PAD_LEFT * scale).round();
@@ -117,6 +357,155 @@ impl ShellLayout {
             height: (terminal.height - pad_top).max(0.0),
         };
 
-        Self { sidebar, tab_bar, breadcrumb, terminal, terminal_content, status_bar, right_panel, right_panel_status }
+        ShellLayout {
+            sidebar,
+            tab_bar,
+            breadcrumb,
+            terminal,
+            terminal_content,
+            status_bar,
+            right_panel,
+            right_panel_status,
+        }
+    }
+
+    fn set_style(&mut self, node: NodeId, style: Style) {
+        self.tree
+            .set_style(node, style)
+            .expect("layout node style should update");
+    }
+
+    fn absolute_rect_for(&self, path: &[NodeId]) -> Rect {
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut width = 0.0;
+        let mut height = 0.0;
+
+        for node in path {
+            let layout = self.tree.layout(*node).expect("layout node should exist");
+            x += layout.location.x;
+            y += layout.location.y;
+            width = layout.size.width;
+            height = layout.size.height;
+        }
+
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
+impl Default for ShellLayoutEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ShellLayout {
+    /// Compatibility wrapper for older call sites and tests.
+    pub fn compute(
+        viewport_w: f32,
+        viewport_h: f32,
+        sidebar_visible: bool,
+        right_panel_visible: bool,
+        status_bar_visible: bool,
+        sidebar_width: f32,
+        right_panel_width: f32,
+        scale: f32,
+    ) -> Self {
+        ShellLayoutEngine::new().compute(
+            viewport_w,
+            viewport_h,
+            sidebar_visible,
+            right_panel_visible,
+            status_bar_visible,
+            sidebar_width,
+            right_panel_width,
+            scale,
+        )
+    }
+}
+
+fn px(value: f32) -> Dimension {
+    Dimension::Length(value.max(0.0))
+}
+
+fn hidden_style() -> Style {
+    Style {
+        display: Display::None,
+        ..Default::default()
+    }
+}
+
+fn zero_rect() -> Rect {
+    Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f32, b: f32) {
+        assert!(
+            (a - b).abs() < 0.01,
+            "expected {a} ~= {b}, diff={}",
+            (a - b).abs()
+        );
+    }
+
+    #[test]
+    fn taffy_layout_matches_expected_visible_regions() {
+        let layout = ShellLayout::compute(1200.0, 800.0, true, true, true, 200.0, 380.0, 1.0);
+
+        approx_eq(layout.tab_bar.height, 36.0);
+        approx_eq(layout.status_bar.y, 774.0);
+        approx_eq(layout.sidebar.width, 200.0);
+        approx_eq(layout.sidebar.y, 36.0);
+        approx_eq(layout.right_panel.x, 820.0);
+        approx_eq(layout.right_panel.width, 380.0);
+        approx_eq(layout.terminal.x, 200.0);
+        approx_eq(layout.terminal.y, 36.0);
+        approx_eq(layout.terminal.width, 620.0);
+        approx_eq(layout.terminal.height, 738.0);
+        approx_eq(layout.terminal_content.x, 208.0);
+        approx_eq(layout.terminal_content.y, 42.0);
+    }
+
+    #[test]
+    fn hidden_panels_collapse_cleanly() {
+        let layout = ShellLayout::compute(1200.0, 800.0, false, false, true, 200.0, 380.0, 1.0);
+
+        approx_eq(layout.sidebar.width, 0.0);
+        approx_eq(layout.right_panel.width, 0.0);
+        approx_eq(layout.terminal.x, 0.0);
+        approx_eq(layout.terminal.width, 1200.0);
+    }
+
+    #[test]
+    fn scale_factor_updates_fixed_regions() {
+        let layout = ShellLayout::compute(1200.0, 800.0, true, true, true, 200.0, 380.0, 1.5);
+
+        approx_eq(layout.tab_bar.height, 54.0);
+        approx_eq(layout.status_bar.height, 39.0);
+        approx_eq(layout.sidebar.width, 300.0);
+        approx_eq(layout.right_panel.width, 570.0);
+        approx_eq(layout.terminal_content.x, 312.0);
+        approx_eq(layout.terminal_content.y, 63.0);
+    }
+
+    #[test]
+    fn hidden_status_bar_returns_height_to_terminal() {
+        let layout = ShellLayout::compute(1200.0, 800.0, true, false, false, 200.0, 380.0, 1.0);
+
+        approx_eq(layout.status_bar.height, 0.0);
+        approx_eq(layout.terminal.height, 764.0);
     }
 }

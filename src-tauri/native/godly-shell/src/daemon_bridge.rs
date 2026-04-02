@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use godly_app_adapter::daemon_client::FrontendEventSink;
 use crate::event_bus::{AsyncEvent, EventSender};
+use godly_app_adapter::daemon_client::FrontendEventSink;
+use std::sync::Arc;
 
 pub struct ShellEventSink {
     sender: EventSender,

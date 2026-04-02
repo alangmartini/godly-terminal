@@ -1,0 +1,29 @@
+﻿{
+    "run_id":  "20260402-105856",
+    "started_at":  "2026-04-02T10:58:56.2716498-03:00",
+    "project_root":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal",
+    "artifacts_root":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\.omx-visual-parity-loop",
+    "run_dir":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\.omx-visual-parity-loop\\20260402-105856",
+    "stop_file":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\.omx-visual-parity-loop\\STOP",
+    "agent_command":  "omx",
+    "model":  "gpt-5.4",
+    "reasoning_effort":  "xhigh",
+    "profile":  "",
+    "enable_search":  false,
+    "ephemeral":  false,
+    "show_raw_json_events":  false,
+    "dry_run":  true,
+    "web_reference_image":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\web-reference.png",
+    "native_image":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\current-godly-shell.png",
+    "diff_image":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\current-godly-shell.diff.png",
+    "task_contract_path":  "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\omx-visual-parity-task.md",
+    "attached_images":  [
+                            "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\web-reference.png",
+                            "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\current-godly-shell.png",
+                            "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\current-godly-shell.diff.png"
+                        ],
+    "max_iterations":  1,
+    "iteration_delay_seconds":  5,
+    "retry_delay_seconds":  10,
+    "no_cleanup":  false
+}

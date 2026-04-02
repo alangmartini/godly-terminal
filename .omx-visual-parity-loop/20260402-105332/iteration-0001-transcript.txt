@@ -1,0 +1,9 @@
+﻿node.exe : C:\nvm4w\nodejs\codex.ps1 : Não é possível processar o argumento porque o valor do argumento "name" não é 
+válido. 
+No C:\nvm4w\nodejs\omx.ps1:14 caractere:14
++ ...    $input | & "$basedir/node$exe"  "$basedir/node_modules/oh-my-codex ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\nvm4w\nodejs... não é válido. :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
