@@ -389,8 +389,8 @@ impl Sidebar {
             if !item.branch.is_empty() {
                 let branch_rect = layout_item.secondary_row.unwrap_or(layout_item.first_row);
                 let branch_fg = lerp_color(
-                    colors::FG_DIM, // #555d6b — brighter than #484f58 for readability
-                    colors::FG_MUTED,
+                    colors::STATUS_DEFAULT, // #484f58 — matches web exactly
+                    colors::FG_DIM,
                     hover_t * 0.4 + active_t * 0.3,
                 );
                 ui.text_ui_scaled(
@@ -407,7 +407,7 @@ impl Sidebar {
                 let desc_avail = branch_rect.width.min(sidebar.width - s(LIST_PAD_X * 2.0));
                 let desc = truncate_to_width(&item.description, desc_avail, text);
                 let desc_fg =
-                    lerp_color(colors::FG_MUTED, colors::FG_SECONDARY, 0.40 + hover_t * 0.3);
+                    lerp_color(colors::STATUS_DEFAULT, colors::FG_DIM, 0.40 + hover_t * 0.3);
                 ui.text_ui_scaled(
                     text,
                     &desc,
@@ -494,6 +494,8 @@ impl Sidebar {
         // Bottom panel: running agents/processes — matches web reference layout:
         // borderTop "1px solid #1a1d25", directory path header, two-line items
         // with icon + name + status badge (right-aligned) + × + wrapped description.
+        log::info!("sidebar.build: show_footer={} agents={} sidebar_h={:.0} sidebar_bottom={:.0}",
+            self.show_footer_sections, self.agents.len(), sidebar.height, sidebar.bottom());
         if self.show_footer_sections && !self.agents.is_empty() {
             let header_section_h = s(24.0); // directory path header
             let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
@@ -541,7 +543,7 @@ impl Sidebar {
             for (ai, agent) in self.agents.iter().enumerate() {
                 let status_color = match agent.status {
                     AgentStatus::Running => colors::ACCENT_GREEN,
-                    AgentStatus::Waiting => colors::ACCENT_PEACH,
+                    AgentStatus::Waiting => colors::ACCENT_BLUE,
                     AgentStatus::Stopped => colors::ACCENT_RED,
                 };
                 let status_text = match agent.status {
@@ -624,8 +626,9 @@ impl Sidebar {
                 // Web: fontSize 10, borderRadius 3, backgroundColor: color+"18",
                 //       marginLeft "auto" pushes badge to the right
                 let sw = text.text_width_ui_scaled(status_text, font_scale::PX10);
-                let status_badge_pad_h = s(6.0);
-                let status_badge_h = ch * font_scale::PX10 + s(4.0);
+                let status_badge_pad_h = s(6.0); // web: padding "1px 6px" horizontal
+                let status_badge_pad_v = s(2.0); // web: padding "1px 6px" vertical
+                let status_badge_h = ch * font_scale::PX10 + status_badge_pad_v * 2.0;
                 let status_badge_w = sw + status_badge_pad_h * 2.0;
                 let status_badge_x = dismiss_x - s(6.0) - status_badge_w;
                 let status_badge_y = line1_y + (ch - status_badge_h) / 2.0;
@@ -635,18 +638,11 @@ impl Sidebar {
                     width: status_badge_w,
                     height: status_badge_h,
                 };
-                let status_badge_r = status_badge_h / 2.0; // full pill shape
+                let status_badge_r = s(3.0); // web: borderRadius 3
+                // web: backgroundColor color+"18" → 0x18/0xFF ≈ 0.094 alpha
                 let status_bg =
-                    [status_color[0], status_color[1], status_color[2], 0.18];
+                    [status_color[0], status_color[1], status_color[2], 0.094];
                 ui.fill_rounded(status_badge_rect, status_bg, status_badge_r);
-                // Subtle 1px border for crisper pill edge matching reference
-                ui.fill_rounded_bordered(
-                    status_badge_rect,
-                    [0.0, 0.0, 0.0, 0.0], // transparent fill (already filled above)
-                    status_badge_r,
-                    1.0,
-                    [status_color[0], status_color[1], status_color[2], 0.25],
-                );
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y =
                     status_badge_y + (status_badge_h - ch * font_scale::PX10) / 2.0;
@@ -672,7 +668,7 @@ impl Sidebar {
                             line,
                             desc_x,
                             desc_y,
-                            colors::FG_DIM, // #555d6b — brighter for readability
+                            colors::STATUS_DEFAULT, // #484f58 — matches web exactly
                             panel_bg,
                             desc_sc,
                         );
