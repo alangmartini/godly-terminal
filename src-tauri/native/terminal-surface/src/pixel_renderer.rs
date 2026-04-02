@@ -1,8 +1,8 @@
 use std::sync::LazyLock;
 use std::time::Instant;
 
-use godly_protocol::types::{CursorShape, RichGridData};
 use crate::Color;
+use godly_protocol::types::{CursorShape, RichGridData};
 
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;

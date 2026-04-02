@@ -1,7 +1,7 @@
 //! Builds per-cell vertex data for the GPU glyph atlas renderer.
 
-use godly_protocol::types::RichGridData;
 use crate::Color;
+use godly_protocol::types::RichGridData;
 
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;

@@ -13,6 +13,11 @@ use std::collections::HashMap;
 use crate::glyph_cache::GlyphKey;
 use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 
+fn glyph_origin_y(baseline_offset: u32, bearing_y: i32, clamp_top: bool) -> i32 {
+    let y = baseline_offset as i32 - bearing_y;
+    if clamp_top { y.max(0) } else { y }
+}
+
 /// Position of a glyph inside the atlas (normalised UV coordinates).
 #[derive(Debug, Clone, Copy)]
 pub struct AtlasEntry {
@@ -87,11 +92,7 @@ impl GlyphAtlas {
     }
 
     /// Pre-cache printable ASCII (32–126) in normal + bold variants.
-    pub fn precache_ascii(
-        &mut self,
-        rasterizer: &mut dyn GlyphRasterizer,
-        font_size_px: f32,
-    ) {
+    pub fn precache_ascii(&mut self, rasterizer: &mut dyn GlyphRasterizer, font_size_px: f32) {
         for ch in ' '..='~' {
             for bold in [false, true] {
                 let key = GlyphKey::new(ch, font_size_px, bold, false);
@@ -137,7 +138,13 @@ impl GlyphAtlas {
 
         // Convert to RGBA subpixel coverage and blit into a slot-sized region.
         let rgba = glyph.as_ref().map(|g| to_rgba_coverage(g));
-        let entry = self.pack_slot(rgba.as_ref(), glyph.as_ref(), slot_w, advance);
+        let entry = self.pack_slot(
+            rgba.as_ref(),
+            glyph.as_ref(),
+            slot_w,
+            advance,
+            key.font_id != 0,
+        );
         self.entries.insert(key, entry);
         entry
     }
@@ -151,6 +158,7 @@ impl GlyphAtlas {
         glyph: Option<&crate::glyph_rasterizer::RasterizedGlyph>,
         slot_w: u32,
         advance: f32,
+        clamp_top_for_ui_fonts: bool,
     ) -> AtlasEntry {
         let sw = slot_w;
         let ch = self.cell_h;
@@ -175,7 +183,7 @@ impl GlyphAtlas {
             if g.width > 0 && g.height > 0 {
                 // Glyph origin within the slot:
                 let gx = g.bearing_x;
-                let gy = self.baseline_offset as i32 - g.bearing_y;
+                let gy = glyph_origin_y(self.baseline_offset, g.bearing_y, clamp_top_for_ui_fonts);
                 for row in 0..g.height {
                     for col in 0..g.width {
                         let dst_x = x0 as i32 + gx + col as i32;
@@ -184,16 +192,17 @@ impl GlyphAtlas {
                             && dst_y >= 0
                             && (dst_x as u32) < self.width
                             && (dst_y as u32) < self.height
-                            && (dst_x as u32) < x0 + sw // clip to slot boundary
+                            && (dst_x as u32) < x0 + sw
+                        // clip to slot boundary
                         {
                             let src_idx = (row * g.width + col) as usize * 4;
-                            let dst_idx =
-                                ((dst_y as u32) * self.width + dst_x as u32) as usize * 4;
+                            let dst_idx = ((dst_y as u32) * self.width + dst_x as u32) as usize * 4;
                             if src_idx + 3 < rgba_data.len() && dst_idx + 3 < self.data.len() {
-                                self.data[dst_idx] = rgba_data[src_idx];         // R
+                                self.data[dst_idx] = rgba_data[src_idx]; // R
                                 self.data[dst_idx + 1] = rgba_data[src_idx + 1]; // G
                                 self.data[dst_idx + 2] = rgba_data[src_idx + 2]; // B
-                                self.data[dst_idx + 3] = rgba_data[src_idx + 3]; // A
+                                self.data[dst_idx + 3] = rgba_data[src_idx + 3];
+                                // A
                             }
                         }
                     }
@@ -214,7 +223,13 @@ impl GlyphAtlas {
         let u1 = (x0 + sw) as f32 / self.width as f32;
         let v1 = (y0 + ch) as f32 / self.height as f32;
 
-        AtlasEntry { u0, v0, u1, v1, advance }
+        AtlasEntry {
+            u0,
+            v0,
+            u1,
+            v1,
+            advance,
+        }
     }
 
     /// Double the atlas height, preserving existing data and rescaling UVs.
@@ -283,6 +298,17 @@ impl GlyphAtlas {
 
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glyph_origin_y;
+
+    #[test]
+    fn ui_glyph_origin_clamps_negative_top_offsets() {
+        assert_eq!(glyph_origin_y(11, 13, true), 0);
+        assert_eq!(glyph_origin_y(11, 13, false), -2);
     }
 }
 
