@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-02 (Iteration 85)
+Last updated: 2026-04-02 (Iteration 86)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -76,8 +76,21 @@ Last updated: 2026-04-02 (Iteration 85)
 | Reference-mode CSS-pixel scaling | Done | The cropped parity scene now lays out chrome/text at fixed CSS-pixel sizes and compensates at rasterization time instead of inflating the whole scene by the Windows DPI scale factor (iteration 84) |
 | Crop tab-strip intrinsic sizing | Done | The cropped parity scene now uses content-width tabs with inline badges, 2px left padding, and full-height 36px geometry instead of stretching tab slots across the strip (iteration 84) |
 | Sidebar session-stack CSS layout | Done | The cropped sidebar session stack now comes from a shared web-CSS layout helper (`ui/sidebar_layout.rs`) reused by both render and hit-testing, closing the old branch-row height mismatch and switching to full-height active borders / 20px secondary-row indent (iteration 85) |
+| Transcript paragraph word-wrapping | Done | Long paragraphs and bullet text now word-wrap at the content boundary instead of overflowing as single lines, with dynamic block heights from the taffy layout engine (iteration 86) |
+| Progress bar 3-stop gradient | Done | Gradient now matches web's `linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1)` with correct track color `#1e2128` (iteration 86) |
+| Status bar streaming tilde size | Done | Pulsing `~` renders at fontSize 9 matching web, not 11 (iteration 86) |
 | Streaming status bar | Done | Status bar shows "~ Streaming response..." matching web reference demo state (iteration 78) |
 | Agent demo data parity | Done | Agent 2 name "anu" → "amp", descriptions matched to web, claude-code has no description (iteration 78) |
+
+## Changes in Iteration 86
+
+1. **Transcript paragraphs now word-wrap at the content boundary** — Added `wrap_mono_text()` and `wrap_mono_line_count()` to [`ui/reference_pane.rs`]. Long paragraphs (`BLOCK_RESIDUAL_PARAGRAPH`, `BLOCK_PARAGRAPH_TONE`, `BLOCK_PARAGRAPH_COLLAPSE`) and bullet text (`BLOCK_INTRO`) now break at word boundaries instead of rendering as single overflowing lines. The layout engine gains `compute_wrapped()` which accepts per-block line counts so taffy allocates correct heights for multi-line blocks.
+2. **Progress bar gradient now matches web 3-stop pattern** — Changed from a 2-stop `ACCENT_BLUE → ACCENT_MAUVE` gradient to a 3-stop `ACCENT_BLUE → ACCENT_MAUVE → ACCENT_BLUE` matching the web's `linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1)`. Track background corrected from `BG_SURFACE` (#1a1d25) to exact web value `#1e2128`.
+3. **Status bar streaming tilde size matches web** — The pulsing `~` indicator now renders at `fontSize 9` (`PX9`) matching the web reference, previously used `PX11` like the surrounding text. Vertical centering adjusted for the smaller glyph.
+
+**What changed structurally**: The reference pane layout engine can now accept dynamic block heights via `compute_wrapped()`, enabling proper text flow for varying viewport widths. This closes the single biggest layout divergence between the native and web transcript scenes.
+
+**Remaining gaps**: Inline runs (bullet runs with mixed Text/Link/Code segments) still render on single lines without wrapping. Glyph weight and anti-aliasing contrast differences between DirectWrite ClearType and browser rendering remain an inherent platform divergence.
 
 ## Changes in Iteration 85
 
