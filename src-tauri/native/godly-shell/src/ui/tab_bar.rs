@@ -257,7 +257,8 @@ impl TabBar {
                 };
 
                 let circle_sz = if self.crop_mode { CROP_TAB_BADGE_SIZE } else { 18.0 };
-                s(leading_pad) + s(circle_sz) + s(6.0) + title_w + badge_w + s(14.0)
+                let close_btn_space = if self.show_tab_close_buttons { s(16.0) + s(8.0) } else { 0.0 };
+                s(leading_pad) + s(circle_sz) + s(6.0) + title_w + badge_w + close_btn_space + s(4.0)
             })
             .collect()
     }
