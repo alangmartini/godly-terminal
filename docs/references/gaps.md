@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-03 (Iteration 91)
+Last updated: 2026-04-03 (Iteration 92)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -92,6 +92,14 @@ Last updated: 2026-04-03 (Iteration 91)
 
 | Inline run wrapping | Done | Mixed Text/Link/Code bullet runs now word-wrap at content boundary with dynamic layout heights (iteration 90) |
 | Letter spacing | Done | letterSpacing 0.2 on content headings, 0.5 on sidebar directory path, 0.3 on poem title, 0.2 on poem stanzas matching web exactly (iteration 91) |
+| Sub-bullet character | Done | Changed from • (bullet) to · (middle dot) and color from STATUS_DEFAULT to STATUS_PATH (#3b4048) matching web exactly (iteration 92) |
+| Thoughts checkmark size | Done | Checkmark ✓ now renders at fontSize 13 (BODY_SCALE) instead of 12, matching web's fontSize: 13. Arrow changed from > to ▸ (iteration 92) |
+
+## Changes in Iteration 92
+
+1. **Sub-bullet character and color corrected** — Changed sub-bullet marker from `•` (U+2022, bullet) to `·` (U+00B7, middle dot) and marker color from STATUS_DEFAULT (#484f58) to STATUS_PATH (#3b4048) matching the web's `<span style={{ color: "#3b4048" }}>·</span>`.
+2. **Thoughts row checkmark size and arrow** — Green checkmark `✓` now renders at BODY_SCALE (fontSize 13) matching web's fontSize: 13, was SMALL_SCALE (fontSize 12). Arrow character changed from ASCII `>` to Unicode `▸` (U+25B8) matching web's `▸`.
+3. **Remaining gaps stale reference cleaned** — Removed stale mention of letter-spacing from remaining gaps description.
 
 ## Changes in Iteration 91
 
@@ -128,7 +136,7 @@ Last updated: 2026-04-03 (Iteration 91)
 
 **What changed structurally**: The reference pane layout engine can now accept dynamic block heights via `compute_wrapped()`, enabling proper text flow for varying viewport widths. This closes the single biggest layout divergence between the native and web transcript scenes.
 
-**Remaining gaps**: Glyph weight and anti-aliasing contrast differences between DirectWrite ClearType and browser rendering remain an inherent platform divergence. Letter-spacing is not yet implemented (web uses `letterSpacing: 0.2` on headings, `0.5` on directory paths, `0.3` on poem titles).
+**Remaining gaps**: Glyph weight and anti-aliasing contrast differences between DirectWrite ClearType and browser rendering remain an inherent platform divergence.
 
 ## Changes in Iteration 85
 
