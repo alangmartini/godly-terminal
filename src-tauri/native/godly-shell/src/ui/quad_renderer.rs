@@ -26,8 +26,9 @@ pub struct QuadVertex {
     pub rotation: f32,
     pub lighting_intensity: f32,
     pub clip_rect: [f32; 4], // x_min, y_min, x_max, y_max in screen pixels
+    pub corner_smoothness: f32, // 0.0 = circular (CSS), 1.0 = full squircle (Apple/iOS)
 }
-// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 + 16 = 104 bytes
+// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 + 16 + 4 = 108 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -98,9 +99,15 @@ impl QuadVertex {
                 offset: 88,
                 shader_location: 10,
             },
+            // corner_smoothness: 0.0 = circular, 1.0 = full squircle
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32,
+                offset: 104,
+                shader_location: 11,
+            },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 104,
+            array_stride: 108,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -120,6 +127,7 @@ struct VertexInput {
     @location(8) rotation: f32,
     @location(9) lighting_intensity: f32,
     @location(10) clip_rect: vec4<f32>,
+    @location(11) corner_smoothness: f32,
 };
 
 struct VertexOutput {
@@ -134,6 +142,7 @@ struct VertexOutput {
     @location(7) @interpolate(flat) rotation: f32,
     @location(8) @interpolate(flat) lighting_intensity: f32,
     @location(9) @interpolate(flat) clip_rect: vec4<f32>,
+    @location(10) @interpolate(flat) corner_smoothness: f32,
 };
 
 @vertex
@@ -152,6 +161,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.rotation = input.rotation;
     out.lighting_intensity = input.lighting_intensity;
     out.clip_rect = input.clip_rect;
+    out.corner_smoothness = input.corner_smoothness;
     return out;
 }
 
@@ -174,16 +184,28 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(hi, lo, s <= vec3<f32>(0.0031308));
 }
 
-// Signed distance to a rounded rectangle with per-corner radii.
+// Signed distance to a rounded rectangle with per-corner radii and optional
+// superellipse (squircle) corners.
 // radii = (top_left, top_right, bottom_right, bottom_left)
+// smoothness: 0.0 = circular (CSS border-radius), 1.0 = full squircle (Apple/iOS)
 // Returns negative inside, positive outside.
-fn sd_rounded_rect(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+fn sd_rounded_rect(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>, smoothness: f32) -> f32 {
     // Select radius based on quadrant
     let r_top = select(radii.x, radii.y, p.x > 0.0);
     let r_bot = select(radii.w, radii.z, p.x > 0.0);
     let r = select(r_top, r_bot, p.y > 0.0);
     let q = abs(p) - half_size + vec2<f32>(r);
-    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+
+    // Lp norm: p=2 is circular (L2), p=5 is full squircle.
+    // The Lp norm produces continuous-curvature corners that transition
+    // smoothly from straight edges — the same approach Apple uses in iOS
+    // and Figma uses for "corner smoothing".
+    let n = 2.0 + smoothness * 3.0;
+    let qx = max(q.x, 0.0);
+    let qy = max(q.y, 0.0);
+    // When smoothness is 0 (n=2), this is equivalent to length(max(q,0))
+    let outer = pow(pow(qx, n) + pow(qy, n), 1.0 / n);
+    return outer + min(max(q.x, q.y), 0.0) - r;
 }
 
 // Triangle-distributed noise for gradient dithering.
@@ -268,7 +290,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // SDF path: rounded rectangle with anti-aliased edges
-    let d = sd_rounded_rect(p, he, input.corner_radii);
+    let d = sd_rounded_rect(p, he, input.corner_radii, input.corner_smoothness);
 
     // Screen-space adaptive AA: fwidth(d) gives the rate of change of the SDF
     // distance across the pixel.  Using this instead of a fixed pixel width
@@ -562,6 +584,7 @@ pub fn quad_vertices(
         rotation: 0.0,
         lighting_intensity: 0.0, // flat quads have no SDF lighting
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness: 0.0,
     };
 
     [
@@ -653,6 +676,7 @@ fn quad_vertices_gradient_dir(
         rotation: 0.0,
         lighting_intensity: 0.0, // flat quads have no SDF lighting
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness: 0.0,
     };
 
     // Vertical gradient: top=color_a, bottom=color_b
@@ -691,6 +715,7 @@ pub fn quad_vertices_sdf(
     border_color: [f32; 4],
     blur_radius: f32,
     lighting_intensity: f32,
+    corner_smoothness: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -740,6 +765,7 @@ pub fn quad_vertices_sdf(
         rotation: 0.0,
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness,
     };
 
     [
@@ -768,6 +794,7 @@ pub fn quad_vertices_sdf_gradient(
     border_width: f32,
     border_color: [f32; 4],
     lighting_intensity: f32,
+    corner_smoothness: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -809,6 +836,7 @@ pub fn quad_vertices_sdf_gradient(
         rotation: 0.0,
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness,
     };
 
     [
@@ -837,6 +865,7 @@ pub fn quad_vertices_sdf_gradient_h(
     border_width: f32,
     border_color: [f32; 4],
     lighting_intensity: f32,
+    corner_smoothness: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -878,6 +907,7 @@ pub fn quad_vertices_sdf_gradient_h(
         rotation: 0.0,
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness,
     };
 
     // Horizontal: left=fill_color_left, right=fill_color_right
@@ -911,6 +941,7 @@ pub fn quad_vertices_sdf_rotated(
     border_color: [f32; 4],
     blur_radius: f32,
     lighting_intensity: f32,
+    corner_smoothness: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -963,6 +994,7 @@ pub fn quad_vertices_sdf_rotated(
         rotation,
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness,
     };
 
     [

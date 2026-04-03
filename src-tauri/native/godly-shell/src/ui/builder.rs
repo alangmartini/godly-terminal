@@ -313,6 +313,10 @@ pub struct UiBuilder {
     /// Fragments outside this rect are discarded with smooth AA at edges.
     /// Default NO_CLIP disables clipping.
     clip_rect: [f32; 4],
+    /// Superellipse corner smoothness: 0.0 = circular arcs (CSS border-radius),
+    /// 1.0 = full squircle (Apple iOS / Figma corner smoothing).
+    /// Applied to all SDF quads emitted after this is set.
+    corner_smoothness: f32,
 }
 
 impl UiBuilder {
@@ -324,6 +328,7 @@ impl UiBuilder {
             vh,
             lighting: 0.0,
             clip_rect: NO_CLIP,
+            corner_smoothness: 0.0,
         }
     }
 
@@ -343,6 +348,18 @@ impl UiBuilder {
     /// Clear the clip rectangle, disabling clipping for subsequent quads.
     pub fn clear_clip(&mut self) {
         self.clip_rect = NO_CLIP;
+    }
+
+    /// Set superellipse corner smoothness for subsequently emitted SDF quads.
+    /// 0.0 = standard circular arcs (CSS border-radius).
+    /// 1.0 = full squircle (Apple iOS / Figma corner smoothing).
+    pub fn set_corner_smoothness(&mut self, smoothness: f32) {
+        self.corner_smoothness = smoothness;
+    }
+
+    /// Reset corner smoothness to 0.0 (standard circular arcs).
+    pub fn clear_corner_smoothness(&mut self) {
+        self.corner_smoothness = 0.0;
     }
 
     /// Viewport dimensions in physical pixels.
@@ -403,7 +420,8 @@ impl UiBuilder {
     fn emit_sdf(&mut self, verts: &[QuadVertex; 6]) {
         let needs_lighting = self.lighting != 1.0;
         let needs_clip = self.clip_rect != NO_CLIP;
-        if needs_lighting || needs_clip {
+        let needs_smoothness = self.corner_smoothness != 0.0;
+        if needs_lighting || needs_clip || needs_smoothness {
             let mut owned = *verts;
             for v in &mut owned {
                 if needs_lighting {
@@ -411,6 +429,9 @@ impl UiBuilder {
                 }
                 if needs_clip {
                     v.clip_rect = self.clip_rect;
+                }
+                if needs_smoothness {
+                    v.corner_smoothness = self.corner_smoothness;
                 }
             }
             self.quads.extend_from_slice(&owned);
@@ -452,6 +473,7 @@ impl UiBuilder {
             border_color,
             blur_radius,
             lighting_intensity,
+            0.0,
         );
         self.emit_sdf(&verts);
     }
@@ -526,6 +548,7 @@ impl UiBuilder {
             border_width,
             border_color,
             1.0,
+            0.0,
         ));
     }
 
@@ -550,6 +573,7 @@ impl UiBuilder {
             0.0,
             [0.0; 4],
             1.0,
+            0.0,
         ));
     }
 
@@ -574,6 +598,7 @@ impl UiBuilder {
             0.0,
             [0.0; 4],
             1.0,
+            0.0,
         ));
     }
 
@@ -598,6 +623,7 @@ impl UiBuilder {
             0.0,
             [0.0; 4],
             1.0,
+            0.0,
         ));
     }
 
@@ -623,6 +649,7 @@ impl UiBuilder {
             0.0,
             [0.0; 4],
             1.0,
+            0.0,
         ));
     }
 
@@ -768,6 +795,7 @@ impl UiBuilder {
         let r = (t * 0.5).min(1.0);
         self.emit_sdf(&quad_vertices_sdf(
             x, y, w, t, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0, 0.0,
+            0.0,
         ));
     }
 
@@ -776,6 +804,7 @@ impl UiBuilder {
         let r = (t * 0.5).min(1.0);
         self.emit_sdf(&quad_vertices_sdf(
             x, y, t, h, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0, 0.0,
+            0.0,
         ));
     }
 
@@ -1636,6 +1665,7 @@ impl UiBuilder {
             no_border,
             0.0,
             0.0,
+            0.0,
         ));
         // Vertical bar
         self.emit_sdf(&quad_vertices_sdf(
@@ -1649,6 +1679,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
             0.0,
         ));
@@ -1679,6 +1710,7 @@ impl UiBuilder {
             no_border,
             0.0,
             0.0,
+            0.0,
         ));
         // Diagonal 2: top-right to bottom-left (-π/4)
         self.emit_sdf(&quad_vertices_sdf_rotated(
@@ -1693,6 +1725,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
             0.0,
         ));
@@ -1714,6 +1747,7 @@ impl UiBuilder {
             [r; 4],
             0.0,
             [0.0; 4],
+            0.0,
             0.0,
             0.0,
         ));
@@ -1776,6 +1810,7 @@ impl UiBuilder {
                 [tooth_r; 4],
                 0.0,
                 no_border,
+                0.0,
                 0.0,
                 0.0,
             ));
@@ -1843,7 +1878,7 @@ impl UiBuilder {
         let mcx = (bottom.0 + top_right.0) / 2.0;
         let mcy = (bottom.1 + top_right.1) / 2.0;
         self.emit_sdf(&quad_vertices_sdf_rotated(
-            mcx, mcy, len, t, angle, self.vw, self.vh, color, radii, 0.0, no_border, 0.0, 0.0,
+            mcx, mcy, len, t, angle, self.vw, self.vh, color, radii, 0.0, no_border, 0.0, 0.0, 0.0,
         ));
         // Branch line: mid-trunk → top-left
         let fork_y = cy + hh * 0.1;
@@ -1855,7 +1890,7 @@ impl UiBuilder {
         let mcx2 = (fork_x + top_left.0) / 2.0;
         let mcy2 = (fork_y + top_left.1) / 2.0;
         self.emit_sdf(&quad_vertices_sdf_rotated(
-            mcx2, mcy2, len2, t, angle2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0, 0.0,
+            mcx2, mcy2, len2, t, angle2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0, 0.0, 0.0,
         ));
     }
 
@@ -1891,6 +1926,7 @@ impl UiBuilder {
             no_border,
             0.0,
             0.0,
+            0.0,
         ));
         // Arm: top-right → bottom-center
         let dx2 = bc.0 - tr.0;
@@ -1911,6 +1947,7 @@ impl UiBuilder {
             no_border,
             0.0,
             0.0,
+            0.0,
         ));
         // Arm: top-left → top-right (closes the top edge)
         let dx3 = tr.0 - tl.0;
@@ -1929,6 +1966,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
             0.0,
         ));
@@ -1963,6 +2001,7 @@ impl UiBuilder {
             no_border,
             0.0,
             0.0,
+            0.0,
         ));
         // Bottom arm: center-right → bottom-left
         let bot = (cx - half * 0.4, cy + half);
@@ -1982,6 +2021,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
             0.0,
         ));
@@ -2021,6 +2061,7 @@ impl UiBuilder {
         self.emit_sdf(&quad_vertices_sdf_rotated(
             mcx_top, mcy_top, len_top, t, angle_top, self.vw, self.vh, color, radii, 0.0,
             no_border, 0.0, 0.0,
+            0.0,
         ));
         // Lower arm: (caret_mid_x, caret_mid_y) → (caret_x, caret_bot_y)
         let dx_bot = caret_x - caret_mid_x;
@@ -2032,6 +2073,7 @@ impl UiBuilder {
         self.emit_sdf(&quad_vertices_sdf_rotated(
             mcx_bot, mcy_bot, len_bot, t, angle_bot, self.vw, self.vh, color, radii, 0.0,
             no_border, 0.0, 0.0,
+            0.0,
         ));
         // Cursor line (horizontal bar next to the caret)
         let cursor_x = cx + hw * 0.05;

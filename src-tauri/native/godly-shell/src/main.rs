@@ -2139,6 +2139,7 @@ impl App {
                                     [0.0; 4],
                                     6.0 * self.scale_factor,
                                     0.0,
+                                    0.0,
                                 ));
                             }
                         }
@@ -2190,7 +2191,7 @@ impl App {
                             };
 
                             sel_verts.extend_from_slice(&ui::quad_renderer::quad_vertices_sdf(
-                                px, py, pw, ph, vw, vh, sel_color, radii, 0.5, sel_border, 0.0, 0.0,
+                                px, py, pw, ph, vw, vh, sel_color, radii, 0.5, sel_border, 0.0, 0.0, 0.0,
                             ));
                         }
 
@@ -2276,6 +2277,7 @@ impl App {
                                             [0.0; 4],
                                             4.0 * self.scale_factor,
                                             0.0,
+                                            0.0,
                                         ),
                                     );
 
@@ -2297,6 +2299,7 @@ impl App {
                                             [radius; 4],
                                             0.0,
                                             [0.0; 4],
+                                            0.0,
                                             0.0,
                                         ),
                                     );
@@ -2329,6 +2332,7 @@ impl App {
                                             [0.0; 4],
                                             3.0 * self.scale_factor,
                                             0.0,
+                                            0.0,
                                         ),
                                     );
                                     // Hollow outline (transparent fill + border)
@@ -2344,6 +2348,7 @@ impl App {
                                             [radius; 4],
                                             outline_w,
                                             outline_color,
+                                            0.0,
                                             0.0,
                                             0.0,
                                         ),
@@ -2369,6 +2374,7 @@ impl App {
                                             [radius; 4],
                                             0.0,
                                             [0.0; 4],
+                                            0.0,
                                             0.0,
                                             0.0,
                                         ),
