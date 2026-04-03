@@ -26,12 +26,12 @@ const CONTENT_PAD_TOP: f32 = 12.0;
 const CONTENT_PAD_BOTTOM: f32 = 20.0;
 const BODY_LINE_HEIGHT: f32 = 13.0 * 1.55; // web: fontSize 13, lineHeight 1.55
 const PARAGRAPH_LINE_HEIGHT: f32 = 13.0 * 1.6; // web: fontSize 13, lineHeight 1.6
-const SUB_ROW_HEIGHT: f32 = 14.0;
-const HEADING_HEIGHT: f32 = 14.0;
-const USER_MESSAGE_HEIGHT: f32 = 25.0;
-const THOUGHTS_HEIGHT: f32 = 12.0; // web: fontSize 12
-const COMMAND_HEIGHT: f32 = 24.0;
-const EDITING_HEIGHT: f32 = 12.0;
+const SUB_ROW_HEIGHT: f32 = 12.0 * 1.5 + 2.0; // web: fontSize 12, inherited lineHeight 1.5, padding "1px 0"
+const HEADING_HEIGHT: f32 = 14.0 * 1.5; // web: fontSize 14, inherited lineHeight 1.5
+const USER_MESSAGE_HEIGHT: f32 = 13.0 * 1.5 + 12.0; // web: fontSize 13, inherited lineHeight 1.5, padding "6px 12px"
+const THOUGHTS_HEIGHT: f32 = 12.0 * 1.5; // web: fontSize 12, inherited lineHeight 1.5
+const COMMAND_HEIGHT: f32 = 12.0 * 1.5 + 12.0; // web: fontSize 12, inherited lineHeight 1.5, padding "6px 10px"
+const EDITING_HEIGHT: f32 = 12.0 * 1.5; // web: fontSize 12, inherited lineHeight 1.5
 const CURSOR_HEIGHT: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy)]

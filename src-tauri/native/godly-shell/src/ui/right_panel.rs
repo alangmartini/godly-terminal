@@ -227,7 +227,7 @@ impl RightPanel {
             ui.text_ui_scaled(
                 text,
                 "}",
-                status.x + s(10.0),
+                status.x + s(14.0), // web: padding "0 14px"
                 status_y,
                 status_fg,
                 colors::BG_STATUS,
@@ -239,7 +239,7 @@ impl RightPanel {
             ui.text_ui_scaled(
                 text,
                 hint,
-                status.right() - hint_w - s(10.0),
+                status.right() - hint_w - s(14.0), // web: padding "0 14px"
                 status_y,
                 status_fg,
                 colors::BG_STATUS,
