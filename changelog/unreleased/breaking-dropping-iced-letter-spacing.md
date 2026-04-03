@@ -1,2 +1,2 @@
 ### Added
-- **Letter-spacing support for text rendering** — Added `letter_spacing` field to `TextCommand` and `set_last_letter_spacing()` builder helper. Applied web reference values: 0.2px on content headings, 0.5px on sidebar directory path, 0.3px on poem title, 0.2px on poem stanzas
+- **Letter-spacing support** — text rendering now supports per-command letter-spacing matching the web reference values (0.5 for directory path, 0.2 for headings, 0.3 for poem titles)
