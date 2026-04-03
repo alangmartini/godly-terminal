@@ -131,7 +131,9 @@ struct VertexOutput {
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(input.position, 0.0, 1.0);
-    out.fill_color = input.fill_color;
+    // Convert fill_color from sRGB to linear so GPU hardware interpolation
+    // (for gradients) happens in perceptually correct linear space.
+    out.fill_color = vec4<f32>(srgb_to_linear(input.fill_color.rgb), input.fill_color.a);
     out.local_pos = input.local_pos;
     out.rect_half_ext = input.rect_half_ext;
     out.corner_radii = input.corner_radii;
@@ -141,6 +143,19 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.rotation = input.rotation;
     out.lighting_intensity = input.lighting_intensity;
     return out;
+}
+
+// sRGB ↔ linear conversion for correct gradient interpolation.
+// Vertex colors are specified in sRGB space (matching CSS hex/rgb values).
+// The GPU interpolates vertex outputs linearly, so we convert to linear in
+// the vertex shader — the GPU then interpolates in linear space — and convert
+// back to sRGB in the fragment shader before dither/lighting.
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2));
+}
+
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
 }
 
 // Signed distance to a rounded rectangle with per-corner radii.
@@ -181,7 +196,11 @@ fn material_grain(pos: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let fill = input.fill_color;
+    // Convert interpolated linear fill_color back to sRGB.  The vertex shader
+    // linearized it so the GPU's hardware interpolation (for gradients) happens
+    // in perceptually correct linear space.  The rest of the fragment shader
+    // expects sRGB for dither, lighting, and the final pow(2.2) output path.
+    let fill = vec4<f32>(linear_to_srgb(input.fill_color.rgb), input.fill_color.a);
     let he = input.rect_half_ext;
     let screen_pos = input.position.xy;
 
