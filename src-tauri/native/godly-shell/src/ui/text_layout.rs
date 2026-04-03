@@ -8,6 +8,29 @@ pub enum UiFontKind {
     Mono,
 }
 
+/// CSS-style font weight matching the web reference values.
+/// Maps directly to DirectWrite `DWRITE_FONT_WEIGHT_*` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum FontWeight {
+    Regular = 400,
+    Medium = 500,
+    SemiBold = 600,
+    Bold = 700,
+}
+
+impl FontWeight {
+    pub fn from_bold(bold: bool) -> Self {
+        if bold { FontWeight::Bold } else { FontWeight::Regular }
+    }
+
+    /// Returns `true` for weights that should select the bold font face
+    /// in rasterizers that only distinguish regular vs bold (e.g. GlyphKey).
+    pub fn is_bold(self) -> bool {
+        (self as u16) >= 600
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UiTextLayout {
     pub width: f32,
@@ -27,7 +50,7 @@ struct LayoutKey {
     font: UiFontKind,
     text: String,
     size_q4: u16,
-    bold: bool,
+    weight: FontWeight,
     italic: bool,
 }
 
@@ -65,6 +88,7 @@ impl UiTextLayoutEngine {
         Ok(Self {})
     }
 
+    /// Layout text with a boolean bold flag (backward compat).
     pub fn layout(
         &self,
         font: UiFontKind,
@@ -73,13 +97,25 @@ impl UiTextLayoutEngine {
         bold: bool,
         italic: bool,
     ) -> Option<UiTextLayout> {
+        self.layout_weighted(font, text, font_size_px, FontWeight::from_bold(bold), italic)
+    }
+
+    /// Layout text with a specific CSS-style font weight.
+    pub fn layout_weighted(
+        &self,
+        font: UiFontKind,
+        text: &str,
+        font_size_px: f32,
+        weight: FontWeight,
+        italic: bool,
+    ) -> Option<UiTextLayout> {
         #[cfg(windows)]
         {
             let key = LayoutKey {
                 font,
                 text: text.to_string(),
                 size_q4: (font_size_px.max(0.0) * 4.0).round() as u16,
-                bold,
+                weight,
                 italic,
             };
             let mut inner = self.inner.borrow_mut();
@@ -92,7 +128,7 @@ impl UiTextLayoutEngine {
         }
         #[cfg(not(windows))]
         {
-            let _ = (font, text, font_size_px, bold, italic);
+            let _ = (font, text, font_size_px, weight, italic);
             None
         }
     }
@@ -107,7 +143,7 @@ fn compute_layout(
     use windows::core::PCWSTR;
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_REGULAR, DWRITE_HIT_TEST_METRICS,
+        DWRITE_FONT_WEIGHT, DWRITE_HIT_TEST_METRICS,
         DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP,
     };
 
@@ -120,11 +156,7 @@ fn compute_layout(
     let locale = wide("en-US");
     let utf16: Vec<u16> = key.text.encode_utf16().collect();
 
-    let weight = if key.bold {
-        DWRITE_FONT_WEIGHT_BOLD
-    } else {
-        DWRITE_FONT_WEIGHT_REGULAR
-    };
+    let weight = DWRITE_FONT_WEIGHT(key.weight as i32);
     let style = if key.italic {
         DWRITE_FONT_STYLE_ITALIC
     } else {

@@ -266,9 +266,11 @@ impl ReferencePane {
         label: &str,
         bg: [f32; 4],
     ) -> f32 {
-        ui.text_mono_bold_scaled_mixed(text, label, x, y, colors::FG_BRIGHT, bg, HEADING_SCALE);
+        // Half-leading offset: (lineHeight 1.5 * fontSize 14 - fontSize 14) / 2 = 3.5
+        let half_leading = text.s(3.5);
+        ui.text_mono_bold_scaled_mixed(text, label, x, y + half_leading, colors::FG_BRIGHT, bg, HEADING_SCALE);
         ui.set_last_letter_spacing(0.2); // web: letterSpacing 0.2
-        y + text.s(14.0)
+        y + text.s(21.0) // web: fontSize 14 * lineHeight 1.5
     }
 
     fn draw_paragraph(
@@ -339,13 +341,18 @@ impl ReferencePane {
         lines: &[&str],
         bg: [f32; 4],
     ) -> f32 {
+        // Web: fontSize 12, inherited lineHeight 1.5, padding "1px 0"
+        // Row height = 12 * 1.5 + 2 = 20.0 CSS pixels
+        let half_leading = text.s(3.0); // (18 - 12) / 2
+        let row_pad = text.s(1.0); // padding "1px 0" top
+        let row_h = text.s(20.0); // 12 * 1.5 + 2.0
         for line in lines {
-            // Web: • (bullet) at #484f58, text at #8b949e, fontSize 12
+            let text_y = y + row_pad + half_leading;
             ui.text_mono_scaled_mixed(
                 text,
                 "\u{2022}",
                 x,
-                y,
+                text_y,
                 colors::STATUS_DEFAULT,
                 bg,
                 SMALL_SCALE,
@@ -354,12 +361,12 @@ impl ReferencePane {
                 text,
                 line,
                 x + self.inline_lead(text, "\u{2022}", SMALL_SCALE, INLINE_GAP),
-                y,
+                text_y,
                 colors::FG_SECONDARY,
                 bg,
                 SMALL_SCALE,
             );
-            y += text.s(14.0);
+            y += row_h;
         }
         y
     }
@@ -390,14 +397,16 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         let s = |v: f32| text.s(v);
-        let text_h = s(13.0);
+        // Web: fontSize 13, inherited lineHeight 1.5, padding "6px 12px"
+        // Total height = 13 * 1.5 + 12 = 31.5; half-leading = (19.5 - 13) / 2 = 3.25
         let rect = Rect {
             x,
             y,
             width: text.text_width_mono_scaled(label, BODY_SCALE) + s(24.0),
-            height: text_h + s(12.0),
+            height: s(31.5),
         };
-        ui.fill_rounded(
+        // Web: borderRadius "0 4px 4px 0" — right side rounded only
+        ui.fill_rounded_custom(
             Rect {
                 x: rect.x + s(3.0),
                 y: rect.y,
@@ -405,7 +414,7 @@ impl ReferencePane {
                 height: rect.height,
             },
             colors::BG_ACTIVE_ACC,
-            s(4.0),
+            [0.0, s(4.0), s(4.0), 0.0], // [TL, TR, BR, BL]
         );
         ui.fill(
             Rect {
@@ -416,11 +425,11 @@ impl ReferencePane {
             },
             colors::ACCENT_BLUE,
         );
-        ui.text_mono_scaled_mixed(
+        ui.text_mono_medium_scaled_mixed(
             text,
             label,
             rect.x + s(12.0),
-            rect.y + s(6.0),
+            rect.y + s(9.25), // 6px padding + 3.25px half-leading
             [0.769, 0.698, 0.541, 1.0], // #c4b28a
             bg,
             BODY_SCALE,
@@ -438,12 +447,14 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         let label = format!("{count} thoughts \u{25B8}");
-        // Web: checkmark at fontSize 13, label at fontSize 12
+        // Web: checkmark at fontSize 13, label at fontSize 12, inherited lineHeight 1.5
+        // Half-leading = (12 * 1.5 - 12) / 2 = 3.0
+        let half_leading = text.s(3.0);
         ui.text_mono_scaled_mixed(
             text,
             "\u{2713}",
             x,
-            y,
+            y + half_leading,
             colors::ACCENT_GREEN,
             bg,
             BODY_SCALE,
@@ -452,12 +463,12 @@ impl ReferencePane {
             text,
             &label,
             x + self.inline_lead(text, "\u{2713}", BODY_SCALE, THOUGHTS_GAP),
-            y,
+            y + half_leading,
             colors::FG_MUTED,
             bg,
             SMALL_SCALE,
         );
-        y + text.s(12.0) // web: fontSize 12
+        y + text.s(18.0) // web: fontSize 12 * lineHeight 1.5
     }
 
     fn draw_command_row(
@@ -471,11 +482,13 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         let s = |v: f32| text.s(v);
+        // Web: fontSize 12, inherited lineHeight 1.5, padding "6px 10px"
+        // Total height = 12 * 1.5 + 12 = 30; text y = 6px padding + 3px half-leading = 9px
         let rect = Rect {
             x,
             y,
             width,
-            height: s(24.0),
+            height: s(30.0),
         };
         ui.fill_rounded(rect, [0.039, 0.047, 0.063, 1.0], s(5.0)); // #0a0c10
         ui.stroke_rounded(rect, s(5.0), 1.0, [0.118, 0.129, 0.157, 1.0]); // #1e2128
@@ -483,8 +496,8 @@ impl ReferencePane {
             text,
             command,
             rect.x + s(10.0),
-            rect.y + s(6.0),
-            colors::FG_SECONDARY,
+            rect.y + s(9.0), // 6px padding + 3px half-leading
+            colors::FG_MUTED, // web: color "#6e7681"
             bg,
             SMALL_SCALE,
         );
@@ -494,7 +507,7 @@ impl ReferencePane {
             text,
             arrow,
             rect.right() - arrow_w - s(10.0),
-            rect.y + s(6.0),
+            rect.y + s(9.0), // 6px padding + 3px half-leading
             colors::STATUS_PATH,
             bg,
             SMALL_SCALE,
@@ -510,13 +523,15 @@ impl ReferencePane {
         y: f32,
         bg: [f32; 4],
     ) -> f32 {
-        ui.text_mono_scaled_mixed(text, "::", x, y, colors::STATUS_PATH, bg, SMALL_SCALE);
+        // Web: fontSize 12, inherited lineHeight 1.5; half-leading = 3.0
+        let half_leading = text.s(3.0);
+        ui.text_mono_scaled_mixed(text, "::", x, y + half_leading, colors::STATUS_PATH, bg, SMALL_SCALE);
         let lead = self.inline_lead(text, "::", SMALL_SCALE, THOUGHTS_GAP);
         ui.text_mono_scaled_mixed(
             text,
             "Editing files",
             x + lead,
-            y,
+            y + half_leading,
             colors::FG_MUTED,
             bg,
             SMALL_SCALE,
@@ -527,12 +542,12 @@ impl ReferencePane {
             x + lead
                 + text.text_width_mono_scaled("Editing files", SMALL_SCALE)
                 + text.s(THOUGHTS_GAP),
-            y,
+            y + half_leading,
             colors::STATUS_PATH,
             bg,
             SMALL_SCALE,
         );
-        y + text.s(12.0)
+        y + text.s(18.0) // web: fontSize 12 * lineHeight 1.5
     }
 
     fn draw_cursor(&self, ui: &mut UiBuilder, text: &UiTextRenderer, x: f32, y: f32) {

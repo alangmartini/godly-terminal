@@ -117,7 +117,7 @@ impl GlyphAtlas {
         }
 
         // Rasterize the glyph.
-        let glyph = rasterizer.rasterize(key.codepoint, font_size_px, key.bold, key.italic);
+        let glyph = rasterizer.rasterize(key.codepoint, font_size_px, key.weight, key.italic);
 
         // For UI font glyphs, use actual glyph width for slot sizing (proportional).
         // For terminal font, use the fixed cell_w.

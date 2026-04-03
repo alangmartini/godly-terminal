@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-03 (Iteration 93)
+Last updated: 2026-04-03 (Iteration 95)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -95,6 +95,19 @@ Last updated: 2026-04-03 (Iteration 93)
 | Sub-bullet character | Done | Changed from • (bullet) to · (middle dot) and color from STATUS_DEFAULT to STATUS_PATH (#3b4048) matching web exactly (iteration 92) |
 | Thoughts checkmark size | Done | Checkmark ✓ now renders at fontSize 13 (BODY_SCALE) instead of 12, matching web's fontSize: 13. Arrow changed from > to ▸ (iteration 92) |
 | Transcript font scale | Done | BODY_SCALE 13.6/14.0→13.0/14.0, SMALL_SCALE 12.6/14.0→12.0/14.0 matching web fontSize 13 and 12 exactly (iteration 93) |
+| Granular font weights | Done | Four distinct weights (400/500/600/700) replacing binary bold/regular, matching web fontWeight per element exactly (iteration 95) |
+| Block lineHeight inheritance | Done | Heading, user-message, thoughts, command, editing, sub-bullet block heights now include inherited lineHeight 1.5 from content container, closing ~75px cumulative vertical drift (iteration 96) |
+
+## Changes in Iteration 96
+
+1. **Block heights corrected for inherited lineHeight** — Six layout constants in `reference_layout.rs` now use `fontSize × 1.5` (the inherited CSS `lineHeight: 1.5` from the content container): HEADING_HEIGHT 14→21, USER_MESSAGE_HEIGHT 25→31.5, THOUGHTS_HEIGHT 12→18, COMMAND_HEIGHT 24→30, EDITING_HEIGHT 12→18, SUB_ROW_HEIGHT 14→20. Previously these used only fontSize, causing ~75px of cumulative vertical drift across the full transcript.
+2. **Text vertically centered in taller blocks** — Render functions in `reference_pane.rs` now apply half-leading offsets: headings +3.5px, user messages text y from 6→9.25px, thoughts +3.0px, command text y from 6→9.0px, editing +3.0px, sub-bullets +4.0px (1px padding + 3px half-leading). Background rectangles for user-message and command blocks match new heights.
+
+## Changes in Iteration 95
+
+1. **Granular font weight support** — Added `FontWeight` enum (Regular=400, Medium=500, SemiBold=600, Bold=700) threaded through the full rendering pipeline: `text_layout.rs` → `builder.rs` → `terminal_renderer.rs` → DirectWrite rasterizer. DirectWrite now loads four font faces per font family instead of two.
+2. **Per-element font weights matched to web** — Tab active names → SemiBold (600), tab numbered circle → Bold (700), process indicators → SemiBold (600). Session numbers → Medium (500), session names → SemiBold (600), agent names → SemiBold (600), status badges → SemiBold (600). User message text → Medium (500). Previously these were all either Regular (400) or Bold (700).
+3. **Width measurement uses correct weights** — `text_width_ui_weighted_scaled()` added so layout calculations (intrinsic tab widths, badge sizing) use the correct glyph metrics for each weight.
 
 ## Changes in Iteration 93
 

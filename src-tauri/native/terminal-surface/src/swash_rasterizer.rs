@@ -46,9 +46,10 @@ impl GlyphRasterizer for SwashRasterizer {
         &mut self,
         ch: char,
         font_size_px: f32,
-        bold: bool,
+        weight: u16,
         _italic: bool,
     ) -> Option<RasterizedGlyph> {
+        let bold = weight >= 600;
         if self.font_data.is_empty() {
             return None;
         }
@@ -185,7 +186,7 @@ mod tests {
     fn rasterize_a_returns_nonempty_alpha() {
         let mut rast = SwashRasterizer::new();
         rast.load_font(TEST_FONT, 0);
-        let glyph = rast.rasterize('A', 14.0, false, false).unwrap();
+        let glyph = rast.rasterize('A', 14.0, 400, false).unwrap();
         assert!(glyph.width > 0);
         assert!(glyph.height > 0);
         assert!(!glyph.data.is_empty());
@@ -197,8 +198,8 @@ mod tests {
     fn rasterize_bold_changes_output() {
         let mut rast = SwashRasterizer::new();
         rast.load_font(TEST_FONT, 0);
-        let normal = rast.rasterize('A', 14.0, false, false).unwrap();
-        let bold = rast.rasterize('A', 14.0, true, false).unwrap();
+        let normal = rast.rasterize('A', 14.0, 400, false).unwrap();
+        let bold = rast.rasterize('A', 14.0, 700, false).unwrap();
         // Bold should produce a glyph (possibly wider or with more coverage)
         assert!(bold.width > 0);
         assert!(bold.height > 0);
@@ -216,7 +217,7 @@ mod tests {
         let mut rast = SwashRasterizer::new();
         rast.load_font(TEST_FONT, 0);
         // Private use area character unlikely to exist in Geist Mono
-        let result = rast.rasterize('\u{F0000}', 14.0, false, false);
+        let result = rast.rasterize('\u{F0000}', 14.0, 400, false);
         assert!(result.is_none());
     }
 

@@ -128,15 +128,17 @@ impl TerminalRenderer {
             let use_serif = matches!(cmd.font_kind, TextFontKind::UiSerif);
             let mut fallback_x = cmd.x;
 
+            let weight_u16 = cmd.weight as u16;
+
             for (index, ch) in cmd.text.chars().enumerate() {
                 let entry = match cmd.font_kind {
                     TextFontKind::TerminalMono => {
-                        let key = GlyphKey::new(ch, font_size, cmd.bold, cmd.italic);
+                        let key = GlyphKey::new_weighted(ch, font_size, weight_u16, cmd.italic, 0);
                         self.glyph_atlas
                             .get_or_insert(key, &mut *self.rasterizer, font_size)
                     }
                     TextFontKind::UiMono => {
-                        let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 3);
+                        let key = GlyphKey::new_weighted(ch, font_size, weight_u16, cmd.italic, 3);
                         if let Some(rast) = self.ui_mono_rasterizer.as_mut() {
                             self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
                         } else {
@@ -148,7 +150,7 @@ impl TerminalRenderer {
                         let Some(rast) = self.ui_rasterizer.as_mut() else {
                             continue;
                         };
-                        let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 1);
+                        let key = GlyphKey::new_weighted(ch, font_size, weight_u16, cmd.italic, 1);
                         self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
                     }
                     TextFontKind::UiSerif => {
@@ -159,7 +161,7 @@ impl TerminalRenderer {
                         else {
                             continue;
                         };
-                        let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 2);
+                        let key = GlyphKey::new_weighted(ch, font_size, weight_u16, cmd.italic, 2);
                         self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
                     }
                 };
