@@ -494,8 +494,6 @@ impl Sidebar {
         // Bottom panel: running agents/processes — matches web reference layout:
         // borderTop "1px solid #1a1d25", directory path header, two-line items
         // with icon + name + status badge (right-aligned) + × + wrapped description.
-        eprintln!("SIDEBAR_DBG footer={} agents={} rect=({:.0},{:.0},{:.0},{:.0})",
-            self.show_footer_sections, self.agents.len(), sidebar.x, sidebar.y, sidebar.width, sidebar.height);
         if self.show_footer_sections && !self.agents.is_empty() {
             let header_section_h = s(24.0); // directory path header
             let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
