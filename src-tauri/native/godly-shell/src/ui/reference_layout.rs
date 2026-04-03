@@ -117,7 +117,8 @@ impl ReferencePaneLayoutEngine {
             block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_INTRO) as f32, 4.0, 4.0, text),
             block_style(s(HEADING_HEIGHT), 18.0, 8.0, text),
             block_style(
-                s(BODY_LINE_HEIGHT + 2.0 + SUB_ROW_HEIGHT * 4.0),
+                s(BODY_LINE_HEIGHT) * lc(BLOCK_VERIFICATION_BULLET) as f32
+                    + s(2.0 + SUB_ROW_HEIGHT * 4.0),
                 4.0,
                 4.0,
                 text,
