@@ -1,5 +1,3 @@
 [target.x86_64-pc-windows-msvc]
-linker = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40.33807/bin/Hostx64/x64/link.exe"
-
-[build]
-rustflags = ["-C", "linker=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40.33807/bin/Hostx64/x64/link.exe"]
+# Override stale user/global linker paths with a workspace-local resolver.
+linker = ".cargo\\msvc-linker.cmd"
