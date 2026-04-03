@@ -18,7 +18,7 @@ use super::widget::Rect;
 
 const BODY_SCALE: f32 = 13.6 / 14.0;
 const SMALL_SCALE: f32 = 12.6 / 14.0;
-const HEADING_SCALE: f32 = 1.05;
+const HEADING_SCALE: f32 = 14.0 / 14.0; // web: fontSize 14
 const LINK_COLOR: [f32; 4] = colors::ACCENT_SKY;
 const CODE_BG: [f32; 4] = [0.110, 0.125, 0.188, 1.0]; // #1c2030
 const BODY_LINE_HEIGHT: f32 = 13.6 * 1.55;
@@ -478,7 +478,7 @@ impl ReferencePane {
             height: s(24.0),
         };
         ui.fill_rounded(rect, [0.039, 0.047, 0.063, 1.0], s(5.0)); // #0a0c10
-        ui.stroke_rounded(rect, s(5.0), 1.0, [0.118, 0.129, 0.157, 0.45]); // softened #1e2128
+        ui.stroke_rounded(rect, s(5.0), 1.0, [0.118, 0.129, 0.157, 1.0]); // #1e2128
         ui.text_mono_scaled_mixed(
             text,
             command,
