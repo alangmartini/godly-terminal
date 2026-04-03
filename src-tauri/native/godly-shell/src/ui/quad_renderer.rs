@@ -25,8 +25,9 @@ pub struct QuadVertex {
     pub blur_radius: f32,
     pub rotation: f32,
     pub lighting_intensity: f32,
+    pub clip_rect: [f32; 4], // x_min, y_min, x_max, y_max in screen pixels
 }
-// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 = 88 bytes
+// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 + 16 = 104 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -91,9 +92,15 @@ impl QuadVertex {
                 offset: 84,
                 shader_location: 9,
             },
+            // clip_rect: screen-pixel clip bounds (x_min, y_min, x_max, y_max)
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 88,
+                shader_location: 10,
+            },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 88,
+            array_stride: 104,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -112,6 +119,7 @@ struct VertexInput {
     @location(7) blur_radius: f32,
     @location(8) rotation: f32,
     @location(9) lighting_intensity: f32,
+    @location(10) clip_rect: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -125,6 +133,7 @@ struct VertexOutput {
     @location(6) @interpolate(flat) blur_radius: f32,
     @location(7) @interpolate(flat) rotation: f32,
     @location(8) @interpolate(flat) lighting_intensity: f32,
+    @location(9) @interpolate(flat) clip_rect: vec4<f32>,
 };
 
 @vertex
@@ -142,6 +151,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.blur_radius = input.blur_radius;
     out.rotation = input.rotation;
     out.lighting_intensity = input.lighting_intensity;
+    out.clip_rect = input.clip_rect;
     return out;
 }
 
@@ -204,6 +214,22 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let he = input.rect_half_ext;
     let screen_pos = input.position.xy;
 
+    // Clip rectangle: discard fragments outside the clip bounds with smooth AA.
+    // clip_rect = (x_min, y_min, x_max, y_max) in screen pixels.
+    // Default [0, 0, 99999, 99999] means no clipping (z > 50000 sentinel check).
+    var clip_alpha = 1.0;
+    let cr = input.clip_rect;
+    if (cr.z < 50000.0) {
+        let clip_dx = max(cr.x - screen_pos.x, screen_pos.x - cr.z);
+        let clip_dy = max(cr.y - screen_pos.y, screen_pos.y - cr.w);
+        let clip_d = max(clip_dx, clip_dy);
+        if (clip_d > 1.0) {
+            discard;
+        }
+        // 1px feather for anti-aliased clip edges
+        clip_alpha = 1.0 - smoothstep(-1.0, 1.0, clip_d);
+    }
+
     // Fast path: flat quads with no SDF (rect_half_ext.x <= 0 signals flat mode)
     if (he.x <= 0.0) {
         // Apply dither + grain in sRGB space BEFORE linearization.
@@ -220,7 +246,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // With PREMULTIPLIED_ALPHA_BLENDING, this produces correct compositing
         // of semi-transparent layers (shadows, glows, hover transitions) and
         // eliminates dark fringes at anti-aliased edges of colored elements.
-        return vec4<f32>(linear * fill.a, fill.a);
+        let flat_a = fill.a * clip_alpha;
+        return vec4<f32>(linear * flat_a, flat_a);
     }
 
     // Rotate local_pos into shape space when rotation is non-zero
@@ -392,7 +419,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Premultiplied alpha: RGB is pre-scaled by final alpha so the blend
     // unit can use (One, OneMinusSrcAlpha) — the industry standard for UI
     // compositing (Skia, Direct2D, CoreGraphics).
-    let final_a = color.a * aa;
+    let final_a = color.a * aa * clip_alpha;
     let dith = dither_noise(screen_pos);
     let linear = pow(color.rgb + vec3<f32>(dith), vec3<f32>(2.2));
     let rgb = linear * final_a;
@@ -528,6 +555,7 @@ pub fn quad_vertices(
         blur_radius: 0.0,
         rotation: 0.0,
         lighting_intensity: 0.0, // flat quads have no SDF lighting
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
     };
 
     [
@@ -618,6 +646,7 @@ fn quad_vertices_gradient_dir(
         blur_radius: 0.0,
         rotation: 0.0,
         lighting_intensity: 0.0, // flat quads have no SDF lighting
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
     };
 
     // Vertical gradient: top=color_a, bottom=color_b
@@ -704,6 +733,7 @@ pub fn quad_vertices_sdf(
         blur_radius,
         rotation: 0.0,
         lighting_intensity,
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
     };
 
     [
@@ -772,6 +802,7 @@ pub fn quad_vertices_sdf_gradient(
         blur_radius: 0.0,
         rotation: 0.0,
         lighting_intensity,
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
     };
 
     [
@@ -840,6 +871,7 @@ pub fn quad_vertices_sdf_gradient_h(
         blur_radius: 0.0,
         rotation: 0.0,
         lighting_intensity,
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
     };
 
     // Horizontal: left=fill_color_left, right=fill_color_right
@@ -924,6 +956,7 @@ pub fn quad_vertices_sdf_rotated(
         blur_radius,
         rotation,
         lighting_intensity,
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
     };
 
     [

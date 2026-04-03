@@ -298,6 +298,9 @@ impl UiTextRenderer {
 
 /// Collects quad vertices and text commands for UI chrome, then returns them
 /// together via `finish()`.
+/// Default clip rect: effectively no clipping (sentinel value detected by shader).
+const NO_CLIP: [f32; 4] = [0.0, 0.0, 99999.0, 99999.0];
+
 pub struct UiBuilder {
     quads: Vec<QuadVertex>,
     text_commands: Vec<TextCommand>,
@@ -306,6 +309,10 @@ pub struct UiBuilder {
     /// SDF surface lighting intensity: 0.0 = flat CSS-like, 1.0 = full 3D lighting.
     /// Applied to all SDF quads emitted after this is set.
     lighting: f32,
+    /// Screen-pixel clip bounds (x_min, y_min, x_max, y_max).
+    /// Fragments outside this rect are discarded with smooth AA at edges.
+    /// Default NO_CLIP disables clipping.
+    clip_rect: [f32; 4],
 }
 
 impl UiBuilder {
@@ -316,6 +323,7 @@ impl UiBuilder {
             vw,
             vh,
             lighting: 0.0,
+            clip_rect: NO_CLIP,
         }
     }
 
@@ -325,6 +333,18 @@ impl UiBuilder {
         self.lighting = intensity;
     }
 
+    /// Set a clip rectangle (in screen pixels) for subsequently emitted quads.
+    /// Fragments outside this rect are discarded with smooth 1px AA at edges.
+    /// Implements CSS `overflow: hidden` semantics.
+    pub fn set_clip(&mut self, rect: Rect) {
+        self.clip_rect = [rect.x, rect.y, rect.x + rect.width, rect.y + rect.height];
+    }
+
+    /// Clear the clip rectangle, disabling clipping for subsequent quads.
+    pub fn clear_clip(&mut self) {
+        self.clip_rect = NO_CLIP;
+    }
+
     /// Viewport dimensions in physical pixels.
     pub fn viewport(&self) -> (f32, f32) {
         (self.vw, self.vh)
@@ -332,7 +352,7 @@ impl UiBuilder {
 
     /// Solid filled rectangle (flat, no rounding).
     pub fn fill(&mut self, rect: Rect, color: [f32; 4]) {
-        self.quads.extend_from_slice(&quad_vertices(
+        let mut verts = quad_vertices(
             rect.x,
             rect.y,
             rect.width,
@@ -340,12 +360,14 @@ impl UiBuilder {
             self.vw,
             self.vh,
             color,
-        ));
+        );
+        self.stamp_clip(&mut verts);
+        self.quads.extend_from_slice(&verts);
     }
 
     /// Flat rectangle with vertical gradient (no rounding).
     pub fn fill_gradient(&mut self, rect: Rect, top_color: [f32; 4], bottom_color: [f32; 4]) {
-        self.quads.extend_from_slice(&quad_vertices_gradient(
+        let mut verts = quad_vertices_gradient(
             rect.x,
             rect.y,
             rect.width,
@@ -354,12 +376,14 @@ impl UiBuilder {
             self.vh,
             top_color,
             bottom_color,
-        ));
+        );
+        self.stamp_clip(&mut verts);
+        self.quads.extend_from_slice(&verts);
     }
 
     /// Flat rectangle with horizontal gradient (no rounding).
     pub fn fill_gradient_h(&mut self, rect: Rect, left_color: [f32; 4], right_color: [f32; 4]) {
-        self.quads.extend_from_slice(&quad_vertices_gradient_h(
+        let mut verts = quad_vertices_gradient_h(
             rect.x,
             rect.y,
             rect.width,
@@ -368,21 +392,39 @@ impl UiBuilder {
             self.vh,
             left_color,
             right_color,
-        ));
+        );
+        self.stamp_clip(&mut verts);
+        self.quads.extend_from_slice(&verts);
     }
 
     // -- SDF rounded rectangle methods ----------------------------------------
 
-    /// Emit SDF vertices with the current lighting intensity applied.
+    /// Emit SDF vertices with the current lighting intensity and clip rect applied.
     fn emit_sdf(&mut self, verts: &[QuadVertex; 6]) {
-        if self.lighting != 1.0 {
+        let needs_lighting = self.lighting != 1.0;
+        let needs_clip = self.clip_rect != NO_CLIP;
+        if needs_lighting || needs_clip {
             let mut owned = *verts;
             for v in &mut owned {
-                v.lighting_intensity = self.lighting;
+                if needs_lighting {
+                    v.lighting_intensity = self.lighting;
+                }
+                if needs_clip {
+                    v.clip_rect = self.clip_rect;
+                }
             }
             self.quads.extend_from_slice(&owned);
         } else {
             self.quads.extend_from_slice(verts);
+        }
+    }
+
+    /// Stamp the current clip rect onto a flat quad vertex array.
+    fn stamp_clip(&self, verts: &mut [QuadVertex]) {
+        if self.clip_rect != NO_CLIP {
+            for v in verts.iter_mut() {
+                v.clip_rect = self.clip_rect;
+            }
         }
     }
 
@@ -708,14 +750,16 @@ impl UiBuilder {
 
     /// Horizontal line of thickness `t`.
     pub fn hline(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4]) {
-        self.quads
-            .extend_from_slice(&quad_vertices(x, y, w, t, self.vw, self.vh, color));
+        let mut verts = quad_vertices(x, y, w, t, self.vw, self.vh, color);
+        self.stamp_clip(&mut verts);
+        self.quads.extend_from_slice(&verts);
     }
 
     /// Vertical line of thickness `t`.
     pub fn vline(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4]) {
-        self.quads
-            .extend_from_slice(&quad_vertices(x, y, t, h, self.vw, self.vh, color));
+        let mut verts = quad_vertices(x, y, t, h, self.vw, self.vh, color);
+        self.stamp_clip(&mut verts);
+        self.quads.extend_from_slice(&verts);
     }
 
     /// Anti-aliased horizontal line via SDF.  Produces crisp sub-pixel edges
@@ -741,37 +785,17 @@ impl UiBuilder {
         let transparent = [color[0], color[1], color[2], 0.0];
         if fade > 0.0 && h > fade * 2.0 {
             // Top fade segment
-            self.quads.extend_from_slice(&quad_vertices_gradient(
-                x,
-                y,
-                t,
-                fade,
-                self.vw,
-                self.vh,
-                transparent,
-                color,
-            ));
+            let mut v1 = quad_vertices_gradient(x, y, t, fade, self.vw, self.vh, transparent, color);
+            self.stamp_clip(&mut v1);
+            self.quads.extend_from_slice(&v1);
             // Solid middle
-            self.quads.extend_from_slice(&quad_vertices(
-                x,
-                y + fade,
-                t,
-                h - fade * 2.0,
-                self.vw,
-                self.vh,
-                color,
-            ));
+            let mut v2 = quad_vertices(x, y + fade, t, h - fade * 2.0, self.vw, self.vh, color);
+            self.stamp_clip(&mut v2);
+            self.quads.extend_from_slice(&v2);
             // Bottom fade segment
-            self.quads.extend_from_slice(&quad_vertices_gradient(
-                x,
-                y + h - fade,
-                t,
-                fade,
-                self.vw,
-                self.vh,
-                color,
-                transparent,
-            ));
+            let mut v3 = quad_vertices_gradient(x, y + h - fade, t, fade, self.vw, self.vh, color, transparent);
+            self.stamp_clip(&mut v3);
+            self.quads.extend_from_slice(&v3);
         } else {
             self.vline(x, y, h, t, color);
         }
@@ -782,37 +806,17 @@ impl UiBuilder {
         let transparent = [color[0], color[1], color[2], 0.0];
         if fade > 0.0 && w > fade * 2.0 {
             // Left fade segment
-            self.quads.extend_from_slice(&quad_vertices_gradient_h(
-                x,
-                y,
-                fade,
-                t,
-                self.vw,
-                self.vh,
-                transparent,
-                color,
-            ));
+            let mut v1 = quad_vertices_gradient_h(x, y, fade, t, self.vw, self.vh, transparent, color);
+            self.stamp_clip(&mut v1);
+            self.quads.extend_from_slice(&v1);
             // Solid middle
-            self.quads.extend_from_slice(&quad_vertices(
-                x + fade,
-                y,
-                w - fade * 2.0,
-                t,
-                self.vw,
-                self.vh,
-                color,
-            ));
+            let mut v2 = quad_vertices(x + fade, y, w - fade * 2.0, t, self.vw, self.vh, color);
+            self.stamp_clip(&mut v2);
+            self.quads.extend_from_slice(&v2);
             // Right fade segment
-            self.quads.extend_from_slice(&quad_vertices_gradient_h(
-                x + w - fade,
-                y,
-                fade,
-                t,
-                self.vw,
-                self.vh,
-                color,
-                transparent,
-            ));
+            let mut v3 = quad_vertices_gradient_h(x + w - fade, y, fade, t, self.vw, self.vh, color, transparent);
+            self.stamp_clip(&mut v3);
+            self.quads.extend_from_slice(&v3);
         } else {
             self.hline(x, y, w, t, color);
         }
