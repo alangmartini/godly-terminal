@@ -21,8 +21,8 @@ const SMALL_SCALE: f32 = 12.6 / 14.0;
 const HEADING_SCALE: f32 = 14.0 / 14.0; // web: fontSize 14
 const LINK_COLOR: [f32; 4] = colors::ACCENT_SKY;
 const CODE_BG: [f32; 4] = [0.110, 0.125, 0.188, 1.0]; // #1c2030
-const BODY_LINE_HEIGHT: f32 = 13.6 * 1.55;
-const PARAGRAPH_LINE_HEIGHT: f32 = 13.6 * 1.6;
+const BODY_LINE_HEIGHT: f32 = 13.0 * 1.55; // web: fontSize 13, lineHeight 1.55
+const PARAGRAPH_LINE_HEIGHT: f32 = 13.0 * 1.6; // web: fontSize 13, lineHeight 1.6
 const INLINE_GAP: f32 = 8.0;
 const THOUGHTS_GAP: f32 = 6.0;
 const SUB_BULLET_INDENT: f32 = 12.0;
@@ -340,20 +340,20 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         for line in lines {
-            // Web: · (middle dot) at #3b4048, text at #8b949e, fontSize 12
+            // Web: • (bullet) at #484f58, text at #8b949e, fontSize 12
             ui.text_mono_scaled_mixed(
                 text,
-                "\u{00B7}",
+                "\u{2022}",
                 x,
                 y,
-                colors::STATUS_PATH,
+                colors::STATUS_DEFAULT,
                 bg,
                 SMALL_SCALE,
             );
             ui.text_mono_scaled_mixed(
                 text,
                 line,
-                x + self.inline_lead(text, "\u{00B7}", SMALL_SCALE, INLINE_GAP),
+                x + self.inline_lead(text, "\u{2022}", SMALL_SCALE, INLINE_GAP),
                 y,
                 colors::FG_SECONDARY,
                 bg,
