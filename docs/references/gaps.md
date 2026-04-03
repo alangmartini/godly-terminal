@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-03 (Iteration 92)
+Last updated: 2026-04-03 (Iteration 93)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -94,6 +94,11 @@ Last updated: 2026-04-03 (Iteration 92)
 | Letter spacing | Done | letterSpacing 0.2 on content headings, 0.5 on sidebar directory path, 0.3 on poem title, 0.2 on poem stanzas matching web exactly (iteration 91) |
 | Sub-bullet character | Done | Changed from • (bullet) to · (middle dot) and color from STATUS_DEFAULT to STATUS_PATH (#3b4048) matching web exactly (iteration 92) |
 | Thoughts checkmark size | Done | Checkmark ✓ now renders at fontSize 13 (BODY_SCALE) instead of 12, matching web's fontSize: 13. Arrow changed from > to ▸ (iteration 92) |
+| Transcript font scale | Done | BODY_SCALE 13.6/14.0→13.0/14.0, SMALL_SCALE 12.6/14.0→12.0/14.0 matching web fontSize 13 and 12 exactly (iteration 93) |
+
+## Changes in Iteration 93
+
+1. **Transcript font scale corrected** — BODY_SCALE changed from 13.6/14.0 (0.971) to 13.0/14.0 (0.929) and SMALL_SCALE from 12.6/14.0 (0.900) to 12.0/14.0 (0.857), matching web's fontSize 13 and fontSize 12 exactly. Native text was ~4.6% larger than web, affecting line wrapping points and typographic density.
 
 ## Changes in Iteration 92
 
