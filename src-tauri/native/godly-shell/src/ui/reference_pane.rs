@@ -16,8 +16,8 @@ use super::reference_layout::{
 };
 use super::widget::Rect;
 
-const BODY_SCALE: f32 = 13.6 / 14.0;
-const SMALL_SCALE: f32 = 12.6 / 14.0;
+const BODY_SCALE: f32 = 13.0 / 14.0; // web: fontSize 13
+const SMALL_SCALE: f32 = 12.0 / 14.0; // web: fontSize 12
 const HEADING_SCALE: f32 = 14.0 / 14.0; // web: fontSize 14
 const LINK_COLOR: [f32; 4] = colors::ACCENT_SKY;
 const CODE_BG: [f32; 4] = [0.110, 0.125, 0.188, 1.0]; // #1c2030
