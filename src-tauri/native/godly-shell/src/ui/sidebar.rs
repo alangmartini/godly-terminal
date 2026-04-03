@@ -494,8 +494,8 @@ impl Sidebar {
         // Bottom panel: running agents/processes — matches web reference layout:
         // borderTop "1px solid #1a1d25", directory path header, two-line items
         // with icon + name + status badge (right-aligned) + × + wrapped description.
-        log::info!("sidebar.build: show_footer={} agents={} sidebar_h={:.0} sidebar_bottom={:.0}",
-            self.show_footer_sections, self.agents.len(), sidebar.height, sidebar.bottom());
+        eprintln!("SIDEBAR_DBG footer={} agents={} rect=({:.0},{:.0},{:.0},{:.0})",
+            self.show_footer_sections, self.agents.len(), sidebar.x, sidebar.y, sidebar.width, sidebar.height);
         if self.show_footer_sections && !self.agents.is_empty() {
             let header_section_h = s(24.0); // directory path header
             let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
@@ -627,7 +627,7 @@ impl Sidebar {
                 //       marginLeft "auto" pushes badge to the right
                 let sw = text.text_width_ui_scaled(status_text, font_scale::PX10);
                 let status_badge_pad_h = s(6.0); // web: padding "1px 6px" horizontal
-                let status_badge_pad_v = s(2.0); // web: padding "1px 6px" vertical
+                let status_badge_pad_v = s(1.0); // web: padding "1px 6px" vertical
                 let status_badge_h = ch * font_scale::PX10 + status_badge_pad_v * 2.0;
                 let status_badge_w = sw + status_badge_pad_h * 2.0;
                 let status_badge_x = dismiss_x - s(6.0) - status_badge_w;
@@ -646,7 +646,7 @@ impl Sidebar {
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y =
                     status_badge_y + (status_badge_h - ch * font_scale::PX10) / 2.0;
-                ui.text_ui_scaled(
+                ui.text_ui_bold_scaled(
                     text,
                     status_text,
                     status_text_x,
@@ -654,7 +654,7 @@ impl Sidebar {
                     status_color,
                     panel_bg,
                     font_scale::PX10,
-                ); // web: fontSize 10
+                ); // web: fontSize 10, fontWeight 600
 
                 // Description lines — web: fontSize 11, color "#555d6b",
                 // paddingLeft 20, lineHeight 1.3, word-wrapped
