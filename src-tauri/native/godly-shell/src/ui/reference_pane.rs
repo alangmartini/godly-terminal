@@ -340,19 +340,20 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         for line in lines {
+            // Web: · (middle dot) at #3b4048, text at #8b949e, fontSize 12
             ui.text_mono_scaled_mixed(
                 text,
-                "\u{2022}",
+                "\u{00B7}",
                 x,
                 y,
-                colors::STATUS_DEFAULT,
+                colors::STATUS_PATH,
                 bg,
                 SMALL_SCALE,
             );
             ui.text_mono_scaled_mixed(
                 text,
                 line,
-                x + self.inline_lead(text, "\u{2022}", SMALL_SCALE, INLINE_GAP),
+                x + self.inline_lead(text, "\u{00B7}", SMALL_SCALE, INLINE_GAP),
                 y,
                 colors::FG_SECONDARY,
                 bg,
