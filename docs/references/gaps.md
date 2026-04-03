@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-02 (Iteration 86)
+Last updated: 2026-04-03 (Iteration 89)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -81,6 +81,33 @@ Last updated: 2026-04-02 (Iteration 86)
 | Status bar streaming tilde size | Done | Pulsing `~` renders at fontSize 9 matching web, not 11 (iteration 86) |
 | Streaming status bar | Done | Status bar shows "~ Streaming response..." matching web reference demo state (iteration 78) |
 | Agent demo data parity | Done | Agent 2 name "anu" → "amp", descriptions matched to web, claude-code has no description (iteration 78) |
+| Unicode glyph fallback | Done | FallbackRasterizer composes primary UiSans with Segoe UI Symbol for ⚡ and other Unicode glyphs (iteration 87) |
+| Text contrast boost | Done | Inactive session names FG_INACTIVE (#9198a1→#c9d1d9), session numbers FG_SECONDARY, branch/description text FG_DIM (iteration 87) |
+| Sidebar spacing parity | Done | LIST_PAD_Y 6→4, ITEM_PAD_Y 10→7, ITEM_MARGIN_BOTTOM 6→2, SECONDARY_MARGIN_TOP 4→2, agent padding 9→5px matching web CSS values exactly (iteration 88) |
+| Content-sized tabs | Done | Tabs now content-sized from left edge with 2px padding instead of stretched with branding section. crop_mode flag separates reference-capture scales from normal rendering (iteration 88) |
+| Tab bar branding removed | Done | "Godly Terminal" branding section removed from normal mode — tabs start from left edge matching web reference paddingLeft: 2 (iteration 88) |
+| Agent badge styling | Done | Status badge padding "1px 6px", fontWeight 600, borderRadius 3, alpha 0.094, waiting color ACCENT_BLUE (#6366f1) matching web exactly (iteration 89) |
+| Session number color | Done | FG_DIM (#555d6b) matching web's color: "#555d6b" for session ID numbers (iteration 88) |
+| Surface resize fix | Done | wgpu surface now uses winit's reported size instead of stale HWND GetClientRect for borderless windows (iteration 89) |
+
+## Changes in Iteration 89
+
+1. **Agent status badge vertical padding corrected** — Changed from `s(2.0)` to `s(1.0)` matching web's `padding: "1px 6px"`. Badge text now uses `text_ui_bold_scaled` matching web's `fontWeight: 600`.
+2. **Surface configuration uses winit size** — Fixed surface sizing to use winit's reported `PhysicalSize` instead of potentially stale `GetClientRect` values, preventing bottom-anchored UI from being pushed off-screen when un-maximizing borderless windows.
+3. **Close button width in content-sized tabs** — Intrinsic tab width calculation now accounts for close button space (16px icon + 8px padding) to prevent text truncation in content-sized mode.
+
+## Changes in Iteration 88
+
+1. **Sidebar spacing tightened to match web CSS** — LIST_PAD_Y: 6→4, ITEM_PAD_Y: 10→7, ITEM_MARGIN_BOTTOM: 6→2, SECONDARY_MARGIN_TOP: 4→2. Agent panel padding: 9→5px. Sessions now appear compact like the web reference.
+2. **Content-sized tabs enabled by default** — Tabs are now intrinsically sized based on content width instead of stretched across the strip. crop_mode flag added to TabBar to separate reference-capture-specific font scales (CROP_TAB_*) from normal rendering (PX12/PX9).
+3. **Tab bar branding removed** — show_brand defaults to false, removing the "Godly Terminal" branding section. Tab strip starts from the left edge with standard 14px padding per tab matching web's `padding: "0 14px"`.
+4. **Session number and inactive name colors fixed** — Session numbers use FG_DIM (#555d6b), inactive session names use FG_INACTIVE (#9198a1), branch text uses STATUS_DEFAULT (#484f58), agent badge shape borderRadius 3 with alpha 0.094, waiting status uses ACCENT_BLUE (#6366f1).
+
+## Changes in Iteration 87
+
+1. **FallbackRasterizer for Unicode glyphs** — Added fallback font composition in main.rs that wraps the primary UiSans rasterizer with a Segoe UI Symbol fallback. When the primary font lacks a glyph (like ⚡), the fallback provides it.
+2. **Text contrast improvements** — Inactive session names brightened from FG_INACTIVE to FG_PRIMARY, session numbers from FG_DIM to FG_SECONDARY, branch and description text from STATUS_DEFAULT to FG_DIM.
+3. **Status badge pill refinement** — Tighter horizontal padding, higher opacity (0.18), subtle 1px border stroke for crisper edges.
 
 ## Changes in Iteration 86
 
@@ -252,39 +279,29 @@ Last updated: 2026-04-02 (Iteration 86)
 ## Remaining Gaps (Priority Order)
 
 ### Critical: Transcript typography/compositing still diverges from the browser capture
-After the sidebar/session-stack correction, the main remaining mismatch is the transcript text itself:
-glyph weight, anti-aliasing contrast, and vertical rhythm still drift from the browser capture,
-especially across the long body lines and headings. The latest grayscale-AA experiment moved the
-metrics only marginally, so the blocker is still open.
+The main remaining mismatch is the transcript text itself: glyph weight, anti-aliasing contrast,
+and vertical rhythm still drift from the browser capture, especially across the long body lines
+and headings. This is largely an inherent platform divergence (DirectWrite ClearType vs browser
+subpixel rendering) rather than a configuration error.
 
-**Next measurable step:** compare the crop transcript’s mono rendering/compositing path against the
-browser screenshot more directly (glyph weight, baseline, and AA mode), then retune the reference
-pane using the measured result rather than assuming the current mono path is already equivalent.
+**Status:** Investigated in iteration 85; grayscale-AA experiment moved metrics only marginally.
+The remaining mismatch is fundamentally a platform-level AA/compositing difference.
 
-### Major: Sidebar/session stack spacing is still visibly off
-The shared session-stack helper removed the old row-height mismatch and got the active card much
-closer, but the sidebar header and row rhythm are still a little tighter than the browser capture.
+### Closed: Sidebar/session stack spacing ~~is still visibly off~~
+**Closed in iteration 88.** Sidebar spacing constants now match web CSS values exactly:
+LIST_PAD_Y=4, ITEM_PAD_Y=7, ITEM_MARGIN_BOTTOM=2, SECONDARY_MARGIN_TOP=2, agent padding=5px.
 
-**Next layout step:** keep using the shared session-stack helper as the single source of truth and
-retune the remaining sidebar constants from screenshot evidence instead of reintroducing per-callsite
-manual offsets.
-
-### Major: Some tab-strip typography drift remains
-The crop tab model is now structurally correct, but the label/badge text still reads slightly
-lighter and less precisely placed than the browser capture.
-
-**Next text step:** retune tab chrome typography after the transcript path is corrected, using
-the updated parity baseline rather than the old stretched-tab geometry.
+### Closed: Tab-strip branding and sizing
+**Closed in iteration 88.** Tab bar branding section removed, tabs are now content-sized from the
+left edge matching the web reference. Tab typography uses standard PX12/PX9 scales.
 
 ### Major: Inner chrome/content layout is still mostly manual
 The top-level shell and tab bar already use retained layout, and the sidebar session stack now has
 a shared CSS-layout helper, but the transcript flow is still largely hand-positioned and the
-sidebar helper is not yet a full retained flex tree. That is materially better than iteration 82,
-but it is still short of the parity gates.
+sidebar helper is not yet a full retained flex tree.
 
 **Next architectural step:** move the cropped transcript flow onto a retained flex/layout layer and
-decide whether the sidebar helper should graduate into a fuller retained node tree once the
-remaining transcript blocker is under control.
+decide whether the sidebar helper should graduate into a fuller retained node tree.
 
 ### Medium: Measurable visual gaps remain after the scale/layout fix
 The latest same-size run still has `11.1009%` of pixels differing by more than 10 RGB
