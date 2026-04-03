@@ -1,11 +1,8 @@
-//! GPU glyph atlas shader pipeline for Iced's `Shader` widget.
+//! GPU glyph atlas shader pipeline.
 //!
 //! Renders terminal content as per-cell textured quads sampling from a
 //! persistent glyph atlas texture.  Each cell is 6 vertices (2 triangles)
 //! carrying clip-space position, atlas UV, foreground and background colour.
-
-use iced::widget::shader;
-use iced::{mouse, Rectangle};
 
 use crate::atlas_vertex_builder::CellVertex;
 use crate::glyph_atlas::AtlasUpdate;
@@ -22,7 +19,7 @@ pub struct CachedAtlasFrame {
     pub viewport_size: (u32, u32),
 }
 
-/// Shader widget program — pass to `iced::widget::Shader::new()`.
+/// Frame data carrier — call `build_primitive()` to produce an `AtlasPrimitive`.
 pub struct AtlasShaderProgram {
     pub vertices: Vec<CellVertex>,
     pub atlas_update: Option<AtlasUpdate>,
@@ -83,15 +80,31 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Apply enhanced contrast to boost text weight.
     let coverage = vec3<f32>(enhance(raw.r), enhance(raw.g), enhance(raw.b));
 
-    // Linearise fg/bg using ClearType gamma (1.8).
+    // --- Transparent-bg mode: grayscale AA with alpha compositing ---
+    // Used for UI chrome text that sits on gradient / SDF-rounded backgrounds
+    // drawn by the quad pipeline.  Subpixel (ClearType) AA requires knowing
+    // the exact background colour; when bg is transparent we fall back to
+    // grayscale coverage so the text alpha-composites cleanly over whatever
+    // is already in the framebuffer.
+    if (input.bg_color.a < 0.5) {
+        let gray = max(coverage.r, max(coverage.g, coverage.b));
+        let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
+        return vec4<f32>(pow(fg_lin, vec3<f32>(2.2 / 1.8)), gray);
+    }
+
+    // --- Opaque-bg mode: ClearType subpixel blending (terminal cells) ---
+    // Linearise fg/bg using ClearType gamma (1.8) for perceptually correct blending.
     let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
     let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
 
-    // Per-channel subpixel blending in linear space.
+    // Per-channel subpixel blending in gamma-1.8 linear space.
     let blended = mix(bg_lin, fg_lin, coverage);
 
-    // Back to gamma space.
-    return vec4<f32>(pow(blended, vec3<f32>(INV_GAMMA)), 1.0);
+    // The sRGB render target applies pow(x, 1/2.2) encoding, but our blending
+    // was done in gamma-1.8 space.  Convert: to get correct sRGB output,
+    // output pow(blended, 2.2/1.8) so the surface encoding produces
+    // pow(blended, 2.2/1.8 * 1/2.2) = pow(blended, 1/1.8) = sRGB from gamma-1.8.
+    return vec4<f32>(pow(blended, vec3<f32>(2.2 / 1.8)), 1.0);
 }
 "#;
 
@@ -166,8 +179,8 @@ impl AtlasPipeline {
     }
 }
 
-impl shader::Pipeline for AtlasPipeline {
-    fn new(
+impl AtlasPipeline {
+    pub fn new(
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -233,7 +246,7 @@ impl shader::Pipeline for AtlasPipeline {
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: Some(wgpu::BlendState::REPLACE),
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -291,16 +304,12 @@ pub struct AtlasPrimitive {
     atlas_update: Option<AtlasUpdate>,
 }
 
-impl shader::Primitive for AtlasPrimitive {
-    type Pipeline = AtlasPipeline;
-
-    fn prepare(
+impl AtlasPrimitive {
+    pub fn prepare(
         &self,
-        pipeline: &mut Self::Pipeline,
+        pipeline: &mut AtlasPipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _bounds: &Rectangle,
-        _viewport: &shader::Viewport,
     ) {
         // --- Atlas texture update ---
         if let Some(ref update) = self.atlas_update {
@@ -366,9 +375,9 @@ impl shader::Primitive for AtlasPrimitive {
         pipeline.vertex_count = self.vertices.len() as u32;
     }
 
-    fn draw(
+    pub fn draw(
         &self,
-        pipeline: &Self::Pipeline,
+        pipeline: &AtlasPipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> bool {
         if pipeline.vertex_count == 0 {
@@ -382,20 +391,8 @@ impl shader::Primitive for AtlasPrimitive {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Program (shader::Program for Iced Shader widget)
-// ---------------------------------------------------------------------------
-
-impl<Message> shader::Program<Message> for AtlasShaderProgram {
-    type State = ();
-    type Primitive = AtlasPrimitive;
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+impl AtlasShaderProgram {
+    pub fn build_primitive(&self) -> AtlasPrimitive {
         AtlasPrimitive {
             vertices: self.vertices.clone(),
             atlas_update: self.atlas_update.clone(),

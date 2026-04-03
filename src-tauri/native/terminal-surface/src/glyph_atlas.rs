@@ -20,6 +20,8 @@ pub struct AtlasEntry {
     pub v0: f32,
     pub u1: f32,
     pub v1: f32,
+    /// Actual horizontal advance width in pixels (for proportional font positioning).
+    pub advance: f32,
 }
 
 /// Data bundle for uploading the atlas to the GPU.
@@ -116,25 +118,45 @@ impl GlyphAtlas {
         // Rasterize the glyph.
         let glyph = rasterizer.rasterize(key.codepoint, font_size_px, key.bold, key.italic);
 
-        // Convert to RGBA subpixel coverage and blit into a cell-sized region.
+        // For UI font glyphs, use actual glyph width for slot sizing (proportional).
+        // For terminal font, use the fixed cell_w.
+        let slot_w = if key.font_id != 0 {
+            if let Some(g) = &glyph {
+                // Slot must fit the glyph bitmap (bearing_x + width) and be at least advance-wide
+                let bitmap_extent = (g.bearing_x.max(0) as u32).saturating_add(g.width);
+                let advance_w = g.advance.ceil() as u32;
+                bitmap_extent.max(advance_w).max(1)
+            } else {
+                self.cell_w
+            }
+        } else {
+            self.cell_w
+        };
+
+        let advance = glyph.as_ref().map_or(self.cell_w as f32, |g| g.advance);
+
+        // Convert to RGBA subpixel coverage and blit into a slot-sized region.
         let rgba = glyph.as_ref().map(|g| to_rgba_coverage(g));
-        let entry = self.pack_cell(rgba.as_ref(), glyph.as_ref());
+        let entry = self.pack_slot(rgba.as_ref(), glyph.as_ref(), slot_w, advance);
         self.entries.insert(key, entry);
         entry
     }
 
     /// Pack a glyph bitmap (RGBA subpixel coverage) into the next available
-    /// cell-sized region in the atlas.
-    fn pack_cell(
+    /// slot in the atlas. `slot_w` controls horizontal allocation size
+    /// (cell_w for monospace, actual glyph width for proportional).
+    fn pack_slot(
         &mut self,
         rgba: Option<&Vec<u8>>,
         glyph: Option<&crate::glyph_rasterizer::RasterizedGlyph>,
+        slot_w: u32,
+        advance: f32,
     ) -> AtlasEntry {
-        let cw = self.cell_w;
+        let sw = slot_w;
         let ch = self.cell_h;
 
         // Wrap to next row if current row is full.
-        if self.cursor_x + cw > self.width {
+        if self.cursor_x + sw > self.width {
             self.cursor_y += self.row_height + PADDING;
             self.cursor_x = 0;
             self.row_height = 0;
@@ -148,10 +170,10 @@ impl GlyphAtlas {
         let x0 = self.cursor_x;
         let y0 = self.cursor_y;
 
-        // Blit the glyph bitmap at the correct bearing offset within the cell.
+        // Blit the glyph bitmap at the correct bearing offset within the slot.
         if let (Some(rgba_data), Some(g)) = (rgba, glyph) {
             if g.width > 0 && g.height > 0 {
-                // Glyph origin within the cell:
+                // Glyph origin within the slot:
                 let gx = g.bearing_x;
                 let gy = self.baseline_offset as i32 - g.bearing_y;
                 for row in 0..g.height {
@@ -162,6 +184,7 @@ impl GlyphAtlas {
                             && dst_y >= 0
                             && (dst_x as u32) < self.width
                             && (dst_y as u32) < self.height
+                            && (dst_x as u32) < x0 + sw // clip to slot boundary
                         {
                             let src_idx = (row * g.width + col) as usize * 4;
                             let dst_idx =
@@ -179,7 +202,7 @@ impl GlyphAtlas {
         }
 
         // Update packing cursor.
-        self.cursor_x += cw + PADDING;
+        self.cursor_x += sw + PADDING;
         if ch > self.row_height {
             self.row_height = ch;
         }
@@ -188,10 +211,10 @@ impl GlyphAtlas {
         // Compute normalised UV coordinates.
         let u0 = x0 as f32 / self.width as f32;
         let v0 = y0 as f32 / self.height as f32;
-        let u1 = (x0 + cw) as f32 / self.width as f32;
+        let u1 = (x0 + sw) as f32 / self.width as f32;
         let v1 = (y0 + ch) as f32 / self.height as f32;
 
-        AtlasEntry { u0, v0, u1, v1 }
+        AtlasEntry { u0, v0, u1, v1, advance }
     }
 
     /// Double the atlas height, preserving existing data and rescaling UVs.
@@ -213,6 +236,11 @@ impl GlyphAtlas {
         self.height = new_h;
         self.generation += 1;
         self.dirty = true;
+    }
+
+    /// Current atlas texture width in pixels.
+    pub fn atlas_width(&self) -> u32 {
+        self.width
     }
 
     /// Clear the atlas (e.g. on font change). Bumps generation.

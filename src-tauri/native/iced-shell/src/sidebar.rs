@@ -2,8 +2,8 @@ use iced::widget::{button, column, container, mouse_area, row, rule, scrollable,
 use iced::{Border, Color, Element, Font, Length, Padding};
 
 use crate::theme::{
-    ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER, GHOST_SELECTED, SURFACE_BG,
-    TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT, ACCENT_HOVER, BG_SECONDARY, BORDER, DANGER, GHOST_HOVER,
+    GHOST_SELECTED, SURFACE_BG, TEXT_ACTIVE, TEXT_PRIMARY, TEXT_SECONDARY,
 };
 use crate::workspace_state::WorkspaceInfo;
 
@@ -32,6 +32,8 @@ const ICON_SETTINGS: &str = "\u{EB51}";
 const ICON_ADD: &str = "\u{EA60}";
 /// Codicon: folder (workspace icon)
 const ICON_FOLDER: &str = "\u{EA83}";
+/// Codicon: file (document icon for CLAUDE.md buttons)
+const ICON_FILE: &str = "\u{EB60}";
 
 /// Proportional sans-serif for sidebar labels and workspace names.
 const SIDEBAR_FONT: Font = Font {
@@ -202,8 +204,17 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         let has_workspace_notification =
             workspace_signals.has_workspace_notification(ws.id.as_str());
 
-        let row_text = TEXT_PRIMARY();
-        let name_label = text(&ws.name).size(13).color(row_text).font(font);
+        let row_text = if is_active {
+            TEXT_ACTIVE()
+        } else {
+            TEXT_PRIMARY()
+        };
+        let name_font = if is_active {
+            SIDEBAR_FONT_SEMIBOLD
+        } else {
+            font
+        };
+        let name_label = text(&ws.name).size(13).color(row_text).font(name_font);
 
         // Extract folder name for subtitle
         let folder_display = std::path::Path::new(&ws.folder_path)
@@ -223,6 +234,11 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             TEXT_SECONDARY()
         };
 
+        let badge_border_color = if is_active {
+            Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.25)
+        } else {
+            Color::from_rgba(1.0, 1.0, 1.0, 0.06)
+        };
         let badge = container(
             text(format!("{}", terminal_count))
                 .size(10)
@@ -232,8 +248,8 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(badge_bg)),
             border: Border {
-                color: Color::TRANSPARENT,
-                width: 0.0,
+                color: badge_border_color,
+                width: 1.0,
                 radius: 8.0.into(),
             },
             ..container::Style::default()
@@ -282,7 +298,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             ..container::Style::default()
         });
 
-        // Left accent bar: visible on active workspace.
+        // Left accent bar: visible on active workspace with subtle glow.
         let accent_bar_color = if is_active {
             ACCENT()
         } else {
@@ -290,7 +306,7 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         };
         let accent_bar = container(
             Space::new()
-                .width(Length::Fixed(3.0))
+                .width(Length::Fixed(3.5))
                 .height(Length::Fixed(26.0)),
         )
         .style(move |_theme| container::Style {
@@ -298,6 +314,16 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             border: Border {
                 radius: 2.0.into(),
                 ..Border::default()
+            },
+            shadow: if is_active {
+                let a = accent_bar_color;
+                iced::Shadow {
+                    color: Color::from_rgba(a.r, a.g, a.b, 0.35),
+                    offset: iced::Vector::new(1.0, 0.0),
+                    blur_radius: 6.0,
+                }
+            } else {
+                iced::Shadow::default()
             },
             ..container::Style::default()
         });
@@ -331,8 +357,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 0.7,
             )
         };
+        let folder_icon = text(ICON_FOLDER)
+            .font(CODICON_FONT)
+            .size(11)
+            .color(folder_color);
         let folder_label = text(folder_display).size(10).color(folder_color).font(font);
-        let bottom_row = row![worktree_indicator, folder_label]
+        let bottom_row = row![worktree_indicator, folder_icon, folder_label]
             .spacing(4)
             .align_y(iced::Alignment::Center);
 
@@ -351,10 +381,31 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
             .width(Length::Fill)
             .style(move |_theme, status| {
                 let bg = if is_active {
-                    Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.08)
+                    // Slightly stronger accent tint for better active visibility
+                    Color::from_rgba(ACCENT().r, ACCENT().g, ACCENT().b, 0.14)
                 } else {
                     match status {
-                        button::Status::Hovered | button::Status::Pressed => GHOST_HOVER(),
+                        button::Status::Hovered => {
+                            let gh = GHOST_HOVER();
+                            Color::from_rgba(gh.r, gh.g, gh.b, gh.a * 1.2)
+                        }
+                        button::Status::Pressed => {
+                            let gh = GHOST_HOVER();
+                            Color::from_rgba(gh.r, gh.g, gh.b, gh.a * 1.8)
+                        }
+                        _ => Color::TRANSPARENT,
+                    }
+                };
+
+                let border_color = if is_active {
+                    // Accent-tinted border for active workspace
+                    let a = ACCENT();
+                    Color::from_rgba(a.r, a.g, a.b, 0.18)
+                } else {
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            Color::from_rgba(1.0, 1.0, 1.0, 0.04)
+                        }
                         _ => Color::TRANSPARENT,
                     }
                 };
@@ -363,9 +414,18 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     background: Some(iced::Background::Color(bg)),
                     text_color: row_text,
                     border: Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
+                        color: border_color,
+                        width: if is_active || matches!(status, button::Status::Hovered | button::Status::Pressed) { 1.0 } else { 0.0 },
                         radius: 8.0.into(),
+                    },
+                    shadow: if is_active {
+                        iced::Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.15),
+                            offset: iced::Vector::new(0.0, 1.0),
+                            blur_radius: 4.0,
+                        }
+                    } else {
+                        iced::Shadow::default()
                     },
                     ..button::Style::default()
                 }
@@ -405,7 +465,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     text_color: TEXT_PRIMARY(),
-                    border: Border::default(),
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
@@ -427,7 +490,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     text_color: TEXT_PRIMARY(),
-                    border: Border::default(),
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
@@ -456,7 +522,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 button::Style {
                     background: Some(iced::Background::Color(bg)),
                     text_color: TEXT_PRIMARY(),
-                    border: Border::default(),
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 }
             });
@@ -479,7 +548,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
                         text_color: TEXT_PRIMARY(),
-                        border: Border::default(),
+                        border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                         ..button::Style::default()
                     }
                 })
@@ -513,7 +585,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
                         text_color: TEXT_PRIMARY(),
-                        border: Border::default(),
+                        border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                         ..button::Style::default()
                     }
                 })
@@ -543,7 +618,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                     button::Style {
                         background: Some(iced::Background::Color(bg)),
                         text_color: DANGER(),
-                        border: Border::default(),
+                        border: Border {
+                        radius: 4.0.into(),
+                        ..Border::default()
+                    },
                         ..button::Style::default()
                     }
                 });
@@ -562,7 +640,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
                 border: Border {
                     color: BORDER(),
                     width: 1.0,
-                    radius: 4.0.into(),
+                    radius: 6.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 12.0,
                 },
                 ..container::Style::default()
             });
@@ -593,7 +676,10 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     let header = container(
         row![
-            text("WORKSPACES").size(11).color(TEXT_SECONDARY()),
+            text("WORKSPACES")
+                .size(10)
+                .color(TEXT_SECONDARY())
+                .font(SIDEBAR_FONT_SEMIBOLD),
             Space::new().width(Length::Fill),
             settings_btn,
             new_btn,
@@ -601,13 +687,14 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
         .align_y(iced::Alignment::Center)
         .spacing(6),
     )
-    .padding(Padding::from([10, 10]))
+    .padding(Padding::from([10, 12]))
     .style(|_theme| container::Style {
         background: Some(iced::Background::Color(SURFACE_BG())),
-        border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: 0.0.into(),
+        // Subtle shadow so the header feels elevated above the scrollable list
+        shadow: iced::Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.12),
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 4.0,
         },
         ..container::Style::default()
     });
@@ -627,13 +714,19 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
 
     // --- K1: CLAUDE.md editor buttons ---
     let claude_md_btn = |label: &'a str, action: SidebarAction| {
-        let prefixed = label.to_string();
-        button(
-            text(prefixed)
+        let btn_content = row![
+            text(ICON_FILE)
+                .font(CODICON_FONT)
+                .size(12)
+                .color(TEXT_SECONDARY()),
+            text(label.to_string())
                 .size(11)
                 .color(TEXT_SECONDARY())
                 .font(SIDEBAR_FONT),
-        )
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+        button(btn_content)
         .on_press(on_action(action))
         .padding(Padding::from([4, 8]))
         .width(Length::Fill)
@@ -671,8 +764,12 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .padding(Padding::from([4, 8]))
     .width(Length::Fill);
 
-    let header_divider = container(rule::horizontal(1).style(|_theme| rule::Style {
-        color: BORDER(),
+    let header_div_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.45)
+    };
+    let header_divider = container(rule::horizontal(1).style(move |_theme| rule::Style {
+        color: header_div_color,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,
@@ -690,11 +787,21 @@ pub fn view_sidebar<'a, M: Clone + 'a, S: SidebarWorkspaceSignals>(
     .clip(true)
     .style(|_theme| container::Style {
         background: Some(iced::Background::Color(SURFACE_BG())),
+        // Cast a rightward shadow from the sidebar edge for depth separation.
+        shadow: iced::Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+            offset: iced::Vector::new(2.0, 0.0),
+            blur_radius: 8.0,
+        },
         ..container::Style::default()
     });
 
+    let sidebar_div_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.50)
+    };
     let divider = rule::vertical(1).style(move |_theme| rule::Style {
-        color: Color::TRANSPARENT,
+        color: sidebar_div_color,
         radius: 0.0.into(),
         fill_mode: rule::FillMode::Full,
         snap: true,

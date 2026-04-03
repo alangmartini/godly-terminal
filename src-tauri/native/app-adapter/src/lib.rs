@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod keyboard;
 pub mod commands;
 pub mod daemon_client;
 pub mod desktop_notify;

@@ -1,7 +1,7 @@
 //! Builds per-cell vertex data for the GPU glyph atlas renderer.
 
-use godly_protocol::types::{CursorShape, RichGridData};
-use iced::Color;
+use godly_protocol::types::RichGridData;
+use crate::Color;
 
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
@@ -57,6 +57,10 @@ impl CellVertex {
 }
 
 /// Build the vertex buffer for one terminal frame.
+///
+/// `viewport_w`/`viewport_h` are the full window dimensions (for clip-space mapping).
+/// `offset_x`/`offset_y` shift the terminal content within the window (in pixels).
+/// `terminal_w`/`terminal_h` define the visible terminal area (cells outside are clipped).
 pub fn build_vertices(
     grid: &RichGridData,
     atlas: &mut GlyphAtlas,
@@ -66,6 +70,10 @@ pub fn build_vertices(
     default_bg: Color,
     viewport_w: u32,
     viewport_h: u32,
+    offset_x: f32,
+    offset_y: f32,
+    terminal_w: f32,
+    terminal_h: f32,
 ) -> Vec<CellVertex> {
     let phys = metrics.scaled_for_render();
     let cell_w = phys.cell_width;
@@ -77,11 +85,21 @@ pub fn build_vertices(
     let cols = grid.dimensions.cols as usize;
     let rows = grid.dimensions.rows as usize;
 
+    let clip_right = offset_x + terminal_w;
+    let clip_bottom = offset_y + terminal_h;
+
     let mut verts = Vec::with_capacity(rows * cols * 6 + 64);
 
     for (row_idx, row) in grid.rows.iter().enumerate() {
         for (col_idx, cell) in row.cells.iter().enumerate() {
             if cell.wide_continuation {
+                continue;
+            }
+
+            // Clip: skip cells that extend outside the terminal area
+            let cell_px = col_idx as f32 * cell_w + offset_x;
+            let cell_py = row_idx as f32 * cell_h + offset_y;
+            if cell_px + cell_w > clip_right || cell_py + cell_h > clip_bottom {
                 continue;
             }
 
@@ -99,15 +117,17 @@ pub fn build_vertices(
                 fg = brighten_color(fg);
             }
 
-            // --- pixel position (physical) ---
-            let px = (col_idx as f32 * cell_w).round();
-            let py = (row_idx as f32 * cell_h).round();
+            // --- pixel position (physical, offset by chrome) ---
+            let base_x = (col_idx as f32 * cell_w).round();
+            let base_y = (row_idx as f32 * cell_h).round();
+            let px = base_x + offset_x;
+            let py = base_y + offset_y;
             let pw = if cell.wide {
-                ((col_idx + 2) as f32 * cell_w).round() - px
+                ((col_idx + 2) as f32 * cell_w).round() - base_x
             } else {
-                ((col_idx + 1) as f32 * cell_w).round() - px
+                ((col_idx + 1) as f32 * cell_w).round() - base_x
             };
-            let ph = ((row_idx + 1) as f32 * cell_h).round() - py;
+            let ph = ((row_idx + 1) as f32 * cell_h).round() - base_y;
 
             // --- clip-space position ---
             let x0 = px / vw * 2.0 - 1.0;
@@ -154,64 +174,8 @@ pub fn build_vertices(
         }
     }
 
-    // --- cursor ---
-    if !grid.cursor_hidden {
-        let cr = grid.cursor.row as usize;
-        let cc = grid.cursor.col as usize;
-        let cpx = (cc as f32 * cell_w).round();
-        let cpy = (cr as f32 * cell_h).round();
-
-        let cursor_color = [1.0f32, 1.0, 1.0, 0.8];
-
-        match grid.cursor.cursor_style {
-            CursorShape::BlinkBlock | CursorShape::SteadyBlock => {
-                let cx0 = cpx / vw * 2.0 - 1.0;
-                let cy0 = 1.0 - cpy / vh * 2.0;
-                let cx1 = (cpx + cell_w) / vw * 2.0 - 1.0;
-                let cy1 = 1.0 - (cpy + cell_h) / vh * 2.0;
-                push_quad(
-                    &mut verts,
-                    [cx0, cy0],
-                    [cx1, cy1],
-                    [0.0, 0.0],
-                    [0.0, 0.0],
-                    cursor_color,
-                    cursor_color,
-                );
-            }
-            CursorShape::BlinkUnderline | CursorShape::SteadyUnderline => {
-                let uy = cpy + cell_h - 2.0;
-                let cx0 = cpx / vw * 2.0 - 1.0;
-                let cy0 = 1.0 - uy / vh * 2.0;
-                let cx1 = (cpx + cell_w) / vw * 2.0 - 1.0;
-                let cy1 = 1.0 - (uy + 2.0) / vh * 2.0;
-                push_quad(
-                    &mut verts,
-                    [cx0, cy0],
-                    [cx1, cy1],
-                    [0.0, 0.0],
-                    [0.0, 0.0],
-                    cursor_color,
-                    cursor_color,
-                );
-            }
-            CursorShape::BlinkBar | CursorShape::SteadyBar => {
-                let cx0 = cpx / vw * 2.0 - 1.0;
-                let cy0 = 1.0 - cpy / vh * 2.0;
-                let cx1 = (cpx + 2.0) / vw * 2.0 - 1.0;
-                let cy1 = 1.0 - (cpy + cell_h) / vh * 2.0;
-                push_quad(
-                    &mut verts,
-                    [cx0, cy0],
-                    [cx1, cy1],
-                    [0.0, 0.0],
-                    [0.0, 0.0],
-                    cursor_color,
-                    cursor_color,
-                );
-            }
-        }
-    }
+    // Cursor is rendered separately through the SDF quad pipeline for
+    // rounded corners and glow — see main.rs render().
 
     verts
 }

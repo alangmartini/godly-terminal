@@ -1,14 +1,7 @@
 //! Shader-based terminal rendering surface.
 //!
-//! Uses Iced's `Shader` widget with a persistent `wgpu::Texture` that is
-//! updated in-place via `queue.write_texture()`.  This eliminates the
-//! per-frame GPU texture churn caused by `Handle::from_rgba()` (which
-//! creates a new Iced image handle ID on every call, forcing a full
-//! texture upload -> swap -> deallocation cycle that produces visible
-//! blinking).
-
-use iced::widget::shader;
-use iced::{mouse, Rectangle};
+//! Persistent `wgpu::Texture` updated in-place via `queue.write_texture()`.
+//! Eliminates per-frame GPU texture churn.
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -30,7 +23,7 @@ pub struct TerminalPrimitive {
     height: u32,
 }
 
-/// Shader-based terminal surface.  Pass to `iced::widget::Shader::new()`.
+/// Frame data carrier — call `build_primitive()` to produce a `TerminalPrimitive`.
 pub struct TerminalShaderProgram {
     pub pixels: Vec<u8>,
     pub width: u32,
@@ -140,8 +133,8 @@ impl TerminalPipeline {
     }
 }
 
-impl shader::Pipeline for TerminalPipeline {
-    fn new(
+impl TerminalPipeline {
+    pub fn new(
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -246,16 +239,12 @@ impl shader::Pipeline for TerminalPipeline {
 // Primitive impl — per-frame GPU work
 // ---------------------------------------------------------------------------
 
-impl shader::Primitive for TerminalPrimitive {
-    type Pipeline = TerminalPipeline;
-
-    fn prepare(
+impl TerminalPrimitive {
+    pub fn prepare(
         &self,
-        pipeline: &mut Self::Pipeline,
+        pipeline: &mut TerminalPipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _bounds: &Rectangle,
-        _viewport: &shader::Viewport,
     ) {
         let target = (self.width, self.height);
         if target != pipeline.current_size && self.width > 0 && self.height > 0 {
@@ -296,9 +285,9 @@ impl shader::Primitive for TerminalPrimitive {
         }
     }
 
-    fn draw(
+    pub fn draw(
         &self,
-        pipeline: &Self::Pipeline,
+        pipeline: &TerminalPipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> bool {
         if self.width == 0 || self.height == 0 {
@@ -311,20 +300,8 @@ impl shader::Primitive for TerminalPrimitive {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Program impl — Iced shader::Program for the Shader widget
-// ---------------------------------------------------------------------------
-
-impl<Message> shader::Program<Message> for TerminalShaderProgram {
-    type State = ();
-    type Primitive = TerminalPrimitive;
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+impl TerminalShaderProgram {
+    pub fn build_primitive(&self) -> TerminalPrimitive {
         TerminalPrimitive {
             pixels: self.pixels.clone(),
             width: self.width,
