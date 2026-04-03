@@ -89,6 +89,9 @@ pub struct TextCommand {
     /// surface. Crop/reference scenes can set this below 1.0 to render at
     /// fixed pixel sizes instead of OS-DPI-scaled sizes.
     pub raster_scale: f32,
+    /// Extra horizontal space (in CSS pixels) added between each glyph.
+    /// Matches the web `letterSpacing` property. Default 0.0.
+    pub letter_spacing: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -767,7 +770,19 @@ impl UiBuilder {
             glyph_offsets,
             composite,
             raster_scale: renderer.raster_scale,
+            letter_spacing: 0.0,
         });
+    }
+
+    /// Set letter-spacing (CSS pixels) on the most recently pushed text command.
+    pub fn set_last_letter_spacing(&mut self, ls: f32) {
+        if let Some(cmd) = self.text_commands.last_mut() {
+            // Shift glyph offsets to include the extra spacing.
+            for (i, offset) in cmd.glyph_offsets.iter_mut().enumerate() {
+                *offset += i as f32 * ls * cmd.scale;
+            }
+            cmd.letter_spacing = ls;
+        }
     }
 
     /// Record a text draw command (monospace terminal font).

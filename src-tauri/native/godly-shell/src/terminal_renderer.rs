@@ -215,7 +215,8 @@ impl TerminalRenderer {
                         entry.advance
                     } else {
                         phys.cell_width
-                    }) * draw_scale;
+                    }) * draw_scale
+                        + cmd.letter_spacing * cmd.scale;
                 }
             }
         }

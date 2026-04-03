@@ -536,6 +536,7 @@ impl Sidebar {
                 panel_bg,
                 font_scale::PX10,
             ); // web: fontSize 10
+            ui.set_last_letter_spacing(0.5); // web: letterSpacing 0.5
 
             let mut ay = panel_y + header_section_h;
             for (ai, agent) in self.agents.iter().enumerate() {

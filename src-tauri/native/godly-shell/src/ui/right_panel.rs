@@ -165,6 +165,7 @@ impl RightPanel {
             colors::BG_DARK,
             font_scale::PX15,
         ); // web: fontSize 15
+        ui.set_last_letter_spacing(0.3); // web: letterSpacing 0.3
         y += ch * font_scale::PX15 + s(16.0); // marginBottom 16
 
         // Stanzas — web: marginBottom 18, lineHeight 1.7, fontSize 13,
@@ -189,6 +190,7 @@ impl RightPanel {
                     colors::BG_DARK,
                     font_scale::PX13,
                 );
+                ui.set_last_letter_spacing(0.2); // web: letterSpacing 0.2
                 y += stanza_line_h;
             }
             y += stanza_gap - stanza_line_h; // net gap between stanzas

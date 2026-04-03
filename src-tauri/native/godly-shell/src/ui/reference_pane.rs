@@ -65,19 +65,20 @@ impl ReferencePane {
         line_counts[BLOCK_VERIFICATION_BULLET] = inline_runs_line_count(
             &[InlineRun::Text("The rewritten "), InlineRun::Link("README.md"),
               InlineRun::Text(" now reflects the actual sidebar surface:")],
-            bullet_avail, bullet_lead, text, BODY_SCALE) + 4; // +4 sub-bullets
+            bullet_avail, text, BODY_SCALE);
         line_counts[BLOCK_SMOKE_BULLET] = inline_runs_line_count(
             &[InlineRun::Text("I also verified the smoke-test path directly: "),
               InlineRun::Code("bun test"),
               InlineRun::Text(" from the repo root passes right now with 167 passing tests.")],
-            bullet_avail, bullet_lead, text, BODY_SCALE);
+            bullet_avail, text, BODY_SCALE);
         let numbered_lead = self.inline_lead(text, "1.", BODY_SCALE, INLINE_GAP);
+        let numbered_avail = content_w - numbered_lead;
         line_counts[BLOCK_RESIDUAL_NUMBERED] = inline_runs_line_count(
             &[InlineRun::Text("If you want, I can do the same line-by-line cleanup pass on "),
               InlineRun::Link("docs/reference/features-and-keybindings.md"),
               InlineRun::Text(" and the rest of "), InlineRun::Code("docs/"),
               InlineRun::Text(" next.")],
-            content_w - numbered_lead, numbered_lead, text, BODY_SCALE);
+            numbered_avail, text, BODY_SCALE);
 
         let layout = self.layout_engine.borrow_mut().compute_wrapped(pane, text, &line_counts);
         let body_x = layout.content.x;
@@ -102,7 +103,7 @@ impl ReferencePane {
             bg,
         );
 
-        self.draw_bullet_runs(
+        let vb_end = self.draw_bullet_runs(
             ui,
             text,
             layout.blocks[BLOCK_VERIFICATION_BULLET].x,
@@ -119,7 +120,7 @@ impl ReferencePane {
             ui,
             text,
             bullet_text_x + s(SUB_BULLET_INDENT),
-            layout.blocks[BLOCK_VERIFICATION_BULLET].y + s(BODY_LINE_HEIGHT) + s(2.0),
+            vb_end + s(2.0),
             &[
                 "session list shows branch and agent status",
                 "detail panel shows working directory, ports, agent rows, and thread names",
@@ -266,6 +267,7 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         ui.text_mono_bold_scaled_mixed(text, label, x, y, colors::FG_BRIGHT, bg, HEADING_SCALE);
+        ui.set_last_letter_spacing(0.2); // web: letterSpacing 0.2
         y + text.s(14.0)
     }
 
@@ -323,19 +325,9 @@ impl ReferencePane {
         content_w: f32,
     ) -> f32 {
         let lead = self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP);
+        let avail = content_w - lead;
         ui.text_mono_scaled_mixed(text, "\u{2022}", x, y, colors::FG_MUTED, bg, BODY_SCALE);
-        self.draw_inline_runs(
-            ui,
-            text,
-            x + lead,
-            y,
-            runs,
-            BODY_SCALE,
-            bg,
-            x,
-            content_w,
-        );
-        y + text.s(BODY_LINE_HEIGHT)
+        self.draw_inline_runs(ui, text, x + lead, y, runs, BODY_SCALE, bg, avail)
     }
 
     fn draw_sub_bullets(
@@ -382,19 +374,9 @@ impl ReferencePane {
         content_w: f32,
     ) -> f32 {
         let lead = self.inline_lead(text, "1.", BODY_SCALE, INLINE_GAP);
+        let avail = content_w - lead;
         ui.text_mono_scaled_mixed(text, "1.", x, y, colors::FG_MUTED, bg, BODY_SCALE);
-        self.draw_inline_runs(
-            ui,
-            text,
-            x + lead,
-            y,
-            runs,
-            BODY_SCALE,
-            bg,
-            x,
-            content_w,
-        );
-        y + text.s(BODY_LINE_HEIGHT)
+        self.draw_inline_runs(ui, text, x + lead, y, runs, BODY_SCALE, bg, avail)
     }
 
     fn draw_user_message(
@@ -454,7 +436,8 @@ impl ReferencePane {
         count: u32,
         bg: [f32; 4],
     ) -> f32 {
-        let label = format!("{count} thoughts >");
+        let label = format!("{count} thoughts \u{25B8}");
+        // Web: checkmark at fontSize 13, label at fontSize 12
         ui.text_mono_scaled_mixed(
             text,
             "\u{2713}",
@@ -462,12 +445,12 @@ impl ReferencePane {
             y,
             colors::ACCENT_GREEN,
             bg,
-            SMALL_SCALE,
+            BODY_SCALE,
         );
         ui.text_mono_scaled_mixed(
             text,
             &label,
-            x + self.inline_lead(text, "\u{2713}", SMALL_SCALE, THOUGHTS_GAP),
+            x + self.inline_lead(text, "\u{2713}", BODY_SCALE, THOUGHTS_GAP),
             y,
             colors::FG_MUTED,
             bg,
@@ -569,22 +552,24 @@ impl ReferencePane {
         );
     }
 
+    /// Draw inline runs with word-wrapping. Continuation lines wrap to `start_x`
+    /// (the bullet/number indent level). Returns the y position after the last line.
     fn draw_inline_runs(
         &self,
         ui: &mut UiBuilder,
         text: &UiTextRenderer,
-        first_x: f32,
+        start_x: f32,
         y: f32,
         runs: &[InlineRun<'_>],
         scale: f32,
         bg: [f32; 4],
-        start_x: f32,
         avail_width: f32,
-    ) {
+    ) -> f32 {
         let s = |v: f32| text.s(v);
-        let mut cx = first_x;
+        let mut cx = start_x;
         let mut cy = y;
         let right_edge = start_x + avail_width;
+        let line_h = text.s(BODY_LINE_HEIGHT);
 
         for run in runs {
             match run {
@@ -594,32 +579,37 @@ impl ReferencePane {
                         let avail = (right_edge - cx).max(0.0);
                         let full_w = text.text_width_mono_scaled(remaining, scale);
                         if full_w <= avail {
-                            ui.text_mono_scaled_mixed(text, remaining, cx, cy, colors::FG_PRIMARY, bg, scale);
+                            ui.text_mono_scaled_mixed(
+                                text, remaining, cx, cy, colors::FG_PRIMARY, bg, scale,
+                            );
                             cx += full_w;
                             break;
                         }
-                        // Find word break
                         let brk = find_word_break(remaining, avail, text, scale);
                         if brk > 0 {
                             let piece = &remaining[..brk];
-                            ui.text_mono_scaled_mixed(text, piece, cx, cy, colors::FG_PRIMARY, bg, scale);
+                            ui.text_mono_scaled_mixed(
+                                text, piece, cx, cy, colors::FG_PRIMARY, bg, scale,
+                            );
                             remaining = remaining[brk..].trim_start();
                         } else if cx > start_x + 0.5 {
-                            // No break found but we're not at line start — wrap to next line
+                            // No break found but not at line start — wrap
                         } else {
-                            // At line start, no break — render what we can and move on
-                            ui.text_mono_scaled_mixed(text, remaining, cx, cy, colors::FG_PRIMARY, bg, scale);
+                            // At line start, no break — render and move on
+                            ui.text_mono_scaled_mixed(
+                                text, remaining, cx, cy, colors::FG_PRIMARY, bg, scale,
+                            );
                             cx += full_w;
                             break;
                         }
-                        cy += text.s(BODY_LINE_HEIGHT);
+                        cy += line_h;
                         cx = start_x;
                     }
                 }
                 InlineRun::Link(value) => {
                     let width = text.text_width_mono_scaled(value, scale);
                     if cx + width > right_edge && cx > start_x + 0.5 {
-                        cy += text.s(BODY_LINE_HEIGHT);
+                        cy += line_h;
                         cx = start_x;
                     }
                     ui.text_mono_scaled_mixed(text, value, cx, cy, LINK_COLOR, bg, scale);
@@ -638,7 +628,7 @@ impl ReferencePane {
                     let code_w = text.text_width_mono_scaled(value, code_scale);
                     let total_w = code_w + pad_x * 2.0;
                     if cx + total_w > right_edge && cx > start_x + 0.5 {
-                        cy += text.s(BODY_LINE_HEIGHT);
+                        cy += line_h;
                         cx = start_x;
                     }
                     let code_h = s(16.0);
@@ -662,6 +652,7 @@ impl ReferencePane {
                 }
             }
         }
+        cy + line_h
     }
 
     fn inline_lead(&self, text: &UiTextRenderer, marker: &str, scale: f32, gap: f32) -> f32 {
@@ -693,20 +684,17 @@ fn find_word_break(s: &str, avail: f32, text: &UiTextRenderer, scale: f32) -> us
 }
 
 /// Pre-compute how many visual lines a set of inline runs will occupy when
-/// word-wrapped within `avail_width` pixels.  `first_offset` is the x-distance
-/// from the left edge consumed by the bullet/number marker on the first line.
+/// word-wrapped within `avail_width` pixels. `avail_width` should already
+/// account for the bullet/number marker lead.
 fn inline_runs_line_count(
     runs: &[InlineRun<'_>],
     avail_width: f32,
-    first_offset: f32,
     text: &UiTextRenderer,
     scale: f32,
 ) -> usize {
     let mut lines = 1usize;
     let right_edge = avail_width;
-    // cx tracks how far we are from start_x on the current line.
-    // On the first line, the bullet marker occupies `first_offset`.
-    let mut cx = first_offset;
+    let mut cx: f32 = 0.0;
 
     for run in runs {
         match run {
