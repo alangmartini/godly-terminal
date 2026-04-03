@@ -347,9 +347,9 @@ impl Sidebar {
                 font_scale::PX12,
             );
 
-            // Session name (truncated to fit) — web: #e6edf3 active, #c9d1d9 inactive
-            let inactive_name = lerp_color(colors::FG_PRIMARY, colors::FG_BRIGHT, hover_t * 0.6);
-            let name_fg = lerp_color(inactive_name, colors::FG_BRIGHT, active_t); // web: #e6edf3, not white
+            // Session name (truncated to fit) — web: #e6edf3 active, #9198a1 inactive
+            let inactive_name = lerp_color(colors::FG_INACTIVE, colors::FG_PRIMARY, hover_t * 0.6);
+            let name_fg = lerp_color(inactive_name, colors::FG_BRIGHT, active_t); // web: active #e6edf3, inactive #9198a1
             let indicator_text_w = if item.active {
                 text.text_width_ui_scaled("::", font_scale::PX11)
             } else {

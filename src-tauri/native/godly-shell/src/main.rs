@@ -152,7 +152,7 @@ impl App {
         let mut status_bar = ui::status_bar::StatusBar::new();
 
         if scene_mode == SceneMode::WebReferenceCrop {
-            tab_bar.content_sized_tabs = true;
+            tab_bar.crop_mode = true;
             tab_bar.show_brand = false;
             tab_bar.show_indicators = false;
             tab_bar.show_window_controls = false;

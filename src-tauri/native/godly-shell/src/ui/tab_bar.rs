@@ -61,6 +61,10 @@ pub struct TabBar {
     pub show_new_tab_button: bool,
     pub show_tab_close_buttons: bool,
     pub content_sized_tabs: bool,
+    /// When true, use reference-capture-specific font scales and sizes
+    /// (CROP_TAB_* constants) for screenshot parity. When false, use
+    /// standard PX12/PX9 scales even in content-sized mode.
+    pub crop_mode: bool,
     // Smooth animation state
     tab_hover_anim: AnimVec,
     close_hover_anim: AnimVec,
@@ -84,12 +88,13 @@ impl TabBar {
             hovered_button: None,
             hovered_new_tab: false,
             sidebar_width: 0.0,
-            show_brand: true,
+            show_brand: false,
             show_indicators: true,
             show_window_controls: true,
             show_new_tab_button: true,
             show_tab_close_buttons: true,
-            content_sized_tabs: false,
+            content_sized_tabs: true,
+            crop_mode: false,
             tab_hover_anim: AnimVec::default(),
             close_hover_anim: AnimVec::default(),
             new_tab_anim: Anim::default(),
@@ -207,22 +212,22 @@ impl TabBar {
 
     fn intrinsic_tab_widths(&self, scale: f32, text: Option<&UiTextRenderer>) -> Vec<f32> {
         let s = |v: f32| (v * scale).round();
-        let title_scale = if self.content_sized_tabs {
+        let title_scale = if self.crop_mode {
             CROP_TAB_TITLE_SCALE
         } else {
             font_scale::PX12
         };
-        let badge_text_scale = if self.content_sized_tabs {
+        let badge_text_scale = if self.crop_mode {
             CROP_TAB_BADGE_TEXT_SCALE
         } else {
             font_scale::PX9
         };
-        let badge_size = if self.content_sized_tabs {
+        let badge_size = if self.crop_mode {
             CROP_TAB_BADGE_SIZE
         } else {
             16.0
         };
-        let leading_pad = if self.content_sized_tabs {
+        let leading_pad = if self.crop_mode {
             CROP_TAB_PAD_X
         } else {
             14.0
@@ -251,7 +256,8 @@ impl TabBar {
                     0.0
                 };
 
-                s(leading_pad) + s(CROP_TAB_BADGE_SIZE) + s(6.0) + title_w + badge_w + s(14.0)
+                let circle_sz = if self.crop_mode { CROP_TAB_BADGE_SIZE } else { 18.0 };
+                s(leading_pad) + s(circle_sz) + s(6.0) + title_w + badge_w + s(14.0)
             })
             .collect()
     }
@@ -358,10 +364,10 @@ impl TabBar {
         } else {
             0.0
         };
-        let tab_pad_x = if self.content_sized_tabs {
+        let tab_pad_x = if self.crop_mode {
             s(CROP_TAB_PAD_X)
         } else {
-            s(10.0)
+            s(14.0) // web: padding "0 14px"
         };
 
         // Proportional UI font advance for tab title width estimation.
@@ -374,7 +380,7 @@ impl TabBar {
         };
 
         // Title metrics within each retained-layout tab slot.
-        let badge_sz = if self.content_sized_tabs {
+        let badge_sz = if self.crop_mode {
             s(CROP_TAB_BADGE_SIZE)
         } else {
             s(18.0)
@@ -435,7 +441,7 @@ impl TabBar {
             // Numbered circle badge — web: width 18, height 18, borderRadius "50%",
             //   background "${color}22", color: tab.color, fontSize 10, fontWeight 700
             let num_str = format!("{}", i + 1);
-            let badge_sz = if self.content_sized_tabs {
+            let badge_sz = if self.crop_mode {
                 s(CROP_TAB_BADGE_SIZE)
             } else {
                 s(18.0)
@@ -456,7 +462,7 @@ impl TabBar {
 
             // Number text — proportional font, centered in circle
             // Web: fontSize 10, fontWeight 700
-            let badge_num_scale = if self.content_sized_tabs {
+            let badge_num_scale = if self.crop_mode {
                 10.5 / 14.0
             } else {
                 font_scale::PX10
@@ -499,7 +505,7 @@ impl TabBar {
             if !title.is_empty() {
                 let title_x = rect.x + title_x_offset;
                 let title_y = text_y(rect.height, rect.y);
-                let title_scale = if self.content_sized_tabs {
+                let title_scale = if self.crop_mode {
                     CROP_TAB_TITLE_SCALE
                 } else {
                     font_scale::PX12
@@ -526,13 +532,13 @@ impl TabBar {
                         } else {
                             tab.unread_count.to_string()
                         };
-                        let badge_text_scale = if self.content_sized_tabs {
+                        let badge_text_scale = if self.crop_mode {
                             CROP_TAB_BADGE_TEXT_SCALE
                         } else {
                             font_scale::PX9
                         };
                         let text_w = text.text_width_ui_scaled(&count_str, badge_text_scale);
-                        let badge_h = if self.content_sized_tabs {
+                        let badge_h = if self.crop_mode {
                             s(17.0)
                         } else {
                             s(16.0)
