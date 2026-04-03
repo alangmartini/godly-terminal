@@ -397,7 +397,8 @@ impl ReferencePane {
             width: text.text_width_mono_scaled(label, BODY_SCALE) + s(24.0),
             height: text_h + s(12.0),
         };
-        ui.fill_rounded(
+        // Web: borderRadius "0 4px 4px 0" — right side rounded only
+        ui.fill_rounded_custom(
             Rect {
                 x: rect.x + s(3.0),
                 y: rect.y,
@@ -405,7 +406,7 @@ impl ReferencePane {
                 height: rect.height,
             },
             colors::BG_ACTIVE_ACC,
-            s(4.0),
+            [0.0, s(4.0), s(4.0), 0.0], // [TL, TR, BR, BL]
         );
         ui.fill(
             Rect {
@@ -484,7 +485,7 @@ impl ReferencePane {
             command,
             rect.x + s(10.0),
             rect.y + s(6.0),
-            colors::FG_SECONDARY,
+            colors::FG_MUTED, // web: color "#6e7681"
             bg,
             SMALL_SCALE,
         );

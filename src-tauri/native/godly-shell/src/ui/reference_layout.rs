@@ -129,10 +129,10 @@ impl ReferencePaneLayoutEngine {
             block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_NUMBERED) as f32, 4.0, 4.0, text),
             block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
             block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
-            block_style(s(THOUGHTS_HEIGHT), 6.0, 6.0, text), // web: margin "6px 0"
+            block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text), // web: margin "8px 0 6px"
             block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_TONE) as f32, 8.0, 8.0, text),
             block_style(s(COMMAND_HEIGHT), 8.0, 8.0, text),
-            block_style(s(THOUGHTS_HEIGHT), 6.0, 6.0, text), // web: margin "6px 0"
+            block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text), // web: margin "8px 0 6px"
             block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_COLLAPSE) as f32, 8.0, 8.0, text),
             block_style(s(EDITING_HEIGHT), 6.0, 6.0, text),
             block_style(s(CURSOR_HEIGHT), 8.0, 0.0, text),
