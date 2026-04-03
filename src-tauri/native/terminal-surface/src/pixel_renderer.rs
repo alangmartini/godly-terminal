@@ -1,15 +1,15 @@
 use std::sync::LazyLock;
 use std::time::Instant;
 
+use crate::Color;
 use godly_protocol::types::{CursorShape, RichGridData};
-use iced::Color;
 
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 use crate::glyph_cache::{CachedGlyph, GlyphCache, GlyphKey};
 use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use crate::render_stats::RenderStats;
-use crate::surface::GridPos;
+use crate::GridPos;
 
 // ---------------------------------------------------------------------------
 // sRGB <-> linear colour-space lookup tables
@@ -223,7 +223,7 @@ impl PixelRenderer {
 
                     if cache.get(&key).is_none() {
                         if let Some(rg) =
-                            rasterizer.rasterize(ch, phys.font_size, cell.bold, cell.italic)
+                            rasterizer.rasterize(ch, phys.font_size, if cell.bold { 700 } else { 400 }, cell.italic)
                         {
                             cache.insert(
                                 key,
@@ -695,7 +695,7 @@ mod tests {
             &mut self,
             _ch: char,
             _font_size_px: f32,
-            _bold: bool,
+            _weight: u16,
             _italic: bool,
         ) -> Option<crate::glyph_rasterizer::RasterizedGlyph> {
             Some(crate::glyph_rasterizer::RasterizedGlyph {

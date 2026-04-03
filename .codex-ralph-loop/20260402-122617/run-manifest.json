@@ -1,0 +1,21 @@
+{
+  "run_id": "20260402-122617",
+  "started_at": "2026-04-02T12:26:18.0054121-03:00",
+  "project_root": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal",
+  "artifacts_root": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\.codex-ralph-loop",
+  "run_dir": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\.codex-ralph-loop\\20260402-122617",
+  "stop_file": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\.codex-ralph-loop\\STOP",
+  "agent_command": "codex",
+  "model": "gpt-5.4",
+  "reasoning_effort": "xhigh",
+  "profile": "",
+  "enable_search": false,
+  "ephemeral": false,
+  "show_raw_json_events": false,
+  "web_reference_image": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\web-reference.png",
+  "native_image": "C:\\Users\\alanm\\Documents\\dev\\godly-claude\\godly-terminal\\docs\\references\\current-godly-shell.png",
+  "max_iterations": 0,
+  "iteration_delay_seconds": 5,
+  "retry_delay_seconds": 10,
+  "no_cleanup": false
+}

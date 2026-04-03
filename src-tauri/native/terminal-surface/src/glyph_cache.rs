@@ -30,18 +30,39 @@ pub struct GlyphKey {
     pub codepoint: char,
     /// Quantized font size: `(font_size * 4.0) as u16`.
     pub size_q4: u16,
-    pub bold: bool,
+    /// CSS-style font weight (400=Regular, 500=Medium, 600=SemiBold, 700=Bold).
+    pub weight: u16,
     pub italic: bool,
+    /// Font identifier: 0 = terminal monospace, 1 = UI proportional.
+    pub font_id: u8,
 }
 
 impl GlyphKey {
     pub fn new(ch: char, font_size: f32, bold: bool, italic: bool) -> Self {
+        Self::new_weighted(ch, font_size, if bold { 700 } else { 400 }, italic, 0)
+    }
+
+    pub fn new_font(ch: char, font_size: f32, bold: bool, italic: bool, font_id: u8) -> Self {
+        Self::new_weighted(ch, font_size, if bold { 700 } else { 400 }, italic, font_id)
+    }
+
+    pub fn new_weighted(ch: char, font_size: f32, weight: u16, italic: bool, font_id: u8) -> Self {
         Self {
             codepoint: ch,
             size_q4: (font_size * 4.0) as u16,
-            bold,
+            weight,
             italic,
+            font_id,
         }
+    }
+
+    /// Create a key for UI font glyphs (proportional sans-serif).
+    pub fn new_ui(ch: char, font_size: f32, bold: bool) -> Self {
+        Self::new_font(ch, font_size, bold, false, 1)
+    }
+
+    pub fn new_ui_serif(ch: char, font_size: f32, bold: bool, italic: bool) -> Self {
+        Self::new_font(ch, font_size, bold, italic, 2)
     }
 }
 

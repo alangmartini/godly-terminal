@@ -1,0 +1,9 @@
+{
+  "notes": [
+    {
+      "category": "architecture",
+      "content": "Git workflow conventions: default branch is origin/master; active feature work often happens on descriptive branches like breaking/dropping-iced; commits use conventional prefixes plus Lore trailers; feat/fix commits require changelog fragments under changelog/unreleased/.",
+      "timestamp": "2026-04-02T15:37:58.111Z"
+    }
+  ]
+}

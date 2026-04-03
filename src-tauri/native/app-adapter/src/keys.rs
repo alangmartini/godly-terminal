@@ -1,4 +1,4 @@
-use iced::keyboard::{key::Named, Key, Modifiers};
+use crate::keyboard::{Key, Modifiers, Named};
 
 /// Convert an Iced keyboard event into PTY input bytes.
 ///
@@ -8,7 +8,7 @@ pub fn key_to_pty_bytes(key: &Key, modifiers: Modifiers) -> Option<Vec<u8>> {
     match key {
         // Printable characters
         Key::Character(ch) => {
-            let s = ch.as_str();
+            let s: &str = ch;
             if modifiers.control() && s.len() == 1 {
                 // Ctrl+key: produce control character (0x01..0x1A)
                 let c = s.as_bytes()[0];

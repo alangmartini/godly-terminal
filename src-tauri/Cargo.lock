@@ -1946,7 +1946,6 @@ dependencies = [
  "godly-ports",
  "godly-protocol",
  "godly-testkit",
- "iced",
  "log",
  "notify-rust",
  "parking_lot",
@@ -2100,6 +2099,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "godly-shell"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "bytemuck",
+ "env_logger",
+ "futures-channel",
+ "godly-app-adapter",
+ "godly-layout-core",
+ "godly-protocol",
+ "godly-tabs-core",
+ "godly-terminal-surface",
+ "godly-workspaces-core",
+ "log",
+ "pollster",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "taffy",
+ "uuid",
+ "wgpu",
+ "windows 0.58.0",
+ "winit",
+]
+
+[[package]]
 name = "godly-tabs-core"
 version = "0.1.0"
 
@@ -2107,13 +2132,14 @@ version = "0.1.0"
 name = "godly-terminal-surface"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "criterion",
  "fontdb",
  "godly-protocol",
  "godly-vt",
- "iced",
  "log",
  "swash",
+ "wgpu",
  "windows 0.58.0",
 ]
 
@@ -2216,6 +2242,12 @@ checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.11.0",
 ]
+
+[[package]]
+name = "grid"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
 
 [[package]]
 name = "guillotiere"
@@ -5269,6 +5301,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "taffy"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab4f4d046dd956a47a7e1a2947083d7ac3e6aa3cfaaead36173ceaa5ab11878c"
+dependencies = [
+ "arrayvec",
+ "grid",
+ "serde",
+ "slotmap",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ members = [
     "native/tabs-core",
     "native/testkit",
     "native/workspaces-core",
+    "native/godly-shell",
 ]
 resolver = "2"
 

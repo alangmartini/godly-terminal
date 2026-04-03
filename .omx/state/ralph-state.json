@@ -1,0 +1,26 @@
+{
+  "active": true,
+  "started_at": "2026-04-02T12:26:17-03:00",
+  "current_phase": "starting",
+  "task_description": "Ralph visual parity loop for godly-shell iteration 1",
+  "iteration": 1,
+  "max_iterations": 999,
+  "verdict_score": 78,
+  "verdict": "revise",
+  "next_task": "Investigate transcript glyph weight/baseline/compositing parity against the browser capture; sidebar is no longer the dominant blocker",
+  "last_turn_at": "2026-04-02T14:32:36.065Z",
+  "latest_metrics": {
+    "changed_px": 2073596,
+    "over_10_px": 230188,
+    "over_10_pct": 11.1009,
+    "mae": 0.049211,
+    "rmse": 0.108136,
+    "max_diff": 255
+  },
+  "completed_this_iteration": [
+    "Shared sidebar session-stack layout helper with web-CSS constants",
+    "Fixed branch-row height mismatch between draw and hit-testing paths",
+    "Switched active session border to full-height left border",
+    "Tried grayscale-AA mono transcript path; improvement was negligible"
+  ]
+}

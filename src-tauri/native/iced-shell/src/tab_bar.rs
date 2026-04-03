@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use iced::widget::{button, column, container, mouse_area, row, rule, text, Space};
 use iced::{Border, Color, Element, Font, Length, Padding};
+use crate::theme::BORDER;
 
 use crate::horizontal_wheel::horizontal_wheel;
 use crate::terminal_state::TerminalInfo;
@@ -9,6 +10,25 @@ use crate::theme::{
     ACCENT, BG_SECONDARY, BORDER_VARIANT, DANGER, GHOST_ACTIVE, GHOST_HOVER, TAB_ACTIVE_BG,
     TAB_INACTIVE_BG, TEXT_PRIMARY, TEXT_SECONDARY,
 };
+
+/// Codicon font for pixel-hinted icons.
+const CODICON_FONT: Font = Font {
+    family: iced::font::Family::Name("codicon"),
+    weight: iced::font::Weight::Normal,
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
+};
+
+/// Codicon: close (×)
+const ICON_CLOSE: &str = "\u{EA76}";
+
+/// Semibold variant of whatever font is passed in — used for the active tab label.
+fn font_semibold(base: Font) -> Font {
+    Font {
+        weight: iced::font::Weight::Semibold,
+        ..base
+    }
+}
 
 /// Height of the tab bar in logical pixels.
 pub const TAB_BAR_HEIGHT: f32 = 36.0;
@@ -20,7 +40,7 @@ const TAB_ENTRY_MAX_WIDTH: f32 = 200.0;
 const TAB_BUTTON_HEIGHT: f32 = 30.0;
 const CLOSE_BUTTON_SIZE: f32 = 18.0;
 const SEPARATOR_HEIGHT: f32 = 16.0;
-const ACCENT_INDICATOR_HEIGHT: f32 = 3.0;
+const ACCENT_INDICATOR_HEIGHT: f32 = 2.0;
 
 /// Truncate a label to at most `max_chars` characters, appending "..." if truncated.
 fn truncate_label(s: &str, max_chars: usize) -> String {
@@ -182,20 +202,22 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
         };
 
         let truncated = truncate_label(&terminal.tab_label(), 30);
-        let label = text(truncated).size(13).font(font).color(text_color);
+        let tab_font = if is_active { font_semibold(font) } else { font };
+        let label = text(truncated).size(13).font(tab_font).color(text_color);
         let icon_glyph = process_icon_glyph(terminal).map(|glyph| {
             let icon_color = if is_active {
                 ACCENT()
             } else {
                 TEXT_SECONDARY()
             };
-            text(glyph).size(14).color(icon_color)
+            text(glyph).size(13).color(icon_color)
         });
 
         let close_id = terminal.id.clone();
         // Inactive tabs: close button hidden until directly hovered.
         // Active tab: close button always visible.
-        let close_btn = button(text("\u{00D7}").size(12).color(text_color))
+        // Uses codicon close icon for pixel-hinted crispness.
+        let close_btn = button(text(ICON_CLOSE).size(11).font(CODICON_FONT).color(text_color))
             .on_press(on_close(close_id))
             .padding(0)
             .width(Length::Fixed(CLOSE_BUTTON_SIZE))
@@ -211,7 +233,8 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                         (Color::from_rgba(d.r, d.g, d.b, 0.25), d)
                     }
                     _ if is_active => (Color::TRANSPARENT, text_color),
-                    _ => (Color::TRANSPARENT, Color::TRANSPARENT),
+                    // Faintly visible close button on inactive tabs for discoverability
+                    _ => (Color::TRANSPARENT, Color::from_rgba(text_color.r, text_color.g, text_color.b, 0.25)),
                 };
                 button::Style {
                     background: Some(iced::Background::Color(bg_color)),
@@ -234,14 +257,15 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
 
         let ghost_hover_bg = GHOST_HOVER();
         let ghost_active_bg = GHOST_ACTIVE();
-        // Active tab: blend TAB_ACTIVE_BG with a subtle accent tint.
+        // Active tab: very subtle accent tint so it nearly matches the
+        // terminal pane below, creating a seamless visual connection.
         let active_bg = if is_active {
             let base = bg;
             let accent = ACCENT();
             Color::from_rgb(
-                base.r * 0.85 + accent.r * 0.15,
-                base.g * 0.85 + accent.g * 0.15,
-                base.b * 0.85 + accent.b * 0.15,
+                base.r * 0.92 + accent.r * 0.08,
+                base.g * 0.92 + accent.g * 0.08,
+                base.b * 0.92 + accent.b * 0.08,
             )
         } else {
             bg
@@ -272,8 +296,30 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                     background: Some(iced::Background::Color(bg_color)),
                     text_color,
                     border: Border {
+                        color: if is_active {
+                            let bv = BORDER_VARIANT();
+                            Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.85)
+                        } else {
+                            // Faint rest-state border for tab shape definition
+                            let bv = BORDER_VARIANT();
+                            Color::from_rgba(bv.r, bv.g, bv.b, bv.a * 0.15)
+                        },
+                        width: 1.0,
                         radius,
-                        ..Border::default()
+                    },
+                    shadow: if is_active {
+                        iced::Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+                            offset: iced::Vector::new(0.0, 1.0),
+                            blur_radius: 4.0,
+                        }
+                    } else {
+                        // Subtle shadow on inactive tabs for consistent depth
+                        iced::Shadow {
+                            color: Color::from_rgba(0.0, 0.0, 0.0, 0.08),
+                            offset: iced::Vector::new(0.0, 0.5),
+                            blur_radius: 2.0,
+                        }
                     },
                     ..button::Style::default()
                 }
@@ -304,6 +350,10 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .height(Length::Fixed(ACCENT_INDICATOR_HEIGHT))
             .style(move |_theme| container::Style {
                 background: Some(iced::Background::Color(accent_color)),
+                border: Border {
+                    radius: iced::border::Radius::new(1.5).bottom_left(0.0).bottom_right(0.0),
+                    ..Border::default()
+                },
                 ..container::Style::default()
             });
 
@@ -345,10 +395,10 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
             .height(Length::Fixed(TAB_BAR_HEIGHT)),
     );
 
-    // "+" button to add new terminals (ghost style).
-    let new_btn = button(text("+").size(15).color(TEXT_SECONDARY()))
+    // "+" button to add new terminals (codicon icon, ghost style).
+    let new_btn = button(text("\u{EA60}").size(14).font(CODICON_FONT).color(TEXT_SECONDARY()))
         .on_press(on_new)
-        .padding(Padding::from([3, 10]))
+        .padding(Padding::from([3, 7]))
         .width(Length::Fixed(28.0))
         .height(Length::Fixed(26.0))
         .style(|_theme, status| {
@@ -361,9 +411,15 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
                 background: Some(iced::Background::Color(bg_color)),
                 text_color: TEXT_SECONDARY(),
                 border: Border {
-                    color: Color::TRANSPARENT,
-                    width: 0.0,
-                    radius: 8.0.into(),
+                    color: match status {
+                        button::Status::Hovered => {
+                            let b = BORDER_VARIANT();
+                            Color::from_rgba(b.r, b.g, b.b, 0.5)
+                        }
+                        _ => Color::TRANSPARENT,
+                    },
+                    width: 1.0,
+                    radius: 6.0.into(),
                 },
                 ..button::Style::default()
             }
@@ -377,14 +433,42 @@ pub fn view_tab_bar<'a, M: Clone + 'a>(
     ]
     .align_y(iced::Alignment::Center);
 
-    container(content)
+    // Subtle vertical gradient: slightly lighter at top → BG_SECONDARY at bottom.
+    // Creates depth without being visually noisy.
+    let bar = container(content)
         .width(Length::Fill)
         .height(Length::Fixed(TAB_BAR_HEIGHT))
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(BG_SECONDARY())),
-            ..container::Style::default()
-        })
-        .into()
+        .style(|_theme| {
+            let base = BG_SECONDARY();
+            let lighter = Color::from_rgb(
+                (base.r + 0.025).min(1.0),
+                (base.g + 0.025).min(1.0),
+                (base.b + 0.025).min(1.0),
+            );
+            container::Style {
+                background: Some(iced::Background::Gradient(iced::Gradient::Linear(
+                    iced::gradient::Linear::new(std::f32::consts::PI) // top to bottom
+                        .add_stop(0.0, lighter)
+                        .add_stop(1.0, base),
+                ))),
+                ..container::Style::default()
+            }
+        });
+
+    // Subtle bottom separator — soft enough that the active tab (which shares
+    // the content area's pane_bg) visually "opens" into the terminal below.
+    let sep_color = {
+        let b = BORDER();
+        Color::from_rgba(b.r, b.g, b.b, 0.45)
+    };
+    let separator = rule::horizontal(1).style(move |_theme| rule::Style {
+        color: sep_color,
+        radius: 0.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
+    });
+
+    column![bar, separator].width(Length::Fill).into()
 }
 
 #[cfg(test)]
