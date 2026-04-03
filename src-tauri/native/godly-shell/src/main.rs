@@ -3023,12 +3023,12 @@ impl godly_terminal_surface::glyph_rasterizer::GlyphRasterizer for FallbackRaste
         &mut self,
         ch: char,
         font_size_px: f32,
-        bold: bool,
+        weight: u16,
         italic: bool,
     ) -> Option<godly_terminal_surface::glyph_rasterizer::RasterizedGlyph> {
         self.primary
-            .rasterize(ch, font_size_px, bold, italic)
-            .or_else(|| self.fallback.rasterize(ch, font_size_px, bold, italic))
+            .rasterize(ch, font_size_px, weight, italic)
+            .or_else(|| self.fallback.rasterize(ch, font_size_px, weight, italic))
     }
 
     fn measure(

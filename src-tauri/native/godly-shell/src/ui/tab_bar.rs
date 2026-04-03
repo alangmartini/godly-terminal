@@ -5,6 +5,7 @@ use std::cell::RefCell;
 
 use super::anim::{self, lerp_color, Anim, AnimVec};
 use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
+use super::text_layout::FontWeight;
 use super::tab_bar_layout::{TabBarLayout, TabBarLayoutConfig, TabBarLayoutEngine};
 use super::widget::{MouseEvent, Rect, UiAction};
 
@@ -234,7 +235,9 @@ impl TabBar {
         };
         let text_width = |value: &str, text: Option<&UiTextRenderer>, font_scale: f32| {
             if let Some(renderer) = text {
-                renderer.text_width_ui_scaled(value, font_scale)
+                // Use SemiBold (600) for width measurement — active tabs render at
+                // SemiBold, and we need the slot to fit the widest case.
+                renderer.text_width_ui_weighted_scaled(value, font_scale, FontWeight::SemiBold)
             } else {
                 value.chars().count() as f32 * (7.0 * scale) * font_scale
             }
@@ -468,11 +471,11 @@ impl TabBar {
             } else {
                 font_scale::PX10
             };
-            let num_w = text.text_width_ui_scaled(&num_str, badge_num_scale);
+            let num_w = text.text_width_ui_weighted_scaled(&num_str, badge_num_scale, FontWeight::Bold);
             let num_ch = ch * badge_num_scale;
             let num_x = badge_x + (badge_sz - num_w) / 2.0;
             let num_y = badge_y + (badge_sz - num_ch) / 2.0;
-            ui.text_ui_scaled(
+            ui.text_ui_bold_scaled(
                 text,
                 &num_str,
                 num_x,
@@ -511,9 +514,13 @@ impl TabBar {
                 } else {
                     font_scale::PX12
                 };
-                let title_w = text.text_width_ui_scaled(&title, title_scale);
+                let title_w = if tab.active {
+                    text.text_width_ui_weighted_scaled(&title, title_scale, FontWeight::SemiBold)
+                } else {
+                    text.text_width_ui_scaled(&title, title_scale)
+                };
                 if tab.active {
-                    ui.text_ui_bold_scaled(text, &title, title_x, title_y, fg, bg, title_scale);
+                    ui.text_ui_semibold_scaled(text, &title, title_x, title_y, fg, bg, title_scale);
                 } else {
                     ui.text_ui_scaled(text, &title, title_x, title_y, fg, bg, title_scale);
                 }
@@ -538,7 +545,7 @@ impl TabBar {
                         } else {
                             font_scale::PX9
                         };
-                        let text_w = text.text_width_ui_scaled(&count_str, badge_text_scale);
+                        let text_w = text.text_width_ui_weighted_scaled(&count_str, badge_text_scale, FontWeight::Bold);
                         let badge_h = if self.crop_mode {
                             s(17.0)
                         } else {
@@ -697,7 +704,7 @@ impl TabBar {
 
             // "opensessions" with green dot — web: fontSize 11, fontWeight 600
             let opensessions_label = "opensessions";
-            let opensessions_w = text.text_width_ui_scaled(opensessions_label, font_scale::PX11);
+            let opensessions_w = text.text_width_ui_weighted_scaled(opensessions_label, font_scale::PX11, FontWeight::SemiBold);
             let dot_sz = s(8.0);
             let dot_gap = s(4.0);
             let opensessions_total = dot_sz + dot_gap + opensessions_w;
@@ -714,7 +721,7 @@ impl TabBar {
                 colors::ACCENT_GREEN,
                 dot_sz / 2.0,
             );
-            ui.text_ui_bold_scaled(
+            ui.text_ui_semibold_scaled(
                 text,
                 opensessions_label,
                 opensessions_x + dot_sz + dot_gap,
@@ -726,7 +733,7 @@ impl TabBar {
 
             // "bun" with orange emoji dot — web: fontSize 11, fontWeight 600
             let bun_label = "bun";
-            let bun_w = text.text_width_ui_scaled(bun_label, font_scale::PX11);
+            let bun_w = text.text_width_ui_weighted_scaled(bun_label, font_scale::PX11, FontWeight::SemiBold);
             let bun_dot_sz = s(8.0);
             let bun_total = bun_dot_sz + dot_gap + bun_w;
             let bun_x = opensessions_x - indicator_gap - bun_total;
@@ -741,7 +748,7 @@ impl TabBar {
                 colors::ACCENT_PEACH,
                 bun_dot_sz / 2.0,
             );
-            ui.text_ui_bold_scaled(
+            ui.text_ui_semibold_scaled(
                 text,
                 bun_label,
                 bun_x + bun_dot_sz + dot_gap,

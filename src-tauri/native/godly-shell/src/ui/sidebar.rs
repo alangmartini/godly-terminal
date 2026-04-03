@@ -2,6 +2,7 @@
 
 use super::anim::{self, lerp_color, AnimVec};
 use super::builder::{colors, font_scale, UiBuilder, UiTextRenderer};
+use super::text_layout::FontWeight;
 use super::sidebar_layout::{
     compute_sidebar_session_layout, SessionStackItemSpec, SidebarSessionLayout, ACTIVE_BORDER_W,
     HEADER_LABEL_FONT_PX, HEADER_LIGHTNING_FONT_PX, HEADER_PAD_X, LIST_PAD_X, ROW_GAP_X,
@@ -329,7 +330,7 @@ impl Sidebar {
             let name_h = s(SESSION_NAME_FONT_PX);
             let secondary_h = s(SESSION_SECONDARY_FONT_PX);
             let number_col_w = s(SESSION_NUMBER_MIN_WIDTH)
-                .max(text.text_width_ui_scaled(&num_str, font_scale::PX12));
+                .max(text.text_width_ui_weighted_scaled(&num_str, font_scale::PX12, FontWeight::Medium));
             let num_x = layout_item.first_row.x;
             let num_y = layout_item.first_row.y + (layout_item.first_row.height - number_h) / 2.0;
             let name_x = num_x + number_col_w + s(ROW_GAP_X);
@@ -337,7 +338,7 @@ impl Sidebar {
 
             // Session number — web: fontSize 12, fontWeight 500, color #555d6b (FG_DIM)
             let num_fg = lerp_color(colors::FG_DIM, colors::FG_SECONDARY, hover_t * 0.5);
-            ui.text_ui_scaled(
+            ui.text_ui_medium_scaled(
                 text,
                 &num_str,
                 num_x,
@@ -361,7 +362,7 @@ impl Sidebar {
             .max(s(30.0));
             let name = truncate_to_width(&item.label, name_max_w, text);
             // Web reference: fontWeight 600, fontSize 13 for all session names
-            ui.text_ui_bold_scaled(
+            ui.text_ui_semibold_scaled(
                 text,
                 &name,
                 name_x,
@@ -598,7 +599,7 @@ impl Sidebar {
                     colors::FG_PRIMARY,
                     agent_hover_t * 0.4,
                 );
-                ui.text_ui_bold_scaled(
+                ui.text_ui_semibold_scaled(
                     text,
                     &agent.name,
                     agent_name_x,
@@ -606,7 +607,7 @@ impl Sidebar {
                     agent_name_fg,
                     panel_bg,
                     font_scale::PX12,
-                ); // web: fontSize 12
+                ); // web: fontSize 12, fontWeight 600
 
                 // Dismiss × — web: color "#3b4048", fontSize 13, placed at far right
                 let dismiss_w = text.text_width_ui_scaled("\u{00D7}", font_scale::PX13);
@@ -624,7 +625,7 @@ impl Sidebar {
                 // Status badge — right-aligned before ×
                 // Web: fontSize 10, borderRadius 3, backgroundColor: color+"18",
                 //       marginLeft "auto" pushes badge to the right
-                let sw = text.text_width_ui_scaled(status_text, font_scale::PX10);
+                let sw = text.text_width_ui_weighted_scaled(status_text, font_scale::PX10, FontWeight::SemiBold);
                 let status_badge_pad_h = s(6.0); // web: padding "1px 6px" horizontal
                 let status_badge_pad_v = s(1.0); // web: padding "1px 6px" vertical
                 let status_badge_h = ch * font_scale::PX10 + status_badge_pad_v * 2.0;
@@ -645,7 +646,7 @@ impl Sidebar {
                 let status_text_x = status_badge_x + status_badge_pad_h;
                 let status_text_y =
                     status_badge_y + (status_badge_h - ch * font_scale::PX10) / 2.0;
-                ui.text_ui_bold_scaled(
+                ui.text_ui_semibold_scaled(
                     text,
                     status_text,
                     status_text_x,

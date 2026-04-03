@@ -40,7 +40,7 @@ pub trait GlyphRasterizer {
         &mut self,
         ch: char,
         font_size_px: f32,
-        bold: bool,
+        weight: u16,
         italic: bool,
     ) -> Option<RasterizedGlyph>;
     fn measure(&mut self, font_size_px: f32) -> MeasuredFontMetrics;

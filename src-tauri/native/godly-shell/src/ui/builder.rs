@@ -8,7 +8,7 @@ use super::quad_renderer::{
     quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated,
     QuadVertex,
 };
-use super::text_layout::{UiFontKind, UiTextLayout, UiTextLayoutEngine};
+use super::text_layout::{FontWeight, UiFontKind, UiTextLayout, UiTextLayoutEngine};
 use super::widget::Rect;
 use std::rc::Rc;
 
@@ -72,8 +72,8 @@ pub struct TextCommand {
     pub y: f32,
     pub fg: [f32; 4],
     pub bg: [f32; 4],
-    /// When true, renders glyphs with the bold font variant.
-    pub bold: bool,
+    /// CSS-style font weight (400/500/600/700) for glyph rendering.
+    pub weight: FontWeight,
     /// Which rasterizer/layout path should be used for this text run.
     pub font_kind: TextFontKind,
     /// When true, renders with the italic font face instead of a synthetic skew.
@@ -92,6 +92,13 @@ pub struct TextCommand {
     /// Extra horizontal space (in CSS pixels) added between each glyph.
     /// Matches the web `letterSpacing` property. Default 0.0.
     pub letter_spacing: f32,
+}
+
+impl TextCommand {
+    /// Backward-compat: true when weight selects the bold font face (≥600).
+    pub fn bold(&self) -> bool {
+        self.weight.is_bold()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +178,19 @@ impl UiTextRenderer {
             .width
     }
 
+    /// Exact width of a string rendered in the bold proportional UI font at a given scale.
+    pub fn text_width_ui_bold_scaled(&self, s: &str, scale: f32) -> f32 {
+        self.layout_text_weighted(UiFontKind::Sans, s, scale, FontWeight::Bold, false)
+            .width
+    }
+
+    /// Exact width of a string rendered in the proportional UI font at a given
+    /// weight and scale.
+    pub fn text_width_ui_weighted_scaled(&self, s: &str, scale: f32, weight: FontWeight) -> f32 {
+        self.layout_text_weighted(UiFontKind::Sans, s, scale, weight, false)
+            .width
+    }
+
     pub fn text_width_mono_scaled(&self, s: &str, scale: f32) -> f32 {
         self.layout_text(UiFontKind::Mono, s, scale, false, false)
             .width
@@ -194,18 +214,29 @@ impl UiTextRenderer {
         italic: bool,
         font_kind: TextFontKind,
     ) -> Vec<f32> {
+        self.glyph_offsets_weighted(s, scale, FontWeight::from_bold(bold), italic, font_kind)
+    }
+
+    pub fn glyph_offsets_weighted(
+        &self,
+        s: &str,
+        scale: f32,
+        weight: FontWeight,
+        italic: bool,
+        font_kind: TextFontKind,
+    ) -> Vec<f32> {
         match font_kind {
             TextFontKind::TerminalMono => Vec::new(),
             TextFontKind::UiSans => {
-                self.layout_text(UiFontKind::Sans, s, scale, bold, italic)
+                self.layout_text_weighted(UiFontKind::Sans, s, scale, weight, italic)
                     .glyph_offsets
             }
             TextFontKind::UiSerif => {
-                self.layout_text(UiFontKind::Serif, s, scale, bold, italic)
+                self.layout_text_weighted(UiFontKind::Serif, s, scale, weight, italic)
                     .glyph_offsets
             }
             TextFontKind::UiMono => {
-                self.layout_text(UiFontKind::Mono, s, scale, bold, italic)
+                self.layout_text_weighted(UiFontKind::Mono, s, scale, weight, italic)
                     .glyph_offsets
             }
         }
@@ -219,9 +250,20 @@ impl UiTextRenderer {
         bold: bool,
         italic: bool,
     ) -> UiTextLayout {
+        self.layout_text_weighted(font_kind, s, scale, FontWeight::from_bold(bold), italic)
+    }
+
+    fn layout_text_weighted(
+        &self,
+        font_kind: UiFontKind,
+        s: &str,
+        scale: f32,
+        weight: FontWeight,
+        italic: bool,
+    ) -> UiTextLayout {
         if let Some(engine) = &self.layout_engine {
             if let Some(layout) =
-                engine.layout(font_kind, s, self.font_size_px * scale, bold, italic)
+                engine.layout_weighted(font_kind, s, self.font_size_px * scale, weight, italic)
             {
                 return layout;
             }
@@ -756,14 +798,43 @@ impl UiBuilder {
         font_kind: TextFontKind,
         composite: TextCompositeMode,
     ) {
-        let glyph_offsets = renderer.glyph_offsets_for(text, scale, bold, italic, font_kind);
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            FontWeight::from_bold(bold),
+            italic,
+            scale,
+            font_kind,
+            composite,
+        );
+    }
+
+    fn push_text_command_weighted(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        weight: FontWeight,
+        italic: bool,
+        scale: f32,
+        font_kind: TextFontKind,
+        composite: TextCompositeMode,
+    ) {
+        let glyph_offsets = renderer.glyph_offsets_weighted(text, scale, weight, italic, font_kind);
         self.text_commands.push(TextCommand {
             text: text.to_string(),
             x,
             y,
             fg,
             bg,
-            bold,
+            weight,
             font_kind,
             italic,
             scale,
@@ -1041,6 +1112,32 @@ impl UiBuilder {
         );
     }
 
+    /// Record a scaled medium-weight UI-monospace text draw command (grayscale AA).
+    pub fn text_mono_medium_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            FontWeight::Medium,
+            false,
+            scale,
+            TextFontKind::UiMono,
+            TextCompositeMode::MixedBackground,
+        );
+    }
+
     /// Record a UI text draw command (proportional sans-serif font).
     pub fn text_ui(
         &mut self,
@@ -1189,6 +1286,137 @@ impl UiBuilder {
             scale,
             TextFontKind::UiSans,
             TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled UI text draw command with an explicit font weight.
+    pub fn text_ui_weighted_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+        weight: FontWeight,
+    ) {
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            weight,
+            false,
+            scale,
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled semibold (600) UI text draw command.
+    pub fn text_ui_semibold_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            FontWeight::SemiBold,
+            false,
+            scale,
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled medium (500) UI text draw command.
+    pub fn text_ui_medium_scaled(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            FontWeight::Medium,
+            false,
+            scale,
+            TextFontKind::UiSans,
+            TextCompositeMode::FlatBackground,
+        );
+    }
+
+    /// Record a scaled semibold (600) UI text draw command with mixed background.
+    pub fn text_ui_semibold_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            FontWeight::SemiBold,
+            false,
+            scale,
+            TextFontKind::UiSans,
+            TextCompositeMode::MixedBackground,
+        );
+    }
+
+    /// Record a scaled medium (500) UI text draw command with mixed background.
+    pub fn text_ui_medium_scaled_mixed(
+        &mut self,
+        renderer: &UiTextRenderer,
+        text: &str,
+        x: f32,
+        y: f32,
+        fg: [f32; 4],
+        bg: [f32; 4],
+        scale: f32,
+    ) {
+        self.push_text_command_weighted(
+            renderer,
+            text,
+            x,
+            y,
+            fg,
+            bg,
+            FontWeight::Medium,
+            false,
+            scale,
+            TextFontKind::UiSans,
+            TextCompositeMode::MixedBackground,
         );
     }
 

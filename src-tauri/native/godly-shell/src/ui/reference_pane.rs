@@ -417,7 +417,7 @@ impl ReferencePane {
             },
             colors::ACCENT_BLUE,
         );
-        ui.text_mono_scaled_mixed(
+        ui.text_mono_medium_scaled_mixed(
             text,
             label,
             rect.x + s(12.0),
