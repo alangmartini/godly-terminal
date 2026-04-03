@@ -303,6 +303,9 @@ pub struct UiBuilder {
     text_commands: Vec<TextCommand>,
     vw: f32,
     vh: f32,
+    /// SDF surface lighting intensity: 0.0 = flat CSS-like, 1.0 = full 3D lighting.
+    /// Applied to all SDF quads emitted after this is set.
+    lighting: f32,
 }
 
 impl UiBuilder {
@@ -312,7 +315,14 @@ impl UiBuilder {
             text_commands: Vec::new(),
             vw,
             vh,
+            lighting: 0.0,
         }
+    }
+
+    /// Set the SDF surface lighting intensity for subsequently emitted quads.
+    /// 0.0 = flat CSS-like rendering, 1.0 = full 3D lighting with specular/rim/AO.
+    pub fn set_lighting(&mut self, intensity: f32) {
+        self.lighting = intensity;
     }
 
     /// Viewport dimensions in physical pixels.
@@ -363,6 +373,19 @@ impl UiBuilder {
 
     // -- SDF rounded rectangle methods ----------------------------------------
 
+    /// Emit SDF vertices with the current lighting intensity applied.
+    fn emit_sdf(&mut self, verts: &[QuadVertex; 6]) {
+        if self.lighting != 1.0 {
+            let mut owned = *verts;
+            for v in &mut owned {
+                v.lighting_intensity = self.lighting;
+            }
+            self.quads.extend_from_slice(&owned);
+        } else {
+            self.quads.extend_from_slice(verts);
+        }
+    }
+
     /// Core SDF method — all other rounded/shadow methods delegate here.
     fn fill_sdf(
         &mut self,
@@ -373,7 +396,7 @@ impl UiBuilder {
         border_color: [f32; 4],
         blur_radius: f32,
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf(
+        let verts = quad_vertices_sdf(
             rect.x,
             rect.y,
             rect.width,
@@ -385,7 +408,8 @@ impl UiBuilder {
             border_width,
             border_color,
             blur_radius,
-        ));
+        );
+        self.emit_sdf(&verts);
     }
 
     /// Filled rounded rectangle with uniform corner radius.

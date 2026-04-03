@@ -24,8 +24,9 @@ pub struct QuadVertex {
     pub border_color: [f32; 4],
     pub blur_radius: f32,
     pub rotation: f32,
+    pub lighting_intensity: f32,
 }
-// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 = 84 bytes
+// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 = 88 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -84,9 +85,15 @@ impl QuadVertex {
                 offset: 80,
                 shader_location: 8,
             },
+            // lighting_intensity: 0.0 = flat CSS-like, 1.0 = full 3D lighting
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32,
+                offset: 84,
+                shader_location: 9,
+            },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 84,
+            array_stride: 88,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -104,6 +111,7 @@ struct VertexInput {
     @location(6) border_color: vec4<f32>,
     @location(7) blur_radius: f32,
     @location(8) rotation: f32,
+    @location(9) lighting_intensity: f32,
 };
 
 struct VertexOutput {
@@ -116,6 +124,7 @@ struct VertexOutput {
     @location(5) @interpolate(flat) border_color: vec4<f32>,
     @location(6) @interpolate(flat) blur_radius: f32,
     @location(7) @interpolate(flat) rotation: f32,
+    @location(8) @interpolate(flat) lighting_intensity: f32,
 };
 
 @vertex
@@ -130,6 +139,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.border_color = input.border_color;
     out.blur_radius = input.blur_radius;
     out.rotation = input.rotation;
+    out.lighting_intensity = input.lighting_intensity;
     return out;
 }
 
@@ -341,13 +351,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let left_edge = exp(-32.0 * (nx + 0.95) * (nx + 0.95)) * 0.012;
         let edge_peak = top_edge + left_edge;
 
-        let lighting = (spec + refl + rim + edge_peak - dark - corner_ao) * interior_t;
+        let lit = input.lighting_intensity;
+        let lighting = (spec + refl + rim + edge_peak - dark - corner_ao) * interior_t * lit;
 
         // Material micro-texture: spatially-coherent noise that gives the
         // surface a subtle "brushed matte" quality.  Without this, SDF shapes
         // are perfectly smooth digital rectangles; with it, they feel like
         // real material surfaces under ambient light.
-        let grain = material_grain(screen_pos) * interior_t;
+        let grain = material_grain(screen_pos) * interior_t * lit;
 
         color = vec4<f32>(color.rgb + vec3<f32>(lighting + grain), color.a);
     }
@@ -496,6 +507,7 @@ pub fn quad_vertices(
         border_color: [0.0, 0.0, 0.0, 0.0],
         blur_radius: 0.0,
         rotation: 0.0,
+        lighting_intensity: 0.0, // flat quads have no SDF lighting
     };
 
     [
@@ -585,6 +597,7 @@ fn quad_vertices_gradient_dir(
         border_color: [0.0, 0.0, 0.0, 0.0],
         blur_radius: 0.0,
         rotation: 0.0,
+        lighting_intensity: 0.0, // flat quads have no SDF lighting
     };
 
     // Vertical gradient: top=color_a, bottom=color_b
@@ -622,6 +635,7 @@ pub fn quad_vertices_sdf(
     border_width: f32,
     border_color: [f32; 4],
     blur_radius: f32,
+    lighting_intensity: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -669,6 +683,7 @@ pub fn quad_vertices_sdf(
         border_color,
         blur_radius,
         rotation: 0.0,
+        lighting_intensity,
     };
 
     [
@@ -696,6 +711,7 @@ pub fn quad_vertices_sdf_gradient(
     corner_radii: [f32; 4],
     border_width: f32,
     border_color: [f32; 4],
+    lighting_intensity: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -735,6 +751,7 @@ pub fn quad_vertices_sdf_gradient(
         border_color,
         blur_radius: 0.0,
         rotation: 0.0,
+        lighting_intensity,
     };
 
     [
@@ -762,6 +779,7 @@ pub fn quad_vertices_sdf_gradient_h(
     corner_radii: [f32; 4],
     border_width: f32,
     border_color: [f32; 4],
+    lighting_intensity: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
