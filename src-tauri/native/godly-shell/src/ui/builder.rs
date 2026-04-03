@@ -395,6 +395,7 @@ impl UiBuilder {
         border_width: f32,
         border_color: [f32; 4],
         blur_radius: f32,
+        lighting_intensity: f32,
     ) {
         let verts = quad_vertices_sdf(
             rect.x,
@@ -408,13 +409,14 @@ impl UiBuilder {
             border_width,
             border_color,
             blur_radius,
+            lighting_intensity,
         );
         self.emit_sdf(&verts);
     }
 
     /// Filled rounded rectangle with uniform corner radius.
     pub fn fill_rounded(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
-        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], 0.0);
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], 0.0, 1.0);
     }
 
     /// Filled rounded rectangle with border (uniform radius).
@@ -426,12 +428,12 @@ impl UiBuilder {
         border_width: f32,
         border_color: [f32; 4],
     ) {
-        self.fill_sdf(rect, color, [radius; 4], border_width, border_color, 0.0);
+        self.fill_sdf(rect, color, [radius; 4], border_width, border_color, 0.0, 1.0);
     }
 
     /// Rounded rectangle with only top corners rounded (for tabs).
     pub fn fill_rounded_top(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
-        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], 0.0, [0.0; 4], 0.0);
+        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], 0.0, [0.0; 4], 0.0, 1.0);
     }
 
     /// Rounded rectangle with only top corners + border (for active tabs).
@@ -450,12 +452,13 @@ impl UiBuilder {
             border_width,
             border_color,
             0.0,
+            1.0,
         );
     }
 
     /// Rounded rectangle with per-corner radii [TL, TR, BR, BL].
     pub fn fill_rounded_custom(&mut self, rect: Rect, color: [f32; 4], radii: [f32; 4]) {
-        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], 0.0);
+        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], 0.0, 1.0);
     }
 
     /// SDF rounded rectangle with top-only rounding, gradient fill, and border.
@@ -468,7 +471,7 @@ impl UiBuilder {
         border_width: f32,
         border_color: [f32; 4],
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
+        self.emit_sdf(&quad_vertices_sdf_gradient(
             rect.x,
             rect.y,
             rect.width,
@@ -480,6 +483,7 @@ impl UiBuilder {
             [radius, radius, 0.0, 0.0],
             border_width,
             border_color,
+            1.0,
         ));
     }
 
@@ -491,7 +495,7 @@ impl UiBuilder {
         bottom_color: [f32; 4],
         radius: f32,
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
+        self.emit_sdf(&quad_vertices_sdf_gradient(
             rect.x,
             rect.y,
             rect.width,
@@ -503,6 +507,7 @@ impl UiBuilder {
             [radius; 4],
             0.0,
             [0.0; 4],
+            1.0,
         ));
     }
 
@@ -514,7 +519,7 @@ impl UiBuilder {
         right_color: [f32; 4],
         radius: f32,
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf_gradient_h(
+        self.emit_sdf(&quad_vertices_sdf_gradient_h(
             rect.x,
             rect.y,
             rect.width,
@@ -526,6 +531,7 @@ impl UiBuilder {
             [radius; 4],
             0.0,
             [0.0; 4],
+            1.0,
         ));
     }
 
@@ -537,7 +543,7 @@ impl UiBuilder {
         right_color: [f32; 4],
         radii: [f32; 4],
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf_gradient_h(
+        self.emit_sdf(&quad_vertices_sdf_gradient_h(
             rect.x,
             rect.y,
             rect.width,
@@ -549,6 +555,7 @@ impl UiBuilder {
             radii,
             0.0,
             [0.0; 4],
+            1.0,
         ));
     }
 
@@ -561,7 +568,7 @@ impl UiBuilder {
         bottom_color: [f32; 4],
         radii: [f32; 4],
     ) {
-        self.quads.extend_from_slice(&quad_vertices_sdf_gradient(
+        self.emit_sdf(&quad_vertices_sdf_gradient(
             rect.x,
             rect.y,
             rect.width,
@@ -573,6 +580,7 @@ impl UiBuilder {
             radii,
             0.0,
             [0.0; 4],
+            1.0,
         ));
     }
 
@@ -586,6 +594,7 @@ impl UiBuilder {
             stroke_width,
             color,
             0.0,
+            1.0,
         );
     }
 
@@ -597,12 +606,12 @@ impl UiBuilder {
         stroke_width: f32,
         color: [f32; 4],
     ) {
-        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], radii, stroke_width, color, 0.0);
+        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], radii, stroke_width, color, 0.0, 1.0);
     }
 
     /// Soft shadow/glow behind an element (SDF with wide blur).
     pub fn fill_shadow(&mut self, rect: Rect, color: [f32; 4], radius: f32, blur: f32) {
-        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur);
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur, 1.0);
     }
 
     /// Offset shadow for directional depth (light from top-left → shadow bottom-right).
@@ -622,7 +631,59 @@ impl UiBuilder {
             width: rect.width,
             height: rect.height,
         };
-        self.fill_sdf(offset_rect, color, [radius; 4], 0.0, [0.0; 4], blur);
+        self.fill_sdf(offset_rect, color, [radius; 4], 0.0, [0.0; 4], blur, 1.0);
+    }
+
+    /// CSS-style box-shadow with offset, blur, and spread.
+    ///
+    /// Maps to `box-shadow: dx dy blur spread color`.  Spread expands (positive)
+    /// or contracts (negative) the shadow shape independently of blur — the rect
+    /// grows by `spread` on each side and corner radii increase by `spread`
+    /// (clamped to 0).  This matches CSS box-shadow semantics exactly.
+    pub fn fill_shadow_css(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        blur: f32,
+        dx: f32,
+        dy: f32,
+        spread: f32,
+    ) {
+        let spread_rect = Rect {
+            x: rect.x + dx - spread,
+            y: rect.y + dy - spread,
+            width: rect.width + spread * 2.0,
+            height: rect.height + spread * 2.0,
+        };
+        let spread_radius = (radius + spread).max(0.0);
+        self.fill_sdf(spread_rect, color, [spread_radius; 4], 0.0, [0.0; 4], blur, 1.0);
+    }
+
+    /// CSS-style box-shadow with per-corner radii [TL, TR, BR, BL].
+    pub fn fill_shadow_css_custom(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radii: [f32; 4],
+        blur: f32,
+        dx: f32,
+        dy: f32,
+        spread: f32,
+    ) {
+        let spread_rect = Rect {
+            x: rect.x + dx - spread,
+            y: rect.y + dy - spread,
+            width: rect.width + spread * 2.0,
+            height: rect.height + spread * 2.0,
+        };
+        let spread_radii = [
+            (radii[0] + spread).max(0.0),
+            (radii[1] + spread).max(0.0),
+            (radii[2] + spread).max(0.0),
+            (radii[3] + spread).max(0.0),
+        ];
+        self.fill_sdf(spread_rect, color, spread_radii, 0.0, [0.0; 4], blur, 1.0);
     }
 
     /// Inner shadow: shadow rendered *inside* a rounded rectangle, fading inward
@@ -631,7 +692,7 @@ impl UiBuilder {
     ///
     /// Uses negative `blur_radius` to signal inner shadow mode to the SDF shader.
     pub fn fill_inner_shadow(&mut self, rect: Rect, color: [f32; 4], radius: f32, blur: f32) {
-        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], -blur);
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], -blur, 1.0);
     }
 
     /// Inner shadow with per-corner radii [TL, TR, BR, BL].
@@ -642,7 +703,7 @@ impl UiBuilder {
         radii: [f32; 4],
         blur: f32,
     ) {
-        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], -blur);
+        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], -blur, 1.0);
     }
 
     /// Horizontal line of thickness `t`.
@@ -661,16 +722,16 @@ impl UiBuilder {
     /// at any DPI, unlike the flat-quad `hline` which can blur at fractional scales.
     pub fn hline_aa(&mut self, x: f32, y: f32, w: f32, t: f32, color: [f32; 4]) {
         let r = (t * 0.5).min(1.0);
-        self.quads.extend_from_slice(&quad_vertices_sdf(
-            x, y, w, t, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0,
+        self.emit_sdf(&quad_vertices_sdf(
+            x, y, w, t, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0, 0.0,
         ));
     }
 
     /// Anti-aliased vertical line via SDF.
     pub fn vline_aa(&mut self, x: f32, y: f32, h: f32, t: f32, color: [f32; 4]) {
         let r = (t * 0.5).min(1.0);
-        self.quads.extend_from_slice(&quad_vertices_sdf(
-            x, y, t, h, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0,
+        self.emit_sdf(&quad_vertices_sdf(
+            x, y, t, h, self.vw, self.vh, color, [r; 4], 0.0, [0.0; 4], 0.0, 0.0,
         ));
     }
 
@@ -1558,7 +1619,7 @@ impl UiBuilder {
         let radii = [r; 4];
         let no_border = [0.0f32; 4];
         // Horizontal bar
-        self.quads.extend_from_slice(&quad_vertices_sdf(
+        self.emit_sdf(&quad_vertices_sdf(
             cx - arm,
             cy - t / 2.0,
             arm * 2.0,
@@ -1570,9 +1631,10 @@ impl UiBuilder {
             0.0,
             no_border,
             0.0,
+            0.0,
         ));
         // Vertical bar
-        self.quads.extend_from_slice(&quad_vertices_sdf(
+        self.emit_sdf(&quad_vertices_sdf(
             cx - t / 2.0,
             cy - arm,
             t,
@@ -1583,6 +1645,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
         ));
     }
@@ -1598,7 +1661,7 @@ impl UiBuilder {
         let no_border = [0.0f32; 4];
 
         // Diagonal 1: top-left to bottom-right (π/4 clockwise)
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             cx,
             cy,
             line_len,
@@ -1611,9 +1674,10 @@ impl UiBuilder {
             0.0,
             no_border,
             0.0,
+            0.0,
         ));
         // Diagonal 2: top-right to bottom-left (-π/4)
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             cx,
             cy,
             line_len,
@@ -1626,6 +1690,7 @@ impl UiBuilder {
             0.0,
             no_border,
             0.0,
+            0.0,
         ));
     }
 
@@ -1634,7 +1699,7 @@ impl UiBuilder {
     pub fn icon_minimize(&mut self, rect: Rect, bar_w: f32, t: f32, color: [f32; 4]) {
         let (cx, cy) = rect.center();
         let r = t * 0.5; // pill-shaped rounded caps
-        self.quads.extend_from_slice(&quad_vertices_sdf(
+        self.emit_sdf(&quad_vertices_sdf(
             cx - bar_w / 2.0,
             cy - t / 2.0,
             bar_w,
@@ -1645,6 +1710,7 @@ impl UiBuilder {
             [r; 4],
             0.0,
             [0.0; 4],
+            0.0,
             0.0,
         ));
     }
@@ -1694,7 +1760,7 @@ impl UiBuilder {
             let angle = i as f32 * std::f32::consts::TAU / 6.0;
             let tx = cx + tooth_center_r * angle.cos();
             let ty = cy + tooth_center_r * angle.sin();
-            self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+            self.emit_sdf(&quad_vertices_sdf_rotated(
                 tx,
                 ty,
                 tooth_len,
@@ -1706,6 +1772,7 @@ impl UiBuilder {
                 [tooth_r; 4],
                 0.0,
                 no_border,
+                0.0,
                 0.0,
             ));
         }
@@ -1771,8 +1838,8 @@ impl UiBuilder {
         let angle = dy.atan2(dx);
         let mcx = (bottom.0 + top_right.0) / 2.0;
         let mcy = (bottom.1 + top_right.1) / 2.0;
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            mcx, mcy, len, t, angle, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        self.emit_sdf(&quad_vertices_sdf_rotated(
+            mcx, mcy, len, t, angle, self.vw, self.vh, color, radii, 0.0, no_border, 0.0, 0.0,
         ));
         // Branch line: mid-trunk → top-left
         let fork_y = cy + hh * 0.1;
@@ -1783,8 +1850,8 @@ impl UiBuilder {
         let angle2 = dy2.atan2(dx2);
         let mcx2 = (fork_x + top_left.0) / 2.0;
         let mcy2 = (fork_y + top_left.1) / 2.0;
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
-            mcx2, mcy2, len2, t, angle2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0,
+        self.emit_sdf(&quad_vertices_sdf_rotated(
+            mcx2, mcy2, len2, t, angle2, self.vw, self.vh, color, radii, 0.0, no_border, 0.0, 0.0,
         ));
     }
 
@@ -1806,7 +1873,7 @@ impl UiBuilder {
         let dy1 = bc.1 - tl.1;
         let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
         let a1 = dy1.atan2(dx1);
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             (tl.0 + bc.0) / 2.0,
             (tl.1 + bc.1) / 2.0,
             len1,
@@ -1819,13 +1886,14 @@ impl UiBuilder {
             0.0,
             no_border,
             0.0,
+            0.0,
         ));
         // Arm: top-right → bottom-center
         let dx2 = bc.0 - tr.0;
         let dy2 = bc.1 - tr.1;
         let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
         let a2 = dy2.atan2(dx2);
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             (tr.0 + bc.0) / 2.0,
             (tr.1 + bc.1) / 2.0,
             len2,
@@ -1838,13 +1906,14 @@ impl UiBuilder {
             0.0,
             no_border,
             0.0,
+            0.0,
         ));
         // Arm: top-left → top-right (closes the top edge)
         let dx3 = tr.0 - tl.0;
         let dy3 = tr.1 - tl.1;
         let len3 = (dx3 * dx3 + dy3 * dy3).sqrt();
         let a3 = dy3.atan2(dx3);
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             (tl.0 + tr.0) / 2.0,
             (tl.1 + tr.1) / 2.0,
             len3,
@@ -1856,6 +1925,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
         ));
     }
@@ -1875,7 +1945,7 @@ impl UiBuilder {
         let dy = tip.1 - top.1;
         let len = (dx * dx + dy * dy).sqrt();
         let a = dy.atan2(dx);
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             (top.0 + tip.0) / 2.0,
             (top.1 + tip.1) / 2.0,
             len,
@@ -1888,6 +1958,7 @@ impl UiBuilder {
             0.0,
             no_border,
             0.0,
+            0.0,
         ));
         // Bottom arm: center-right → bottom-left
         let bot = (cx - half * 0.4, cy + half);
@@ -1895,7 +1966,7 @@ impl UiBuilder {
         let dy2 = tip.1 - bot.1;
         let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
         let a2 = dy2.atan2(dx2);
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             (bot.0 + tip.0) / 2.0,
             (bot.1 + tip.1) / 2.0,
             len2,
@@ -1907,6 +1978,7 @@ impl UiBuilder {
             radii,
             0.0,
             no_border,
+            0.0,
             0.0,
         ));
     }
@@ -1942,9 +2014,9 @@ impl UiBuilder {
         let r = t * 0.5;
         let radii = [r; 4];
         let no_border = [0.0f32; 4];
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             mcx_top, mcy_top, len_top, t, angle_top, self.vw, self.vh, color, radii, 0.0,
-            no_border, 0.0,
+            no_border, 0.0, 0.0,
         ));
         // Lower arm: (caret_mid_x, caret_mid_y) → (caret_x, caret_bot_y)
         let dx_bot = caret_x - caret_mid_x;
@@ -1953,9 +2025,9 @@ impl UiBuilder {
         let angle_bot = dy_bot.atan2(dx_bot);
         let mcx_bot = (caret_mid_x + caret_x) / 2.0;
         let mcy_bot = (caret_mid_y + caret_bot_y) / 2.0;
-        self.quads.extend_from_slice(&quad_vertices_sdf_rotated(
+        self.emit_sdf(&quad_vertices_sdf_rotated(
             mcx_bot, mcy_bot, len_bot, t, angle_bot, self.vw, self.vh, color, radii, 0.0,
-            no_border, 0.0,
+            no_border, 0.0, 0.0,
         ));
         // Cursor line (horizontal bar next to the caret)
         let cursor_x = cx + hw * 0.05;

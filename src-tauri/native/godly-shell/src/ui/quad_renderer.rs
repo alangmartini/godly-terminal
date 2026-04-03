@@ -262,17 +262,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let has_border = input.border_width > 0.0;
     if (has_border) {
         let inner_d = d + input.border_width;
-        // Borders use the same adaptive AA band for consistent edge quality
-        let fill_mask = 1.0 - smoothstep(-crisp_aa, crisp_aa, inner_d);
+        // For thin borders, clamp AA band so it doesn't exceed half the
+        // border width — prevents the fill/border transition from consuming
+        // more than its share of a sub-2px border at high DPI.
+        let border_aa = min(crisp_aa, input.border_width * 0.5);
+        let fill_mask = 1.0 - smoothstep(-border_aa, border_aa, inner_d);
 
         // Border 3D rim lighting: directional gradient across the border
-        // using a top-left light source (consistent with the panel cast
-        // shadows in the compositor).  Top and left edges catch more light,
-        // bottom and right recede.  Transforms flat 1px borders into thin
-        // bevels that create real depth perception at panel boundaries.
+        // using a top-left light source.  Gated by lighting_intensity so
+        // flat CSS-like elements (lit=0) get perfectly uniform borders.
         let bny = p.y / max(he.y, 1.0);  // -1 top, +1 bottom
         let bnx = p.x / max(he.x, 1.0);  // -1 left, +1 right
-        let border_highlight = 0.025 * saturate(-bny * 0.4 - bnx * 0.15 + 0.3);
+        let border_highlight = 0.025 * saturate(-bny * 0.4 - bnx * 0.15 + 0.3) * input.lighting_intensity;
         let border_rgb = input.border_color.rgb + vec3<f32>(border_highlight);
 
         color = vec4<f32>(
@@ -294,7 +295,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // so there's no visible discontinuity where the lit fill meets unlit border.
     let edge_margin = select(1.5, input.border_width + 0.5, has_border);
     let interior_t = saturate((-d - 0.5) / edge_margin);
-    if (interior_t > 0.0 && fill.a > 0.1 && blur <= 2.0 && !is_inner_shadow) {
+    let lit = input.lighting_intensity;
+    if (lit > 0.0 && interior_t > 0.0 && fill.a > 0.1 && blur <= 2.0 && !is_inner_shadow) {
         let ny = p.y / he.y;  // -1 at top, +1 at bottom
         let nx = p.x / he.x;  // -1 at left, +1 at right
 
@@ -351,7 +353,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let left_edge = exp(-32.0 * (nx + 0.95) * (nx + 0.95)) * 0.012;
         let edge_peak = top_edge + left_edge;
 
-        let lit = input.lighting_intensity;
         let lighting = (spec + refl + rim + edge_peak - dark - corner_ao) * interior_t * lit;
 
         // Material micro-texture: spatially-coherent noise that gives the
@@ -819,6 +820,7 @@ pub fn quad_vertices_sdf_gradient_h(
         border_color,
         blur_radius: 0.0,
         rotation: 0.0,
+        lighting_intensity,
     };
 
     // Horizontal: left=fill_color_left, right=fill_color_right
@@ -851,6 +853,7 @@ pub fn quad_vertices_sdf_rotated(
     border_width: f32,
     border_color: [f32; 4],
     blur_radius: f32,
+    lighting_intensity: f32,
 ) -> [QuadVertex; 6] {
     let half_w = w / 2.0;
     let half_h = h / 2.0;
@@ -901,6 +904,7 @@ pub fn quad_vertices_sdf_rotated(
         border_color,
         blur_radius,
         rotation,
+        lighting_intensity,
     };
 
     [
