@@ -24,12 +24,12 @@ pub const BLOCK_CURSOR: usize = 15;
 const CONTENT_PAD_X: f32 = 20.0;
 const CONTENT_PAD_TOP: f32 = 12.0;
 const CONTENT_PAD_BOTTOM: f32 = 20.0;
-const BODY_LINE_HEIGHT: f32 = 13.6 * 1.55;
-const PARAGRAPH_LINE_HEIGHT: f32 = 13.6 * 1.6;
+const BODY_LINE_HEIGHT: f32 = 13.0 * 1.55; // web: fontSize 13, lineHeight 1.55
+const PARAGRAPH_LINE_HEIGHT: f32 = 13.0 * 1.6; // web: fontSize 13, lineHeight 1.6
 const SUB_ROW_HEIGHT: f32 = 14.0;
 const HEADING_HEIGHT: f32 = 14.0;
 const USER_MESSAGE_HEIGHT: f32 = 25.0;
-const THOUGHTS_HEIGHT: f32 = 13.0;
+const THOUGHTS_HEIGHT: f32 = 12.0; // web: fontSize 12
 const COMMAND_HEIGHT: f32 = 24.0;
 const EDITING_HEIGHT: f32 = 12.0;
 const CURSOR_HEIGHT: f32 = 16.0;
@@ -129,10 +129,10 @@ impl ReferencePaneLayoutEngine {
             block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_NUMBERED) as f32, 4.0, 4.0, text),
             block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
             block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
-            block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text),
+            block_style(s(THOUGHTS_HEIGHT), 6.0, 6.0, text), // web: margin "6px 0"
             block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_TONE) as f32, 8.0, 8.0, text),
             block_style(s(COMMAND_HEIGHT), 8.0, 8.0, text),
-            block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text),
+            block_style(s(THOUGHTS_HEIGHT), 6.0, 6.0, text), // web: margin "6px 0"
             block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_COLLAPSE) as f32, 8.0, 8.0, text),
             block_style(s(EDITING_HEIGHT), 6.0, 6.0, text),
             block_style(s(CURSOR_HEIGHT), 8.0, 0.0, text),

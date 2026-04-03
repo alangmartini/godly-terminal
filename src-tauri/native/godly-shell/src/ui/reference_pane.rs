@@ -457,7 +457,7 @@ impl ReferencePane {
             bg,
             SMALL_SCALE,
         );
-        y + text.s(13.0)
+        y + text.s(12.0) // web: fontSize 12
     }
 
     fn draw_command_row(
@@ -536,19 +536,15 @@ impl ReferencePane {
     }
 
     fn draw_cursor(&self, ui: &mut UiBuilder, text: &UiTextRenderer, x: f32, y: f32) {
+        // Web: width 8, height 16, backgroundColor #6366f1, borderRadius 1
         ui.fill_rounded(
             Rect {
                 x,
                 y,
-                width: text.s(7.0),
-                height: text.s(15.0),
+                width: text.s(8.0),
+                height: text.s(16.0),
             },
-            [
-                colors::ACCENT_BLUE[0],
-                colors::ACCENT_BLUE[1],
-                colors::ACCENT_BLUE[2],
-                0.88,
-            ],
+            colors::ACCENT_BLUE,
             text.s(1.0),
         );
     }
