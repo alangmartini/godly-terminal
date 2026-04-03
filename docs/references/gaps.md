@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-03 (Iteration 90)
+Last updated: 2026-04-03 (Iteration 91)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -91,6 +91,11 @@ Last updated: 2026-04-03 (Iteration 90)
 | Surface resize fix | Done | wgpu surface now uses winit's reported size instead of stale HWND GetClientRect for borderless windows (iteration 89) |
 
 | Inline run wrapping | Done | Mixed Text/Link/Code bullet runs now word-wrap at content boundary with dynamic layout heights (iteration 90) |
+| Letter spacing | Done | letterSpacing 0.2 on content headings, 0.5 on sidebar directory path, 0.3 on poem title, 0.2 on poem stanzas matching web exactly (iteration 91) |
+
+## Changes in Iteration 91
+
+1. **Letter-spacing support added** — Added `letter_spacing` field to `TextCommand` and `set_last_letter_spacing()` builder helper that adjusts glyph offsets. Applied web reference values at 4 locations: content headings (0.2px), sidebar directory path (0.5px), poem title (0.3px), and poem stanzas (0.2px). The monospace fallback path in `terminal_renderer.rs` also applies letter_spacing to each glyph advance.
 
 ## Changes in Iteration 90
 
