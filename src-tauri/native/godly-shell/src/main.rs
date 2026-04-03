@@ -341,8 +341,8 @@ impl App {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: phys_size.width.max(1),
-            height: phys_size.height.max(1),
+            width: winit_size.width.max(1),
+            height: winit_size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
@@ -2536,20 +2536,13 @@ impl ApplicationHandler<AsyncEvent> for App {
                     self.scale_factor = w.scale_factor() as f32;
                 }
                 if let Some(gpu) = &mut self.gpu {
-                    let surface_size = self
-                        .window
-                        .as_ref()
-                        .map_or(size, |window| window_surface_size(window));
-                    if surface_size != size {
-                        log::info!(
-                            "[DPI] resize surface: winit={}x{}, hwnd-client={}x{}, scale={}",
-                            size.width,
-                            size.height,
-                            surface_size.width,
-                            surface_size.height,
-                            self.scale_factor,
-                        );
-                    }
+                    // Use winit's reported size as the authoritative surface
+                    // dimension. The GetClientRect-based hwnd-client size can
+                    // become stale for borderless windows when un-maximising,
+                    // causing the render surface to be larger than the visible
+                    // window and pushing bottom-anchored UI (agent panel,
+                    // status bar) off screen.
+                    let surface_size = size;
                     gpu.config.width = surface_size.width.max(1);
                     gpu.config.height = surface_size.height.max(1);
                     gpu.surface.configure(&gpu.device, &gpu.config);
