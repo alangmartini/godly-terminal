@@ -628,7 +628,7 @@ impl ReferencePane {
                         cy += line_h;
                         cx = start_x;
                     }
-                    let code_h = s(16.0);
+                    let code_h = s(14.0); // web: fontSize 12 + padding 1px*2
                     let rect = Rect {
                         x: cx,
                         y: cy + s(1.0),
