@@ -151,6 +151,13 @@ impl App {
         let mut right_panel = ui::right_panel::RightPanel::new();
         let mut status_bar = ui::status_bar::StatusBar::new();
 
+        // Demo data matching web reference — populated in LiveShell mode
+        // so the status bar and agent panel have visible content.
+        status_bar.cwd = "~/Documents/work/opensessions".into();
+        status_bar.git_branch = "main".into();
+        status_bar.git_diff_summary = "1 file +21 ~4 -70".into();
+        status_bar.streaming = true;
+
         if scene_mode == SceneMode::WebReferenceCrop {
             tab_bar.crop_mode = true;
             tab_bar.show_brand = false;

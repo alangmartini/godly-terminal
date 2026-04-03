@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-03 (Iteration 89)
+Last updated: 2026-04-03 (Iteration 90)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -90,6 +90,12 @@ Last updated: 2026-04-03 (Iteration 89)
 | Session number color | Done | FG_DIM (#555d6b) matching web's color: "#555d6b" for session ID numbers (iteration 88) |
 | Surface resize fix | Done | wgpu surface now uses winit's reported size instead of stale HWND GetClientRect for borderless windows (iteration 89) |
 
+| Inline run wrapping | Done | Mixed Text/Link/Code bullet runs now word-wrap at content boundary with dynamic layout heights (iteration 90) |
+
+## Changes in Iteration 90
+
+1. **Inline mixed-content runs now word-wrap** — `draw_inline_runs()` gained `start_x`/`avail_width` params and wraps Text runs at word boundaries via `find_word_break()`. Link and Code runs wrap as whole units to the next line when they don't fit. `inline_runs_line_count()` pre-computes line counts for the layout engine so `BLOCK_VERIFICATION_BULLET`, `BLOCK_SMOKE_BULLET`, and `BLOCK_RESIDUAL_NUMBERED` get correct heights. This closes the last documented content-layout gap.
+
 ## Changes in Iteration 89
 
 1. **Agent status badge vertical padding corrected** — Changed from `s(2.0)` to `s(1.0)` matching web's `padding: "1px 6px"`. Badge text now uses `text_ui_bold_scaled` matching web's `fontWeight: 600`.
@@ -117,7 +123,7 @@ Last updated: 2026-04-03 (Iteration 89)
 
 **What changed structurally**: The reference pane layout engine can now accept dynamic block heights via `compute_wrapped()`, enabling proper text flow for varying viewport widths. This closes the single biggest layout divergence between the native and web transcript scenes.
 
-**Remaining gaps**: Inline runs (bullet runs with mixed Text/Link/Code segments) still render on single lines without wrapping. Glyph weight and anti-aliasing contrast differences between DirectWrite ClearType and browser rendering remain an inherent platform divergence.
+**Remaining gaps**: Glyph weight and anti-aliasing contrast differences between DirectWrite ClearType and browser rendering remain an inherent platform divergence. Letter-spacing is not yet implemented (web uses `letterSpacing: 0.2` on headings, `0.5` on directory paths, `0.3` on poem titles).
 
 ## Changes in Iteration 85
 
