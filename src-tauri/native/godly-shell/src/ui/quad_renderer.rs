@@ -155,17 +155,23 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return out;
 }
 
-// sRGB ↔ linear conversion for correct gradient interpolation.
+// sRGB ↔ linear conversion (IEC 61966-2-1 spec-correct piecewise transfer).
 // Vertex colors are specified in sRGB space (matching CSS hex/rgb values).
 // The GPU interpolates vertex outputs linearly, so we convert to linear in
 // the vertex shader — the GPU then interpolates in linear space — and convert
 // back to sRGB in the fragment shader before dither/lighting.
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
-    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2));
+    let s = max(c, vec3<f32>(0.0));
+    let lo = s / vec3<f32>(12.92);
+    let hi = pow((s + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4));
+    return select(hi, lo, s <= vec3<f32>(0.04045));
 }
 
 fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
-    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+    let s = max(c, vec3<f32>(0.0));
+    let lo = s * vec3<f32>(12.92);
+    let hi = vec3<f32>(1.055) * pow(s, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055);
+    return select(hi, lo, s <= vec3<f32>(0.0031308));
 }
 
 // Signed distance to a rounded rectangle with per-corner radii.
@@ -209,7 +215,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Convert interpolated linear fill_color back to sRGB.  The vertex shader
     // linearized it so the GPU's hardware interpolation (for gradients) happens
     // in perceptually correct linear space.  The rest of the fragment shader
-    // expects sRGB for dither, lighting, and the final pow(2.2) output path.
+    // expects sRGB for dither, lighting, and the final srgb_to_linear() output path.
     let fill = vec4<f32>(linear_to_srgb(input.fill_color.rgb), input.fill_color.a);
     let he = input.rect_half_ext;
     let screen_pos = input.position.xy;
@@ -237,11 +243,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // visible noise on dark backgrounds: BG_DARK (0.071 sRGB → 0.0034
         // linear) + 0.003 grain = ~88% brightness swing.  In sRGB space the
         // same grain is only ±4% — perceptually uniform and consistent with
-        // the SDF path which also adds grain before pow(2.2).
+        // the SDF path which also adds grain before srgb_to_linear().
         let d = dither_noise(screen_pos);
         let g = material_grain(screen_pos);
         let srgb = fill.rgb + vec3<f32>(d + g);
-        let linear = pow(srgb, vec3<f32>(2.2));
+        let linear = srgb_to_linear(srgb);
         // Premultiplied alpha output: RGB * alpha before blending.
         // With PREMULTIPLIED_ALPHA_BLENDING, this produces correct compositing
         // of semi-transparent layers (shadows, glows, hover transitions) and
@@ -421,7 +427,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // compositing (Skia, Direct2D, CoreGraphics).
     let final_a = color.a * aa * clip_alpha;
     let dith = dither_noise(screen_pos);
-    let linear = pow(color.rgb + vec3<f32>(dith), vec3<f32>(2.2));
+    let linear = srgb_to_linear(color.rgb + vec3<f32>(dith));
     let rgb = linear * final_a;
     return vec4<f32>(rgb, final_a);
 }
