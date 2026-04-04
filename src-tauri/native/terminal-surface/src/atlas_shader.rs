@@ -93,12 +93,23 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(fg_lin, gray);
     }
 
-    // --- Opaque-bg mode: ClearType subpixel blending (terminal cells) ---
+    // --- Opaque-bg mode ---
     // Linearise fg/bg using ClearType gamma (1.8) for perceptually correct blending.
     let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
     let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
 
-    // Per-channel subpixel blending in gamma-1.8 linear space.
+    // Browsers use grayscale AA on dark backgrounds to avoid ClearType color
+    // fringing.  Compute sRGB-space relative luminance to decide.
+    let lum = 0.2126 * input.bg_color.r + 0.7152 * input.bg_color.g + 0.0722 * input.bg_color.b;
+    if (lum < 0.5) {
+        // Dark background: collapse per-channel ClearType coverage to single
+        // grayscale value, eliminating subpixel color fringing.
+        let gray = (coverage.r + coverage.g + coverage.b) / 3.0;
+        let blended = mix(bg_lin, fg_lin, vec3<f32>(gray));
+        return vec4<f32>(pow(blended, vec3<f32>(2.2 / 1.8)), 1.0);
+    }
+
+    // Light background: ClearType subpixel blending (per-channel).
     let blended = mix(bg_lin, fg_lin, coverage);
 
     // The sRGB render target applies pow(x, 1/2.2) encoding, but our blending
