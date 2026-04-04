@@ -224,7 +224,7 @@ impl DirectWriteRasterizer {
     /// Returns `Ok(None)` if the font does not contain a glyph for the
     /// requested character (glyph index 0 / .notdef).
     ///
-    /// Uses `DWRITE_RENDERING_MODE_NATURAL` with
+    /// Uses `DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC` with
     /// `DWRITE_TEXTURE_CLEARTYPE_3x1` for ClearType subpixel rendering.
     /// The returned bitmap contains 3 bytes per pixel (R, G, B coverage)
     /// preserving the full subpixel information for LCD displays.
@@ -298,7 +298,7 @@ impl DirectWriteRasterizer {
                 &glyph_run,
                 1.0, // font_size_px is already in physical pixels (scaled by pixel_renderer)
                 None,
-                DWRITE_RENDERING_MODE_NATURAL,
+                DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
                 DWRITE_MEASURING_MODE_NATURAL,
                 0.0,
                 0.0, // baseline origin
