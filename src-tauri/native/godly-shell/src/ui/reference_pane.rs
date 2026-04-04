@@ -184,6 +184,7 @@ impl ReferencePane {
             text,
             layout.blocks[BLOCK_USER_FUN].x,
             layout.blocks[BLOCK_USER_FUN].y,
+            layout.blocks[BLOCK_USER_FUN].width,
             "also make it a bit more fun! (interrupted)",
             bg,
         );
@@ -192,6 +193,7 @@ impl ReferencePane {
             text,
             layout.blocks[BLOCK_USER_COMPACT].x,
             layout.blocks[BLOCK_USER_COMPACT].y,
+            layout.blocks[BLOCK_USER_COMPACT].width,
             "and compact!",
             bg,
         );
@@ -394,16 +396,18 @@ impl ReferencePane {
         text: &UiTextRenderer,
         x: f32,
         y: f32,
+        width: f32,
         label: &str,
         bg: [f32; 4],
     ) -> f32 {
         let s = |v: f32| text.s(v);
         // Web: fontSize 13, inherited lineHeight 1.5, padding "6px 12px"
         // Total height = 13 * 1.5 + 12 = 31.5; half-leading = (19.5 - 13) / 2 = 3.25
+        // Web: <div> is block-level, fills parent content width
         let rect = Rect {
             x,
             y,
-            width: text.text_width_mono_scaled(label, BODY_SCALE) + s(24.0),
+            width,
             height: s(31.5),
         };
         // Web: borderLeft "3px solid #6366f1", borderRadius "0 4px 4px 0"
@@ -421,7 +425,7 @@ impl ReferencePane {
             rect.x + s(12.0),
             rect.y + s(9.25), // 6px padding + 3.25px half-leading
             [0.769, 0.698, 0.541, 1.0], // #c4b28a
-            bg,
+            colors::BG_ACTIVE_ACC, // composite against element bg, not content area bg
             BODY_SCALE,
         );
         rect.bottom()
@@ -480,7 +484,8 @@ impl ReferencePane {
             width,
             height: s(30.0),
         };
-        ui.fill_rounded(rect, [0.039, 0.047, 0.063, 1.0], s(5.0)); // #0a0c10
+        let cmd_bg = [0.039, 0.047, 0.063, 1.0]; // #0a0c10
+        ui.fill_rounded(rect, cmd_bg, s(5.0));
         ui.stroke_rounded(rect, s(5.0), 1.0, [0.118, 0.129, 0.157, 1.0]); // #1e2128
         ui.text_mono_scaled_mixed(
             text,
@@ -488,7 +493,7 @@ impl ReferencePane {
             rect.x + s(10.0),
             rect.y + s(9.0), // 6px padding + 3px half-leading
             colors::FG_MUTED, // web: color "#6e7681"
-            bg,
+            cmd_bg, // composite against element bg, not content area bg
             SMALL_SCALE,
         );
         let arrow = "\u{25B8}";
@@ -499,7 +504,7 @@ impl ReferencePane {
             rect.right() - arrow_w - s(10.0),
             rect.y + s(9.0), // 6px padding + 3px half-leading
             colors::STATUS_PATH,
-            bg,
+            cmd_bg, // composite against element bg, not content area bg
             SMALL_SCALE,
         );
         rect.bottom()
