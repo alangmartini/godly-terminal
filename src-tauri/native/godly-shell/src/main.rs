@@ -2795,32 +2795,35 @@ impl ApplicationHandler<AsyncEvent> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                log::info!("[WHEEL_RAW] delta={:?} mouse={:?}", delta, self.mouse_position);
-                let lines = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => -y as isize * 3,
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as isize,
+                log::info!("[WHEEL] delta={:?} mouse={:?}", delta, self.mouse_position);
+                // Compute pixel-level delta (float) for right panel smooth scroll
+                let pixel_delta = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => -y * 40.0,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
                 };
-                if lines != 0 {
-                    // Check if mouse is over right panel to route scroll there
-                    let ui_scale = self.ui_scale();
-                    let gpu = self.gpu.as_ref();
-                    let (vw, vh) = gpu
-                        .map(|g| (g.config.width as f32, g.config.height as f32))
-                        .unwrap_or((1200.0, 800.0));
-                    let layout = self.shell_layout(vw, vh);
-                    let over_right_panel = self.right_panel.visible
-                        && layout.right_panel.width > 0.0
-                        && self
-                            .mouse_position
-                            .map(|(mx, my)| {
-                                layout.right_panel.contains(mx as f32, my as f32)
-                            })
-                            .unwrap_or(false);
-                    if over_right_panel {
-                        let pixel_delta = match delta {
-                            winit::event::MouseScrollDelta::LineDelta(_, y) => -y * 40.0,
-                            winit::event::MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
-                        };
+
+                // Check if mouse is over right panel to route scroll there
+                let ui_scale = self.ui_scale();
+                let gpu = self.gpu.as_ref();
+                let (vw, vh) = gpu
+                    .map(|g| (g.config.width as f32, g.config.height as f32))
+                    .unwrap_or((1200.0, 800.0));
+                let layout = self.shell_layout(vw, vh);
+                let over_right_panel = self.right_panel.visible
+                    && layout.right_panel.width > 0.0
+                    && self
+                        .mouse_position
+                        .map(|(mx, my)| {
+                            layout.right_panel.contains(mx as f32, my as f32)
+                        })
+                        .unwrap_or(false);
+                log::info!("[WHEEL] rp=({},{},{},{}) visible={} over={} px_delta={}",
+                    layout.right_panel.x, layout.right_panel.y,
+                    layout.right_panel.width, layout.right_panel.height,
+                    self.right_panel.visible, over_right_panel, pixel_delta);
+
+                if over_right_panel {
+                    if pixel_delta.abs() > 0.001 {
                         if let Some(renderer) = self.renderer.as_ref() {
                             let m = renderer.font_metrics().scaled_for_render();
                             let mut ui_text = ui::builder::UiTextRenderer::new(
@@ -2841,7 +2844,16 @@ impl ApplicationHandler<AsyncEvent> for App {
                         if let Some(w) = &self.window {
                             w.request_redraw();
                         }
-                    } else {
+                    }
+                } else {
+                    // Terminal scrollback — integer lines
+                    let lines = match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, y) => -y as isize * 3,
+                        winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                            -(pos.y / 20.0) as isize
+                        }
+                    };
+                    if lines != 0 {
                         self.scroll(lines);
                     }
                 }
