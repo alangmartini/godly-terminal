@@ -1393,29 +1393,6 @@ impl UiBuilder {
         );
     }
 
-    pub fn text_ui_mixed(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-    ) {
-        self.push_text_command(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            false,
-            false,
-            1.0,
-            TextFontKind::UiSans,
-            TextCompositeMode::MixedBackground,
-        );
-    }
 
     /// Record a bold UI text draw command (proportional sans-serif font).
     pub fn text_ui_bold(
