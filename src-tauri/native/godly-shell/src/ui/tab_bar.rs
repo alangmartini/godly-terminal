@@ -92,7 +92,7 @@ impl TabBar {
             show_brand: false,
             show_indicators: true,
             show_window_controls: true,
-            show_new_tab_button: true,
+            show_new_tab_button: false,
             show_tab_close_buttons: true,
             content_sized_tabs: true,
             crop_mode: false,
