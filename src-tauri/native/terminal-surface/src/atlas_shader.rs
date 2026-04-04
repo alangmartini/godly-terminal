@@ -61,12 +61,13 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 // ClearType-style gamma blending with enhanced contrast.
 //
 // Windows ClearType uses gamma 1.8 (not sRGB 2.2) and an "enhanced contrast"
-// parameter (default 0.5) that boosts mid-range coverage values to produce
-// heavier, more readable text — especially on dark backgrounds.  These are
-// the same parameters DirectWrite's IDWriteRenderingParams exposes.
+// parameter that boosts mid-range coverage values to produce heavier, more
+// readable text.  DirectWrite's default is 0.5; we use that value to match
+// browser text weight (browsers use raw DirectWrite coverage without extra
+// shader-side boosting, but the default rendering params include 0.5).
 const GAMMA: f32 = 1.8;
 const INV_GAMMA: f32 = 0.5556; // 1.0 / 1.8
-const ENHANCED_CONTRAST: f32 = 1.0;
+const ENHANCED_CONTRAST: f32 = 0.5;
 
 // Boost coverage using DirectWrite's enhanced contrast formula.
 fn enhance(c: f32) -> f32 {
