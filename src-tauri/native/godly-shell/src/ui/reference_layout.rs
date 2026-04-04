@@ -113,33 +113,43 @@ impl ReferencePaneLayoutEngine {
             line_counts.map_or(1, |lc| lc[idx].max(1))
         };
 
-        let styles = [
-            block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_INTRO) as f32, 4.0, 4.0, text),
-            block_style(s(HEADING_HEIGHT), 18.0, 8.0, text),
-            block_style(
-                s(BODY_LINE_HEIGHT) * lc(BLOCK_VERIFICATION_BULLET) as f32
-                    + s(2.0 + SUB_ROW_HEIGHT * 4.0),
-                4.0,
-                4.0,
-                text,
-            ),
-            block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_SMOKE_BULLET) as f32, 4.0, 4.0, text),
-            block_style(s(HEADING_HEIGHT), 18.0, 8.0, text),
-            block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_PARAGRAPH) as f32, 8.0, 8.0, text),
-            block_style(s(BODY_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_NUMBERED) as f32, 4.0, 4.0, text),
-            block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
-            block_style(s(USER_MESSAGE_HEIGHT), 6.0, 6.0, text),
-            block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text), // web: margin "8px 0 6px"
-            block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_TONE) as f32, 8.0, 8.0, text),
-            block_style(s(COMMAND_HEIGHT), 8.0, 8.0, text),
-            block_style(s(THOUGHTS_HEIGHT), 8.0, 6.0, text), // web: margin "8px 0 6px"
-            block_style(s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_COLLAPSE) as f32, 8.0, 8.0, text),
-            block_style(s(EDITING_HEIGHT), 6.0, 6.0, text),
-            block_style(s(CURSOR_HEIGHT), 8.0, 0.0, text),
+        // Block heights and raw CSS margins (margin_top, margin_bottom) before collapsing.
+        // In CSS block flow (the web content area is NOT display:flex), adjacent
+        // vertical margins collapse: gap = max(prev_bottom, curr_top), not sum.
+        let blocks_raw: [(f32, f32, f32); BLOCK_COUNT] = [
+            (s(BODY_LINE_HEIGHT) * lc(BLOCK_INTRO) as f32, 4.0, 4.0),
+            (s(HEADING_HEIGHT), 18.0, 8.0),
+            (s(BODY_LINE_HEIGHT) * lc(BLOCK_VERIFICATION_BULLET) as f32
+                + s(2.0 + SUB_ROW_HEIGHT * 4.0), 4.0, 4.0),
+            (s(BODY_LINE_HEIGHT) * lc(BLOCK_SMOKE_BULLET) as f32, 4.0, 4.0),
+            (s(HEADING_HEIGHT), 18.0, 8.0),
+            (s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_PARAGRAPH) as f32, 8.0, 8.0),
+            (s(BODY_LINE_HEIGHT) * lc(BLOCK_RESIDUAL_NUMBERED) as f32, 4.0, 4.0),
+            (s(USER_MESSAGE_HEIGHT), 6.0, 6.0),
+            (s(USER_MESSAGE_HEIGHT), 6.0, 6.0),
+            (s(THOUGHTS_HEIGHT), 8.0, 6.0), // web: margin "8px 0 6px"
+            (s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_TONE) as f32, 8.0, 8.0),
+            (s(COMMAND_HEIGHT), 8.0, 8.0),
+            (s(THOUGHTS_HEIGHT), 8.0, 6.0), // web: margin "8px 0 6px"
+            (s(PARAGRAPH_LINE_HEIGHT) * lc(BLOCK_PARAGRAPH_COLLAPSE) as f32, 8.0, 8.0),
+            (s(EDITING_HEIGHT), 6.0, 6.0),
+            (s(CURSOR_HEIGHT), 8.0, 0.0),
         ];
 
-        for (index, style) in styles.into_iter().enumerate() {
-            self.set_style(self.blocks[index], style);
+        // Simulate CSS margin collapsing: gap between adjacent blocks = max(prev_bottom, curr_top).
+        // We achieve this by setting margin_bottom = 0 for all blocks, and
+        // collapsed_top = max(prev_bottom_css, curr_top_css) for blocks 1..N.
+        // Block 0 keeps its original top margin (no collapsing with the container
+        // because the container has overflow:auto which creates a BFC).
+        for i in 0..BLOCK_COUNT {
+            let (height, css_top, _css_bottom) = blocks_raw[i];
+            let collapsed_top = if i == 0 {
+                css_top
+            } else {
+                let prev_bottom = blocks_raw[i - 1].2;
+                f32::max(prev_bottom, css_top)
+            };
+            self.set_style(self.blocks[i], block_style(height, collapsed_top, 0.0, text));
         }
 
         self.tree
