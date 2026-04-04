@@ -142,17 +142,21 @@ impl StatusBar {
         // Web reference uses much darker text here than the main UI:
         //   path: #3b4048, separators: #2d333b, diff text: #484f58
         let mut rx = bar.right() - s(14.0);
-        let sep = " | ";
+        let gap = s(6.0); // web: flex container gap: 6
+        let sep_w = text.text_width_ui_scaled("|", sc);
         let sep_fg = colors::BG_HOVER; // web: #2d333b
 
         // Git diff stats (rightmost)
         if !self.git_diff_summary.is_empty() {
-            // Parse simple diff format like "+21 ~4 -70" and colorize
-            let diff_w = text.text_width_ui_scaled(&self.git_diff_summary, sc);
-            rx -= diff_w;
-            // Render each token with appropriate color
+            // Parse simple diff format like "+21 ~4 -70" and colorize.
+            // Web renders each token as a separate <span> child with gap: 6.
+            let tokens: Vec<&str> = self.git_diff_summary.split_whitespace().collect();
+            // Measure total width: sum of token widths + gap between each token
+            let total_w: f32 = tokens.iter().map(|t| text.text_width_ui_scaled(t, sc)).sum::<f32>()
+                + gap * (tokens.len().saturating_sub(1)) as f32;
+            rx -= total_w;
             let mut dx = rx;
-            for token in self.git_diff_summary.split_whitespace() {
+            for (i, token) in tokens.iter().enumerate() {
                 let color = if token.starts_with('+') {
                     colors::ACCENT_GREEN
                 } else if token.starts_with('-') || token.starts_with('~') {
@@ -161,11 +165,15 @@ impl StatusBar {
                     colors::STATUS_DEFAULT // web: #484f58 (inherited status bar color)
                 };
                 ui.text_ui_scaled(text, token, dx, y_center, color, bg, sc);
-                dx += text.text_width_ui_scaled(token, sc) + text.text_width_ui_scaled(" ", sc);
+                dx += text.text_width_ui_scaled(token, sc);
+                if i + 1 < tokens.len() {
+                    dx += gap;
+                }
             }
 
-            rx -= text.text_width_ui_scaled(sep, sc);
-            ui.text_ui_scaled(text, sep, rx, y_center, sep_fg, bg, sc);
+            // Separator: gap + "|" + gap
+            rx -= gap + sep_w + gap;
+            ui.text_ui_scaled(text, "|", rx + gap, y_center, sep_fg, bg, sc);
         }
 
         // Git branch (amber)
@@ -183,8 +191,9 @@ impl StatusBar {
                 sc,
             );
 
-            rx -= text.text_width_ui_scaled(sep, sc);
-            ui.text_ui_scaled(text, sep, rx, y_center, sep_fg, bg, sc);
+            // Separator: gap + "|" + gap
+            rx -= gap + sep_w + gap;
+            ui.text_ui_scaled(text, "|", rx + gap, y_center, sep_fg, bg, sc);
         }
 
         // Working directory path (muted)
