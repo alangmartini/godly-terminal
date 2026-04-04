@@ -1,0 +1,21 @@
+﻿{
+  "score": 72,
+  "verdict": "revise",
+  "category_match": true,
+  "differences": [
+    "Top tab-strip in the generated screenshot is materially undersized versus the reference: tab labels, circular badges, and overall strip height read smaller and weaker.",
+    "Sidebar/session-chip sizing is somewhat smaller too, but the mismatch is less dominant than the tab-strip difference.",
+    "The top strip therefore loses the visual hierarchy seen in the reference, while the sidebar remains closer in relative proportion."
+  ],
+  "suggestions": [
+    "Prioritize a top tab-strip sizing pass first: increase tab height, label size/weight, badge diameter, and horizontal padding to restore the stronger top-row presence.",
+    "After the tab-strip is corrected, do a lighter sidebar/session-chip tuning pass only if needed—mainly chip height and label scale.",
+    "Keep sidebar changes secondary so you do not overcorrect the left rail before the more obvious top-strip mismatch is fixed."
+  ],
+  "reasoning": "The largest perceptual delta is the top tab-strip, which appears too compressed and visually faint compared with the reference. Sidebar/session-chip sizing is off slightly, but fixing the tab-strip first should yield the highest-leverage improvement.",
+  "next_actions": [
+    "Increase crop-mode tab-strip sizing and typography.",
+    "Re-capture parity before changing sidebar sizing."
+  ],
+  "threshold_pass": false
+}

@@ -106,3 +106,40 @@ Track all bugs and investigations as **GitHub Issues**, not local docs.
 - No Laziness: Find root causes. No temporary fixes. Senior developer standards.
 - Minimal Impact: Only touch what's necessary. No side effects with new bugs.
 
+## Stateful Ralph Loop (Visual Parity)
+
+An autonomous loop that iteratively closes the visual gap between `godly-shell` (native winit+wgpu) and `web/godly-terminal.jsx` (the web reference).
+
+### How it works
+- **State machine** in `.ralph-state/STATE.md` — survives cancellations and usage limits.
+- **Prompt** in `RALPH_STATEFUL_PROMPT.md` — same prompt fed every iteration; Claude reads the state file to know what phase it's in.
+- **Goal** in `.ralph-state/GOAL.md` — the target (visual parity with the web reference).
+- **Phases**: DISCOVER → PLAN_MINOR → IMPLEMENT (one minor per iteration) → VALIDATE → loop.
+
+### How to manage it (as an overseer)
+```bash
+# Launch in background
+cd /c/Users/User/godly-terminal
+nohup bash ./ralph-stateful-loop.sh >> /c/Users/User/godly-terminal/.ralph-state/loop-output.log 2>&1 &
+LOOP_PID=$!
+echo "$LOOP_PID" > /c/Users/User/godly-terminal/.ralph-state/loop.pid
+
+# Monitor (check every 5-7 min)
+ps -p $(cat .ralph-state/loop.pid) -o pid= 2>/dev/null && echo "alive" || echo "dead"
+head -10 .ralph-state/STATE.md                    # current major loop
+grep -E "^### Minor|Status" .ralph-state/STATE.md # minor loop progress
+git log --oneline -5                              # commits made
+tail -30 .ralph-state/loop-output.log             # recent output
+
+# Restart after crash/usage limit (state persists, picks up where it left off)
+nohup bash ./ralph-stateful-loop.sh >> /c/Users/User/godly-terminal/.ralph-state/loop-output.log 2>&1 &
+LOOP_PID=$!
+echo "$LOOP_PID" > /c/Users/User/godly-terminal/.ralph-state/loop.pid
+```
+
+### Known behaviors
+- The process dies between iterations due to `claude --print` exit codes or API limits. This is expected — just restart.
+- Each restart picks up exactly where it left off via the state file.
+- The loop uses `set -uo pipefail` (no `set -e`) so non-zero exits from Claude don't kill the bash loop.
+- All work targets `godly-shell` only (NOT `godly-iced-shell`).
+

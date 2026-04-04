@@ -1,0 +1,30 @@
+# Context Snapshot — godly-shell-quality-20260402T182900Z
+
+- task statement: Improve the visual quality of `godly-shell` so it reaches at least the minimum quality shown by the HTML/CSS reference embedded in `web/godly-terminal.jsx`.
+- desired outcome: Native `godly-shell` chrome/transcript should look materially more polished and closer to the reference, with measurable screenshot-parity improvement and no regression in targeted native-shell checks.
+- known facts/evidence:
+  - The reference source is `web/godly-terminal.jsx`.
+  - Native implementation lives under `src-tauri/native/godly-shell/`.
+  - The repo already has a screenshot parity harness: `scripts/measure-godly-shell-parity.ps1`.
+  - `docs/references/gaps.md` says the biggest remaining gaps are transcript typography/compositing, sidebar/session spacing, and some tab-strip typography drift.
+  - `ui/reference_pane.rs` renders the deterministic crop transcript used by the parity scene.
+  - `ui/sidebar_layout.rs`, `ui/sidebar.rs`, `ui/tab_bar.rs`, and `ui/builder.rs` are current quality-sensitive touchpoints.
+- constraints:
+  - Ralph/ralplan-first gate requires PRD + test-spec artifacts before implementation.
+  - No new dependencies.
+  - Keep diffs small and reversible.
+  - Verify with targeted checks only, not full workspace builds.
+  - Visual claims must be backed by the repo parity harness rather than subjective judgment.
+- unknowns/open questions:
+  - Whether transcript mismatch is primarily font choice, compositing mode, baseline rhythm, or layout spacing.
+  - Whether a small sidebar/tab retune is needed after transcript improvements.
+  - Exact measurable improvement threshold achievable in one pass.
+- likely codebase touchpoints:
+  - `src-tauri/native/godly-shell/src/ui/reference_pane.rs`
+  - `src-tauri/native/godly-shell/src/ui/reference_layout.rs`
+  - `src-tauri/native/godly-shell/src/ui/builder.rs`
+  - `src-tauri/native/godly-shell/src/terminal_renderer.rs`
+  - `src-tauri/native/godly-shell/src/ui/sidebar.rs`
+  - `src-tauri/native/godly-shell/src/ui/tab_bar.rs`
+  - `docs/references/gaps.md`
+  - `tasks/rendering-quality-iterations.md`

@@ -1,0 +1,427 @@
+﻿[thread] 019d4f70-b961-7142-8d2e-4aa0205c608d
+[turn] started
+[agent]
+  Ralph mode is active for this iteration. IΓÇÖm starting by reading the required files, checking whether the required RALPH planning artifacts already exist, and auditing the current native/web parity blockers before choosing the highest-leverage implementation target.
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src-tauri\\native\\godly-shell\\src\\terminal_renderer.rs"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Force .omx\\plans"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content docs\\superpowers\\plans\\2026-03-27-directwrite-cleartype-rendering.md"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src-tauri\\native\\godly-shell\\src\\ui\\layout.rs"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content AGENTS.md'
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src-tauri\\native\\godly-shell\\src\\main.rs"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content tasks\\rendering-quality-iterations.md"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content docs\\superpowers\\plans\\2026-03-29-drop-iced-migration.md"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content docs\\references\\gaps.md"
+[command:start] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src-tauri\\native\\godly-shell\\src\\ui\\builder.rs"
+[command:done exit=0] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Force .omx\\plans"
+[command:done exit=0] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src-tauri\\native\\godly-shell\\src\\terminal_renderer.rs"
+[command output]
+  use godly_protocol::types::RichGridData;
+  use godly_terminal_surface::{
+      atlas_shader::{AtlasPipeline, AtlasShaderProgram},
+      atlas_vertex_builder::{self, CellVertex},
+      font_metrics::FontMetrics,
+      glyph_atlas::GlyphAtlas,
+      glyph_cache::GlyphKey,
+      glyph_rasterizer::GlyphRasterizer,
+      Color,
+  };
+  
+  use crate::ui::builder::{TextCommand, TextCompositeMode, TextFontKind};
+  
+  pub struct TerminalRenderer {
+      pipeline: AtlasPipeline,
+      glyph_atlas: GlyphAtlas,
+      rasterizer: Box<dyn GlyphRasterizer>,
+      /// Optional proportional sans-serif rasterizer for UI chrome labels.
+      ui_rasterizer: Option<Box<dyn GlyphRasterizer>>,
+      /// Optional serif rasterizer for rich UI copy (e.g. poem panel italics).
+      ui_serif_rasterizer: Option<Box<dyn GlyphRasterizer>>,
+      /// Optional monospace rasterizer for screenshot-parity UI text. When unset,
+      /// UI monospace text falls back to the main terminal rasterizer.
+      ui_mono_rasterizer: Option<Box<dyn GlyphRasterizer>>,
+      font_metrics: FontMetrics,
+      /// Average advance width of the UI font (for layout estimation).
+      ui_avg_advance: f32,
+      default_fg: Color,
+      default_bg: Color,
+  }
+  
+  impl TerminalRenderer {
+      pub fn new(
+          device: &wgpu::Device,
+          queue: &wgpu::Queue,
+          format: wgpu::TextureFormat,
+          font_metrics: FontMetrics,
+          rasterizer: Box<dyn GlyphRasterizer>,
+      ) -> Self {
+          let pipeline = AtlasPipeline::new(device, queue, format);
+          let phys = font_metrics.scaled_for_render();
+          let glyph_atlas = GlyphAtlas::new(phys.cell_width, phys.cell_height, phys.baseline_offset);
+  
+          Self {
+              pipeline,
+              glyph_atlas,
+              rasterizer,
+              ui_rasterizer: None,
+              ui_serif_rasterizer: None,
+              ui_mono_rasterizer: None,
+              font_metrics,
+              ui_avg_advance: 0.0,
+              default_fg: Color::new(0.788, 0.820, 0.851, 1.0), // GitHub Dark Text #c9d1d9
+              default_bg: Color::new(0.055, 0.063, 0.090, 1.0), // GitHub Dark Base #0e1017
+          }
+      }
+  
+      /// Set the proportional UI font rasterizer (e.g., Segoe UI).
+      pub fn set_ui_rasterizer(&mut self, mut rasterizer: Box<dyn GlyphRasterizer>) {
+          let phys = self.font_metrics.scaled_for_render();
+          let metrics = rasterizer.measure(phys.font_size);
+          self.ui_avg_advance = metrics.average_advance;
+          self.ui_rasterizer = Some(rasterizer);
+      }
+  
+      pub fn set_ui_serif_rasterizer(&mut self, rasterizer: Box<dyn GlyphRasterizer>) {
+          self.ui_serif_rasterizer = Some(rasterizer);
+      }
+  
+      pub fn set_ui_mono_rasterizer(&mut self, rasterizer: Box<dyn GlyphRasterizer>) {
+          self.ui_mono_rasterizer = Some(rasterizer);
+      }
+  
+      /// Average advance width of the UI proportional font.
+      pub fn ui_avg_advance(&self) -> f32 {
+          self.ui_avg_advance
+      }
+  
+      /// Prepare GPU resources (atlas texture upload, vertex buffer) BEFORE the render pass.
+      ///
+      /// Renders both terminal grid content and UI chrome text through the
+      /// same glyph atlas pipeline for consistent ClearType quality.
+      pub fn prepare(
+          &mut self,
+          device: &wgpu::Device,
+          queue: &wgpu::Queue,
+          grid: Option<&RichGridData>,
+          full_width: u32,
+          full_height: u32,
+          offset_x: f32,
+          offset_y: f32,
+          terminal_w: f32,
+          terminal_h: f32,
+          ui_text: &[TextCommand],
+      ) {
+          let mut vertices = if let Some(grid) = grid {
+              atlas_vertex_builder::build_vertices(
+                  grid,
+                  &mut self.glyph_atlas,
+                  &self.font_metrics,
+                  &mut *self.rasterizer,
+                  self.default_fg,
+                  self.default_bg,
+                  full_width,
+                  full_height,
+                  offset_x,
+                  offset_y,
+                  terminal_w,
+                  terminal_h,
+              )
+          } else {
+              Vec::new()
+          };
+  
+          // Rasterize UI chrome text through the same atlas.
+          // UI text uses transparent bg (alpha=0) to trigger grayscale AA mode
+          // in the atlas shader, so text alpha-composites cleanly over gradient
+          // and SDF-rounded backgrounds drawn by the quad pipeline.
+          let phys = self.font_metrics.scaled_for_render();
+          let vw = full_width as f32;
+          let vh = full_height as f32;
+          let transparent_bg = [0.0f32, 0.0, 0.0, 0.0];
+  
+          for cmd in ui_text {
+              let draw_scale = cmd.scale * cmd.raster_scale;
+              let font_size = phys.font_size * draw_scale;
+              let use_variable_advance = !matches!(cmd.font_kind, TextFontKind::TerminalMono);
+              let use_serif = matches!(cmd.font_kind, TextFontKind::UiSerif);
+              let mut fallback_x = cmd.x;
+  
+              for (index, ch) in cmd.text.chars().enumerate() {
+                  let entry = match cmd.font_kind {
+                      TextFontKind::TerminalMono => {
+                          let key = GlyphKey::new(ch, font_size, cmd.bold, cmd.italic);
+                          self.glyph_atlas
+                              .get_or_insert(key, &mut *self.rasterizer, font_size)
+                      }
+                      TextFontKind::UiMono => {
+                          let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 3);
+                          if let Some(rast) = self.ui_mono_rasterizer.as_mut() {
+                              self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
+                          } else {
+                              self.glyph_atlas
+                                  .get_or_insert(key, &mut *self.rasterizer, font_size)
+                          }
+                      }
+                      TextFontKind::UiSans => {
+                          let Some(rast) = self.ui_rasterizer.as_mut() else {
+                              continue;
+                          };
+                          let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 1);
+                          self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
+                      }
+                      TextFontKind::UiSerif => {
+                          let Some(rast) = self
+                              .ui_serif_rasterizer
+                              .as_mut()
+                              .or(self.ui_rasterizer.as_mut())
+                          else {
+                              continue;
+                          };
+                          let key = GlyphKey::new_font(ch, font_size, cmd.bold, cmd.italic, 2);
+                          self.glyph_atlas.get_or_insert(key, &mut **rast, font_size)
+                      }
+                  };
+  
+                  let px = cmd
+                      .glyph_offsets
+                      .get(index)
+                      .map_or(fallback_x, |offset| cmd.x + *offset);
+                  let py = cmd.y;
+                  // For proportional font, use actual glyph slot width from UV;
+                  // for monospace, use cell_width.
+                  let pw = if use_variable_advance {
+                      // Slot width = atlas slot pixel width from UV coords
+                      (entry.u1 - entry.u0) * self.glyph_atlas.atlas_width() as f32
+                  } else {
+                      phys.cell_width * draw_scale
+                  };
+                  let ph = phys.cell_height * draw_scale;
+  
+                  let x0 = px / vw * 2.0 - 1.0;
+                  let y0 = 1.0 - py / vh * 2.0;
+                  let x1 = (px + pw) / vw * 2.0 - 1.0;
+                  let y1 = 1.0 - (py + ph) / vh * 2.0;
+  
+                  // 6 vertices (2 triangles)
+                  let v = |pos: [f32; 2], uv: [f32; 2]| CellVertex {
+                      position: pos,
+                      uv,
+                      fg_color: cmd.fg,
+                      bg_color: match cmd.composite {
+                          TextCompositeMode::FlatBackground => [cmd.bg[0], cmd.bg[1], cmd.bg[2], 1.0],
+                          TextCompositeMode::MixedBackground => transparent_bg,
+                      },
+                  };
+                  let tl = [x0, y0];
+                  let tr = [x1, y0];
+                  let bl = [x0, y1];
+                  let br = [x1, y1];
+                  let uv_tl = [entry.u0, entry.v0];
+                  let uv_br = [entry.u1, entry.v1];
+                  let uv_tr = [uv_br[0], uv_tl[1]];
+                  let uv_bl = [uv_tl[0], uv_br[1]];
+  
+                  vertices.push(v(tl, uv_tl));
+                  vertices.push(v(tr, uv_tr));
+                  vertices.push(v(bl, uv_bl));
+                  vertices.push(v(tr, uv_tr));
+                  vertices.push(v(bl, uv_bl));
+                  vertices.push(v(br, uv_br));
+  
+                  if cmd.glyph_offsets.is_empty() {
+                      fallback_x += (if use_variable_advance || use_serif {
+                          entry.advance
+                      } else {
+                          phys.cell_width
+                      }) * draw_scale;
+                  }
+              }
+          }
+  
+          if vertices.is_empty() {
+              return;
+          }
+  
+          let atlas_update = self.glyph_atlas.take_dirty_data();
+          let program = AtlasShaderProgram {
+              vertices,
+              atlas_update,
+              viewport_size: (full_width, full_height),
+          };
+          let primitive = program.build_primitive();
+          primitive.prepare(&mut self.pipeline, device, queue);
+      }
+  
+      /// Draw the prepared terminal content into the render pass.
+      pub fn draw(&self, render_pass: &mut wgpu::RenderPass<'_>) {
+          // AtlasPipeline stores vertex_count from prepare; draw uses the stored pipeline state
+          // We need a dummy primitive to call draw - reuse the pipeline's stored vertex count
+          let primitive = godly_terminal_surface::atlas_shader::AtlasShaderProgram {
+              vertices: vec![],
+              atlas_update: None,
+              viewport_size: (0, 0),
+          }
+          .build_primitive();
+          primitive.draw(&self.pipeline, render_pass);
+      }
+  
+      pub fn font_metrics(&self) -> &FontMetrics {
+          &self.font_metrics
+      }
+  }
+[command:done exit=0] "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content AGENTS.md'
+[command output]
+  # AGENTS.md
+  
+  This file provides guidance to coding agents working with code in this repository.
+  
+  ## Build and Development Commands
+  
+  ```bash
+  # Install dependencies
+  pnpm install
+  
+  # Build the daemon (required before first dev run)
+  pnpm build:daemon
+  
+  # Development mode (starts Vite + Tauri)
+  pnpm tauri dev
+  
+  # Production build (daemon must be built first)
+  pnpm build:daemon:release
+  pnpm tauri build
+  
+  # TypeScript check only
+  pnpm exec tsc --noEmit
+  
+  # Rust check only (changed crate ├óΓé¼ΓÇ¥ NOT --workspace)
+  cd src-tauri && cargo check -p <crate-you-modified>
+  
+  # Run Rust tests (all workspace members, requires cargo-nextest)
+  cd src-tauri && cargo nextest run --workspace
+  
+  # Run Rust tests (fast profile ├óΓé¼ΓÇ¥ skip stress/perf tests)
+  cd src-tauri && cargo nextest run --workspace --profile fast
+  
+  # Smart test runner (only affected crates based on git diff)
+  pnpm test:smart
+  
+  # Run TypeScript unit tests
+  pnpm test
+  
+  # Run browser tests (real Chromium via Playwright)
+  pnpm test:browser
+  
+  # Run browser tests with visible browser window
+  pnpm test:browser:headed
+  
+  # Run integration tests (daemon required ├óΓé¼ΓÇ¥ spawns isolated daemon per suite)
+  pnpm build:daemon && pnpm test:integration
+  ```
+  
+  ## Git Workflow
+  
+  Always commit all staged and unstaged changes when making a commit. Do not leave uncommitted changes behind.
+  
+  Never add "Generated with Claude Code" or any similar attribution message to commits, PRs, or any other output.
+  
+  ### Changelog Fragments
+  
+  Every `feat:` and `fix:` commit must include a changelog fragment file in `changelog/unreleased/`.
+  
+  - **Naming**: `<PR-number>-<short-description>.md` (e.g., `425-fix-scroll-snap.md`). If no PR yet, use the branch name.
+  - **Format**: One or more [Keep a Changelog](https://keepachangelog.com/) sections (`### Added`, `### Fixed`, `### Changed`, `### Removed`, `### Tests`).
+  - **Content**: Bold title + dash + description + PR reference. See `changelog/TEMPLATE.md`.
+  - **When**: Create the fragment as part of the same commit that introduces the change.
+  - **Who collects**: `/bump-version` merges fragments into `CHANGELOG.md` and deletes them at release time.
+  - `chore:`, `docs:`, `style:`, `refactor:`, `test:` commits do NOT need fragments unless they represent user-facing changes.
+  
+  ### PR Policy
+  
+  - **Features (`feat:`) and bug fixes (`fix:`)**: Create a feature branch, open a PR to master, and wait for merge.
+  - **Documentation (`docs:`), chores (`chore:`), style (`style:`), and other minor changes**: Commit and push directly to master ├óΓé¼ΓÇ¥ no PR needed.
+  
+  ## Debugging Principles
+  
+  - **Never mask errors.** Don't add retry loops, fallback handlers, or auto-recovery that hides the root cause of a crash or failure. If something crashes, the priority is understanding WHY ├óΓé¼ΓÇ¥ not papering over it so the user doesn't notice.
+  - **Preserve crash evidence.** Logs must survive process restarts. Never truncate logs on startup. Use append mode and rotate old logs so the previous run's crash info is always available for post-mortem.
+  
+  ## Issue Investigation Tracking
+  
+  Track all bugs and investigations as **GitHub Issues**, not local docs.
+  
+  ### When starting a bug investigation:
+  1. Search existing issues: `gh issue list --search "<keywords>" --state all --limit 10`
+  2. If a matching closed issue exists, read it (`gh issue view N`) ├óΓé¼ΓÇ¥ the bug may have regressed
+  3. Create a new issue or reopen the existing one with appropriate labels (`bug`, `performance`, `daemon`, `frontend`, `mcp`, `ux`)
+  4. Comment on the issue with each approach tried, including what failed and why
+  
+  ### During investigation:
+  - Add a comment for each significant attempt (what you tried, result, why it failed/succeeded)
+  - Include relevant code snippets, test commands, and root cause analysis in comments
+  - Use the issue body for the canonical summary (symptom, root cause, fix)
+  
+  ### When resolved:
+  - Reference the issue in the PR description with `fixes #N` (GitHub auto-closes on merge)
+  - Add a final comment with regression risk assessment and relevant test commands
+  
+  ### Reference docs
+  Architecture docs, design specs, and testing guides stay in `docs/` ├óΓé¼ΓÇ¥ only investigation/bug tracking uses GitHub Issues.
+  
+  ## Test Frameworks
+  
+  Six test tiers, each targeting a different layer of the stack. When reproducing a bug, pick the tier that exercises the real failure point ├óΓé¼ΓÇ¥ not the one that's easiest to write.
+  
+  ### Quick Reference
+  
+  | Tier | Naming | Command | Environment | Mocks | Best For |
+  |------|--------|---------|-------------|-------|----------|
+  | **Unit** | `*.test.ts` | `pnpm test` | Node/jsdom | Tauri APIs | Store logic, services, pure functions, keyboard routing |
+  | **Browser** | `*.browser.test.ts` | `pnpm test:browser` | Real Chromium | Tauri APIs | Canvas2D rendering, pixel correctness, real layout, pointer events |
+  | **Integration** | `*.integration.test.ts` | `pnpm test:integration` | Node + spawned daemon | Nothing | Daemon protocol, session lifecycle, Quick Claude flow, IPC correctness |
+  | **E2E** | `e2e/specs/*.e2e.ts` | `pnpm test:e2e` | Full Tauri app + WebdriverIO | Nothing | Full user workflows, persistence across restarts, input latency |
+  | **Daemon** | `daemon/tests/*.rs` | `cargo nextest run -p godly-daemon` | Isolated daemon process | Nothing | Concurrency, lock contention, memory leaks, pipe saturation, handler starvation |
+  | **Crate** | `#[test]` in `*.rs` | `cargo nextest run -p <crate>` | Rust unit | ├óΓé¼ΓÇ¥ | Parser correctness, serialization, data structures |
+  
+  ### Tier Details
+  
+  #### 1. Unit Tests (`pnpm test`)
+  - **Location**: `src/**/*.test.ts`
+  - **Environment**: Vitest + jsdom (Node.js DOM simulator)
+  - **What's real**: JavaScript logic, state machines, event bus
+  - **What's mocked**: All Tauri APIs (invoke, listen, Store, dialogs)
+  - **Catches**: State management bugs, event routing errors, keyboard shortcut conflicts, service logic regressions, plugin system errors
+  - **Cannot catch**: Canvas rendering bugs, real DOM layout, real CSS flexbox, pointer events (jsdom returns zeros for `getBoundingClientRect`)
+  - **Examples**: `src/state/store.split-navigation.test.ts`, `src/services/workspace-service.test.ts`
+  
+  #### 2. Browser Tests (`pnpm test:browser`)
+  - **Location**: `src/**/*.browser.test.ts`
+  - **Environment**: Vitest Browser Mode + real Chromium via Playwright
+  - **What's real**: DOM, CSS flexbox, Canvas2D, `measureText()`, `getImageData()`, pointer events
+  - **What's mocked**: Tauri APIs (via `src/test-utils/browser-setup.ts`)
+  - **Catches**: Canvas paint order bugs, font metric errors, pixel color correctness, flexbox layout regressions, split pane sizing bugs, divider positioning errors
+  - **Cannot catch**: Daemon interaction, session lifecycle, persistence
+  - **Use `pnpm test:browser:headed`** to see the Chromium window during tests
+  - **Examples**: `Canvas2DGridRenderer.browser.test.ts` (pixel inspection), `SplitContainer.browser.test.ts` (real layout)
+  
+  #### 3. Integration Tests (`pnpm test:integration`)
+  - **Location**: `integration/tests/**/*.integration.test.ts`
+  - **Environment**: Node.js + real spawned daemon (isolated per suite via `DaemonFixture`)
+  - **What's real**: Daemon binary, named pipe IPC, PTY sessions, shell processes, binary frame protocol
+  - **What's mocked**: Nothing ├óΓé¼ΓÇ¥ exercises the real daemon
+  - **Catches**: Protocol correctness (binary frames, JSON messages), session create/attach/detach lifecycle, IPC pipe saturation, command execution + output parsing, Quick Claude flow (trust prompt, incremental echo)
+  - **Cannot catch**: Frontend rendering, Tauri app lifecycle, persistence across restarts
+  - **Key infrastructure**: `DaemonFixture` (spawns isolated daemon), `DaemonClient` (TypeScript wire protocol), `SessionHandle` (high-level session API)
+  - **Examples**: `smoke.integration.test.ts`, `quick-claude.integration.test.ts`
+  
+  #### 4. E2E Tests (`pnpm test:e2e`)
+  - **Location**: `e2e/specs/**/*.e2e.ts`
+  - **Environment**: Full Tauri debug binary + WebdriverIO + tauri-driver + WebView2
+Add-Content : The process cannot access the file 
+'C:\Users\User\godly-terminal\.codex-ralph-loop\latest-transcript.txt' because it is being used by another process.
+At C:\Users\User\godly-terminal\codex-ralph-loop.ps1:243 char:9
++         Add-Content -Path $Path -Value $Line -Encoding UTF8
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\User\g...-transcript.txt:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+
