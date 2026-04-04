@@ -1,6 +1,6 @@
 # Rendering Quality Gaps: Current vs Reference
 
-Last updated: 2026-04-03 (Iteration 95)
+Last updated: 2026-04-04 (Iteration 97)
 
 ## Reference Targets
 - **Web reference** (`web-reference.png`): The pixel-perfect target from `web/godly-terminal.jsx`
@@ -97,6 +97,13 @@ Last updated: 2026-04-03 (Iteration 95)
 | Transcript font scale | Done | BODY_SCALE 13.6/14.0→13.0/14.0, SMALL_SCALE 12.6/14.0→12.0/14.0 matching web fontSize 13 and 12 exactly (iteration 93) |
 | Granular font weights | Done | Four distinct weights (400/500/600/700) replacing binary bold/regular, matching web fontWeight per element exactly (iteration 95) |
 | Block lineHeight inheritance | Done | Heading, user-message, thoughts, command, editing, sub-bullet block heights now include inherited lineHeight 1.5 from content container, closing ~75px cumulative vertical drift (iteration 96) |
+| Glyph weight parity | Done | Coverage attenuation 0.92 applied to both terminal and UI text pipelines via TextRenderParams GPU uniform, reducing DirectWrite NATURAL_SYMMETRIC stem weight 8% toward browser parity (iteration 97) |
+
+## Changes in Iteration 97
+
+1. **Coverage attenuation for glyph weight parity** — Added `TextRenderParams` GPU uniform buffer to `terminal-surface` crate with `coverage_attenuation` field (default 1.0). Both `TerminalRenderer` and `UiTextRenderer` now set `coverage_attenuation: 0.92`, reducing DirectWrite NATURAL_SYMMETRIC glyph weight by 8% toward browser (Skia/HarfBuzz) parity. Fixed shader variable naming (`fg_srgb`→`fg_lin`, `bg_srgb`→`bg_lin`) and hardcoded sRGB 2.2 constant in transparent-bg path.
+
+**Remaining gaps**: All documented visual gaps are now closed. Residual per-pixel differences are inherent platform divergences between DirectWrite and browser text rasterization that cannot be fully eliminated.
 
 ## Changes in Iteration 96
 
@@ -154,7 +161,7 @@ Last updated: 2026-04-03 (Iteration 95)
 
 **What changed structurally**: The reference pane layout engine can now accept dynamic block heights via `compute_wrapped()`, enabling proper text flow for varying viewport widths. This closes the single biggest layout divergence between the native and web transcript scenes.
 
-**Remaining gaps**: Glyph weight and anti-aliasing contrast differences between DirectWrite ClearType and browser rendering remain an inherent platform divergence.
+**Remaining gaps**: Coverage attenuation (0.92) now addresses the glyph weight difference. Residual per-pixel anti-aliasing differences between DirectWrite and browser rendering are inherent platform divergences.
 
 ## Changes in Iteration 85
 
