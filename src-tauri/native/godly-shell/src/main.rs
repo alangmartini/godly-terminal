@@ -100,6 +100,9 @@ struct App {
     right_resize_hover: bool,
     left_resize_anim: ui::anim::Anim,
     right_resize_anim: ui::anim::Anim,
+    /// SDF surface lighting intensity for UI chrome (0.0 = flat, 1.0 = full).
+    /// Controlled by GODLY_LIGHTING env var.
+    lighting_intensity: f32,
 }
 
 impl App {
@@ -211,6 +214,11 @@ impl App {
             right_resize_dragging: false,
             left_resize_hover: false,
             right_resize_hover: false,
+            lighting_intensity: std::env::var("GODLY_LIGHTING")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0),
             left_resize_anim: ui::anim::Anim::default(),
             right_resize_anim: ui::anim::Anim::default(),
             sidebar,
@@ -812,6 +820,7 @@ impl App {
             tr
         };
         let mut ui_builder = ui::builder::UiBuilder::new(vw, vh);
+        ui_builder.set_lighting(self.lighting_intensity);
 
         // Terminal area background (BG_BASE) — must come before chrome overlays
         ui_builder.fill(layout.terminal, ui::builder::colors::BG_BASE);
@@ -2748,13 +2757,12 @@ impl ApplicationHandler<AsyncEvent> for App {
                     .map(|g| (g.config.width as f32, g.config.height as f32))
                     .unwrap_or((1200.0, 800.0));
                 let layout = self.shell_layout(vw, vh);
-                let sf = self.scale_factor as f32;
                 let over_right_panel = self.right_panel.visible
                     && layout.right_panel.width > 0.0
                     && self
                         .mouse_position
                         .map(|(mx, my)| {
-                            layout.right_panel.contains(mx as f32 * sf, my as f32 * sf)
+                            layout.right_panel.contains(mx as f32, my as f32)
                         })
                         .unwrap_or(false);
                 if over_right_panel {
