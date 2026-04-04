@@ -155,7 +155,7 @@ impl App {
         // so the status bar and agent panel have visible content.
         status_bar.cwd = "~/Documents/work/opensessions".into();
         status_bar.git_branch = "main".into();
-        status_bar.git_diff_summary = "1 file +21 ~4 -70".into();
+        status_bar.git_diff_summary = "1 file changed +21 ~4 -70".into();
         status_bar.streaming = true;
 
         if scene_mode == SceneMode::WebReferenceCrop {
