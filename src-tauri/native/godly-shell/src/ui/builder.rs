@@ -1311,7 +1311,7 @@ impl UiBuilder {
             false,
             scale,
             TextFontKind::UiMono,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1554,31 +1554,6 @@ impl UiBuilder {
     /// Record a scaled italic serif text draw command using a real italic font
     /// face instead of synthetic skew.
     pub fn text_serif_italic_scaled(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-        scale: f32,
-    ) {
-        self.push_text_command(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            false,
-            true,
-            scale,
-            TextFontKind::UiSerif,
-            TextCompositeMode::MixedBackground,
-        );
-    }
-
-    pub fn text_serif_italic_scaled_mixed(
         &mut self,
         renderer: &UiTextRenderer,
         text: &str,
