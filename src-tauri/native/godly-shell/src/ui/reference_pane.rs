@@ -288,9 +288,11 @@ impl ReferencePane {
     ) -> f32 {
         let lines = wrap_mono_text(label, width, text, BODY_SCALE);
         let line_h = text.s(PARAGRAPH_LINE_HEIGHT);
+        // CSS half-leading: (lineHeight 1.6 * fontSize 13 - fontSize 13) / 2 = 3.9px
+        let half_leading = text.s(3.9);
         let mut cy = y;
         for line in &lines {
-            ui.text_mono_scaled_mixed(text, line, x, cy, colors::FG_PRIMARY, bg, BODY_SCALE);
+            ui.text_mono_scaled_mixed(text, line, x, cy + half_leading, colors::FG_PRIMARY, bg, BODY_SCALE);
             cy += line_h;
         }
         cy
@@ -307,13 +309,15 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         let lead = self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP);
-        ui.text_mono_scaled_mixed(text, "\u{2022}", x, y, colors::FG_MUTED, bg, BODY_SCALE);
+        // CSS half-leading: (lineHeight 1.55 * fontSize 13 - fontSize 13) / 2 = 3.575px
+        let half_leading = text.s(3.575);
+        ui.text_mono_scaled_mixed(text, "\u{2022}", x, y + half_leading, colors::FG_MUTED, bg, BODY_SCALE);
         let text_avail = width - lead;
         let lines = wrap_mono_text(label, text_avail, text, BODY_SCALE);
         let line_h = text.s(BODY_LINE_HEIGHT);
         let mut cy = y;
         for line in &lines {
-            ui.text_mono_scaled_mixed(text, line, x + lead, cy, colors::FG_PRIMARY, bg, BODY_SCALE);
+            ui.text_mono_scaled_mixed(text, line, x + lead, cy + half_leading, colors::FG_PRIMARY, bg, BODY_SCALE);
             cy += line_h;
         }
         cy
@@ -331,8 +335,10 @@ impl ReferencePane {
     ) -> f32 {
         let lead = self.inline_lead(text, "\u{2022}", BODY_SCALE, INLINE_GAP);
         let avail = content_w - lead;
-        ui.text_mono_scaled_mixed(text, "\u{2022}", x, y, colors::FG_MUTED, bg, BODY_SCALE);
-        self.draw_inline_runs(ui, text, x + lead, y, runs, BODY_SCALE, bg, avail)
+        // CSS half-leading: (lineHeight 1.55 * fontSize 13 - fontSize 13) / 2 = 3.575px
+        let half_leading = text.s(3.575);
+        ui.text_mono_scaled_mixed(text, "\u{2022}", x, y + half_leading, colors::FG_MUTED, bg, BODY_SCALE);
+        self.draw_inline_runs(ui, text, x + lead, y + half_leading, runs, BODY_SCALE, bg, avail)
     }
 
     fn draw_sub_bullets(
@@ -386,8 +392,10 @@ impl ReferencePane {
     ) -> f32 {
         let lead = self.inline_lead(text, "1.", BODY_SCALE, INLINE_GAP);
         let avail = content_w - lead;
-        ui.text_mono_scaled_mixed(text, "1.", x, y, colors::FG_MUTED, bg, BODY_SCALE);
-        self.draw_inline_runs(ui, text, x + lead, y, runs, BODY_SCALE, bg, avail)
+        // CSS half-leading: (lineHeight 1.55 * fontSize 13 - fontSize 13) / 2 = 3.575px
+        let half_leading = text.s(3.575);
+        ui.text_mono_scaled_mixed(text, "1.", x, y + half_leading, colors::FG_MUTED, bg, BODY_SCALE);
+        self.draw_inline_runs(ui, text, x + lead, y + half_leading, runs, BODY_SCALE, bg, avail)
     }
 
     fn draw_user_message(
