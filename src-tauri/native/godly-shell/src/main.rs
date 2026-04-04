@@ -3119,15 +3119,37 @@ fn create_ui_mono_font(family: &str) -> Option<UiFontBundle> {
     use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
 
     let mut dw = DirectWriteRasterizer::new_grayscale().ok()?;
-    if dw.load_system_font(family).is_ok() {
-        Some(UiFontBundle {
-            family: family.to_string(),
-            rasterizer: Box::new(dw),
-        })
-    } else {
+    if dw.load_system_font(family).is_err() {
         log::warn!("[FONT] No UI mono font available for {}", family);
-        None
+        return None;
     }
+    let family_owned = family.to_string();
+
+    // Try to load a symbol font as fallback for emoji/symbol glyphs (e.g. ⚡, ●, ⚠)
+    // that are missing from the primary mono font, mirroring create_ui_sans_font().
+    let fallback_families = ["Segoe UI Symbol", "Segoe UI Emoji"];
+    for fb_family in fallback_families {
+        let mut fb_dw = match DirectWriteRasterizer::new_grayscale() {
+            Ok(fb_dw) => fb_dw,
+            Err(_) => continue,
+        };
+        if fb_dw.load_system_font(fb_family).is_ok() {
+            log::info!("[FONT] UI mono fallback: {fb_family}");
+            return Some(UiFontBundle {
+                family: family_owned,
+                rasterizer: Box::new(FallbackRasterizer {
+                    primary: Box::new(dw),
+                    fallback: Box::new(fb_dw),
+                }),
+            });
+        }
+    }
+
+    // No fallback available — use primary alone.
+    Some(UiFontBundle {
+        family: family_owned,
+        rasterizer: Box::new(dw),
+    })
 }
 
 #[cfg(not(windows))]
