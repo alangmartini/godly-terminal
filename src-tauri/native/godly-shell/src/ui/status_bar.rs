@@ -115,14 +115,14 @@ impl StatusBar {
 
             ui.text_ui_scaled(
                 text,
-                "Streaming response\u{2026}",
+                "Streaming response...",
                 x,
                 y_center,
                 colors::FG_SECONDARY,
                 bg,
                 sc,
             );
-            x += text.text_width_ui_scaled("Streaming response\u{2026}", sc) + s(12.0);
+            x += text.text_width_ui_scaled("Streaming response...", sc) + s(12.0);
 
             let esc_fg = colors::FG_MUTED;
             ui.text_ui_scaled(text, "Esc to cancel", x, y_center, esc_fg, bg, sc);
