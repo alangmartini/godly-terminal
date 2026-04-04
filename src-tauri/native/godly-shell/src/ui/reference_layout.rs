@@ -30,7 +30,7 @@ const SUB_ROW_HEIGHT: f32 = 12.0 * 1.5 + 2.0; // web: fontSize 12, inherited lin
 const HEADING_HEIGHT: f32 = 14.0 * 1.5; // web: fontSize 14, inherited lineHeight 1.5
 const USER_MESSAGE_HEIGHT: f32 = 13.0 * 1.5 + 12.0; // web: fontSize 13, inherited lineHeight 1.5, padding "6px 12px"
 const THOUGHTS_HEIGHT: f32 = 12.0 * 1.5; // web: fontSize 12, inherited lineHeight 1.5
-const COMMAND_HEIGHT: f32 = 12.0 * 1.5 + 12.0; // web: fontSize 12, inherited lineHeight 1.5, padding "6px 10px"
+const COMMAND_HEIGHT: f32 = 12.0 * 1.5 + 12.0 + 2.0; // web: fontSize 12, lineHeight 1.5, padding "6px 10px", border "1px solid" (1+1=2)
 const EDITING_HEIGHT: f32 = 12.0 * 1.5; // web: fontSize 12, inherited lineHeight 1.5
 const CURSOR_HEIGHT: f32 = 16.0;
 
