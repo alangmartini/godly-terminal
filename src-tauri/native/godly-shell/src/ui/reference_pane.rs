@@ -476,13 +476,13 @@ impl ReferencePane {
         bg: [f32; 4],
     ) -> f32 {
         let s = |v: f32| text.s(v);
-        // Web: fontSize 12, inherited lineHeight 1.5, padding "6px 10px"
-        // Total height = 12 * 1.5 + 12 = 30; text y = 6px padding + 3px half-leading = 9px
+        // Web: fontSize 12, inherited lineHeight 1.5, padding "6px 10px", border "1px solid #1e2128"
+        // Total height = 12 * 1.5 + 12 + 2 = 32; text y = 1px border + 6px padding + 3px half-leading = 10px
         let rect = Rect {
             x,
             y,
             width,
-            height: s(30.0),
+            height: s(32.0),
         };
         let cmd_bg = [0.039, 0.047, 0.063, 1.0]; // #0a0c10
         ui.fill_rounded(rect, cmd_bg, s(5.0));
@@ -491,7 +491,7 @@ impl ReferencePane {
             text,
             command,
             rect.x + s(10.0),
-            rect.y + s(9.0), // 6px padding + 3px half-leading
+            rect.y + s(10.0), // 1px border + 6px padding + 3px half-leading
             colors::FG_MUTED, // web: color "#6e7681"
             cmd_bg, // composite against element bg, not content area bg
             SMALL_SCALE,
@@ -502,7 +502,7 @@ impl ReferencePane {
             text,
             arrow,
             rect.right() - arrow_w - s(10.0),
-            rect.y + s(9.0), // 6px padding + 3px half-leading
+            rect.y + s(10.0), // 1px border + 6px padding + 3px half-leading
             colors::STATUS_PATH,
             cmd_bg, // composite against element bg, not content area bg
             SMALL_SCALE,
