@@ -2795,7 +2795,6 @@ impl ApplicationHandler<AsyncEvent> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                log::info!("[WHEEL] delta={:?} mouse={:?}", delta, self.mouse_position);
                 // Compute pixel-level delta (float) for right panel smooth scroll
                 let pixel_delta = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => -y * 40.0,
@@ -2817,11 +2816,6 @@ impl ApplicationHandler<AsyncEvent> for App {
                             layout.right_panel.contains(mx as f32, my as f32)
                         })
                         .unwrap_or(false);
-                log::info!("[WHEEL] rp=({},{},{},{}) visible={} over={} px_delta={}",
-                    layout.right_panel.x, layout.right_panel.y,
-                    layout.right_panel.width, layout.right_panel.height,
-                    self.right_panel.visible, over_right_panel, pixel_delta);
-
                 if over_right_panel {
                     if pixel_delta.abs() > 0.001 {
                         if let Some(renderer) = self.renderer.as_ref() {
