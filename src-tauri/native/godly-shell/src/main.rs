@@ -398,14 +398,14 @@ impl App {
             renderer.set_ui_serif_rasterizer(ui_font.rasterizer);
             log::info!("[FONT] UI serif font loaded: {}", ui_families.serif);
         }
-        if self.is_web_reference_crop() {
-            if let Some(ui_font) = create_ui_mono_font(&terminal_font.family) {
-                renderer.set_ui_mono_rasterizer(ui_font.rasterizer);
-                log::info!(
-                    "[FONT] UI mono screenshot font loaded (grayscale): {}",
-                    ui_font.family
-                );
-            }
+        if let Some(ui_font) = create_ui_mono_font(&terminal_font.family, self.is_web_reference_crop()) {
+            renderer.set_ui_mono_rasterizer(ui_font.rasterizer);
+            let aa_mode = if self.is_web_reference_crop() { "grayscale" } else { "ClearType" };
+            log::info!(
+                "[FONT] UI mono font loaded ({}): {}",
+                aa_mode,
+                ui_font.family
+            );
         }
         self.ui_text_layout = create_ui_text_layout_engine(ui_families).map(Rc::new);
 
@@ -3115,10 +3115,14 @@ fn create_ui_serif_font() -> Option<UiFontBundle> {
 }
 
 #[cfg(windows)]
-fn create_ui_mono_font(family: &str) -> Option<UiFontBundle> {
+fn create_ui_mono_font(family: &str, grayscale: bool) -> Option<UiFontBundle> {
     use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
 
-    let mut dw = DirectWriteRasterizer::new_grayscale().ok()?;
+    let mut dw = if grayscale {
+        DirectWriteRasterizer::new_grayscale().ok()?
+    } else {
+        DirectWriteRasterizer::new().ok()?
+    };
     if dw.load_system_font(family).is_err() {
         log::warn!("[FONT] No UI mono font available for {}", family);
         return None;
@@ -3129,9 +3133,16 @@ fn create_ui_mono_font(family: &str) -> Option<UiFontBundle> {
     // that are missing from the primary mono font, mirroring create_ui_sans_font().
     let fallback_families = ["Segoe UI Symbol", "Segoe UI Emoji"];
     for fb_family in fallback_families {
-        let mut fb_dw = match DirectWriteRasterizer::new_grayscale() {
-            Ok(fb_dw) => fb_dw,
-            Err(_) => continue,
+        let mut fb_dw = if grayscale {
+            match DirectWriteRasterizer::new_grayscale() {
+                Ok(fb_dw) => fb_dw,
+                Err(_) => continue,
+            }
+        } else {
+            match DirectWriteRasterizer::new() {
+                Ok(fb_dw) => fb_dw,
+                Err(_) => continue,
+            }
         };
         if fb_dw.load_system_font(fb_family).is_ok() {
             log::info!("[FONT] UI mono fallback: {fb_family}");
@@ -3163,7 +3174,7 @@ fn create_ui_serif_font() -> Option<UiFontBundle> {
 }
 
 #[cfg(not(windows))]
-fn create_ui_mono_font(_family: &str) -> Option<UiFontBundle> {
+fn create_ui_mono_font(_family: &str, _grayscale: bool) -> Option<UiFontBundle> {
     None
 }
 
