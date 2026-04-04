@@ -5,8 +5,8 @@
 
 use super::quad_renderer::{
     quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf,
-    quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_gradient_3stop,
-    quad_vertices_sdf_rotated, QuadVertex,
+    quad_vertices_sdf_bordered, quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h,
+    quad_vertices_sdf_gradient_3stop, quad_vertices_sdf_rotated, QuadVertex,
 };
 use super::text_layout::{FontWeight, UiFontKind, UiTextLayout, UiTextLayoutEngine};
 use super::widget::Rect;
@@ -478,6 +478,35 @@ impl UiBuilder {
         self.emit_sdf(&verts);
     }
 
+    /// Core SDF method with per-side border widths (top, right, bottom, left).
+    fn fill_sdf_sided(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radii: [f32; 4],
+        border_widths: [f32; 4],
+        border_color: [f32; 4],
+        blur_radius: f32,
+        lighting_intensity: f32,
+    ) {
+        let verts = quad_vertices_sdf_bordered(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            color,
+            radii,
+            border_widths,
+            border_color,
+            blur_radius,
+            lighting_intensity,
+            0.0,
+        );
+        self.emit_sdf(&verts);
+    }
+
     /// Filled rounded rectangle with uniform corner radius.
     pub fn fill_rounded(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
         self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], 0.0, 1.0);
@@ -493,6 +522,18 @@ impl UiBuilder {
         border_color: [f32; 4],
     ) {
         self.fill_sdf(rect, color, [radius; 4], border_width, border_color, 0.0, 1.0);
+    }
+
+    /// Filled rounded rectangle with per-side border widths (top, right, bottom, left).
+    pub fn fill_rounded_border_sides(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radius: f32,
+        border_widths: [f32; 4],
+        border_color: [f32; 4],
+    ) {
+        self.fill_sdf_sided(rect, color, [radius; 4], border_widths, border_color, 0.0, 1.0);
     }
 
     /// Rounded rectangle with only top corners rounded (for tabs).
