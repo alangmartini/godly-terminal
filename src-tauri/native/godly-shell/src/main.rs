@@ -816,37 +816,8 @@ impl App {
         // Terminal area background (BG_BASE) — must come before chrome overlays
         ui_builder.fill(layout.terminal, ui::builder::colors::BG_BASE);
 
-        // Subtle directional shadows — kept minimal to match web reference's flat style.
-        // Only retain lightweight edge shadows for panel depth, no vignettes or glows.
-        if !reference_crop {
-            // Tab bar cast shadow (subtle top edge darkening)
-            let shadow_h = ui_text_handle.s(6.0);
-            ui_builder.fill_gradient(
-                ui::widget::Rect {
-                    x: layout.terminal.x,
-                    y: layout.terminal.y,
-                    width: layout.terminal.width,
-                    height: shadow_h,
-                },
-                [0.0, 0.0, 0.0, 0.06],
-                [0.0, 0.0, 0.0, 0.0],
-            );
-
-            // Sidebar cast shadow (subtle left edge darkening)
-            if layout.sidebar.width > 0.0 {
-                let shadow_w = ui_text_handle.s(4.0);
-                ui_builder.fill_gradient_h(
-                    ui::widget::Rect {
-                        x: layout.terminal.x,
-                        y: layout.terminal.y,
-                        width: shadow_w,
-                        height: layout.terminal.height,
-                    },
-                    [0.0, 0.0, 0.0, 0.04],
-                    [0.0, 0.0, 0.0, 0.0],
-                );
-            }
-        }
+        // Cast shadows removed — JSX reference uses flat aesthetic with no
+        // directional shadows on the content area.
 
         // Empty terminal welcome state — styled welcome screen with branded
         // header, status indicator, and keyboard shortcut cards.
@@ -1589,39 +1560,8 @@ impl App {
                         }
                     }
 
-                    // Scroll-away fog: subtle gradients at edges when scrolled,
-                    // hinting that there's content beyond the visible viewport.
-                    if self.scrollback_offset > 0 {
-                        // Bottom fog — newer content below
-                        let fog_h = s(8.0);
-                        let fog_rect = ui::widget::Rect {
-                            x: layout.terminal.x,
-                            y: layout.terminal.y + layout.terminal.height - fog_h,
-                            width: layout.terminal.width,
-                            height: fog_h,
-                        };
-                        ui_builder.fill_gradient(
-                            fog_rect,
-                            [0.0, 0.0, 0.0, 0.0],
-                            [0.0, 0.0, 0.0, 0.15],
-                        );
-                    }
-                    // Top fog — older scrollback content above (always present when
-                    // there's scrollback history, regardless of current scroll position)
-                    if grid.total_scrollback > 0 && self.scrollback_offset < grid.total_scrollback {
-                        let fog_h = s(6.0);
-                        let fog_rect = ui::widget::Rect {
-                            x: layout.terminal.x,
-                            y: layout.terminal.y,
-                            width: layout.terminal.width,
-                            height: fog_h,
-                        };
-                        ui_builder.fill_gradient(
-                            fog_rect,
-                            [0.0, 0.0, 0.0, 0.10],
-                            [0.0, 0.0, 0.0, 0.0],
-                        );
-                    }
+                    // Scroll-away fog removed — JSX reference has no edge
+                    // gradients on the terminal content area.
                 }
             }
         }
@@ -2808,12 +2748,13 @@ impl ApplicationHandler<AsyncEvent> for App {
                     .map(|g| (g.config.width as f32, g.config.height as f32))
                     .unwrap_or((1200.0, 800.0));
                 let layout = self.shell_layout(vw, vh);
+                let sf = self.scale_factor as f32;
                 let over_right_panel = self.right_panel.visible
                     && layout.right_panel.width > 0.0
                     && self
                         .mouse_position
                         .map(|(mx, my)| {
-                            layout.right_panel.contains(mx as f32, my as f32)
+                            layout.right_panel.contains(mx as f32 * sf, my as f32 * sf)
                         })
                         .unwrap_or(false);
                 if over_right_panel {
