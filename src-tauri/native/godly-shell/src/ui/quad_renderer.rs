@@ -20,7 +20,7 @@ pub struct QuadVertex {
     pub local_pos: [f32; 2],
     pub rect_half_ext: [f32; 2],
     pub corner_radii: [f32; 4], // TL, TR, BR, BL
-    pub border_width: f32,
+    pub border_widths: [f32; 4], // top, right, bottom, left (CSS order)
     pub border_color: [f32; 4],
     pub blur_radius: f32,
     pub rotation: f32,
@@ -30,7 +30,7 @@ pub struct QuadVertex {
     pub gradient_color_mid: [f32; 4], // Middle stop color (sRGB RGBA) for multi-stop gradients
     pub gradient_config: [f32; 4], // .x=stop_count (0=off, 3=three-stop), .y=direction (0=horiz, 1=vert), .z=mid_t, .w=reserved
 }
-// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 + 16 + 4 + 16 + 16 = 140 bytes
+// Total size: 8 + 16 + 8 + 8 + 16 + 16 + 16 + 4 + 4 + 4 + 16 + 4 + 16 + 16 = 152 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -65,63 +65,63 @@ impl QuadVertex {
                 offset: 40,
                 shader_location: 4,
             },
-            // border_width: pixels
+            // border_widths: top, right, bottom, left in pixels (CSS order)
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32,
+                format: wgpu::VertexFormat::Float32x4,
                 offset: 56,
                 shader_location: 5,
             },
             // border_color: sRGB RGBA
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
-                offset: 60,
+                offset: 72,
                 shader_location: 6,
             },
             // blur_radius: AA smoothstep width (0 = default 0.75px crisp)
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32,
-                offset: 76,
+                offset: 88,
                 shader_location: 7,
             },
             // rotation: radians (0 = no rotation)
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32,
-                offset: 80,
+                offset: 92,
                 shader_location: 8,
             },
             // lighting_intensity: 0.0 = flat CSS-like, 1.0 = full 3D lighting
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32,
-                offset: 84,
+                offset: 96,
                 shader_location: 9,
             },
             // clip_rect: screen-pixel clip bounds (x_min, y_min, x_max, y_max)
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
-                offset: 88,
+                offset: 100,
                 shader_location: 10,
             },
             // corner_smoothness: 0.0 = circular, 1.0 = full squircle
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32,
-                offset: 104,
+                offset: 116,
                 shader_location: 11,
             },
             // gradient_color_mid: sRGB RGBA middle stop for multi-stop gradients
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
-                offset: 108,
+                offset: 120,
                 shader_location: 12,
             },
             // gradient_config: stop_count, direction, mid_t, reserved
             wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
-                offset: 124,
+                offset: 136,
                 shader_location: 13,
             },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 140,
+            array_stride: 152,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -135,7 +135,7 @@ struct VertexInput {
     @location(2) local_pos: vec2<f32>,
     @location(3) rect_half_ext: vec2<f32>,
     @location(4) corner_radii: vec4<f32>,
-    @location(5) border_width: f32,
+    @location(5) border_widths: vec4<f32>,
     @location(6) border_color: vec4<f32>,
     @location(7) blur_radius: f32,
     @location(8) rotation: f32,
@@ -152,7 +152,7 @@ struct VertexOutput {
     @location(1) local_pos: vec2<f32>,
     @location(2) @interpolate(flat) rect_half_ext: vec2<f32>,
     @location(3) @interpolate(flat) corner_radii: vec4<f32>,
-    @location(4) @interpolate(flat) border_width: f32,
+    @location(4) @interpolate(flat) border_widths: vec4<f32>,
     @location(5) @interpolate(flat) border_color: vec4<f32>,
     @location(6) @interpolate(flat) blur_radius: f32,
     @location(7) @interpolate(flat) rotation: f32,
@@ -173,7 +173,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.local_pos = input.local_pos;
     out.rect_half_ext = input.rect_half_ext;
     out.corner_radii = input.corner_radii;
-    out.border_width = input.border_width;
+    out.border_widths = input.border_widths;
     out.border_color = input.border_color;
     out.blur_radius = input.blur_radius;
     out.rotation = input.rotation;
@@ -379,14 +379,30 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Determine pixel color (fill or border)
+    // Per-side border: pick the effective width based on which edge the fragment
+    // is nearest to.  border_widths = (top, right, bottom, left) in CSS order.
+    let bw = input.border_widths;
+    let max_bw = max(bw.x, max(bw.y, max(bw.z, bw.w)));
     var color = fill;
-    let has_border = input.border_width > 0.0;
+    let has_border = max_bw > 0.0;
     if (has_border) {
-        let inner_d = d + input.border_width;
+        // Select per-side border width using miter diagonals (CSS box model):
+        // the fragment belongs to whichever side's edge it is closest to.
+        let nx = p.x / max(he.x, 0.001);  // -1..+1
+        let ny = p.y / max(he.y, 0.001);  // -1..+1
+        let ax = abs(nx);
+        let ay = abs(ny);
+        var eff_bw: f32;
+        if (ay >= ax) {
+            eff_bw = select(bw.z, bw.x, ny < 0.0);  // top or bottom
+        } else {
+            eff_bw = select(bw.w, bw.y, nx > 0.0);  // right or left
+        }
+        let inner_d = d + eff_bw;
         // For thin borders, clamp AA band so it doesn't exceed half the
         // border width — prevents the fill/border transition from consuming
         // more than its share of a sub-2px border at high DPI.
-        let border_aa = min(crisp_aa, input.border_width * 0.5);
+        let border_aa = min(crisp_aa, eff_bw * 0.5);
         let fill_mask = 1.0 - smoothstep(-border_aa, border_aa, inner_d);
 
         // Border 3D rim lighting: directional gradient across the border
@@ -414,7 +430,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     //
     // Lighting extends smoothly to the fill edge (fading out near the border)
     // so there's no visible discontinuity where the lit fill meets unlit border.
-    let edge_margin = select(1.5, input.border_width + 0.5, has_border);
+    let edge_margin = select(1.5, max_bw + 0.5, has_border);
     let interior_t = saturate((-d - 0.5) / edge_margin);
     let lit = input.lighting_intensity;
     if (lit > 0.0 && interior_t > 0.0 && fill.a > 0.1 && blur <= 2.0 && !is_inner_shadow) {
@@ -446,7 +462,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Edge-proximity rim light: Fresnel-like brightening near the SDF
         // boundary.  Strongest at the top-left (light source direction) and
         // fades toward the bottom-right for directional depth.
-        let edge_dist = -d - select(0.5, input.border_width, has_border);
+        let edge_dist = -d - select(0.5, max_bw, has_border);
         let rim_band = 2.5;  // width in pixels of the rim highlight zone
         let rim_raw = saturate(1.0 - edge_dist / rim_band);
         let dir_bias = saturate((-ny * 0.5 - nx * 0.25 + 0.4) * 0.8 + 0.2);
@@ -625,7 +641,7 @@ pub fn quad_vertices(
         local_pos: [0.0, 0.0],
         rect_half_ext: [0.0, 0.0], // signals flat path in shader
         corner_radii: [0.0; 4],
-        border_width: 0.0,
+        border_widths: [0.0; 4],
         border_color: [0.0, 0.0, 0.0, 0.0],
         blur_radius: 0.0,
         rotation: 0.0,
@@ -719,7 +735,7 @@ fn quad_vertices_gradient_dir(
         local_pos: [0.0, 0.0],
         rect_half_ext: [0.0, 0.0],
         corner_radii: [0.0; 4],
-        border_width: 0.0,
+        border_widths: [0.0; 4],
         border_color: [0.0, 0.0, 0.0, 0.0],
         blur_radius: 0.0,
         rotation: 0.0,
@@ -810,7 +826,82 @@ pub fn quad_vertices_sdf(
         local_pos: lp,
         rect_half_ext: he,
         corner_radii: radii,
-        border_width,
+        border_widths: [border_width; 4],
+        border_color,
+        blur_radius,
+        rotation: 0.0,
+        lighting_intensity,
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
+    };
+
+    [
+        v([x0, y0], [lx0, ly0]),
+        v([x1, y0], [lx1, ly0]),
+        v([x0, y1], [lx0, ly1]),
+        v([x0, y1], [lx0, ly1]),
+        v([x1, y0], [lx1, ly0]),
+        v([x1, y1], [lx1, ly1]),
+    ]
+}
+
+/// Like [`quad_vertices_sdf`] but accepts per-side border widths (top, right, bottom, left).
+pub fn quad_vertices_sdf_bordered(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
+    fill_color: [f32; 4],
+    corner_radii: [f32; 4],
+    border_widths: [f32; 4],
+    border_color: [f32; 4],
+    blur_radius: f32,
+    lighting_intensity: f32,
+    corner_smoothness: f32,
+) -> [QuadVertex; 6] {
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let max_r = half_w.min(half_h);
+    let radii = [
+        corner_radii[0].min(max_r),
+        corner_radii[1].min(max_r),
+        corner_radii[2].min(max_r),
+        corner_radii[3].min(max_r),
+    ];
+
+    let pad = if blur_radius > 0.0 {
+        blur_radius + 1.0
+    } else {
+        1.0
+    };
+    let ex = x - pad;
+    let ey = y - pad;
+    let ew = w + pad * 2.0;
+    let eh = h + pad * 2.0;
+
+    let x0 = ex / viewport_w * 2.0 - 1.0;
+    let y0 = -(ey / viewport_h * 2.0 - 1.0);
+    let x1 = (ex + ew) / viewport_w * 2.0 - 1.0;
+    let y1 = -((ey + eh) / viewport_h * 2.0 - 1.0);
+
+    let lx0 = -(half_w + pad);
+    let ly0 = -(half_h + pad);
+    let lx1 = half_w + pad;
+    let ly1 = half_h + pad;
+
+    let he = [half_w, half_h];
+
+    let v = |pos: [f32; 2], lp: [f32; 2]| QuadVertex {
+        position: pos,
+        fill_color,
+        local_pos: lp,
+        rect_half_ext: he,
+        corner_radii: radii,
+        border_widths,
         border_color,
         blur_radius,
         rotation: 0.0,
@@ -883,7 +974,7 @@ pub fn quad_vertices_sdf_gradient(
         local_pos: lp,
         rect_half_ext: he,
         corner_radii: radii,
-        border_width,
+        border_widths: [border_width; 4],
         border_color,
         blur_radius: 0.0,
         rotation: 0.0,
@@ -956,7 +1047,7 @@ pub fn quad_vertices_sdf_gradient_h(
         local_pos: lp,
         rect_half_ext: he,
         corner_radii: radii,
-        border_width,
+        border_widths: [border_width; 4],
         border_color,
         blur_radius: 0.0,
         rotation: 0.0,
@@ -1035,7 +1126,7 @@ pub fn quad_vertices_sdf_gradient_3stop(
         local_pos: lp,
         rect_half_ext: he,
         corner_radii: radii,
-        border_width,
+        border_widths: [border_width; 4],
         border_color,
         blur_radius: 0.0,
         rotation: 0.0,
@@ -1123,7 +1214,7 @@ pub fn quad_vertices_sdf_rotated(
         local_pos: lp,
         rect_half_ext: he,
         corner_radii: radii,
-        border_width,
+        border_widths: [border_width; 4],
         border_color,
         blur_radius,
         rotation,
