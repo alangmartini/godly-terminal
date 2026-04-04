@@ -87,7 +87,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // grayscale coverage so the text alpha-composites cleanly over whatever
     // is already in the framebuffer.
     if (input.bg_color.a < 0.5) {
-        let gray = raw.a;
+        let gray = enhance(raw.a);
         let fg_lin = pow(input.fg_color.rgb, vec3<f32>(2.2));
         return vec4<f32>(fg_lin, gray);
     }
