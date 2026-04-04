@@ -5,8 +5,8 @@
 
 use super::quad_renderer::{
     quad_vertices, quad_vertices_gradient, quad_vertices_gradient_h, quad_vertices_sdf,
-    quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_rotated,
-    QuadVertex,
+    quad_vertices_sdf_gradient, quad_vertices_sdf_gradient_h, quad_vertices_sdf_gradient_3stop,
+    quad_vertices_sdf_rotated, QuadVertex,
 };
 use super::text_layout::{FontWeight, UiFontKind, UiTextLayout, UiTextLayoutEngine};
 use super::widget::Rect;
@@ -650,6 +650,65 @@ impl UiBuilder {
             [0.0; 4],
             1.0,
             0.0,
+        ));
+    }
+
+    /// SDF rounded rectangle with a 3-stop symmetric horizontal gradient.
+    /// Gradient: `color_start` -> `color_mid` -> `color_start` left to right.
+    /// `mid_pos` is the position of the middle stop (0.0-1.0, typically 0.5).
+    pub fn fill_gradient_3stop_h(
+        &mut self,
+        rect: Rect,
+        color_start: [f32; 4],
+        color_mid: [f32; 4],
+        radius: f32,
+        mid_pos: f32,
+    ) {
+        self.emit_sdf(&quad_vertices_sdf_gradient_3stop(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            color_start,
+            color_mid,
+            [radius; 4],
+            0.0,
+            [0.0; 4],
+            0.0,
+            0.0,
+            0.0, // direction: horizontal
+            mid_pos,
+        ));
+    }
+
+    /// SDF rounded rectangle with a 3-stop symmetric vertical gradient.
+    /// Gradient: `color_start` -> `color_mid` -> `color_start` top to bottom.
+    pub fn fill_gradient_3stop_v(
+        &mut self,
+        rect: Rect,
+        color_start: [f32; 4],
+        color_mid: [f32; 4],
+        radius: f32,
+        mid_pos: f32,
+    ) {
+        self.emit_sdf(&quad_vertices_sdf_gradient_3stop(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            self.vw,
+            self.vh,
+            color_start,
+            color_mid,
+            [radius; 4],
+            0.0,
+            [0.0; 4],
+            0.0,
+            0.0,
+            1.0, // direction: vertical
+            mid_pos,
         ));
     }
 

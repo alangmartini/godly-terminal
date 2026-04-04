@@ -27,8 +27,10 @@ pub struct QuadVertex {
     pub lighting_intensity: f32,
     pub clip_rect: [f32; 4], // x_min, y_min, x_max, y_max in screen pixels
     pub corner_smoothness: f32, // 0.0 = circular (CSS), 1.0 = full squircle (Apple/iOS)
+    pub gradient_color_mid: [f32; 4], // Middle stop color (sRGB RGBA) for multi-stop gradients
+    pub gradient_config: [f32; 4], // .x=stop_count (0=off, 3=three-stop), .y=direction (0=horiz, 1=vert), .z=mid_t, .w=reserved
 }
-// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 + 16 + 4 = 108 bytes
+// Total size: 8 + 16 + 8 + 8 + 16 + 4 + 16 + 4 + 4 + 4 + 16 + 4 + 16 + 16 = 140 bytes
 
 impl QuadVertex {
     pub fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -105,9 +107,21 @@ impl QuadVertex {
                 offset: 104,
                 shader_location: 11,
             },
+            // gradient_color_mid: sRGB RGBA middle stop for multi-stop gradients
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 108,
+                shader_location: 12,
+            },
+            // gradient_config: stop_count, direction, mid_t, reserved
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 124,
+                shader_location: 13,
+            },
         ];
         wgpu::VertexBufferLayout {
-            array_stride: 108,
+            array_stride: 140,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: ATTRS,
         }
@@ -128,6 +142,8 @@ struct VertexInput {
     @location(9) lighting_intensity: f32,
     @location(10) clip_rect: vec4<f32>,
     @location(11) corner_smoothness: f32,
+    @location(12) gradient_color_mid: vec4<f32>,
+    @location(13) gradient_config: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -143,6 +159,8 @@ struct VertexOutput {
     @location(8) @interpolate(flat) lighting_intensity: f32,
     @location(9) @interpolate(flat) clip_rect: vec4<f32>,
     @location(10) @interpolate(flat) corner_smoothness: f32,
+    @location(11) @interpolate(flat) gradient_color_mid: vec4<f32>,
+    @location(12) @interpolate(flat) gradient_config: vec4<f32>,
 };
 
 @vertex
@@ -162,6 +180,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.lighting_intensity = input.lighting_intensity;
     out.clip_rect = input.clip_rect;
     out.corner_smoothness = input.corner_smoothness;
+    // Linearize gradient mid color the same way as fill_color for correct interpolation
+    out.gradient_color_mid = vec4<f32>(srgb_to_linear(input.gradient_color_mid.rgb), input.gradient_color_mid.a);
+    out.gradient_config = input.gradient_config;
     return out;
 }
 
@@ -238,9 +259,38 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // linearized it so the GPU's hardware interpolation (for gradients) happens
     // in perceptually correct linear space.  The rest of the fragment shader
     // expects sRGB for dither, lighting, and the final srgb_to_linear() output path.
-    let fill = vec4<f32>(linear_to_srgb(input.fill_color.rgb), input.fill_color.a);
+    var fill = vec4<f32>(linear_to_srgb(input.fill_color.rgb), input.fill_color.a);
     let he = input.rect_half_ext;
     let screen_pos = input.position.xy;
+
+    // Multi-stop gradient: when gradient_config.x > 0.5, compute gradient color
+    // from local_pos instead of using vertex-interpolated fill_color.
+    // gradient_config = (stop_count, direction, mid_pos, 0)
+    //   direction: 0.0 = horizontal (left->right), 1.0 = vertical (top->bottom)
+    // Stops: fill_color = start/end color, gradient_color_mid = middle (symmetric).
+    let g_cfg = input.gradient_config;
+    if (g_cfg.x > 0.5 && he.x > 0.0) {
+        let lp = input.local_pos;
+        var t: f32;
+        if (g_cfg.y > 0.5) {
+            t = saturate((lp.y + he.y) / (2.0 * he.y));
+        } else {
+            t = saturate((lp.x + he.x) / (2.0 * he.x));
+        }
+        let mid_t = g_cfg.z;
+
+        // Interpolate in linear space for sRGB-correct gradients (matching Loop #14).
+        // Both fill_color and gradient_color_mid were linearized in the vertex shader.
+        let start_lin = input.fill_color.rgb;
+        let mid_lin = input.gradient_color_mid.rgb;
+        var grad_lin: vec3<f32>;
+        if (t < mid_t) {
+            grad_lin = mix(start_lin, mid_lin, t / max(mid_t, 0.001));
+        } else {
+            grad_lin = mix(mid_lin, start_lin, (t - mid_t) / max(1.0 - mid_t, 0.001));
+        }
+        fill = vec4<f32>(linear_to_srgb(grad_lin), fill.a);
+    }
 
     // Clip rectangle: discard fragments outside the clip bounds with smooth AA.
     // clip_rect = (x_min, y_min, x_max, y_max) in screen pixels.
@@ -585,6 +635,8 @@ pub fn quad_vertices(
         lighting_intensity: 0.0, // flat quads have no SDF lighting
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
         corner_smoothness: 0.0,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
     };
 
     [
@@ -677,6 +729,8 @@ fn quad_vertices_gradient_dir(
         lighting_intensity: 0.0, // flat quads have no SDF lighting
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
         corner_smoothness: 0.0,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
     };
 
     // Vertical gradient: top=color_a, bottom=color_b
@@ -766,6 +820,8 @@ pub fn quad_vertices_sdf(
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
         corner_smoothness,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
     };
 
     [
@@ -837,6 +893,8 @@ pub fn quad_vertices_sdf_gradient(
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
         corner_smoothness,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
     };
 
     [
@@ -908,6 +966,8 @@ pub fn quad_vertices_sdf_gradient_h(
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
         corner_smoothness,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
     };
 
     // Horizontal: left=fill_color_left, right=fill_color_right
@@ -918,6 +978,84 @@ pub fn quad_vertices_sdf_gradient_h(
         v([x0, y1], [lx0, ly1], fill_color_left),
         v([x1, y0], [lx1, ly0], fill_color_right),
         v([x1, y1], [lx1, ly1], fill_color_right),
+    ]
+}
+
+/// Build 6 vertices for an SDF rounded rectangle with a 3-stop symmetric gradient.
+///
+/// The gradient runs start -> mid -> start along the specified axis.
+/// `direction`: 0.0 = horizontal (left->right), 1.0 = vertical (top->bottom).
+/// `mid_pos`: position of the middle stop (0.0-1.0, typically 0.5).
+/// All vertices share the same colors; the fragment shader computes the gradient.
+pub fn quad_vertices_sdf_gradient_3stop(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    viewport_w: f32,
+    viewport_h: f32,
+    color_start: [f32; 4],
+    color_mid: [f32; 4],
+    corner_radii: [f32; 4],
+    border_width: f32,
+    border_color: [f32; 4],
+    lighting_intensity: f32,
+    corner_smoothness: f32,
+    direction: f32,
+    mid_pos: f32,
+) -> [QuadVertex; 6] {
+    let half_w = w / 2.0;
+    let half_h = h / 2.0;
+    let max_r = half_w.min(half_h);
+    let radii = [
+        corner_radii[0].min(max_r),
+        corner_radii[1].min(max_r),
+        corner_radii[2].min(max_r),
+        corner_radii[3].min(max_r),
+    ];
+
+    let pad = 1.0;
+    let ex = x - pad;
+    let ey = y - pad;
+    let ew = w + pad * 2.0;
+    let eh = h + pad * 2.0;
+
+    let x0 = ex / viewport_w * 2.0 - 1.0;
+    let y0 = -(ey / viewport_h * 2.0 - 1.0);
+    let x1 = (ex + ew) / viewport_w * 2.0 - 1.0;
+    let y1 = -((ey + eh) / viewport_h * 2.0 - 1.0);
+
+    let lx0 = -(half_w + pad);
+    let ly0 = -(half_h + pad);
+    let lx1 = half_w + pad;
+    let ly1 = half_h + pad;
+
+    let he = [half_w, half_h];
+
+    let v = |pos: [f32; 2], lp: [f32; 2]| QuadVertex {
+        position: pos,
+        fill_color: color_start,
+        local_pos: lp,
+        rect_half_ext: he,
+        corner_radii: radii,
+        border_width,
+        border_color,
+        blur_radius: 0.0,
+        rotation: 0.0,
+        lighting_intensity,
+        clip_rect: [0.0, 0.0, 99999.0, 99999.0],
+        corner_smoothness,
+        gradient_color_mid: color_mid,
+        gradient_config: [3.0, direction, mid_pos, 0.0],
+    };
+
+    [
+        v([x0, y0], [lx0, ly0]),
+        v([x1, y0], [lx1, ly0]),
+        v([x0, y1], [lx0, ly1]),
+        v([x0, y1], [lx0, ly1]),
+        v([x1, y0], [lx1, ly0]),
+        v([x1, y1], [lx1, ly1]),
     ]
 }
 
@@ -995,6 +1133,8 @@ pub fn quad_vertices_sdf_rotated(
         lighting_intensity,
         clip_rect: [0.0, 0.0, 99999.0, 99999.0],
         corner_smoothness,
+        gradient_color_mid: [0.0; 4],
+        gradient_config: [0.0; 4],
     };
 
     [

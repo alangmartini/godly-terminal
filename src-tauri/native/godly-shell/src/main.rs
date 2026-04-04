@@ -1707,28 +1707,17 @@ impl App {
             // Animated fill — width driven by progress_pct (0.05 → 0.90)
             // Web: linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1) — 3-stop gradient
             let fill_w = terminal_w * self.progress_pct;
-            let half_w = fill_w / 2.0;
-            // Left half: ACCENT_BLUE → ACCENT_MAUVE
-            ui_builder.fill_gradient_h(
+            ui_builder.fill_gradient_3stop_h(
                 ui::widget::Rect {
                     x: terminal_x,
                     y: progress_y,
-                    width: half_w,
+                    width: fill_w,
                     height: s(2.0),
                 },
                 ui::builder::colors::ACCENT_BLUE,
                 ui::builder::colors::ACCENT_MAUVE,
-            );
-            // Right half: ACCENT_MAUVE → ACCENT_BLUE
-            ui_builder.fill_gradient_h(
-                ui::widget::Rect {
-                    x: terminal_x + half_w,
-                    y: progress_y,
-                    width: fill_w - half_w,
-                    height: s(2.0),
-                },
-                ui::builder::colors::ACCENT_MAUVE,
-                ui::builder::colors::ACCENT_BLUE,
+                s(1.0), // small radius for the thin progress bar
+                0.5,
             );
         }
 
