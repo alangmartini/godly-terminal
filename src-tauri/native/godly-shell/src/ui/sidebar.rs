@@ -292,29 +292,23 @@ impl Sidebar {
                 ui.fill_rounded(layout_item.outer, hover_bg, item_radius);
             }
 
-            // Active state — flat background + 3px left accent bar
-            // Web reference always uses #6366f1 (indigo/ACCENT_BLUE) for active border
+            // Active state — background + 3px left accent border as a single SDF quad
+            // Web: borderLeft "3px solid #6366f1", borderRadius 6, backgroundColor "#171b24"
             if active_t > 0.005 {
-                // Flat active background (#171b24)
                 let active_bg = lerp_color(colors::BG_DARK, colors::BG_ACTIVE, active_t);
-                ui.fill_rounded(layout_item.outer, active_bg, item_radius);
-
-                // 3px flat left border — full-height like the web reference.
-                let indicator_rect = Rect {
-                    x: layout_item.outer.x,
-                    y: layout_item.outer.y,
-                    width: s(ACTIVE_BORDER_W),
-                    height: layout_item.outer.height,
-                };
-                ui.fill_rounded(
-                    indicator_rect,
-                    [
-                        colors::ACCENT_BLUE[0],
-                        colors::ACCENT_BLUE[1],
-                        colors::ACCENT_BLUE[2],
-                        active_t,
-                    ],
-                    s(1.5),
+                let border_color = [
+                    colors::ACCENT_BLUE[0],
+                    colors::ACCENT_BLUE[1],
+                    colors::ACCENT_BLUE[2],
+                    active_t,
+                ];
+                // Per-side border: [top, right, bottom, left] — only left side
+                ui.fill_rounded_border_sides(
+                    layout_item.outer,
+                    active_bg,
+                    item_radius,
+                    [0.0, 0.0, 0.0, s(ACTIVE_BORDER_W)],
+                    border_color,
                 );
             }
 

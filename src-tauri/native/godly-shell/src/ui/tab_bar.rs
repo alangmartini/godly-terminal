@@ -411,24 +411,23 @@ impl TabBar {
             );
 
             if active_t > 0.005 {
-                // Active: flat background matching web (#161920)
+                // Active: flat background + 2px bottom accent border as single SDF quad
+                // Web: backgroundColor "#161920", borderBottom: "2px solid ${accentColor}"
                 let active_bg = [
                     colors::BG_TAB_ACTIVE[0],
                     colors::BG_TAB_ACTIVE[1],
                     colors::BG_TAB_ACTIVE[2],
                     active_t,
                 ];
-                ui.fill(rect, active_bg);
-
-                // Bottom accent indicator (2px colored bar) — web: borderBottom: 2px solid ${color}
                 let accent_color = [accent[0], accent[1], accent[2], active_t];
-                let bottom_bar = Rect {
-                    x: rect.x,
-                    y: rect.bottom() - s(2.0),
-                    width: rect.width,
-                    height: s(2.0),
-                };
-                ui.fill(bottom_bar, accent_color);
+                // Per-side border: [top, right, bottom, left] — only bottom side
+                ui.fill_rounded_border_sides(
+                    rect,
+                    active_bg,
+                    0.0,
+                    [0.0, 0.0, s(2.0), 0.0],
+                    accent_color,
+                );
             }
             if active_t < 0.995 && hover_t > 0.005 {
                 // Hover: subtle flat background
