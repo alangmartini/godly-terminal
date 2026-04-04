@@ -977,7 +977,7 @@ impl App {
                 ui::builder::colors::FG_PRIMARY[2] * 0.80 + active_accent[2] * 0.20,
                 0.88,
             ];
-            ui_builder.text_ui_bold_mixed(&ui_text_handle, title, title_x, block_y, title_fg, bg);
+            ui_builder.text_ui_bold_scaled(&ui_text_handle, title, title_x, block_y, title_fg, bg, 1.0);
 
             // Subtitle line — "GPU-accelerated terminal" in very muted text
             let subtitle = "GPU-accelerated terminal";
@@ -989,7 +989,7 @@ impl App {
                 ui::builder::colors::FG_MUTED[2] * 0.7 + ui::builder::colors::FG_SECONDARY[2] * 0.3,
                 0.55,
             ];
-            ui_builder.text_ui_mixed(
+            ui_builder.text_ui(
                 &ui_text_handle,
                 subtitle,
                 center_x - subtitle_w / 2.0,
@@ -1043,7 +1043,7 @@ impl App {
             // --- Status message with animated loading indicator ---
             let status_y = underline_y + s(16.0);
             let status_w = ui_text_handle.text_width_ui(status);
-            ui_builder.text_ui_mixed(
+            ui_builder.text_ui(
                 &ui_text_handle,
                 status,
                 center_x - status_w / 2.0,
@@ -1313,7 +1313,7 @@ impl App {
                         + ui::builder::colors::FG_SECONDARY[2] * 0.5,
                     0.75,
                 ];
-                ui_builder.text_ui_mixed(&ui_text_handle, desc, desc_x, key_text_y, desc_fg, bg);
+                ui_builder.text_ui(&ui_text_handle, desc, desc_x, key_text_y, desc_fg, bg);
             }
 
             // Thin separator between shortcut grid and CTA section
@@ -1344,7 +1344,7 @@ impl App {
                 ui::builder::colors::FG_MUTED[2],
                 0.38,
             ];
-            ui_builder.text_ui_mixed(
+            ui_builder.text_ui(
                 &ui_text_handle,
                 version_str,
                 center_x - version_w / 2.0,
@@ -1437,7 +1437,7 @@ impl App {
                 ui::builder::colors::FG_PRIMARY[2] * 0.55 + active_accent[2] * 0.45,
                 0.92,
             ];
-            ui_builder.text_ui_scaled_mixed(
+            ui_builder.text_ui_scaled(
                 &ui_text_handle,
                 cta_label,
                 content_x + cta_icon_sz + cta_icon_gap,
@@ -1843,7 +1843,7 @@ impl App {
                 let chevron_t = (0.8 * ui_text_handle.scale).max(0.5);
 
                 if show_ellipsis {
-                    ui_builder.text_ui_mixed(
+                    ui_builder.text_ui(
                         &ui_text_handle,
                         "\u{2026}",
                         x,
@@ -1914,7 +1914,7 @@ impl App {
                             ],
                         );
                     }
-                    ui_builder.text_ui_mixed(&ui_text_handle, seg, x, y_center, fg, bc_bg);
+                    ui_builder.text_ui(&ui_text_handle, seg, x, y_center, fg, bc_bg);
                     x += ui_text_handle.text_width_ui(seg) + s(4.0);
                 }
             }
@@ -3062,7 +3062,7 @@ fn create_ui_font_bundle(candidates: &[&str], label: &str) -> Option<UiFontBundl
     use godly_terminal_surface::directwrite_rasterizer::DirectWriteRasterizer;
 
     for family in candidates {
-        let mut dw = DirectWriteRasterizer::new().ok()?;
+        let mut dw = DirectWriteRasterizer::new_grayscale().ok()?;
         if dw.load_system_font(family).is_ok() {
             log::info!("[FONT] {label}: {family}");
             return Some(UiFontBundle {
@@ -3089,7 +3089,7 @@ fn create_ui_sans_font() -> Option<UiFontBundle> {
     // that are missing from the primary UI font.
     let fallback_families = ["Segoe UI Symbol", "Segoe UI Emoji"];
     for family in fallback_families {
-        let mut dw = match DirectWriteRasterizer::new() {
+        let mut dw = match DirectWriteRasterizer::new_grayscale() {
             Ok(dw) => dw,
             Err(_) => continue,
         };

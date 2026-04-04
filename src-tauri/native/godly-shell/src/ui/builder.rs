@@ -1258,7 +1258,7 @@ impl UiBuilder {
             false,
             scale,
             TextFontKind::UiMono,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1389,7 +1389,7 @@ impl UiBuilder {
             false,
             1.0,
             TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1438,30 +1438,6 @@ impl UiBuilder {
             false,
             1.0,
             TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
-        );
-    }
-
-    pub fn text_ui_bold_mixed(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-    ) {
-        self.push_text_command(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            true,
-            false,
-            1.0,
-            TextFontKind::UiSans,
             TextCompositeMode::MixedBackground,
         );
     }
@@ -1489,7 +1465,7 @@ impl UiBuilder {
             false,
             scale,
             TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1515,7 +1491,7 @@ impl UiBuilder {
             false,
             scale,
             TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1542,7 +1518,7 @@ impl UiBuilder {
             false,
             scale,
             TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1568,7 +1544,7 @@ impl UiBuilder {
             false,
             scale,
             TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
@@ -1591,110 +1567,6 @@ impl UiBuilder {
             fg,
             bg,
             FontWeight::Medium,
-            false,
-            scale,
-            TextFontKind::UiSans,
-            TextCompositeMode::FlatBackground,
-        );
-    }
-
-    /// Record a scaled semibold (600) UI text draw command with mixed background.
-    pub fn text_ui_semibold_scaled_mixed(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-        scale: f32,
-    ) {
-        self.push_text_command_weighted(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            FontWeight::SemiBold,
-            false,
-            scale,
-            TextFontKind::UiSans,
-            TextCompositeMode::MixedBackground,
-        );
-    }
-
-    /// Record a scaled medium (500) UI text draw command with mixed background.
-    pub fn text_ui_medium_scaled_mixed(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-        scale: f32,
-    ) {
-        self.push_text_command_weighted(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            FontWeight::Medium,
-            false,
-            scale,
-            TextFontKind::UiSans,
-            TextCompositeMode::MixedBackground,
-        );
-    }
-
-    /// Record a scaled UI text draw command that must stay in grayscale AA
-    /// because the background under the text is not a single flat color.
-    pub fn text_ui_scaled_mixed(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-        scale: f32,
-    ) {
-        self.push_text_command(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            false,
-            false,
-            scale,
-            TextFontKind::UiSans,
-            TextCompositeMode::MixedBackground,
-        );
-    }
-
-    pub fn text_ui_bold_scaled_mixed(
-        &mut self,
-        renderer: &UiTextRenderer,
-        text: &str,
-        x: f32,
-        y: f32,
-        fg: [f32; 4],
-        bg: [f32; 4],
-        scale: f32,
-    ) {
-        self.push_text_command(
-            renderer,
-            text,
-            x,
-            y,
-            fg,
-            bg,
-            true,
             false,
             scale,
             TextFontKind::UiSans,
@@ -1725,7 +1597,7 @@ impl UiBuilder {
             true,
             scale,
             TextFontKind::UiSerif,
-            TextCompositeMode::FlatBackground,
+            TextCompositeMode::MixedBackground,
         );
     }
 
