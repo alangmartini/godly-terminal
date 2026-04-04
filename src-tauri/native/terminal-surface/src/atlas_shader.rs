@@ -8,6 +8,44 @@ use crate::atlas_vertex_builder::CellVertex;
 use crate::glyph_atlas::AtlasUpdate;
 
 // ---------------------------------------------------------------------------
+// Text render parameters (configurable at runtime via GPU uniform)
+// ---------------------------------------------------------------------------
+
+/// Tunable text rendering parameters exposed as a GPU uniform buffer.
+/// All fields correspond to constants previously hardcoded in the WGSL shader.
+/// Padded to 32 bytes (two vec4<f32>) for GPU uniform alignment.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TextRenderParams {
+    /// ClearType gamma for light-background blending (default 1.8).
+    pub gamma: f32,
+    /// DirectWrite enhanced contrast boost (default 0.0 = browser-matching).
+    pub enhanced_contrast: f32,
+    /// sRGB luminance threshold for dark/light background cutoff (default 0.5).
+    pub luminance_threshold: f32,
+    /// Gamma used for dark-background sRGB compositing (default 2.2).
+    pub dark_bg_gamma: f32,
+    /// Coverage multiplier to thin glyphs (default 1.0, range 0.0–1.0).
+    /// Values < 1.0 reduce glyph weight toward browser-style thinner stems.
+    pub coverage_attenuation: f32,
+    /// Padding to 32 bytes (GPU uniform alignment).
+    pub _pad: [f32; 3],
+}
+
+impl Default for TextRenderParams {
+    fn default() -> Self {
+        Self {
+            gamma: 1.8,
+            enhanced_contrast: 0.0,
+            luminance_threshold: 0.5,
+            dark_bg_gamma: 2.2,
+            coverage_attenuation: 1.0,
+            _pad: [0.0; 3],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -48,6 +86,20 @@ struct VertexOutput {
 @group(0) @binding(0) var atlas_tex: texture_2d<f32>;
 @group(0) @binding(1) var atlas_samp: sampler;
 
+// Runtime-configurable text rendering parameters (set from CPU side).
+struct TextParams {
+    gamma: f32,
+    enhanced_contrast: f32,
+    luminance_threshold: f32,
+    dark_bg_gamma: f32,
+    coverage_attenuation: f32,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
+};
+
+@group(1) @binding(0) var<uniform> params: TextParams;
+
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -65,13 +117,11 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 // no enhanced contrast (effectively 0.0) — the enhance() function becomes
 // identity: c + 0 * c * (1-c) = c.  Setting to 0.0 produces text weight
 // that exactly matches browser rendering.
-const GAMMA: f32 = 1.8;
-const INV_GAMMA: f32 = 0.5556; // 1.0 / 1.8
-const ENHANCED_CONTRAST: f32 = 0.0;
+// inv_gamma computed in shader: 1.0 / params.gamma
 
 // Boost coverage using DirectWrite's enhanced contrast formula.
 fn enhance(c: f32) -> f32 {
-    return clamp(c + ENHANCED_CONTRAST * c * (1.0 - c), 0.0, 1.0);
+    return clamp(c + params.enhanced_contrast * c * (1.0 - c), 0.0, 1.0);
 }
 
 @fragment
@@ -88,7 +138,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // grayscale coverage so the text alpha-composites cleanly over whatever
     // is already in the framebuffer.
     if (input.bg_color.a < 0.5) {
-        let gray = enhance(raw.a);
+        let gray = enhance(raw.a) * params.coverage_attenuation;
+        // sRGB linearization constant (fixed standard, not a tunable parameter)
         let fg_lin = pow(input.fg_color.rgb, vec3<f32>(2.2));
         return vec4<f32>(fg_lin, gray);
     }
@@ -97,28 +148,28 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Browsers use grayscale AA on dark backgrounds to avoid ClearType color
     // fringing.  Compute sRGB-space relative luminance to decide.
     let lum = 0.2126 * input.bg_color.r + 0.7152 * input.bg_color.g + 0.0722 * input.bg_color.b;
-    if (lum < 0.5) {
-        // Dark background: use sRGB gamma (2.2) for browser-matching compositing.
-        // Linearise with pow(x, 2.2), blend grayscale, output linear — the sRGB
-        // render target auto-applies pow(x, 1/2.2) to produce correct sRGB.
-        let fg_srgb = pow(input.fg_color.rgb, vec3<f32>(2.2));
-        let bg_srgb = pow(input.bg_color.rgb, vec3<f32>(2.2));
-        let gray = (coverage.r + coverage.g + coverage.b) / 3.0;
-        let blended = mix(bg_srgb, fg_srgb, vec3<f32>(gray));
+    if (lum < params.luminance_threshold) {
+        // Dark background: linearise with pow(x, dark_bg_gamma), blend grayscale,
+        // output linear — the sRGB render target auto-applies pow(x, 1/2.2).
+        let fg_lin = pow(input.fg_color.rgb, vec3<f32>(params.dark_bg_gamma));
+        let bg_lin = pow(input.bg_color.rgb, vec3<f32>(params.dark_bg_gamma));
+        let gray = (coverage.r + coverage.g + coverage.b) / 3.0 * params.coverage_attenuation;
+        let blended = mix(bg_lin, fg_lin, vec3<f32>(gray));
         return vec4<f32>(blended, 1.0);
     }
 
     // Light background: ClearType subpixel blending (per-channel).
-    // Linearise fg/bg using ClearType gamma (1.8) for perceptually correct blending.
-    let fg_lin = pow(input.fg_color.rgb, vec3<f32>(GAMMA));
-    let bg_lin = pow(input.bg_color.rgb, vec3<f32>(GAMMA));
-    let blended = mix(bg_lin, fg_lin, coverage);
+    // Linearise fg/bg using ClearType gamma for perceptually correct blending.
+    let fg_lin = pow(input.fg_color.rgb, vec3<f32>(params.gamma));
+    let bg_lin = pow(input.bg_color.rgb, vec3<f32>(params.gamma));
+    let att_coverage = coverage * params.coverage_attenuation;
+    let blended = mix(bg_lin, fg_lin, att_coverage);
 
     // The sRGB render target applies pow(x, 1/2.2) encoding, but our blending
-    // was done in gamma-1.8 space.  Convert: to get correct sRGB output,
-    // output pow(blended, 2.2/1.8) so the surface encoding produces
-    // pow(blended, 2.2/1.8 * 1/2.2) = pow(blended, 1/1.8) = sRGB from gamma-1.8.
-    return vec4<f32>(pow(blended, vec3<f32>(2.2 / 1.8)), 1.0);
+    // was done in gamma-params.gamma space.  Convert: to get correct sRGB output,
+    // output pow(blended, 2.2/gamma) so the surface encoding produces
+    // pow(blended, 2.2/gamma * 1/2.2) = pow(blended, 1/gamma) = sRGB from custom gamma.
+    return vec4<f32>(pow(blended, vec3<f32>(2.2 / params.gamma)), 1.0);
 }
 "#;
 
@@ -140,6 +191,11 @@ pub struct AtlasPipeline {
     vertex_buffer: wgpu::Buffer,
     vertex_capacity: usize, // in bytes
     vertex_count: u32,
+    // @group(1) uniform buffer for TextRenderParams
+    params_buffer: wgpu::Buffer,
+    params_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    params_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl AtlasPipeline {
@@ -194,12 +250,13 @@ impl AtlasPipeline {
 }
 
 impl AtlasPipeline {
-    pub fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyph_atlas_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SRC.into()),
         });
 
+        // @group(0): atlas texture + sampler
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("glyph_atlas_bgl"),
             entries: &[
@@ -222,9 +279,25 @@ impl AtlasPipeline {
             ],
         });
 
+        // @group(1): TextRenderParams uniform buffer
+        let params_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("glyph_atlas_params_bgl"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("glyph_atlas_pl"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout, &params_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -284,6 +357,25 @@ impl AtlasPipeline {
             mapped_at_creation: false,
         });
 
+        // TextRenderParams uniform buffer (16 bytes, initialised to defaults).
+        let default_params = TextRenderParams::default();
+        let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("glyph_atlas_params"),
+            size: std::mem::size_of::<TextRenderParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&params_buffer, 0, bytemuck::bytes_of(&default_params));
+
+        let params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("glyph_atlas_params_bg"),
+            layout: &params_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buffer.as_entire_binding(),
+            }],
+        });
+
         Self {
             render_pipeline,
             bind_group_layout,
@@ -297,7 +389,15 @@ impl AtlasPipeline {
             vertex_buffer,
             vertex_capacity,
             vertex_count: 0,
+            params_buffer,
+            params_bind_group,
+            params_bind_group_layout,
         }
+    }
+
+    /// Update text rendering parameters on the GPU.
+    pub fn set_text_render_params(&self, queue: &wgpu::Queue, params: &TextRenderParams) {
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(params));
     }
 }
 
@@ -388,6 +488,7 @@ impl AtlasPrimitive {
         }
         render_pass.set_pipeline(&pipeline.render_pipeline);
         render_pass.set_bind_group(0, &pipeline.bind_group, &[]);
+        render_pass.set_bind_group(1, &pipeline.params_bind_group, &[]);
         render_pass.set_vertex_buffer(0, pipeline.vertex_buffer.slice(..));
         render_pass.draw(0..pipeline.vertex_count, 0..1);
         true

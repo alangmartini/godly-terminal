@@ -1,7 +1,7 @@
 //! Simple UI text rendering using the glyph atlas pipeline.
 
 use godly_terminal_surface::{
-    atlas_shader::{AtlasPipeline, AtlasShaderProgram},
+    atlas_shader::{AtlasPipeline, AtlasShaderProgram, TextRenderParams},
     atlas_vertex_builder::CellVertex,
     glyph_atlas::GlyphAtlas,
     glyph_cache::GlyphKey,
@@ -30,6 +30,12 @@ impl UiTextRenderer {
         rasterizer: Box<dyn GlyphRasterizer>,
     ) -> Self {
         let pipeline = AtlasPipeline::new(device, queue, format);
+        // Match terminal renderer's coverage attenuation for consistent text weight.
+        let params = TextRenderParams {
+            coverage_attenuation: 0.92,
+            ..TextRenderParams::default()
+        };
+        pipeline.set_text_render_params(queue, &params);
         let atlas = GlyphAtlas::new(cell_w, cell_h, baseline);
         Self { pipeline, atlas, rasterizer, cell_w, cell_h, font_size }
     }

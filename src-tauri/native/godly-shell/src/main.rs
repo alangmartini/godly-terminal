@@ -356,6 +356,7 @@ impl App {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        log::info!("Surface format: {format:?} (sRGB={})", format.is_srgb());
 
         let scale_factor = scale as f32;
         self.scale_factor = scale_factor;
@@ -408,6 +409,12 @@ impl App {
             );
         }
         self.ui_text_layout = create_ui_text_layout_engine(ui_families).map(Rc::new);
+
+        // Reduce glyph weight to compensate for DirectWrite's heavier stems vs browser rendering.
+        renderer.set_text_render_params(&queue, &godly_terminal_surface::TextRenderParams {
+            coverage_attenuation: 0.92,
+            ..Default::default()
+        });
 
         self.renderer = Some(renderer);
         self.quad_pipeline = Some(ui::quad_renderer::QuadPipeline::new(&device, format));

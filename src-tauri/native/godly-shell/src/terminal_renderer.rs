@@ -1,6 +1,6 @@
 use godly_protocol::types::RichGridData;
 use godly_terminal_surface::{
-    atlas_shader::{AtlasPipeline, AtlasShaderProgram},
+    atlas_shader::{AtlasPipeline, AtlasShaderProgram, TextRenderParams},
     atlas_vertex_builder::{self, CellVertex},
     font_metrics::FontMetrics,
     glyph_atlas::GlyphAtlas,
@@ -38,6 +38,13 @@ impl TerminalRenderer {
         rasterizer: Box<dyn GlyphRasterizer>,
     ) -> Self {
         let pipeline = AtlasPipeline::new(device, queue, format);
+        // Attenuate glyph coverage to compensate for DirectWrite NATURAL_SYMMETRIC
+        // producing heavier stems than browser (Skia/HarfBuzz) rasterization.
+        let params = TextRenderParams {
+            coverage_attenuation: 0.92,
+            ..TextRenderParams::default()
+        };
+        pipeline.set_text_render_params(queue, &params);
         let phys = font_metrics.scaled_for_render();
         let glyph_atlas = GlyphAtlas::new(phys.cell_width, phys.cell_height, phys.baseline_offset);
 
@@ -252,5 +259,14 @@ impl TerminalRenderer {
 
     pub fn font_metrics(&self) -> &FontMetrics {
         &self.font_metrics
+    }
+
+    /// Update GPU text rendering parameters (e.g. coverage attenuation).
+    pub fn set_text_render_params(
+        &self,
+        queue: &wgpu::Queue,
+        params: &godly_terminal_surface::TextRenderParams,
+    ) {
+        self.pipeline.set_text_render_params(queue, params);
     }
 }

@@ -14,6 +14,7 @@ pub mod render_stats;
 pub mod shader_surface;
 pub mod swash_rasterizer;
 
+pub use atlas_shader::TextRenderParams;
 pub use color::Color;
 pub use font_metrics::FontMetrics;
 
