@@ -281,16 +281,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Fast path: flat quads with no SDF (rect_half_ext.x <= 0 signals flat mode)
     if (he.x <= 0.0) {
-        // Apply dither + grain in sRGB space BEFORE linearization.
-        // Previously these were added in linear space, which caused massive
-        // visible noise on dark backgrounds: BG_DARK (0.071 sRGB → 0.0034
-        // linear) + 0.003 grain = ~88% brightness swing.  In sRGB space the
-        // same grain is only ±4% — perceptually uniform and consistent with
-        // the SDF path which also adds grain before srgb_to_linear().
-        let d = dither_noise(screen_pos);
-        let g = material_grain(screen_pos);
-        let srgb = fill.rgb + vec3<f32>(d + g);
-        let linear = srgb_to_linear(srgb);
+        // CSS renders backgrounds as perfectly flat solid colors — no dither
+        // or grain.  Keeping these flat for pixel-exact web parity.
+        let linear = srgb_to_linear(fill.rgb);
         // Premultiplied alpha output: RGB * alpha before blending.
         // With PREMULTIPLIED_ALPHA_BLENDING, this produces correct compositing
         // of semi-transparent layers (shadows, glows, hover transitions) and
