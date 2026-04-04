@@ -571,14 +571,7 @@ impl TabBar {
                         let badge_r = s(7.0);
 
                         let badge_color = [accent[0], accent[1], accent[2], badge_fade];
-                        let badge_border = [
-                            accent[0] * 0.7,
-                            accent[1] * 0.7,
-                            accent[2] * 0.7,
-                            0.25 * badge_fade,
-                        ];
                         ui.fill_rounded(badge_rect, badge_color, badge_r);
-                        ui.stroke_rounded(badge_rect, badge_r, 0.5, badge_border);
 
                         let badge_ch = ch * badge_text_scale;
                         let text_x = badge_x + (badge_w - text_w) / 2.0;
