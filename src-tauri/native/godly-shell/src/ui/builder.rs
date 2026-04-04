@@ -536,6 +536,18 @@ impl UiBuilder {
         self.fill_sdf_sided(rect, color, [radius; 4], border_widths, border_color, 0.0, 1.0);
     }
 
+    /// Filled rounded rectangle with per-corner radii [TL, TR, BR, BL] and per-side border widths [top, right, bottom, left].
+    pub fn fill_rounded_custom_border_sides(
+        &mut self,
+        rect: Rect,
+        color: [f32; 4],
+        radii: [f32; 4],
+        border_widths: [f32; 4],
+        border_color: [f32; 4],
+    ) {
+        self.fill_sdf_sided(rect, color, radii, border_widths, border_color, 0.0, 1.0);
+    }
+
     /// Rounded rectangle with only top corners rounded (for tabs).
     pub fn fill_rounded_top(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
         self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], 0.0, [0.0; 4], 0.0, 1.0);

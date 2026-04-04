@@ -406,24 +406,13 @@ impl ReferencePane {
             width: text.text_width_mono_scaled(label, BODY_SCALE) + s(24.0),
             height: s(31.5),
         };
-        // Web: borderRadius "0 4px 4px 0" — right side rounded only
-        ui.fill_rounded_custom(
-            Rect {
-                x: rect.x + s(3.0),
-                y: rect.y,
-                width: rect.width - s(3.0),
-                height: rect.height,
-            },
+        // Web: borderLeft "3px solid #6366f1", borderRadius "0 4px 4px 0"
+        // Single SDF quad with per-corner radii + left-only border
+        ui.fill_rounded_custom_border_sides(
+            rect,
             colors::BG_ACTIVE_ACC,
-            [0.0, s(4.0), s(4.0), 0.0], // [TL, TR, BR, BL]
-        );
-        ui.fill(
-            Rect {
-                x: rect.x,
-                y: rect.y,
-                width: s(3.0),
-                height: rect.height,
-            },
+            [0.0, s(4.0), s(4.0), 0.0],    // radii: [TL, TR, BR, BL]
+            [0.0, 0.0, 0.0, s(3.0)],        // border_widths: [top, right, bottom, left]
             colors::ACCENT_BLUE,
         );
         ui.text_mono_medium_scaled_mixed(
