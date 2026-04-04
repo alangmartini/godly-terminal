@@ -115,4 +115,5 @@ pub enum MouseEvent {
     Press { x: f32, y: f32 },
     Release { x: f32, y: f32 },
     Move { x: f32, y: f32 },
+    Scroll { delta: f32 },
 }

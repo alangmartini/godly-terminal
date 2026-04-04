@@ -92,6 +92,10 @@ pub struct TextCommand {
     /// Extra horizontal space (in CSS pixels) added between each glyph.
     /// Matches the web `letterSpacing` property. Default 0.0.
     pub letter_spacing: f32,
+    /// Optional clip rectangle [min_x, min_y, max_x, max_y] in screen pixels.
+    /// Glyphs fully outside this rect are culled during rendering.
+    /// Default NO_CLIP disables clipping.
+    pub clip_rect: [f32; 4],
 }
 
 impl TextCommand {
@@ -1072,6 +1076,7 @@ impl UiBuilder {
             composite,
             raster_scale: renderer.raster_scale,
             letter_spacing: 0.0,
+            clip_rect: self.clip_rect,
         });
     }
 

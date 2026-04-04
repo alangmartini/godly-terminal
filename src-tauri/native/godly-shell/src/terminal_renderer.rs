@@ -188,6 +188,24 @@ impl TerminalRenderer {
                 };
                 let ph = phys.cell_height * draw_scale;
 
+                // CPU-side clip culling: skip glyphs fully outside the clip rect.
+                // clip_rect is [min_x, min_y, max_x, max_y] in screen pixels.
+                let cr = cmd.clip_rect;
+                if cr[2] < 99000.0 {
+                    // Clip rect is active (not NO_CLIP sentinel)
+                    if px + pw < cr[0] || px > cr[2] || py + ph < cr[1] || py > cr[3] {
+                        if cmd.glyph_offsets.is_empty() {
+                            fallback_x += (if use_variable_advance || use_serif {
+                                entry.advance
+                            } else {
+                                phys.cell_width
+                            }) * draw_scale
+                                + cmd.letter_spacing * cmd.scale;
+                        }
+                        continue;
+                    }
+                }
+
                 let x0 = px / vw * 2.0 - 1.0;
                 let y0 = 1.0 - py / vh * 2.0;
                 let x1 = (px + pw) / vw * 2.0 - 1.0;

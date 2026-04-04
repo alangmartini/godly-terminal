@@ -21,6 +21,13 @@ pub struct RightPanel {
     // Close button hover animation
     close_hover_anim: Anim,
     close_hovered: bool,
+    /// Current scroll offset (pixels scrolled from top).
+    scroll_offset: f32,
+    /// Total height of all content (for computing scroll max).
+    total_content_height: f32,
+    /// Scrollbar thumb hover animation (0=idle, 1=hovered).
+    scrollbar_hover_anim: Anim,
+    scrollbar_hovered: bool,
 }
 
 impl RightPanel {
@@ -42,6 +49,10 @@ impl RightPanel {
             footer: "Hope you enjoyed that one too.".into(),
             close_hover_anim: Anim::default(),
             close_hovered: false,
+            scroll_offset: 0.0,
+            total_content_height: 0.0,
+            scrollbar_hover_anim: Anim::default(),
+            scrollbar_hovered: false,
         }
     }
 
@@ -50,10 +61,14 @@ impl RightPanel {
         let hl = anim::timing::HOVER;
         self.close_hover_anim
             .set(if self.close_hovered { 1.0 } else { 0.0 });
-        self.close_hover_anim.tick(hl, dt)
+        let a = self.close_hover_anim.tick(hl, dt);
+        self.scrollbar_hover_anim
+            .set(if self.scrollbar_hovered { 1.0 } else { 0.0 });
+        let b = self.scrollbar_hover_anim.tick(hl, dt);
+        a || b
     }
 
-    pub fn build(&self, ui: &mut UiBuilder, panel: Rect, status: Rect, text: &UiTextRenderer) {
+    pub fn build(&mut self, ui: &mut UiBuilder, panel: Rect, status: Rect, text: &UiTextRenderer) {
         if !self.visible || panel.width < 1.0 {
             return;
         }
@@ -140,33 +155,73 @@ impl RightPanel {
             height: content_h - content_pad_y,
         };
 
-        let mut y = content_rect.y;
+        // Compute total content height (all stanzas + title + footer)
+        // so scroll_max can be derived as (total - visible).max(0.0).
+        {
+            let mut h = 0.0_f32;
+            // Poem title height + marginBottom
+            h += ch * font_scale::PX15 + s(16.0);
+            // Stanzas
+            let stanza_ch = ch * font_scale::PX13;
+            let stanza_line_h = stanza_ch * 1.7;
+            let stanza_gap = s(18.0);
+            for stanza in &self.stanzas {
+                let line_count = stanza.split('\n').count();
+                h += stanza_line_h * line_count as f32;
+                h += stanza_gap - stanza_line_h; // net gap between stanzas
+            }
+            // Footer: marginTop 8 + divider line + paddingTop 12 + text height
+            h += s(8.0) + s(12.0) + ch * font_scale::PX12;
+            self.total_content_height = h;
+        }
+
+        // Set clip to content area so scrolled content doesn't overflow.
+        // Web: overflowY "auto" — clip at the content div boundary.
+        let clip_rect = Rect {
+            x: panel.x,
+            y: content_y,
+            width: panel.width,
+            height: content_h,
+        };
+        ui.set_clip(clip_rect);
+
+        // Apply scroll offset: shift content upward by scroll_offset pixels.
+        let mut y = content_rect.y - self.scroll_offset;
+
+        // Visibility check — text commands bypass the quad clip rect,
+        // so we manually skip text draws that are fully outside the area.
+        let vis_top = content_y;
+        let vis_bot = content_y + content_h;
+        let visible = |ly: f32, lh: f32| -> bool { ly + lh > vis_top && ly < vis_bot };
 
         // Poem title — web: display flex, gap 8, marginBottom 16
         // White dot (8px) + bold 15px text, color "#e6edf3", letterSpacing 0.3
         let dot_sz = s(8.0);
-        let dot_y = y + (ch - dot_sz) / 2.0;
-        ui.fill_rounded(
-            Rect {
-                x: content_rect.x,
-                y: dot_y,
-                width: dot_sz,
-                height: dot_sz,
-            },
-            colors::FG_BRIGHT, // #e6edf3
-            dot_sz / 2.0,
-        );
-        ui.text_ui_bold_scaled(
-            text,
-            &self.poem_title,
-            content_rect.x + dot_sz + s(8.0),
-            y,
-            colors::FG_BRIGHT, // #e6edf3
-            colors::BG_DARK,
-            font_scale::PX15,
-        ); // web: fontSize 15
-        ui.set_last_letter_spacing(0.3); // web: letterSpacing 0.3
-        y += ch * font_scale::PX15 + s(16.0); // marginBottom 16
+        let title_h = ch * font_scale::PX15;
+        if visible(y, title_h) {
+            let dot_y = y + (ch - dot_sz) / 2.0;
+            ui.fill_rounded(
+                Rect {
+                    x: content_rect.x,
+                    y: dot_y,
+                    width: dot_sz,
+                    height: dot_sz,
+                },
+                colors::FG_BRIGHT, // #e6edf3
+                dot_sz / 2.0,
+            );
+            ui.text_ui_bold_scaled(
+                text,
+                &self.poem_title,
+                content_rect.x + dot_sz + s(8.0),
+                y,
+                colors::FG_BRIGHT, // #e6edf3
+                colors::BG_DARK,
+                font_scale::PX15,
+            ); // web: fontSize 15
+            ui.set_last_letter_spacing(0.3); // web: letterSpacing 0.3
+        }
+        y += title_h + s(16.0); // marginBottom 16
 
         // Stanzas — web: marginBottom 18, lineHeight 1.7, fontSize 13,
         //                 color "#9198a1", fontFamily Georgia/serif italic,
@@ -178,19 +233,18 @@ impl RightPanel {
 
         for stanza in &self.stanzas {
             for line in stanza.split('\n') {
-                if y + stanza_ch > content_rect.y + content_rect.height {
-                    break;
+                if visible(y, stanza_line_h) {
+                    ui.text_serif_italic_scaled(
+                        text,
+                        line,
+                        content_rect.x,
+                        y,
+                        stanza_fg,
+                        colors::BG_DARK,
+                        font_scale::PX13,
+                    );
+                    ui.set_last_letter_spacing(0.2); // web: letterSpacing 0.2
                 }
-                ui.text_serif_italic_scaled(
-                    text,
-                    line,
-                    content_rect.x,
-                    y,
-                    stanza_fg,
-                    colors::BG_DARK,
-                    font_scale::PX13,
-                );
-                ui.set_last_letter_spacing(0.2); // web: letterSpacing 0.2
                 y += stanza_line_h;
             }
             y += stanza_gap - stanza_line_h; // net gap between stanzas
@@ -198,10 +252,13 @@ impl RightPanel {
 
         // Footer divider + text — web: borderTop "1px solid #1a1d25",
         //     paddingTop 12, marginTop 8, color "#6e7681", fontSize 12
-        if y + s(24.0) < content_rect.y + content_rect.height {
-            y += s(8.0);
+        y += s(8.0);
+        if visible(y, 1.0) {
             ui.hline(content_rect.x, y, content_rect.width, 1.0, colors::BORDER);
-            y += s(12.0);
+        }
+        y += s(12.0);
+        let footer_h = ch * font_scale::PX12;
+        if visible(y, footer_h) {
             ui.text_ui_scaled(
                 text,
                 &self.footer,
@@ -211,6 +268,44 @@ impl RightPanel {
                 colors::BG_DARK,
                 font_scale::PX12,
             ); // web: fontSize 12
+        }
+
+        // Clear clip before rendering scrollbar and status bar.
+        ui.clear_clip();
+
+        // --- Scrollbar thumb ---
+        // Web: ::-webkit-scrollbar { width: 6px }, thumb #2d333b, radius 3px
+        // Only shown when content overflows the visible area.
+        let scroll_max = (self.total_content_height - content_rect.height).max(0.0);
+        if scroll_max > 0.0 {
+            let track_w = s(6.0);
+            let track_x = panel.right() - track_w - s(2.0);
+            let track_y = content_y;
+            let track_h = content_h;
+            let radius = s(3.0);
+
+            let visible_ratio = (content_rect.height / self.total_content_height).min(1.0);
+            let thumb_h = (track_h * visible_ratio).max(s(20.0)).min(track_h);
+            let scroll_progress = if scroll_max > 0.0 {
+                self.scroll_offset / scroll_max
+            } else {
+                0.0
+            };
+            let thumb_y = track_y + scroll_progress * (track_h - thumb_h);
+            let thumb_rect = Rect {
+                x: track_x,
+                y: thumb_y,
+                width: track_w,
+                height: thumb_h,
+            };
+            // Web: thumb #2d333b, thumbHover #3b4048
+            let hover_t = self.scrollbar_hover_anim.value();
+            let thumb_color = lerp_color(
+                colors::BG_HOVER,    // #2d333b — normal
+                colors::STATUS_PATH, // #3b4048 — hover
+                hover_t,
+            );
+            ui.fill_rounded(thumb_rect, thumb_color, radius);
         }
 
         // --- Bottom status bar ---
@@ -273,9 +368,21 @@ impl RightPanel {
             height: close_sz,
         };
 
+        // Scrollbar hover zone: right edge of panel, within content area
+        let content_y = panel.y + header_h;
+        let content_h = panel.height - header_h;
+        let sb_zone_w = s(16.0); // generous hit zone around 6px bar
+
         match event {
             MouseEvent::Move { x, y } => {
                 self.close_hovered = close_rect.contains(x, y);
+                // Check if mouse is near scrollbar (right edge of panel, in content area)
+                let scroll_max = (self.total_content_height - content_h).max(0.0);
+                self.scrollbar_hovered = scroll_max > 0.0
+                    && x >= panel.right() - sb_zone_w
+                    && x <= panel.right()
+                    && y >= content_y
+                    && y <= content_y + content_h;
                 None
             }
             MouseEvent::Press { x, y, .. } => {
@@ -284,6 +391,12 @@ impl RightPanel {
                 } else {
                     None
                 }
+            }
+            MouseEvent::Scroll { delta } => {
+                let visible_h = panel.height - s(36.0); // header height
+                let scroll_max = (self.total_content_height - visible_h).max(0.0);
+                self.scroll_offset = (self.scroll_offset + delta).clamp(0.0, scroll_max);
+                None
             }
             _ => None,
         }

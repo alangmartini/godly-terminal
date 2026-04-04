@@ -2793,7 +2793,49 @@ impl ApplicationHandler<AsyncEvent> for App {
                     winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as isize,
                 };
                 if lines != 0 {
-                    self.scroll(lines);
+                    // Check if mouse is over right panel to route scroll there
+                    let ui_scale = self.ui_scale();
+                    let gpu = self.gpu.as_ref();
+                    let (vw, vh) = gpu
+                        .map(|g| (g.config.width as f32, g.config.height as f32))
+                        .unwrap_or((1200.0, 800.0));
+                    let layout = self.shell_layout(vw, vh);
+                    let over_right_panel = self.right_panel.visible
+                        && layout.right_panel.width > 0.0
+                        && self
+                            .mouse_position
+                            .map(|(mx, my)| {
+                                layout.right_panel.contains(mx as f32, my as f32)
+                            })
+                            .unwrap_or(false);
+                    if over_right_panel {
+                        let pixel_delta = match delta {
+                            winit::event::MouseScrollDelta::LineDelta(_, y) => -y * 40.0,
+                            winit::event::MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+                        };
+                        if let Some(renderer) = self.renderer.as_ref() {
+                            let m = renderer.font_metrics().scaled_for_render();
+                            let mut ui_text = ui::builder::UiTextRenderer::new(
+                                m.cell_width,
+                                m.cell_height,
+                                m.font_size,
+                                ui_scale,
+                            );
+                            ui_text.ui_avg_advance = renderer.ui_avg_advance();
+                            ui_text.layout_engine = self.ui_text_layout.clone();
+                            ui_text.raster_scale = self.ui_raster_scale();
+                            self.right_panel.on_mouse(
+                                ui::widget::MouseEvent::Scroll { delta: pixel_delta },
+                                layout.right_panel,
+                                &ui_text,
+                            );
+                        }
+                        if let Some(w) = &self.window {
+                            w.request_redraw();
+                        }
+                    } else {
+                        self.scroll(lines);
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
