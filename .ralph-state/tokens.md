@@ -1,17 +1,17 @@
 # Token Usage Summary
 
-**Total iterations**: 2722
-**Total cost**: $12.1052
-**Total input tokens**: 15367657
-**Total output tokens**: 76351
-**Total non-cached input tokens**: 718
+**Total iterations**: 6614
+**Total cost**: $118.2442
+**Total input tokens**: 145084269
+**Total output tokens**: 643316
+**Total non-cached input tokens**: 10012
 
-## Last Iteration (#678)
-- Total input: 90977 (non-cached: 478)
-- Output: 1508
-- Cache read: 77311 | Cache create: 13188
-- Cost: $0.1611705
-- Duration: 22554ms | Turns: 5
+## Last Iteration (#1657)
+- Total input: 95972 (non-cached: 3)
+- Output: 40
+- Cache read: 95675 | Cache create: 294
+- Cost: $3.2307935
+- Duration: 3291ms | Turns: 1
 
 ## Full Log
 See `token-usage.log` for per-iteration breakdown.
