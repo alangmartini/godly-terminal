@@ -459,7 +459,7 @@ impl Sidebar {
         // borderTop "1px solid #1a1d25", directory path header, two-line items
         // with icon + name + status badge (right-aligned) + × + wrapped description.
         if self.show_footer_sections && !self.agents.is_empty() {
-            let header_section_h = s(24.0); // directory path header
+            let header_section_h = s(22.0); // web: padding "8px 10px 4px" → 8+~10+4=22
             let shortcuts_h = s(SHORTCUTS_BAR_HEIGHT);
             let panel_bg = colors::BG_DARK;
             let desc_sc = font_scale::PX11;
@@ -495,7 +495,7 @@ impl Sidebar {
                 text,
                 "\u{2026}ments/work/opensessions",
                 sidebar.x + s(10.0),
-                panel_y + s(4.0),
+                panel_y + s(8.0),
                 colors::STATUS_DEFAULT, // #484f58
                 panel_bg,
                 font_scale::PX10,
