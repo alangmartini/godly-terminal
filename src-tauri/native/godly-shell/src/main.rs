@@ -2650,16 +2650,8 @@ impl ApplicationHandler<AsyncEvent> for App {
                     && layout.right_panel.width > 0.0
                     && (px - right_edge).abs() < handle_zone;
 
-                // Set cursor icon
-                if let Some(w) = &self.window {
-                    if self.left_resize_hover || self.right_resize_hover {
-                        w.set_cursor(winit::window::CursorIcon::EwResize);
-                    } else {
-                        w.set_cursor(winit::window::CursorIcon::Default);
-                    }
-                }
-
-                // Route mouse to UI chrome
+                // Route mouse to UI chrome (must happen before cursor-setting
+                // so hover state is up-to-date for wants_pointer_cursor checks)
                 let me = ui::widget::MouseEvent::Move { x: px, y: py };
                 self.tab_bar.on_mouse(me, layout.tab_bar, ui_scale);
                 self.sidebar.on_mouse(me, layout.sidebar, ui_scale);
@@ -2680,6 +2672,21 @@ impl ApplicationHandler<AsyncEvent> for App {
                     ui_text.raster_scale = self.ui_raster_scale();
                     self.status_bar.on_mouse(me, layout.status_bar, &ui_text);
                     self.right_panel.on_mouse(me, layout.right_panel, &ui_text);
+                }
+
+                // Set cursor icon — resize handles take priority, then pointer
+                // for interactive elements (matching web `cursor:` CSS properties).
+                if let Some(w) = &self.window {
+                    if self.left_resize_hover || self.right_resize_hover {
+                        w.set_cursor(winit::window::CursorIcon::EwResize);
+                    } else if self.tab_bar.wants_pointer_cursor()
+                        || self.sidebar.wants_pointer_cursor()
+                        || self.right_panel.wants_pointer_cursor()
+                    {
+                        w.set_cursor(winit::window::CursorIcon::Pointer);
+                    } else {
+                        w.set_cursor(winit::window::CursorIcon::Default);
+                    }
                 }
 
                 // Selection drag in terminal area
@@ -2788,6 +2795,7 @@ impl ApplicationHandler<AsyncEvent> for App {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                log::info!("[WHEEL_RAW] delta={:?} mouse={:?}", delta, self.mouse_position);
                 let lines = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => -y as isize * 3,
                     winit::event::MouseScrollDelta::PixelDelta(pos) => -(pos.y / 20.0) as isize,

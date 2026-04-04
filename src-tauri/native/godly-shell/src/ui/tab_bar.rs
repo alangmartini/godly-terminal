@@ -811,6 +811,13 @@ impl TabBar {
         }
     }
 
+    pub fn wants_pointer_cursor(&self) -> bool {
+        self.hovered_tab.is_some()
+            || self.hovered_close_tab.is_some()
+            || self.hovered_new_tab
+            || self.hovered_button.is_some()
+    }
+
     pub fn on_mouse(&mut self, event: MouseEvent, bar: Rect, scale: f32) -> Option<UiAction> {
         let layout = self.layout(bar, scale, None);
         match event {
@@ -905,4 +912,5 @@ impl TabBar {
             _ => None,
         }
     }
+
 }

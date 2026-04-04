@@ -712,6 +712,10 @@ impl Sidebar {
         }
     }
 
+    pub fn wants_pointer_cursor(&self) -> bool {
+        self.hovered_index.is_some() || self.hovered_agent.is_some()
+    }
+
     pub fn on_mouse(&mut self, event: MouseEvent, sidebar: Rect, scale: f32) -> Option<UiAction> {
         if sidebar.width < 1.0 {
             return None;
@@ -770,6 +774,7 @@ impl Sidebar {
             _ => None,
         }
     }
+
 }
 
 /// Count how many lines a proportional-font string wraps to within `avail` pixels.

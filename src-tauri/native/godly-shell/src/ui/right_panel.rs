@@ -401,6 +401,11 @@ impl RightPanel {
             _ => None,
         }
     }
+
+    /// Returns `true` when the mouse is over any interactive (clickable) element.
+    pub fn wants_pointer_cursor(&self) -> bool {
+        self.visible && self.close_hovered
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
