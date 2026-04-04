@@ -160,15 +160,15 @@ impl UiTextRenderer {
         self.text_width(s) * scale
     }
 
-    /// Exact width of a string rendered in the proportional UI font.
+    /// Exact width of a string rendered in the monospace UI font.
     pub fn text_width_ui(&self, s: &str) -> f32 {
-        self.layout_text(UiFontKind::Sans, s, 1.0, false, false)
+        self.layout_text(UiFontKind::Mono, s, 1.0, false, false)
             .width
     }
 
-    /// Exact width of a string rendered in the proportional UI font at a given scale.
+    /// Exact width of a string rendered in the monospace UI font at a given scale.
     pub fn text_width_ui_scaled(&self, s: &str, scale: f32) -> f32 {
-        self.layout_text(UiFontKind::Sans, s, scale, false, false)
+        self.layout_text(UiFontKind::Mono, s, scale, false, false)
             .width
     }
 
@@ -178,16 +178,16 @@ impl UiTextRenderer {
             .width
     }
 
-    /// Exact width of a string rendered in the bold proportional UI font at a given scale.
+    /// Exact width of a string rendered in the bold monospace UI font at a given scale.
     pub fn text_width_ui_bold_scaled(&self, s: &str, scale: f32) -> f32 {
-        self.layout_text_weighted(UiFontKind::Sans, s, scale, FontWeight::Bold, false)
+        self.layout_text_weighted(UiFontKind::Mono, s, scale, FontWeight::Bold, false)
             .width
     }
 
-    /// Exact width of a string rendered in the proportional UI font at a given
+    /// Exact width of a string rendered in the monospace UI font at a given
     /// weight and scale.
     pub fn text_width_ui_weighted_scaled(&self, s: &str, scale: f32, weight: FontWeight) -> f32 {
-        self.layout_text_weighted(UiFontKind::Sans, s, scale, weight, false)
+        self.layout_text_weighted(UiFontKind::Mono, s, scale, weight, false)
             .width
     }
 
@@ -1368,7 +1368,7 @@ impl UiBuilder {
         );
     }
 
-    /// Record a UI text draw command (proportional sans-serif font).
+    /// Record a UI text draw command (monospace font — Cascadia Code).
     pub fn text_ui(
         &mut self,
         renderer: &UiTextRenderer,
@@ -1388,13 +1388,13 @@ impl UiBuilder {
             false,
             false,
             1.0,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
 
 
-    /// Record a bold UI text draw command (proportional sans-serif font).
+    /// Record a bold UI text draw command (monospace font — Cascadia Code).
     pub fn text_ui_bold(
         &mut self,
         renderer: &UiTextRenderer,
@@ -1414,12 +1414,12 @@ impl UiBuilder {
             true,
             false,
             1.0,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
 
-    /// Record a scaled UI text draw command (proportional sans-serif font).
+    /// Record a scaled UI text draw command (monospace font — Cascadia Code).
     /// `scale` controls glyph size relative to the 14px base font size.
     pub fn text_ui_scaled(
         &mut self,
@@ -1441,12 +1441,12 @@ impl UiBuilder {
             false,
             false,
             scale,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
 
-    /// Record a scaled bold UI text draw command (proportional sans-serif font).
+    /// Record a scaled bold UI text draw command (monospace font — Cascadia Code).
     pub fn text_ui_bold_scaled(
         &mut self,
         renderer: &UiTextRenderer,
@@ -1467,7 +1467,7 @@ impl UiBuilder {
             true,
             false,
             scale,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
@@ -1494,7 +1494,7 @@ impl UiBuilder {
             weight,
             false,
             scale,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
@@ -1520,7 +1520,7 @@ impl UiBuilder {
             FontWeight::SemiBold,
             false,
             scale,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
@@ -1546,7 +1546,7 @@ impl UiBuilder {
             FontWeight::Medium,
             false,
             scale,
-            TextFontKind::UiSans,
+            TextFontKind::UiMono,
             TextCompositeMode::MixedBackground,
         );
     }
