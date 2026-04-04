@@ -509,7 +509,7 @@ impl UiBuilder {
 
     /// Filled rounded rectangle with uniform corner radius.
     pub fn fill_rounded(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
-        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], 0.0, 1.0);
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], 0.0, 0.0);
     }
 
     /// Filled rounded rectangle with border (uniform radius).
@@ -521,7 +521,7 @@ impl UiBuilder {
         border_width: f32,
         border_color: [f32; 4],
     ) {
-        self.fill_sdf(rect, color, [radius; 4], border_width, border_color, 0.0, 1.0);
+        self.fill_sdf(rect, color, [radius; 4], border_width, border_color, 0.0, 0.0);
     }
 
     /// Filled rounded rectangle with per-side border widths (top, right, bottom, left).
@@ -533,7 +533,7 @@ impl UiBuilder {
         border_widths: [f32; 4],
         border_color: [f32; 4],
     ) {
-        self.fill_sdf_sided(rect, color, [radius; 4], border_widths, border_color, 0.0, 1.0);
+        self.fill_sdf_sided(rect, color, [radius; 4], border_widths, border_color, 0.0, 0.0);
     }
 
     /// Filled rounded rectangle with per-corner radii [TL, TR, BR, BL] and per-side border widths [top, right, bottom, left].
@@ -545,12 +545,12 @@ impl UiBuilder {
         border_widths: [f32; 4],
         border_color: [f32; 4],
     ) {
-        self.fill_sdf_sided(rect, color, radii, border_widths, border_color, 0.0, 1.0);
+        self.fill_sdf_sided(rect, color, radii, border_widths, border_color, 0.0, 0.0);
     }
 
     /// Rounded rectangle with only top corners rounded (for tabs).
     pub fn fill_rounded_top(&mut self, rect: Rect, color: [f32; 4], radius: f32) {
-        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], 0.0, [0.0; 4], 0.0, 1.0);
+        self.fill_sdf(rect, color, [radius, radius, 0.0, 0.0], 0.0, [0.0; 4], 0.0, 0.0);
     }
 
     /// Rounded rectangle with only top corners + border (for active tabs).
@@ -569,13 +569,13 @@ impl UiBuilder {
             border_width,
             border_color,
             0.0,
-            1.0,
+            0.0,
         );
     }
 
     /// Rounded rectangle with per-corner radii [TL, TR, BR, BL].
     pub fn fill_rounded_custom(&mut self, rect: Rect, color: [f32; 4], radii: [f32; 4]) {
-        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], 0.0, 1.0);
+        self.fill_sdf(rect, color, radii, 0.0, [0.0; 4], 0.0, 0.0);
     }
 
     /// SDF rounded rectangle with top-only rounding, gradient fill, and border.
@@ -600,7 +600,7 @@ impl UiBuilder {
             [radius, radius, 0.0, 0.0],
             border_width,
             border_color,
-            1.0,
+            0.0,
             0.0,
         ));
     }
@@ -625,7 +625,7 @@ impl UiBuilder {
             [radius; 4],
             0.0,
             [0.0; 4],
-            1.0,
+            0.0,
             0.0,
         ));
     }
@@ -650,7 +650,7 @@ impl UiBuilder {
             [radius; 4],
             0.0,
             [0.0; 4],
-            1.0,
+            0.0,
             0.0,
         ));
     }
@@ -675,7 +675,7 @@ impl UiBuilder {
             radii,
             0.0,
             [0.0; 4],
-            1.0,
+            0.0,
             0.0,
         ));
     }
@@ -701,7 +701,7 @@ impl UiBuilder {
             radii,
             0.0,
             [0.0; 4],
-            1.0,
+            0.0,
             0.0,
         ));
     }
@@ -775,7 +775,7 @@ impl UiBuilder {
             stroke_width,
             color,
             0.0,
-            1.0,
+            0.0,
         );
     }
 
@@ -787,12 +787,12 @@ impl UiBuilder {
         stroke_width: f32,
         color: [f32; 4],
     ) {
-        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], radii, stroke_width, color, 0.0, 1.0);
+        self.fill_sdf(rect, [0.0, 0.0, 0.0, 0.0], radii, stroke_width, color, 0.0, 0.0);
     }
 
     /// Soft shadow/glow behind an element (SDF with wide blur).
     pub fn fill_shadow(&mut self, rect: Rect, color: [f32; 4], radius: f32, blur: f32) {
-        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur, 1.0);
+        self.fill_sdf(rect, color, [radius; 4], 0.0, [0.0; 4], blur, 0.0);
     }
 
     /// Offset shadow for directional depth (light from top-left → shadow bottom-right).
@@ -812,7 +812,7 @@ impl UiBuilder {
             width: rect.width,
             height: rect.height,
         };
-        self.fill_sdf(offset_rect, color, [radius; 4], 0.0, [0.0; 4], blur, 1.0);
+        self.fill_sdf(offset_rect, color, [radius; 4], 0.0, [0.0; 4], blur, 0.0);
     }
 
     /// CSS-style box-shadow with offset, blur, and spread.
@@ -838,7 +838,7 @@ impl UiBuilder {
             height: rect.height + spread * 2.0,
         };
         let spread_radius = (radius + spread).max(0.0);
-        self.fill_sdf(spread_rect, color, [spread_radius; 4], 0.0, [0.0; 4], blur, 1.0);
+        self.fill_sdf(spread_rect, color, [spread_radius; 4], 0.0, [0.0; 4], blur, 0.0);
     }
 
     /// CSS-style box-shadow with per-corner radii [TL, TR, BR, BL].
