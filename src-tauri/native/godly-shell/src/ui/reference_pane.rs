@@ -492,7 +492,7 @@ impl ReferencePane {
             command,
             rect.x + s(10.0),
             rect.y + s(10.0), // 1px border + 6px padding + 3px half-leading
-            colors::FG_MUTED, // web: color "#6e7681"
+            colors::FG_MUTED, // web: span color "#6e7681" (container div is #8b949e but span overrides)
             cmd_bg, // composite against element bg, not content area bg
             SMALL_SCALE,
         );

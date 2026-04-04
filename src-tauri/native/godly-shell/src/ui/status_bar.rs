@@ -11,7 +11,6 @@ pub struct StatusBar {
     pub cwd: String,
     pub git_branch: String,
     pub terminal_size: (u16, u16),
-    pub sidebar_width: f32,
     pub git_diff_summary: String,
     /// Connection status label (e.g. "Ready", "Connecting...", "Disconnected").
     pub connection_status: String,
@@ -32,7 +31,6 @@ impl StatusBar {
             cwd: String::new(),
             git_branch: String::new(),
             terminal_size: (24, 80),
-            sidebar_width: 0.0,
             git_diff_summary: String::new(),
             connection_status: "Ready".into(),
             cursor_line: 1,
@@ -58,27 +56,8 @@ impl StatusBar {
         let s = |v: f32| text.s(v);
         let ch = text.cell_height;
 
-        // Flat background — BG_STATUS
+        // Flat background — BG_STATUS (status bar now only covers center column)
         ui.fill(bar, colors::BG_STATUS);
-
-        // Sidebar portion (slightly different shade)
-        if self.sidebar_width > 0.0 {
-            let sidebar_status = Rect {
-                x: bar.x,
-                y: bar.y,
-                width: self.sidebar_width,
-                height: bar.height,
-            };
-            ui.fill(sidebar_status, colors::BG_DARK);
-            // Right border on sidebar section — solid, matching other separators
-            ui.vline(
-                self.sidebar_width - 1.0,
-                bar.y,
-                bar.height,
-                1.0,
-                colors::BORDER,
-            );
-        }
 
         // Top separator — solid 1px hairline matching web reference
         // (borderTop: "1px solid #1a1d25").
@@ -91,11 +70,7 @@ impl StatusBar {
         let bg = colors::BG_STATUS;
 
         // --- Left side: streaming state or process name ---
-        let left_x = if self.sidebar_width > 0.0 {
-            self.sidebar_width + s(14.0)
-        } else {
-            bar.x + s(14.0)
-        };
+        let left_x = bar.x + s(14.0);
         let mut x = left_x;
 
         if self.streaming {

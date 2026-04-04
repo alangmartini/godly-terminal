@@ -62,6 +62,8 @@ impl ShellLayoutEngine {
         let sidebar = tree.new_leaf(Style::default()).expect("sidebar node");
         let breadcrumb = tree.new_leaf(Style::default()).expect("breadcrumb node");
         let terminal = tree.new_leaf(Style::default()).expect("terminal node");
+        let status_bar = tree.new_leaf(Style::default()).expect("status_bar node");
+
         let center = tree
             .new_with_children(
                 Style {
@@ -71,7 +73,7 @@ impl ShellLayoutEngine {
                     flex_shrink: 1.0,
                     ..Default::default()
                 },
-                &[breadcrumb, terminal],
+                &[breadcrumb, terminal, status_bar],
             )
             .expect("center node");
 
@@ -106,8 +108,6 @@ impl ShellLayoutEngine {
             )
             .expect("body node");
 
-        let status_bar = tree.new_leaf(Style::default()).expect("status_bar node");
-
         let root = tree
             .new_with_children(
                 Style {
@@ -115,7 +115,7 @@ impl ShellLayoutEngine {
                     flex_direction: FlexDirection::Column,
                     ..Default::default()
                 },
-                &[tab_bar, body, status_bar],
+                &[tab_bar, body],
             )
             .expect("root node");
 
@@ -301,7 +301,7 @@ impl ShellLayoutEngine {
                 Style {
                     display: Display::Flex,
                     size: Size {
-                        width: px(viewport_w),
+                        width: Dimension::Percent(1.0),
                         height: px(status_h),
                     },
                     flex_shrink: 0.0,
@@ -323,7 +323,11 @@ impl ShellLayoutEngine {
             .expect("shell layout should compute");
 
         let tab_bar = self.absolute_rect_for(&[self.nodes.tab_bar]);
-        let status_bar = self.absolute_rect_for(&[self.nodes.status_bar]);
+        let status_bar = self.absolute_rect_for(&[
+            self.nodes.body,
+            self.nodes.center,
+            self.nodes.status_bar,
+        ]);
         let sidebar = if sidebar_visible {
             self.absolute_rect_for(&[self.nodes.body, self.nodes.sidebar])
         } else {

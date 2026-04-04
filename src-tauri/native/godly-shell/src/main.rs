@@ -1682,7 +1682,6 @@ impl App {
         }
 
         if !reference_crop {
-            self.status_bar.sidebar_width = layout.sidebar.width;
             self.status_bar.build(
                 &mut ui_builder,
                 layout.status_bar,
@@ -2624,7 +2623,13 @@ impl ApplicationHandler<AsyncEvent> for App {
                 // Resize handle hover detection (3px zones at panel boundaries)
                 let handle_zone = 5.0 * ui_scale;
                 let handle_y_min = layout.tab_bar.bottom();
-                let handle_y_max = layout.status_bar.y;
+                // Sidebar/right-panel extend full body height (status bar is inside
+                // center column only), so resize handles cover the entire body strip.
+                let handle_y_max = if layout.sidebar.height > 0.0 {
+                    layout.sidebar.bottom()
+                } else {
+                    layout.terminal.bottom()
+                };
                 let in_handle_y = py >= handle_y_min && py <= handle_y_max;
 
                 let left_edge = layout.sidebar.width;
@@ -2666,7 +2671,6 @@ impl ApplicationHandler<AsyncEvent> for App {
                     ui_text.ui_avg_advance = renderer.ui_avg_advance();
                     ui_text.layout_engine = self.ui_text_layout.clone();
                     ui_text.raster_scale = self.ui_raster_scale();
-                    self.status_bar.sidebar_width = layout.sidebar.width;
                     self.status_bar.on_mouse(me, layout.status_bar, &ui_text);
                     self.right_panel.on_mouse(me, layout.right_panel, &ui_text);
                 }
