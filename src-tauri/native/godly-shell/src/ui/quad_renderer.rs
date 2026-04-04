@@ -263,35 +263,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let he = input.rect_half_ext;
     let screen_pos = input.position.xy;
 
-    // Multi-stop gradient: when gradient_config.x > 0.5, compute gradient color
-    // from local_pos instead of using vertex-interpolated fill_color.
-    // gradient_config = (stop_count, direction, mid_pos, 0)
-    //   direction: 0.0 = horizontal (left->right), 1.0 = vertical (top->bottom)
-    // Stops: fill_color = start/end color, gradient_color_mid = middle (symmetric).
-    let g_cfg = input.gradient_config;
-    if (g_cfg.x > 0.5 && he.x > 0.0) {
-        let lp = input.local_pos;
-        var t: f32;
-        if (g_cfg.y > 0.5) {
-            t = saturate((lp.y + he.y) / (2.0 * he.y));
-        } else {
-            t = saturate((lp.x + he.x) / (2.0 * he.x));
-        }
-        let mid_t = g_cfg.z;
-
-        // Interpolate in linear space for sRGB-correct gradients (matching Loop #14).
-        // Both fill_color and gradient_color_mid were linearized in the vertex shader.
-        let start_lin = input.fill_color.rgb;
-        let mid_lin = input.gradient_color_mid.rgb;
-        var grad_lin: vec3<f32>;
-        if (t < mid_t) {
-            grad_lin = mix(start_lin, mid_lin, t / max(mid_t, 0.001));
-        } else {
-            grad_lin = mix(mid_lin, start_lin, (t - mid_t) / max(1.0 - mid_t, 0.001));
-        }
-        fill = vec4<f32>(linear_to_srgb(grad_lin), fill.a);
-    }
-
     // Clip rectangle: discard fragments outside the clip bounds with smooth AA.
     // clip_rect = (x_min, y_min, x_max, y_max) in screen pixels.
     // Default [0, 0, 99999, 99999] means no clipping (z > 50000 sentinel check).
@@ -379,6 +350,32 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     } else {
         // Crisp edges: smoothstep AA for sharp anti-aliased boundaries
         aa = 1.0 - smoothstep(-blur, blur, d);
+    }
+
+    // Multi-stop gradient: when gradient_config.x > 0.5, compute gradient color
+    // from local_pos instead of using vertex-interpolated fill_color.
+    // gradient_config = (stop_count, direction, mid_pos, 0)
+    //   direction: 0.0 = horizontal (left->right), 1.0 = vertical (top->bottom)
+    // Stops: fill_color = start/end color, gradient_color_mid = middle (symmetric).
+    // Interpolation in linear space for sRGB-correct gradients (matching Loop #14).
+    // Uses rotated `p` coordinate so gradient follows the quad's local axes.
+    if (input.gradient_config.x > 0.5 && he.x > 0.0) {
+        var t: f32;
+        if (input.gradient_config.y > 0.5) {
+            t = saturate((p.y + he.y) / (2.0 * he.y));
+        } else {
+            t = saturate((p.x + he.x) / (2.0 * he.x));
+        }
+        let mid_t = input.gradient_config.z;
+        let start_lin = input.fill_color.rgb;
+        let mid_lin = input.gradient_color_mid.rgb;
+        var grad_lin: vec3<f32>;
+        if (t < mid_t) {
+            grad_lin = mix(start_lin, mid_lin, t / max(mid_t, 0.001));
+        } else {
+            grad_lin = mix(mid_lin, start_lin, (t - mid_t) / max(1.0 - mid_t, 0.001));
+        }
+        fill = vec4<f32>(linear_to_srgb(grad_lin), fill.a);
     }
 
     // Determine pixel color (fill or border)
