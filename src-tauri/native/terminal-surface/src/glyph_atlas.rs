@@ -27,6 +27,10 @@ pub struct AtlasEntry {
     pub v1: f32,
     /// Actual horizontal advance width in pixels (for proportional font positioning).
     pub advance: f32,
+    /// Pixels the glyph extends left of the slot origin due to negative bearing_x
+    /// (common for italic glyphs). The renderer must shift the quad left by this
+    /// amount to position the glyph correctly on screen.
+    pub left_pad: f32,
 }
 
 /// Data bundle for uploading the atlas to the GPU.
@@ -121,17 +125,20 @@ impl GlyphAtlas {
 
         // For UI font glyphs, use actual glyph width for slot sizing (proportional).
         // For terminal font, use the fixed cell_w.
-        let slot_w = if key.font_id != 0 {
+        // Also compute neg_bearing: extra left padding needed for italic glyphs
+        // whose bearing_x is negative (pixels extend left of the origin).
+        let (slot_w, neg_bearing) = if key.font_id != 0 {
             if let Some(g) = &glyph {
-                // Slot must fit the glyph bitmap (bearing_x + width) and be at least advance-wide
-                let bitmap_extent = (g.bearing_x.max(0) as u32).saturating_add(g.width);
+                let neg_bear = if g.bearing_x < 0 { (-g.bearing_x) as u32 } else { 0 };
+                // Slot must fit: neg_bearing padding + bearing_x (clamped) + bitmap width
+                let bitmap_extent = neg_bear + (g.bearing_x.max(0) as u32).saturating_add(g.width);
                 let advance_w = g.advance.ceil() as u32;
-                bitmap_extent.max(advance_w).max(1)
+                (bitmap_extent.max(advance_w).max(1), neg_bear)
             } else {
-                self.cell_w
+                (self.cell_w, 0)
             }
         } else {
-            self.cell_w
+            (self.cell_w, 0)
         };
 
         let advance = glyph.as_ref().map_or(self.cell_w as f32, |g| g.advance);
@@ -144,6 +151,7 @@ impl GlyphAtlas {
             slot_w,
             advance,
             key.font_id != 0,
+            neg_bearing,
         );
         self.entries.insert(key, entry);
         entry
@@ -159,6 +167,7 @@ impl GlyphAtlas {
         slot_w: u32,
         advance: f32,
         clamp_top_for_ui_fonts: bool,
+        neg_bearing: u32,
     ) -> AtlasEntry {
         let sw = slot_w;
         let ch = self.cell_h;
@@ -181,8 +190,9 @@ impl GlyphAtlas {
         // Blit the glyph bitmap at the correct bearing offset within the slot.
         if let (Some(rgba_data), Some(g)) = (rgba, glyph) {
             if g.width > 0 && g.height > 0 {
-                // Glyph origin within the slot:
-                let gx = g.bearing_x;
+                // Glyph origin within the slot. Shift right by neg_bearing so
+                // glyphs with negative bearing_x are fully inside the slot.
+                let gx = g.bearing_x + neg_bearing as i32;
                 let gy = glyph_origin_y(self.baseline_offset, g.bearing_y, clamp_top_for_ui_fonts);
                 for row in 0..g.height {
                     for col in 0..g.width {
@@ -229,6 +239,7 @@ impl GlyphAtlas {
             u1,
             v1,
             advance,
+            left_pad: neg_bearing as f32,
         }
     }
 

@@ -173,11 +173,16 @@ impl TerminalRenderer {
                     }
                 };
 
-                let px = cmd
+                let mut px = cmd
                     .glyph_offsets
                     .get(index)
                     .map_or(fallback_x, |offset| cmd.x + *offset);
                 let py = cmd.y;
+                // Shift quad left by left_pad to compensate for the extra
+                // padding added in the atlas slot for negative-bearing glyphs.
+                if use_variable_advance && entry.left_pad > 0.0 {
+                    px -= entry.left_pad;
+                }
                 // For proportional font, use actual glyph slot width from UV;
                 // for monospace, use cell_width.
                 let pw = if use_variable_advance {
