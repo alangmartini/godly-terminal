@@ -49,6 +49,7 @@ pub struct Sidebar {
     pub agents: Vec<AgentItem>,
     pub hovered_index: Option<usize>,
     pub hovered_agent: Option<usize>,
+    pub hovered_shortcut: bool,
     pub show_footer_sections: bool,
     // Smooth animation state
     item_hover_anim: AnimVec,
@@ -122,6 +123,7 @@ impl Sidebar {
             ],
             hovered_index: None,
             hovered_agent: None,
+            hovered_shortcut: false,
             show_footer_sections: true,
             glow_phase: 0.0,
         }
@@ -713,7 +715,7 @@ impl Sidebar {
     }
 
     pub fn wants_pointer_cursor(&self) -> bool {
-        self.hovered_index.is_some() || self.hovered_agent.is_some()
+        self.hovered_index.is_some() || self.hovered_agent.is_some() || self.hovered_shortcut
     }
 
     pub fn on_mouse(&mut self, event: MouseEvent, sidebar: Rect, scale: f32) -> Option<UiAction> {
@@ -724,6 +726,7 @@ impl Sidebar {
             MouseEvent::Move { x, y } => {
                 self.hovered_index = None;
                 self.hovered_agent = None;
+                self.hovered_shortcut = false;
                 let session_layout = self.session_layout(sidebar, scale);
                 for (i, _) in self.items.iter().enumerate() {
                     if session_layout
@@ -755,6 +758,20 @@ impl Sidebar {
                             self.hovered_agent = Some(i);
                         }
                         ay += base_item_h;
+                    }
+                }
+                // Shortcuts bar hover detection — bottom SHORTCUTS_BAR_HEIGHT of sidebar
+                if self.show_footer_sections {
+                    let s = |v: f32| (v * scale).round();
+                    let shortcuts_y = sidebar.bottom() - s(SHORTCUTS_BAR_HEIGHT);
+                    let shortcuts_rect = Rect {
+                        x: sidebar.x,
+                        y: shortcuts_y,
+                        width: sidebar.width,
+                        height: s(SHORTCUTS_BAR_HEIGHT),
+                    };
+                    if shortcuts_rect.contains(x, y) {
+                        self.hovered_shortcut = true;
                     }
                 }
                 None
