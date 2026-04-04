@@ -101,16 +101,17 @@ pub fn compute_sidebar_session_layout(
             width: item_w,
             height: item_h,
         };
+        // CSS: borderLeft 3px + padding 8px = 11px left indent; right side has no border, just 8px padding
         let first_row = Rect {
-            x: outer.x + s(ITEM_PAD_X),
+            x: outer.x + s(ACTIVE_BORDER_W + ITEM_PAD_X),
             y: outer.y + s(ITEM_PAD_Y),
-            width: (outer.width - s(ITEM_PAD_X * 2.0)).max(0.0),
+            width: (outer.width - s(ACTIVE_BORDER_W + ITEM_PAD_X * 2.0)).max(0.0),
             height: first_row_h,
         };
         let secondary_row = item.has_secondary.then(|| Rect {
-            x: outer.x + s(ITEM_PAD_X + SECONDARY_PAD_LEFT),
+            x: outer.x + s(ACTIVE_BORDER_W + ITEM_PAD_X + SECONDARY_PAD_LEFT),
             y: first_row.bottom() + s(SECONDARY_MARGIN_TOP),
-            width: (outer.width - s(ITEM_PAD_X * 2.0 + SECONDARY_PAD_LEFT)).max(0.0),
+            width: (outer.width - s(ACTIVE_BORDER_W + ITEM_PAD_X * 2.0 + SECONDARY_PAD_LEFT)).max(0.0),
             height: secondary_row_h,
         });
         item_layouts.push(SidebarSessionItemLayout {
@@ -164,10 +165,11 @@ mod tests {
         assert_eq!(layout.items[0].outer.width, 188.0);
         assert_eq!(layout.items[0].outer.height, 40.0);
         assert_eq!(layout.items[1].outer.y, 110.0);
+        assert_eq!(layout.items[0].first_row.x, 17.0); // 6 + 3 (border) + 8 (padding)
         assert_eq!(layout.items[0].first_row.y, 75.0);
         assert_eq!(
             layout.items[0].secondary_row.expect("secondary row").x,
-            34.0
+            37.0 // 6 + 3 (border) + 8 (padding) + 20 (secondary indent)
         );
         assert_eq!(
             layout.items[0].secondary_row.expect("secondary row").y,
