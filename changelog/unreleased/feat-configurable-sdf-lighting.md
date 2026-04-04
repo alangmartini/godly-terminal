@@ -1,2 +1,5 @@
-### Fixed
-- **SDF lighting call sites match runtime behavior** — all `fill_rounded*`, `stroke_rounded*`, `fill_shadow*`, and gradient builder methods now pass `lighting_intensity = 0.0` at the call site, matching the `UiBuilder` default that was already overriding them at emit time
+### Added
+- **Configurable text shader parameters** — text rendering gamma, enhanced contrast, luminance threshold, dark-bg gamma, and coverage attenuation are now runtime-configurable via GPU uniform buffer instead of hardcoded WGSL constants
+
+### Changed
+- **Text glyph weight reduced to match browser rendering** — coverage attenuation set to 0.92 to compensate for DirectWrite NATURAL_SYMMETRIC producing heavier stems than browser (Skia/HarfBuzz) rasterization
