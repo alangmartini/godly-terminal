@@ -12,7 +12,7 @@ use super::widget::{MouseEvent, Rect, UiAction};
 pub(super) const TAB_MAX_WIDTH: f32 = 170.0;
 pub(super) const TAB_MIN_WIDTH: f32 = 90.0;
 pub(super) const TAB_GAP: f32 = 6.0;
-pub(super) const TAB_MARGIN_LEFT: f32 = 6.0;
+pub(super) const TAB_MARGIN_LEFT: f32 = 2.0;
 pub(super) const TAB_INSET_V: f32 = 3.0;
 pub(super) const BUTTON_WIDTH: f32 = 46.0;
 const ICON_LINE_T: f32 = 1.2;

@@ -530,7 +530,7 @@ mod tests {
         approx_eq(layout.buttons[0].width, 46.0);
         approx_eq(layout.buttons[2].right(), 1100.0);
         assert_eq!(layout.tabs.len(), 5);
-        assert!(layout.tabs[0].x >= 206.0);
+        assert!(layout.tabs[0].x >= 202.0);
         assert!(layout.tabs[4].right() <= layout.new_tab.x);
         approx_eq(layout.new_tab.width, 24.0);
         approx_eq(layout.new_tab.height, 24.0);
