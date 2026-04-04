@@ -100,7 +100,7 @@ impl StatusBar {
 
         if self.streaming {
             // Pulsing ~ indicator — web: fontSize 9, animation pulse 1.5s
-            let pulse = 0.6 + 0.4 * (glow_phase * 0.6).sin().abs(); // ~1.5s period
+            let pulse = 0.8 - 0.2 * (glow_phase * 3.5 / 1.5).cos(); // 1.5s period
             let tilde_fg = [
                 colors::FG_SECONDARY[0],
                 colors::FG_SECONDARY[1],

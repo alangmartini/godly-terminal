@@ -38,7 +38,7 @@ impl ReferencePane {
         }
     }
 
-    pub fn build(&self, ui: &mut UiBuilder, pane: Rect, text: &UiTextRenderer) {
+    pub fn build(&self, ui: &mut UiBuilder, pane: Rect, text: &UiTextRenderer, phase: f32) {
         let bg = colors::BG_BASE;
         let s = |v: f32| text.s(v);
 
@@ -254,6 +254,7 @@ impl ReferencePane {
             text,
             layout.blocks[BLOCK_CURSOR].x,
             layout.blocks[BLOCK_CURSOR].y,
+            phase,
         );
     }
 
@@ -550,8 +551,23 @@ impl ReferencePane {
         y + text.s(18.0) // web: fontSize 12 * lineHeight 1.5
     }
 
-    fn draw_cursor(&self, ui: &mut UiBuilder, text: &UiTextRenderer, x: f32, y: f32) {
-        // Web: width 8, height 16, backgroundColor #6366f1, borderRadius 1
+    fn draw_cursor(
+        &self,
+        ui: &mut UiBuilder,
+        text: &UiTextRenderer,
+        x: f32,
+        y: f32,
+        phase: f32,
+    ) {
+        // Web: width 8, height 16, backgroundColor #6366f1, borderRadius 1,
+        // animation: blink 1s infinite — 0%,100% opacity:1, 50% opacity:0
+        // glow_phase runs at TAU/3.5 rad/s. Convert to 1s blink cycle:
+        // time_seconds = phase / (TAU / 3.5) = phase * 3.5 / TAU
+        let time_s = phase * 3.5 / std::f32::consts::TAU;
+        let visible = (time_s % 1.0) < 0.5;
+        if !visible {
+            return;
+        }
         ui.fill_rounded(
             Rect {
                 x,

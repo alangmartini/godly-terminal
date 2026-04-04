@@ -844,8 +844,12 @@ impl App {
         // Empty terminal welcome state — styled welcome screen with branded
         // header, status indicator, and keyboard shortcut cards.
         if reference_crop {
-            self.reference_pane
-                .build(&mut ui_builder, layout.terminal_content, &ui_text_handle);
+            self.reference_pane.build(
+                &mut ui_builder,
+                layout.terminal_content,
+                &ui_text_handle,
+                self.tab_bar.glow_phase(),
+            );
         } else if self.current_grid.is_none() {
             let s = |v: f32| ui_text_handle.s(v);
             let _cw = ui_text_handle.cell_width;
