@@ -494,18 +494,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = vec4<f32>(color.rgb + vec3<f32>(lighting + grain), color.a);
     }
 
-    // Apply dither in sRGB space before linearization for perceptually
-    // uniform anti-banding.  Adding ±1/255 in sRGB corresponds to ±0.5 LSB
-    // in the quantized framebuffer — exactly the right magnitude regardless
-    // of brightness.  Previously dither was added in linear space, causing
-    // disproportionately large noise on dark SDF elements.
-    //
     // Premultiplied alpha: RGB is pre-scaled by final alpha so the blend
     // unit can use (One, OneMinusSrcAlpha) — the industry standard for UI
     // compositing (Skia, Direct2D, CoreGraphics).
     let final_a = color.a * aa * clip_alpha;
-    let dith = dither_noise(screen_pos);
-    let linear = srgb_to_linear(color.rgb + vec3<f32>(dith));
+    let linear = srgb_to_linear(color.rgb);
     let rgb = linear * final_a;
     return vec4<f32>(rgb, final_a);
 }
