@@ -1,15 +1,15 @@
 use std::sync::LazyLock;
 use std::time::Instant;
 
+use crate::Color;
 use godly_protocol::types::{CursorShape, RichGridData};
-use iced::Color;
 
 use crate::colors::{brighten_color, dim_color, parse_color};
 use crate::font_metrics::FontMetrics;
 use crate::glyph_cache::{CachedGlyph, GlyphCache, GlyphKey};
 use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use crate::render_stats::RenderStats;
-use crate::surface::GridPos;
+use crate::GridPos;
 
 // ---------------------------------------------------------------------------
 // sRGB <-> linear colour-space lookup tables

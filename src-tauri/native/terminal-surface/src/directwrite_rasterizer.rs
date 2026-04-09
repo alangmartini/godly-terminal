@@ -52,11 +52,29 @@ pub struct DirectWriteRasterizer {
     /// Stored for future ClearType subpixel blending (`GetAlphaBlendParams`).
     #[allow(dead_code)]
     rendering_params: IDWriteRenderingParams,
+    output_mode: DirectWriteOutputMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectWriteOutputMode {
+    SubpixelRgb,
+    GrayscaleAlpha,
 }
 
 impl DirectWriteRasterizer {
     /// Create a new rasterizer, initializing the DirectWrite factory.
     pub fn new() -> windows::core::Result<Self> {
+        Self::with_output_mode(DirectWriteOutputMode::SubpixelRgb)
+    }
+
+    /// Create a rasterizer that emits grayscale alpha coverage instead of
+    /// ClearType subpixel coverage. This is intended for screenshot-parity
+    /// paths where the target is a browser screenshot rather than a live LCD.
+    pub fn new_grayscale() -> windows::core::Result<Self> {
+        Self::with_output_mode(DirectWriteOutputMode::GrayscaleAlpha)
+    }
+
+    fn with_output_mode(output_mode: DirectWriteOutputMode) -> windows::core::Result<Self> {
         unsafe {
             let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let rendering_params = factory.CreateRenderingParams()?;
@@ -68,6 +86,7 @@ impl DirectWriteRasterizer {
                 bold_italic_face: None,
                 font_family_name: String::new(),
                 rendering_params,
+                output_mode,
             })
         }
     }
@@ -177,20 +196,37 @@ impl DirectWriteRasterizer {
         ch: char,
         font_size_px: f32,
     ) -> windows::core::Result<Option<RasterizedGlyphDW>> {
+        // Legacy helper: callers of this API expect raw ClearType RGB coverage.
+        // The configurable grayscale path is exposed through `GlyphRasterizer`.
         let font_face = self
             .font_face
             .as_ref()
             .ok_or(windows::core::Error::from(E_FAIL))?;
-        self.rasterize_with_face(font_face, ch, font_size_px)
+        let glyph = self.rasterize_with_face_mode(
+            font_face,
+            ch,
+            font_size_px,
+            DirectWriteOutputMode::SubpixelRgb,
+        )?;
+
+        Ok(glyph.map(|glyph| RasterizedGlyphDW {
+            rgb: glyph.data,
+            width: glyph.width,
+            height: glyph.height,
+            bearing_x: glyph.bearing_x,
+            bearing_y: glyph.bearing_y,
+            advance: glyph.advance,
+        }))
     }
 
     /// Core rasterization logic using a specific font face.
-    fn rasterize_with_face(
+    fn rasterize_with_face_mode(
         &self,
         font_face: &IDWriteFontFace,
         ch: char,
         font_size_px: f32,
-    ) -> windows::core::Result<Option<RasterizedGlyphDW>> {
+        output_mode: DirectWriteOutputMode,
+    ) -> windows::core::Result<Option<RasterizedGlyph>> {
         unsafe {
             let codepoints = [ch as u32];
             let mut glyph_indices = [0u16; 1];
@@ -231,14 +267,24 @@ impl DirectWriteRasterizer {
                 0.0, // baseline origin
             )?;
 
-            let bounds = analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1)?;
+            // DirectWrite only exposes ClearType 3x1 or aliased 1x1 texture
+            // extraction here. For screenshot/browser-style grayscale AA we
+            // still request ClearType coverage, then collapse the three
+            // subpixel channels into a single alpha coverage value.
+            let texture_type = DWRITE_TEXTURE_CLEARTYPE_3x1;
+            let bounds = analysis.GetAlphaTextureBounds(texture_type)?;
 
             let width = (bounds.right - bounds.left) as u32;
             let height = (bounds.bottom - bounds.top) as u32;
+            let format = match output_mode {
+                DirectWriteOutputMode::SubpixelRgb => GlyphFormat::SubpixelRgb,
+                DirectWriteOutputMode::GrayscaleAlpha => GlyphFormat::Alpha,
+            };
 
             if width == 0 || height == 0 {
-                return Ok(Some(RasterizedGlyphDW {
-                    rgb: vec![],
+                return Ok(Some(RasterizedGlyph {
+                    data: vec![],
+                    format,
                     width: 0,
                     height: 0,
                     bearing_x: 0,
@@ -247,13 +293,18 @@ impl DirectWriteRasterizer {
                 }));
             }
 
-            let mut rgb = vec![0u8; (width * height * 3) as usize];
-            analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut rgb)?;
+            let mut texture_data = vec![0u8; (width * height * 3) as usize];
+            analysis.CreateAlphaTexture(texture_type, &bounds, &mut texture_data)?;
+            let data = match output_mode {
+                DirectWriteOutputMode::SubpixelRgb => texture_data,
+                DirectWriteOutputMode::GrayscaleAlpha => collapse_cleartype_to_alpha(&texture_data),
+            };
 
             let advance = metrics[0].advanceWidth as f32 * scale;
 
-            Ok(Some(RasterizedGlyphDW {
-                rgb,
+            Ok(Some(RasterizedGlyph {
+                data,
+                format,
                 width,
                 height,
                 bearing_x: bounds.left,
@@ -325,16 +376,8 @@ impl GlyphRasterizer for DirectWriteRasterizer {
         italic: bool,
     ) -> Option<RasterizedGlyph> {
         let face = self.face_for(bold, italic)?.clone();
-        let glyph = self.rasterize_with_face(&face, ch, font_size_px).ok()??;
-        Some(RasterizedGlyph {
-            data: glyph.rgb,
-            format: GlyphFormat::SubpixelRgb,
-            width: glyph.width,
-            height: glyph.height,
-            bearing_x: glyph.bearing_x,
-            bearing_y: glyph.bearing_y,
-            advance: glyph.advance,
-        })
+        self.rasterize_with_face_mode(&face, ch, font_size_px, self.output_mode)
+            .ok()?
     }
 
     fn measure(&mut self, font_size_px: f32) -> MeasuredFontMetrics {
@@ -372,6 +415,15 @@ impl GlyphRasterizer for DirectWriteRasterizer {
             glyph_indices[0] != 0
         }
     }
+}
+
+fn collapse_cleartype_to_alpha(rgb: &[u8]) -> Vec<u8> {
+    let mut alpha = Vec::with_capacity(rgb.len() / 3);
+    for pixel in rgb.chunks_exact(3) {
+        let coverage = (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
+        alpha.push(coverage as u8);
+    }
+    alpha
 }
 
 #[cfg(test)]
@@ -544,5 +596,26 @@ mod tests {
         assert!(m.descent > 0.0, "descent should be positive");
         assert!(m.average_advance > 0.0, "advance should be positive");
         assert!(m.is_monospace, "Consolas should report as monospace");
+    }
+
+    #[test]
+    fn grayscale_mode_emits_alpha_glyphs() {
+        let mut rast = DirectWriteRasterizer::new_grayscale().unwrap();
+        rast.load_system_font("Consolas").unwrap();
+        let glyph = rast
+            .rasterize('A', 14.0, false, false)
+            .expect("'A' should rasterize in grayscale mode");
+        assert_eq!(glyph.format, GlyphFormat::Alpha);
+        assert_eq!(glyph.data.len(), (glyph.width * glyph.height) as usize);
+        assert!(
+            glyph.data.iter().any(|&value| value > 0 && value < 255),
+            "grayscale mode should preserve antialiased coverage, not just bilevel pixels"
+        );
+    }
+
+    #[test]
+    fn cleartype_alpha_collapse_averages_subpixel_coverage() {
+        let alpha = collapse_cleartype_to_alpha(&[30, 120, 240, 10, 10, 10]);
+        assert_eq!(alpha, vec![130, 10]);
     }
 }

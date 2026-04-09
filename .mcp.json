@@ -3,6 +3,10 @@
     "playwright": {
       "command": "npx",
       "args": ["@playwright/mcp@latest"]
+    },
+    "pyautogui": {
+      "command": "python",
+      "args": ["tools/pyautogui-mcp/server.py"]
     }
   }
 }

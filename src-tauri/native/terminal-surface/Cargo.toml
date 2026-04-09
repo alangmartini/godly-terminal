@@ -3,10 +3,9 @@ name = "godly-terminal-surface"
 version = "0.1.0"
 edition = "2021"
 license = "BUSL-1.1"
-description = "Custom Iced widget for rendering terminal grid via wgpu"
+description = "GPU terminal surface rendering via wgpu"
 
 [dependencies]
-iced.workspace = true
 wgpu = "27"
 bytemuck = { version = "1", features = ["derive"] }
 godly-protocol = { path = "../../protocol" }

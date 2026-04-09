@@ -1,0 +1,36 @@
+[package]
+name = "godly-shell"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "godly-native"
+path = "src/main.rs"
+
+[dependencies]
+winit = { version = "0.30", features = ["rwh_06"] }
+wgpu = "27"
+pollster = "0.4"
+log = "0.4"
+env_logger = "0.11"
+raw-window-handle = "0.6"
+godly-terminal-surface = { path = "../terminal-surface" }
+godly-protocol = { path = "../../protocol" }
+godly-app-adapter = { path = "../app-adapter" }
+godly-tabs-core = { path = "../tabs-core" }
+godly-layout-core = { path = "../layout-core" }
+godly-workspaces-core = { path = "../workspaces-core" }
+bytemuck = { version = "1", features = ["derive"] }
+uuid.workspace = true
+arboard = "3"
+taffy = "0.7"
+serde.workspace = true
+serde_json.workspace = true
+futures-channel = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Graphics_DirectWrite",
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }

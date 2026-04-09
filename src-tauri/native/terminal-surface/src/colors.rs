@@ -1,4 +1,4 @@
-use iced::Color;
+use crate::Color;
 
 /// Parse a color string from RichGridData into an Iced Color.
 ///

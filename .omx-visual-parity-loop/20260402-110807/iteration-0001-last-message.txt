@@ -1,0 +1,37 @@
+Mode: ralph  
+Result: closed the highest-leverage sidebar mismatch and remeasured.
+
+Changed files:
+- `src-tauri/native/godly-shell/src/ui/sidebar.rs`
+- `src-tauri/native/godly-shell/src/ui/sidebar_layout.rs`
+- `src-tauri/native/godly-shell/src/ui/mod.rs`
+- `src-tauri/native/godly-shell/src/ui/builder.rs`
+- `src-tauri/native/godly-shell/src/ui/reference_pane.rs`
+- `docs/references/gaps.md`
+- `tasks/rendering-quality-iterations.md`
+- refreshed parity artifacts in `docs/references/`
+
+Simplifications made:
+- unified sidebar session-stack geometry behind one shared helper
+- removed the old draw vs hit-test row-height mismatch
+- switched the active session border to full-height CSS-style rendering
+- added mono “mixed/grayscale” text helpers for transcript experiments
+
+Evidence:
+- `cargo check -p godly-shell`
+- `cargo test -p godly-shell ui::sidebar_layout -- --nocapture`
+- `powershell -ExecutionPolicy Bypass -File scripts/measure-godly-shell-parity.ps1`
+- parity moved from `11.5366%` to `11.1009%` pixels over threshold (`230,188` px over-10)
+
+Remaining risks:
+- transcript typography/compositing is still the dominant blocker
+- sidebar is better, but not fully parity-perfect
+- sidebar helper is shared CSS-layout math, not yet a full retained flex tree
+
+Visual-verdict gate:
+- before edits: `74 / revise`
+- after sidebar pass: `78 / revise`
+
+If you want afterward, I can also run `/manual-testing parity crop`.
+
+RALPH_CONTINUE: Investigate transcript glyph weight, baseline rhythm, and compositing parity against the browser capture; the sidebar is no longer the main blocker.

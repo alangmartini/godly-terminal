@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use iced::keyboard::{key, key::Named, Key, Modifiers};
+use crate::keyboard::{Key, Modifiers, Named};
 
 /// App-level actions triggered by keyboard shortcuts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,7 +114,7 @@ pub fn normalize_chord(key: &Key, modifiers: Modifiers) -> String {
             // On Windows, Ctrl+\ produces 0x1C (File Separator) instead of "\".
             // Normalize it back to the display character so capture and resolve
             // produce identical chord strings.
-            let raw = ch.as_str();
+            let raw: &str = ch;
             let display = if raw == "\x1c" { "\\" } else { raw };
             let upper = display.to_uppercase();
             let prefix = parts.join("+");
@@ -213,7 +213,7 @@ impl ShortcutResolver {
         &self,
         key: &Key,
         modifiers: Modifiers,
-        physical_key: Option<&key::Physical>,
+        physical_key: Option<&crate::keyboard::Physical>,
     ) -> Option<AppAction> {
         let chord = normalize_chord(key, modifiers);
 
@@ -252,7 +252,7 @@ pub fn check_app_shortcut(key: &Key, modifiers: Modifiers) -> Option<AppAction> 
     let shift = modifiers.shift();
     let alt = modifiers.alt();
     match key {
-        Key::Character(ch) => check_character_shortcut(ch.as_str(), ctrl, shift, alt),
+        Key::Character(ch) => check_character_shortcut(ch, ctrl, shift, alt),
         Key::Named(named) => check_named_shortcut(named, ctrl, shift, alt),
         Key::Unidentified => None,
     }
@@ -313,10 +313,10 @@ fn check_character_shortcut(s: &str, ctrl: bool, shift: bool, alt: bool) -> Opti
 /// layout-independent, so we use it as a fallback for backslash-based
 /// shortcuts when the character-based check doesn't match.
 pub fn check_physical_key_shortcut(
-    physical_key: &key::Physical,
+    physical_key: &crate::keyboard::Physical,
     modifiers: Modifiers,
 ) -> Option<AppAction> {
-    let is_backslash = matches!(physical_key, key::Physical::Code(key::Code::Backslash));
+    let is_backslash = matches!(physical_key, crate::keyboard::Physical::Code(crate::keyboard::Code::Backslash));
     if !is_backslash {
         return None;
     }
@@ -384,7 +384,7 @@ fn check_named_shortcut(named: &Named, ctrl: bool, shift: bool, alt: bool) -> Op
 mod tests {
     use super::*;
     fn char_key(s: &str) -> Key {
-        Key::Character(s.into())
+        Key::Character(s.to_owned().into())
     }
     fn named_key(n: Named) -> Key {
         Key::Named(n)
@@ -1053,8 +1053,8 @@ mod tests {
     // instead of Key::Character("\\"). The physical key position is
     // layout-independent, so we use it as a fallback.
 
-    fn backslash_physical() -> key::Physical {
-        key::Physical::Code(key::Code::Backslash)
+    fn backslash_physical() -> crate::keyboard::Physical {
+        crate::keyboard::Physical::Code(crate::keyboard::Code::Backslash)
     }
 
     #[test]

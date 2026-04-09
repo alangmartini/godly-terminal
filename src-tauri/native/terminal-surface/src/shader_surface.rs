@@ -1,14 +1,7 @@
 //! Shader-based terminal rendering surface.
 //!
-//! Uses Iced's `Shader` widget with a persistent `wgpu::Texture` that is
-//! updated in-place via `queue.write_texture()`.  This eliminates the
-//! per-frame GPU texture churn caused by `Handle::from_rgba()` (which
-//! creates a new Iced image handle ID on every call, forcing a full
-//! texture upload -> swap -> deallocation cycle that produces visible
-//! blinking).
-
-use iced::widget::shader;
-use iced::{mouse, Rectangle};
+//! Persistent `wgpu::Texture` updated in-place via `queue.write_texture()`.
+//! Eliminates per-frame GPU texture churn.
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -30,7 +23,7 @@ pub struct TerminalPrimitive {
     height: u32,
 }
 
-/// Shader-based terminal surface.  Pass to `iced::widget::Shader::new()`.
+/// Frame data carrier — call `build_primitive()` to produce a `TerminalPrimitive`.
 pub struct TerminalShaderProgram {
     pub pixels: Vec<u8>,
     pub width: u32,
@@ -140,81 +133,74 @@ impl TerminalPipeline {
     }
 }
 
-impl shader::Pipeline for TerminalPipeline {
-    fn new(
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self {
+impl TerminalPipeline {
+    pub fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terminal_shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SRC.into()),
         });
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("terminal_shader_bgl"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terminal_shader_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
-
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("terminal_shader_pl"),
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let render_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("terminal_shader_rp"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader_module,
-                    entry_point: Some("vs_main"),
-                    buffers: &[],
-                    compilation_options: Default::default(),
+                    count: None,
                 },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleStrip,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
                 },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader_module,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                multiview: None,
-                cache: None,
-            });
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terminal_shader_pl"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terminal_shader_rp"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader_module,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            multiview: None,
+            cache: None,
+        });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terminal_shader_sampler"),
@@ -246,16 +232,12 @@ impl shader::Pipeline for TerminalPipeline {
 // Primitive impl — per-frame GPU work
 // ---------------------------------------------------------------------------
 
-impl shader::Primitive for TerminalPrimitive {
-    type Pipeline = TerminalPipeline;
-
-    fn prepare(
+impl TerminalPrimitive {
+    pub fn prepare(
         &self,
-        pipeline: &mut Self::Pipeline,
+        pipeline: &mut TerminalPipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _bounds: &Rectangle,
-        _viewport: &shader::Viewport,
     ) {
         let target = (self.width, self.height);
         if target != pipeline.current_size && self.width > 0 && self.height > 0 {
@@ -296,9 +278,9 @@ impl shader::Primitive for TerminalPrimitive {
         }
     }
 
-    fn draw(
+    pub fn draw(
         &self,
-        pipeline: &Self::Pipeline,
+        pipeline: &TerminalPipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> bool {
         if self.width == 0 || self.height == 0 {
@@ -311,20 +293,8 @@ impl shader::Primitive for TerminalPrimitive {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Program impl — Iced shader::Program for the Shader widget
-// ---------------------------------------------------------------------------
-
-impl<Message> shader::Program<Message> for TerminalShaderProgram {
-    type State = ();
-    type Primitive = TerminalPrimitive;
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        _cursor: mouse::Cursor,
-        _bounds: Rectangle,
-    ) -> Self::Primitive {
+impl TerminalShaderProgram {
+    pub fn build_primitive(&self) -> TerminalPrimitive {
         TerminalPrimitive {
             pixels: self.pixels.clone(),
             width: self.width,

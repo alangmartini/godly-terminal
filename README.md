@@ -44,6 +44,8 @@ cd src-tauri && cargo nextest run -p godly-parity-harness  # contract tests
 cd src-tauri && cargo nextest run --workspace           # everything
 ```
 
+For native-vs-web visual parity work, see [`docs/omx-visual-parity-workflow.md`](docs/omx-visual-parity-workflow.md) and use [`omx-visual-parity-loop.ps1`](omx-visual-parity-loop.ps1) or [`scripts/start-omx-parity-team.ps1`](scripts/start-omx-parity-team.ps1).
+
 ## MCP Setup
 
 Add to your Claude Code MCP configuration:
